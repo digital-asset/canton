@@ -16,6 +16,7 @@ import com.digitalasset.canton.util.{ErrorUtil, ResourceUtil}
 import slick.jdbc.JdbcBackend.Database
 
 import java.sql.SQLException
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
@@ -38,7 +39,7 @@ class DbStorageSingle private (
   private val periodicConnectionCheck = new PeriodicAction(
     clock,
     // using the same interval for connection timeout as for periodic check
-    dbConfig.connectionTimeout,
+    dbConfig.parameters.connectionTimeout,
     loggerFactory,
     timeouts,
     "db-connection-check",
@@ -73,7 +74,7 @@ class DbStorageSingle private (
         // this will timeout and throw a SQLException if can't establish a connection
         db.source.createConnection()
       ResourceUtil.withResource(connection)(
-        _.isValid(dbConfig.connectionTimeout.duration.toSeconds.toInt)
+        _.isValid(dbConfig.parameters.connectionTimeout.duration.toSeconds.toInt)
       )
     } catch {
       case e: SQLException =>
@@ -88,6 +89,7 @@ object DbStorageSingle {
   def tryCreate(
       config: DbConfig,
       clock: Clock,
+      scheduler: Option[ScheduledExecutorService],
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
       metrics: DbStorageMetrics,
@@ -100,6 +102,7 @@ object DbStorageSingle {
       connectionPoolForParticipant,
       logQueryCost,
       clock,
+      scheduler,
       metrics,
       timeouts,
       loggerFactory,
@@ -113,6 +116,7 @@ object DbStorageSingle {
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
       clock: Clock,
+      scheduler: Option[ScheduledExecutorService],
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -129,6 +133,7 @@ object DbStorageSingle {
         withMainConnection = false,
         Some(metrics.queue),
         logQueryCost,
+        scheduler,
         retryConfig = retryConfig,
       )(loggerFactory)
       profile = DbStorage.profile(config)

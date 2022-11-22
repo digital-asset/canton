@@ -32,6 +32,13 @@ case class CreatedContract private (
       rolledBack = rolledBack,
     )
 
+  def toProtoV1: v1.CreatedContract =
+    v1.CreatedContract(
+      contract = Some(contract.toProtoV1),
+      consumedInCore = consumedInCore,
+      rolledBack = rolledBack,
+    )
+
   override def pretty: Pretty[CreatedContract] = prettyOfClass(
     unnamedParam(_.contract),
     paramIfTrue("consumed in core", _.consumedInCore),
@@ -40,13 +47,28 @@ case class CreatedContract private (
 }
 
 object CreatedContract {
+  private type EnsureContractIdVersion =
+    LfContractId => CantonContractIdVersion => Either[String, CantonContractIdVersion]
+
   def create(
       contract: SerializableContract,
       consumedInCore: Boolean,
       rolledBack: Boolean,
-  ): Either[MalformedContractId, CreatedContract] =
-    ContractId
+      checkContractIdVersion: CantonContractIdVersion => Either[String, CantonContractIdVersion],
+  ): Either[String, CreatedContract] =
+    CantonContractIdVersion
       .ensureCantonContractId(contract.contractId)
+      .leftMap(err => s"Encountered invalid Canton contract id: ${err.toString}")
+      .flatMap(checkContractIdVersion)
+      .flatMap {
+        case AuthenticatedContractIdVersion =>
+          // Contracts created with the "authenticated" contract id prefix-of-suffix
+          // must have contract_salt present in order to be properly authenticated (and used for explicit disclosure)
+          ProtoConverter
+            .required("contract_salt", contract.contractSalt)
+            .leftMap(err => s"Failed instantiating created contract: ${err.message}")
+        case NonAuthenticatedContractIdVersion => Right(())
+      }
       .map(_ => new CreatedContract(contract, consumedInCore, rolledBack))
 
   def tryCreate(
@@ -54,22 +76,64 @@ object CreatedContract {
       consumedInCore: Boolean,
       rolledBack: Boolean,
   ): CreatedContract =
-    create(contract, consumedInCore, rolledBack).valueOr(err =>
-      throw new IllegalArgumentException(err.toString)
-    )
+    create(
+      contract = contract,
+      consumedInCore = consumedInCore,
+      rolledBack = rolledBack,
+      // The caller is responsible here for providing the correct contract id
+      checkContractIdVersion = Right(_),
+    ).valueOr(err => throw new IllegalArgumentException(err))
 
   def fromProtoV0(
       createdContractP: v0.ViewParticipantData.CreatedContract
   ): ParsingResult[CreatedContract] = {
     val v0.ViewParticipantData.CreatedContract(contractP, consumedInCore, rolledBack) =
       createdContractP
+
+    val ensureNonAuthenticatedContractId: EnsureContractIdVersion =
+      contractId => {
+        case NonAuthenticatedContractIdVersion => Right(NonAuthenticatedContractIdVersion)
+        case AuthenticatedContractIdVersion =>
+          Left(s"Unexpected authenticated contract id version (contract id: $contractId)")
+      }
+
     for {
       contract <- ProtoConverter
         .required("contract", contractP)
         .flatMap(SerializableContract.fromProtoV0)
-      createdContract <- create(contract, consumedInCore, rolledBack).leftMap(err =>
-        OtherError(err.toString)
-      )
+      createdContract <-
+        create(
+          contract = contract,
+          consumedInCore = consumedInCore,
+          rolledBack = rolledBack,
+          checkContractIdVersion = ensureNonAuthenticatedContractId(contract.contractId),
+        ).leftMap(OtherError)
+    } yield createdContract
+  }
+
+  def fromProtoV1(
+      createdContractP: v1.CreatedContract
+  ): ParsingResult[CreatedContract] = {
+    val v1.CreatedContract(contractP, consumedInCore, rolledBack) =
+      createdContractP
+
+    val ensureAuthenticatedContractId: EnsureContractIdVersion =
+      contractId => {
+        case AuthenticatedContractIdVersion => Right(AuthenticatedContractIdVersion)
+        case NonAuthenticatedContractIdVersion =>
+          Left(s"Unexpected un-authenticated contract id version (contract id: $contractId)")
+      }
+
+    for {
+      contract <- ProtoConverter
+        .required("contract", contractP)
+        .flatMap(SerializableContract.fromProtoV1)
+      createdContract <- create(
+        contract = contract,
+        consumedInCore = consumedInCore,
+        rolledBack = rolledBack,
+        checkContractIdVersion = ensureAuthenticatedContractId(contract.contractId),
+      ).leftMap(OtherError)
     } yield createdContract
   }
 }

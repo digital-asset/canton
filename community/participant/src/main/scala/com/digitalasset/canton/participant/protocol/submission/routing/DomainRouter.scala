@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
+import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
@@ -229,20 +230,22 @@ class DomainRouter(
       _ <- EitherTUtil.condUnitET[Future](
         allContractsHaveDomainData, {
           val ids = inputContractsDomainData.withoutDomainData.map(_.show)
-          UnknownContractDomains.Error(ids.toList): TransactionRoutingError
+          UnknownContractDomains.Error(ids.toList)
         },
       )
 
       // Check: connected domains
-      _ <- EitherTUtil.condUnitET[Future](
-        contractsDomainNotConnected.isEmpty, {
-          val contractsAndDomains: Map[String, DomainId] = contractsDomainNotConnected.map {
-            contractData => contractData.id.show -> contractData.domain
-          }.toMap
+      _ <- EitherTUtil
+        .condUnitET[Future](
+          contractsDomainNotConnected.isEmpty, {
+            val contractsAndDomains: Map[String, DomainId] = contractsDomainNotConnected.map {
+              contractData => contractData.id.show -> contractData.domain
+            }.toMap
 
-          NotConnectedToAllContractDomains.Error(contractsAndDomains): TransactionRoutingError
-        },
-      )
+            NotConnectedToAllContractDomains.Error(contractsAndDomains)
+          },
+        )
+        .leftWiden[TransactionRoutingError]
 
     } yield ()
   }

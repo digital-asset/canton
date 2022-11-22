@@ -7,28 +7,55 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.version.{
+  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWrapper,
+  ProtoVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 
 /** A request to receive events from a given counter from a sequencer.
   *
   * @param member the member subscribing to the sequencer
   * @param counter the counter of the first event to receive.
   */
-case class SubscriptionRequest(member: Member, counter: SequencerCounter) {
+final case class SubscriptionRequest(member: Member, counter: SequencerCounter)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[SubscriptionRequest]
+) extends HasProtocolVersionedWrapper[SubscriptionRequest] {
 
-  // despite being serialized in the HttpSequencerClient, we don't introduce a `VersionedSubscriptionRequest` because
-  // we assume that the subscription endpoint will also be bumped if a V1 SubscriptionRequest is ever introduced
-  def toProtoV0: v0.SubscriptionRequest =
-    v0.SubscriptionRequest(member.toProtoPrimitive, counter.v)
+  override protected def companionObj = SubscriptionRequest
+
+  def toProtoV0: v0.SubscriptionRequest = v0.SubscriptionRequest(member.toProtoPrimitive, counter.v)
 }
 
-object SubscriptionRequest {
+object SubscriptionRequest extends HasProtocolVersionedCompanion[SubscriptionRequest] {
+  override val name: String = "SubscriptionRequest"
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> LegacyProtoConverter(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SubscriptionRequest)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
+
+  def apply(
+      member: Member,
+      counter: SequencerCounter,
+      protocolVersion: ProtocolVersion,
+  ): SubscriptionRequest =
+    SubscriptionRequest(member, counter)(protocolVersionRepresentativeFor(protocolVersion))
+
   def fromProtoV0(
       subscriptionRequestP: v0.SubscriptionRequest
   ): ParsingResult[SubscriptionRequest] = {
     val v0.SubscriptionRequest(memberP, counter) = subscriptionRequestP
     for {
       member <- Member.fromProtoPrimitive(memberP, "member")
-    } yield SubscriptionRequest(member, SequencerCounter(counter))
+    } yield SubscriptionRequest(member, SequencerCounter(counter))(
+      protocolVersionRepresentativeFor(ProtoVersion(0))
+    )
   }
 
 }

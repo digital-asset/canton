@@ -179,7 +179,6 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       SignedProtocolMessage.tryCreate(
         response,
         participantCrypto.tryForDomain(domainId).currentSnapshotApproximation,
-        participantCrypto.pureCrypto,
         testedProtocolVersion,
       )
     }
@@ -857,7 +856,6 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         SignedProtocolMessage.tryCreate(
           response,
           participantCrypto.tryForDomain(domainId).currentSnapshotApproximation,
-          participantCrypto.pureCrypto,
           testedProtocolVersion,
         )
       }

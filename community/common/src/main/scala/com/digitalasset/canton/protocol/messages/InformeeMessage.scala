@@ -7,6 +7,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewType}
+import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -91,6 +92,8 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: 
   override def rootHash: Option[RootHash] = Some(fullInformeeTree.transactionId.toRootHash)
 
   override def viewType: ViewType = ViewType.TransactionViewType
+
+  override def pretty: Pretty[InformeeMessage] = prettyOfClass(unnamedParam(_.fullInformeeTree))
 }
 
 object InformeeMessage extends HasProtocolVersionedWithContextCompanion[InformeeMessage, HashOps] {

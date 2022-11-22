@@ -25,7 +25,7 @@ import com.digitalasset.canton.config.RequireTypes.{
   PositiveInt,
   String255,
 }
-import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApiProvider}
+import com.digitalasset.canton.crypto.{HashPurpose, Salt, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, HasCloseContext}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -142,14 +142,16 @@ class RepairService(
     *                           but otherwise ignored as stakeholder and signatories can be recomputed from contracts.
     * @param ignoreAlreadyAdded whether to ignore and skip over contracts already added/present in the domain. Setting
     *                           this to true (at least on retries) enables writing idempotent repair scripts.
+    * @param ignoreStakeholderCheck do not check for stakeholder presence for the given parties
     */
   def addContracts(
       domain: DomainAlias,
       contractsToAdd: Seq[SerializableContractWithWitnesses],
       ignoreAlreadyAdded: Boolean,
+      ignoreStakeholderCheck: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
     logger.info(
-      s"Adding ${contractsToAdd.length} contracts to domain ${domain} with ignoreAlreadyAdded=${ignoreAlreadyAdded}"
+      s"Adding ${contractsToAdd.length} contracts to domain ${domain} with ignoreAlreadyAdded=${ignoreAlreadyAdded} and ignoreStakeholderCheck=${ignoreStakeholderCheck}"
     )
     lockAndAwaitEitherT(
       "repair.add", {
@@ -198,7 +200,7 @@ class RepairService(
 
           // Note the following purposely fails if any contract fails which results in not all contracts being processed.
           contractsToPublishUpstreamO <- MonadUtil.sequentialTraverse(contractsToAdd)(
-            addContract(repair, ignoreAlreadyAdded)
+            addContract(repair, ignoreAlreadyAdded, ignoreStakeholderCheck)
           )
           contractsToPublishUpstream = contractsToPublishUpstreamO.toList.flattenOption
 
@@ -451,12 +453,19 @@ class RepairService(
     }
   }
 
-  private def addContract(repair: RepairRequest, ignoreAlreadyAdded: Boolean)(
+  private def addContract(
+      repair: RepairRequest,
+      ignoreAlreadyAdded: Boolean,
+      ignoreStakeholderCheck: Boolean,
+  )(
       contractToAdd: SerializableContractWithWitnesses
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Option[(LfContractId, ContractWithMetadata)]] = {
     val topologySnapshot = repair.topologySnapshot
+
+    def runStakeholderCheck[L](check: => EitherT[Future, L, Unit]): EitherT[Future, L, Unit] =
+      if (ignoreStakeholderCheck) EitherT.rightT(()) else check
 
     // TODO(#4001) - performance of point-db lookups will be slow, add batching (also to purgeContract and moveContract)
     def persistCreation(cid: LfContractId): EitherT[Future, String, Unit] =
@@ -522,28 +531,33 @@ class RepairService(
       }
 
       // At least one stakeholder is hosted locally if no witnesses are defined
-      _localStakeholderOrWitnesses <- EitherT(
-        computedContractWithMetadata.stakeholders.toList
-          .findM(hostsParty(topologySnapshot))
-          .map(_.isDefined)
-          .map { oneStakeholderIsLocal =>
-            EitherUtil.condUnitE(
-              witnesses.nonEmpty || oneStakeholderIsLocal,
-              log(
-                s"Contract ${contract.contractId} has no local stakeholders ${computedContractWithMetadata.stakeholders} and no witnesses defined"
-              ),
+      _localStakeholderOrWitnesses <-
+        runStakeholderCheck(
+          EitherT(
+            computedContractWithMetadata.stakeholders.toList
+              .findM(hostsParty(topologySnapshot))
+              .map(_.isDefined)
+              .map { oneStakeholderIsLocal =>
+                EitherUtil.condUnitE(
+                  witnesses.nonEmpty || oneStakeholderIsLocal,
+                  log(
+                    s"Contract ${contract.contractId} has no local stakeholders ${computedContractWithMetadata.stakeholders} and no witnesses defined"
+                  ),
+                )
+              }
+          )
+        )
+
+      // All stakeholders exist on the domain
+      _ <- runStakeholderCheck(
+        topologySnapshot
+          .allHaveActiveParticipants(computedContractWithMetadata.stakeholders)
+          .leftMap { missingStakeholders =>
+            log(
+              s"Domain ${repair.domainAlias} missing stakeholders ${missingStakeholders} of contract ${contract.contractId}"
             )
           }
       )
-
-      // All stakeholders exist on the domain
-      _ <- topologySnapshot
-        .allHaveActiveParticipants(computedContractWithMetadata.stakeholders)
-        .leftMap { missingStakeholders =>
-          log(
-            s"Domain ${repair.domainAlias} missing stakeholders ${missingStakeholders} of contract ${contract.contractId}"
-          )
-        }
 
       // All witnesses exist on the domain
       _ <- topologySnapshot.allHaveActiveParticipants(witnesses).leftMap { missingWitnesses =>
@@ -1357,6 +1371,7 @@ object RepairService {
         signatories: Set[String],
         lfContractId: LfContractId,
         ledgerTime: Instant,
+        contractSalt: Option[Salt],
     )(implicit namedLoggingContext: NamedLoggingContext): Either[String, SerializableContract] = {
       for {
         template <- LedgerApiFieldValidations.validateIdentifier(templateId).leftMap(_.getMessage)
@@ -1389,12 +1404,13 @@ object RepairService {
         metadata =
           checked(ContractMetadata.tryCreate(signatoriesAsParties, signatoriesAsParties, None)),
         ledgerCreateTime = time,
+        contractSalt = contractSalt,
       )
     }
 
     def contractInstanceToData(
         contract: SerializableContract
-    ): Either[String, (Identifier, Record, Set[String], LfContractId)] = {
+    ): Either[String, (Identifier, Record, Set[String], LfContractId, Option[Salt])] = {
       val contractInstance = contract.rawContractInstance.contractInstance
       LfEngineToApi
         .lfValueToApiRecord(verbose = true, contractInstance.unversioned.arg)
@@ -1407,6 +1423,7 @@ object RepairService {
               record,
               contract.metadata.signatories.map(_.toString),
               contract.contractId,
+              contract.contractSalt,
             ),
         )
     }

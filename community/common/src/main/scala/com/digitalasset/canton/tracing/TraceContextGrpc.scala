@@ -19,6 +19,8 @@ object TraceContextGrpc {
 
   def fromGrpcContext: TraceContext = TraceContextKey.get()
 
+  def withGrpcTraceContext[A](f: TraceContext => A): A = f(fromGrpcContext)
+
   def withGrpcContext[A](traceContext: TraceContext)(fn: => A): A = {
     val context = GrpcContext.current().withValue(TraceContextKey, traceContext)
 

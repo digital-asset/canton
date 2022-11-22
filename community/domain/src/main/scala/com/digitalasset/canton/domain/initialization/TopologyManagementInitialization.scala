@@ -22,7 +22,12 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.client.{SendType, SequencerClient, SequencerClientFactory}
+import com.digitalasset.canton.sequencing.client.{
+  RequestSigner,
+  SendType,
+  SequencerClient,
+  SequencerClientFactory,
+}
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
   EnvelopeOpener,
@@ -159,7 +164,7 @@ object TopologyManagementInitialization {
           managerId,
           sequencedEventStore,
           sendTrackerStore,
-          SequencerClient.signSubmissionRequest(syncCrypto),
+          RequestSigner(syncCrypto),
         )
       }
       timeTracker = DomainTimeTracker(config.timeTracker, clock, newClient, loggerFactory)

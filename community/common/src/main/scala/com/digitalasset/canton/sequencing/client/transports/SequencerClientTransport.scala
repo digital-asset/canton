@@ -14,7 +14,6 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.handshake.SupportsHandshake
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
@@ -27,8 +26,8 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
     * If the sequencer accepted (or may have accepted) the request this call will return successfully.
     * This is about to be deprecated in favor of [[sendAsyncSigned]]
     */
-  def sendAsync(request: SubmissionRequest, timeout: Duration, protocolVersion: ProtocolVersion)(
-      implicit traceContext: TraceContext
+  def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
+      traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit]
 
   /** Sends a signed submission request to the sequencer.
@@ -39,7 +38,6 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
   def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit]
@@ -47,7 +45,6 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
   def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit]
@@ -73,6 +70,10 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
   def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit]
+
+  def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit]
 
   /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
   def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy

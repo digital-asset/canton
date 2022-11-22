@@ -40,6 +40,7 @@ import org.scalatestplus.scalacheck.CheckerAsserting
 import org.slf4j.bridge.SLF4JBridgeHandler
 import org.typelevel.discipline.Laws
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
@@ -336,6 +337,12 @@ object BaseTest {
   // Uses SymbolicCrypto for the configured crypto schemes
   lazy val defaultStaticDomainParameters: StaticDomainParameters =
     defaultStaticDomainParametersWith()
+
+  lazy val defaultMaxRatePerParticipant =
+    defaultStaticDomainParameters.maxRatePerParticipant: @nowarn("msg=deprecated")
+  lazy val defaultMaxRequestSize = defaultStaticDomainParameters.maxRequestSize: @nowarn(
+    "msg=deprecated"
+  )
 
   def defaultStaticDomainParametersWith(
       maxRatePerParticipant: Int = StaticDomainParameters.defaultMaxRatePerParticipant.unwrap,

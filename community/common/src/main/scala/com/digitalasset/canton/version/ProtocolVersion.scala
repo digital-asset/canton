@@ -148,7 +148,7 @@ object ProtocolVersion {
 
   private val deprecated: Seq[ProtocolVersion] = Seq(ProtocolVersion.v2)
   val unstable: NonEmpty[List[ProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v4, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.v5, ProtocolVersion.dev)
 
   val latest: ProtocolVersion = supported.max1
 
@@ -167,6 +167,7 @@ object ProtocolVersion {
   lazy val v2: ProtocolVersion = ProtocolVersion(2)
   lazy val v3: ProtocolVersion = ProtocolVersion(3)
   lazy val v4: ProtocolVersion = ProtocolVersion(4)
+  lazy val v5: ProtocolVersion = ProtocolVersion(5)
 
   /** @return Parsed protocol version if found in environment variable `CANTON_PROTOCOL_VERSION`
     * @throws java.lang.RuntimeException if the given parameter cannot be parsed to a protocol version

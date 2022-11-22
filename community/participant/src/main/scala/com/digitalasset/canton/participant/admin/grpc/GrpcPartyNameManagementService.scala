@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.admin.v0.{
 }
 import com.digitalasset.canton.participant.topology.LedgerServerPartyNotifier
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -24,23 +24,23 @@ class GrpcPartyNameManagementService(notifier: LedgerServerPartyNotifier)(implic
 ) extends PartyNameManagementServiceGrpc.PartyNameManagementService {
   override def setPartyDisplayName(
       request: SetPartyDisplayNameRequest
-  ): Future[SetPartyDisplayNameResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      (for {
-        partyId <- EitherT.fromEither[Future](
-          UniqueIdentifier
-            .fromProtoPrimitive(request.partyId, "partyId")
-            .map(PartyId(_))
-            .leftMap(x => x.toString)
-        )
-        // validating displayName length here and not on client-side
-        displayName <- EitherT.fromEither[Future](String255.create(request.displayName))
-        _ <- EitherT.rightT[Future, String](notifier.setDisplayName(partyId, displayName))
-      } yield SetPartyDisplayNameResponse()).value.transform {
-        case Success(Left(err)) =>
-          Failure(Status.INVALID_ARGUMENT.withDescription(err).asRuntimeException())
-        case Success(Right(v)) => Success(v)
-        case Failure(x) => Failure(x)
-      }
+  ): Future[SetPartyDisplayNameResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    (for {
+      partyId <- EitherT.fromEither[Future](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.partyId, "partyId")
+          .map(PartyId(_))
+          .leftMap(x => x.toString)
+      )
+      // validating displayName length here and not on client-side
+      displayName <- EitherT.fromEither[Future](String255.create(request.displayName))
+      _ <- EitherT.rightT[Future, String](notifier.setDisplayName(partyId, displayName))
+    } yield SetPartyDisplayNameResponse()).value.transform {
+      case Success(Left(err)) =>
+        Failure(Status.INVALID_ARGUMENT.withDescription(err).asRuntimeException())
+      case Success(Right(v)) => Success(v)
+      case Failure(x) => Failure(x)
     }
+  }
 }

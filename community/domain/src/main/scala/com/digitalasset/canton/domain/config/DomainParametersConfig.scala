@@ -123,26 +123,48 @@ final case class DomainParametersConfig(
   private def warnOnNonDefaultValues(
       logger: TracedLogger
   )(implicit traceContext: TraceContext): Unit = {
+
+    def logMessage[A](
+        name: String,
+        setConsoleCommand: String,
+        configuredValue: A,
+        defaultValue: A,
+    ) =
+      s"""|Starting from protocol version ${ProtocolVersion.v4}, $name is a dynamic parameter that cannot be configured within the configuration file.
+          |The configured value `$configuredValue` is ignored. The default value is ${defaultValue}.
+          |Please use the admin api to set this parameter: domain-name.service.set_$setConsoleCommand($configuredValue)
+          |""".stripMargin
+
     val currentPV = protocolVersion.version
-    // TODO(#9800) Change references to protocol version 4
-    if (currentPV >= ProtocolVersion.dev) {
+    if (currentPV >= ProtocolVersion.v4) {
       if (reconciliationInterval != StaticDomainParameters.defaultReconciliationInterval)
         logger.warn(
-          logMessage(reconciliationInterval, StaticDomainParameters.defaultReconciliationInterval)
+          logMessage(
+            "reconciliationInterval",
+            "reconciliation_interval",
+            reconciliationInterval,
+            StaticDomainParameters.defaultReconciliationInterval,
+          )
         )
       if (maxRatePerParticipant != StaticDomainParameters.defaultMaxRatePerParticipant)
         logger.warn(
-          logMessage(maxRatePerParticipant, StaticDomainParameters.defaultMaxRatePerParticipant)
+          logMessage(
+            "max rate per participant",
+            "max_rate_per_participant",
+            maxRatePerParticipant,
+            StaticDomainParameters.defaultMaxRatePerParticipant,
+          )
         )
 
       if (maxInboundMessageSize != StaticDomainParameters.defaultMaxRequestSize)
-        logger.warn(logMessage(maxInboundMessageSize, StaticDomainParameters.defaultMaxRequestSize))
+        logger.warn(
+          logMessage(
+            "max request size (previously: max inbound message size)",
+            "set_max_request_size",
+            maxInboundMessageSize,
+            StaticDomainParameters.defaultMaxRequestSize,
+          )
+        )
     }
   }
-  private def logMessage[A](configureValue: A, defaultValue: A) =
-    s"""|Starting from protocol version ${ProtocolVersion.dev}, max-inbound-message-size is a dynamic parameter that cannot be configured within the configuration file.
-        |The configured value "max-inbound-message-size = $configureValue" is ignored. The default value is ${defaultValue}.
-        |Please use the admin api to set this parameter: domain-name.service.set_max_request_size($configureValue)
-        |""".stripMargin
-
 }

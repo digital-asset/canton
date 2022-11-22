@@ -9,7 +9,6 @@ import com.digitalasset.canton.lifecycle.{AsyncCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor.PendingRequestDataOrReplayData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ConflictDetector,
   NaiveRequestTracker,
@@ -20,10 +19,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   WatermarkLookup,
   WatermarkTracker,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.PendingTransferIn
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.PendingTransferSubmission
-import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
 import com.digitalasset.canton.participant.protocol.{
   Phase37Synchronizer,
   ProcessingStartingPoints,
@@ -32,7 +28,7 @@ import com.digitalasset.canton.participant.protocol.{
   SingleDomainCausalTracker,
 }
 import com.digitalasset.canton.participant.store.memory.TransferCache
-import com.digitalasset.canton.protocol.{RequestId, RootHash}
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.time.DomainTimeTracker
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -64,13 +60,6 @@ class SyncDomainEphemeralState(
     TrieMap.empty[RootHash, PendingTransferSubmission]
   val pendingTransferInSubmissions: TrieMap[RootHash, PendingTransferSubmission] =
     TrieMap.empty[RootHash, PendingTransferSubmission]
-
-  val pendingTransactions: TrieMap[RequestId, PendingRequestDataOrReplayData[PendingTransaction]] =
-    TrieMap.empty[RequestId, PendingRequestDataOrReplayData[PendingTransaction]]
-  val pendingTransferOuts: TrieMap[RequestId, PendingRequestDataOrReplayData[PendingTransferOut]] =
-    TrieMap.empty[RequestId, PendingRequestDataOrReplayData[PendingTransferOut]]
-  val pendingTransferIns: TrieMap[RequestId, PendingRequestDataOrReplayData[PendingTransferIn]] =
-    TrieMap.empty[RequestId, PendingRequestDataOrReplayData[PendingTransferIn]]
 
   val requestJournal =
     new RequestJournal(

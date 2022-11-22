@@ -7,46 +7,85 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 
 import scala.jdk.CollectionConverters.*
 
+/** Various database related settings
+  *
+  * @param maxConnections Allows for setting the maximum number of db connections used by Canton and the ledger API server.
+  *                 If None or non-positive, the value will be auto-detected from the number of processors.
+  *                 Has no effect, if the number of connections is already set via slick options
+  *                 (i.e., `config.numThreads`).
+  * @param failFastOnStartup If true, the node will fail-fast when the database cannot be connected to
+  *                    If false, the node will wait indefinitely for the database to come up
+  * @param overrideMigrationPaths Where should database migrations be read from. Enables specialized DDL for different database servers (e.g. Postgres, Oracle).
+  * @param ledgerApiJdbcUrl Canton attempts to generate appropriate configuration for the daml ledger-api to persist the data it requires.
+  *                   In most circumstances this should be sufficient and there is no need to override this.
+  *                   However if this generation fails or an advanced configuration is required, the ledger-api jdbc url can be
+  *                   explicitly configured using this property.
+  *                   The jdbc url **must** specify the schema of `ledger_api` (using h2 parameter `schema` or postgres parameter `currentSchema`).
+  *                   This property is not used by a domain node as it does not run a ledger-api instance,
+  *                   and will be ignored if the node is configured with in-memory persistence.
+  * @param connectionTimeout How long to wait for acquiring a database connection
+  * @param warnOnSlowQuery Optional time when we start logging a query as slow.
+  * @param warnOnSlowQueryInterval How often to repeat the logging statement for slow queries.
+  * @param unsafeCleanOnValidationError TO BE USED ONLY FOR TESTING! Clean the database if validation during DB migration fails.
+  * @param unsafeBaselineOnMigrate TO BE USED ONLY FOR TESTING!
+  *                          <p>Whether to automatically call baseline when migrate is executed against a non-empty schema with no schema history table.
+  *                          This schema will then be baselined with the {@code baselineVersion} before executing the migrations.
+  *                          Only migrations above {@code baselineVersion} will then be applied.</p>
+  *                          <p>This is useful for databases projects where the initial vendor schema is not empty</p>
+  *                          If baseline should be called on migrate for non-empty schemas, { @code false} if not. (default: { @code false})
+  */
+case class DbParametersConfig(
+    maxConnections: Option[Int] = None,
+    failFastOnStartup: Boolean = true,
+    migrationsPaths: Seq[String] = Seq.empty,
+    ledgerApiJdbcUrl: Option[String] = None,
+    connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
+    warnOnSlowQuery: Option[PositiveFiniteDuration] = None,
+    warnOnSlowQueryInterval: PositiveFiniteDuration =
+      DbParametersConfig.defaultWarnOnSlowQueryInterval,
+    unsafeCleanOnValidationError: Boolean = false,
+    unsafeBaselineOnMigrate: Boolean = false,
+) extends PrettyPrinting {
+  override def pretty: Pretty[DbParametersConfig] =
+    prettyOfClass(
+      paramIfDefined(
+        "overrideMigrationsPaths",
+        x =>
+          if (x.migrationsPaths.nonEmpty)
+            Some(x.migrationsPaths.map(_.doubleQuoted))
+          else None,
+      ),
+      paramIfDefined("ledgerApiJdbcUrl", _.ledgerApiJdbcUrl.map(_.doubleQuoted)),
+      paramIfDefined("maxConnections", _.maxConnections),
+      param("failFast", _.failFastOnStartup),
+    )
+}
+
+object DbParametersConfig {
+  val defaultWarnOnSlowQueryInterval: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(5)
+}
+
 trait StorageConfig {
   type Self <: StorageConfig
-
-  /** If true, the node will fail-fast when the database cannot be connected to
-    * If false, the node will wait indefinitely for the database to come up
-    */
-  def failFastOnStartup: Boolean
 
   /** Database specific configuration parameters used by Slick.
     * Also available for in-memory storage to support easy switching between in-memory and database storage.
     */
   def config: Config
 
-  /** Allows for setting the maximum number of db connections used by Canton and the ledger API server.
-    * If None or non-positive, the value will be auto-detected from the number of processors.
-    * Has no effect, if the number of connections is already set via slick options
-    * (i.e., `config.numThreads`).
-    */
-  def maxConnections: Option[Int]
-
-  /** Copy parameters of `storageConfig` into `this` (if possible)
-    */
-  def withParameters(storageConfig: StorageConfig): Self
-
-  /** Converts this to B, copying all values of this to the new config created by mk.
-    * @param mk function creating a new storage config of type B from a typesafe config
-    * @tparam B new storage type to convert this to
-    */
-  def to[B <: StorageConfig](mk: Config => B): B#Self = mk(config).withParameters(this)
+  /** General database related parameters. */
+  def parameters: DbParametersConfig
 
   private def maxConnectionsOrDefault: Int = {
     // The following is an educated guess of a sane default for the number of DB connections.
     // https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing
-    maxConnections match {
+    parameters.maxConnections match {
       case Some(value) if value > 0 => value
       case _ => Threading.detectNumberOfThreads(NamedLogging.noopLogger)(TraceContext.empty)
     }
@@ -93,9 +132,7 @@ trait StorageConfig {
   */
 sealed trait CommunityStorageConfig extends StorageConfig
 
-trait MemoryStorageConfig extends StorageConfig {
-  override val maxConnections: Option[Int] = None
-}
+trait MemoryStorageConfig extends StorageConfig
 
 object CommunityStorageConfig {
 
@@ -106,13 +143,11 @@ object CommunityStorageConfig {
     */
   case class Memory(
       override val config: Config = ConfigFactory.empty(),
-      failFastOnStartup: Boolean = false,
+      override val parameters: DbParametersConfig = DbParametersConfig(),
   ) extends CommunityStorageConfig
       with MemoryStorageConfig {
     override type Self = Memory
 
-    override def withParameters(storageConfig: StorageConfig): Self =
-      this.copy(config = storageConfig.config)
   }
 }
 
@@ -120,45 +155,17 @@ object CommunityStorageConfig {
   */
 trait DbConfig extends StorageConfig with PrettyPrinting {
 
-  /** Where should database migrations be read from.
-    * Enables specialized DDL for different database servers (e.g. Postgres, Oracle).
-    */
-  def migrationsPaths: Seq[String]
-
   /** Function to combine the defined migration path together with dev version changes */
-  def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String]
+  final def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] = {
+    if (parameters.migrationsPaths.nonEmpty)
+      parameters.migrationsPaths
+    else if (devVersionSupport)
+      Seq(stableMigrationPath, devMigrationPath)
+    else Seq(stableMigrationPath)
+  }
 
-  /** Canton attempts to generate appropriate configuration for the daml ledger-api to persist the data it requires.
-    * In most circumstances this should be sufficient and there is no need to override this.
-    * However if this generation fails or an advanced configuration is required, the ledger-api jdbc url can be
-    * explicitly configured using this property.
-    * The jdbc url **must** specify the schema of `ledger_api` (using h2 parameter `schema` or postgres parameter `currentSchema`).
-    * This property is not used by a domain node as it does not run a ledger-api instance,
-    * and will be ignored if the node is configured with in-memory persistence.
-    */
-  val ledgerApiJdbcUrl: Option[String]
-
-  /** How long to wait for acquiring a database connection */
-  val connectionTimeout: NonNegativeFiniteDuration
-
-  /** TO BE USED ONLY FOR TESTING!
-    * Clean the database if validation during DB migration fails.
-    */
-  def cleanOnValidationError: Boolean = false
-
-  /** TO BE USED ONLY FOR TESTING!
-    * <p>
-    * Whether to automatically call baseline when migrate is executed against a non-empty schema with no schema history table.
-    * This schema will then be baselined with the {@code baselineVersion} before executing the migrations.
-    * Only migrations above {@code baselineVersion} will then be applied.
-    * </p>
-    * <p>
-    * This is useful for databases projects where the initial vendor schema is not empty
-    * </p>
-    *
-    * if baseline should be called on migrate for non-empty schemas, { @code false} if not. (default: { @code false})
-    */
-  def baselineOnMigrate: Boolean = false
+  protected def devMigrationPath: String
+  protected def stableMigrationPath: String
 
   override def pretty: Pretty[DbConfig] =
     prettyOfClass(
@@ -166,8 +173,7 @@ trait DbConfig extends StorageConfig with PrettyPrinting {
         "config",
         _.config.toString.replaceAll("\"password\":\".*?\"", "\"password\":\"???\"").unquoted,
       ),
-      param("migrationsPaths", _.migrationsPaths.map(_.doubleQuoted)),
-      paramIfDefined("ledgerApiJdbcUrl", _.ledgerApiJdbcUrl.map(_.doubleQuoted)),
+      param("parameters", _.parameters),
     )
 }
 
@@ -189,78 +195,26 @@ sealed trait CommunityDbConfig extends CommunityStorageConfig with DbConfig
 object CommunityDbConfig {
   case class H2(
       override val config: Config,
-      override val maxConnections: Option[Int] = None,
-      override val migrationsPaths: Seq[String] = Seq(DbConfig.h2MigrationsPathStable),
-      override val ledgerApiJdbcUrl: Option[String] = None,
-      override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
-      override val failFastOnStartup: Boolean = true,
+      override val parameters: DbParametersConfig = DbParametersConfig(),
   ) extends CommunityDbConfig
       with H2DbConfig {
     override type Self = H2
 
-    override def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] = {
-      if (devVersionSupport)
-        migrationsPaths :+ DbConfig.h2MigrationsPathDev
-      else
-        migrationsPaths
-    }
+    protected val devMigrationPath: String = DbConfig.h2MigrationsPathDev
+    protected val stableMigrationPath: String = DbConfig.h2MigrationsPathStable
 
-    override def withParameters(storageConfig: StorageConfig): H2 = storageConfig match {
-      case dbConfig: DbConfig =>
-        this.copy(
-          config = dbConfig.config,
-          maxConnections = dbConfig.maxConnections,
-          migrationsPaths = dbConfig.migrationsPaths,
-          ledgerApiJdbcUrl = dbConfig.ledgerApiJdbcUrl,
-          connectionTimeout = dbConfig.connectionTimeout,
-          failFastOnStartup = dbConfig.failFastOnStartup,
-        )
-      case memoryConfig: MemoryStorageConfig =>
-        this.copy(config = memoryConfig.config, failFastOnStartup = storageConfig.failFastOnStartup)
-      case unknownConfig =>
-        throw new UnsupportedOperationException(
-          s"Unknown storage config type: ${unknownConfig.getClass.getSimpleName}"
-        )
-    }
   }
 
   case class Postgres(
       override val config: Config,
-      override val maxConnections: Option[Int] = None,
-      override val migrationsPaths: Seq[String] = Seq(DbConfig.postgresMigrationsPathStable),
-      override val ledgerApiJdbcUrl: Option[String] = None,
-      override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
-      override val cleanOnValidationError: Boolean = false,
-      override val failFastOnStartup: Boolean = true,
+      override val parameters: DbParametersConfig = DbParametersConfig(),
   ) extends CommunityDbConfig
       with PostgresDbConfig {
     override type Self = Postgres
 
-    override def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] = {
-      if (devVersionSupport)
-        migrationsPaths :+ DbConfig.postgresMigrationsPathDev
-      else
-        migrationsPaths
-    }
+    protected def devMigrationPath: String = DbConfig.postgresMigrationsPathDev
+    protected val stableMigrationPath: String = DbConfig.postgresMigrationsPathStable
 
-    override def withParameters(storageConfig: StorageConfig): Postgres = storageConfig match {
-      case dbConfig: DbConfig =>
-        this.copy(
-          config = dbConfig.config,
-          maxConnections = dbConfig.maxConnections,
-          migrationsPaths = dbConfig.migrationsPaths,
-          ledgerApiJdbcUrl = dbConfig.ledgerApiJdbcUrl,
-          connectionTimeout = dbConfig.connectionTimeout,
-          cleanOnValidationError = dbConfig.cleanOnValidationError,
-          failFastOnStartup = dbConfig.failFastOnStartup,
-        )
-      case memoryConfig: MemoryStorageConfig =>
-        this.copy(config = memoryConfig.config, failFastOnStartup = storageConfig.failFastOnStartup)
-      case unknownConfig =>
-        throw new UnsupportedOperationException(
-          s"Unknown storage config type: ${unknownConfig.getClass.getSimpleName}"
-        )
-    }
   }
 }
 
@@ -321,7 +275,7 @@ object DbConfig extends NoTracing {
             withMainConnection,
           )
           .unwrap,
-        "connectionTimeout" -> dbConfig.connectionTimeout.unwrap.toMillis,
+        "connectionTimeout" -> dbConfig.parameters.connectionTimeout.unwrap.toMillis,
         "initializationFailTimeout" -> 1, // Must be greater than 0 to force a connection validation on startup
       )
     )

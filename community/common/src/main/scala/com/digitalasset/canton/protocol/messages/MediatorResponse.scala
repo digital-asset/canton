@@ -79,6 +79,8 @@ case class MediatorResponse private (
         throw InvalidMediatorResponse(show"View mash must not be empty for verdict $localVerdict")
   }
 
+  override def signingTimestamp: CantonTimestamp = requestId.unwrap
+
   protected override def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 

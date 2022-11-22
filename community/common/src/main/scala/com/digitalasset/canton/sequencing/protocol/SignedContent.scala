@@ -166,16 +166,6 @@ object SignedContent {
         } yield SignedContent(content, signature, ts)
     }
 
-  def fromByteString[A <: ProtocolVersionedMemoizedEvidence](
-      contentDeserializer: ContentDeserializer[A],
-      bytes: ByteString,
-  ): ParsingResult[SignedContent[A]] =
-    for {
-      signedContentP <- ProtoConverter
-        .protoParser(v0.SignedContent.parseFrom)(bytes)
-      result <- fromProtoV0[A](contentDeserializer, signedContentP)
-    } yield result
-
   implicit def prettySignedContent[A <: ProtocolVersionedMemoizedEvidence](implicit
       prettyA: Pretty[A]
   ): Pretty[SignedContent[A]] = {

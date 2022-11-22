@@ -11,7 +11,7 @@ import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherTUtil
 import com.google.protobuf.empty.Empty
 
@@ -24,14 +24,14 @@ class GrpcDomainInitializationService(
 )(implicit executionContext: ExecutionContext)
     extends DomainInitializationService
     with NamedLogging {
-  override def init(request: DomainInitRequest): Future[Empty] = fromGrpcContext {
-    implicit traceContext =>
-      val res = for {
-        _ <- mapErr(manager.isInitializedET(mustHaveActiveMediator = false))
-        configP <- mapErr(ProtoConverter.required("config", request.config))
-        config <- mapErrNew(wrapErr(DomainNodeSequencerConfig.fromProtoV0(configP)))
-        _ <- mapErr(start(config))
-      } yield Empty()
-      EitherTUtil.toFuture(res)
+  override def init(request: DomainInitRequest): Future[Empty] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      _ <- mapErr(manager.isInitializedET(mustHaveActiveMediator = false))
+      configP <- mapErr(ProtoConverter.required("config", request.config))
+      config <- mapErrNew(wrapErr(DomainNodeSequencerConfig.fromProtoV0(configP)))
+      _ <- mapErr(start(config))
+    } yield Empty()
+    EitherTUtil.toFuture(res)
   }
 }

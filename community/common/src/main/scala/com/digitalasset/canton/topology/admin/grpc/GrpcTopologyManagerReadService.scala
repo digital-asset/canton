@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{mapErrNew, wrapErr}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.admin.{v0 as adminProto}
+import com.digitalasset.canton.topology.admin.v0 as adminProto
 import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
@@ -24,8 +24,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -207,136 +206,132 @@ class GrpcTopologyManagerReadService(
 
   override def listPartyToParticipant(
       request: adminProto.ListPartyToParticipantRequest
-  ): Future[adminProto.ListPartyToParticipantResult] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        filterRequestSide <- wrapErr(
-          request.filterRequestSide.map(_.value).traverse(RequestSide.fromProtoEnum)
-        )
-        filterPermission <- wrapErr(
-          request.filterPermission.map(_.value).traverse(ParticipantPermission.fromProtoEnum)
-        )
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.PartyToParticipant,
-          request.filterParty,
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect {
-            case (result, x: PartyToParticipant)
-                if x.party.filterString.startsWith(
-                  request.filterParty
-                ) && x.participant.filterString.startsWith(request.filterParticipant)
-                  && filterRequestSide
-                    .forall(_ == x.side) && filterPermission.forall(_ == x.permission) =>
-              (result, x)
-          }
-          .map { case (context, elem) =>
-            new adminProto.ListPartyToParticipantResult.Result(
-              context = Some(createBaseResult(context)),
-              item = Some(elem.toProtoV0),
-            )
-          }
-        adminProto.ListPartyToParticipantResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+  ): Future[adminProto.ListPartyToParticipantResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      filterRequestSide <- wrapErr(
+        request.filterRequestSide.map(_.value).traverse(RequestSide.fromProtoEnum)
+      )
+      filterPermission <- wrapErr(
+        request.filterPermission.map(_.value).traverse(ParticipantPermission.fromProtoEnum)
+      )
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.PartyToParticipant,
+        request.filterParty,
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect {
+          case (result, x: PartyToParticipant)
+              if x.party.filterString.startsWith(
+                request.filterParty
+              ) && x.participant.filterString.startsWith(request.filterParticipant)
+                && filterRequestSide
+                  .forall(_ == x.side) && filterPermission.forall(_ == x.permission) =>
+            (result, x)
+        }
+        .map { case (context, elem) =>
+          new adminProto.ListPartyToParticipantResult.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.toProtoV0),
+          )
+        }
+      adminProto.ListPartyToParticipantResult(results = results)
     }
+    EitherTUtil.toFuture(mapErrNew(ret))
+  }
 
   override def listOwnerToKeyMapping(
       request: adminProto.ListOwnerToKeyMappingRequest
-  ): Future[adminProto.ListOwnerToKeyMappingResult] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        filterKeyPurpose <- wrapErr(
-          request.filterKeyPurpose.traverse(x =>
-            KeyPurpose.fromProtoEnum("filterKeyPurpose", x.value)
+  ): Future[adminProto.ListOwnerToKeyMappingResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      filterKeyPurpose <- wrapErr(
+        request.filterKeyPurpose.traverse(x =>
+          KeyPurpose.fromProtoEnum("filterKeyPurpose", x.value)
+        )
+      )
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.OwnerToKeyMapping,
+        request.filterKeyOwnerUid,
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect {
+          case (result, x: OwnerToKeyMapping)
+              if x.owner.filterString.startsWith(request.filterKeyOwnerUid) &&
+                (request.filterKeyOwnerType.isEmpty || request.filterKeyOwnerType == x.owner.code.threeLetterId.unwrap) &&
+                (filterKeyPurpose.isEmpty || filterKeyPurpose.contains(x.key.purpose)) =>
+            (result, x)
+        }
+        .map { case (context, elem) =>
+          new adminProto.ListOwnerToKeyMappingResult.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.toProtoV0),
+            keyFingerprint = elem.key.fingerprint.unwrap,
           )
-        )
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.OwnerToKeyMapping,
-          request.filterKeyOwnerUid,
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect {
-            case (result, x: OwnerToKeyMapping)
-                if x.owner.filterString.startsWith(request.filterKeyOwnerUid) &&
-                  (request.filterKeyOwnerType.isEmpty || request.filterKeyOwnerType == x.owner.code.threeLetterId.unwrap) &&
-                  (filterKeyPurpose.isEmpty || filterKeyPurpose.contains(x.key.purpose)) =>
-              (result, x)
-          }
-          .map { case (context, elem) =>
-            new adminProto.ListOwnerToKeyMappingResult.Result(
-              context = Some(createBaseResult(context)),
-              item = Some(elem.toProtoV0),
-              keyFingerprint = elem.key.fingerprint.unwrap,
-            )
-          }
-        adminProto.ListOwnerToKeyMappingResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+        }
+      adminProto.ListOwnerToKeyMappingResult(results = results)
     }
+    EitherTUtil.toFuture(mapErrNew(ret))
+  }
 
   override def listNamespaceDelegation(
       request: adminProto.ListNamespaceDelegationRequest
-  ): Future[adminProto.ListNamespaceDelegationResult] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.NamespaceDelegation,
-          request.filterNamespace,
-          namespaceOnly = true,
-        )
-      } yield {
-        val results = res
-          .collect { case (result, x: NamespaceDelegation) =>
-            (result, x)
-          }
-          .map { case (context, elem) =>
-            new adminProto.ListNamespaceDelegationResult.Result(
-              context = Some(createBaseResult(context)),
-              item = Some(elem.toProtoV0),
-              targetKeyFingerprint = elem.target.fingerprint.unwrap,
-            )
-          }
+  ): Future[adminProto.ListNamespaceDelegationResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.NamespaceDelegation,
+        request.filterNamespace,
+        namespaceOnly = true,
+      )
+    } yield {
+      val results = res
+        .collect { case (result, x: NamespaceDelegation) => (result, x) }
+        .map { case (context, elem) =>
+          new adminProto.ListNamespaceDelegationResult.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.toProtoV0),
+            targetKeyFingerprint = elem.target.fingerprint.unwrap,
+          )
+        }
 
-        adminProto.ListNamespaceDelegationResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+      adminProto.ListNamespaceDelegationResult(results = results)
     }
+    EitherTUtil.toFuture(mapErrNew(ret))
+  }
 
   override def listIdentifierDelegation(
       request: adminProto.ListIdentifierDelegationRequest
-  ): Future[adminProto.ListIdentifierDelegationResult] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.IdentifierDelegation,
-          request.filterUid,
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect { case (result, x: IdentifierDelegation) =>
-            (result, x)
-          }
-          .map { case (context, elem) =>
-            new adminProto.ListIdentifierDelegationResult.Result(
-              context = Some(createBaseResult(context)),
-              item = Some(elem.toProtoV0),
-              targetKeyFingerprint = elem.target.fingerprint.unwrap,
-            )
-          }
-        adminProto.ListIdentifierDelegationResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+  ): Future[adminProto.ListIdentifierDelegationResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.IdentifierDelegation,
+        request.filterUid,
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect { case (result, x: IdentifierDelegation) => (result, x) }
+        .map { case (context, elem) =>
+          new adminProto.ListIdentifierDelegationResult.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.toProtoV0),
+            targetKeyFingerprint = elem.target.fingerprint.unwrap,
+          )
+        }
+      adminProto.ListIdentifierDelegationResult(results = results)
     }
+    EitherTUtil.toFuture(mapErrNew(ret))
+  }
 
   override def listAvailableStores(
       request: adminProto.ListAvailableStoresRequest
@@ -347,185 +342,183 @@ class GrpcTopologyManagerReadService(
 
   override def listParticipantDomainState(
       request: adminProto.ListParticipantDomainStateRequest
-  ): Future[adminProto.ListParticipantDomainStateResult] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.ParticipantState,
-          request.filterParticipant,
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect {
-            case (context, elem: ParticipantState)
-                if elem.domain.filterString.startsWith(request.filterDomain) =>
-              new adminProto.ListParticipantDomainStateResult.Result(
-                context = Some(createBaseResult(context)),
-                item = Some(elem.toProtoV0),
-              )
-          }
-        adminProto.ListParticipantDomainStateResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
-    }
-
-  override def listSignedLegalIdentityClaim(
-      request: adminProto.ListSignedLegalIdentityClaimRequest
-  ): Future[adminProto.ListSignedLegalIdentityClaimResult] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.SignedLegalIdentityClaim,
-          request.filterUid,
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect { case (result, x: SignedLegalIdentityClaim) =>
-            (result, x)
-          }
-          .map { case (context, elem) =>
-            new adminProto.ListSignedLegalIdentityClaimResult.Result(
+  ): Future[adminProto.ListParticipantDomainStateResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.ParticipantState,
+        request.filterParticipant,
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect {
+          case (context, elem: ParticipantState)
+              if elem.domain.filterString.startsWith(request.filterDomain) =>
+            new adminProto.ListParticipantDomainStateResult.Result(
               context = Some(createBaseResult(context)),
               item = Some(elem.toProtoV0),
             )
-          }
-        adminProto.ListSignedLegalIdentityClaimResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+        }
+      adminProto.ListParticipantDomainStateResult(results = results)
     }
+    EitherTUtil.toFuture(mapErrNew(ret))
+  }
+
+  override def listSignedLegalIdentityClaim(
+      request: adminProto.ListSignedLegalIdentityClaimRequest
+  ): Future[adminProto.ListSignedLegalIdentityClaimResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.SignedLegalIdentityClaim,
+        request.filterUid,
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect { case (result, x: SignedLegalIdentityClaim) =>
+          (result, x)
+        }
+        .map { case (context, elem) =>
+          new adminProto.ListSignedLegalIdentityClaimResult.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.toProtoV0),
+          )
+        }
+      adminProto.ListSignedLegalIdentityClaimResult(results = results)
+    }
+    EitherTUtil.toFuture(mapErrNew(ret))
+  }
 
   /** Access all topology transactions
     */
-  override def listAll(request: adminProto.ListAllRequest): Future[adminProto.ListAllResponse] =
-    fromGrpcContext { implicit traceContext =>
-      val res = for {
-        baseQuery <- wrapErr(BaseQuery.fromProto(request.baseQuery))
-        stores <- collectStores(baseQuery.filterStore)
-        results <- EitherT.right(
-          stores.parTraverse { store =>
-            store
-              .inspect(
-                stateStore =
-                  // state store doesn't make any sense for the authorized store
-                  if (store.storeId == TopologyStoreId.AuthorizedStore) false
-                  else baseQuery.useStateStore,
-                timeQuery = baseQuery.timeQuery,
-                recentTimestampO = getApproximateTimestamp(store.storeId),
-                ops = baseQuery.ops,
-                typ = None,
-                idFilter = "",
-                namespaceOnly = false,
-              )
-          }
-        ): EitherT[Future, CantonError, Seq[StoredTopologyTransactions[TopologyChangeOp]]]
-      } yield {
-        val res = results.foldLeft(StoredTopologyTransactions.empty[TopologyChangeOp]) {
-          case (acc, elem) =>
-            StoredTopologyTransactions(
-              acc.result ++ elem.result.filter(
-                _.transaction.key.fingerprint.unwrap.startsWith(baseQuery.filterSigningKey)
-              )
+  override def listAll(request: adminProto.ListAllRequest): Future[adminProto.ListAllResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      baseQuery <- wrapErr(BaseQuery.fromProto(request.baseQuery))
+      stores <- collectStores(baseQuery.filterStore)
+      results <- EitherT.right(
+        stores.parTraverse { store =>
+          store
+            .inspect(
+              stateStore =
+                // state store doesn't make any sense for the authorized store
+                if (store.storeId == TopologyStoreId.AuthorizedStore) false
+                else baseQuery.useStateStore,
+              timeQuery = baseQuery.timeQuery,
+              recentTimestampO = getApproximateTimestamp(store.storeId),
+              ops = baseQuery.ops,
+              typ = None,
+              idFilter = "",
+              namespaceOnly = false,
             )
         }
-        adminProto.ListAllResponse(result = Some(res.toProtoV0))
+      ): EitherT[Future, CantonError, Seq[StoredTopologyTransactions[TopologyChangeOp]]]
+    } yield {
+      val res = results.foldLeft(StoredTopologyTransactions.empty[TopologyChangeOp]) {
+        case (acc, elem) =>
+          StoredTopologyTransactions(
+            acc.result ++ elem.result.filter(
+              _.transaction.key.fingerprint.unwrap.startsWith(baseQuery.filterSigningKey)
+            )
+          )
       }
-      EitherTUtil.toFuture(mapErrNew(res))
+      adminProto.ListAllResponse(result = Some(res.toProtoV0))
     }
+    EitherTUtil.toFuture(mapErrNew(res))
+  }
 
   override def listVettedPackages(
       request: adminProto.ListVettedPackagesRequest
-  ): Future[adminProto.ListVettedPackagesResult] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.PackageUse,
-          request.filterParticipant,
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect { case (context, vetted: VettedPackages) =>
-            new adminProto.ListVettedPackagesResult.Result(
-              context = Some(createBaseResult(context)),
-              item = Some(vetted.toProtoV0),
-            )
-          }
-        adminProto.ListVettedPackagesResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+  ): Future[adminProto.ListVettedPackagesResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.PackageUse,
+        request.filterParticipant,
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect { case (context, vetted: VettedPackages) =>
+          new adminProto.ListVettedPackagesResult.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(vetted.toProtoV0),
+          )
+        }
+      adminProto.ListVettedPackagesResult(results = results)
     }
+    EitherTUtil.toFuture(mapErrNew(ret))
+  }
 
   override def listDomainParametersChanges(
       request: adminProto.ListDomainParametersChangesRequest
   ): Future[adminProto.ListDomainParametersChangesResult] = {
     import adminProto.ListDomainParametersChangesResult.*
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.DomainParameters,
+        "",
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect { case (context, domainParametersChange: DomainParametersChange) =>
+          val protoVersion = domainParametersChange.domainParameters.protoVersion.v
 
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val ret = for {
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.DomainParameters,
-          "",
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect { case (context, domainParametersChange: DomainParametersChange) =>
-            val protoVersion = domainParametersChange.domainParameters.protoVersion.v
-
-            val parameters =
-              if (protoVersion == 0)
-                Some(Result.Parameters.V0(domainParametersChange.domainParameters.toProtoV0))
-              else if (protoVersion == 1)
-                Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
-              else {
-                logger.warn(s"Unable to serialize domain parameters with version $protoVersion")
-                None
-              }
-
-            parameters.map { parameters =>
-              adminProto.ListDomainParametersChangesResult.Result(
-                Some(createBaseResult(context)),
-                parameters,
-              )
+          val parameters =
+            if (protoVersion == 0)
+              Some(Result.Parameters.V0(domainParametersChange.domainParameters.toProtoV0))
+            else if (protoVersion == 1)
+              Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
+            else {
+              logger.warn(s"Unable to serialize domain parameters with version $protoVersion")
+              None
             }
-          }
 
-        adminProto.ListDomainParametersChangesResult(results.flatten)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+          parameters.map { parameters =>
+            adminProto.ListDomainParametersChangesResult.Result(
+              Some(createBaseResult(context)),
+              parameters,
+            )
+          }
+        }
+
+      adminProto.ListDomainParametersChangesResult(results.flatten)
     }
+    EitherTUtil.toFuture(mapErrNew(ret))
   }
 
   override def listMediatorDomainState(
       request: adminProto.ListMediatorDomainStateRequest
-  ): Future[adminProto.ListMediatorDomainStateResult] = TraceContext.fromGrpcContext {
-    implicit traceContext =>
-      val ret = for {
-        res <- collectFromStores(
-          request.baseQuery,
-          DomainTopologyTransactionType.MediatorDomainState,
-          request.filterMediator,
-          namespaceOnly = false,
-        )
-      } yield {
-        val results = res
-          .collect {
-            case (context, elem: MediatorDomainState)
-                if elem.domain.filterString.startsWith(request.filterDomain) =>
-              new adminProto.ListMediatorDomainStateResult.Result(
-                context = Some(createBaseResult(context)),
-                item = Some(elem.toProtoV0),
-              )
-          }
-        adminProto.ListMediatorDomainStateResult(results = results)
-      }
-      EitherTUtil.toFuture(mapErrNew(ret))
+  ): Future[adminProto.ListMediatorDomainStateResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        DomainTopologyTransactionType.MediatorDomainState,
+        request.filterMediator,
+        namespaceOnly = false,
+      )
+    } yield {
+      val results = res
+        .collect {
+          case (context, elem: MediatorDomainState)
+              if elem.domain.filterString.startsWith(request.filterDomain) =>
+            new adminProto.ListMediatorDomainStateResult.Result(
+              context = Some(createBaseResult(context)),
+              item = Some(elem.toProtoV0),
+            )
+        }
+      adminProto.ListMediatorDomainStateResult(results = results)
+    }
+    EitherTUtil.toFuture(mapErrNew(ret))
   }
 
 }

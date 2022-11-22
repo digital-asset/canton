@@ -56,6 +56,7 @@ abstract class TransactionTreeFactoryImpl(
     with NamedLogging {
 
   private val unicumGenerator = new UnicumGenerator(cryptoOps)
+  private val cantonContractIdVersion = CantonContractIdVersion.fromProtocolVersion(protocolVersion)
 
   protected type State <: TransactionTreeFactoryImpl.State
 
@@ -156,7 +157,7 @@ abstract class TransactionTreeFactoryImpl(
 
       rootViews <- createRootViews(rootViewDecompositions, state, contractOfId)
         .map(rootViews =>
-          GenTransactionTree(cryptoOps)(
+          GenTransactionTree.tryCreate(cryptoOps)(
             submitterMetadata,
             commonMetadata,
             participantMetadata,
@@ -334,7 +335,9 @@ abstract class TransactionTreeFactoryImpl(
   )(implicit traceContext: TraceContext): LfNodeCreate = {
     val cantonContractInst = checked(
       LfTransactionUtil
-        .suffixContractInst(state.unicumOfCreatedContract)(createNode.versionedCoinst)
+        .suffixContractInst(state.unicumOfCreatedContract, cantonContractIdVersion)(
+          createNode.versionedCoinst
+        )
         .fold(
           cid =>
             throw new IllegalStateException(
@@ -353,7 +356,7 @@ abstract class TransactionTreeFactoryImpl(
           s"Invalid contract id for created contract ${createNode.coid}"
         )
     }
-    val unicum = unicumGenerator.generateUnicum(
+    val (contractSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
       domainId,
       state.mediatorId,
       state.transactionUUID,
@@ -363,7 +366,8 @@ abstract class TransactionTreeFactoryImpl(
       state.ledgerTime,
       serializedCantonContractInst,
     )
-    val contractId = ContractId.fromDiscriminator(discriminator, unicum)
+
+    val contractId = cantonContractIdVersion.fromDiscriminator(discriminator, unicum)
 
     state.setUnicumFor(discriminator, unicum)
 
@@ -372,10 +376,11 @@ abstract class TransactionTreeFactoryImpl(
       .getOrElse(throw new RuntimeException("Created metadata be defined for create node"))
       .metadata
     val createdInfo = SerializableContract(
-      contractId,
-      serializedCantonContractInst,
-      createdMetadata,
-      state.ledgerTime,
+      contractId = contractId,
+      rawContractInstance = serializedCantonContractInst,
+      metadata = createdMetadata,
+      ledgerCreateTime = state.ledgerTime,
+      contractSalt = Option.when(protocolVersion >= ProtocolVersion.v4)(contractSalt.unwrap),
     )
     state.setCreatedContractInfo(contractId, createdInfo)
 
@@ -391,7 +396,7 @@ abstract class TransactionTreeFactoryImpl(
   )(idAndNode: (LfNodeId, LfActionNode)): LfActionNode = {
     val (nodeId, node) = idAndNode
     val suffixedNode = LfTransactionUtil
-      .suffixNode(state.unicumOfCreatedContract)(node)
+      .suffixNode(state.unicumOfCreatedContract, cantonContractIdVersion)(node)
       .fold(
         cid => throw new IllegalArgumentException(s"Invalid contract id $cid found"),
         Predef.identity,

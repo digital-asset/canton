@@ -8,15 +8,15 @@ import cats.syntax.either.*
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.GetDomainParameters.Response.Parameters
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.{GetDomainId, GetDomainParameters}
-import com.digitalasset.canton.domain.api.{v0 as proto}
+import com.digitalasset.canton.domain.api.v0 as proto
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.protocol.v0.{ServiceAgreement as protoServiceAgreement}
+import com.digitalasset.canton.protocol.v0.ServiceAgreement as protoServiceAgreement
 import com.digitalasset.canton.sequencing.protocol.VerifyActiveResponse
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -73,24 +73,22 @@ class GrpcSequencerConnectService(
       request: proto.SequencerConnect.VerifyActive.Request
   ): Future[proto.SequencerConnect.VerifyActive.Response] = {
     import proto.SequencerConnect.VerifyActive
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val resultF = for {
+      participant <- EitherT.fromEither[Future](getParticipantFromGrpcContext())
+      isActive <- EitherT(
+        cryptoApi.ips.currentSnapshotApproximation
+          .isParticipantActive(participant)
+          .map(_.asRight[String])
+      )
+    } yield VerifyActiveResponse.Success(isActive)
 
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val resultF = for {
-        participant <- EitherT.fromEither[Future](getParticipantFromGrpcContext())
-        isActive <- EitherT(
-          cryptoApi.ips.currentSnapshotApproximation
-            .isParticipantActive(participant)
-            .map(_.asRight[String])
-        )
-      } yield VerifyActiveResponse.Success(isActive)
-
-      resultF
-        .fold[VerifyActive.Response.Value](
-          reason => VerifyActive.Response.Value.Failure(VerifyActive.Failure(reason)),
-          success => VerifyActive.Response.Value.Success(VerifyActive.Success(success.isActive)),
-        )
-        .map(VerifyActive.Response(_))
-    }
+    resultF
+      .fold[VerifyActive.Response.Value](
+        reason => VerifyActive.Response.Value.Failure(VerifyActive.Failure(reason)),
+        success => VerifyActive.Response.Value.Success(VerifyActive.Success(success.isActive)),
+      )
+      .map(VerifyActive.Response(_))
   }
 
   /*

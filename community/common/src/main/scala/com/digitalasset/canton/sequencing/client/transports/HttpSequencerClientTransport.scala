@@ -35,6 +35,7 @@ case class SubscriptionReadError(readError: HttpSequencerClientError) extends Ht
 
 class HttpSequencerClientTransport(
     client: HttpSequencerClient,
+    protocolVersion: ProtocolVersion,
     val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -55,7 +56,6 @@ class HttpSequencerClientTransport(
   override def sendAsync(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
@@ -64,16 +64,14 @@ class HttpSequencerClientTransport(
   override def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     // http sequencers don't check signatures, so just use regular send
-    sendAsync(request.content, timeout, protocolVersion)
+    sendAsync(request.content, timeout)
   }
 
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
@@ -86,6 +84,7 @@ class HttpSequencerClientTransport(
       request,
       handler,
       client,
+      protocolVersion,
       timeouts,
       requiresAuthentication = true,
       loggerFactory,
@@ -99,6 +98,7 @@ class HttpSequencerClientTransport(
       request,
       handler,
       client,
+      protocolVersion,
       timeouts,
       requiresAuthentication = false,
       loggerFactory,
@@ -125,6 +125,13 @@ class HttpSequencerClientTransport(
     // Will revisit if CCF moves beyond beta integration level.
     logger.debug("acknowledgments for the http sequencer client transport are not yet implemented")
     Future.unit
+  }
+
+  override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] = {
+    logger.debug("acknowledgments for the http sequencer client transport are not yet implemented")
+    EitherT.rightT(())
   }
 
 }

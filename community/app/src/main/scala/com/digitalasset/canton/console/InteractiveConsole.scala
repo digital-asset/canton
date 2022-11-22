@@ -31,7 +31,7 @@ object InteractiveConsole extends NoTracing {
       consoleEnvironment.environment.config.parameters.console,
       // for including implicit conversions
       predefCode =
-        ConsoleEnvironmentBinding.predefCode(interactive = true, noTty = noTty) + lineSeparator(),
+        consoleEnvironment.predefCode(interactive = true, noTty = noTty) + lineSeparator(),
       welcomeBanner = Some(loadBanner()),
       isRepl = true,
       logger,

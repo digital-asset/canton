@@ -378,6 +378,7 @@ class CantonSyncService(
     participantNodePersistentState,
     pruningProcessor,
     parameters.processingTimeouts,
+    parameters.maxDbConnections,
     loggerFactory,
   )
 
@@ -1307,13 +1308,6 @@ class CantonSyncService(
   def partyHasActiveContracts(
       partyId: PartyId
   )(implicit traceContext: TraceContext): Future[Boolean] = {
-    val stateInspection = new SyncStateInspection(
-      syncDomainPersistentStateManager,
-      participantNodePersistentState,
-      pruningProcessor,
-      parameters.processingTimeouts,
-      loggerFactory,
-    )
 
     // checks active contracts for all stores of connected domains
     syncDomainPersistentStateManager.getAll.toList

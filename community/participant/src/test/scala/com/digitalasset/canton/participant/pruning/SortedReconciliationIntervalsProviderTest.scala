@@ -13,8 +13,10 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
+import scala.annotation.nowarn
 import scala.concurrent.Future
 
+@nowarn("msg=deprecated")
 class SortedReconciliationIntervalsProviderTest
     extends AnyWordSpec
     with BaseTest
@@ -22,9 +24,8 @@ class SortedReconciliationIntervalsProviderTest
     with SortedReconciliationIntervalsHelpers {
 
   "SortedReconciliationIntervalsProvider" must {
-    // TODO(#9800) migrate to stable version
-    "allow to query reconciliation intervals (PV=DEV)" in {
-      val protocolVersion = ProtocolVersion.dev
+    "allow to query reconciliation intervals (PV >= 4)" in {
+      val protocolVersion = ProtocolVersion.v4
 
       val clock = new SimClock(fromEpoch(0), loggerFactory)
 
@@ -72,16 +73,16 @@ class SortedReconciliationIntervalsProviderTest
         .ofSeconds(2)
     }
 
-    // TODO(#9800) change DEV and eventually PV=3 below
-    "allow to query reconciliation intervals (PV < DEV)" in {
+    "allow to query reconciliation intervals (PV < 4)" in {
       val protocolVersion = ProtocolVersion.v3
 
       val clock = new SimClock(fromEpoch(0), loggerFactory)
+      val defaultReconciliationInterval = defaultStaticDomainParameters.reconciliationInterval
+
       val updatedStaticDomainParameters =
         BaseTest.defaultStaticDomainParametersWith(
-          reconciliationInterval = PositiveSeconds.ofSeconds(
-            defaultStaticDomainParameters.reconciliationInterval.unwrap.getSeconds + 1
-          ),
+          reconciliationInterval =
+            PositiveSeconds.ofSeconds(defaultReconciliationInterval.unwrap.getSeconds + 1),
           protocolVersion = protocolVersion,
         )
 
@@ -122,9 +123,8 @@ class SortedReconciliationIntervalsProviderTest
       provider.getApproximateLatestReconciliationInterval.value.intervalLength shouldBe updatedStaticDomainParameters.reconciliationInterval
     }
 
-    // TODO(#9800) migrate to stable version
     "return an error if topology is not known" in {
-      val protocolVersion = ProtocolVersion.dev
+      val protocolVersion = ProtocolVersion.v4
 
       val topologyKnownAt = fromEpoch(10)
 

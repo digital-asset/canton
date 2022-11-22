@@ -15,6 +15,7 @@ import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc.VaultServiceStub
 import com.digitalasset.canton.crypto.{PublicKeyWithName, v0 as cryptoproto, *}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.google.protobuf.ByteString
+import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
 
 import scala.concurrent.Future
@@ -133,7 +134,7 @@ object VaultAdminCommands {
         .toRight("No public key returned")
         .flatMap(k => SigningPublicKey.fromProtoV0(k).leftMap(_.toString))
 
-    // may time some time if we need to wait for entropy
+    // may take some time if we need to wait for entropy
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
 
   }
@@ -171,6 +172,31 @@ object VaultAdminCommands {
 
     // may time some time if we need to wait for entropy
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+
+  }
+
+  case class RotateWrapperKey(newWrapperKeyId: String)
+      extends BaseVaultAdminCommand[
+        v0.RotateWrapperKeyRequest,
+        Empty,
+        Unit,
+      ] {
+
+    override def createRequest(): Either[String, v0.RotateWrapperKeyRequest] =
+      Right(
+        v0.RotateWrapperKeyRequest(
+          newWrapperKeyId = newWrapperKeyId
+        )
+      )
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.RotateWrapperKeyRequest,
+    ): Future[Empty] = {
+      service.rotateWrapperKey(request)
+    }
+
+    override def handleResponse(response: Empty): Either[String, Unit] = Right(())
 
   }
 

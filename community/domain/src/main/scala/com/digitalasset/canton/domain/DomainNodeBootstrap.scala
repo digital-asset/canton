@@ -16,6 +16,10 @@ import com.digitalasset.canton.concurrent.{
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{InitConfigBase, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.{
+  CommunityGrpcVaultServiceFactory,
+  GrpcVaultServiceFactory,
+}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
   CommunityCryptoPrivateStoreFactory,
   CryptoPrivateStoreFactory,
@@ -64,6 +68,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.google.common.annotations.VisibleForTesting
 
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContextExecutorService, Future, blocking}
 
@@ -88,10 +93,12 @@ class DomainNodeBootstrap(
     mediatorFactory: MediatorRuntimeFactory,
     storageFactory: StorageFactory,
     cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
+    grpcVaultServiceFactory: GrpcVaultServiceFactory,
     futureSupervisor: FutureSupervisor,
     writeHealthDumpToFile: HealthDumpFunction,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
+    scheduler: ScheduledExecutorService,
     actorSystem: ActorSystem,
 ) extends CantonNodeBootstrapBase[Domain, DomainConfig, DomainNodeParameters](
       name,
@@ -101,6 +108,7 @@ class DomainNodeBootstrap(
       metrics,
       storageFactory,
       cryptoPrivateStoreFactory,
+      grpcVaultServiceFactory,
       parentLogger.append(DomainNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
     )
@@ -520,6 +528,7 @@ object DomainNodeBootstrap {
         writeHealthDumpToFile: HealthDumpFunction,
     )(implicit
         actorSystem: ActorSystem,
+        scheduler: ScheduledExecutorService,
         ec: ExecutionContextIdlenessExecutorService,
         traceContext: TraceContext,
     ): Either[String, DomainNodeBootstrap]
@@ -539,6 +548,7 @@ object DomainNodeBootstrap {
         writeHealthDumpToFile: HealthDumpFunction,
     )(implicit
         actorSystem: ActorSystem,
+        scheduler: ScheduledExecutorService,
         executionContext: ExecutionContextIdlenessExecutorService,
         traceContext: TraceContext,
     ): Either[String, DomainNodeBootstrap] = {
@@ -558,6 +568,7 @@ object DomainNodeBootstrap {
         CommunityMediatorRuntimeFactory,
         new CommunityStorageFactory(config.storage),
         new CommunityCryptoPrivateStoreFactory,
+        new CommunityGrpcVaultServiceFactory,
         futureSupervisor,
         writeHealthDumpToFile,
       )

@@ -10,7 +10,7 @@ import com.digitalasset.canton.config.{Password, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.crypto.store.ProtectedKeyStore
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.GetDomainParameters.Response.Parameters
-import com.digitalasset.canton.domain.api.{v0 as domainProto}
+import com.digitalasset.canton.domain.api.v0 as domainProto
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.http.HttpClientError.{
@@ -26,9 +26,15 @@ import com.digitalasset.canton.sequencing.{HttpSequencerConnection, OrdinarySeri
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.{DomainId, Member}
-import com.digitalasset.canton.tracing.{TraceContext, Traced, TracingConfig}
+import com.digitalasset.canton.tracing.{
+  SerializableTraceContext,
+  TraceContext,
+  Traced,
+  TracingConfig,
+}
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import io.circe.Codec
 import io.circe.generic.extras.Configuration
@@ -280,7 +286,11 @@ class HttpSequencerClient(
         },
       )
 
-  def readNextEvent(member: Member, requiresAuthentication: Boolean)(
+  def readNextEvent(
+      member: Member,
+      protocolVersion: ProtocolVersion,
+      requiresAuthentication: Boolean,
+  )(
       tracedCounter: Traced[SequencerCounter]
   )(implicit
       executionContext: ExecutionContext
@@ -295,7 +305,7 @@ class HttpSequencerClient(
               if (requiresAuthentication) "Recv" else "RecvUnauthenticated",
             ),
             // if we ever introduce a V1 SubscriptionRequest, then we will need to bump the endpoint
-            SubscriptionRequest(member, counter).toProtoV0.toByteArray,
+            SubscriptionRequest(member, counter, protocolVersion).toByteArray,
           )
           .leftMap(ClientError)
         txMeta <- EitherT
@@ -310,8 +320,8 @@ class HttpSequencerClient(
           .leftMap(DeserializationError)
           .toEitherT[Future]
         traceContext = response.traceContext
-          .flatMap(tc => TraceContext.fromProtoV0(tc).toOption)
-          .getOrElse(TraceContext.empty)
+          .flatMap(tc => SerializableTraceContext.fromProtoV0(tc).toOption)
+          .fold(TraceContext.empty)(_.unwrap)
         mbEvent = response.signedSequencedEvent
         mbSigned <- mbEvent
           .traverse(

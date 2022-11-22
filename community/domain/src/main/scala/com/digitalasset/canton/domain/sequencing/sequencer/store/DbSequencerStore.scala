@@ -28,7 +28,7 @@ import com.digitalasset.canton.resource.DbStorage.*
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -37,7 +37,7 @@ import com.google.protobuf.ByteString
 import com.zaxxer.hikari.pool.HikariProxyConnection
 import io.functionmeta.functionFullName
 import oracle.jdbc.{OracleArray, OracleConnection}
-import org.h2.api.{ErrorCode as H2ErrorCode}
+import org.h2.api.ErrorCode as H2ErrorCode
 import org.postgresql.util.PSQLState
 import slick.jdbc.*
 
@@ -146,8 +146,8 @@ class DbSequencerStore(
     }
   }
 
-  private implicit val setParameterTraceContext: SetParameter[TraceContext] =
-    TraceContext.getVersionedSetParameter(protocolVersion)
+  private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =
+    SerializableTraceContext.getVersionedSetParameter(protocolVersion)
 
   /** Single char that is persisted with the event to indicate the type of event */
   sealed abstract class EventTypeDiscriminator(val value: Char)
@@ -169,7 +169,7 @@ class DbSequencerStore(
     (etd, pp) => pp >> etd.value.toString
 
   private implicit val getEventTypeDiscriminatorResult: GetResult[EventTypeDiscriminator] =
-    GetResult(r => {
+    GetResult { r =>
       val value = r.nextString()
 
       val resultE = for {
@@ -179,7 +179,7 @@ class DbSequencerStore(
 
       // there's nothing we can do from a `GetResult` with an error but throw
       resultE.fold(msg => throw new DbDeserializationException(msg), identity)
-    })
+    }
 
   case class DeliverStoreEventRow[P](
       timestamp: CantonTimestamp,
@@ -288,9 +288,9 @@ class DbSequencerStore(
     val memberIdNesGetter = implicitly[GetResult[Option[NonEmpty[SortedSet[SequencerMemberId]]]]]
     val payloadGetter = implicitly[GetResult[Option[Payload]]]
     val errorMessageGetter = implicitly[GetResult[Option[String256M]]]
-    val traceContextGetter = implicitly[GetResult[TraceContext]]
+    val traceContextGetter = implicitly[GetResult[SerializableTraceContext]]
 
-    GetResult(r => {
+    GetResult { r =>
       val row = DeliverStoreEventRow[Payload](
         timestampGetter(r),
         r.nextInt(),
@@ -301,7 +301,7 @@ class DbSequencerStore(
         payloadGetter(r),
         timestampOGetter(r),
         errorMessageGetter(r),
-        traceContextGetter(r),
+        traceContextGetter(r).unwrap,
       )
 
       row.asStoreEvent
@@ -309,7 +309,7 @@ class DbSequencerStore(
           msg => throw new DbDeserializationException(s"Failed to deserialize event row: $msg"),
           identity,
         )
-    })
+    }
   }
 
   private val profile = storage.profile
@@ -569,7 +569,7 @@ class DbSequencerStore(
         pp >> payloadId
         pp >> signingTimestampO
         pp >> errorMessage
-        pp >> traceContext
+        pp >> SerializableTraceContext(traceContext)
       },
       functionFullName,
     )

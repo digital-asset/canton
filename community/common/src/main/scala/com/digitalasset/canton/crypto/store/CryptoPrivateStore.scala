@@ -76,6 +76,15 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit]
 
+  /** Replaces a set of keys transactionally to avoid an inconsistent state of the store.
+    * Key ids will remain the same while replacing these keys.
+    *
+    * @param newKeys sequence of keys to replace
+    */
+  private[crypto] def replaceStoredPrivateKeys(newKeys: Seq[StoredPrivateKey])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Unit]
+
   def exportPrivateKey(keyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Option[PrivateKey]] = {
@@ -315,6 +324,12 @@ object CryptoPrivateStoreError {
 
   case class EncryptedPrivateStoreError(reason: String) extends CryptoPrivateStoreError {
     override def pretty: Pretty[EncryptedPrivateStoreError] = prettyOfClass(
+      unnamedParam(_.reason.unquoted)
+    )
+  }
+
+  case class WrapperKeyAlreadyInUse(reason: String) extends CryptoPrivateStoreError {
+    override def pretty: Pretty[WrapperKeyAlreadyInUse] = prettyOfClass(
       unnamedParam(_.reason.unquoted)
     )
   }

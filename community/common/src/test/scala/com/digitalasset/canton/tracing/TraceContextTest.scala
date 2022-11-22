@@ -93,7 +93,7 @@ class TraceContextTest extends BaseTestWordSpec with HasTempDirectory with Befor
     // columns but our table definitions typically expect non-null for the trace context column value.
     // This is not an issue when serializing a `VersionedTraceContext` but to not regress we have this unit test.
     "won't be serialized to an empty ByteArray" in {
-      val res = TraceContext.empty.toByteArray(testedProtocolVersion)
+      val res = SerializableTraceContext.empty.toByteArray(testedProtocolVersion)
       val empty = new Array[Byte](0)
       res should not be empty
     }
@@ -111,10 +111,12 @@ class TraceContextTest extends BaseTestWordSpec with HasTempDirectory with Befor
 
       val testCases = Seq(emptyContext, contextWithRootSpan, contextWithChildSpan)
       forEvery(testCases) { context =>
-        TraceContext.fromProtoV0(context.toProtoV0) shouldBe Right(context)
-        TraceContext.fromProtoVersioned(
-          context.toProtoVersioned(testedProtocolVersion)
-        ) shouldBe Right(context)
+        SerializableTraceContext
+          .fromProtoV0(SerializableTraceContext(context).toProtoV0) shouldBe
+          Right(SerializableTraceContext(context))
+        SerializableTraceContext.fromProtoVersioned(
+          SerializableTraceContext(context).toProtoVersioned(testedProtocolVersion)
+        ) shouldBe Right(SerializableTraceContext(context))
       }
     }
   }

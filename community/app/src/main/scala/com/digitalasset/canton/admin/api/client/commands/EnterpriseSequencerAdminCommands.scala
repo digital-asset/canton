@@ -13,7 +13,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.admin.v0
+import com.digitalasset.canton.domain.admin.{v0, v1}
 import com.digitalasset.canton.domain.sequencing.admin.client.HttpSequencerAdminClient
 import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
 import com.digitalasset.canton.domain.sequencing.sequencer.{LedgerIdentity, SequencerSnapshot}
@@ -23,6 +23,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
 
@@ -58,27 +59,72 @@ object EnterpriseSequencerAdminCommands {
       v0.TopologyBootstrapServiceGrpc.stub(channel)
   }
 
-  case class Initialize(
-      domainId: DomainId,
-      topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
-      domainParameters: StaticDomainParameters,
-      snapshotO: Option[SequencerSnapshot] = None,
-  ) extends BaseSequencerInitializationCommand[v0.InitRequest, v0.InitResponse, InitResponse] {
-    override def createRequest(): Either[String, v0.InitRequest] = {
+  sealed trait Initialize[ProtoRequest]
+      extends BaseSequencerInitializationCommand[ProtoRequest, v0.InitResponse, InitResponse] {
+    protected def domainId: DomainId
+    protected def topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive]
+
+    protected def domainParameters: StaticDomainParameters
+
+    protected def snapshotO: Option[SequencerSnapshot]
+
+    protected def serializer: InitRequest => ProtoRequest
+
+    override def createRequest(): Either[String, ProtoRequest] = {
       val request = InitRequest(domainId, topologySnapshot, domainParameters.toInternal, snapshotO)
-      Right(request.toProtoV0)
+      Right(serializer(request))
     }
-    override def submitRequest(
-        service: v0.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
-        request: v0.InitRequest,
-    ): Future[v0.InitResponse] =
-      service.init(request)
+
     override def handleResponse(response: v0.InitResponse): Either[String, InitResponse] =
       InitResponse
         .fromProtoV0(response)
         .leftMap(err => s"Failed to deserialize response: $err")
 
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+  }
+
+  object Initialize {
+    case class V0(
+        domainId: DomainId,
+        topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
+        domainParameters: StaticDomainParameters,
+        snapshotO: Option[SequencerSnapshot],
+    ) extends Initialize[v0.InitRequest] {
+
+      override protected def serializer: InitRequest => v0.InitRequest = _.toProtoV0
+
+      override def submitRequest(
+          service: v0.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
+          request: v0.InitRequest,
+      ): Future[v0.InitResponse] =
+        service.init(request)
+    }
+
+    case class V1(
+        domainId: DomainId,
+        topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
+        domainParameters: StaticDomainParameters,
+        snapshotO: Option[SequencerSnapshot],
+    ) extends Initialize[v1.InitRequest] {
+
+      override protected def serializer: InitRequest => v1.InitRequest = _.toProtoV1
+
+      override def submitRequest(
+          service: v0.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
+          request: v1.InitRequest,
+      ): Future[v0.InitResponse] =
+        service.initV1(request)
+    }
+    def apply(
+        domainId: DomainId,
+        topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
+        domainParameters: StaticDomainParameters,
+        snapshotO: Option[SequencerSnapshot] = None,
+    ): Initialize[_] = {
+      if (domainParameters.protocolVersion >= ProtocolVersion.v4)
+        V1(domainId, topologySnapshot, domainParameters, snapshotO)
+      else V0(domainId, topologySnapshot, domainParameters, snapshotO)
+    }
   }
 
   case class HttpInitialize(

@@ -60,7 +60,9 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
       participant.init.parameters.uniqueContractKeys shouldBe false
       participant.init.parameters.unsafeEnableCausalityTracking shouldBe true
       participant.init.identity.map(_.generateLegalIdentityCertificate) shouldBe Some(true)
-      participant.storage.failFastOnStartup shouldBe false
+      participant.storage.parameters.failFastOnStartup shouldBe false
+      participant.storage.parameters.maxConnections shouldBe Some(10)
+      participant.storage.parameters.ledgerApiJdbcUrl shouldBe Some("yes")
 
       def domain(name: String) = config.domains
         .find(_._1.unwrap == name)

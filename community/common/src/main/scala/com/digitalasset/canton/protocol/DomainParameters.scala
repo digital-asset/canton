@@ -26,6 +26,7 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 
 import scala.Ordering.Implicits.*
+import scala.annotation.nowarn
 
 object DomainParameters {
 
@@ -49,10 +50,20 @@ object DomainParameters {
   }
 }
 
+@nowarn("msg=deprecated") // TODO(#9014) Remove deprecated parameters with next breaking version
 final case class StaticDomainParameters(
-    reconciliationInterval: PositiveSeconds, // TODO(#9800) Mark as deprecated, optional, indicate that it should be used only for V0
-    maxRatePerParticipant: NonNegativeInt, //  TODO(#9800) Mark as deprecated, optional, indicate that it should be used only for V0
-    maxRequestSize: MaxRequestSize, //  TODO(#9800) Mark as deprecated, optional, indicate that it should be used only for V0
+    @deprecated(
+      "Starting from protocol version 4, `reconciliationInterval` is a dynamic domain parameter",
+      "protocol version 4",
+    ) reconciliationInterval: PositiveSeconds,
+    @deprecated(
+      "Starting from protocol version 4, `maxRatePerParticipant` is a dynamic domain parameter",
+      "protocol version 4",
+    ) maxRatePerParticipant: NonNegativeInt,
+    @deprecated(
+      "Starting from protocol version 4, `maxRequestSize` is a dynamic domain parameter",
+      "protocol version 4",
+    ) maxRequestSize: MaxRequestSize,
     uniqueContractKeys: Boolean,
     requiredSigningKeySchemes: NonEmpty[Set[SigningKeyScheme]],
     requiredEncryptionKeySchemes: NonEmpty[Set[EncryptionKeyScheme]],
@@ -65,6 +76,7 @@ final case class StaticDomainParameters(
 
   val companionObj = StaticDomainParameters
 
+  @nowarn("msg=deprecated")
   def toProtoV0: protoV0.StaticDomainParameters =
     protoV0.StaticDomainParameters(
       reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
@@ -100,9 +112,8 @@ object StaticDomainParameters
       supportedProtoVersion(protoV0.StaticDomainParameters)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#9800) Move to stable protocol version
     ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(protoV1.StaticDomainParameters)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -430,8 +441,7 @@ final case class DynamicDomainParameters(
     )
 
   override def pretty: Pretty[DynamicDomainParameters] = {
-    // TODO(#9800) Change reference to dev, remove preview
-    if (representativeProtocolVersion.representative < ProtocolVersion.dev) {
+    if (representativeProtocolVersion.representative < ProtocolVersion.v4) {
       prettyOfClass(
         param("participant response timeout", _.participantResponseTimeout),
         param("mediator reaction timeout", _.mediatorReactionTimeout),
@@ -519,9 +529,8 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       supportedProtoVersion(protoV0.DynamicDomainParameters)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#9800) Move to stable protocol version
     ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(protoV1.DynamicDomainParameters)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

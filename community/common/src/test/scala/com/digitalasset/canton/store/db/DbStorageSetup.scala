@@ -76,6 +76,7 @@ trait DbStorageSetup extends FlagCloseable with HasCloseContext with NamedLoggin
     DbStorageSingle.tryCreate(
       cfg,
       new SimClock(CantonTimestamp.Epoch, loggerFactory),
+      None,
       connectionPoolForParticipant =
         false, // can always be false, because this storage is only used for initialization and unit tests
       None,
@@ -293,7 +294,10 @@ object DbStorageSetup {
       )
     )
 
-    def toPostgresDbConfig: Postgres = Postgres(toPostgresConfig, cleanOnValidationError = true)
+    def toPostgresDbConfig: Postgres = Postgres(
+      toPostgresConfig,
+      parameters = DbParametersConfig(unsafeCleanOnValidationError = true),
+    )
 
     def toH2Config: Config = configOfMap(
       Map(

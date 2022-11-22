@@ -111,6 +111,15 @@ trait TransferProcessingSteps[
     pendingSubmission.transferCompletion.success(status)
   }
 
+  override def authenticateInputContracts(
+      pendingDataAndResponseArgs: PendingDataAndResponseArgs
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferProcessorError, Unit] = {
+    // We don't authenticate input contracts on transfers
+    EitherT.pure(())
+  }
+
   protected def performPendingSubmissionMapUpdate(
       pendingSubmissionMap: concurrent.Map[RootHash, PendingTransferSubmission],
       transferId: Option[TransferId],

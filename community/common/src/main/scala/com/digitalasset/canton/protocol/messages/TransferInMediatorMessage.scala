@@ -8,6 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{Informee, TransferInViewTree, ViewType}
+import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -98,6 +99,8 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
   override def rootHash: Option[RootHash] = Some(tree.rootHash)
 
   override def viewType: ViewType = ViewType.TransferInViewType
+
+  override def pretty: Pretty[TransferInMediatorMessage] = prettyOfClass(unnamedParam(_.tree))
 }
 
 object TransferInMediatorMessage

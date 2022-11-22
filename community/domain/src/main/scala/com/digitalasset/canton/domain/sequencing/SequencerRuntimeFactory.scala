@@ -32,6 +32,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.{DomainId, Member}
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.ExecutionContextExecutor
 
 trait SequencerRuntimeFactory {
@@ -58,6 +59,7 @@ trait SequencerRuntimeFactory {
       logger: TracedLogger,
   )(implicit
       executionContext: ExecutionContextExecutor,
+      scheduler: ScheduledExecutorService,
       tracer: Tracer,
       system: ActorSystem,
   ): SequencerRuntime
@@ -89,6 +91,7 @@ object SequencerRuntimeFactory {
         logger: TracedLogger,
     )(implicit
         executionContext: ExecutionContextExecutor,
+        scheduler: ScheduledExecutorService,
         tracer: Tracer,
         system: ActorSystem,
     ): SequencerRuntime =

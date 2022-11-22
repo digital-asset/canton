@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.protocol.{ContractId, ExampleTransactionFactory, Unicum}
+import com.digitalasset.canton.protocol.{CantonContractIdVersion, ExampleTransactionFactory, Unicum}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -13,6 +13,8 @@ import org.scalatest.wordspec.AnyWordSpec
   */
 class CryptoPureApiCantonCompatibilityTest extends AnyWordSpec with BaseTest {
 
+  private val cantonContractIdVersion =
+    CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)
   private val longString =
     (('a' to 'z').mkString + ('A' to 'Z').mkString + ('0' to '9').mkString + ":") * 10
 
@@ -31,7 +33,10 @@ class CryptoPureApiCantonCompatibilityTest extends AnyWordSpec with BaseTest {
       }
 
       "be able to build a ContractId" in {
-        ContractId.fromDiscriminator(ExampleTransactionFactory.submissionSeed, Unicum(hash))
+        cantonContractIdVersion.fromDiscriminator(
+          ExampleTransactionFactory.submissionSeed,
+          Unicum(hash),
+        )
       }
 
     }

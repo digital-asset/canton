@@ -29,7 +29,6 @@ import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleEnvironment,
-  FeatureFlag,
   FeatureFlagFilter,
   Help,
   Helpful,
@@ -45,11 +44,13 @@ import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordering.Implicits.infixOrderingOps
+import scala.util.chaining.scalaUtilChainingOps
 
 trait DomainAdministration {
   this: AdminCommandRunner with FeatureFlagFilter with NamedLogging =>
@@ -153,10 +154,9 @@ trait DomainAdministration {
     private def get_dynamic_domain_parameters_v1(
         operation: String
     ): DynamicDomainParametersV1 = {
-      val protocolVersion = get_static_domain_parameters.protocolVersion
-
       get_dynamic_domain_parameters match {
         case _: DynamicDomainParametersV0 =>
+          val protocolVersion = get_static_domain_parameters.protocolVersion
           throw new UnsupportedOperationException(
             s"Unable to $operation for domain running protocol version $protocolVersion."
           )
@@ -211,39 +211,44 @@ trait DomainAdministration {
         read either from the static domain parameters or the dynamic ones.
         This value is not necessarily the one used by the sequencer node because it requires a restart
         of the server to be taken into account.""")
-    def get_max_request_size: NonNegativeInt = {
-      getParameterStaticV0DynamicV1(
-        "max request size",
-        _.maxInboundMessageSize,
-        _.maxRequestSize,
-      )
-    }
-    @Help.Summary("Get the mediator deduplication timeout", FeatureFlag.Preview)
+    def get_max_request_size: NonNegativeInt =
+      TraceContext.withNewTraceContext { implicit tc =>
+        getParameterStaticV0DynamicV1(
+          "max request size",
+          _.maxInboundMessageSize,
+          _.maxRequestSize,
+        ).tap { res =>
+          logger.info(
+            s"This value ($res) is not necessarily the one used by the sequencer node because it requires a restart of the server to be taken into account"
+          )
+        }
+      }
+
+    @Help.Summary("Get the mediator deduplication timeout")
     @Help.Description(
       "The method will fail, if the domain does not support the mediatorDeduplicationTimeout."
     )
-    def get_mediator_deduplication_timeout: NonNegativeFiniteDuration = check(FeatureFlag.Preview) {
+    @Help.AvailableFrom(ProtocolVersion.v4)
+    def get_mediator_deduplication_timeout: NonNegativeFiniteDuration =
       get_dynamic_domain_parameters_v1(
         "get mediatorDeduplicationTimeout"
       ).mediatorDeduplicationTimeout
-    }
 
-    @Help.Summary("Update the mediator deduplication timeout", FeatureFlag.Preview)
+    @Help.Summary("Update the mediator deduplication timeout")
     @Help.Description(
       """The method will fail:
         |
         |- if the domain does not support the ``mediatorDeduplicationTimeout`` parameter,
         |- if the new value of ``mediatorDeduplicationTimeout`` is less than twice the value of ``ledgerTimeRecordTimeTolerance.``"""
     )
+    @Help.AvailableFrom(ProtocolVersion.v4)
     def set_mediator_deduplication_timeout(
         newMediatorDeduplicationTimeout: NonNegativeFiniteDuration
     ): Unit =
-      check(FeatureFlag.Preview) {
-        update_dynamic_domain_parameters_v1(
-          _.copy(mediatorDeduplicationTimeout = newMediatorDeduplicationTimeout),
-          "set mediatorDeduplicationTimeout",
-        )
-      }
+      update_dynamic_domain_parameters_v1(
+        _.copy(mediatorDeduplicationTimeout = newMediatorDeduplicationTimeout),
+        "set mediatorDeduplicationTimeout",
+      )
 
     @Help.Summary("Set the Dynamic Domain Parameters configured for the domain")
     @Help.Description(
@@ -278,55 +283,54 @@ trait DomainAdministration {
         .discard[ByteString]
     }
 
-    // TODO(#9800) Change reference to dev, remove preview
-    //  Also revisit other methods in da.service that are flagged as preview.
     @Help.Summary("Try to update the reconciliation interval for the domain")
     @Help.Description("""If the reconciliation interval is dynamic, update the value.
         If the reconciliation interval is not dynamic (i.e., if the domain is running
-        on protocol version lower than `dev`), then it will throw an error.
+        on protocol version lower than `4`), then it will throw an error.
         """)
+    @Help.AvailableFrom(ProtocolVersion.v4)
     def set_reconciliation_interval(
         newReconciliationInterval: PositiveDurationSeconds
     ): Unit =
-      check(FeatureFlag.Preview) {
-        update_dynamic_domain_parameters_v1(
-          _.copy(reconciliationInterval = newReconciliationInterval),
-          "update reconciliation interval",
-        )
-      }
+      update_dynamic_domain_parameters_v1(
+        _.copy(reconciliationInterval = newReconciliationInterval),
+        "update reconciliation interval",
+      )
 
-    // TODO(#9800) Change reference to dev, remove preview
     @Help.Summary("Try to update the max rate per participant for the domain")
     @Help.Description("""If the max rate per participant is dynamic, update the value.
         If the max rate per participant is not dynamic (i.e., if the domain is running
-        on protocol version lower than DEV),  then it will throw an error.
+        on protocol version lower than `4`),  then it will throw an error.
         """)
+    @Help.AvailableFrom(ProtocolVersion.v4)
     def set_max_rate_per_participant(
         maxRatePerParticipant: NonNegativeInt
     ): Unit =
-      check(FeatureFlag.Preview) {
-        update_dynamic_domain_parameters_v1(
-          _.copy(maxRatePerParticipant = maxRatePerParticipant),
-          "update max rate per participant",
-        )
-      }
+      update_dynamic_domain_parameters_v1(
+        _.copy(maxRatePerParticipant = maxRatePerParticipant),
+        "update max rate per participant",
+      )
 
-    // TODO(#9800) Change reference to dev, remove preview
     @Help.Summary("Try to update the max rate per participant for the domain")
     @Help.Description("""If the max request size is dynamic, update the value.
                          The update won't have any effect unless the sequencer server is restarted. 
     If the max request size is not dynamic (i.e., if the domain is running
-    on protocol version lower than DEV), then it will throw an error.
+    on protocol version lower than `4`), then it will throw an error.
     """)
+    @Help.AvailableFrom(ProtocolVersion.v4)
     def set_max_request_size(
         maxRequestSize: NonNegativeInt
     ): Unit =
-      check(FeatureFlag.Preview) {
+      TraceContext.withNewTraceContext { implicit tc =>
         update_dynamic_domain_parameters_v1(
           _.copy(maxRequestSize = maxRequestSize),
           "update max request size",
         )
+        logger.info(
+          "Please restart the sequencer node to take into account the new value for max-request-size."
+        )
       }
+
     private def update_dynamic_domain_parameters_v1(
         modifier: DynamicDomainParametersV1 => DynamicDomainParametersV1,
         operation: String,
@@ -342,8 +346,7 @@ trait DomainAdministration {
     }
 
     @Help.Summary(
-      "Update the `ledgerTimeRecordTimeTolerance` in the dynamic domain parameters.",
-      FeatureFlag.Preview,
+      "Update the `ledgerTimeRecordTimeTolerance` in the dynamic domain parameters."
     )
     @Help.Description(
       """If it would be insecure to perform the change immediately, 
@@ -364,7 +367,7 @@ trait DomainAdministration {
     def set_ledger_time_record_time_tolerance(
         newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
         force: Boolean = false,
-    ): Unit = check(FeatureFlag.Preview) {
+    ): Unit = {
       TraceContext.withNewTraceContext { implicit tc =>
         get_dynamic_domain_parameters match {
           case oldDomainParameters: DynamicDomainParametersV1 if !force =>

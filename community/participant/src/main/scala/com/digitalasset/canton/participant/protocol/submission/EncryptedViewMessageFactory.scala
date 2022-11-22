@@ -39,9 +39,9 @@ object EncryptedViewMessageFactory {
 
     val cryptoPureApi = cryptoSnapshot.pureCrypto
 
-    val viewEncryptionScheme = cryptoSnapshot.pureCrypto.defaultSymmetricKeyScheme
+    val viewEncryptionScheme = cryptoPureApi.defaultSymmetricKeyScheme
     val viewKeyLength = viewEncryptionScheme.keySizeInBytes
-    val randomnessLength = EncryptedViewMessage.computeRandomnessLength(cryptoSnapshot)
+    val randomnessLength = EncryptedViewMessage.computeRandomnessLength(cryptoPureApi)
     val randomness: SecureRandomness =
       optRandomness.getOrElse(cryptoPureApi.generateSecureRandomness(randomnessLength))
 

@@ -36,6 +36,7 @@ case class UsedAndCreatedContracts(
     witnessedAndDivulged: Map[LfContractId, SerializableContract],
     checkActivenessTxInputs: Set[LfContractId],
     consumedInputsOfHostedStakeholders: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
+    used: Map[LfContractId, SerializableContract],
     maybeCreated: Map[LfContractId, Option[SerializableContract]],
     transient: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
 ) {

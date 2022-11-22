@@ -24,12 +24,14 @@ import com.daml.lf.transaction.Transaction.{
 import com.daml.lf.value.Value
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.protocol.{
-  ContractId,
+  AuthenticatedContractIdVersion,
+  CantonContractIdVersion,
   LfContractId,
   LfGlobalKey,
   LfHash,
   LfNodeId,
   LfTransactionVersion,
+  NonAuthenticatedContractIdVersion,
 }
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.W3CTraceContext
@@ -213,11 +215,18 @@ trait PrettyInstances {
     prettyOfString(id => show"${id.packageId}:${id.qualifiedName}")
 
   implicit def prettyLfContractId: Pretty[LfContractId] = prettyOfString {
-    case LfContractId.V1(discriminator, suffix) if suffix.startsWith(ContractId.suffixPrefix) =>
-      // Shorten only Canton contract ids
+    case LfContractId.V1(discriminator, suffix)
+        // Shorten only Canton contract ids
+        if suffix.startsWith(NonAuthenticatedContractIdVersion.versionPrefixBytes) ||
+          suffix.startsWith(AuthenticatedContractIdVersion.versionPrefixBytes) =>
+      val prefixBytesSize = CantonContractIdVersion.versionPrefixBytesSize
+
+      val cantonVersionPrefix = suffix.slice(0, prefixBytesSize)
+      val rawSuffix = suffix.slice(prefixBytesSize, suffix.length)
+
       discriminator.toHexString.readableHash.toString +
-        ContractId.suffixPrefixHex +
-        suffix.toHexString.drop(ContractId.suffixPrefixHex.length).readableHash.toString
+        cantonVersionPrefix.toHexString +
+        rawSuffix.toHexString.readableHash.toString
     case lfContractId: LfContractId =>
       // Don't abbreviate anything for unusual contract ids
       lfContractId.toString

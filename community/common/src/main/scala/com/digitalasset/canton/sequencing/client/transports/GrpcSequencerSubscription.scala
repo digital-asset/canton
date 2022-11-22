@@ -22,7 +22,7 @@ import com.digitalasset.canton.sequencing.client.{SequencerSubscription, Subscri
 import com.digitalasset.canton.sequencing.protocol.SubscriptionResponse
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.tracing.TraceContext.withTraceContext
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
+import com.digitalasset.canton.tracing.{NoTracing, SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureUtil
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
@@ -130,7 +130,9 @@ class GrpcSequencerSubscription[E] private[transports] (
         // we take the unusual step of immediately trying to deserialize the trace-context
         // so it is available here for logging
         implicit val traceContext: TraceContext =
-          TraceContext.fromProtoSafeV0Opt(loggerWithoutTracing(logger))(value.traceContext)
+          SerializableTraceContext
+            .fromProtoSafeV0Opt(loggerWithoutTracing(logger))(value.traceContext)
+            .unwrap
 
         logger.debug("Received a message from the sequencer.")
 

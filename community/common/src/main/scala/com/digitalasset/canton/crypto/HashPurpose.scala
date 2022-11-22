@@ -81,5 +81,6 @@ object HashPurpose {
   val DbLockId = HashPurpose(33, "DbLockId")
   val AcsCommitmentDb = HashPurpose(34, "AcsCommitmentDb")
   val SubmissionRequestSignature = HashPurpose(35, "SubmissionRequestSignature")
+  val AcknowledgementSignature = HashPurpose(36, "AcknowledgementSignature")
 
 }

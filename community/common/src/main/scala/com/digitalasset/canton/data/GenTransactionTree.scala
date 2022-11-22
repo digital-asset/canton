@@ -237,9 +237,9 @@ case class GenTransactionTree(
 
 object GenTransactionTree {
 
-  /** @throws InvalidGenTransactionTree if two subtrees have the same root hash
+  /** @throws GenTransactionTree$.InvalidGenTransactionTree if two subtrees have the same root hash
     */
-  def apply(hashOps: HashOps)(
+  def tryCreate(hashOps: HashOps)(
       submitterMetadata: MerkleTree[SubmitterMetadata],
       commonMetadata: MerkleTree[CommonMetadata],
       participantMetadata: MerkleTree[ParticipantMetadata],

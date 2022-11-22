@@ -456,7 +456,7 @@ abstract class ProtocolProcessor[
       val steps.CheckActivenessAndWritePendingContracts(
         activenessSet,
         pendingContracts,
-        constructPendingDataAndResponseArgs,
+        pendingDataAndResponseArgs,
       ) = contractsAndContinue
 
       val cleanReplay = isCleanReplay(rc)
@@ -473,6 +473,8 @@ abstract class ProtocolProcessor[
               .addRequest(rc, sc, ts, ts, domainParameters.decisionTimeFor(ts), activenessSet)
           )
           .leftMap(err => steps.embedRequestError(RequestTrackerError(err)))
+
+        _ <- steps.authenticateInputContracts(pendingDataAndResponseArgs)
 
         conflictingContracts <- EitherT.right(
           ephemeral.storedContractManager.addPendingContracts(rc, pendingContracts)
@@ -500,7 +502,7 @@ abstract class ProtocolProcessor[
               pendingCursor <- EitherT.right(ephemeral.requestJournal.insert(rc, ts))
 
               pendingDataAndResponses <- steps.constructPendingDataAndResponse(
-                constructPendingDataAndResponseArgs,
+                pendingDataAndResponseArgs,
                 ephemeral.transferCache,
                 ephemeral.storedContractManager,
                 ephemeral.causalityLookup,
@@ -534,15 +536,17 @@ abstract class ProtocolProcessor[
               () => steps.createRejectionEvent(rejectionArgs),
             )
           }
-        (pendingData, responsesTo, causalityMsgs, timeoutEvent) =
+        (
+          pendingData,
+          responsesTo,
+          causalityMsgs,
+          timeoutEvent,
+        ) =
           pendingDataAndResponsesAndTimeoutEvent
 
         // Make sure activeness result finished
         requestFutures <- EitherT.right[steps.RequestError](requestFuturesF)
         _activenessResult <- EitherT.right[steps.RequestError](requestFutures.activenessResult)
-
-        _existingData = steps.pendingRequestMap(ephemeral).putIfAbsent(requestId, pendingData)
-        // TODO(Andreas): Handle existing request data (validation here)
 
         _ <- EitherT.right[steps.RequestError](
           unlessCleanReplay(rc)(
@@ -550,7 +554,8 @@ abstract class ProtocolProcessor[
           )
         )
 
-        _ = ephemeral.phase37Synchronizer.markConfirmed(rc, requestId)
+        _ = ephemeral.phase37Synchronizer
+          .markConfirmed(steps.requestType)(rc, requestId, pendingData)
 
         timeoutET = EitherT
           .right(requestFutures.timeoutResult)
@@ -585,7 +590,9 @@ abstract class ProtocolProcessor[
       )
     } else {
       logger.info(show"Processing ${steps.requestKind.unquoted} request at $requestId.")
-      performUnlessClosingF(functionFullName) {
+      performUnlessClosingF(
+        s"ProtocolProcess.processRequest(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
+      ) {
         val resultF = for {
           snapshot <- EitherT.right(
             crypto.awaitSnapshotSupervised(s"await crypto snapshot $ts")(ts)
@@ -738,8 +745,11 @@ abstract class ProtocolProcessor[
       signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]]
   )(implicit traceContext: TraceContext): HandlerResult = {
     val ts = signedResultBatch.content.timestamp
+    val sc = signedResultBatch.content.counter
 
-    val processedET = performUnlessClosingEitherU(functionFullName) {
+    val processedET = performUnlessClosingEitherU(
+      s"ProtocolProcess.processResult(sc=$sc, traceId=${traceContext.traceId}"
+    ) {
       val resultEnvelopes =
         signedResultBatch.content.batch.envelopes
           .mapFilter(ProtocolMessage.select[SignedProtocolMessage[Result]])
@@ -750,8 +760,6 @@ abstract class ProtocolProcessor[
 
       val result = resultEnvelopes(0).protocolMessage.message
       val requestId = result.requestId
-
-      val sc = signedResultBatch.content.counter
 
       logger.debug(
         show"Got result for ${steps.requestKind.unquoted} request at $requestId: $resultEnvelopes"
@@ -839,53 +847,59 @@ abstract class ProtocolProcessor[
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, steps.ResultError, EitherT[FutureUnlessShutdown, steps.ResultError, Unit]] = {
-    for {
-      // Wait until we have processed the corresponding request
-      //
-      // This may deadlock if we haven't received the `requestId` as a request.
-      // For example, if there never was a request with the given timestamp,
-      // then the phase 3-7 synchronizer waits until the all requests until `requestId`'s timestamp
-      // and the next request have reached `Confirmed`.
-      // However, if there was no request between `requestId` and `ts`,
-      // then the next request will not reach `Confirmed`
-      // because the request tracker will not progress beyond `ts` as the `tick` for `ts` comes only after this point.
-      // Accordingly, time proofs will not trigger a timeout either.
-      //
-      // We don't know whether any protocol processor has ever seen the request with `requestId`;
-      // it might be that the message dispatcher already decided that the request is malformed and should not be processed.
-      // In this case, the message dispatcher has assigned a request counter to the request if it expects to get a mediator result
-      // and the BadRootHashMessagesRequestProcessor moved the request counter to `Confirmed`.
-      // So the deadlock should happen only if the mediator or sequencer are dishonest.
-      //
-      // TODO(M99) This argument relies on the mediator sending a MalformedMediatorRequest only to participants
-      //  that have also received a message with the request.
-      //  A dishonest sequencer or mediator could break this assumption.
 
-      /*
-        TODO(M43)
-        This part is still in the synchronous processing stage. As a result, processing of mediator responses
-        can delay processing of subsequent messages.
-        Part of the processing of mediator responses was switched from asynchronous to synchronous
-        because several verdicts can be sent in case the mediator crashes (see #10345).
-        One possible improvement could be to synchronize per request instead of globally.
-       */
-      _ <- EitherT.right(ephemeral.phase37Synchronizer.awaitConfirmed(requestId))
+    // Wait until we have processed the corresponding request
+    //
+    // This may deadlock if we haven't received the `requestId` as a request.
+    // For example, if there never was a request with the given timestamp,
+    // then the phase 3-7 synchronizer waits until the all requests until `requestId`'s timestamp
+    // and the next request have reached `Confirmed`.
+    // However, if there was no request between `requestId` and `ts`,
+    // then the next request will not reach `Confirmed`
+    // because the request tracker will not progress beyond `ts` as the `tick` for `ts` comes only after this point.
+    // Accordingly, time proofs will not trigger a timeout either.
+    //
+    // We don't know whether any protocol processor has ever seen the request with `requestId`;
+    // it might be that the message dispatcher already decided that the request is malformed and should not be processed.
+    // In this case, the message dispatcher has assigned a request counter to the request if it expects to get a mediator result
+    // and the BadRootHashMessagesRequestProcessor moved the request counter to `Confirmed`.
+    // So the deadlock should happen only if the mediator or sequencer are dishonest.
+    //
+    // TODO(M99) This argument relies on the mediator sending a MalformedMediatorRequest only to participants
+    //  that have also received a message with the request.
+    //  A dishonest sequencer or mediator could break this assumption.
 
-      pendingRequestDataOrReplayData <- EitherT.fromEither[Future](
-        steps.pendingRequestMap(ephemeral).remove(requestId).toRight {
-          ephemeral.requestTracker.tick(sc, resultTs)
-          steps.embedResultError(UnknownPendingRequest(requestId))
-        }
-      )
-    } yield performResultProcessing3(
-      signedResultBatch,
-      result,
-      requestId,
-      resultTs,
-      sc,
-      domainParameters,
-      pendingRequestDataOrReplayData,
+    /* This part is still run as part of the synchronous processing, because we want
+     * only the first call to awaitConfirmed to get
+     * a non-empty value.
+     *
+     * Some more synchronization is done in the Phase37Synchronizer.
+     */
+    val res = performUnlessClosingF(
+      s"ProtocolProcess.processResult2(sc=$sc, traceId=${traceContext.traceId}"
+    )(
+      EitherT(
+        ephemeral.phase37Synchronizer
+          .awaitConfirmed(requestId, steps.requestType)
+          .map(_.toRight {
+            ephemeral.requestTracker.tick(sc, resultTs)
+            steps.embedResultError(UnknownPendingRequest(requestId))
+          })
+      ).flatMap { pendingRequestDataOrReplayData =>
+        performResultProcessing3(
+          signedResultBatch,
+          result,
+          requestId,
+          resultTs,
+          sc,
+          domainParameters,
+          pendingRequestDataOrReplayData,
+        )
+      }.value
     )
+
+    // This is now lifted to the asynchronous part of the processing.
+    EitherT.pure(EitherT(res))
   }
 
   private[this] def performResultProcessing3(
@@ -895,8 +909,10 @@ abstract class ProtocolProcessor[
       resultTs: CantonTimestamp,
       sc: SequencerCounter,
       domainParameters: DynamicDomainParameters,
-      pendingRequestDataOrReplayData: PendingRequestDataOrReplayData[steps.PendingRequestData],
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, steps.ResultError, Unit] = {
+      pendingRequestDataOrReplayData: PendingRequestDataOrReplayData[
+        steps.requestType.PendingRequestData
+      ],
+  )(implicit traceContext: TraceContext): EitherT[Future, steps.ResultError, Unit] = {
     val verdict = result.merge.verdict
 
     val PendingRequestData(requestCounter, requestSequencerCounter, pendingContracts) =
@@ -904,7 +920,7 @@ abstract class ProtocolProcessor[
     val cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
     val pendingSubmissionDataO = pendingSubmissionDataForRequest(pendingRequestDataOrReplayData)
 
-    lazy val processingResultET = for {
+    for {
       commitAndEvent <- pendingRequestDataOrReplayData match {
         case WrappedPendingRequestData(pendingRequestData) =>
           for {
@@ -1006,9 +1022,6 @@ abstract class ProtocolProcessor[
         } yield pendingSubmissionDataO.foreach(steps.postProcessResult(verdict, _))
       }
     } yield ()
-
-    performUnlessClosingEitherU(functionFullName)(processingResultET)
-
   }
 
   private[this] def logResultWarnings(
@@ -1059,7 +1072,9 @@ abstract class ProtocolProcessor[
   }
 
   private[this] def pendingSubmissionDataForRequest(
-      pendingRequestDataOrReplayData: PendingRequestDataOrReplayData[steps.PendingRequestData]
+      pendingRequestDataOrReplayData: PendingRequestDataOrReplayData[
+        steps.requestType.PendingRequestData
+      ]
   ): Option[steps.PendingSubmissionData] =
     for {
       pendingRequestData <- maybePendingRequestData(pendingRequestDataOrReplayData)
@@ -1139,14 +1154,6 @@ abstract class ProtocolProcessor[
         show"${steps.requestKind.unquoted} request at $requestId timed out without a transaction result message."
       )
 
-      val pendingRequestDataOrReplayDataO = steps.pendingRequestMap(ephemeral).remove(requestId)
-      val pendingRequestDataOrReplayData = pendingRequestDataOrReplayDataO.getOrElse(
-        throw new IllegalStateException(s"Unknown pending request $requestId at timeout.")
-      )
-      // No need to clean up the pending submissions because this is handled (concurrently) by schedulePendingSubmissionRemoval
-
-      val cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
-
       def publishEvent(): EitherT[Future, steps.ResultError, Unit] = {
         for {
           maybeEvent <- EitherT.fromEither[Future](timeoutEvent)
@@ -1169,6 +1176,17 @@ abstract class ProtocolProcessor[
       }
 
       for {
+        pendingRequestDataOrReplayData <- EitherT.liftF(
+          ephemeral.phase37Synchronizer.awaitConfirmed(requestId, steps.requestType).map {
+            _.getOrElse(
+              throw new IllegalStateException(s"Unknown pending request $requestId at timeout.")
+            )
+          }
+        )
+
+        // No need to clean up the pending submissions because this is handled (concurrently) by schedulePendingSubmissionRemoval
+        cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
+
         _ <- EitherT.right[steps.ResultError](
           ephemeral.storedContractManager.deleteIfPending(requestCounter, pendingContracts)
         )

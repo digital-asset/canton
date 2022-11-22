@@ -8,7 +8,7 @@ import com.daml.ledger.api.v1.transaction.TransactionTree
 import com.daml.ledger.client.binding.{Contract, Primitive as P, TemplateCompanion}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.{NonNegativeDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.console.commands.DomainChoice
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
@@ -590,14 +590,9 @@ object ReferenceDemoScript {
     val loggerFactory = consoleEnvironment.environment.loggerFactory
 
     // update domain parameters
-    // TODO(#9800): restore this code
-    /*
     Seq(banking, medical).foreach {
-      _.service.update_reconciliation_interval(
-        com.digitalasset.canton.time.PositiveSeconds.ofSeconds(1)
-      )
+      _.service.set_reconciliation_interval(PositiveDurationSeconds.ofSeconds(1))
     }
-     */
 
     val script = new ReferenceDemoScript(
       consoleEnvironment.participants.all,

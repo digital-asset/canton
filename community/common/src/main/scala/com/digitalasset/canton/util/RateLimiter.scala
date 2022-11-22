@@ -29,7 +29,7 @@ class RateLimiter(val maxTasksPerSecond: NonNegativeInt) {
 
   // Cycles are at least 100 millis, because otherwise they may be below the resolution of `System.nanoTime`.
   // In that case, we would enforce a much lower rate than requested.
-  private val (cycleDuration, maxTasksPerCycle): (FiniteDuration, Long) =
+  val (cycleDuration, maxTasksPerCycle): (FiniteDuration, Long) =
     if (maxTasksPerSecondLong == 0) (1.day, 0)
     else if (maxTasksPerSecondLong >= 10) (100.millis, maxTasksPerSecondLong / 10)
     else (1.second / maxTasksPerSecondLong, 1)

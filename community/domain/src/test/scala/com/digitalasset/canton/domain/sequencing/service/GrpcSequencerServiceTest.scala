@@ -99,7 +99,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     when(sequencer.acknowledge(any[Member], any[CantonTimestamp])(anyTraceContext))
       .thenReturn(Future.unit)
     when(sequencer.acknowledgeSigned(any[SignedContent[AcknowledgeRequest]])(anyTraceContext))
-      .thenReturn(Future.unit)
+      .thenReturn(EitherT.rightT(()))
     val cryptoApi: DomainSyncCryptoClient =
       TestingIdentityFactory(loggerFactory).forOwnerAndDomain(member)
     val subscriptionPool: SubscriptionPool[Subscription] =
@@ -643,6 +643,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         SubscriptionRequest(
           participant,
           SequencerCounter.Genesis,
+          testedProtocolVersion,
         ).toProtoV0
 
       Mockito
@@ -668,6 +669,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         SubscriptionRequest(
           ParticipantId("Wrong participant"),
           SequencerCounter.Genesis,
+          testedProtocolVersion,
         ).toProtoV0
 
       loggerFactory.suppressWarningsAndErrors {
@@ -685,6 +687,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         SubscriptionRequest(
           participant,
           SequencerCounter.Genesis,
+          testedProtocolVersion,
         ).toProtoV0
 
       loggerFactory.suppressWarningsAndErrors {
@@ -702,6 +705,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         SubscriptionRequest(
           unauthenticatedMember,
           SequencerCounter.Genesis,
+          testedProtocolVersion,
         ).toProtoV0
 
       loggerFactory.suppressWarningsAndErrors {

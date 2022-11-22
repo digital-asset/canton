@@ -5,11 +5,12 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
 import cats.data.EitherT.fromEither
-import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.domain.admin.v0.SequencerInitializationServiceGrpc.SequencerInitializationService
+import com.digitalasset.canton.domain.admin.{v0, v1}
 import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TraceContextGrpc, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, SimpleExecutionQueue}
 import io.grpc.Status
 
@@ -26,25 +27,35 @@ class GrpcSequencerInitializationService(
     with NoTracing {
   private val executionQueue = new SimpleExecutionQueue()
 
-  /** Process requests sequentially */
   override def init(requestP: v0.InitRequest): Future[v0.InitResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      // ensure here we don't process initialization requests concurrently
-      executionQueue.execute(
-        {
-          val result = for {
-            request <- fromEither[Future](InitRequest.fromProtoV0(requestP))
-              .leftMap(err => s"Failed to deserialize request: $err")
-              .leftMap(Status.INVALID_ARGUMENT.withDescription)
-            response <- initialize(Traced(request))
-              .leftMap(Status.FAILED_PRECONDITION.withDescription)
-            responseP = response.toProtoV0
-          } yield responseP
+    initInternal(requestP.domainId, requestP, InitRequest.fromProtoV0)
 
-          EitherTUtil.toFuture(result.leftMap(_.asRuntimeException()))
-        },
-        s"sequencer initialization for domain ${requestP.domainId}",
-      )
-    }
+  override def initV1(requestP: v1.InitRequest): Future[v0.InitResponse] =
+    initInternal(requestP.domainId, requestP, InitRequest.fromProtoV1)
+
+  /** Process requests sequentially */
+  def initInternal[P](
+      domainId: String,
+      requestP: P,
+      deserializer: P => ParsingResult[InitRequest],
+  ): Future[v0.InitResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    // ensure here we don't process initialization requests concurrently
+    executionQueue.execute(
+      {
+        val result = for {
+          request <- fromEither[Future](deserializer(requestP))
+            .leftMap(err => s"Failed to deserialize request: $err")
+            .leftMap(Status.INVALID_ARGUMENT.withDescription)
+          response <- initialize(Traced(request))
+            .leftMap(Status.FAILED_PRECONDITION.withDescription)
+          responseP = response.toProtoV0
+        } yield responseP
+
+        EitherTUtil.toFuture(result.leftMap(_.asRuntimeException()))
+      },
+      s"sequencer initialization for domain $domainId",
+    )
+  }
 
 }

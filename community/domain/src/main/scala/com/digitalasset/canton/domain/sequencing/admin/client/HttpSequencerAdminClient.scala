@@ -35,9 +35,6 @@ class HttpSequencerAdminClient(
     extends SequencerAdminClient
     with NamedLogging {
 
-  private case class InitializeParams(domain_id: String)
-  private case class InitializeResponse(public_key: String, fingerprint: String)
-
   private def uri(packageName: String, serviceName: String, endpointName: String): Uri =
     uri"$baseUrl/app/com.digitalasset.canton.$packageName.$endpointVersion.$serviceName/$endpointName"
 
@@ -48,7 +45,7 @@ class HttpSequencerAdminClient(
       response <- httpClient
         .postAsBytes(
           uri("domain.admin", "SequencerInitializationService", "Init"),
-          initRequest.toByteArrayV0,
+          initRequest.toByteArray,
         )
         .leftMap(err => s"HTTP sequencer initialization request failed: $err")
       initResponseP <- EitherT.fromEither[Future](

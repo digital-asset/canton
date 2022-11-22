@@ -28,7 +28,12 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
+import com.digitalasset.canton.sequencing.client.{
+  RecordingConfig,
+  ReplayConfig,
+  RequestSigner,
+  SequencerClient,
+}
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
@@ -278,7 +283,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           participantId,
           persistentState.sequencedEventStore,
           persistentState.sendTrackerStore,
-          SequencerClient.signSubmissionRequest(domainCryptoApi),
+          RequestSigner(domainCryptoApi),
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)

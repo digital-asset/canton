@@ -22,8 +22,7 @@ import com.digitalasset.canton.topology.admin.v0.*
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
@@ -71,40 +70,40 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
 
   override def authorizePartyToParticipant(
       request: PartyToParticipantAuthorization
-  ): Future[AuthorizationSuccess] =
-    fromGrpcContext { implicit traceContext =>
-      val item = for {
-        party <- UniqueIdentifier.fromProtoPrimitive(request.party, "party")
-        side <- RequestSide.fromProtoEnum(request.side)
-        participantId <- ParticipantId
-          .fromProtoPrimitive(request.participant, "participant")
-        permission <- ParticipantPermission
-          .fromProtoEnum(request.permission)
-      } yield PartyToParticipant(side, PartyId(party), participantId, permission)
-      process(request.authorization, item.leftMap(ProtoDeserializationFailure.Wrap(_)))
-    }
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val item = for {
+      party <- UniqueIdentifier.fromProtoPrimitive(request.party, "party")
+      side <- RequestSide.fromProtoEnum(request.side)
+      participantId <- ParticipantId
+        .fromProtoPrimitive(request.participant, "participant")
+      permission <- ParticipantPermission
+        .fromProtoEnum(request.permission)
+    } yield PartyToParticipant(side, PartyId(party), participantId, permission)
+    process(request.authorization, item.leftMap(ProtoDeserializationFailure.Wrap(_)))
+  }
 
   override def authorizeOwnerToKeyMapping(
       request: OwnerToKeyMappingAuthorization
-  ): Future[AuthorizationSuccess] =
-    fromGrpcContext { implicit traceContext =>
-      val itemEitherT: EitherT[Future, CantonError, OwnerToKeyMapping] = for {
-        owner <- KeyOwner
-          .fromProtoPrimitive(request.keyOwner, "keyOwner")
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val itemEitherT: EitherT[Future, CantonError, OwnerToKeyMapping] = for {
+      owner <- KeyOwner
+        .fromProtoPrimitive(request.keyOwner, "keyOwner")
+        .leftMap(ProtoDeserializationFailure.Wrap(_))
+        .toEitherT[Future]
+      keyId <- EitherT.fromEither[Future](
+        Fingerprint
+          .fromProtoPrimitive(request.fingerprintOfKey)
           .leftMap(ProtoDeserializationFailure.Wrap(_))
-          .toEitherT[Future]
-        keyId <- EitherT.fromEither[Future](
-          Fingerprint
-            .fromProtoPrimitive(request.fingerprintOfKey)
-            .leftMap(ProtoDeserializationFailure.Wrap(_))
-        )
-        key <- parseKeyInStoreResponse[PublicKey](keyId, cryptoPublicStore.publicKey(keyId))
-      } yield OwnerToKeyMapping(owner, key)
-      for {
-        item <- itemEitherT.value
-        result <- process(request.authorization, item)
-      } yield result
-    }
+      )
+      key <- parseKeyInStoreResponse[PublicKey](keyId, cryptoPublicStore.publicKey(keyId))
+    } yield OwnerToKeyMapping(owner, key)
+    for {
+      item <- itemEitherT.value
+      result <- process(request.authorization, item)
+    } yield result
+  }
 
   private def parseKeyInStoreResponse[K <: PublicKey](
       fp: Fingerprint,
@@ -130,59 +129,60 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
 
   override def authorizeNamespaceDelegation(
       request: NamespaceDelegationAuthorization
-  ): Future[AuthorizationSuccess] =
-    fromGrpcContext { implicit traceContext =>
-      val item = for {
-        fp <- parseFingerprint(request.fingerprintOfAuthorizedKey)
-        key <- getSigningPublicKey(fp)
-        namespaceFingerprint <- parseFingerprint(request.namespace)
-      } yield NamespaceDelegation(
-        Namespace(namespaceFingerprint),
-        key,
-        request.isRootDelegation || request.namespace == request.fingerprintOfAuthorizedKey,
-      )
-      item.value.flatMap(itemE => process(request.authorization, itemE))
-    }
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val item = for {
+      fp <- parseFingerprint(request.fingerprintOfAuthorizedKey)
+      key <- getSigningPublicKey(fp)
+      namespaceFingerprint <- parseFingerprint(request.namespace)
+    } yield NamespaceDelegation(
+      Namespace(namespaceFingerprint),
+      key,
+      request.isRootDelegation || request.namespace == request.fingerprintOfAuthorizedKey,
+    )
+    item.value.flatMap(itemE => process(request.authorization, itemE))
+  }
 
   override def authorizeIdentifierDelegation(
       request: IdentifierDelegationAuthorization
-  ): Future[AuthorizationSuccess] =
-    fromGrpcContext { implicit traceContext =>
-      val item = for {
-        uid <- UniqueIdentifier
-          .fromProtoPrimitive(request.identifier, "identifier")
-          .leftMap(ProtoDeserializationFailure.Wrap(_))
-          .toEitherT[Future]
-        fp <- parseFingerprint(request.fingerprintOfAuthorizedKey)
-        key <- getSigningPublicKey(fp)
-      } yield IdentifierDelegation(uid, key)
-      item.value.flatMap(itemE => process(request.authorization, itemE))
-    }
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val item = for {
+      uid <- UniqueIdentifier
+        .fromProtoPrimitive(request.identifier, "identifier")
+        .leftMap(ProtoDeserializationFailure.Wrap(_))
+        .toEitherT[Future]
+      fp <- parseFingerprint(request.fingerprintOfAuthorizedKey)
+      key <- getSigningPublicKey(fp)
+    } yield IdentifierDelegation(uid, key)
+    item.value.flatMap(itemE => process(request.authorization, itemE))
+  }
 
   /** Adds a signed topology transaction to the Authorized store
     */
   override def addSignedTopologyTransaction(
       request: SignedTopologyTransactionAddition
-  ): Future[AdditionSuccess] =
-    fromGrpcContext { implicit traceContext =>
-      val item = for {
-        parsed <- mapErrNew(
-          EitherT
-            .fromEither[Future](SignedTopologyTransaction.fromByteString(request.serialized))
-            .leftMap(ProtoDeserializationFailure.Wrap(_))
-        )
-        _ <- mapErrNew(
-          manager.add(parsed, force = true, replaceExisting = true, allowDuplicateMappings = true)
-        )
-      } yield AdditionSuccess()
-      EitherTUtil.toFuture(item)
-    }
+  ): Future[AdditionSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val item = for {
+      parsed <- mapErrNew(
+        EitherT
+          .fromEither[Future](SignedTopologyTransaction.fromByteString(request.serialized))
+          .leftMap(ProtoDeserializationFailure.Wrap(_))
+      )
+      _ <- mapErrNew(
+        manager.add(parsed, force = true, replaceExisting = true, allowDuplicateMappings = true)
+      )
+    } yield AdditionSuccess()
+    EitherTUtil.toFuture(item)
+  }
 
   /** Authorizes a new signed legal identity
     */
   override def authorizeSignedLegalIdentityClaim(
       request: SignedLegalIdentityClaimAuthorization
-  ): Future[AuthorizationSuccess] = fromGrpcContext { implicit traceContext =>
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val item = for {
       claimP <- ProtoConverter
         .required("claim", request.claim)
@@ -198,8 +198,9 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
     */
   override def generateSignedLegalIdentityClaim(
       request: SignedLegalIdentityClaimGeneration
-  ): Future[v0.SignedLegalIdentityClaim] = fromGrpcContext { implicit traceContext =>
+  ): Future[v0.SignedLegalIdentityClaim] = {
     import SignedLegalIdentityClaimGeneration.Request
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     request.request match {
       case Request.LegalIdentityClaim(bytes) =>
         val result = for {
@@ -232,7 +233,8 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
 
   override def authorizeParticipantDomainState(
       request: ParticipantDomainStateAuthorization
-  ): Future[AuthorizationSuccess] = fromGrpcContext { implicit traceContext =>
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val item = for {
       side <- RequestSide.fromProtoEnum(request.side)
       domain <- DomainId.fromProtoPrimitive(request.domain, "domain")
@@ -246,7 +248,8 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
 
   override def authorizeMediatorDomainState(
       request: MediatorDomainStateAuthorization
-  ): Future[AuthorizationSuccess] = fromGrpcContext { implicit traceContext =>
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val item = for {
       side <- RequestSide.fromProtoEnum(request.side)
       domain <- DomainId.fromProtoPrimitive(request.domain, "domain")
@@ -259,27 +262,28 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
   /** Authorizes a new package vetting transaction */
   override def authorizeVettedPackages(
       request: VettedPackagesAuthorization
-  ): Future[AuthorizationSuccess] =
-    fromGrpcContext { implicit traceContext =>
-      val item = for {
-        uid <- UniqueIdentifier
-          .fromProtoPrimitive(request.participant, "participant")
-          .leftMap(ProtoDeserializationFailure.Wrap(_))
-        packageIds <- request.packageIds
-          .traverse(LfPackageId.fromString)
-          .leftMap(err =>
-            ProtoDeserializationFailure.Wrap(
-              ProtoDeserializationError.ValueConversionError("package_ids", err)
-            )
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val item = for {
+      uid <- UniqueIdentifier
+        .fromProtoPrimitive(request.participant, "participant")
+        .leftMap(ProtoDeserializationFailure.Wrap(_))
+      packageIds <- request.packageIds
+        .traverse(LfPackageId.fromString)
+        .leftMap(err =>
+          ProtoDeserializationFailure.Wrap(
+            ProtoDeserializationError.ValueConversionError("package_ids", err)
           )
-      } yield VettedPackages(ParticipantId(uid), packageIds)
-      process(request.authorization, item)
-    }
+        )
+    } yield VettedPackages(ParticipantId(uid), packageIds)
+    process(request.authorization, item)
+  }
 
   /** Authorizes a new domain parameters change transaction */
   override def authorizeDomainParametersChange(
       request: DomainParametersChangeAuthorization
-  ): Future[AuthorizationSuccess] = fromGrpcContext { implicit traceContext =>
+  ): Future[AuthorizationSuccess] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val item = for {
       uid <- UniqueIdentifier
         .fromProtoPrimitive(request.domain, "domain")

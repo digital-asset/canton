@@ -8,7 +8,7 @@ import akka.stream.scaladsl.{Keep, Source}
 import akka.stream.{KillSwitches, Materializer}
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.crypto.{HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
@@ -18,6 +18,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   domainManager,
@@ -62,7 +63,16 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         loggerFactory,
         None,
         new SimClock(CantonTimestamp.Epoch, loggerFactory),
-        _ => req => EitherT.rightT(req),
+        new SignatureVerifier {
+          override def verifySignature[A <: ProtocolVersionedMemoizedEvidence](
+              signedContent: SignedContent[A],
+              hashPurpose: HashPurpose,
+              sender: A => Member,
+          )(implicit
+              traceContext: TraceContext
+          ): EitherT[Future, String, SignedContent[A]] =
+            EitherT.rightT(signedContent)
+        },
       )
       with FlagCloseable {
     val newlyRegisteredMembers =
@@ -100,9 +110,9 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         traceContext: TraceContext
     ): Future[Unit] = ???
 
-    override def acknowledgeSigned(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(
-        implicit traceContext: TraceContext
-    ): Future[Unit] = ???
+    override protected def acknowledgeSignedInternal(
+        signedAcknowledgeRequest: SignedContent[AcknowledgeRequest]
+    )(implicit traceContext: TraceContext): Future[Unit] = ???
 
     override def pruningStatus(implicit
         traceContext: TraceContext

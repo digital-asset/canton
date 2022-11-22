@@ -601,7 +601,6 @@ object ParticipantTransactionView {
   *                  the view is considered approved.
   */
 // This class is a reference example of serialization best practices, demonstrating:
-// - handling of object invariants (i.e., the construction of an instance may fail with an exception)
 // - memoized serialization, which is required if we need to compute a signature or cryptographic hash of a class
 // - use of an UntypedVersionedMessage wrapper when serializing to an anonymous binary format
 // Please consult the team if you intend to change the design of serialization.
@@ -614,11 +613,11 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
     val representativeProtocolVersion: RepresentativeProtocolVersion[ViewCommonData],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewCommonData](hashOps)
-    // The class needs to implement MemoizedEvidence, because we want that serialize always yields the same ByteString.
+    // The class needs to implement ProtocolVersionedMemoizedEvidence, because we want that serialize always yields the same ByteString.
     // This is to ensure that different participants compute the same hash after receiving a ViewCommonData over the network.
     // (Recall that serialization is in general not guaranteed to be deterministic.)
     with ProtocolVersionedMemoizedEvidence
-    // The class implements `HasVersionedWrapper` because we serialize it to an anonymous binary format and need to encode
+    // The class implements `HasProtocolVersionedWrapper` because we serialize it to an anonymous binary format and need to encode
     // the version of the serialized Protobuf message
     with HasProtocolVersionedWrapper[ViewCommonData] {
 
@@ -627,7 +626,7 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
   // If another serializable class contains a ViewCommonData, it has to include it as a ByteString
   // (and not as "message ViewCommonData") in its ProtoBuf representation.
 
-  override def companionObj = ViewCommonData
+  override def companionObj: ViewCommonData.type = ViewCommonData
 
   // We use named parameters, because then the code remains correct even when the ProtoBuf code generator
   // changes the order of parameters.
@@ -671,24 +670,14 @@ object ViewCommonData
     )
   )
 
-  /** Creates a fresh [[ViewCommonData]].
-    *
-    * @throws ViewCommonData$.InvalidViewCommonData if `threshold` is negative
-    */
-  // This method is tailored to the case that the caller already knows that the parameters meet the object invariants.
-  // Consequently, the method throws an exception on invalid parameters.
-  //
-  // The "tryCreate" method has the following advantages over the auto-generated "apply" method:
+  /** Creates a fresh [[ViewCommonData]]. */
+  // The "create" method has the following advantages over the auto-generated "apply" method:
   // - The parameter lists have been flipped to facilitate curried usages.
   // - The deserializedFrom field cannot be set; so it cannot be set incorrectly.
   //
-  // The method is called "tryCreate" instead of "apply" for two reasons:
-  // - to emphasize that this method may throw an exception
-  // - to not confuse the Idea compiler by overloading "apply".
+  // The method is called "create" instead of "apply"
+  // to not confuse the Idea compiler by overloading "apply".
   //   (This is not a problem with this particular class, but it has been a problem with other classes.)
-  //
-  // The "tryCreate" method is optional.
-  // Feel free to omit "tryCreate", if the auto-generated "apply" method is good enough.
   def create(hashOps: HashOps)(
       informees: Set[Informee],
       threshold: NonNegativeInt,
@@ -719,9 +708,6 @@ object ViewCommonData
       protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
-
-  /** Indicates an attempt to create an invalid [[ViewCommonData]] */
-  case class InvalidViewCommonData(message: String) extends RuntimeException(message)
 }
 
 /** Information concerning every '''participant''' involved in processing the underlying view.
@@ -956,8 +942,8 @@ final case class ViewParticipantData private (
   private[ViewParticipantData] def toProtoV1: v0.ViewParticipantData = toProtoV0
 
   private[ViewParticipantData] def toProtoV2: v2.ViewParticipantData = v2.ViewParticipantData(
-    coreInputs = coreInputs.values.map(_.toProtoV0).toSeq,
-    createdCore = createdCore.map(_.toProtoV0),
+    coreInputs = coreInputs.values.map(_.toProtoV1).toSeq,
+    createdCore = createdCore.map(_.toProtoV1),
     createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
     resolvedKeys = resolvedKeys.toList.map { case (k, res) => ResolvedKey(k, res).toProtoV0 },
     actionDescription = Some(actionDescription.toProtoV1),
@@ -1137,27 +1123,33 @@ object ViewParticipantData
       createdInSubviewArchivedInCoreP,
       resolvedKeysP,
       actionDescriptionP,
-      ActionDescription.fromProtoV1 _,
+      ActionDescription.fromProtoV1,
+      CreatedContract.fromProtoV1,
+      InputContract.fromProtoV1,
       rbContextP,
     )(bytes)
   }
 
-  private def fromProtoV0V1V2[ActionDescriptionProto](
+  private def fromProtoV0V1V2[ActionDescriptionProto, CreatedContractProto, InputContractProto](
       hashOps: HashOps,
       protoVersion: ProtoVersion,
   )(
       saltP: Option[com.digitalasset.canton.crypto.v0.Salt],
-      coreInputsP: Seq[v0.ViewParticipantData.InputContract],
-      createdCoreP: Seq[v0.ViewParticipantData.CreatedContract],
+      coreInputsP: Seq[InputContractProto],
+      createdCoreP: Seq[CreatedContractProto],
       createdInSubviewArchivedInCoreP: Seq[String],
       resolvedKeysP: Seq[v0.ViewParticipantData.ResolvedKey],
       actionDescriptionP: Option[ActionDescriptionProto],
       actionDescriptionDeserializer: ActionDescriptionProto => ParsingResult[ActionDescription],
+      createdContractDeserializer: CreatedContractProto => ParsingResult[CreatedContract],
+      inputContractDeserializer: InputContractProto => ParsingResult[InputContract],
       rbContextP: Option[v0.ViewParticipantData.RollbackContext],
   )(bytes: ByteString): ParsingResult[ViewParticipantData] = for {
-    coreInputsSeq <- coreInputsP.traverse(InputContract.fromProtoV0)
-    coreInputs = coreInputsSeq.map(x => x.contractId -> x).toMap
-    createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV0)
+    coreInputsSeq <- coreInputsP.traverse(inputContractDeserializer)
+    coreInputs = coreInputsSeq.view
+      .map(inputContract => inputContract.contract.contractId -> inputContract)
+      .toMap
+    createdCore <- createdCoreP.traverse(createdContractDeserializer)
     createdInSubviewArchivedInCore <- createdInSubviewArchivedInCoreP
       .traverse(LfContractId.fromProtoPrimitive)
     resolvedKeys <- resolvedKeysP.traverse(
@@ -1211,7 +1203,9 @@ object ViewParticipantData
       createdInSubviewArchivedInCoreP,
       resolvedKeysP,
       actionDescriptionP,
-      ActionDescription.fromProtoV0 _,
+      ActionDescription.fromProtoV0,
+      CreatedContract.fromProtoV0,
+      InputContract.fromProtoV0,
       rbContextP,
     )(bytes)
   }

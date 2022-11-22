@@ -66,7 +66,6 @@ import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
-import scala.collection.immutable.Set
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
@@ -181,7 +180,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       TransferInProcessingStepsTest.transferOutResult(
         sourceDomain,
         cryptoSnapshot,
-        pureCrypto,
         participant,
       )
 
@@ -371,7 +369,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       TransferInProcessingStepsTest.transferOutResult(
         sourceDomain,
         cryptoSnapshot,
-        pureCrypto,
         submitterParticipant,
       )
     val inTree =
@@ -505,7 +502,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       TransferInProcessingStepsTest.transferOutResult(
         sourceDomain,
         cryptoSnapshot,
-        pureCrypto,
         submitterParticipant,
       )
 
@@ -618,7 +614,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       TransferInProcessingStepsTest.transferOutResult(
         sourceDomain,
         cryptoSnapshot,
-        pureCrypto,
         submitterParticipant,
       )
     val inRequest =
@@ -731,7 +726,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
       promise.completeWith(Future.unit)
       for {
-        completed <- inValidated
+        _ <- inValidated
       } yield { succeed }
     }
   }
@@ -911,7 +906,6 @@ object TransferInProcessingStepsTest {
   def transferOutResult(
       sourceDomain: DomainId,
       cryptoSnapshot: SyncCryptoApi,
-      hashOps: HashOps,
       participantId: ParticipantId,
   )(implicit traceContext: TraceContext): DeliveredTransferOutResult = {
     val protocolVersion = BaseTest.testedProtocolVersion
@@ -934,7 +928,7 @@ object TransferInProcessingStepsTest {
       )
     val signedResult: SignedProtocolMessage[TransferOutResult] =
       Await.result(
-        SignedProtocolMessage.tryCreate(result, cryptoSnapshot, hashOps, protocolVersion),
+        SignedProtocolMessage.tryCreate(result, cryptoSnapshot, protocolVersion),
         10.seconds,
       )
     val batch: Batch[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =

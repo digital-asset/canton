@@ -594,6 +594,12 @@ class LocalCommitmentsAdministrationGroup(
   @Help.Summary(
     "Lookup ACS commitments received from other participants as part of the reconciliation protocol"
   )
+  @Help.Description("""The arguments are:
+       - domain: the alias of the domain
+       - start: lowest time exclusive
+       - end: highest time inclusive
+       - counterParticipant: optionally filter by counter participant
+      """)
   def received(
       domain: DomainAlias,
       start: Instant,
@@ -1335,6 +1341,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(domainAlias))
     }
 
+    @Help.Summary("Disconnect this participant from all connected domains")
+    def disconnect_all(): Unit = {
+      list_connected().foreach { connected =>
+        disconnect(connected.domainAlias)
+      }
+    }
+
     @Help.Summary("Disconnect this participant from the given local domain")
     def disconnect_local(domain: DomainReference): Unit = consoleEnvironment.run {
       adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(domain.name))
@@ -1522,6 +1535,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |The maximum rate is a hard limit on the rate of commands submitted to this participant through the ledger API.
         |As the rate of commands is checked and updated immediately after receiving a new command submission,
         |an application cannot exceed the maximum rate, even when it sends a "burst" of commands.
+        |
+        |For the sake of illustration, let's assume the configured rate limit is ``100 commands/s``.
+        |If an application submits 100 commands within a single second, waiting exactly 10 milliseconds between consecutive commands,
+        |then the participant will accept all commands.
+        |If an application submits 100 commands within one millisecond, then the actual rate is ``100000 commands/s``.
+        |Consequently, the participant may reject all but the first command;
+        |however, due to limited clock precision the participant will actually accept about 10 commands. 
         |
         |Resource limits can only be changed, if the server runs Canton enterprise.
         |In the community edition, the server uses fixed limits that cannot be changed."""

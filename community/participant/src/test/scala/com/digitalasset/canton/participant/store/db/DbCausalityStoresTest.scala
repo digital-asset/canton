@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.SerializableTraceContext
 import io.functionmeta.functionFullName
 import slick.dbio.DBIOAction
 import slick.jdbc.SetParameter
@@ -60,8 +60,9 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
     import theStorage.api.*
     import theStorage.converters.*
 
-    @nowarn("cat=unused") implicit val setParameterTraceContext: SetParameter[TraceContext] =
-      TraceContext.getVersionedSetParameter(testedProtocolVersion)
+    @nowarn("cat=unused") implicit val setParameterTraceContext
+        : SetParameter[SerializableTraceContext] =
+      SerializableTraceContext.getVersionedSetParameter(testedProtocolVersion)
     @nowarn("cat=unused") implicit val setParameterSerializableLedgerSyncEvent
         : SetParameter[SerializableLedgerSyncEvent] =
       SerializableLedgerSyncEvent.getVersionedSetParameter
@@ -80,7 +81,8 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
           sql"""
                             event_log (log_id, local_offset, ts, request_sequencer_counter, event_id, content, trace_context)
                             values ($id, $localOffset, ${tsEvent.timestamp}, $requestSequencerCounter,
-                            $eventId, $serializableLedgerSyncEvent, ${tsEvent.traceContext})""",
+                            $eventId, $serializableLedgerSyncEvent,
+                            ${SerializableTraceContext(tsEvent.traceContext)})""",
         )
 
         val writeMultiDomainEventLog =

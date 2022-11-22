@@ -21,7 +21,7 @@ import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationToke
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, Member}
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.retry.Pause
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
@@ -66,32 +66,32 @@ class AuthenticationTokenProvider(
 
   def generateToken(
       authenticationClient: SequencerAuthenticationServiceStub
-  ): EitherT[Future, Status, AuthenticationTokenWithExpiry] =
+  ): EitherT[Future, Status, AuthenticationTokenWithExpiry] = {
     // this should be called by a grpc client interceptor
-    fromGrpcContext { implicit traceContext =>
-      performUnlessClosingEitherT(functionFullName, shutdownStatus) {
-        def generateTokenET: Future[Either[Status, AuthenticationTokenWithExpiry]] =
-          (for {
-            challenge <- getChallenge(authenticationClient)
-            nonce <- Nonce
-              .fromProtoPrimitive(challenge.nonce)
-              .leftMap(err => Status.INVALID_ARGUMENT.withDescription(s"Invalid nonce: $err"))
-              .toEitherT[Future]
-            token <- authenticate(authenticationClient, nonce, challenge.fingerprints)
-          } yield token).value
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    performUnlessClosingEitherT(functionFullName, shutdownStatus) {
+      def generateTokenET: Future[Either[Status, AuthenticationTokenWithExpiry]] =
+        (for {
+          challenge <- getChallenge(authenticationClient)
+          nonce <- Nonce
+            .fromProtoPrimitive(challenge.nonce)
+            .leftMap(err => Status.INVALID_ARGUMENT.withDescription(s"Invalid nonce: $err"))
+            .toEitherT[Future]
+          token <- authenticate(authenticationClient, nonce, challenge.fingerprints)
+        } yield token).value
 
-        EitherT {
-          Pause(
-            logger,
-            this,
-            maxRetries = config.retries.value,
-            delay = config.pauseRetries.toScala,
-            operationName = "generate sequencer authentication token",
-          ).unlessShutdown(FutureUnlessShutdown.outcomeF(generateTokenET), NoExnRetryable)
-            .onShutdown(Left(shutdownStatus))
-        }
+      EitherT {
+        Pause(
+          logger,
+          this,
+          maxRetries = config.retries.value,
+          delay = config.pauseRetries.toScala,
+          operationName = "generate sequencer authentication token",
+        ).unlessShutdown(FutureUnlessShutdown.outcomeF(generateTokenET), NoExnRetryable)
+          .onShutdown(Left(shutdownStatus))
       }
     }
+  }
 
   private def getChallenge(
       authenticationClient: SequencerAuthenticationServiceStub

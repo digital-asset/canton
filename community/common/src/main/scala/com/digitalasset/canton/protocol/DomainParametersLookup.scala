@@ -13,6 +13,7 @@ import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 /** This class allows to query domain parameters, regardless of whether they are
@@ -92,11 +93,10 @@ class DynamicDomainParametersLookup[P](
 
   def getApproximate(warnOnUsingDefaults: Boolean)(implicit
       traceContext: TraceContext
-  ): Future[P] = {
+  ): Future[P] =
     topologyClient.currentSnapshotApproximation
       .findDynamicDomainParametersOrDefault(protocolVersion, warnOnUsingDefaults)
       .map(projector)
-  }
 
   def getAll(validAt: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -114,14 +114,14 @@ class DynamicDomainParametersLookup[P](
 }
 
 object DomainParametersLookup {
+  @nowarn("msg=deprecated")
   def forReconciliationInterval(
       staticDomainParameters: StaticDomainParameters,
       topologyClient: DomainTopologyClient,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): DomainParametersLookup[PositiveSeconds] = {
-    // TODO(#9800) migrate to stable version
-    if (staticDomainParameters.protocolVersion < ProtocolVersion.dev)
+    if (staticDomainParameters.protocolVersion < ProtocolVersion.v4)
       new StaticDomainParametersLookup(staticDomainParameters.reconciliationInterval)
     else
       new DynamicDomainParametersLookup(
@@ -133,14 +133,14 @@ object DomainParametersLookup {
       )
   }
 
+  @nowarn("msg=deprecated")
   def forSequencerDomainParameters(
       staticDomainParameters: StaticDomainParameters,
       topologyClient: DomainTopologyClient,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): DomainParametersLookup[SequencerDomainParameters] = {
-    // TODO(#9800) migrate to stable version
-    if (staticDomainParameters.protocolVersion < ProtocolVersion.dev)
+    if (staticDomainParameters.protocolVersion < ProtocolVersion.v4)
       new StaticDomainParametersLookup(
         SequencerDomainParameters(
           staticDomainParameters.maxRatePerParticipant,
@@ -157,6 +157,7 @@ object DomainParametersLookup {
       )
     }
   }
+
   case class SequencerDomainParameters(
       maxRatePerParticipant: NonNegativeInt,
       maxRequestSize: MaxRequestSize,

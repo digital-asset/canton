@@ -5,7 +5,7 @@ package com.digitalasset.canton.crypto.store.memory
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.crypto.store.{
@@ -25,6 +25,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.TrieMapUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -68,11 +69,11 @@ class InMemoryCryptoPrivateStore(
   private[crypto] def readPrivateKey(keyId: Fingerprint, purpose: KeyPurpose)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Option[StoredPrivateKey]] = {
-    (purpose match {
+    purpose match {
       case Signing =>
         storedSigningKeyMap
           .get(keyId)
-          .map(pk =>
+          .parTraverse(pk =>
             EitherT.rightT[Future, CryptoPrivateStoreError](
               wrapPrivateKeyInToStored(pk.privateKey, pk.name)
             )
@@ -80,12 +81,12 @@ class InMemoryCryptoPrivateStore(
       case Encryption =>
         storedDecryptionKeyMap
           .get(keyId)
-          .map(pk =>
+          .parTraverse(pk =>
             EitherT.rightT[Future, CryptoPrivateStoreError](
               wrapPrivateKeyInToStored(pk.privateKey, pk.name)
             )
           )
-    }).sequence
+    }
   }
 
   private[crypto] def writePrivateKey(
@@ -152,19 +153,19 @@ class InMemoryCryptoPrivateStore(
     (purpose match {
       case Signing =>
         storedSigningKeyMap.values.toSeq
-          .map((x: SigningPrivateKeyWithName) =>
+          .parTraverse((x: SigningPrivateKeyWithName) =>
             EitherT.rightT[Future, CryptoPrivateStoreError](
               wrapPrivateKeyInToStored(x.privateKey, x.name)
             )
           )
       case Encryption =>
         storedDecryptionKeyMap.values.toSeq
-          .map((x: EncryptionPrivateKeyWithName) =>
+          .parTraverse((x: EncryptionPrivateKeyWithName) =>
             EitherT.rightT[Future, CryptoPrivateStoreError](
               wrapPrivateKeyInToStored(x.privateKey, x.name)
             )
           )
-    }).sequence.map(_.toSet)
+    }).map(_.toSet)
 
   private[crypto] def deletePrivateKey(
       keyId: Fingerprint
@@ -173,6 +174,18 @@ class InMemoryCryptoPrivateStore(
     storedDecryptionKeyMap.remove(keyId).discard
     EitherT.rightT(())
   }
+
+  private[crypto] def replaceStoredPrivateKeys(newKeys: Seq[StoredPrivateKey])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
+    newKeys
+      .parTraverse { newKey =>
+        for {
+          _ <- deletePrivateKey(newKey.id)
+          _ <- writePrivateKey(newKey)
+        } yield ()
+      }
+      .map(_ => ())
 
   override def close(): Unit = ()
 }

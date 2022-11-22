@@ -14,8 +14,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import io.grpc.Status
 import io.grpc.stub.ServerCallStreamObserver
@@ -90,7 +90,7 @@ private[service] class GrpcManagedSubscription(
       val response =
         v0.SubscriptionResponse(
           signedSequencedEvent = Some(event.signedEvent.toProtoV0),
-          Some(event.traceContext.toProtoV0),
+          Some(SerializableTraceContext(event.traceContext).toProtoV0),
         )
       Right(performUnlessClosing("grpc-managed-subscription-handler") {
         observer.onNext(response)

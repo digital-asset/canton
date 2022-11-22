@@ -3,15 +3,18 @@
 
 package com.digitalasset.canton.concurrent
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{FutureUtil, StackTraceUtil}
+import com.digitalasset.canton.util.{FutureUtil, LoggerUtil, StackTraceUtil}
 
+import java.time.Instant
 import java.util.concurrent.*
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Debugging utility used to write at regular intervals the executor service queue size into the logfile
@@ -21,8 +24,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class ExecutionContextMonitor(
     val loggerFactory: NamedLoggerFactory,
     interval: NonNegativeFiniteDuration,
-    maxReports: Int,
-    reportAsWarnings: Boolean,
+    warnInterval: NonNegativeFiniteDuration,
     override val timeouts: ProcessingTimeout,
 )(implicit scheduler: ScheduledExecutorService)
     extends NamedLogging
@@ -33,9 +35,12 @@ class ExecutionContextMonitor(
     val _ = scheduler.scheduleAtFixedRate(runnable, ms, ms, TimeUnit.MILLISECONDS)
   }
 
-  private val scheduled = new AtomicBoolean(false)
-  private val reported = new AtomicBoolean(false)
-  private val reports = new AtomicInteger(0)
+  private val warnIntervalMs = warnInterval.duration.toMillis
+
+  // indicates when the last pending task has been scheduled
+  private val scheduled = new AtomicReference[Option[Long]](None)
+  // indicates how many times the current deadlock (if any) has been reported
+  private val reported = new AtomicInteger(0)
 
   import TraceContext.Implicits.Empty.*
 
@@ -45,28 +50,31 @@ class ExecutionContextMonitor(
       override def run(): Unit = {
         if (!isClosing) {
           // if we are still scheduled, complain!
-          if (scheduled.getAndSet(true)) {
-            if (!reported.getAndSet(true)) {
-              reportIssue(ec)
-            }
+          val started = scheduled.getAndUpdate {
+            case None => Some(Instant.now().toEpochMilli)
+            case x => x
           }
-          // if we aren't scheduled yet, schedule a future!
-          else {
-            implicit val myEc: ExecutionContext = ec
-            FutureUtil.doNotAwait(
-              Future {
-                if (!scheduled.getAndSet(false)) {
-                  logger.error(s"Are we monitoring the EC ${ec.name} twice?")
-                }
-                // reset the reporting
-                if (reported.getAndSet(false)) {
-                  emit(
-                    s"Task runner ${ec.name} is just overloaded, but operating correctly. Task got executed in the meantime."
-                  )
-                }
-              },
-              "Monitoring future failed despite being trivial ...",
-            )
+          started match {
+            // if we are still scheduled, complain
+            case Some(started) =>
+              reportIssue(ec, started)
+            // if we aren't scheduled yet, schedule a future!
+            case None =>
+              implicit val myEc: ExecutionContext = ec
+              FutureUtil.doNotAwait(
+                Future {
+                  if (scheduled.getAndSet(None).isEmpty) {
+                    logger.error(s"Are we monitoring the EC ${ec.name} twice?")
+                  }
+                  // reset the reporting
+                  if (reported.getAndSet(0) > 0) {
+                    emit(
+                      s"Task runner ${ec.name} is just overloaded, but operating correctly. Task got executed in the meantime."
+                    )
+                  }
+                },
+                "Monitoring future failed despite being trivial ...",
+              )
           }
         }
       }
@@ -75,26 +83,35 @@ class ExecutionContextMonitor(
   }
 
   private def emit(message: => String): Unit = {
-    if (reportAsWarnings) {
-      logger.warn(message)
-    } else {
-      logger.debug(message)
-    }
+    logger.warn(message)
   }
 
-  private def reportIssue(ec: ExecutionContextIdlenessExecutorService): Unit = {
-    def message(): String = {
-      s"Task runner ${ec.name} is stuck or overloaded. My scheduled task has not been processed for at least ${interval.toScala} (queue-size=${ec.queueSize}).\n$ec"
-    }
-    val count = reports.incrementAndGet()
-    if (count <= maxReports) {
-
-      emit(message())
-      val traces = StackTraceUtil.formatStackTrace(_.getName.startsWith(ec.name))
-      logger.debug(s"Here is the stack-trace of threads for ${ec.name}:\n$traces")
-      if (count == maxReports) {
-        logger.info(s"Reached ${count} of issue reports. Shutting up now.")
+  private def reportIssue(
+      ec: ExecutionContextIdlenessExecutorService,
+      startedEpochMs: Long,
+  ): Unit = {
+    val delta = Instant.now().toEpochMilli - startedEpochMs
+    val current = reported.getAndIncrement()
+    val warn = delta > (warnIntervalMs * current)
+    if (warn) {
+      val deltaTs = LoggerUtil.roundDurationForHumans(Duration(delta, TimeUnit.MILLISECONDS))
+      if (current > 0) {
+        emit(
+          s"Task runner ${ec.name} is still stuck or overloaded for ${deltaTs}. (queue-size=${ec.queueSize}).\n$ec"
+        )
+      } else {
+        emit(
+          s"Task runner ${ec.name} is stuck or overloaded for ${deltaTs}. (queue-size=${ec.queueSize}).\n$ec"
+        )
       }
+      val traces = StackTraceUtil.formatStackTrace(_.getName.startsWith(ec.name))
+      val msg = s"Here is the stack-trace of threads for ${ec.name}:\n$traces"
+      if (current == 0)
+        logger.info(msg)
+      else
+        logger.debug(msg)
+    } else {
+      reported.updateAndGet(x => Math.max(0, x - 1)).discard
     }
   }
 

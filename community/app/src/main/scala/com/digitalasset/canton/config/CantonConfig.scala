@@ -104,14 +104,12 @@ final case class HealthConfig(server: HealthServerConfig, check: CheckConfig)
   *
   * @param enabled if true, we'll monitor the EC for deadlocks (or slow processings)
   * @param interval how often we check the EC
-  * @param maxReports after how many warnings are we going to shut up.
-  * @param reportAsWarnings if false, the deadlock detector will report using debug messages
+  * @param warnInterval how often we report a deadlock as still being active
   */
 final case class DeadlockDetectionConfig(
     enabled: Boolean = true,
     interval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(3),
-    maxReports: Int = 10,
-    reportAsWarnings: Boolean = true,
+    warnInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(10),
 )
 
 /** Configuration for metrics and tracing
@@ -717,6 +715,8 @@ object CantonConfig {
       deriveReader[RemoteDomainConfig]
     lazy implicit val remoteParticipantConfigReader: ConfigReader[RemoteParticipantConfig] =
       deriveReader[RemoteParticipantConfig]
+    lazy implicit val dbParamsReader: ConfigReader[DbParametersConfig] =
+      deriveReader[DbParametersConfig]
     lazy implicit val memoryReader: ConfigReader[CommunityStorageConfig.Memory] =
       deriveReader[CommunityStorageConfig.Memory]
     lazy implicit val h2Reader: ConfigReader[CommunityDbConfig.H2] =
@@ -1070,6 +1070,8 @@ object CantonConfig {
       deriveWriter[RemoteDomainConfig]
     lazy implicit val remoteParticipantConfigWriter: ConfigWriter[RemoteParticipantConfig] =
       deriveWriter[RemoteParticipantConfig]
+    lazy implicit val dbParametersWriter: ConfigWriter[DbParametersConfig] =
+      deriveWriter[DbParametersConfig]
     lazy implicit val memoryWriter: ConfigWriter[CommunityStorageConfig.Memory] =
       deriveWriter[CommunityStorageConfig.Memory]
     lazy implicit val h2Writer: ConfigWriter[CommunityDbConfig.H2] =

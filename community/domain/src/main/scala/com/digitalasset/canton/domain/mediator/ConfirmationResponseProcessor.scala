@@ -327,7 +327,7 @@ private[mediator] class ConfirmationResponseProcessor(
                 protocolVersion,
               )
             SignedProtocolMessage
-              .tryCreate(rejection, snapshot, crypto.pureCrypto, protocolVersion)
+              .tryCreate(rejection, snapshot, protocolVersion)
               .map { signedRejection =>
                 signedRejection -> Recipients.groups(recipients.map(r => NonEmpty(Set, r)))
               }

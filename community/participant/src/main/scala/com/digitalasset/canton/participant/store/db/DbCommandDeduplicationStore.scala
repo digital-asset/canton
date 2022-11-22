@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.protocol.StoredParties
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.DbSerializationException
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{ApplicationId, CommandId}
@@ -46,10 +46,10 @@ class DbCommandDeduplicationStore(
 
   private implicit val setParameterStoredParties: SetParameter[StoredParties] =
     StoredParties.getVersionedSetParameter(releaseProtocolVersion.v)
-  private implicit val setParameterTraceContext: SetParameter[TraceContext] =
-    TraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
-  private implicit val setParameterTraceContextO: SetParameter[Option[TraceContext]] =
-    TraceContext.getVersionedSetParameterO(releaseProtocolVersion.v)
+  private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =
+    SerializableTraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
+  private implicit val setParameterTraceContextO: SetParameter[Option[SerializableTraceContext]] =
+    SerializableTraceContext.getVersionedSetParameterO(releaseProtocolVersion.v)
 
   override def lookup(
       changeIdHash: ChangeIdHash
@@ -206,11 +206,11 @@ class DbCommandDeduplicationStore(
           pp >> definiteAnswerEvent.offset
           pp >> definiteAnswerEvent.publicationTime
           pp >> definiteAnswerEvent.serializableSubmissionId
-          pp >> definiteAnswerEvent.traceContext
+          pp >> SerializableTraceContext(definiteAnswerEvent.traceContext)
           pp >> acceptance.map(_.offset)
           pp >> acceptance.map(_.publicationTime)
           pp >> acceptance.flatMap(_.serializableSubmissionId)
-          pp >> acceptance.map(_.traceContext)
+          pp >> acceptance.map(accept => SerializableTraceContext(accept.traceContext))
 
           @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
           def setAcceptFlag(): Unit = {

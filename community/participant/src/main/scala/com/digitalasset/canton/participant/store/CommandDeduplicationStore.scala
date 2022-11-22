@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.store.memory.InMemoryCommandDeduplica
 import com.digitalasset.canton.protocol.StoredParties
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{ApplicationId, CommandId, LedgerSubmissionId}
 import slick.jdbc.GetResult
@@ -202,16 +202,19 @@ case class DefiniteAnswerEvent(
 }
 
 object DefiniteAnswerEvent {
-  import TraceContext.*
-
   implicit def getResultDefiniteAnswerEvent(implicit
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[DefiniteAnswerEvent] = GetResult { r =>
     val offset = r.<<[GlobalOffset]
     val publicationTime = r.<<[CantonTimestamp]
     val submissionIdO = r.<<[Option[SerializableSubmissionId]]
-    val traceContext = r.<<[TraceContext]
-    DefiniteAnswerEvent(offset, publicationTime, submissionIdO.map(_.submissionId), traceContext)
+    val traceContext = r.<<[SerializableTraceContext]
+    DefiniteAnswerEvent(
+      offset,
+      publicationTime,
+      submissionIdO.map(_.submissionId),
+      traceContext.unwrap,
+    )
   }
 
   implicit def getResultDefinitionAnswerEventOption(implicit
@@ -221,14 +224,14 @@ object DefiniteAnswerEvent {
       val offsetO = r.<<[Option[GlobalOffset]]
       val publicationTimeO = r.<<[Option[CantonTimestamp]]
       val submissionIdO = r.<<[Option[SerializableSubmissionId]]
-      val traceContextO = r.<<[Option[TraceContext]]
+      val traceContextO = r.<<[Option[SerializableTraceContext]]
       (offsetO, publicationTimeO, submissionIdO, traceContextO) match {
         case (Some(offset), Some(publicationTime), submissionId, Some(traceContext)) =>
           DefiniteAnswerEvent(
             offset,
             publicationTime,
             submissionId.map(_.submissionId),
-            traceContext,
+            traceContext.unwrap,
           ).some
         case (None, None, None, None) => None
         case _ =>

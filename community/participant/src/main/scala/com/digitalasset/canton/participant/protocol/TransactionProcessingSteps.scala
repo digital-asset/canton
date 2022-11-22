@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
@@ -31,14 +32,17 @@ import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
   NoMediatorError,
-  PendingRequestDataOrReplayData,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.{
+  ContractAuthenticationFailed,
   DomainWithoutMediatorError,
   SequencerRequest,
 }
-import com.digitalasset.canton.participant.protocol.TransactionProcessor.*
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
+  TransactionProcessorError,
+  *,
+}
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.*
@@ -83,7 +87,7 @@ import com.google.protobuf.ByteString
 
 import scala.annotation.nowarn
 import scala.collection.immutable.SortedMap
-import scala.collection.{concurrent, mutable}
+import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -102,6 +106,7 @@ class TransactionProcessingSteps(
     crypto: DomainSyncCryptoClient,
     storedContractManager: StoredContractManager,
     metrics: TransactionProcessingMetrics,
+    serializableContractAuthenticator: SerializableContractAuthenticator,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
@@ -115,7 +120,6 @@ class TransactionProcessingSteps(
   private def protocolVersion = staticDomainParameters.protocolVersion
 
   override type SubmissionSendError = TransactionProcessor.SubmissionErrors.SequencerRequest.Error
-  override type PendingRequestData = PendingTransaction
   override type PendingSubmissions = Unit
   override type PendingSubmissionId = Unit
   override type PendingSubmissionData = Nothing
@@ -129,13 +133,10 @@ class TransactionProcessingSteps(
   override type RequestError = TransactionProcessorError
   override type ResultError = TransactionProcessorError
 
-  override def pendingSubmissions(state: SyncDomainEphemeralState): Unit = ()
+  override type RequestType = ProcessingSteps.RequestType.Transaction
+  override val requestType = ProcessingSteps.RequestType.Transaction
 
-  override def pendingRequestMap
-      : SyncDomainEphemeralState => concurrent.Map[RequestId, PendingRequestDataOrReplayData[
-        PendingRequestData
-      ]] =
-    _.pendingTransactions
+  override def pendingSubmissions(state: SyncDomainEphemeralState): Unit = ()
 
   override def requestKind: String = "Transaction"
 
@@ -687,6 +688,30 @@ class TransactionProcessingSteps(
     EitherT.right(fut)
   }
 
+  def authenticateInputContracts(
+      pendingDataAndResponseArgs: PendingDataAndResponseArgs
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransactionProcessorError, Unit] =
+    if (protocolVersion < ProtocolVersion.v4) {
+      EitherT.rightT(())
+    } else {
+      pendingDataAndResponseArgs.enrichedTransaction match {
+        case Some(enrichedTransaction) =>
+          EitherT.fromEither(
+            enrichedTransaction.rootViewsWithUsedAndCreated.contracts.used.toList
+              .traverse_ { case (contractId, contract) =>
+                serializableContractAuthenticator
+                  .authenticate(contract)
+                  .leftMap(message =>
+                    ContractAuthenticationFailed.Error(contractId, message).reported()
+                  )
+              }
+          )
+        case None => EitherT.rightT(())
+      }
+    }
+
   override def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
@@ -717,21 +742,21 @@ class TransactionProcessingSteps(
       for {
         _ <- pendingCursor
 
-        rootViewTrees = enrichedTransaction.rootViewsWithUsedAndCreated.rootViews
-        rootViews = rootViewTrees.map(_.view)
-        consistencyResult = ContractConsistencyChecker.assertInputContractsInPast(
-          rootViews.toList,
-          ledgerTime,
-        )
+        rootViewsWithUsedAndCreated = enrichedTransaction.rootViewsWithUsedAndCreated
+        consistencyResult = ContractConsistencyChecker
+          .assertInputContractsInPast(
+            rootViewsWithUsedAndCreated.contracts.used.toList,
+            ledgerTime,
+          )
 
         domainParameters <- ipsSnapshot.findDynamicDomainParametersOrDefault(protocolVersion)
 
         // `tryCommonData` should never throw here because all views have the same root hash
         // which already commits to the ParticipantMetadata and CommonMetadata
-        commonData = checked(tryCommonData(rootViewTrees))
+        commonData = checked(tryCommonData(rootViewsWithUsedAndCreated.rootViews))
 
-        amSubmitter = enrichedTransaction.submitterMetadata.fold(false)(meta =>
-          meta.submitterParticipant == participantId
+        amSubmitter = enrichedTransaction.submitterMetadata.exists(
+          _.submitterParticipant == participantId
         )
         timeValidation = TimeValidator.checkTimestamps(
           commonData,
@@ -743,15 +768,14 @@ class TransactionProcessingSteps(
 
         conformanceResult <- modelConformanceChecker
           .check(
-            enrichedTransaction.rootViewsWithUsedAndCreated.rootViews,
-            enrichedTransaction.rootViewsWithUsedAndCreated.keys.keyResolverFor(_),
+            rootViewsWithUsedAndCreated.rootViews,
+            rootViewsWithUsedAndCreated.keys.keyResolverFor(_),
             pendingDataAndResponseArgs.rc,
             ipsSnapshot,
             commonData,
           )
           .value
       } yield ParallelChecksResult(consistencyResult, conformanceResult, timeValidation)
-
     }
 
     def awaitActivenessResult: Future[ActivenessResult] = activenessResultFuture.map {
@@ -1078,7 +1102,7 @@ class TransactionProcessingSteps(
   }
 
   private def getCommitSetAndContractsToBeStoredAndEventApproveConform(
-      pendingRequestData: PendingRequestData,
+      pendingRequestData: RequestType#PendingRequestData,
       completionInfo: Option[CompletionInfo],
       modelConformance: ModelConformanceChecker.Result,
   )(implicit
@@ -1157,7 +1181,7 @@ class TransactionProcessingSteps(
   override def getCommitSetAndContractsToBeStoredAndEvent(
       event: SignedContent[Deliver[DefaultOpenEnvelope]],
       result: Either[MalformedMediatorRequestResult, TransactionResultMessage],
-      pendingRequestData: PendingRequestData,
+      pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
@@ -1254,6 +1278,7 @@ class TransactionProcessingSteps(
       partyPrefetch: PrefetchedParties,
   )(implicit traceContext: TraceContext): (UsedAndCreatedContracts, Set[LfPartyId]) = {
     val divulgedInputsB = Map.newBuilder[LfContractId, SerializableContract]
+    val usedContracts = Map.newBuilder[LfContractId, SerializableContract]
     val createdContractsOfHostedStakeholdersB =
       Map.newBuilder[LfContractId, (Option[SerializableContract], Set[LfPartyId])]
     val contractsForActivenessCheckUnlessRelativeB = Map.newBuilder[LfContractId, Set[LfPartyId]]
@@ -1269,6 +1294,7 @@ class TransactionProcessingSteps(
 
         viewParticipantData.coreInputs.values.foreach { inputContractWithMetadata =>
           val contract = inputContractWithMetadata.contract
+          usedContracts += contract.contractId -> contract
           val stakeholders = inputContractWithMetadata.contract.metadata.stakeholders
 
           val informeeStakeholders = stakeholders.intersect(informees)
@@ -1366,6 +1392,7 @@ class TransactionProcessingSteps(
         consumedInputsOfHostedStakeholders -- maybeCreatedResult.keySet,
       maybeCreated = maybeCreatedResult,
       transient = transientResult,
+      used = usedContracts.result(),
     )
     val hostedInformeeStakeholders =
       informeeStakeholders.filter(s => partyPrefetch.hostsAny(Iterable(s)))

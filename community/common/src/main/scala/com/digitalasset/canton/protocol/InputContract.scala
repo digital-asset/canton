@@ -28,6 +28,12 @@ case class InputContract(contract: SerializableContract, consumed: Boolean) exte
       consumed = consumed,
     )
 
+  def toProtoV1: v1.InputContract =
+    v1.InputContract(
+      contract = Some(contract.toProtoV1),
+      consumed = consumed,
+    )
+
   override def pretty: Pretty[InputContract] = prettyOfClass(
     unnamedParam(_.contract),
     paramIfTrue("consumed", _.consumed),
@@ -38,12 +44,24 @@ object InputContract {
   def fromProtoV0(
       inputContractP: v0.ViewParticipantData.InputContract
   ): ParsingResult[InputContract] = {
-    val v0.ViewParticipantData.InputContract(contractP, consumed) =
-      inputContractP
-    for {
-      contract <- ProtoConverter
-        .required("InputContract.contract", contractP)
-        .flatMap(SerializableContract.fromProtoV0)
-    } yield InputContract(contract, consumed)
+    val v0.ViewParticipantData.InputContract(contractP, consumed) = inputContractP
+    toInputContract(contractP, consumed, SerializableContract.fromProtoV0)
   }
+
+  def fromProtoV1(
+      inputContractP: v1.InputContract
+  ): ParsingResult[InputContract] = {
+    val v1.InputContract(contractP, consumed) = inputContractP
+    toInputContract(contractP, consumed, SerializableContract.fromProtoV1)
+  }
+
+  private def toInputContract[SerializableContractP](
+      serializableContractO: Option[SerializableContractP],
+      consumed: Boolean,
+      deserializeContract: SerializableContractP => ParsingResult[SerializableContract],
+  ): ParsingResult[InputContract] =
+    ProtoConverter
+      .required("InputContract.contract", serializableContractO)
+      .flatMap(deserializeContract)
+      .map(InputContract(_, consumed))
 }

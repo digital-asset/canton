@@ -12,37 +12,65 @@ import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
-object ContractId {
+object CantonContractIdVersion {
+  val versionPrefixBytesSize = 2
 
-  // The prefix for the suffix of Canton contract IDs
-  val suffixPrefix: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x00.toByte))
-  val suffixPrefixHex: String = suffixPrefix.toHexString
+  def fromProtocolVersion(protocolVersion: ProtocolVersion): CantonContractIdVersion =
+    if (protocolVersion >= ProtocolVersion.v4) AuthenticatedContractIdVersion
+    else NonAuthenticatedContractIdVersion
 
-  private def withoutPrefix(suffix: Bytes): Bytes = suffix.slice(suffixPrefix.length, suffix.length)
-
-  def ensureCantonContractId(contractId: LfContractId): Either[MalformedContractId, Unit] = {
+  def ensureCantonContractId(
+      contractId: LfContractId
+  ): Either[MalformedContractId, CantonContractIdVersion] =
     contractId match {
       case LfContractId.V1(_discriminator, suffix) =>
         for {
-          _ <- Either.cond(
-            suffix.startsWith(suffixPrefix),
-            (),
-            MalformedContractId(
-              contractId.toString,
-              s"Suffix ${suffix.toHexString} does not start with prefix ${suffixPrefix.toHexString}",
-            ),
-          )
+          versionedContractId <- suffix match {
+            case s if s.startsWith(AuthenticatedContractIdVersion.versionPrefixBytes) =>
+              Right(AuthenticatedContractIdVersion)
+            case s if s.startsWith(NonAuthenticatedContractIdVersion.versionPrefixBytes) =>
+              Right(NonAuthenticatedContractIdVersion)
+            case invalidSuffix =>
+              Left(
+                MalformedContractId(
+                  contractId.toString,
+                  s"Suffix ${invalidSuffix.toHexString} does not start with one of the supported prefixes: ${AuthenticatedContractIdVersion.versionPrefixBytes} or ${NonAuthenticatedContractIdVersion.versionPrefixBytes}",
+                )
+              )
+          }
+
+          unprefixedSuffix = suffix.slice(versionPrefixBytesSize, suffix.length)
+
           _ <- Hash
-            .fromByteString(withoutPrefix(suffix).toByteString)
+            .fromByteString(unprefixedSuffix.toByteString)
             .leftMap(err => MalformedContractId(contractId.toString, err.message))
-        } yield ()
+        } yield versionedContractId
     }
-  }
+}
+
+sealed trait CantonContractIdVersion extends Serializable with Product {
+  require(
+    versionPrefixBytes.length == CantonContractIdVersion.versionPrefixBytesSize,
+    s"Version prefix of size ${versionPrefixBytes.length} should have size ${CantonContractIdVersion.versionPrefixBytesSize}",
+  )
+
+  def versionPrefixBytes: Bytes
 
   def fromDiscriminator(discriminator: LfHash, unicum: Unicum): LfContractId.V1 =
-    LfContractId.V1(discriminator, unicum.toContractIdSuffix)
+    LfContractId.V1(discriminator, unicum.toContractIdSuffix(this))
+}
+
+case object NonAuthenticatedContractIdVersion extends CantonContractIdVersion {
+  // The prefix for the suffix of non-authenticated (legacy) Canton contract IDs
+  lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x00.toByte))
+}
+
+case object AuthenticatedContractIdVersion extends CantonContractIdVersion {
+  // The prefix for the suffix of Canton contract IDs for contracts that can be authenticated (created in Protocol V4+)
+  lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x01.toByte))
 }
 
 object ContractIdSyntax {

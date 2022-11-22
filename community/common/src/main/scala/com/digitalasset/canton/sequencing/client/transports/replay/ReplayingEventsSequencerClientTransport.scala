@@ -51,7 +51,6 @@ class ReplayingEventsSequencerClientTransport(
   override def sendAsync(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
@@ -60,7 +59,6 @@ class ReplayingEventsSequencerClientTransport(
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
@@ -69,7 +67,6 @@ class ReplayingEventsSequencerClientTransport(
   override def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     EitherT.rightT(())
 
@@ -77,6 +74,12 @@ class ReplayingEventsSequencerClientTransport(
   override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
+
+  /** Does nothing */
+  override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] =
+    EitherT.rightT(())
 
   /** Replays all events in `replayPath` to the handler. */
   override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(

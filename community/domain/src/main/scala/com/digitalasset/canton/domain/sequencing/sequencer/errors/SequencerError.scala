@@ -78,10 +78,11 @@ object SequencerError extends SequencerErrorGroup {
         signedSubmissionRequest: SignedContent[SubmissionRequest],
         error: SignatureCheckError,
         sequencingTimestamp: CantonTimestamp,
+        timestampOfSigningKey: CantonTimestamp,
     )(implicit override val loggingContext: ErrorLoggingContext)
         extends Alarm({
           val submissionRequest = signedSubmissionRequest.content
-          s"Sender [${submissionRequest.sender}] of send request [${submissionRequest.messageId}] provided signature that failed to be verified. " +
+          s"Sender [${submissionRequest.sender}] of send request [${submissionRequest.messageId}] provided signature from $timestampOfSigningKey that failed to be verified. " +
             s"Could not sequence at $sequencingTimestamp: $error"
         })
         with CantonError {
@@ -94,7 +95,7 @@ object SequencerError extends SequencerErrorGroup {
       |It indicates that the sequencer node that placed the request is not following the protocol as there should always be a defined timestamp.
       |This request will not get processed.
       |""")
-  object MissingSubmissionRequestTimestampSignature
+  object MissingSubmissionRequestSignatureTimestamp
       extends AlarmErrorCode("MISSING_SUBMISSION_REQUEST_SIGNATURE_TIMESTAMP") {
     case class Error(
         signedSubmissionRequest: SignedContent[SubmissionRequest],
@@ -105,26 +106,6 @@ object SequencerError extends SequencerErrorGroup {
           s"Send request [${submissionRequest.messageId}] by sender [${submissionRequest.sender}] is missing a signature timestamp. " +
             s"Could not sequence at $sequencingTimestamp"
         })
-        with CantonError {
-      override val logOnCreation: Boolean = false
-    }
-  }
-
-  @Explanation("""
-      |This error indicates that the sequencer has detected a signed submission request with a signing timestamp after the sequencing timestamp.
-      |It will not get processed.
-      |""")
-  object InvalidSubmissionRequestSignatureTimestamp
-      extends AlarmErrorCode("INVALID_SUBMISSION_REQUEST_SIGNATURE_TIMESTAMP") {
-    case class Error(
-        submissionRequest: SubmissionRequest,
-        signingTimestamp: CantonTimestamp,
-        sequencingTimestamp: CantonTimestamp,
-    )(implicit override val loggingContext: ErrorLoggingContext)
-        extends Alarm(
-          s"Send request [${submissionRequest.messageId}] by sender [${submissionRequest.sender}] has an " +
-            s"invalid signing timestamp $signingTimestamp that is after current sequencing time $sequencingTimestamp. Could not sequence."
-        )
         with CantonError {
       override val logOnCreation: Boolean = false
     }

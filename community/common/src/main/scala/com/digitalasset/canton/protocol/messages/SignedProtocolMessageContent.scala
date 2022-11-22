@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.crypto.HashPurpose
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
@@ -23,6 +24,10 @@ trait SignedProtocolMessageContent
 
   /** Hash purpose that uniquely identifies the type of message content to be signed. */
   def hashPurpose: HashPurpose
+
+  /** The timestamp of the [[com.digitalasset.canton.crypto.SyncCryptoApi]] used for signing this message.
+    */
+  def signingTimestamp: CantonTimestamp
 
   override def pretty: Pretty[this.type] = prettyOfObject[SignedProtocolMessageContent]
 }

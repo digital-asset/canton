@@ -20,6 +20,7 @@ import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SerializedEv
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{AkkaUtil, FutureUtil, SingleUseCell}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 
@@ -155,6 +156,7 @@ object HttpSequencerSubscription {
       request: SubscriptionRequest,
       handler: SerializedEventHandler[E],
       client: HttpSequencerClient,
+      protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
       requiresAuthentication: Boolean,
       loggerFactory: NamedLoggerFactory,
@@ -165,7 +167,7 @@ object HttpSequencerSubscription {
     new HttpSequencerSubscription(
       request.counter,
       handler,
-      client.readNextEvent(request.member, requiresAuthentication),
+      client.readNextEvent(request.member, protocolVersion, requiresAuthentication),
       timeouts,
       loggerFactory,
     )

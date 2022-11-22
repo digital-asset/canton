@@ -5,7 +5,7 @@ package com.digitalasset.canton.networking.grpc
 
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.*
 
 import scala.jdk.CollectionConverters.*
@@ -26,16 +26,15 @@ object StaticGrpcServices {
       logger: TracedLogger,
   ): ServerServiceDefinition =
     forService(descriptor) { method =>
-      fromGrpcContext { implicit traceContext =>
-        // the service name typically includes the full package details, so ideally do away with this if it parses
-        val shortServiceName =
-          method.getServiceName.split('.').lastOption.getOrElse(method.getServiceName)
-        logger.warn(
-          s"This Community edition of canton does not support the operation: $shortServiceName.${method.getBareMethodName}. Please see canton.io/enterprise for details on obtaining Canton Enterprise edition."
-        )
+      implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+      // the service name typically includes the full package details, so ideally do away with this if it parses
+      val shortServiceName =
+        method.getServiceName.split('.').lastOption.getOrElse(method.getServiceName)
+      logger.warn(
+        s"This Community edition of canton does not support the operation: $shortServiceName.${method.getBareMethodName}. Please see canton.io/enterprise for details on obtaining Canton Enterprise edition."
+      )
 
-        notSupportedByCommunityStatus
-      }
+      notSupportedByCommunityStatus
     }
 
   def notSupportedByCommunity(

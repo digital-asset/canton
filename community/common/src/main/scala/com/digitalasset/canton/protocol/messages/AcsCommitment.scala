@@ -124,6 +124,8 @@ abstract sealed case class AcsCommitment private (
 
   override def companionObj = AcsCommitment
 
+  override def signingTimestamp: CantonTimestamp = period.toInclusive.forgetRefinement
+
   protected def toProtoV0: v0.AcsCommitment = {
     v0.AcsCommitment(
       domainId = domainId.toProtoPrimitive,

@@ -21,9 +21,6 @@ final case class HandshakeRequest(
       minimumProtocolVersion.map(_.toProtoPrimitiveS),
     )
 
-  /* We allow serializing this message to a ByteArray despite it not implementing HasVersionedWrapper because the serialization
-   is (and should only be used) in the HttpSequencerClient.
-  If you need to save this message in a database, please add an UntypedVersionedMessage message as documented in CONTRIBUTING.md  */
   // IMPORTANT: changing the version handshakes can lead to issues with upgrading domains - be very careful
   // when changing the handshake message format
   def toByteArrayV0: Array[Byte] = toProtoV0.toByteArray

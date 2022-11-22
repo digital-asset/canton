@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, required}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 
 case class SubscriptionResponse(
     signedSequencedEvent: Traced[SignedContent[SequencedEvent[ClosedEnvelope]]]
@@ -17,7 +17,7 @@ case class SubscriptionResponse(
   def toProtoV0: v0.SubscriptionResponse =
     v0.SubscriptionResponse(
       signedSequencedEvent = Some(signedSequencedEvent.value.toProtoV0),
-      traceContext = Some(signedSequencedEvent.traceContext.toProtoV0),
+      traceContext = Some(SerializableTraceContext(signedSequencedEvent.traceContext).toProtoV0),
     )
 }
 

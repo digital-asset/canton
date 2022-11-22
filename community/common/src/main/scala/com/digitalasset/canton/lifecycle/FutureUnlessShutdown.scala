@@ -264,6 +264,12 @@ object FutureUnlessShutdownImpl {
         implicit ec: ExecutionContext
     ): FutureUnlessShutdown[A] =
       FutureUnlessShutdown(f.unwrap.thereafter(body))
+
+    override def thereafterF[A](f: FutureUnlessShutdown[A])(
+        body: Try[UnlessShutdown[A]] => Future[Unit]
+    )(implicit ec: ExecutionContext): FutureUnlessShutdown[A] = {
+      FutureUnlessShutdown(Thereafter[Future].summon.thereafterF(f.unwrap)(body))
+    }
   }
 
   /** Use a type synonym instead of a type lambda so that the Scala compiler does not get confused during implicit resolution,

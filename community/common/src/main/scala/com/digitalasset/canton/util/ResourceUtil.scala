@@ -3,6 +3,11 @@
 
 package com.digitalasset.canton.util
 
+import cats.data.EitherT
+import com.digitalasset.canton.util.Thereafter.syntax.*
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 import scala.util.control.NonFatal
 
 /** Utility code for doing proper resource management.
@@ -47,6 +52,18 @@ object ResourceUtil {
     } finally {
       closeAndAddSuppressed(exception, resource)
     }
+  }
+
+  def withResourceEitherT[T <: AutoCloseable, E, V](r: => T)(f: T => EitherT[Future, E, V])(implicit
+      ec: ExecutionContext
+  ): EitherT[Future, E, V] = {
+    EitherT(withResourceFuture(r)(rs => f(rs).value))
+  }
+
+  def withResourceFuture[T <: AutoCloseable, V](r: => T)(f: T => Future[V])(implicit
+      ec: ExecutionContext
+  ): Future[V] = {
+    Future.fromTry(Try(f(r))).flatten.thereafter(_ => r.close())
   }
 
   def closeAndAddSuppressed(e: Option[Throwable], resource: AutoCloseable): Unit =

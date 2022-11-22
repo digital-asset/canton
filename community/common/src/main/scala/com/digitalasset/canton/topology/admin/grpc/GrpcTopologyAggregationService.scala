@@ -19,10 +19,10 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, KeyOwnerCode, ParticipantId, PartyId}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, OptionUtil}
-import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
+import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -109,74 +109,74 @@ class GrpcTopologyAggregationService(
         (k, v.map { case (domain, _, permission) => (domain, permission) }.toMap)
       })
 
-  override def listParties(request: v0.ListPartiesRequest): Future[v0.ListPartiesResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val v0.ListPartiesRequest(asOfP, limit, filterDomain, filterParty, filterParticipant) =
-        request
-      val res: EitherT[Future, CantonError, v0.ListPartiesResponse] = for {
-        matched <- snapshots(filterDomain, asOfP)
-        parties <- EitherT.right(
-          findMatchingParties(matched, filterParty, filterParticipant, limit)
-        )
-        results <- EitherT.right(parties.toList.parTraverse { partyId =>
-          findParticipants(matched, partyId).map(res => (partyId, res))
-        })
-      } yield {
-        v0.ListPartiesResponse(
-          results = results.map { case (partyId, participants) =>
-            v0.ListPartiesResponse.Result(
-              party = partyId.toProtoPrimitive,
-              participants = participants.map { case (participantId, domains) =>
-                v0.ListPartiesResponse.Result.ParticipantDomains(
-                  participant = participantId.toProtoPrimitive,
-                  domains = domains.map { case (domainId, permission) =>
-                    v0.ListPartiesResponse.Result.ParticipantDomains.DomainPermissions(
-                      domain = domainId.toProtoPrimitive,
-                      permission = permission.toProtoEnum,
-                    )
-                  }.toSeq,
-                )
-              }.toSeq,
+  override def listParties(request: v0.ListPartiesRequest): Future[v0.ListPartiesResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val v0.ListPartiesRequest(asOfP, limit, filterDomain, filterParty, filterParticipant) =
+      request
+    val res: EitherT[Future, CantonError, v0.ListPartiesResponse] = for {
+      matched <- snapshots(filterDomain, asOfP)
+      parties <- EitherT.right(
+        findMatchingParties(matched, filterParty, filterParticipant, limit)
+      )
+      results <- EitherT.right(parties.toList.parTraverse { partyId =>
+        findParticipants(matched, partyId).map(res => (partyId, res))
+      })
+    } yield {
+      v0.ListPartiesResponse(
+        results = results.map { case (partyId, participants) =>
+          v0.ListPartiesResponse.Result(
+            party = partyId.toProtoPrimitive,
+            participants = participants.map { case (participantId, domains) =>
+              v0.ListPartiesResponse.Result.ParticipantDomains(
+                participant = participantId.toProtoPrimitive,
+                domains = domains.map { case (domainId, permission) =>
+                  v0.ListPartiesResponse.Result.ParticipantDomains.DomainPermissions(
+                    domain = domainId.toProtoPrimitive,
+                    permission = permission.toProtoEnum,
+                  )
+                }.toSeq,
+              )
+            }.toSeq,
+          )
+        }
+      )
+    }
+    EitherTUtil.toFuture(mapErrNew(res))
+  }
+
+  override def listKeyOwners(request: v0.ListKeyOwnersRequest): Future[v0.ListKeyOwnersResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res: EitherT[Future, CantonError, v0.ListKeyOwnersResponse] = for {
+      keyOwnerTypeO <- wrapErr(
+        OptionUtil
+          .emptyStringAsNone(request.filterKeyOwnerType)
+          .traverse(code => KeyOwnerCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
+      ): EitherT[Future, CantonError, Option[KeyOwnerCode]]
+      matched <- snapshots(request.filterDomain, request.asOf)
+      res <- EitherT.right(matched.parTraverse { case (storeId, client) =>
+        client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
+          (storeId, res)
+        }
+      })
+    } yield {
+      val mapped = groupBySnd(res.flatMap { case (storeId, domainData) =>
+        domainData.map { case (owner, keys) =>
+          (storeId, owner, keys)
+        }
+      })
+      v0.ListKeyOwnersResponse(
+        results = mapped.toSeq.flatMap { case (owner, domainData) =>
+          domainData.map { case (domain, keys) =>
+            v0.ListKeyOwnersResponse.Result(
+              keyOwner = owner.toProtoPrimitive,
+              domain = domain.toProtoPrimitive,
+              signingKeys = keys.signingKeys.map(_.toProtoV0),
+              encryptionKeys = keys.encryptionKeys.map(_.toProtoV0),
             )
           }
-        )
-      }
-      EitherTUtil.toFuture(mapErrNew(res))
+        }
+      )
     }
-
-  override def listKeyOwners(request: v0.ListKeyOwnersRequest): Future[v0.ListKeyOwnersResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val res: EitherT[Future, CantonError, v0.ListKeyOwnersResponse] = for {
-        keyOwnerTypeO <- wrapErr(
-          OptionUtil
-            .emptyStringAsNone(request.filterKeyOwnerType)
-            .traverse(code => KeyOwnerCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
-        ): EitherT[Future, CantonError, Option[KeyOwnerCode]]
-        matched <- snapshots(request.filterDomain, request.asOf)
-        res <- EitherT.right(matched.parTraverse { case (storeId, client) =>
-          client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
-            (storeId, res)
-          }
-        })
-      } yield {
-        val mapped = groupBySnd(res.flatMap { case (storeId, domainData) =>
-          domainData.map { case (owner, keys) =>
-            (storeId, owner, keys)
-          }
-        })
-        v0.ListKeyOwnersResponse(
-          results = mapped.toSeq.flatMap { case (owner, domainData) =>
-            domainData.map { case (domain, keys) =>
-              v0.ListKeyOwnersResponse.Result(
-                keyOwner = owner.toProtoPrimitive,
-                domain = domain.toProtoPrimitive,
-                signingKeys = keys.signingKeys.map(_.toProtoV0),
-                encryptionKeys = keys.encryptionKeys.map(_.toProtoV0),
-              )
-            }
-          }
-        )
-      }
-      EitherTUtil.toFuture(mapErrNew(res))
-    }
+    EitherTUtil.toFuture(mapErrNew(res))
+  }
 }

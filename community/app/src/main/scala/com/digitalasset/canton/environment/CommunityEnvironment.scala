@@ -12,6 +12,7 @@ import com.digitalasset.canton.console.{
   CommunityLocalDomainReference,
   CommunityRemoteDomainReference,
   ConsoleEnvironment,
+  ConsoleEnvironmentBinding,
   ConsoleGrpcAdminCommandRunner,
   ConsoleOutput,
   DomainReference,
@@ -85,6 +86,7 @@ class CommunityConsoleEnvironment(
   override type Status = CommunityCantonStatus
 
   private lazy val health_ = new CommunityCantonHealthAdministration(this)
+  override protected val consoleEnvironmentBindings = new ConsoleEnvironmentBinding()
 
   @Help.Summary("Environment health inspection")
   @Help.Group("Health")

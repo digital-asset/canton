@@ -24,10 +24,6 @@ object CommunityConfigTransforms {
 
   type CommunityConfigTransform = CantonCommunityConfig => CantonCommunityConfig
 
-  /** make the ec monitoring just emit debug messages and not warnings */
-  def deadlockDetectionAsDebug(config: CantonCommunityConfig): CantonCommunityConfig =
-    config.focus(_.monitoring.deadlockDetection.reportAsWarnings).replace(false)
-
   /** Parameterized version to allow specifying community or enterprise versions */
   def withUniqueDbName[SC <: StorageConfig, H2SC <: H2DbConfig with SC](
       nodeName: String,

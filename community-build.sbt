@@ -12,6 +12,11 @@ lazy val functionmeta = CommunityProjects.functionmeta
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
 lazy val `akka-fork` = CommunityProjects.`akka-fork`
 lazy val `daml-fork` = CommunityProjects.`daml-fork`
+lazy val `daml-copy-macro` = CommunityProjects.`daml-copy-macro`
+lazy val `daml-copy-common` = CommunityProjects.`daml-copy-common`
+lazy val `daml-copy-testing` = CommunityProjects.`daml-copy-testing`
+lazy val `daml-copy-participant` = CommunityProjects.`daml-copy-participant`
+
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
 
 lazy val root = (project in file("."))
@@ -27,5 +32,9 @@ lazy val root = (project in file("."))
     `slick-fork`,
     `akka-fork`,
     `daml-fork`,
+    `daml-copy-macro`,
+    `daml-copy-common`,
+    `daml-copy-testing`,
+    `daml-copy-participant`,
     `wartremover-extension`,
   )
