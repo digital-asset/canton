@@ -141,6 +141,7 @@ class ParticipantNodeBootstrap(
       grpcVaultServiceFactory,
       parentLogger.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
+      metrics.ledgerApiServer.daml.grpc,
     ) {
 
   /** per session created admin token for in-process connections to ledger-api */

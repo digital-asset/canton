@@ -8,6 +8,7 @@ import better.files.File
 import cats.data.{EitherT, OptionT}
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
+import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.InstanceName
@@ -113,6 +114,7 @@ abstract class CantonNodeBootstrapBase[
     grpcVaultServiceFactory: GrpcVaultServiceFactory,
     val loggerFactory: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
+    grpcMetrics: GrpcServerMetrics,
 )(
     implicit val executionContext: ExecutionContextIdlenessExecutorService,
     implicit val scheduler: ScheduledExecutorService,
@@ -235,6 +237,7 @@ abstract class CantonNodeBootstrapBase[
         loggerFactory,
         parameterConfig.loggingConfig.api,
         parameterConfig.tracing,
+        grpcMetrics,
       )
 
     val registry = builder.mutableHandlerRegistry()

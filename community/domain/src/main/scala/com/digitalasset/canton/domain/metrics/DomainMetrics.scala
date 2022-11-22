@@ -8,10 +8,14 @@ import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
 import com.daml.metrics.api.dropwizard.DropwizardGauge
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
+import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.metrics.{DbStorageMetrics, MetricHandle, SequencerClientMetrics}
 
-class SequencerMetrics(parent: MetricName, val registry: MetricRegistry)
-    extends MetricHandle.NodeMetrics {
+class SequencerMetrics(
+    parent: MetricName,
+    val registry: MetricRegistry,
+    val grpcMetrics: GrpcServerMetrics,
+) extends MetricHandle.NodeMetrics {
   override val prefix = MetricName(parent :+ "sequencer")
 
   object sequencerClient extends SequencerClientMetrics(prefix, registry)
@@ -54,10 +58,6 @@ class SequencerMetrics(parent: MetricName, val registry: MetricRegistry)
   object dbStorage extends DbStorageMetrics(prefix, registry)
 }
 
-object SequencerMetrics {
-  val notImplemented = new SequencerMetrics(MetricName("todo"), new MetricRegistry())
-}
-
 class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Factory {
   override def prefix: MetricName = MetricName("env")
 
@@ -84,20 +84,26 @@ class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Fac
   representative = "canton.<component>.sequencer-client",
   groupableClass = classOf[SequencerClientMetrics],
 )
-class DomainMetrics(override val prefix: MetricName, override val registry: MetricRegistry)
-    extends MetricHandle.NodeMetrics {
+class DomainMetrics(
+    override val prefix: MetricName,
+    override val registry: MetricRegistry,
+    val grpcMetrics: GrpcServerMetrics,
+) extends MetricHandle.NodeMetrics {
 
   object dbStorage extends DbStorageMetrics(prefix, registry)
 
-  object sequencer extends SequencerMetrics(prefix, registry)
+  object sequencer extends SequencerMetrics(prefix, registry, grpcMetrics)
 
   object mediator extends MediatorMetrics(prefix, registry)
 
   object topologyManager extends IdentityManagerMetrics(prefix, registry)
 }
 
-class MediatorNodeMetrics(override val prefix: MetricName, override val registry: MetricRegistry)
-    extends MetricHandle.NodeMetrics {
+class MediatorNodeMetrics(
+    override val prefix: MetricName,
+    override val registry: MetricRegistry,
+    val grpcMetrics: GrpcServerMetrics,
+) extends MetricHandle.NodeMetrics {
   object dbStorage extends DbStorageMetrics(prefix, registry)
 
   object mediator extends MediatorMetrics(prefix, registry)

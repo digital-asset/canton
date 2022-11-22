@@ -38,6 +38,9 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: 
   val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage] =
     InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
 
+  def copy(fullInformeeTree: FullInformeeTree = this.fullInformeeTree): InformeeMessage =
+    InformeeMessage(fullInformeeTree)(protocolVersion)
+
   override def requestUuid: UUID = fullInformeeTree.transactionUuid
 
   override def domainId: DomainId = fullInformeeTree.domainId

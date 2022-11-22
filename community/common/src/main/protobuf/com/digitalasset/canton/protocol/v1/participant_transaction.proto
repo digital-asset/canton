@@ -39,7 +39,7 @@ message ActionDescription {
 message ViewNode {
   BlindableNode view_common_data = 1;
   BlindableNode view_participant_data = 2;
-  repeated BlindableNode subviews = 3;
+  MerkleSeq subviews = 3; // changed type to MerkleSeq in v1
 }
 
 // EncryptedViewMessage
@@ -81,6 +81,7 @@ message InformeeMessage {
 
 message LightTransactionViewTree {
   GenTransactionTree tree = 1;
+  repeated bytes subview_hashes = 2; // added in v1
 }
 
 message FullInformeeTree {

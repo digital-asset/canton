@@ -47,7 +47,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
       val view = TransactionView.tryCreate(hashOps)(
         viewCommonData,
         BlindedNode(rh(0)),
-        Nil,
+        TransactionSubviews.empty(testedProtocolVersion, hashOps),
         testedProtocolVersion,
       )
       val commonMetadata = CommonMetadata(hashOps)(

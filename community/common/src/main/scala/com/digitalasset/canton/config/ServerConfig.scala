@@ -4,6 +4,7 @@
 package com.digitalasset.canton.config
 
 import com.daml.ledger.api.tls.TlsVersion
+import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
@@ -82,6 +83,7 @@ trait ServerConfig extends Product with Serializable {
       apiLoggingConfig: ApiLoggingConfig,
       metrics: MetricHandle.Factory,
       loggerFactory: NamedLoggerFactory,
+      grpcMetrics: GrpcServerMetrics,
   ): CantonServerInterceptors
 
 }
@@ -92,7 +94,13 @@ trait CommunityServerConfig extends ServerConfig {
       apiLoggingConfig: ApiLoggingConfig,
       metrics: MetricHandle.Factory,
       loggerFactory: NamedLoggerFactory,
-  ) = new CantonCommunityServerInterceptors(tracingConfig, apiLoggingConfig, loggerFactory)
+      grpcMetrics: GrpcServerMetrics,
+  ) = new CantonCommunityServerInterceptors(
+    tracingConfig,
+    apiLoggingConfig,
+    loggerFactory,
+    grpcMetrics,
+  )
 }
 
 object ServerConfig {

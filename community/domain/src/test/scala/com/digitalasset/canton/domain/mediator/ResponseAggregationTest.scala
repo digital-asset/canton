@@ -43,6 +43,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1)
     val solo = ParticipantId("solo")
 
+    val emptySubviews = TransactionSubviews.empty(testedProtocolVersion, hashOps)
+
     val viewCommonData2 =
       ViewCommonData.create(hashOps)(
         Set(bob, charlie),
@@ -58,9 +60,20 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         testedProtocolVersion,
       )
     val view2 =
-      TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil, testedProtocolVersion)
+      TransactionView.tryCreate(hashOps)(
+        viewCommonData2,
+        b(100),
+        emptySubviews,
+        testedProtocolVersion,
+      )
+    val view1Subviews = TransactionSubviews(view2 :: Nil)(testedProtocolVersion, hashOps)
     val view1 =
-      TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), view2 :: Nil, testedProtocolVersion)
+      TransactionView.tryCreate(hashOps)(
+        viewCommonData1,
+        b(8),
+        view1Subviews,
+        testedProtocolVersion,
+      )
 
     val requestId = RequestId(CantonTimestamp.Epoch)
 
@@ -142,7 +155,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           TransactionView.tryCreate(hashOps)(
             viewcommonDataThresholdTooLow,
             b(100),
-            Nil,
+            emptySubviews,
             testedProtocolVersion,
           )
         val fullInformeeTreeThresholdTooLow = FullInformeeTree.tryCreate(
@@ -409,9 +422,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         testedProtocolVersion,
       )
       val view2 =
-        TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil, testedProtocolVersion)
+        TransactionView.tryCreate(hashOps)(
+          viewCommonData2,
+          b(100),
+          emptySubviews,
+          testedProtocolVersion,
+        )
       val view1 =
-        TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), Nil, testedProtocolVersion)
+        TransactionView.tryCreate(hashOps)(
+          viewCommonData1,
+          b(8),
+          emptySubviews,
+          testedProtocolVersion,
+        )
 
       val informeeMessage = InformeeMessage(
         FullInformeeTree.tryCreate(

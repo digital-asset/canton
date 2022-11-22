@@ -111,6 +111,7 @@ class DomainNodeBootstrap(
       grpcVaultServiceFactory,
       parentLogger.append(DomainNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
+      metrics.grpcMetrics,
     )
     with DomainTopologyManagerIdentityInitialization {
 
@@ -447,6 +448,7 @@ class DomainNodeBootstrap(
           agreementManager,
           staticDomainParameters,
           syncCrypto,
+          metrics.grpcMetrics,
         )
 
         topologyManagementArtefacts <- TopologyManagementInitialization(

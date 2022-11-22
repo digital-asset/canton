@@ -50,7 +50,7 @@ import scala.util.control.NonFatal
   */
 trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
-  // TODO(matthias): Remove this, once the cyclic class initialization has been fixed upstream.
+  // TODO(i10999): Remove this, once the cyclic class initialization has been fixed upstream.
   //  https://digitalasset.atlassian.net/browse/DPP-1303
   //  Background: https://www.farside.org.uk/201510/deadlocks_in_java_class_initialisation
   LedgerApiErrors.discard

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.initialization
 
+import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.config.{DomainConfig, DomainNodeParameters}
@@ -40,6 +41,7 @@ object PublicGrpcServerInitialization {
       agreementManager: Option[ServiceAgreementManager],
       staticDomainParameters: StaticDomainParameters,
       cryptoApi: DomainSyncCryptoClient,
+      grpcMetrics: GrpcServerMetrics,
   )(implicit executionContext: ExecutionContextExecutorService): CloseableServer = {
 
     logger.info(s"Starting public services with config ${config.publicApi}")(TraceContext.empty)
@@ -52,6 +54,7 @@ object PublicGrpcServerInitialization {
         loggerFactory,
         cantonParameterConfig.loggingConfig.api,
         cantonParameterConfig.tracing,
+        grpcMetrics,
       )
       // Overriding the dummy setting from PublicServerConfig.
       .maxInboundMessageSize(maxRequestSize.value)
