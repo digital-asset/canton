@@ -7,7 +7,7 @@ import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{
   LocalNodeParameters,
   ProcessingTimeout,
@@ -78,7 +78,6 @@ import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
 
-import java.util.concurrent.ScheduledExecutorService
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -245,7 +244,7 @@ class SequencerRuntime(
           // Since the sequencer runtime trusts itself, there is no point in validating the events.
           SequencedEventValidatorFactory.noValidation(domainId, sequencerId, warn = false),
           clock,
-          SequencerClient.signSubmissionRequest(syncCrypto),
+          RequestSigner(syncCrypto),
           sequencedEventStore,
           new SendTracker(Map(), SendTrackerStore(storage), metrics.sequencerClient, loggerFactory),
           metrics.sequencerClient,
@@ -288,9 +287,6 @@ class SequencerRuntime(
         Some((client, timeTracker, initializationObserver))
       }
     } else None
-
-  private val timeoutScheduler: ScheduledExecutorService =
-    Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-env-scheduler", logger)
 
   private val sequencerService = GrpcSequencerService(
     sequencer,
@@ -507,7 +503,6 @@ class SequencerRuntime(
       sequencerService,
       authenticationServices.memberAuthenticationService,
       sequencer,
-      ExecutorServiceExtensions(timeoutScheduler)(logger, timeouts),
     )(logger)
 
 }

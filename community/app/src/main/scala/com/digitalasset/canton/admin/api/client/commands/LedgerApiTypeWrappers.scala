@@ -5,6 +5,7 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
+import com.digitalasset.canton.crypto.Salt
 import com.digitalasset.canton.protocol.LfContractId
 
 /** Wrapper class to make scalapb LedgerApi classes more convenient to access
@@ -58,7 +59,13 @@ object LedgerApiTypeWrappers {
           .getOrElse(
             throw new IllegalArgumentException(s"Illegal Contract Id: ${event.contractId}")
           )
-      ContractData(templateId, createArguments, event.signatories.toSet, lfContractId)
+      ContractData(
+        templateId = templateId,
+        createArguments = createArguments,
+        signatories = event.signatories.toSet,
+        inheritedContractId = lfContractId,
+        contractSalt = None, // TODO(#9795): Extract and populate from created event
+      )
     }
 
   }
@@ -69,6 +76,7 @@ object LedgerApiTypeWrappers {
       createArguments: Record,
       signatories: Set[String], // track signatories for use as auth validation by daml engine
       inheritedContractId: LfContractId,
+      contractSalt: Option[Salt],
   )
 
 }

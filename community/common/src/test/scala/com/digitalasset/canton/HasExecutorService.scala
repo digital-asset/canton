@@ -58,8 +58,7 @@ trait HasExecutorService extends BeforeAndAfterAll { this: Suite with NamedLoggi
       new ExecutionContextMonitor(
         loggerFactory,
         NonNegativeFiniteDuration.ofSeconds(3),
-        10,
-        reportAsWarnings = true,
+        NonNegativeFiniteDuration.ofSeconds(10),
         DefaultProcessingTimeouts.testing,
       )(scheduler)
     monitor.monitor(service)

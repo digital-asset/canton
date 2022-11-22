@@ -7,20 +7,25 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.Crypto
+import com.digitalasset.canton.crypto.{Crypto, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
+import com.digitalasset.canton.sequencing.client.{
+  RequestSigner,
+  SequencerClient,
+  SequencerClientFactory,
+}
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
   EnvelopeOpener,
   StripSignature,
 }
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
+import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -30,7 +35,7 @@ import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
 object ParticipantInitializeTopology {
@@ -137,7 +142,16 @@ object ParticipantInitializeTopology {
           unauthenticatedMember,
           new InMemorySequencedEventStore(loggerFactory),
           new InMemorySendTrackerStore(),
-          _ => _ => EitherT.leftT("Unauthenticated members do not sign submission requests"),
+          new RequestSigner {
+            override def signRequest[A <: ProtocolVersionedMemoizedEvidence](
+                request: A,
+                hashPurpose: HashPurpose,
+            )(implicit
+                ec: ExecutionContext,
+                traceContext: TraceContext,
+            ): EitherT[Future, String, SignedContent[A]] =
+              EitherT.leftT("Unauthenticated members do not sign submission requests")
+          },
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)

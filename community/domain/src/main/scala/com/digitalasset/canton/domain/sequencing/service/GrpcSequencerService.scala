@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import cats.instances.future.*
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -24,8 +25,7 @@ import com.digitalasset.canton.protocol.{DomainParametersLookup, v0 as protocolV
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{Clock, TimeProof}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, RateLimiter}
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
@@ -168,66 +168,63 @@ class GrpcSequencerService(
   override def sendAsyncSigned(
       request: protocolV0.SignedContent
   ): Future[v0.SendAsyncSignedResponse] = {
-    fromGrpcContext { implicit traceContext =>
-      val senderFromMetadata =
-        authenticationCheck
-          .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
-      lazy val sendF = for {
-        maxRequestSize <- domainParamsLookup
-          .getApproximate(
-            warnOnUsingDefaults(senderFromMetadata)
-          )
-          .map(_.maxRequestSize)
-        send <- send[SignedContent[SubmissionRequest], v0.SendAsyncSignedResponse](
-          maxRequestSize,
-          SignedContent
-            .fromProtoV0[SubmissionRequest](
-              SubmissionRequest.fromByteString(
-                MaxRequestSizeToDeserialize.Limit(maxRequestSize.value)
-              ),
-              request,
-            )
-            .map(request => GrpcSequencerService.SignedSubmissionRequest(request)),
-          SendAsyncResponse(_).toSendAsyncSignedResponseProto,
-          senderFromMetadata,
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val senderFromMetadata =
+      authenticationCheck
+        .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
+    lazy val sendF = for {
+      maxRequestSize <- domainParamsLookup
+        .getApproximate(
+          warnOnUsingDefaults(senderFromMetadata)
         )
-      } yield send
-
-      onShutDown(
-        sendF,
-        SendAsyncResponse(error =
-          Some(SendAsyncError.ShuttingDown())
-        ).toSendAsyncSignedResponseProto,
+        .map(_.maxRequestSize)
+      send <- send[SignedContent[SubmissionRequest], v0.SendAsyncSignedResponse](
+        maxRequestSize,
+        SignedContent
+          .fromProtoV0[SubmissionRequest](
+            SubmissionRequest.fromByteString(
+              MaxRequestSizeToDeserialize.Limit(maxRequestSize.value)
+            ),
+            request,
+          )
+          .map(request => GrpcSequencerService.SignedSubmissionRequest(request)),
+        SendAsyncResponse(_).toSendAsyncSignedResponseProto,
+        senderFromMetadata,
       )
-    }
+    } yield send
+
+    onShutDown(
+      sendF,
+      SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncSignedResponseProto,
+    )
   }
 
   override def sendAsync(requestP: v0.SubmissionRequest): Future[v0.SendAsyncResponse] = {
-    fromGrpcContext { implicit traceContext =>
-      val senderFromMetadata =
-        authenticationCheck
-          .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
-      lazy val sendF = for {
-        maxRequestSize <- domainParamsLookup
-          .getApproximate(
-            warnOnUsingDefaults(senderFromMetadata)
-          )
-          .map(_.maxRequestSize)
-        send <- send[SubmissionRequest, v0.SendAsyncResponse](
-          maxRequestSize,
-          SubmissionRequest
-            .fromProtoV0(requestP, MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
-            .map(request => GrpcSequencerService.PlainSubmissionRequest(request, requestP)),
-          SendAsyncResponse(_).toSendAsyncResponseProto,
-          senderFromMetadata,
-        )
-      } yield send
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-      onShutDown(
-        sendF,
-        SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncResponseProto,
+    val senderFromMetadata =
+      authenticationCheck
+        .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
+    lazy val sendF = for {
+      maxRequestSize <- domainParamsLookup
+        .getApproximate(
+          warnOnUsingDefaults(senderFromMetadata)
+        )
+        .map(_.maxRequestSize)
+      send <- send[SubmissionRequest, v0.SendAsyncResponse](
+        maxRequestSize,
+        SubmissionRequest
+          .fromProtoV0(requestP, MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
+          .map(request => GrpcSequencerService.PlainSubmissionRequest(request, requestP)),
+        SendAsyncResponse(_).toSendAsyncResponseProto,
+        senderFromMetadata,
       )
-    }
+    } yield send
+
+    onShutDown(
+      sendF,
+      SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncResponseProto,
+    )
   }
 
   private def send[Req, Response](
@@ -296,54 +293,53 @@ class GrpcSequencerService(
 
   override def sendAsyncUnauthenticated(
       requestP: v0.SubmissionRequest
-  ): Future[v0.SendAsyncResponse] =
-    fromGrpcContext { implicit traceContext =>
-      lazy val sendF = {
-        val messageIdP = requestP.messageId
-        val senderFromMetadata =
-          authenticationCheck
-            .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
-        def validatedRequestEither(maxRequestSize: MaxRequestSize) = for {
-          request <- SubmissionRequest
-            .fromProtoV0(requestP, MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
-            .leftMap(err => SendAsyncError.RequestInvalid(err.toString))
-          validatedRequest <- validateSubmissionRequest(requestP, request, senderFromMetadata)
-          sender = validatedRequest.sender
-          _ <- sender match {
-            case _: UnauthenticatedMemberId =>
-              checkUnauthenticatedSendPermission(messageIdP, validatedRequest, sender)
-            case _: AuthenticatedMember =>
-              Left(
-                refuse(messageIdP, sender)(
-                  s"Sender $sender needs to use authenticated send operation"
-                )
+  ): Future[v0.SendAsyncResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    lazy val sendF = {
+      val messageIdP = requestP.messageId
+      val senderFromMetadata =
+        authenticationCheck
+          .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
+      def validatedRequestEither(maxRequestSize: MaxRequestSize) = for {
+        request <- SubmissionRequest
+          .fromProtoV0(requestP, MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
+          .leftMap(err => SendAsyncError.RequestInvalid(err.toString))
+        validatedRequest <- validateSubmissionRequest(requestP, request, senderFromMetadata)
+        sender = validatedRequest.sender
+        _ <- sender match {
+          case _: UnauthenticatedMemberId =>
+            checkUnauthenticatedSendPermission(messageIdP, validatedRequest, sender)
+          case _: AuthenticatedMember =>
+            Left(
+              refuse(messageIdP, sender)(
+                s"Sender $sender needs to use authenticated send operation"
               )
-          }
-        } yield validatedRequest
+            )
+        }
+      } yield validatedRequest
 
-        val validatedRequestF =
-          for {
-            maxRequestSize <- EitherTUtil
-              .fromFuture(
-                domainParamsLookup.getApproximate(),
-                e =>
-                  SendAsyncError.Internal(s"Unable to retrieve domain parameters: ${e.getMessage}"),
-              )
-              .map(_.maxRequestSize)
-            validatedRequest <- EitherT.fromEither[Future](validatedRequestEither(maxRequestSize))
-            _ <- checkRate(validatedRequest)
-          } yield PlainSubmissionRequest(validatedRequest, requestP): WrappedSubmissionRequest
+      val validatedRequestF =
+        for {
+          maxRequestSize <- EitherTUtil
+            .fromFuture(
+              domainParamsLookup.getApproximate(),
+              e => SendAsyncError.Internal(s"Unable to retrieve domain parameters: ${e.getMessage}"),
+            )
+            .map(_.maxRequestSize)
+          validatedRequest <- EitherT.fromEither[Future](validatedRequestEither(maxRequestSize))
+          _ <- checkRate(validatedRequest)
+        } yield PlainSubmissionRequest(validatedRequest, requestP): WrappedSubmissionRequest
 
-        sendRequestIfValid(
-          validatedRequestF,
-          SendAsyncResponse(_).toSendAsyncResponseProto,
-        )
-      }
-
-      performUnlessClosingF(functionFullName)(sendF).onShutdown(
-        SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncResponseProto
+      sendRequestIfValid(
+        validatedRequestF,
+        SendAsyncResponse(_).toSendAsyncResponseProto,
       )
     }
+
+    performUnlessClosingF(functionFullName)(sendF).onShutdown(
+      SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncResponseProto
+    )
+  }
 
   private def sendRequestIfValid[Req, Response](
       validatedRequestEither: EitherT[Future, SendAsyncError, WrappedSubmissionRequest],
@@ -612,41 +608,41 @@ class GrpcSequencerService(
       request: v0.SubscriptionRequest,
       responseObserver: StreamObserver[v0.SubscriptionResponse],
       requiresAuthentication: Boolean,
-  ): Unit =
-    fromGrpcContext { implicit traceContext =>
-      withServerCallStreamObserver(responseObserver) { observer =>
-        val result = for {
-          subscriptionRequest <- SubscriptionRequest
-            .fromProtoV0(request)
-            .left
-            .map(err => invalidRequest(err.toString))
-          SubscriptionRequest(member, offset) = subscriptionRequest
-          _ = logger.debug(s"Received subscription request from $member for offset $offset")
-          _ <- Either.cond(
-            !isClosing,
-            (),
-            Status.UNAVAILABLE.withDescription("Domain is being shutdown."),
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    withServerCallStreamObserver(responseObserver) { observer =>
+      val result = for {
+        subscriptionRequest <- SubscriptionRequest
+          .fromProtoV0(request)
+          .left
+          .map(err => invalidRequest(err.toString))
+        SubscriptionRequest(member, offset) = subscriptionRequest
+        _ = logger.debug(s"Received subscription request from $member for offset $offset")
+        _ <- Either.cond(
+          !isClosing,
+          (),
+          Status.UNAVAILABLE.withDescription("Domain is being shutdown."),
+        )
+        _ <- checkSubscriptionMemberPermission(member, requiresAuthentication)
+        authenticationTokenO = IdentityContextHelper.getCurrentStoredAuthenticationToken
+        _ <- subscriptionPool
+          .create(
+            () =>
+              createSubscription(
+                member,
+                authenticationTokenO.map(_.expireAt),
+                offset,
+                observer,
+              ),
+            member,
           )
-          _ <- checkSubscriptionMemberPermission(member, requiresAuthentication)
-          authenticationTokenO = IdentityContextHelper.getCurrentStoredAuthenticationToken
-          _ <- subscriptionPool
-            .create(
-              () =>
-                createSubscription(
-                  member,
-                  authenticationTokenO.map(_.expireAt),
-                  offset,
-                  observer,
-                ),
-              member,
-            )
-            .leftMap { case SubscriptionPool.PoolClosed =>
-              Status.UNAVAILABLE.withDescription("Subscription pool is closed.")
-            }
-        } yield ()
-        result.fold(err => responseObserver.onError(err.asException()), identity)
-      }
+          .leftMap { case SubscriptionPool.PoolClosed =>
+            Status.UNAVAILABLE.withDescription("Subscription pool is closed.")
+          }
+      } yield ()
+      result.fold(err => responseObserver.onError(err.asException()), identity)
     }
+  }
 
   private def checkSubscriptionMemberPermission(member: Member, requiresAuthentication: Boolean)(
       implicit traceContext: TraceContext
@@ -690,33 +686,31 @@ class GrpcSequencerService(
         WrappedAcknowledgeRequest,
       ]
   ): Future[Empty] = {
-    fromGrpcContext { implicit traceContext =>
-      // deserialize the request and check that they're authorized to perform a request on behalf of the member.
-      // intentionally not using an EitherT here as we want to remain on the same thread to retain the GRPC context
-      // for authorization.
-      val validatedRequestE = for {
-        wrappedRequest <- acknowledgeRequestE
-          .leftMap(err => invalidRequest(err.toString).asException())
-        request = wrappedRequest.unwrap
-        // check they are authenticated to perform actions on behalf of this member
-        _ <- checkAuthenticatedMemberPermission(request.member)
-          .leftMap(_.asException())
-      } yield wrappedRequest
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-      validatedRequestE.fold(
-        Future.failed,
-        wrappedRequest => {
-          for {
-            _ <- wrappedRequest match {
-              case p: PlainAcknowledgeRequest =>
-                sequencer.acknowledge(p.unwrap.member, p.unwrap.timestamp)
-              case s: SignedAcknowledgeRequest =>
-                sequencer.acknowledgeSigned(s.signedRequest)
-            }
-          } yield Empty()
-        },
+    // deserialize the request and check that they're authorized to perform a request on behalf of the member.
+    // intentionally not using an EitherT here as we want to remain on the same thread to retain the GRPC context
+    // for authorization.
+    val validatedRequestE = for {
+      wrappedRequest <- acknowledgeRequestE
+        .leftMap(err => invalidRequest(err.toString).asException())
+      request = wrappedRequest.unwrap
+      // check they are authenticated to perform actions on behalf of this member
+      _ <- checkAuthenticatedMemberPermission(request.member)
+        .leftMap(_.asException())
+    } yield wrappedRequest
+    (for {
+      request <- validatedRequestE.toEitherT[Future]
+      _ <- (request match {
+        case p: PlainAcknowledgeRequest =>
+          EitherT.right(sequencer.acknowledge(p.unwrap.member, p.unwrap.timestamp))
+        case s: SignedAcknowledgeRequest =>
+          sequencer
+            .acknowledgeSigned(s.signedRequest)
+      }).leftMap(e =>
+        Status.INVALID_ARGUMENT.withDescription(s"Could not acknowledge $e").asException()
       )
-    }
+    } yield ()).foldF[Empty](Future.failed, _ => Future.successful(Empty()))
   }
 
   private def createSubscription(

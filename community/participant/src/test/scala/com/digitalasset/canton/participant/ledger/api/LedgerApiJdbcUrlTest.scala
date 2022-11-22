@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.ledger.api
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CommunityDbConfig.*
+import com.digitalasset.canton.config.DbParametersConfig
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.FailedToConfigureLedgerApiStorage
 import com.typesafe.config.ConfigFactory
 import org.scalatest.wordspec.AnyWordSpec
@@ -174,7 +175,10 @@ class LedgerApiJdbcUrlTest extends AnyWordSpec with BaseTest {
 
   "specifying an explicit ledger-api url" should {
     "use that rather than generating one" in {
-      val dbConfig = H2(ConfigFactory.empty(), ledgerApiJdbcUrl = Some("use-this-jdbc-url-please"))
+      val dbConfig = H2(
+        ConfigFactory.empty(),
+        DbParametersConfig(ledgerApiJdbcUrl = Some("use-this-jdbc-url-please")),
+      )
       LedgerApiJdbcUrl.fromDbConfig(dbConfig).value.url shouldBe "use-this-jdbc-url-please"
     }
   }

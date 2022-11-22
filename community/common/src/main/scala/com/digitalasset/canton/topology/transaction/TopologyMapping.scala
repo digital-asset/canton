@@ -500,6 +500,9 @@ final case class PartyToParticipant(
     permission: ParticipantPermission,
 ) extends TopologyStateUpdateMapping {
   // architecture-handbook-entry-end: PartyToParticipant
+
+  // TODO(i10809) maybe support "list of participants" to reduce number of topology transactions necessary ..
+
   require(
     party.uid != participant.uid,
     s"Unable to allocate party ${party.uid}, as it has the same name as the participant's admin party.",

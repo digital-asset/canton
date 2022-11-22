@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.{
   TestingConfigInternal,
 }
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{Hash, TestHash}
+import com.digitalasset.canton.crypto.{Hash, HashPurpose, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
@@ -41,6 +41,7 @@ import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.{
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{
@@ -742,10 +743,14 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     ): Future[Unit] =
       Future.unit
 
+    override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, String, Unit] =
+      EitherT.rightT(())
+
     override def sendAsync(
         request: SubmissionRequest,
         timeout: Duration,
-        protocolVersion: ProtocolVersion,
     )(implicit
         traceContext: TraceContext
     ): EitherT[Future, SendAsyncClientError, Unit] = {
@@ -756,14 +761,12 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     override def sendAsyncSigned(
         request: SignedContent[SubmissionRequest],
         timeout: Duration,
-        protocolVersion: ProtocolVersion,
     )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
-      sendAsync(request.content, timeout, protocolVersion)
+      sendAsync(request.content, timeout)
 
     override def sendAsyncUnauthenticated(
         request: SubmissionRequest,
         timeout: Duration,
-        protocolVersion: ProtocolVersion,
     )(implicit
         traceContext: TraceContext
     ): EitherT[Future, SendAsyncClientError, Unit] = ???
@@ -875,7 +878,23 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         timeouts,
         eventValidatorFactory,
         clock,
-        _ => req => EitherT.rightT(SignedContent(req, SymbolicCrypto.emptySignature, None)),
+        new RequestSigner {
+          override def signRequest[A <: ProtocolVersionedMemoizedEvidence](
+              request: A,
+              hashPurpose: HashPurpose,
+          )(implicit
+              ec: ExecutionContext,
+              traceContext: TraceContext,
+          ): EitherT[Future, String, SignedContent[A]] =
+            EitherT(
+              Future.successful(
+                Right(SignedContent(request, SymbolicCrypto.emptySignature, None)): Either[
+                  String,
+                  SignedContent[A],
+                ]
+              )
+            )
+        },
         sequencedEventStore,
         sendTracker,
         CommonMockMetrics.sequencerClient,

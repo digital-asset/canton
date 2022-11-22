@@ -321,7 +321,7 @@ object EncryptedViewMessageV0 {
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, EncryptedViewMessageDecryptionError[VT], SecureRandomness] = {
-    val randomnessLength = EncryptedViewMessage.computeRandomnessLength(snapshot)
+    val randomnessLength = EncryptedViewMessage.computeRandomnessLength(snapshot.pureCrypto)
 
     for {
       encryptedRandomness <-
@@ -404,7 +404,7 @@ object EncryptedViewMessageV1 {
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, EncryptedViewMessageDecryptionError[VT], SecureRandomness] = {
-    val randomnessLength = EncryptedViewMessage.computeRandomnessLength(snapshot)
+    val randomnessLength = EncryptedViewMessage.computeRandomnessLength(snapshot.pureCrypto)
 
     for {
       encryptionKeys <- EitherT
@@ -448,10 +448,8 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
   ): EitherT[Future, EncryptedViewMessageDecryptionError[VT], B] =
     EitherT.fromEither[Future](value)
 
-  def computeRandomnessLength(snapshot: DomainSnapshotSyncCryptoApi): Int = {
-    val pureCrypto = snapshot.pureCrypto
+  def computeRandomnessLength(pureCrypto: CryptoPureApi): Int =
     pureCrypto.defaultHashAlgorithm.length.toInt
-  }
 
   // This method is not defined as a member of EncryptedViewMessage because the covariant parameter VT conflicts
   // with the parameter deserialize.
@@ -466,7 +464,7 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
 
     val pureCrypto = snapshot.pureCrypto
     val viewKeyLength = encrypted.viewEncryptionScheme.keySizeInBytes
-    val randomnessLength = computeRandomnessLength(snapshot)
+    val randomnessLength = computeRandomnessLength(snapshot.pureCrypto)
 
     for {
       _ <- EitherT.cond[Future](

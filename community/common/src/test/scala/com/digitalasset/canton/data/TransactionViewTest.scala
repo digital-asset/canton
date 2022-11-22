@@ -4,10 +4,11 @@
 package com.digitalasset.canton.data
 
 import com.daml.lf.value.Value
-import com.digitalasset.canton.crypto.{HashOps, Salt}
+import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -20,8 +21,10 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   val contractInst = ExampleTransactionFactory.contractInstance()
   val serContractInst = ExampleTransactionFactory.asSerializableRaw(contractInst)
 
+  val cantonContractIdVersion: CantonContractIdVersion =
+    CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)
   val createdId: LfContractId =
-    ContractId.fromDiscriminator(
+    cantonContractIdVersion.fromDiscriminator(
       ExampleTransactionFactory.lfHash(3),
       ExampleTransactionFactory.unicum(0),
     )
@@ -99,6 +102,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
           id,
           contractInstance = ExampleTransactionFactory.contractInstance(),
           metadata = ContractMetadata.empty,
+          salt = Option.when(testedProtocolVersion >= ProtocolVersion.v4)(TestSalt.generateSalt(1)),
         )
         CreatedContract.tryCreate(serializable, consumed.contains(id), rolledBack = false)
       }
@@ -165,7 +169,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         )
 
         val otherCantonId =
-          ContractId.fromDiscriminator(
+          cantonContractIdVersion.fromDiscriminator(
             ExampleTransactionFactory.lfHash(3),
             ExampleTransactionFactory.unicum(1),
           )
@@ -225,6 +229,8 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
               Set.empty,
               Some(ExampleTransactionFactory.globalKeyWithMaintainers()),
             ),
+            salt =
+              Option.when(testedProtocolVersion >= ProtocolVersion.v4)(TestSalt.generateSalt(0)),
           )
 
         val vpd = create(

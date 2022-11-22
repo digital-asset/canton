@@ -24,8 +24,7 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member, ParticipantId}
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
@@ -104,16 +103,16 @@ private[domain] class ParticipantDomainTopologyService(
       request: RegisterTopologyTransactionRequest
   ): FutureUnlessShutdown[
     RegisterTopologyTransactionResponse.Result
-  ] =
-    fromGrpcContext { implicit traceContext =>
-      val responseF = getResponse(request)
-      for {
-        _ <- performUnlessClosingF(functionFullName)(
-          EitherTUtil.toFuture(mapErr(sendRequest(request)))
-        )
-        response <- responseF
-      } yield response
-    }
+  ] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val responseF = getResponse(request)
+    for {
+      _ <- performUnlessClosingF(functionFullName)(
+        EitherTUtil.toFuture(mapErr(sendRequest(request)))
+      )
+      response <- responseF
+    } yield response
+  }
 
   private def sendRequest(
       request: RegisterTopologyTransactionRequest

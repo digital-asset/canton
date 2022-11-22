@@ -15,7 +15,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejection
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import slick.jdbc.GetResult
 
@@ -103,7 +103,7 @@ case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo](
 
 object InFlightSubmission {
   implicit def getResultInFlightSubmission[SequencingInfo <: SubmissionSequencingInfo: GetResult](
-      implicit getResultTraceContext: GetResult[TraceContext]
+      implicit getResultTraceContext: GetResult[SerializableTraceContext]
   ): GetResult[InFlightSubmission[SequencingInfo]] = { r =>
     import com.digitalasset.canton.resource.DbStorage.Implicits.*
     val changeId = r.<<[ChangeIdHash]
@@ -111,14 +111,14 @@ object InFlightSubmission {
     val submissionDomain = r.<<[DomainId]
     val messageId = r.<<[UUID]
     val sequencingInfo = r.<<[SequencingInfo]
-    val submissionTraceContext = r.<<[TraceContext]
+    val submissionTraceContext = r.<<[SerializableTraceContext]
     InFlightSubmission(
       changeId,
       submissionId,
       submissionDomain,
       messageId,
       sequencingInfo,
-      submissionTraceContext,
+      submissionTraceContext.unwrap,
     )
   }
 }

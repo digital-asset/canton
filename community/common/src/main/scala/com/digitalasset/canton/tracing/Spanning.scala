@@ -16,8 +16,10 @@ import scala.util.{Failure, Success}
 trait Spanning {
   protected def withSpanFromGrpcContext[A](description: String)(
       f: TraceContext => SpanWrapper => A
-  )(implicit tracer: Tracer): A =
-    TraceContext.fromGrpcContext(withSpan(description)(f)(_, tracer))
+  )(implicit tracer: Tracer): A = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    withSpan(description)(f)(traceContext, tracer)
+  }
 
   protected def withNewTrace[A](description: String)(f: TraceContext => SpanWrapper => A)(implicit
       tracer: Tracer

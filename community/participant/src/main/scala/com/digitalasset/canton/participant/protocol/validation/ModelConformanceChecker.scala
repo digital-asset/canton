@@ -16,9 +16,11 @@ import com.digitalasset.canton.data.{
   TransactionViewDecomposition,
   TransactionViewTree,
 }
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.TransactionTreeConversionError
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.{
   ContractAndKeyLookup,
@@ -99,7 +101,7 @@ class ModelConformanceChecker(
       joinedWfTx <- EitherT
         .fromEither[Future](WellFormedTransaction.merge(suffixedTxs))
         .leftMap[Error](err =>
-          JoinedTransactionNotWellFormed(suffixedTxs.map(_.unwrap.unwrap).toList, err)
+          JoinedTransactionNotWellFormed(err, suffixedTxs.map(_.unwrap.unwrap).toList)
         )
     } yield {
       Result(transactionId, joinedWfTx)
@@ -156,7 +158,7 @@ class ModelConformanceChecker(
         .fromEither[Future](
           WellFormedTransaction.normalizeAndCheck(lfTx, metadata, WithoutSuffixes)
         )
-        .leftMap[Error](err => TransactionNotWellformed(lfTx, err))
+        .leftMap[Error](err => TransactionNotWellformed(err, lfTx))
       salts = transactionTreeFactory.saltsFromView(view)
       reconstructedViewAndTx <- checked(
         transactionTreeFactory.tryReconstruct(
@@ -171,18 +173,13 @@ class ModelConformanceChecker(
           contractOfId = TransactionTreeFactory.contractInstanceLookup(lookupWithKeys),
           keyResolver = resolverFromReinterpretation,
         )
-      ).leftMap(err =>
-        TransactionTreeError(lfTx, s"Failed to construct transaction view tree: $err")
-      )
+      ).leftMap(err => TransactionTreeError(err, lfTx))
       (reconstructedView, suffixedTx) = reconstructedViewAndTx
 
       _ <- EitherT.cond[Future](
         view.view == reconstructedView,
         (),
-        TransactionTreeError(
-          lfTx,
-          s"Reconstructed view differs from received view:\nReceived: ${view.view}\nReconstructed: $reconstructedView",
-        ): Error,
+        ViewReconstructionError(view.view, reconstructedView, lfTx): Error,
       )
 
     } yield WithRollbackScope(rbContext.rollbackScope, suffixedTx)
@@ -221,29 +218,76 @@ object ModelConformanceChecker {
     new ModelConformanceChecker(reinterpret, transactionTreeFactory, loggerFactory)
   }
 
-  sealed trait Error
+  sealed trait Error extends PrettyPrinting
 
   /** Indicates that [[ModelConformanceChecker.reinterpret]] has failed. */
-  case class DAMLeError(cause: engine.Error) extends Error
+  case class DAMLeError(cause: engine.Error) extends Error {
+    override def pretty: Pretty[DAMLeError] = adHocPrettyInstance
+  }
 
   /** Indicates that the received views and the reconstructed view decompositions have a different tree structure. */
   case class ModelConformanceError(
       receivedViews: Seq[TransactionView],
       reconstructedViewDecompositions: Seq[TransactionViewDecomposition],
-  ) extends Error
+  ) extends Error {
+    override def pretty: Pretty[ModelConformanceError] = prettyOfClass(
+      param("receivedViews", _.receivedViews),
+      param("reconstructedViewDecompositions", _.reconstructedViewDecompositions),
+    )
+  }
 
   /** Indicates a different number of declared and reconstructed create nodes. */
   case class CreatedContractsDeclaredIncorrectly(
       declaredCreateNodes: Seq[CreatedContract],
       reconstructedCreateNodes: Seq[LfNodeCreate],
-  ) extends Error
+  ) extends Error {
+    override def pretty: Pretty[CreatedContractsDeclaredIncorrectly] = prettyOfClass(
+      param("declaredCreateNodes", _.declaredCreateNodes),
+      param(
+        "reconstructedCreateNodes",
+        _.reconstructedCreateNodes.map(_.showWithAdHocPrettyInstance),
+      ),
+    )
+  }
 
-  case class TransactionNotWellformed(tx: LfVersionedTransaction, cause: String) extends Error
+  case class TransactionNotWellformed(cause: String, tx: LfVersionedTransaction) extends Error {
+    override def pretty: Pretty[TransactionNotWellformed] = adHocPrettyInstance
+  }
 
-  case class TransactionTreeError(tx: LfVersionedTransaction, cause: String) extends Error
+  case class TransactionTreeError(
+      details: TransactionTreeConversionError,
+      tx: LfVersionedTransaction,
+  ) extends Error {
 
-  case class JoinedTransactionNotWellFormed(tx: Seq[LfVersionedTransaction], cause: String)
-      extends Error
+    def cause: String = "Failed to construct transaction tree."
+
+    override def pretty: Pretty[TransactionTreeError] = prettyOfClass(
+      param("cause", _.cause.unquoted),
+      unnamedParam(_.details),
+      param("tx", _.tx.showWithAdHocPrettyInstance),
+    )
+  }
+
+  case class ViewReconstructionError(
+      received: TransactionView,
+      reconstructed: TransactionView,
+      tx: LfVersionedTransaction,
+  ) extends Error {
+
+    def cause = "Reconstructed view differs from received view."
+
+    override def pretty: Pretty[ViewReconstructionError] = prettyOfClass(
+      param("cause", _.cause.unquoted),
+      param("received", _.received),
+      param("reconstructed", _.reconstructed),
+      param("tx", _.tx.showWithAdHocPrettyInstance),
+    )
+  }
+
+  case class JoinedTransactionNotWellFormed(cause: String, tx: Seq[LfVersionedTransaction])
+      extends Error {
+    override def pretty: Pretty[JoinedTransactionNotWellFormed] = adHocPrettyInstance
+  }
 
   case class Result(
       transactionId: TransactionId,

@@ -75,8 +75,9 @@ private[participant] class NaiveRequestTracker(
 
   override def tick(sc: SequencerCounter, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Unit =
+  ): Unit = {
     taskScheduler.addTick(sc, timestamp)
+  }
 
   override def addRequest(
       rc: RequestCounter,

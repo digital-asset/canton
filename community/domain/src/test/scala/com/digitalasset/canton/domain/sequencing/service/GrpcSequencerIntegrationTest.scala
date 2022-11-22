@@ -14,8 +14,8 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
   TestingConfigInternal,
 }
-import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.{HashPurpose, Nonce}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
@@ -48,6 +48,7 @@ import com.digitalasset.canton.sequencing.{
   OrdinaryApplicationHandler,
   SerializedEventHandler,
 }
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{DomainTimeTracker, SimClock}
 import com.digitalasset.canton.topology.*
@@ -68,7 +69,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.FixtureAnyWordSpec
 
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, ExecutionContextExecutor, Future, Promise}
+import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Future, Promise}
 
 case class Env(loggerFactory: NamedLoggerFactory)(implicit
     ec: ExecutionContextExecutor,
@@ -91,8 +92,9 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val futureSupervisor = FutureSupervisor.Noop
   private val topologyClient = mock[DomainTopologyClient]
   private val mockTopologySnapshot = mock[TopologySnapshot]
-  private val maxRatePerParticipant = BaseTest.defaultStaticDomainParameters.maxRatePerParticipant
-  private val maxRequestSize = BaseTest.defaultStaticDomainParameters.maxRequestSize
+  private val maxRatePerParticipant = BaseTest.defaultMaxRatePerParticipant
+  private val maxRequestSize = BaseTest.defaultMaxRequestSize
+
   when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
     .thenReturn(mockTopologySnapshot)
   when(
@@ -235,7 +237,14 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         participant,
         sequencedEventStore,
         sendTrackerStore,
-        _ => request => EitherT.rightT(SignedContent(request, SymbolicCrypto.emptySignature, None)),
+        new RequestSigner {
+          override def signRequest[A <: ProtocolVersionedMemoizedEvidence](
+              request: A,
+              hashPurpose: HashPurpose,
+          )(implicit ec: ExecutionContext, traceContext: TraceContext)
+              : EitherT[Future, String, SignedContent[A]] =
+            EitherT.rightT(SignedContent(request, SymbolicCrypto.emptySignature, None))
+        },
       ).value,
       10.seconds,
     )

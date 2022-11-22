@@ -59,7 +59,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         testedProtocolVersion,
       )
       FullInformeeTree.tryCreate(
-        GenTransactionTree(hashOps)(
+        GenTransactionTree.tryCreate(hashOps)(
           BlindedNode(rh(11)),
           commonMetadata,
           BlindedNode(rh(12)),

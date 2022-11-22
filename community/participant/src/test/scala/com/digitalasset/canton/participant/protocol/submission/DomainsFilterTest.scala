@@ -23,7 +23,8 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
   "DomainsFilter (simple create)" should {
     import SimpleTopology.*
 
-    val filter = DomainsFilterForTx(Transactions.Create.tx(), ProtocolVersion.v3)
+    // TODO(i10964): Make this dependent on CANTON_PROTOCOL_VERSION?
+    val filter = DomainsFilterForTx(Transactions.Create.tx(), ProtocolVersion.v4)
     val correctPackages = Transactions.Create.correctPackages
 
     "keep domains that satisfy all the constraints" in {
@@ -94,7 +95,8 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
     import SimpleTopology.*
     val exerciseByInterface = Transactions.ExerciseByInterface()
 
-    val filter = DomainsFilterForTx(exerciseByInterface.tx, ProtocolVersion.v3)
+    // TODO(i10964): Make this dependent on CANTON_PROTOCOL_VERSION?
+    val filter = DomainsFilterForTx(exerciseByInterface.tx, ProtocolVersion.v4)
     val correctPackages = ExerciseByInterface.correctPackages
 
     "keep domains that satisfy all the constraints" in {

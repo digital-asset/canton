@@ -12,7 +12,7 @@ import com.digitalasset.canton.domain.mediator.{MediatorRuntime, MediatorRuntime
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
+import com.digitalasset.canton.sequencing.client.{RequestSigner, SequencerClientFactory}
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.store.{
   IndexedStringStore,
@@ -108,7 +108,7 @@ object EmbeddedMediatorInitialization {
         mediatorId,
         sequencedEventStore,
         sendTrackerStore,
-        SequencerClient.signSubmissionRequest(syncCrypto),
+        RequestSigner(syncCrypto),
       )
       mediatorRuntime <- mediatorFactory
         .create(

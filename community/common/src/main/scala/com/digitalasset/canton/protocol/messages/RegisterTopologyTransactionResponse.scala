@@ -82,7 +82,7 @@ object RegisterTopologyTransactionResponse
     ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersion(v1.RegisterTopologyTransactionResponse)(fromProtoV1),
-      _.toProtoV0.toByteString,
+      _.toProtoV1.toByteString,
     ),
   )
 

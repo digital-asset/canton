@@ -20,7 +20,7 @@ import scala.jdk.CollectionConverters.SetHasAsScala
   * It also adds a schema specification to point the ledger-api server at a distinct schema from canton allowing
   * it to be managed separately.
   * Although it is expected a JDBC url will be generated for almost all circumstances, if this process fails or an
-  * advanced configuration is required the [[config.DbConfig.ledgerApiJdbcUrl]] configuration can be explicitly set
+  * advanced configuration is required the [[com.digitalasset.canton.config.DbParametersConfig.ledgerApiJdbcUrl]] configuration can be explicitly set
   * and this will be used instead. This manually configured url **must** specify using the schema of `ledger_api`.
   */
 object LedgerApiJdbcUrl {
@@ -50,12 +50,12 @@ object LedgerApiJdbcUrl {
         case h2: H2DbConfig => reuseH2(h2.config)
         case postgres: PostgresDbConfig => reusePostgres(postgres.config)
         case other: DbConfig =>
-          other.ledgerApiJdbcUrl.map(CustomLedgerApiUrl).toRight("No URL specified")
+          other.parameters.ledgerApiJdbcUrl.map(CustomLedgerApiUrl).toRight("No URL specified")
       }).left.map(FailedToConfigureLedgerApiStorage)
 
     // In the unlikely event we've explicitly specified the jdbc url for the ledger-api just use that.
     // Otherwise generate an appropriate one for the datastore.
-    dbConfig.ledgerApiJdbcUrl.fold(generate)(url => Right(CustomLedgerApiUrl(url)))
+    dbConfig.parameters.ledgerApiJdbcUrl.fold(generate)(url => Right(CustomLedgerApiUrl(url)))
   }
 
   /** Extensions to [[com.typesafe.config.Config]] to make config extraction more concise for our purposes. */

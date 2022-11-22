@@ -64,6 +64,11 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
   /** the console for user facing output */
   val consoleOutput: ConsoleOutput
 
+  /** The predef code itself which is executed before any script or repl command */
+  private[console] def predefCode(interactive: Boolean, noTty: Boolean = false): String =
+    consoleEnvironmentBindings.predefCode(interactive, noTty)
+  protected def consoleEnvironmentBindings: ConsoleEnvironmentBinding
+
   private val tracerProvider =
     TracerProvider.Factory(environment.config.monitoring.tracing.tracer, "console")
   private[console] val tracer: Tracer = tracerProvider.tracer

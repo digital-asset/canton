@@ -75,14 +75,14 @@ class DbAcsCommitmentStore(
             s"Failed to deserialize signed ACS commitment: $err"
           ),
         m =>
-          m.message match {
-            case cmt: AcsCommitment =>
-              SignedProtocolMessage(cmt, m.signature)(m.representativeProtocolVersion)
-            case v =>
+          SignedProtocolMessage
+            .signedMessageCast[AcsCommitment]
+            .toKind(m)
+            .getOrElse(
               throw new DbDeserializationException(
-                s"Expected a signed ACS commitment, but got a $v"
+                s"Expected a signed ACS commitment, but got a $m"
               )
-          },
+            ),
       )
   )
 

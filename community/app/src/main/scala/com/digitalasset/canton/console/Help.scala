@@ -4,10 +4,11 @@
 package com.digitalasset.canton.console
 
 import cats.syntax.functor.*
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.annotation.StaticAnnotation
 import scala.reflect.ClassTag
-import scala.reflect.runtime.{universe as ru}
+import scala.reflect.runtime.universe as ru
 
 /** User friendly help messages generator.
   */
@@ -27,6 +28,11 @@ object Help {
   /** A longer description of the method */
   case class Description(s: String) extends StaticAnnotation {
     override def toString: String = s
+  }
+
+  /** Indicates that a command is only available for domain running at least the specified protocolVersion. */
+  case class AvailableFrom(protocolVersion: ProtocolVersion) extends StaticAnnotation {
+    override def toString: String = protocolVersion.toString
   }
 
   /** A sequence of strings classifying the method breadcrumb style (e.g. Seq("Participant", "Diagnostics")).

@@ -18,7 +18,7 @@ import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgno
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.store.db.DbSequencedEventStore.*
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, Thereafter}
 import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
 import io.functionmeta.functionFullName
@@ -80,7 +80,7 @@ class DbSequencedEventStore(
       val sequencerCounter = r.<<[SequencerCounter]
       val timestamp = r.<<[CantonTimestamp]
       val eventBytes = r.<<[Array[Byte]]
-      val traceContext: TraceContext = r.<<[TraceContext]
+      val traceContext: TraceContext = r.<<[SerializableTraceContext].unwrap
       val ignore = r.<<[Boolean]
 
       typ match {
@@ -106,8 +106,8 @@ class DbSequencedEventStore(
       }
     }
 
-  private implicit val traceContextSetParameter: SetParameter[TraceContext] =
-    TraceContext.getVersionedSetParameter(protocolVersion)
+  private implicit val traceContextSetParameter: SetParameter[SerializableTraceContext] =
+    SerializableTraceContext.getVersionedSetParameter(protocolVersion)
 
   override def store(
       events: Seq[OrdinarySerializedEvent]
@@ -146,7 +146,7 @@ class DbSequencedEventStore(
       pp >> event.underlyingEventBytes
       pp >> event.dbType
       pp >> event.counter
-      pp >> event.traceContext
+      pp >> SerializableTraceContext(event.traceContext)
       pp >> event.isIgnored
     }
   }

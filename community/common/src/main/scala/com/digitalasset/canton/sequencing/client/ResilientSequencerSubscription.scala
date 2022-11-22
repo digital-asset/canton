@@ -25,10 +25,11 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionErro
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handlers.{CounterCapture, HasReceivedEvent}
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.{DelayUtil, FutureUtil, LoggerUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import io.functionmeta.functionFullName
 
@@ -52,7 +53,7 @@ import scala.util.{Failure, Success, Try}
   * For this subscription [[ResilientSequencerSubscription.start]] must be called for the underlying subscriptions to begin.
   */
 class ResilientSequencerSubscription[HandlerError](
-    identifier: String,
+    domainId: DomainId,
     startingFrom: SequencerCounter,
     handler: SerializedEventHandler[HandlerError],
     subscriptionFactory: SequencerSubscriptionFactory[HandlerError],
@@ -168,7 +169,7 @@ class ResilientSequencerSubscription[HandlerError](
     } else {
       TraceContext.withNewTraceContext { tx =>
         this.degradationOccurred(
-          LostSequencerSubscription.Warn(identifier)(this.errorLoggingContext(tx))
+          LostSequencerSubscription.Warn(domainId.toString)(this.errorLoggingContext(tx))
         )
       }
     }
@@ -297,7 +298,8 @@ class ResilientSequencerSubscription[HandlerError](
 
 object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
   def apply[E](
-      domain: String,
+      domainId: DomainId,
+      protocolVersion: ProtocolVersion,
       member: Member,
       getTransport: => SequencerClientTransport,
       handler: SerializedEventHandler[E],
@@ -310,10 +312,10 @@ object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ResilientSequencerSubscription[E] = {
     new ResilientSequencerSubscription[E](
-      domain,
+      domainId,
       startingFrom,
       handler,
-      createSubscription(member, getTransport, requiresAuthentication),
+      createSubscription(member, getTransport, requiresAuthentication, protocolVersion),
       SubscriptionRetryDelayRule(
         initialDelay,
         warnDelay,
@@ -329,6 +331,7 @@ object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
       member: Member,
       getTransport: => SequencerClientTransport,
       requiresAuthentication: Boolean,
+      protocolVersion: ProtocolVersion,
   )(implicit ec: ExecutionContext): SequencerSubscriptionFactory[E] =
     new SequencerSubscriptionFactory[E] {
       override def create(startingCounter: SequencerCounter, handler: SerializedEventHandler[E])(
@@ -338,7 +341,7 @@ object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
         SequencerSubscriptionCreationError,
         (SequencerSubscription[E], SubscriptionErrorRetryPolicy),
       ] = {
-        val request = SubscriptionRequest(member, startingCounter)
+        val request = SubscriptionRequest(member, startingCounter, protocolVersion)
         val transport = getTransport
         val subscription =
           if (requiresAuthentication) transport.subscribe(request, handler)(traceContext)

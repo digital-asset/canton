@@ -10,6 +10,7 @@ import cats.{Functor, Monad}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String255}
 import com.digitalasset.canton.config.*
+import com.digitalasset.canton.crypto.Salt
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -29,6 +30,7 @@ import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, LfHash}
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.StorageFactory.StorageCreationException
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
@@ -54,8 +56,8 @@ import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, ClassLoaderUtil}
 
 import java.sql.{Blob, SQLException, Statement}
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import javax.sql.rowset.serial.SerialBlob
 import scala.annotation.nowarn
 import scala.concurrent.duration.*
@@ -83,6 +85,7 @@ trait StorageFactory {
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
       clock: Clock,
+      scheduler: Option[ScheduledExecutorService],
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -91,7 +94,15 @@ trait StorageFactory {
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): Storage =
-    create(connectionPoolForParticipant, logQueryCost, clock, metrics, timeouts, loggerFactory)
+    create(
+      connectionPoolForParticipant,
+      logQueryCost,
+      clock,
+      scheduler,
+      metrics,
+      timeouts,
+      loggerFactory,
+    )
       .valueOr(err => throw new StorageCreationException(err))
       .onShutdown(throw new StorageCreationException("Shutdown during storage creation"))
 
@@ -99,6 +110,7 @@ trait StorageFactory {
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
       clock: Clock,
+      scheduler: Option[ScheduledExecutorService],
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -118,6 +130,7 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
       clock: Clock,
+      scheduler: Option[ScheduledExecutorService],
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -135,6 +148,7 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
             connectionPoolForParticipant,
             logQueryCost,
             clock,
+            scheduler,
             metrics,
             timeouts,
             loggerFactory,
@@ -468,6 +482,27 @@ object DbStorage {
     implicit val getResultByteStringOption: GetResult[Option[ByteString]] =
       GetResult(r => r.nextBytesOption().map(ByteString.copyFrom))
 
+    implicit val setContractSalt: SetParameter[Option[Salt]] =
+      (c, pp) => pp >> c.map(_.toProtoV0.toByteString)
+    implicit val getContractSalt: GetResult[Option[Salt]] =
+      implicitly[GetResult[Option[ByteString]]] andThen {
+        _.map(byteString =>
+          ProtoConverter
+            .parse(
+              // Even though it is versioned, the Salt is considered static
+              // as it's used for authenticating contract ids which are immutable
+              com.digitalasset.canton.crypto.v0.Salt.parseFrom,
+              Salt.fromProtoV0,
+              byteString,
+            )
+            .valueOr(err =>
+              throw new DbDeserializationException(
+                s"Failed to deserialize contract salt: $err"
+              )
+            )
+        )
+      }
+
     object BuilderChain {
 
       import scala.language.implicitConversions
@@ -540,6 +575,7 @@ object DbStorage {
       withMainConnection: Boolean,
       metrics: Option[DbQueueMetrics] = None,
       logQueryCost: Option[QueryCostMonitoringConfig] = None,
+      scheduler: Option[ScheduledExecutorService],
       forMigration: Boolean = false,
       retryConfig: DbStorage.RetryConfig = DbStorage.RetryConfig.failFast,
   )(
@@ -598,6 +634,8 @@ object DbStorage {
             configWithMigrationFallbacks,
             metrics,
             logQueryCost,
+            scheduler,
+            config.parameters,
             Logger(baseLogger),
           )
           _ <- Either
@@ -613,6 +651,8 @@ object DbStorage {
       config: Config,
       metrics: Option[DbQueueMetrics],
       logQueryCost: Option[QueryCostMonitoringConfig],
+      scheduler: Option[ScheduledExecutorService],
+      parameters: DbParametersConfig,
       logger: Logger,
   ): Either[String, Database] = {
     // copy paste from JdbcBackend.forConfig
@@ -637,6 +677,9 @@ object DbStorage {
             registerMbeans = registerMbeans,
             logQueryCost = logQueryCost,
             metrics = m,
+            scheduler = scheduler,
+            warnOnSlowQueryO = parameters.warnOnSlowQuery,
+            warnInterval = parameters.warnOnSlowQueryInterval,
             logger = logger,
           )
         case None =>

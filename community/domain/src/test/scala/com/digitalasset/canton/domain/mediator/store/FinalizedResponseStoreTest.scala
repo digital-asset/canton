@@ -64,7 +64,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       testedProtocolVersion,
     )
     FullInformeeTree.tryCreate(
-      GenTransactionTree(hashOps)(
+      GenTransactionTree.tryCreate(hashOps)(
         BlindedNode(rh(11)),
         commonMetadata,
         BlindedNode(rh(12)),

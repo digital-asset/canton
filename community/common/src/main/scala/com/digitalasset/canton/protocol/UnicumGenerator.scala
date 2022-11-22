@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.crypto.{HashOps, HashPurpose, HmacOps, Salt}
+import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose, HmacOps, Salt}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 
 import java.util.UUID
 
-/** Generates [[Unicum]]s for contract IDs such that the [[Unicum]] is a cryptographic commitment to the following:
+/** Generates [[ContractSalt]]s and [[Unicum]]s for contract IDs such that the [[Unicum]] is a cryptographic commitment to the following:
   * <ul>
   *   <li>The [[com.digitalasset.canton.topology.DomainId]] of the transaction that creates the contract</li>
   *   <li>The [[com.digitalasset.canton.topology.MediatorId]] of the mediator that handles the transaction request</li>
@@ -87,7 +87,7 @@ import java.util.UUID
   */
 class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
 
-  /** Creates the [[Unicum]] for a create node.
+  /** Creates the [[ContractSalt]] and [[Unicum]] for a create node.
     *
     * @param domainId        the domain on which this transaction is sequenced
     * @param mediatorId      the mediator that is responsible for handling the request that creates the contract
@@ -101,7 +101,7 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
     *
     * @see UnicumGenerator for the construction details and the security properties
     */
-  def generateUnicum(
+  def generateSaltAndUnicum(
       domainId: DomainId,
       mediatorId: MediatorId,
       transactionUuid: UUID,
@@ -110,7 +110,7 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
       createIndex: Int,
       ledgerTime: CantonTimestamp,
       suffixedContractInstance: SerializableRawContractInstance,
-  ): Unicum = {
+  ): (ContractSalt, Unicum) = {
     val contractSalt =
       ContractSalt.create(cryptoOps)(
         transactionUuid,
@@ -120,17 +120,50 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
         createIndex,
         viewPosition,
       )
-    val unicumHash = cryptoOps
+    val unicumHash =
+      computeUnicumHash(
+        ledgerTime = ledgerTime,
+        suffixedContractInstance = suffixedContractInstance,
+        contractSalt = contractSalt.unwrap,
+      )
+
+    contractSalt -> Unicum(unicumHash)
+  }
+
+  /** Re-computes a contract's [[Unicum]] based on the provided salt.
+    * Used for authenticating contracts.
+    *
+    * @param contractSalt the [[ContractSalt]] computed when the original contract id was generated.
+    * @param ledgerTime the ledger time at which the contract is created
+    * @param suffixedContractInstance the serializable raw contract instance of the contract where contract IDs have already been suffixed.
+    * @return the unicum if successful or a failure if the contract salt size is mismatching the predefined size.
+    */
+  def recomputeUnicum(
+      contractSalt: Salt,
+      ledgerTime: CantonTimestamp,
+      suffixedContractInstance: SerializableRawContractInstance,
+  ): Either[String, Unicum] = {
+    val contractSaltSize = contractSalt.unwrap.size()
+    Either.cond(
+      contractSaltSize.toLong == cryptoOps.defaultHmacAlgorithm.hashAlgorithm.length,
+      Unicum(computeUnicumHash(ledgerTime, suffixedContractInstance, contractSalt)),
+      s"Invalid contract salt size ($contractSaltSize)",
+    )
+  }
+
+  private def computeUnicumHash(
+      ledgerTime: CantonTimestamp,
+      suffixedContractInstance: SerializableRawContractInstance,
+      contractSalt: Salt,
+  ): Hash =
+    cryptoOps
       .build(HashPurpose.Unicum)
       // The salt's length is determined by the hash algorithm and the contract ID version determines the hash algorithm,
       // so salts have fixed length.
-      .addWithoutLengthPrefix(contractSalt.unwrap.toByteString)
+      .addWithoutLengthPrefix(contractSalt.toByteString)
       .addWithoutLengthPrefix(DeterministicEncoding.encodeInstant(ledgerTime.toInstant))
       // The contract instance has variable length, but it is the last block of bytes to be hashed,
       // so we don't need a length prefix.
       .addWithoutLengthPrefix(suffixedContractInstance.contractHash.bytes.toByteString)
       .finish()
-
-    Unicum(unicumHash)
-  }
 }

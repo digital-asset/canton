@@ -34,7 +34,7 @@ class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
 
   @Help.Summary("List keys in private vault")
   @Help.Description("""Returns all public keys to the corresponding private keys in the key vault.
-                      |   Optional arguments can be used for filtering.""")
+                      |Optional arguments can be used for filtering.""")
   def list(
       filterFingerprint: String = "",
       filterName: String = "",
@@ -74,6 +74,19 @@ class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
     }
   }
 
+  @Help.Summary("Change the wrapper key for encrypted private keys store")
+  @Help.Description(
+    """Change the wrapper key (e.g. AWS KMS key) being used to encrypt the private keys in the store.
+      |newWrapperKeyId: The optional new wrapper key id to be used. If the wrapper key id is empty Canton will generate a new key based on the current configuration."""
+  )
+  def rotate_wrapper_key(
+      newWrapperKeyId: String = ""
+  ): Unit = {
+    consoleEnvironment.run {
+      adminCommand(VaultAdminCommands.RotateWrapperKey(newWrapperKeyId))
+    }
+  }
+
 }
 
 class LocalSecretKeyAdministration(
@@ -84,7 +97,8 @@ class LocalSecretKeyAdministration(
 
   private def run[V](eitherT: EitherT[Future, String, V], action: String): V = {
     import TraceContext.Implicits.Empty.*
-    implicit val loggingContext = ErrorLoggingContext.fromTracedLogger(runner.tracedLogger)
+    implicit val loggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(runner.tracedLogger)
     consoleEnvironment.environment.config.parameters.timeouts.processing.default
       .await(action)(eitherT.value) match {
       case Left(error) =>
@@ -265,7 +279,7 @@ class PublicKeyAdministration(
       fingerprint: Fingerprint,
       protocolVersion: ProtocolVersion = ProtocolVersion.latest,
   ): ByteString = {
-    val keys = list(fingerprint.unwrap, "")
+    val keys = list(fingerprint.unwrap)
     if (keys.sizeCompare(1) == 0) { // vector doesn't like matching on Nil
       val key = keys.headOption.getOrElse(sys.error("no key"))
       key.publicKey.toByteString(protocolVersion)

@@ -284,7 +284,7 @@ final case class TransferInView private (
     v1.TransferInView(
       salt = Some(salt.toProtoV0),
       submitter = submitter,
-      contract = Some(contract.toProtoV0),
+      contract = Some(contract.toProtoV1),
       creatingTransactionId = creatingTransactionId.toProtoPrimitive,
       transferOutResultEvent = Some(transferOutResultEvent.result.toProtoV0),
       sourceProtocolVersion = sourceProtocolVersion.v.toProtoPrimitive,
@@ -410,7 +410,7 @@ object TransferInView
       submitter <- ProtoConverter.parseLfPartyId(submitterP)
       contract <- ProtoConverter
         .required("contract", contractP)
-        .flatMap(SerializableContract.fromProtoV0)
+        .flatMap(SerializableContract.fromProtoV1)
 
       sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion(sourceProtocolVersionP))
 

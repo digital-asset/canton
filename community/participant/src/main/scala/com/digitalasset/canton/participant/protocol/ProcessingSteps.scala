@@ -24,6 +24,9 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SubmissionTrackingData,
   UnsequencedSubmission,
 }
+import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.PendingTransferIn
+import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
+import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
 import com.digitalasset.canton.participant.store.{
   ContractLookup,
   SyncDomainEphemeralState,
@@ -38,7 +41,6 @@ import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
 
-import scala.collection.concurrent
 import scala.concurrent.Future
 
 /** Interface for processing steps that are specific to request types.
@@ -77,9 +79,6 @@ trait ProcessingSteps[
   /** The type used for look-ups into the [[PendingSubmissions]] */
   type PendingSubmissionId
 
-  /** The type of data stored after request processing to make it available for result processing */
-  type PendingRequestData <: ProcessingSteps.PendingRequestData
-
   /** The type of data needed to generate the submission result in [[createSubmissionResult]].
     * The data is created by [[updatePendingSubmissions]].
     */
@@ -104,6 +103,10 @@ trait ProcessingSteps[
   /** The type of errors that can occur during result processing */
   type ResultError <: WrapsProcessorError
 
+  /** The type of the request (transaction, transfer out, transfer in) */
+  type RequestType <: ProcessingSteps.RequestType
+  val requestType: RequestType
+
   /** Wrap an error in request processing from the generic request processor */
   def embedRequestError(err: RequestProcessingError): RequestError
 
@@ -113,12 +116,6 @@ trait ProcessingSteps[
   /** Selector to get the [[PendingSubmissions]], if any */
   def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions
 
-  /** Selector for the storage slot for [[PendingRequestData]] */
-  def pendingRequestMap
-      : SyncDomainEphemeralState => concurrent.Map[RequestId, PendingRequestDataOrReplayData[
-        PendingRequestData
-      ]]
-
   /** The kind of request, used for logging and error reporting */
   def requestKind: String
 
@@ -126,7 +123,7 @@ trait ProcessingSteps[
   def submissionDescription(param: SubmissionParam): String
 
   /** Extract the submission ID that corresponds to a pending request, if any */
-  def submissionIdOfPendingRequest(pendingData: PendingRequestData): PendingSubmissionId
+  def submissionIdOfPendingRequest(pendingData: requestType.PendingRequestData): PendingSubmissionId
 
   // Phase 1: Submission
 
@@ -405,6 +402,12 @@ trait ProcessingSteps[
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
   )
 
+  def authenticateInputContracts(
+      pendingDataAndResponseArgs: PendingDataAndResponseArgs
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, RequestError, Unit]
+
   /** Phase 3, step 3:
     *
     * @param pendingDataAndResponseArgs Implementation-specific data passed from [[decryptViews]]
@@ -417,7 +420,7 @@ trait ProcessingSteps[
     *                                   reaching the current request. Block on this future to ensure that all earlier contract store
     *                                   writes are visible.
     * @param mediatorId                 The mediator that handles this request
-    * @return Returns the [[PendingRequestData]] to be stored until Phase 7 and the responses to be sent to the mediator.
+    * @return Returns the `requestType.PendingRequestData` to be stored until Phase 7 and the responses to be sent to the mediator.
     */
   def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
@@ -433,12 +436,12 @@ trait ProcessingSteps[
 
   /** Phase 3:
     *
-    * @param pendingData   The [[PendingRequestData]] to be stored until Phase 7
+    * @param pendingData   The `requestType.PendingRequestData` to be stored until Phase 7
     * @param mediatorResponses     The responses to be sent to the mediator
     * @param rejectionArgs The implementation-specific arguments needed to create a rejection event on timeout
     */
   case class StorePendingDataAndSendResponseAndCreateTimeout(
-      pendingData: PendingRequestData,
+      pendingData: requestType.PendingRequestData,
       mediatorResponses: Seq[(MediatorResponse, Recipients)],
       causalityMessages: Seq[(CausalityMessage, Recipients)],
       rejectionArgs: RejectionArgs,
@@ -459,7 +462,7 @@ trait ProcessingSteps[
     * @param event              The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the mediator result.
     *                           It is ensured that the `event` contains exactly one [[com.digitalasset.canton.protocol.messages.MediatorResult]]
     * @param result             The unpacked mediator result that is contained in the `event`
-    * @param pendingRequestData The [[PendingRequestData]] produced in Phase 3
+    * @param pendingRequestData The `requestType.PendingRequestData` produced in Phase 3
     * @param pendingSubmissions The data stored on submissions in the [[PendingSubmissions]]
     * @return The [[com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet]],
     *         the contracts from Phase 3 to be persisted to the contract store,
@@ -468,7 +471,7 @@ trait ProcessingSteps[
   def getCommitSetAndContractsToBeStoredAndEvent(
       event: SignedContent[Deliver[DefaultOpenEnvelope]],
       result: Either[MalformedMediatorRequestResult, Result],
-      pendingRequestData: PendingRequestData,
+      pendingRequestData: requestType.PendingRequestData,
       pendingSubmissions: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
@@ -506,6 +509,28 @@ trait ProcessingSteps[
 }
 
 object ProcessingSteps {
+
+  trait RequestType {
+    type PendingRequestData <: ProcessingSteps.PendingRequestData
+  }
+
+  object RequestType {
+    case object Transaction extends RequestType {
+      override type PendingRequestData = PendingTransaction
+    }
+    type Transaction = Transaction.type
+
+    case object TransferOut extends RequestType {
+      override type PendingRequestData = PendingTransferOut
+    }
+
+    type TransferOut = TransferOut.type
+
+    case object TransferIn extends RequestType {
+      override type PendingRequestData = PendingTransferIn
+    }
+    type TransferIn = TransferIn.type
+  }
 
   trait WrapsProcessorError {
     def underlyingProcessorError(): Option[ProcessorError]

@@ -12,9 +12,8 @@ import com.digitalasset.canton.participant.admin.PackageService.DarDescriptor
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.v0.{DarDescription as ProtoDarDescription, *}
-import com.digitalasset.canton.participant.admin.workflows.{DarDistribution as M}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.participant.admin.workflows.DarDistribution as M
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import com.digitalasset.canton.{LfPackageId, protocol}
 import com.google.protobuf.ByteString
@@ -32,153 +31,147 @@ class GrpcPackageService(
     extends PackageServiceGrpc.PackageService
     with NamedLogging {
 
-  override def listPackages(request: ListPackagesRequest): Future[ListPackagesResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      for {
-        activePackages <- service.listPackages(OptionUtil.zeroAsNone(request.limit))
-      } yield ListPackagesResponse(activePackages.map {
-        case protocol.PackageDescription(pid, sourceDescription) =>
-          v0.PackageDescription(pid, sourceDescription.unwrap)
-      })
-    }
-
-  override def uploadDar(request: UploadDarRequest): Future[UploadDarResponse] = fromGrpcContext {
-    implicit traceContext =>
-      val ret = for {
-        hash <- service.appendDarFromByteString(
-          request.data,
-          request.filename,
-          request.vetAllPackages,
-          request.synchronizeVetting,
-        )
-      } yield UploadDarResponse(
-        UploadDarResponse.Value.Success(UploadDarResponse.Success(hash.toHexString))
-      )
-      EitherTUtil.toFuture(ret.leftMap(err => err.code.asGrpcError(err)))
+  override def listPackages(request: ListPackagesRequest): Future[ListPackagesResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    for {
+      activePackages <- service.listPackages(OptionUtil.zeroAsNone(request.limit))
+    } yield ListPackagesResponse(activePackages.map {
+      case protocol.PackageDescription(pid, sourceDescription) =>
+        v0.PackageDescription(pid, sourceDescription.unwrap)
+    })
   }
 
-  override def removePackage(request: RemovePackageRequest): Future[RemovePackageResponse] =
-    fromGrpcContext { implicit traceContext =>
-      val packageIdE: Either[StatusRuntimeException, LfPackageId] =
-        LfPackageId
-          .fromString(request.packageId)
-          .left
-          .map(_ =>
-            Status.INVALID_ARGUMENT
-              .withDescription(s"Invalid package ID: ${request.packageId}")
-              .asRuntimeException()
-          )
+  override def uploadDar(request: UploadDarRequest): Future[UploadDarResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      hash <- service.appendDarFromByteString(
+        request.data,
+        request.filename,
+        request.vetAllPackages,
+        request.synchronizeVetting,
+      )
+    } yield UploadDarResponse(
+      UploadDarResponse.Value.Success(UploadDarResponse.Success(hash.toHexString))
+    )
+    EitherTUtil.toFuture(ret.leftMap(err => err.code.asGrpcError(err)))
+  }
 
-      val ret = {
-        for {
-          packageId <- EitherT.fromEither[Future](packageIdE)
-          _unit <- service
-            .removePackage(
-              packageId,
-              request.force,
-            )
-            .leftMap(err => err.code.asGrpcError(err))
-        } yield {
-          RemovePackageResponse(success = Some(Empty()))
-        }
-      }
-
-      EitherTUtil.toFuture(ret)
-    }
-
-  override def removeDar(request: RemoveDarRequest): Future[RemoveDarResponse] = {
-
-    fromGrpcContext { implicit traceContext =>
-      val hashE = Hash
-        .fromHexString(request.darHash)
+  override def removePackage(request: RemovePackageRequest): Future[RemovePackageResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val packageIdE: Either[StatusRuntimeException, LfPackageId] =
+      LfPackageId
+        .fromString(request.packageId)
         .left
-        .map(err =>
+        .map(_ =>
           Status.INVALID_ARGUMENT
-            .withDescription(s"Invalid dar hash: ${request.darHash} [$err]")
+            .withDescription(s"Invalid package ID: ${request.packageId}")
             .asRuntimeException()
         )
-      val ret = {
-        for {
-          hash <- EitherT.fromEither[Future](hashE)
-          _unit <- service
-            .removeDar(
-              hash
-            )
-            .leftMap(_.asGrpcError)
-        } yield {
-          RemoveDarResponse(success = Some(Empty()))
-        }
-      }
 
-      EitherTUtil.toFuture(ret)
-    }
-
-  }
-  override def getDar(request: GetDarRequest): Future[GetDarResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val darHash = Hash.tryFromHexString(request.hash)
+    val ret = {
       for {
-        maybeDar <- service.getDar(darHash)
-      } yield maybeDar.fold(GetDarResponse(data = ByteString.EMPTY, name = "")) { dar =>
-        GetDarResponse(ByteString.copyFrom(dar.bytes), dar.descriptor.name.toProtoPrimitive)
-      }
-    }
-
-  override def listDars(request: ListDarsRequest): Future[ListDarsResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      for {
-        dars <- service.listDars(OptionUtil.zeroAsNone(request.limit))
-      } yield ListDarsResponse(dars.map { case DarDescriptor(hash, name) =>
-        ProtoDarDescription(hash.toHexString, name.toProtoPrimitive)
-      })
-    }
-
-  override def listDarContents(request: ListDarContentsRequest): Future[ListDarContentsResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      val res = for {
-        hash <- EitherT.fromEither[Future](Hash.fromHexString(request.darId)).leftMap(_.toString)
-        result <- service.listDarContents(hash)
+        packageId <- EitherT.fromEither[Future](packageIdE)
+        _unit <- service
+          .removePackage(
+            packageId,
+            request.force,
+          )
+          .leftMap(err => err.code.asGrpcError(err))
       } yield {
-        val (description, archive) = result
-        ListDarContentsResponse(
-          description = description.name.toProtoPrimitive,
-          main = archive.main.getHash,
-          packages = archive.all.map(_.getHash),
-          dependencies = archive.dependencies.map(_.getHash),
-        )
+        RemovePackageResponse(success = Some(Empty()))
       }
-      EitherTUtil.toFuture(res.leftMap(Status.NOT_FOUND.withDescription(_).asRuntimeException()))
     }
+
+    EitherTUtil.toFuture(ret)
+  }
+
+  override def removeDar(request: RemoveDarRequest): Future[RemoveDarResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val hashE = Hash
+      .fromHexString(request.darHash)
+      .left
+      .map(err =>
+        Status.INVALID_ARGUMENT
+          .withDescription(s"Invalid dar hash: ${request.darHash} [$err]")
+          .asRuntimeException()
+      )
+    val ret = {
+      for {
+        hash <- EitherT.fromEither[Future](hashE)
+        _unit <- service.removeDar(hash).leftMap(_.asGrpcError)
+      } yield {
+        RemoveDarResponse(success = Some(Empty()))
+      }
+    }
+
+    EitherTUtil.toFuture(ret)
+  }
+
+  override def getDar(request: GetDarRequest): Future[GetDarResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val darHash = Hash.tryFromHexString(request.hash)
+    for {
+      maybeDar <- service.getDar(darHash)
+    } yield maybeDar.fold(GetDarResponse(data = ByteString.EMPTY, name = "")) { dar =>
+      GetDarResponse(ByteString.copyFrom(dar.bytes), dar.descriptor.name.toProtoPrimitive)
+    }
+  }
+
+  override def listDars(request: ListDarsRequest): Future[ListDarsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    for {
+      dars <- service.listDars(OptionUtil.zeroAsNone(request.limit))
+    } yield ListDarsResponse(dars.map { case DarDescriptor(hash, name) =>
+      ProtoDarDescription(hash.toHexString, name.toProtoPrimitive)
+    })
+  }
+
+  override def listDarContents(request: ListDarContentsRequest): Future[ListDarContentsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      hash <- EitherT.fromEither[Future](Hash.fromHexString(request.darId)).leftMap(_.toString)
+      result <- service.listDarContents(hash)
+    } yield {
+      val (description, archive) = result
+      ListDarContentsResponse(
+        description = description.name.toProtoPrimitive,
+        main = archive.main.getHash,
+        packages = archive.all.map(_.getHash),
+        dependencies = archive.dependencies.map(_.getHash),
+      )
+    }
+    EitherTUtil.toFuture(res.leftMap(Status.NOT_FOUND.withDescription(_).asRuntimeException()))
+  }
 
   override def listPackageContents(
       request: ListPackageContentsRequest
-  ): Future[ListPackageContentsResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      for {
-        optModules <- service.getPackage(LfPackageId.assertFromString(request.packageId))
-        modules = optModules.map(_.modules).getOrElse(Map.empty)
-      } yield {
-        ListPackageContentsResponse(modules.toSeq.map { case (moduleName, _) =>
-          ModuleDescription(moduleName.dottedName)
-        })
-      }
+  ): Future[ListPackageContentsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    for {
+      optModules <- service.getPackage(LfPackageId.assertFromString(request.packageId))
+      modules = optModules.map(_.modules).getOrElse(Map.empty)
+    } yield {
+      ListPackageContentsResponse(modules.toSeq.map { case (moduleName, _) =>
+        ModuleDescription(moduleName.dottedName)
+      })
     }
+  }
 
-  override def share(request: ShareRequest): Future[Empty] = fromGrpcContext {
-    implicit traceContext =>
-      val darHash = Hash.tryFromHexString(request.darHash)
-      darDistribution
-        .share(darHash, Converters.toParty(request.recipientId))
-        .map(_.left.map {
-          case DarNotFound =>
-            Status.NOT_FOUND.withDescription("Dar with matching hash was not found")
-          case ShareError.SubmissionFailed(_) =>
-            Status.INTERNAL.withDescription("Submission of share request to ledger failed")
-        })
-        .flatMap {
-          case Left(status) => Future.failed(status.asException())
-          case Right(_) => Future.successful(Empty())
-        }
+  override def share(request: ShareRequest): Future[Empty] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val darHash = Hash.tryFromHexString(request.darHash)
+    darDistribution
+      .share(darHash, Converters.toParty(request.recipientId))
+      .map(_.left.map {
+        case DarNotFound =>
+          Status.NOT_FOUND.withDescription("Dar with matching hash was not found")
+        case ShareError.SubmissionFailed(_) =>
+          Status.INTERNAL.withDescription("Submission of share request to ledger failed")
+      })
+      .flatMap {
+        case Left(status) => Future.failed(status.asException())
+        case Right(_) => Future.successful(Empty())
+      }
   }
 
   override def listShareRequests(request: Empty): Future[ListShareRequestsResponse] =
@@ -195,20 +188,20 @@ class GrpcPackageService(
         ListShareOffersResponse(offers.map(shareOfferItem))
       }
 
-  override def acceptShareOffer(request: AcceptShareOfferRequest): Future[Empty] = fromGrpcContext {
-    implicit traceContext =>
-      darDistribution
-        .accept(Converters.toContractId[M.ShareDar](request.id))
-        .map(acceptRejectResultToResponse("accept"))
-        .flatMap(Future.fromTry)
+  override def acceptShareOffer(request: AcceptShareOfferRequest): Future[Empty] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    darDistribution
+      .accept(Converters.toContractId[M.ShareDar](request.id))
+      .map(acceptRejectResultToResponse("accept"))
+      .flatMap(Future.fromTry)
   }
 
-  override def rejectShareOffer(request: RejectShareOfferRequest): Future[Empty] = fromGrpcContext {
-    implicit traceContext =>
-      darDistribution
-        .reject(Converters.toContractId[M.ShareDar](request.id), request.reason)
-        .map(acceptRejectResultToResponse("reject"))
-        .flatMap(Future.fromTry)
+  override def rejectShareOffer(request: RejectShareOfferRequest): Future[Empty] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    darDistribution
+      .reject(Converters.toContractId[M.ShareDar](request.id), request.reason)
+      .map(acceptRejectResultToResponse("reject"))
+      .flatMap(Future.fromTry)
   }
 
   private def acceptRejectResultToResponse(

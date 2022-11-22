@@ -166,7 +166,6 @@ class ReplayingSendsSequencerClientTransport(
         .sendAsync(
           extendMaxSequencingTime(submission),
           replaySendsConfig.sendTimeout.toScala,
-          protocolVersion,
         )(traceContext)
         .value
         .map(handleSendResult)
@@ -183,14 +182,6 @@ class ReplayingSendsSequencerClientTransport(
         .toMat(Sink.fold(SendReplayReport())(_.update(_)))(Keep.right)
 
       AkkaUtil.runSupervised(logger.error("Failed to run submission replay", _), submissionReplay)
-  }
-
-  /** How long did the replay take from first send sent to last event received. */
-  def replayDuration: Option[java.time.Duration] = {
-    for {
-      firstSend <- firstSend.get()
-      lastReceived <- lastReceivedEvent.get()
-    } yield java.time.Duration.between(firstSend.toInstant, lastReceived.toInstant)
   }
 
   def waitForIdle(
@@ -335,7 +326,7 @@ class ReplayingSendsSequencerClientTransport(
     val idleF: Future[EventsReceivedReport] = idleP.future
 
     private val subscription =
-      underlyingTransport.subscribe(SubscriptionRequest(member, readFrom), handle)
+      underlyingTransport.subscribe(SubscriptionRequest(member, readFrom, protocolVersion), handle)
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
       Seq(
@@ -347,7 +338,6 @@ class ReplayingSendsSequencerClientTransport(
   override def sendAsync(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
@@ -356,14 +346,12 @@ class ReplayingSendsSequencerClientTransport(
   override def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     EitherT.rightT(())
 
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
@@ -390,6 +378,11 @@ class ReplayingSendsSequencerClientTransport(
   override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
+
+  override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] =
+    EitherT.rightT(())
 
   override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
     SubscriptionErrorRetryPolicy.never

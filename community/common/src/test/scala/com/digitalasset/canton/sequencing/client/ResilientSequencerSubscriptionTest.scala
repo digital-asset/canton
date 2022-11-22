@@ -19,6 +19,7 @@ import com.digitalasset.canton.sequencing.client.TestSubscriptionError.{
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.sequencing.{SequencerTestUtils, SerializedEventHandler}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext, SequencerCounter}
 import org.scalatest.Assertion
@@ -62,6 +63,8 @@ class ResilientSequencerSubscriptionTest
     with BaseTest
     with ResilientSequencerSubscriptionTestUtils
     with HasExecutionContext {
+
+  private lazy val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain1::test"))
 
   "ResilientSequencerSubscription" should {
     "not retry on an unrecoverable error" in {
@@ -217,7 +220,7 @@ class ResilientSequencerSubscriptionTest
         }
 
       val resilientSequencerSubscription = new ResilientSequencerSubscription[TestHandlerError](
-        "test",
+        domainId,
         SequencerCounter(0),
         _ => Future.successful[Either[TestHandlerError, Unit]](Right(())),
         subscriptionFactory,
@@ -298,6 +301,8 @@ trait ResilientSequencerSubscriptionTestUtils {
   val MaxDelay: FiniteDuration =
     1025.millis // 1 + power of 2 because InitialDelay keeps being doubled
 
+  private lazy val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain1::test"))
+
   def retryDelay(maxDelay: FiniteDuration = MaxDelay) =
     SubscriptionRetryDelayRule(InitialDelay, maxDelay, maxDelay)
 
@@ -306,7 +311,7 @@ trait ResilientSequencerSubscriptionTestUtils {
       retryDelayRule: SubscriptionRetryDelayRule = retryDelay(),
   ): ResilientSequencerSubscription[TestHandlerError] = {
     val subscription = new ResilientSequencerSubscription(
-      "test",
+      domainId,
       SequencerCounter(0),
       _ => Future.successful[Either[TestHandlerError, Unit]](Right(())),
       subscriptionTestFactory,

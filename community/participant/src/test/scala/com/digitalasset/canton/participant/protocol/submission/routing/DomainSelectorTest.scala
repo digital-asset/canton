@@ -329,9 +329,9 @@ private[routing] object DomainSelectorTest {
     UniqueIdentifier(Identifier.tryCreate(alias), DefaultTestIdentities.namespace)
   )
 
-  val da = createDomainId("da")
-  val acme = createDomainId("acme")
-  val repair = createDomainId("repair")
+  private lazy val da = createDomainId("da")
+  private lazy val acme = createDomainId("acme")
+  private lazy val repair = createDomainId("repair")
 
   object ForSimpleTopology {
     import SimpleTopology.*
@@ -348,7 +348,8 @@ private[routing] object DomainSelectorTest {
 
     private val defaultPrescribedDomainAlias: Option[String] = None
 
-    private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ => ProtocolVersion.v3
+    // TODO(i10964): Make this dependent on CANTON_PROTOCOL_VERSION?
+    private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ => ProtocolVersion.v4
 
     private val defaultTransactionVersion: LanguageVersion = LanguageVersion.v1_14
 

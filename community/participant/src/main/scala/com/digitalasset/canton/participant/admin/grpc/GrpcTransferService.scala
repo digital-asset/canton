@@ -15,7 +15,7 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -25,84 +25,84 @@ class GrpcTransferService(service: TransferService)(implicit ec: ExecutionContex
 
   import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 
-  override def transferOut(request: AdminTransferOutRequest): Future[AdminTransferOutResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      request match {
-        case AdminTransferOutRequest(submittingPartyP, contractIdP, sourceDomainP, targetDomainP) =>
-          val res = for {
-            sourceDomain <- mapErr(DomainAlias.create(sourceDomainP))
-            targetDomain <- mapErr(DomainAlias.create(targetDomainP))
-            contractId <- mapErr(LfContractId.fromProtoPrimitive(contractIdP))
-            submittingParty <- mapErr(
-              EitherT.fromEither[Future](ProtoConverter.parseLfPartyId(submittingPartyP))
-            )
-            transferId <- mapErr(
-              service.transferOut(submittingParty, contractId, sourceDomain, targetDomain)
-            )
-          } yield AdminTransferOutResponse(transferId = Some(transferId.toProtoV0))
-          EitherTUtil.toFuture(res)
-      }
+  override def transferOut(request: AdminTransferOutRequest): Future[AdminTransferOutResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    request match {
+      case AdminTransferOutRequest(submittingPartyP, contractIdP, sourceDomainP, targetDomainP) =>
+        val res = for {
+          sourceDomain <- mapErr(DomainAlias.create(sourceDomainP))
+          targetDomain <- mapErr(DomainAlias.create(targetDomainP))
+          contractId <- mapErr(LfContractId.fromProtoPrimitive(contractIdP))
+          submittingParty <- mapErr(
+            EitherT.fromEither[Future](ProtoConverter.parseLfPartyId(submittingPartyP))
+          )
+          transferId <- mapErr(
+            service.transferOut(submittingParty, contractId, sourceDomain, targetDomain)
+          )
+        } yield AdminTransferOutResponse(transferId = Some(transferId.toProtoV0))
+        EitherTUtil.toFuture(res)
     }
+  }
 
-  override def transferIn(request: AdminTransferInRequest): Future[AdminTransferInResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      request match {
-        case AdminTransferInRequest(submittingPartyId, targetDomainP, Some(transferIdP)) =>
-          val res = for {
-            targetDomain <- mapErr(EitherT.fromEither[Future](DomainAlias.create(targetDomainP)))
-            submittingParty <- mapErr(
-              EitherT.fromEither[Future](ProtoConverter.parseLfPartyId(submittingPartyId))
-            )
-            transferId <- mapErr(EitherT.fromEither[Future](TransferId.fromProtoV0(transferIdP)))
-            _result <- mapErr(service.transferIn(submittingParty, targetDomain, transferId))
-          } yield AdminTransferInResponse()
-          EitherTUtil.toFuture(res)
-        case AdminTransferInRequest(_, _, None) =>
-          Future.failed(invalidArgument("TransferId not set in transfer-in request"))
-      }
+  override def transferIn(request: AdminTransferInRequest): Future[AdminTransferInResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    request match {
+      case AdminTransferInRequest(submittingPartyId, targetDomainP, Some(transferIdP)) =>
+        val res = for {
+          targetDomain <- mapErr(EitherT.fromEither[Future](DomainAlias.create(targetDomainP)))
+          submittingParty <- mapErr(
+            EitherT.fromEither[Future](ProtoConverter.parseLfPartyId(submittingPartyId))
+          )
+          transferId <- mapErr(EitherT.fromEither[Future](TransferId.fromProtoV0(transferIdP)))
+          _result <- mapErr(service.transferIn(submittingParty, targetDomain, transferId))
+        } yield AdminTransferInResponse()
+        EitherTUtil.toFuture(res)
+      case AdminTransferInRequest(_, _, None) =>
+        Future.failed(invalidArgument("TransferId not set in transfer-in request"))
     }
+  }
 
   override def transferSearch(
       searchRequest: AdminTransferSearchQuery
-  ): Future[AdminTransferSearchResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      searchRequest match {
-        case AdminTransferSearchQuery(
-              searchDomainP,
-              filterSourceDomainP,
-              filterTimestampP,
-              filterSubmitterP,
-              limit,
-            ) =>
-          val res = for {
-            filterSourceDomain <- mapErr(DomainAlias.create(filterSourceDomainP))
-            filterDomain = if (filterSourceDomainP == "") None else Some(filterSourceDomain)
-            searchDomain <- mapErr(DomainAlias.create(searchDomainP))
-            filterSubmitterO <- mapErr(
-              OptionUtil
-                .emptyStringAsNone(filterSubmitterP)
-                .map(ProtoConverter.parseLfPartyId)
-                .sequence
+  ): Future[AdminTransferSearchResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    searchRequest match {
+      case AdminTransferSearchQuery(
+            searchDomainP,
+            filterSourceDomainP,
+            filterTimestampP,
+            filterSubmitterP,
+            limit,
+          ) =>
+        val res = for {
+          filterSourceDomain <- mapErr(DomainAlias.create(filterSourceDomainP))
+          filterDomain = if (filterSourceDomainP == "") None else Some(filterSourceDomain)
+          searchDomain <- mapErr(DomainAlias.create(searchDomainP))
+          filterSubmitterO <- mapErr(
+            OptionUtil
+              .emptyStringAsNone(filterSubmitterP)
+              .map(ProtoConverter.parseLfPartyId)
+              .sequence
+          )
+          filterTimestampO <- mapErr(
+            filterTimestampP.map(CantonTimestamp.fromProtoPrimitive).sequence
+          )
+          transferData <- mapErr(
+            service.transferSearch(
+              searchDomain,
+              filterDomain,
+              filterTimestampO,
+              filterSubmitterO,
+              limit.toInt,
             )
-            filterTimestampO <- mapErr(
-              filterTimestampP.map(CantonTimestamp.fromProtoPrimitive).sequence
-            )
-            transferData <- mapErr(
-              service.transferSearch(
-                searchDomain,
-                filterDomain,
-                filterTimestampO,
-                filterSubmitterO,
-                limit.toInt,
-              )
-            )
-          } yield {
-            val searchResultsP = transferData.map(TransferSearchResult(_).toProtoV0)
-            AdminTransferSearchResponse(results = searchResultsP)
-          }
-          EitherTUtil.toFuture(res)
-      }
+          )
+        } yield {
+          val searchResultsP = transferData.map(TransferSearchResult(_).toProtoV0)
+          AdminTransferSearchResponse(results = searchResultsP)
+        }
+        EitherTUtil.toFuture(res)
     }
+  }
 }
 
 case class TransferSearchResult(

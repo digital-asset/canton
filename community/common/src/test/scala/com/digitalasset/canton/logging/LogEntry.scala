@@ -162,7 +162,7 @@ object LogEntry {
     */
   def assertLogSeq(
       mustContainWithClue: Seq[(LogEntry => Assertion, String)],
-      mayContain: Seq[LogEntry => Assertion],
+      mayContain: Seq[LogEntry => Assertion] = Seq.empty,
   )(entries: Iterable[LogEntry]): Assertion = {
     val mustContain = mustContainWithClue.map { case (assertion, _) => assertion }
 

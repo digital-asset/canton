@@ -6,6 +6,7 @@ package com.digitalasset.canton.protocol.v1;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v0/common.proto";
+import "com/digitalasset/canton/protocol/v1/common.proto";
 import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
 import "com/digitalasset/canton/protocol/v1/merkle.proto";
 
@@ -84,4 +85,17 @@ message LightTransactionViewTree {
 
 message FullInformeeTree {
   GenTransactionTree tree = 1;
+}
+
+// Compared to v0: contract changed type from v0.SerializableContract to v1.SerializableContract
+message CreatedContract {
+  v1.SerializableContract contract = 1;
+  bool consumed_in_core = 2;
+  bool rolled_back = 3;
+}
+
+// Compared to v0: contract changed type from v0.SerializableContract to v1.SerializableContract
+message InputContract {
+  v1.SerializableContract contract = 1;
+  bool consumed = 2;
 }

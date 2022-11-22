@@ -698,7 +698,7 @@ class AcsCommitmentProcessor(
       cmt,
       protocolVersion,
     )
-    SignedProtocolMessage.tryCreate(payload, crypto, domainCrypto.pureCrypto, protocolVersion)
+    SignedProtocolMessage.tryCreate(payload, crypto, protocolVersion)
   }
 
   /* Compute commitment messages to be sent for the ACS at the given timestamp. The snapshot is assumed to be ordered

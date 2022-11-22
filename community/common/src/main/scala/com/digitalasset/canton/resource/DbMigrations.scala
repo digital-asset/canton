@@ -56,8 +56,8 @@ trait DbMigrations { this: NamedLogging =>
     Flyway.configure
       .locations(dbConfig.buildMigrationsPaths(devVersionSupport): _*)
       .dataSource(dataSource)
-      .cleanOnValidationError(dbConfig.cleanOnValidationError)
-      .baselineOnMigrate(dbConfig.baselineOnMigrate)
+      .cleanOnValidationError(dbConfig.parameters.unsafeCleanOnValidationError)
+      .baselineOnMigrate(dbConfig.parameters.unsafeBaselineOnMigrate)
       .lockRetryCount(60)
       .load()
   }
@@ -72,6 +72,7 @@ trait DbMigrations { this: NamedLogging =>
           false, // no need to adjust the connection pool for participants, as we are not yet running the ledger api server
         withWriteConnectionPool = false,
         withMainConnection = false,
+        scheduler = None, // no db query deadlock detection here
         forMigration = true,
         retryConfig = retryConfig,
       )(loggerFactory)

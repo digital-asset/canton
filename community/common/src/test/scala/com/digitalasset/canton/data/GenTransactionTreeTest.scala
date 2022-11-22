@@ -14,13 +14,12 @@ import com.digitalasset.canton.topology.transaction.{
   TrustLevel,
 }
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
-import org.scalatest.wordspec.AnyWordSpec
+import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId}
 
 import scala.annotation.nowarn
 
 @nowarn("msg=match may not be exhaustive")
-class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
 
   val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
 
@@ -176,7 +175,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       factory.SingleCreate(ExampleTransactionFactory.lfHash(0)).rootViews.headOption.value
 
     // First check that the normal thing does not throw an exception.
-    GenTransactionTree(factory.cryptoOps)(
+    GenTransactionTree.tryCreate(factory.cryptoOps)(
       factory.submitterMetadata,
       factory.commonMetadata,
       factory.participantMetadata,

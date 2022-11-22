@@ -95,28 +95,30 @@ object SignedProtocolMessage
   def create[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
-      hashOps: HashOps,
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, SyncCryptoError, SignedProtocolMessage[M]] = {
-    val serialization = message.getCryptographicEvidence
-    val hash = hashOps.digest(message.hashPurpose, serialization)
-    cryptoApi
-      .sign(hash)
+  ): EitherT[Future, SyncCryptoError, SignedProtocolMessage[M]] =
+    mkSignature(message, cryptoApi)
       .map(signature =>
         SignedProtocolMessage(message, signature)(protocolVersionRepresentativeFor(protocolVersion))
       )
+
+  def mkSignature[M <: SignedProtocolMessageContent](message: M, cryptoApi: SyncCryptoApi)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SyncCryptoError, Signature] = {
+    val serialization = message.getCryptographicEvidence
+    val hash = cryptoApi.pureCrypto.digest(message.hashPurpose, serialization)
+    cryptoApi.sign(hash)
   }
 
   def tryCreate[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
-      hashOps: HashOps,
       protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext, ec: ExecutionContext): Future[SignedProtocolMessage[M]] =
-    create(message, cryptoApi, hashOps, protocolVersion)
+    create(message, cryptoApi, protocolVersion)
       .fold(
         err => throw new IllegalStateException(s"Failed to create signed protocol message: $err"),
         identity,

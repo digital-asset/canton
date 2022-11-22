@@ -24,6 +24,7 @@ import com.digitalasset.canton.{ProtoDeserializationError, crypto as DomainCrypt
 import io.scalaland.chimney.dsl.*
 
 import scala.Ordering.Implicits.*
+import scala.annotation.nowarn
 
 /** Companion object [[com.digitalasset.canton.protocol.StaticDomainParameters]] indicates
   * when the different version were introduces.
@@ -104,6 +105,8 @@ sealed abstract case class StaticDomainParametersV1(
 }
 
 object StaticDomainParameters {
+
+  @nowarn("msg=deprecated")
   def apply(
       domain: StaticDomainParametersInternal
   ): Either[ProtoDeserializationError.VersionError, StaticDomainParameters] = {

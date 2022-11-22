@@ -28,8 +28,7 @@ class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest {
       new ExecutionContextMonitor(
         loggerFactory,
         NonNegativeFiniteDuration.ofSeconds(1),
-        5,
-        true,
+        NonNegativeFiniteDuration.ofSeconds(2),
         DefaultProcessingTimeouts.testing,
       )
     monitor.monitor(ec)
@@ -70,8 +69,9 @@ class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest {
         { seq =>
           seq.foreach { entry =>
             assert(
-              entry.warningMessage.contains("is stuck or overloaded") || entry.warningMessage
-                .contains("is just overloaded"),
+              entry.warningMessage.contains("is stuck or overloaded") ||
+                entry.warningMessage.contains("is still stuck or overloaded") ||
+                entry.warningMessage.contains("is just overloaded"),
               s"did not match expected warning messages: ${entry.toString}",
             )
           }

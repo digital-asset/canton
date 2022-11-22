@@ -24,8 +24,20 @@ object LocalNodeConfig {
         override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
           DeprecatedConfigUtils.MovedConfigPath(
             "init.startup-fail-fast",
+            "storage.parameters.fail-fast-on-startup",
+          ),
+          DeprecatedConfigUtils.MovedConfigPath(
             "storage.fail-fast-on-startup",
-          )
+            "storage.parameters.fail-fast-on-startup",
+          ),
+          DeprecatedConfigUtils.MovedConfigPath(
+            "storage.max-connections",
+            "storage.parameters.max-connections",
+          ),
+          DeprecatedConfigUtils.MovedConfigPath(
+            "storage.ledger-api-jdbc-url",
+            "storage.parameters.ledger-api-jdbc-url",
+          ),
         )
       }
   }

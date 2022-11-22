@@ -2,3 +2,4 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- no deactivation index for pruning
+alter table contracts add column contract_salt binary large object;

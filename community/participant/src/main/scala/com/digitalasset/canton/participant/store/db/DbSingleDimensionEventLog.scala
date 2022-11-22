@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
@@ -50,8 +50,8 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
 
   private def log_id: Int = id.index
 
-  private implicit val setParameterTraceContext: SetParameter[TraceContext] =
-    TraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
+  private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =
+    SerializableTraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
   private implicit val setParameterCausalityUpdate: SetParameter[CausalityUpdate] =
     CausalityUpdate.getVersionedSetParameter
   private implicit val setParameterCausalityUpdateO: SetParameter[Option[CausalityUpdate]] =
@@ -176,7 +176,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
               pp >> event.eventId
               pp >> associatedDomainIdO.map(_.index)
               pp >> SerializableLedgerSyncEvent(event.event, releaseProtocolVersion.v)
-              pp >> event.traceContext
+              pp >> SerializableTraceContext(event.traceContext)
               pp >> clock
             }
           case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Postgres =>
@@ -196,7 +196,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
                 pp >> event.eventId
                 pp >> associatedDomainIdO.map(_.index)
                 pp >> SerializableLedgerSyncEvent(event.event, releaseProtocolVersion.v)
-                pp >> event.traceContext
+                pp >> SerializableTraceContext(event.traceContext)
                 pp >> clock
             }
         }

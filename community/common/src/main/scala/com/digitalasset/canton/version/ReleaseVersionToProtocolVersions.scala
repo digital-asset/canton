@@ -16,7 +16,7 @@ object ReleaseVersionToProtocolVersions {
     ReleaseVersions.v2_2_0 -> List(v2),
     ReleaseVersions.v2_3_0 -> List(v2, v3),
     ReleaseVersions.v2_4_0 -> List(v2, v3),
-    ReleaseVersions.v2_5_0 -> List(v2, v3),
+    ReleaseVersions.v2_5_0 -> List(v2, v3, v4),
   ).map { case (release, pvs) => (release.majorMinor, NonEmptyUtil.fromUnsafe(pvs)) }
 
   def get(releaseVersion: ReleaseVersion): Option[NonEmpty[List[ProtocolVersion]]] =

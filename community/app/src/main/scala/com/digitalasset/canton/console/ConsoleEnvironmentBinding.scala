@@ -6,10 +6,10 @@ package com.digitalasset.canton.console
 /** To make the [[ConsoleEnvironment]] functionality conveniently available in ammonite we stash
   * it in a implicit variable included as a predef before any script or REPL commands are run.
   */
-object ConsoleEnvironmentBinding {
+class ConsoleEnvironmentBinding {
 
-  /** where we hide the value of the active environment instance within the scope of our repl ******* */
-  val BindingName = "__replEnvironmentValue"
+  protected def consoleMacrosImport: String =
+    "import com.digitalasset.canton.console.ConsoleMacros._"
 
   /** The predef code itself which is executed before any script or repl command */
   def predefCode(interactive: Boolean, noTty: Boolean = false): String = {
@@ -27,7 +27,7 @@ object ConsoleEnvironmentBinding {
        |import com.digitalasset.canton.config._
        |import com.digitalasset.canton.admin.api.client.data._
        |import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-       |import com.digitalasset.canton.console.ConsoleMacros._
+       |$consoleMacrosImport
        |import com.digitalasset.canton.console.commands.DomainChoice
        |import com.digitalasset.canton.console.BootstrapScriptException
        |import com.digitalasset.canton.config.RequireTypes._
@@ -36,7 +36,7 @@ object ConsoleEnvironmentBinding {
        |import scala.concurrent.ExecutionContextExecutor
        |import scala.concurrent.duration._
        |import scala.language.postfixOps
-       |implicit val consoleEnvironment = $BindingName
+       |implicit val consoleEnvironment = ${ConsoleEnvironmentBinding.BindingName}
        |implicit val ec: ExecutionContextExecutor = consoleEnvironment.environment.executionContext
        |def help = consoleEnvironment.help
        |def help(s: String) = consoleEnvironment.help(s)
@@ -57,5 +57,12 @@ object ConsoleEnvironmentBinding {
 
     builder.result()
   }
+
+}
+
+object ConsoleEnvironmentBinding {
+
+  /** where we hide the value of the active environment instance within the scope of our repl ******* */
+  private[console] val BindingName = "__replEnvironmentValue"
 
 }

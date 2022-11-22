@@ -72,6 +72,8 @@ case class SubmissionRequest private (
   def isConfirmationResponse(mediator: Member): Boolean =
     batch.envelopes.nonEmpty && batch.envelopes.forall(_.recipients.allRecipients == Set(mediator))
 
+  def isMediatorResult(mediator: Member): Boolean = batch.envelopes.nonEmpty && sender == mediator
+
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 }
@@ -164,9 +166,6 @@ object SubmissionRequest
     )
   }
 
-  def usingSignedSubmissionRequest(protocolVersion: ProtocolVersion): Boolean = {
-    // TODO(#10047) migrate to stable
-    val sigCheckSupportSince = ProtocolVersion.dev
-    protocolVersion >= sigCheckSupportSince
-  }
+  def usingSignedSubmissionRequest(protocolVersion: ProtocolVersion): Boolean =
+    protocolVersion >= ProtocolVersion.v4
 }

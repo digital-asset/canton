@@ -6,9 +6,9 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import com.digitalasset.canton.data.{CantonTimestamp, TransactionView}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 
 object ContractConsistencyChecker {
 
@@ -27,36 +27,16 @@ object ContractConsistencyChecker {
     )
   }
 
-  private def usedContracts(
-      rootViews: List[TransactionView]
-  ): List[(LfContractId, CantonTimestamp)] = {
-    val coreInputs = List.newBuilder[(LfContractId, CantonTimestamp)]
-
-    def go(view: TransactionView): Unit = {
-      coreInputs ++= view.viewParticipantData.unwrap
-        .map(_.coreInputs.map { case (cid, inputContract) =>
-          (cid, inputContract.contract.ledgerCreateTime)
-        })
-        .getOrElse(List.empty)
-
-      view.subviews.foreach(_.unwrap.foreach(go))
-    }
-
-    rootViews.foreach(go)
-    coreInputs.result()
-  }
-
-  /** Checks for all unblinded [[com.digitalasset.canton.data.ViewParticipantData]] nodes in the `rootViews`
-    * that the [[com.digitalasset.canton.data.ViewParticipantData.coreInputs]] have a ledger time
+  /** Checks that the provided contracts have a ledger time
     * no later than `ledgerTime`.
     */
   def assertInputContractsInPast(
-      rootViews: List[TransactionView],
+      inputContracts: List[(LfContractId, SerializableContract)],
       ledgerTime: CantonTimestamp,
-  ): Either[List[ReferenceToFutureContractError], Unit] = {
-    val contracts = usedContracts(rootViews)
-    contracts
-      .traverse_ { case (coid, let) =>
+  ): Either[List[ReferenceToFutureContractError], Unit] =
+    inputContracts
+      .traverse_ { case (coid, contract) =>
+        val let = contract.ledgerCreateTime
         Validated.condNec(
           let <= ledgerTime,
           (),
@@ -65,5 +45,4 @@ object ContractConsistencyChecker {
       }
       .toEither
       .leftMap(_.toList)
-  }
 }

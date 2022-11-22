@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
 import cats.syntax.alternative.*
+import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
@@ -12,8 +13,8 @@ import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
-import com.daml.lf.engine.{Error as LfError}
-import com.daml.lf.interpretation.{Error as LfInterpretationError}
+import com.daml.lf.engine.Error as LfError
+import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
@@ -22,7 +23,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor.PendingRequestDataOrReplayData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
   ActivenessResult,
@@ -36,6 +36,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{
+  ProcessingSteps,
   ProtocolProcessor,
   SingleDomainCausalTracker,
   TransferInUpdate,
@@ -59,7 +60,6 @@ import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, che
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
-import scala.collection.concurrent
 import scala.collection.immutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -88,13 +88,14 @@ private[transfer] class TransferInProcessingSteps(
   override def submissionDescription(param: SubmissionParam): String =
     s"Submitter ${param.submitterLf}, transferId ${param.transferId}"
 
-  override type PendingRequestData = PendingTransferIn
-
   override type SubmissionResultArgs = PendingTransferSubmission
 
   override type PendingDataAndResponseArgs = TransferInProcessingSteps.PendingDataAndResponseArgs
 
   override type RejectionArgs = Unit
+
+  override type RequestType = ProcessingSteps.RequestType.TransferIn
+  override val requestType = ProcessingSteps.RequestType.TransferIn
 
   override def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions = {
     state.pendingTransferInSubmissions
@@ -282,8 +283,8 @@ private[transfer] class TransferInProcessingSteps(
           txInRequest.transferOutResultEvent.transferId,
           targetDomain = txInRequest.domainId,
           receivedOn = domainId,
-        ): TransferProcessorError,
-      )
+        ),
+      ).leftWiden[TransferProcessorError]
 
       // TODO(M40): check recipients
 
@@ -377,8 +378,8 @@ private[transfer] class TransferInProcessingSteps(
             declaredViewStakeholders = declaredViewStakeholders,
             declaredContractStakeholders = Some(declaredContractStakeholders),
             expectedStakeholders = Right(recomputedStakeholders),
-          ): TransferProcessorError,
-        )
+          ),
+        ).leftWiden[TransferProcessorError]
       } yield ()
     }
 
@@ -580,7 +581,7 @@ private[transfer] class TransferInProcessingSteps(
 
           _ <- condUnitET[Future](
             transferInRequest.contract == transferData.contract,
-            ContractDataMismatch(transferId): TransferProcessorError,
+            ContractDataMismatch(transferId),
           )
           _ <- EitherT.fromEither[Future](checkSubmitterIsStakeholder)
           transferOutSubmitter = transferData.transferOutRequest.submitter
@@ -619,7 +620,7 @@ private[transfer] class TransferInProcessingSteps(
               transferInRequest.submitter,
               currentTimestamp = tsIn,
               timeout = exclusivityLimit,
-            ): TransferProcessorError,
+            ),
           )
           _ <- condUnitET[Future](
             transferData.creatingTransactionId == transferInRequest.creatingTransactionId,
@@ -627,7 +628,7 @@ private[transfer] class TransferInProcessingSteps(
               transferId,
               transferInRequest.creatingTransactionId,
               transferData.creatingTransactionId,
-            ): TransferProcessorError,
+            ),
           )
           sourceIps = sourceCrypto.ipsSnapshot
           confirmingParties <- EitherT.right(
@@ -663,12 +664,6 @@ private[transfer] class TransferInProcessingSteps(
         } yield res
     }
   }
-
-  override def pendingRequestMap
-      : SyncDomainEphemeralState => concurrent.Map[RequestId, PendingRequestDataOrReplayData[
-        PendingTransferIn
-      ]] =
-    _.pendingTransferIns
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
       message: SignedContent[Deliver[DefaultOpenEnvelope]],

@@ -11,7 +11,7 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.*
@@ -117,7 +117,7 @@ object CantonGrpcUtil {
 
     def go(backoffMs: Long): Future[Either[GrpcError, Res]] = {
       logger.debug(s"Sending request $requestDescription to $serverName.")
-      traceContext.intoGrpcContext(send(clientWithDeadline)).transformWith {
+      TraceContextGrpc.withGrpcContext(traceContext)(send(clientWithDeadline)).transformWith {
         case Success(value) =>
           logger.debug(s"Request $requestDescription has succeeded for $serverName.")
           Future.successful(Right(value))

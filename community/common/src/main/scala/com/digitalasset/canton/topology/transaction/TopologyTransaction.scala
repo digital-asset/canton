@@ -244,9 +244,8 @@ object TopologyTransaction
       supportedProtoVersionMemoized(v0.TopologyTransaction)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#9694): Move topology transaction changes to PV4
     ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TopologyTransaction)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

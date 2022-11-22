@@ -49,7 +49,12 @@ class HeadlessConsole(
       interpreter <- Try(createInterpreter(options)).toEither.leftMap(e =>
         HeadlessConsole.RuntimeError("Failed to initialize console", e)
       )
-      _ <- initializePredef(interpreter, consoleEnvironment.bindings.toIndexedSeq, logger)
+      _ <- initializePredef(
+        interpreter,
+        consoleEnvironment.bindings.toIndexedSeq,
+        consoleEnvironment.predefCode(_),
+        logger,
+      )
     } yield {
       interpreterO.set(Some(interpreter))
     }
@@ -123,6 +128,7 @@ object HeadlessConsole extends NoTracing {
   private def initializePredef(
       interpreter: Interpreter,
       bindings: IndexedSeq[Bind[_]],
+      interactivePredef: Boolean => String,
       logger: TracedLogger,
   ): Either[HeadlessConsoleError, Unit] = {
     val bindingsPredef = generateBindPredef(bindings)
@@ -141,7 +147,7 @@ object HeadlessConsole extends NoTracing {
         PredefInfo(Name("BindingsPredef"), bindingsPredef, hardcoded = false, None),
         PredefInfo(
           Name("CantonImplicitPredef"),
-          ConsoleEnvironmentBinding.predefCode(interactive = false),
+          interactivePredef(false),
           hardcoded = false,
           None,
         ),

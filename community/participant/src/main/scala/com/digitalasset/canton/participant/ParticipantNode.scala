@@ -21,6 +21,10 @@ import com.digitalasset.canton.concurrent.{
 }
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig, InitConfigBase, TestingConfigInternal}
+import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.{
+  CommunityGrpcVaultServiceFactory,
+  GrpcVaultServiceFactory,
+}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
   CommunityCryptoPrivateStoreFactory,
   CryptoPrivateStoreFactory,
@@ -101,6 +105,7 @@ class ParticipantNodeBootstrap(
     metrics: ParticipantMetrics,
     storageFactory: StorageFactory,
     cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
+    grpcVaultServiceFactory: GrpcVaultServiceFactory,
     setStartableStoppableLedgerApiAndCantonServices: (
         StartableStoppableLedgerApiServer,
         StartableStoppableLedgerApiDependentServices,
@@ -133,6 +138,7 @@ class ParticipantNodeBootstrap(
       metrics,
       storageFactory,
       cryptoPrivateStoreFactory,
+      grpcVaultServiceFactory,
       parentLogger.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
     ) {
@@ -727,6 +733,7 @@ object ParticipantNodeBootstrap {
             participantMetrics,
             new CommunityStorageFactory(participantConfig.storage),
             new CommunityCryptoPrivateStoreFactory,
+            new CommunityGrpcVaultServiceFactory,
             (_ledgerApi, _ledgerApiDependentServices) => (),
             _ =>
               new ResourceManagementService.CommunityResourceManagementService(

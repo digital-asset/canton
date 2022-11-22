@@ -86,6 +86,7 @@ class TransactionProcessor(
         crypto,
         ephemeral.storedContractManager,
         metrics,
+        new SerializableContractAuthenticator(new UnicumGenerator(crypto.pureCrypto)),
         loggerFactory,
       ),
       inFlightSubmissionTracker,
@@ -299,6 +300,16 @@ object TransactionProcessor {
       case class Error(topology_snapshot_timestamp: CantonTimestamp, chosen_domain: DomainId)
           extends TransactionErrorImpl(
             cause = "There are no active mediators on the domain"
+          )
+          with TransactionSubmissionError
+    }
+
+    @Explanation("At least one of the transaction's input contracts could not be authenticated.")
+    @Resolution("Retry the submission with correctly authenticated contracts.")
+    object ContractAuthenticationFailed extends AlarmErrorCode("CONTRACT_AUTHENTICATION_FAILED") {
+      case class Error(contractId: LfContractId, message: String)
+          extends Alarm(
+            cause = s"Contract with id ($contractId) could not be authenticated: $message"
           )
           with TransactionSubmissionError
     }

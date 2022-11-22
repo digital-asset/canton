@@ -194,7 +194,7 @@ private[mediator] class DefaultVerdictSender(
         .parTraverse { case (participantId, informees) =>
           val result = request.createMediatorResult(requestId, verdictWithInformeeCheck, informees)
           SignedProtocolMessage
-            .create(result, snapshot, crypto.pureCrypto, protocolVersion)
+            .create(result, snapshot, protocolVersion)
             .map(signedResult =>
               OpenEnvelope(signedResult, Recipients.cc(participantId), protocolVersion)
             )

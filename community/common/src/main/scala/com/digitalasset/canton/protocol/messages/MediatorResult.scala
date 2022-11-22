@@ -3,12 +3,19 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.data.ViewType
+import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 
-trait MediatorResult extends ProtocolVersionedMemoizedEvidence with HasDomainId with HasRequestId {
+trait MediatorResult
+    extends ProtocolVersionedMemoizedEvidence
+    with HasDomainId
+    with HasRequestId
+    with SignedProtocolMessageContent {
+
   def verdict: Verdict
+
+  override def signingTimestamp: CantonTimestamp = requestId.unwrap
 
   def viewType: ViewType
 }
@@ -16,7 +23,7 @@ trait MediatorResult extends ProtocolVersionedMemoizedEvidence with HasDomainId 
 /** The mediator issues a regular mediator result for well-formed mediator requests.
   * Malformed mediator requests lead to a [[MalformedMediatorRequestResult]].
   */
-trait RegularMediatorResult extends MediatorResult with SignedProtocolMessageContent
+trait RegularMediatorResult extends MediatorResult
 
 object RegularMediatorResult {
   implicit val regularMediatorResultMessageCast: SignedMessageContentCast[RegularMediatorResult] = {

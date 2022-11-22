@@ -19,13 +19,7 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
   TestingConfigInternal,
 }
-import com.digitalasset.canton.crypto.{
-  Crypto,
-  DomainSyncCryptoClient,
-  HashPurpose,
-  SyncCryptoApi,
-  SyncCryptoClient,
-}
+import com.digitalasset.canton.crypto.{Crypto, HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.*
@@ -168,9 +162,7 @@ class SequencerClient(
     override val timeouts: ProcessingTimeout,
     eventValidatorFactory: SequencedEventValidatorFactory,
     clock: Clock,
-    signSubmission: TraceContext => SubmissionRequest => EitherT[Future, String, SignedContent[
-      SubmissionRequest
-    ]],
+    requestSigner: RequestSigner,
     private val sequencedEventStore: SequencedEventStore,
     sendTracker: SendTracker,
     metrics: SequencerClientMetrics,
@@ -398,30 +390,19 @@ class SequencerClient(
         val timeout = timeouts.network.duration
         if (requiresAuthentication) {
           if (usingSignedSubmissionRequest(protocolVersion)) for {
-            signedContent <- signSubmission(traceContext)(request)
+            signedContent <- requestSigner
+              .signRequest(request, HashPurpose.SubmissionRequestSignature)
               .leftMap { err =>
                 val message = s"Error signing submission request $err"
                 logger.error(message)
                 SendAsyncClientError.RequestRefused(SendAsyncError.RequestRefused(message))
               }
-            _ <- transport.sendAsyncSigned(
-              signedContent,
-              timeout,
-              protocolVersion,
-            )
+            _ <- transport.sendAsyncSigned(signedContent, timeout)
           } yield ()
           else
-            transport.sendAsync(
-              request,
-              timeout,
-              protocolVersion,
-            )
+            transport.sendAsync(request, timeout)
         } else
-          transport.sendAsyncUnauthenticated(
-            request,
-            timeout,
-            protocolVersion,
-          )
+          transport.sendAsyncUnauthenticated(request, timeout)
       }
       .leftSemiflatMap { err =>
         // increment appropriate error metrics
@@ -653,7 +634,8 @@ class SequencerClient(
         )
 
         val subscription = ResilientSequencerSubscription[SequencerClientSubscriptionError](
-          domainId.toString,
+          domainId,
+          protocolVersion,
           member,
           transport,
           subscriptionHandler.handleEvent,
@@ -678,20 +660,23 @@ class SequencerClient(
         // periodically acknowledge that we've successfully processed up to the clean counter
         // We only need to it setup once; the sequencer client will direct the acknowledgements to the
         // right transport.
-        periodicAcknowledgementsRef.compareAndSet(
-          None,
-          PeriodicAcknowledgements
-            .create(
-              config.acknowledgementInterval.toScala,
-              subscriptionIsHealthy,
-              SequencerClient.this,
-              fetchCleanTimestamp,
-              clock,
-              timeouts,
-              loggerFactory,
-            )
-            .some,
-        )
+        if (requiresAuthentication) { // unauthenticated members don't need to ack
+          periodicAcknowledgementsRef.compareAndSet(
+            None,
+            PeriodicAcknowledgements
+              .create(
+                config.acknowledgementInterval.toScala,
+                subscriptionIsHealthy,
+                SequencerClient.this,
+                fetchCleanTimestamp,
+                clock,
+                timeouts,
+                loggerFactory,
+                protocolVersion,
+              )
+              .some,
+          )
+        }
 
         // pipe the eventual close reason of the subscription to the client itself
         subscription.closeReason onComplete closeWithSubscriptionReason
@@ -1035,6 +1020,16 @@ class SequencerClient(
     transport.acknowledge(request)
   }
 
+  private[client] def acknowledgeSigned(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] = {
+    val request = AcknowledgeRequest(member, timestamp, protocolVersion)
+    for {
+      signedRequest <- requestSigner.signRequest(request, HashPurpose.AcknowledgementSignature)
+      _ <- transport.acknowledgeSigned(signedRequest)
+    } yield ()
+  }
+
   def changeTransport(
       newTransport: SequencerClientTransport
   )(implicit traceContext: TraceContext): Future[Unit] = {
@@ -1107,9 +1102,7 @@ trait SequencerClientFactory {
       member: Member,
       sequencedEventStore: SequencedEventStore,
       sendTrackerStore: SendTrackerStore,
-      signSubmission: TraceContext => SubmissionRequest => EitherT[Future, String, SignedContent[
-        SubmissionRequest
-      ]],
+      requestSigner: RequestSigner,
   )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
@@ -1160,13 +1153,7 @@ object SequencerClient {
           member: Member,
           sequencedEventStore: SequencedEventStore,
           sendTrackerStore: SendTrackerStore,
-          signSubmission: TraceContext => SubmissionRequest => EitherT[
-            Future,
-            String,
-            SignedContent[
-              SubmissionRequest
-            ],
-          ],
+          requestSigner: RequestSigner,
       )(implicit
           executionContext: ExecutionContextExecutor,
           materializer: Materializer,
@@ -1236,7 +1223,7 @@ object SequencerClient {
           processingTimeout,
           validatorFactory,
           clock,
-          signSubmission,
+          requestSigner,
           sequencedEventStore,
           sendTracker,
           metrics,
@@ -1313,7 +1300,14 @@ object SequencerClient {
           processingTimeout,
           traceContextPropagation,
           loggerFactory,
-        ).map(client => new HttpSequencerClientTransport(client, processingTimeout, loggerFactory))
+        ).map(client =>
+          new HttpSequencerClientTransport(
+            client,
+            domainParameters.protocolVersion,
+            processingTimeout,
+            loggerFactory,
+          )
+        )
 
       private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
           executionContext: ExecutionContextExecutor
@@ -1435,22 +1429,5 @@ object SequencerClient {
     retry
       .Pause(loggingContext.logger, flagCloseable, maxRetries, delay, sendDescription)
       .apply(doSend(), AllExnRetryable)(retry.Success.always, ec, loggingContext.traceContext)
-  }
-
-  def signSubmissionRequest(topologyClient: DomainSyncCryptoClient)(implicit
-      ec: ExecutionContext
-  ): TraceContext => SubmissionRequest => EitherT[Future, String, SignedContent[
-    SubmissionRequest
-  ]] = { implicit traceContext => request =>
-    val snapshot = topologyClient.headSnapshot
-    SignedContent
-      .create(
-        topologyClient.pureCrypto,
-        snapshot,
-        request,
-        Some(snapshot.ipsSnapshot.timestamp),
-        HashPurpose.SubmissionRequestSignature,
-      )
-      .leftMap(_.toString)
   }
 }

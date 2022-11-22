@@ -25,7 +25,6 @@ import com.digitalasset.canton.sequencing.protocol.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
@@ -50,7 +49,6 @@ class DirectSequencerClientTransport(
   override def sendAsync(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
@@ -61,7 +59,6 @@ class DirectSequencerClientTransport(
   override def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     sequencer
       .sendAsyncSigned(request)
@@ -70,7 +67,6 @@ class DirectSequencerClientTransport(
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
@@ -82,6 +78,11 @@ class DirectSequencerClientTransport(
       traceContext: TraceContext
   ): Future[Unit] =
     sequencer.acknowledge(request.member, request.timestamp)
+
+  override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] =
+    sequencer.acknowledgeSigned(request)
 
   override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
       implicit traceContext: TraceContext

@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.admin.grpc
 
 import com.digitalasset.canton.participant.admin.DomainConnectivityService
 import com.digitalasset.canton.participant.admin.v0.*
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -14,17 +14,17 @@ class GrpcDomainConnectivityService(service: DomainConnectivityService)(implicit
     ec: ExecutionContext
 ) extends DomainConnectivityServiceGrpc.DomainConnectivityService {
 
-  override def connectDomain(request: ConnectDomainRequest): Future[ConnectDomainResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      service.connectDomain(request.domainAlias, request.retry)
-    }
+  override def connectDomain(request: ConnectDomainRequest): Future[ConnectDomainResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    service.connectDomain(request.domainAlias, request.retry)
+  }
 
   override def disconnectDomain(
       request: DisconnectDomainRequest
-  ): Future[DisconnectDomainResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      service.disconnectDomain(request.domainAlias)
-    }
+  ): Future[DisconnectDomainResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    service.disconnectDomain(request.domainAlias)
+  }
 
   override def listConnectedDomains(
       request: ListConnectedDomainsRequest
@@ -45,27 +45,27 @@ class GrpcDomainConnectivityService(service: DomainConnectivityService)(implicit
       case Some(value) => use(value)
     }
 
-  override def registerDomain(request: RegisterDomainRequest): Future[RegisterDomainResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      nonEmptyProcess(request.add, service.registerDomain)
-    }
+  override def registerDomain(request: RegisterDomainRequest): Future[RegisterDomainResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    nonEmptyProcess(request.add, service.registerDomain)
+  }
 
-  override def getAgreement(request: GetAgreementRequest): Future[GetAgreementResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      service.getAgreement(request.domainAlias)
-    }
+  override def getAgreement(request: GetAgreementRequest): Future[GetAgreementResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    service.getAgreement(request.domainAlias)
+  }
 
-  override def acceptAgreement(request: AcceptAgreementRequest): Future[AcceptAgreementResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      service.acceptAgreement(request.domainAlias, request.agreementId)
-    }
+  override def acceptAgreement(request: AcceptAgreementRequest): Future[AcceptAgreementResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    service.acceptAgreement(request.domainAlias, request.agreementId)
+  }
 
   /** reconfigure a domain connection
     */
-  override def modifyDomain(request: ModifyDomainRequest): Future[ModifyDomainResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      nonEmptyProcess(request.modify, service.modifyDomain)
-    }
+  override def modifyDomain(request: ModifyDomainRequest): Future[ModifyDomainResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    nonEmptyProcess(request.modify, service.modifyDomain)
+  }
 
   /** reconnect to domains
     */
@@ -76,11 +76,11 @@ class GrpcDomainConnectivityService(service: DomainConnectivityService)(implicit
 
   /** Get the domain id of the given domain alias
     */
-  override def getDomainId(request: GetDomainIdRequest): Future[GetDomainIdResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      service.getDomainId(request.domainAlias).map { domainId =>
-        GetDomainIdResponse(domainId = domainId.toProtoPrimitive)
-      }
+  override def getDomainId(request: GetDomainIdRequest): Future[GetDomainIdResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    service.getDomainId(request.domainAlias).map { domainId =>
+      GetDomainIdResponse(domainId = domainId.toProtoPrimitive)
     }
+  }
 
 }

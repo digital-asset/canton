@@ -23,7 +23,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.Au
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Status
 
@@ -42,58 +42,58 @@ class GrpcSequencerAuthenticationService(
   /** This will complete the participant authentication process using the challenge information and returning a token
     * to be used for further authentication.
     */
-  override def authenticate(request: Authentication.Request): Future[Authentication.Response] =
-    fromGrpcContext { implicit traceContext =>
-      (for {
-        member <- eitherT(deserializeMember(request.member))
-        signature <- eitherT(
-          ProtoConverter
-            .parseRequired(Signature.fromProtoV0, "signature", request.signature)
-            .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
-        )
-        providedNonce <- eitherT(
-          Nonce
-            .fromProtoPrimitive(request.nonce)
-            .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
-        )
-        tokenAndExpiry <- authenticationService
-          .validateSignature(member, signature, providedNonce)
-          .leftMap(handleAuthError)
-      } yield tokenAndExpiry)
-        .fold[Authentication.Response.Value](
-          error => {
-            val sensitive =
-              if (
-                error.getCode == Status.Code.INTERNAL || error.getCode == Status.Code.INVALID_ARGUMENT
-              ) {
-                // create error message to appropriately log this incident
-                SequencerAuthenticationFaultyOrMalicious
-                  .AuthenticationFailure(request.member, error)
-                  .discard
-                true
-              } else {
-                // create error message to appropriate log this incident
-                SequencerAuthenticationFailure
-                  .AuthenticationFailure(request.member, error)
-                  .discard
-                false
-              }
-            Authentication.Response.Value.Failure(
-              Authentication.Failure(
-                code = error.getCode.value(),
-                reason = if (sensitive) "Bad authentication request" else error.getDescription,
-              )
+  override def authenticate(request: Authentication.Request): Future[Authentication.Response] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    (for {
+      member <- eitherT(deserializeMember(request.member))
+      signature <- eitherT(
+        ProtoConverter
+          .parseRequired(Signature.fromProtoV0, "signature", request.signature)
+          .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+      )
+      providedNonce <- eitherT(
+        Nonce
+          .fromProtoPrimitive(request.nonce)
+          .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+      )
+      tokenAndExpiry <- authenticationService
+        .validateSignature(member, signature, providedNonce)
+        .leftMap(handleAuthError)
+    } yield tokenAndExpiry)
+      .fold[Authentication.Response.Value](
+        error => {
+          val sensitive =
+            if (
+              error.getCode == Status.Code.INTERNAL || error.getCode == Status.Code.INVALID_ARGUMENT
+            ) {
+              // create error message to appropriately log this incident
+              SequencerAuthenticationFaultyOrMalicious
+                .AuthenticationFailure(request.member, error)
+                .discard
+              true
+            } else {
+              // create error message to appropriate log this incident
+              SequencerAuthenticationFailure
+                .AuthenticationFailure(request.member, error)
+                .discard
+              false
+            }
+          Authentication.Response.Value.Failure(
+            Authentication.Failure(
+              code = error.getCode.value(),
+              reason = if (sensitive) "Bad authentication request" else error.getDescription,
             )
-          },
-          { case AuthenticationTokenWithExpiry(token, expiry) =>
-            Authentication.Response.Value.Success(
-              Authentication
-                .Success(token = token.toProtoPrimitive, expiresAt = Some(expiry.toProtoPrimitive))
-            )
-          },
-        )
-        .map(Authentication.Response(_))
-    }
+          )
+        },
+        { case AuthenticationTokenWithExpiry(token, expiry) =>
+          Authentication.Response.Value.Success(
+            Authentication
+              .Success(token = token.toProtoPrimitive, expiresAt = Some(expiry.toProtoPrimitive))
+          )
+        },
+      )
+      .map(Authentication.Response(_))
+  }
 
   /** This is will return a random number (nonce) plus the fingerprint of the key the participant needs to use to complete
     * the authentication process with this domain.
@@ -101,57 +101,57 @@ class GrpcSequencerAuthenticationService(
     * While the pure handshake can be called without any prior setup, this endpoint will only work after topology state
     * for the participant has been pushed to this domain.
     */
-  override def challenge(request: Challenge.Request): Future[Challenge.Response] = fromGrpcContext {
-    implicit traceContext =>
-      (for {
-        _ <- eitherT(handshakeValidation(request))
-        member <- eitherT(deserializeMember(request.member))
-        result <- authenticationService
-          .generateNonce(member)
-          .leftMap(handleAuthError)
-      } yield result)
-        .fold[Challenge.Response.Value](
-          error => {
-            val sensitive =
-              if (
-                error.getCode == Status.Code.INTERNAL || error.getCode == Status.Code.INVALID_ARGUMENT
-              ) {
-                SequencerAuthenticationFaultyOrMalicious
-                  .ChallengeFailure(
-                    request.member,
-                    request.memberProtocolVersions,
-                    error,
-                  )
-                  .discard
-                true
-              } else {
-                SequencerAuthenticationFailure
-                  .ChallengeFailure(
-                    request.member,
-                    request.memberProtocolVersions,
-                    error,
-                  )
-                  .discard
-                false
-              }
-            Challenge.Response.Value.Failure(
-              Challenge.Failure(
-                code = error.getCode.value(),
-                reason = if (sensitive) "Bad challenge request" else error.getDescription,
-              )
+  override def challenge(request: Challenge.Request): Future[Challenge.Response] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    (for {
+      _ <- eitherT(handshakeValidation(request))
+      member <- eitherT(deserializeMember(request.member))
+      result <- authenticationService
+        .generateNonce(member)
+        .leftMap(handleAuthError)
+    } yield result)
+      .fold[Challenge.Response.Value](
+        error => {
+          val sensitive =
+            if (
+              error.getCode == Status.Code.INTERNAL || error.getCode == Status.Code.INVALID_ARGUMENT
+            ) {
+              SequencerAuthenticationFaultyOrMalicious
+                .ChallengeFailure(
+                  request.member,
+                  request.memberProtocolVersions,
+                  error,
+                )
+                .discard
+              true
+            } else {
+              SequencerAuthenticationFailure
+                .ChallengeFailure(
+                  request.member,
+                  request.memberProtocolVersions,
+                  error,
+                )
+                .discard
+              false
+            }
+          Challenge.Response.Value.Failure(
+            Challenge.Failure(
+              code = error.getCode.value(),
+              reason = if (sensitive) "Bad challenge request" else error.getDescription,
             )
-          },
-          { case (nonce, fingerprints) =>
-            Challenge.Response.Value.Success(
-              Challenge.Success(
-                protocolVersion.toProtoPrimitiveS,
-                nonce.toProtoPrimitive,
-                fingerprints.map(_.unwrap).toList,
-              )
+          )
+        },
+        { case (nonce, fingerprints) =>
+          Challenge.Response.Value.Success(
+            Challenge.Success(
+              protocolVersion.toProtoPrimitiveS,
+              nonce.toProtoPrimitive,
+              fingerprints.map(_.unwrap).toList,
             )
-          },
-        )
-        .map(Challenge.Response(_))
+          )
+        },
+      )
+      .map(Challenge.Response(_))
   }
 
   private def handleAuthError(err: AuthenticationError): Status = {

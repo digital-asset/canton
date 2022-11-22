@@ -150,8 +150,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     val mon = new ExecutionContextMonitor(
       loggerFactory,
       deadlockConfig.interval,
-      deadlockConfig.maxReports,
-      deadlockConfig.reportAsWarnings,
+      deadlockConfig.warnInterval,
       timeouts,
     )
     mon.monitor(executionContext)

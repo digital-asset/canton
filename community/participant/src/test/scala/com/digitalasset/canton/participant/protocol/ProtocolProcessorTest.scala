@@ -18,6 +18,7 @@ import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.{Confirmed, Pending}
 import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestPendingRequestData,
+  TestPendingRequestDataType,
   TestProcessorError,
   TestViewType,
 }
@@ -133,9 +134,6 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private val parameters =
     DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero, testedProtocolVersion)
 
-  private val protocolMessagePVRepresentative =
-    EncryptedViewMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
-
   private type TestInstance =
     ProtocolProcessor[
       Int,
@@ -148,8 +146,6 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private def testProcessingSteps(
       overrideConstructedPendingRequestData: Option[TestPendingRequestData] = None,
       startingPoints: ProcessingStartingPoints = ProcessingStartingPoints.default,
-      pendingRequest: PendingRequestDataOrReplayData[TestPendingRequestData] =
-        WrappedPendingRequestData(TestPendingRequestData(rc, requestSc, Set.empty)),
       pendingSubmissionMap: concurrent.Map[Int, Unit] = TrieMap[Int, Unit](),
       sequencerClient: SequencerClient = mockSequencerClient,
       crypto: DomainSyncCryptoClient = crypto,
@@ -252,7 +248,6 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     )
 
     val steps = new TestProcessingSteps(
-      pendingRequestMap = TrieMap(requestId -> pendingRequest),
       pendingSubmissionMap = pendingSubmissionMap,
       overrideConstructedPendingRequestData,
     )
@@ -587,7 +582,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
 
         _ <- ephemeral.requestJournal.insert(rc, CantonTimestamp.Epoch)
         _ <- ephemeral.requestJournal.transit(rc, CantonTimestamp.Epoch, Pending, Confirmed)
-      } yield ephemeral.phase37Synchronizer.markConfirmed(rc, requestId)
+      } yield ephemeral.phase37Synchronizer.markConfirmed(TestPendingRequestDataType)(
+        rc,
+        requestId,
+        WrappedPendingRequestData(TestPendingRequestData(rc, requestSc, Set.empty)),
+      )
       setupF.futureValue
     }
 
@@ -665,12 +664,15 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
           ),
           RequestCounter.Genesis.asLocalOffset,
           None,
-        ),
-        pendingRequest = CleanReplayData(rc, requestSc, Set.empty),
+        )
       )
 
       addRequestState(ephemeral)
-      ephemeral.phase37Synchronizer.markConfirmed(rc, requestId)
+      ephemeral.phase37Synchronizer.markConfirmed(TestPendingRequestDataType)(
+        rc,
+        requestId,
+        CleanReplayData(rc, requestSc, Set.empty),
+      )
 
       val before = ephemeral.requestJournal.query(rc).value.futureValue
       before shouldEqual None

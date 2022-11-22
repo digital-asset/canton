@@ -17,7 +17,7 @@ import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LedgerTransactionId, SequencerCounter, checked}
 import slick.jdbc.{GetResult, SetParameter}
@@ -75,13 +75,11 @@ object TimestampedEvent {
       getResultByteArray: GetResult[Array[Byte]],
   ): GetResult[TimestampedEvent] =
     GetResult { r =>
-      import TraceContext.hasVersionedWrapperGetResult
-
       val localOffset = r.nextLong()
       val requestSequencerCounter = GetResult[Option[SequencerCounter]].apply(r)
       val eventId = GetResult[Option[EventId]].apply(r)
       val event = implicitly[GetResult[LedgerSyncEvent]].apply(r)
-      val traceContext = implicitly[GetResult[TraceContext]].apply(r)
+      val traceContext = implicitly[GetResult[SerializableTraceContext]].apply(r).unwrap
       TimestampedEvent(event, localOffset, requestSequencerCounter, eventId)(traceContext)
     }
 

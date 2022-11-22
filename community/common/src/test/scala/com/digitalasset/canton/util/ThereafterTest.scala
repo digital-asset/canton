@@ -10,7 +10,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future, Promise, blocking}
 import scala.util.{Failure, Success, Try}
@@ -22,91 +22,172 @@ trait ThereafterTest extends AnyWordSpec with BaseTest {
       fixture: ThereafterTest.Fixture[F, Content],
   )(implicit ec: ExecutionContext): Unit = {
 
-    "run the body once upon completion" in {
-      forEvery(fixture.contents) { content =>
-        val hasRun = new AtomicBoolean(false)
-        val x = fixture.fromContent(content)
-        val res = sut.thereafter(x) { _ =>
-          fixture.isCompleted(x) shouldBe true
-          val swapped = hasRun.compareAndSet(false, true)
-          swapped shouldBe true
+    "thereafter" should {
+      "run the body once upon completion" in {
+        forEvery(fixture.contents) { content =>
+          val runCount = new AtomicInteger(0)
+          val x = fixture.fromContent(content)
+          val res = sut.thereafter(x) { _ =>
+            fixture.isCompleted(x) shouldBe true
+            runCount.incrementAndGet()
+            ()
+          }
+          fixture.await(res) shouldBe content
+          runCount.get shouldBe 1
+        }
+      }
+
+      "run the body only afterwards" in {
+        val runCount = new AtomicInteger(0)
+        val promise = Promise[Int]()
+        val x = fixture.fromFuture(promise.future)
+        val res = sut.thereafter(x) { content =>
+          promise.future.isCompleted shouldBe true
+          fixture.theContent(content) shouldBe 42
+          runCount.incrementAndGet()
           ()
         }
-        fixture.await(res) shouldBe content
-        hasRun.get shouldBe true
+        promise.success(42)
+        val y = fixture.await(res)
+        fixture.theContent(y) shouldBe 42
+        runCount.get shouldBe 1
+      }
+
+      "run the body even after failure" in {
+        val ex = new RuntimeException("EXCEPTION")
+        val promise = Promise[Unit]()
+        val x = fixture.fromFuture(promise.future)
+        val res = sut.thereafter(x) { content =>
+          fixture.isCompleted(x) shouldBe true
+          promise.future.isCompleted shouldBe true
+          Try(fixture.theContent(content)) shouldBe Failure(ex)
+          ()
+        }
+        promise.failure(ex)
+        val y = fixture.await(res)
+        Try(fixture.theContent(y)) shouldBe Failure(ex)
+      }
+
+      "propagate an exception in the body" in {
+        val ex = new RuntimeException("BODY FAILURE")
+        val x = fixture.fromFuture(Future.successful(()))
+        val res = sut.thereafter(x)(_content => throw ex)
+        val y = fixture.await(res)
+        Try(fixture.theContent(y)) shouldBe Failure(ex)
+      }
+
+      "chain failure and body failure via suppression" in {
+        val ex1 = new RuntimeException("EXCEPTION")
+        val ex2 = new RuntimeException("BODY FAILURE")
+        val x = fixture.fromFuture(Future.failed[Unit](ex1))
+        val res = sut.thereafter(x)(_content => throw ex2)
+        val y = fixture.await(res)
+        Try(fixture.theContent(y)) shouldBe Failure(ex1)
+        ex1.getSuppressed should contain(ex2)
+      }
+
+      "chain body exceptions via suppression" in {
+        val ex1 = new RuntimeException("BODY FAILURE 1")
+        val ex2 = new RuntimeException("BODY FAILURE 2")
+        val x = fixture.fromFuture(Future.successful(()))
+        val y = sut.thereafter(x)(_ => throw ex1)
+        val res = sut.thereafter(y)(_ => throw ex2)
+        val z = fixture.await(res)
+        Try(fixture.theContent(z)) shouldBe Failure(ex1)
+        ex1.getSuppressed should contain(ex2)
+      }
+
+      "rethrow the exception in the body" in {
+        val ex = new RuntimeException("FAILURE")
+        val x = fixture.fromFuture(Future.failed[Unit](ex))
+        val res = sut.thereafter(x)(_ => throw ex)
+        val z = fixture.await(res)
+        Try(fixture.theContent(z)) shouldBe Failure(ex)
       }
     }
 
-    "run the body only afterwards" in {
-      val hasRun = new AtomicBoolean(false)
-      val promise = Promise[Int]()
-      val x = fixture.fromFuture(promise.future)
-      val res = sut.thereafter(x) { content =>
-        promise.future.isCompleted shouldBe true
-        fixture.theContent(content) shouldBe 42
-        val swapped = hasRun.compareAndSet(false, true)
-        swapped shouldBe true
-        ()
+    "thereafterF " should {
+      "run the body once upon completion" in {
+        forEvery(fixture.contents) { content =>
+          val runCount = new AtomicInteger(0)
+          val bodyRunCount = new AtomicInteger(0)
+          val x = fixture.fromContent(content)
+          val res = sut.thereafterF(x) { _ =>
+            fixture.isCompleted(x) shouldBe true
+            runCount.incrementAndGet()
+            Future {
+              bodyRunCount.incrementAndGet()
+              ()
+            }
+          }
+          fixture.await(res) shouldBe content
+          runCount.get shouldBe 1
+          bodyRunCount.get shouldBe 1
+        }
       }
-      promise.success(42)
-      val y = fixture.await(res)
-      fixture.theContent(y) shouldBe 42
-      hasRun.get shouldBe true
-    }
 
-    "run the body even after failure" in {
-      val ex = new RuntimeException("EXCEPTION")
-      val hasRun = new AtomicBoolean(false)
-      val promise = Promise[Unit]()
-      val x = fixture.fromFuture(promise.future)
-      val res = sut.thereafter(x) { content =>
-        fixture.isCompleted(x) shouldBe true
-        promise.future.isCompleted shouldBe true
-        val swapped = hasRun.compareAndSet(false, true)
-        swapped shouldBe true
-        Try(fixture.theContent(content)) shouldBe Failure(ex)
-        ()
+      "run the body only afterwards" in {
+        val runCount = new AtomicInteger(0)
+        val promise = Promise[Int]()
+        val x = fixture.fromFuture(promise.future)
+        val res = sut.thereafterF(x) { content =>
+          promise.future.isCompleted shouldBe true
+          Future {
+            fixture.theContent(content) shouldBe 42
+            runCount.incrementAndGet()
+            ()
+          }
+        }
+        promise.success(42)
+        val y = fixture.await(res)
+        fixture.theContent(y) shouldBe 42
+        runCount.get shouldBe 1
       }
-      promise.failure(ex)
-      val y = fixture.await(res)
-      Try(fixture.theContent(y)) shouldBe Failure(ex)
-    }
 
-    "propagate an exception in the body" in {
-      val ex = new RuntimeException("BODY FAILURE")
-      val x = fixture.fromFuture(Future.successful(()))
-      val res = sut.thereafter(x)(_content => throw ex)
-      val y = fixture.await(res)
-      Try(fixture.theContent(y)) shouldBe Failure(ex)
-    }
+      "propagate a synchronous exception in the body" in {
+        val ex = new RuntimeException("BODY FAILURE")
+        val x = fixture.fromFuture(Future.successful(()))
+        val res = sut.thereafterF(x)(_content => throw ex)
+        val y = fixture.await(res)
+        Try(fixture.theContent(y)) shouldBe Failure(ex)
+      }
 
-    "chain failure and body failure via suppression" in {
-      val ex1 = new RuntimeException("EXCEPTION")
-      val ex2 = new RuntimeException("BODY FAILURE")
-      val x = fixture.fromFuture(Future.failed[Unit](ex1))
-      val res = sut.thereafter(x)(_content => throw ex2)
-      val y = fixture.await(res)
-      Try(fixture.theContent(y)) shouldBe Failure(ex1)
-      ex1.getSuppressed should contain(ex2)
-    }
+      "propagate an asynchronous exception in the body" in {
+        val ex = new RuntimeException("BODY FAILURE")
+        val x = fixture.fromFuture(Future.successful(()))
+        val res = sut.thereafterF(x)(_content => Future.failed(ex))
+        val y = fixture.await(res)
+        Try(fixture.theContent(y)) shouldBe Failure(ex)
+      }
 
-    "chain body exceptions via suppression" in {
-      val ex1 = new RuntimeException("BODY FAILURE 1")
-      val ex2 = new RuntimeException("BODY FAILURE 2")
-      val x = fixture.fromFuture(Future.successful(()))
-      val y = sut.thereafter(x)(_ => throw ex1)
-      val res = sut.thereafter(y)(_ => throw ex2)
-      val z = fixture.await(res)
-      Try(fixture.theContent(z)) shouldBe Failure(ex1)
-      ex1.getSuppressed should contain(ex2)
-    }
+      "chain failure and body failure via suppression" in {
+        val ex1 = new RuntimeException("EXCEPTION")
+        val ex2 = new RuntimeException("BODY FAILURE")
+        val x = fixture.fromFuture(Future.failed[Unit](ex1))
+        val res = sut.thereafterF(x)(_content => Future.failed(ex2))
+        val y = fixture.await(res)
+        Try(fixture.theContent(y)) shouldBe Failure(ex1)
+        ex1.getSuppressed should contain(ex2)
+      }
 
-    "rethrow the exception in the body" in {
-      val ex = new RuntimeException("FAILURE")
-      val x = fixture.fromFuture(Future.failed[Unit](ex))
-      val res = sut.thereafter(x)(_ => throw ex)
-      val z = fixture.await(res)
-      Try(fixture.theContent(z)) shouldBe Failure(ex)
+      "chain body exceptions via suppression" in {
+        val ex1 = new RuntimeException("BODY FAILURE 1")
+        val ex2 = new RuntimeException("BODY FAILURE 2")
+        val x = fixture.fromFuture(Future.successful(()))
+        val y = sut.thereafterF(x)(_ => Future.failed(ex1))
+        val res = sut.thereafterF(y)(_ => Future.failed(ex2))
+        val z = fixture.await(res)
+        Try(fixture.theContent(z)) shouldBe Failure(ex1)
+        ex1.getSuppressed should contain(ex2)
+      }
+
+      "rethrow the exception in the body" in {
+        val ex = new RuntimeException("FAILURE")
+        val x = fixture.fromFuture(Future.failed[Unit](ex))
+        val res = sut.thereafterF(x)(_ => Future.failed(ex))
+        val z = fixture.await(res)
+        Try(fixture.theContent(z)) shouldBe Failure(ex)
+      }
     }
   }
 }

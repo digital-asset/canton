@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -191,13 +192,15 @@ class SyncDomainPersistentStateFactory(
         // make sure that we haven't been connected to a different domain before (unless we are doing a migration here)
         val allActiveDomains = syncDomainPersistentStateManager.getAll.keySet
           .filter(syncDomainPersistentStateManager.getStatusOf(_).exists(_.isActive))
-        EitherTUtil.condUnitET[Future](
-          allActiveDomains.forall(_ == domainId),
-          DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
-            s"Cannot connect to domain ${domainAlias.unwrap} as the participant has UCK semantics enabled and has already been connected to other domains: ${allActiveDomains
-                .mkString(", ")}"
-          ): DomainRegistryError,
-        )
+        EitherTUtil
+          .condUnitET[Future](
+            allActiveDomains.forall(_ == domainId),
+            DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
+              s"Cannot connect to domain ${domainAlias.unwrap} as the participant has UCK semantics enabled and has already been connected to other domains: ${allActiveDomains
+                  .mkString(", ")}"
+            ),
+          )
+          .leftWiden[DomainRegistryError]
       }
     } yield ()
   }

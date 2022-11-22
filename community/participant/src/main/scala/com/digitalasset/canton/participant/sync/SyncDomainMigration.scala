@@ -129,7 +129,6 @@ class SyncDomainMigration(
           targetDomainId,
           targetParameters,
         )
-        // TODO(i9522) depending on protocol version, ensure that the current topology state exists in the target protocol version:  not applicable right now
         // check if the target alias already exists.
         targetStatusO = domainConnectionConfigStore.get(target.domain).toOption.map(_.status)
         // check if we are already active on the target domain

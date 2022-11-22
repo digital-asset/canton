@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.crypto.admin.v0;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
+import "google/protobuf/empty.proto";
 
 /**
  * Vault service providing programmatic access to locally stored keys and certificates
@@ -80,6 +81,11 @@ service VaultService {
      * List certificates stored in the local vault
      */
     rpc ListCertificates(ListCertificateRequest) returns (ListCertificateResponse);
+
+    /**
+     * Changes the wrapper key that is used to encrypt private keys when stored
+     */
+    rpc RotateWrapperKey(RotateWrapperKeyRequest) returns (google.protobuf.Empty);
 
 }
 
@@ -165,4 +171,8 @@ message GenerateEncryptionKeyRequest {
 
 message GenerateEncryptionKeyResponse {
     com.digitalasset.canton.crypto.v0.EncryptionPublicKey public_key = 1;
+}
+
+message RotateWrapperKeyRequest {
+    string new_wrapper_key_id = 1;
 }

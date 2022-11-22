@@ -43,7 +43,6 @@ import com.digitalasset.canton.store.{
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LedgerTransactionId, RequestCounter}
 import io.functionmeta.functionFullName
@@ -61,6 +60,7 @@ class SyncStateInspection(
     participantNodePersistentState: ParticipantNodePersistentState,
     pruningProcessor: PruningProcessor,
     timeouts: ProcessingTimeout,
+    maxDbConnections: Int,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -147,11 +147,12 @@ class SyncStateInspection(
       parties: Set[PartyId],
       target: File,
       batchSize: PositiveInt,
-      filterDomain: DomainId => Boolean = _ => true,
-      protocolVersion: ProtocolVersion,
+      filterDomain: DomainId => Boolean,
+      timestamp: Option[CantonTimestamp],
+      protocolVersion: Option[ProtocolVersion],
   )(implicit
       traceContext: TraceContext
-  ): Either[String, Unit] = {
+  ): Either[String, Map[DomainId, Long]] = {
     import scala.util.Using
     val lfParties = parties.map(_.toLf)
     val encoder = java.util.Base64.getEncoder
@@ -166,7 +167,9 @@ class SyncStateInspection(
       }
       new OutputStreamWriter(bufferOut)
     }
-    logger.info(s"Downloading active contract set to ${target} for parties ${parties}")
+    logger.info(
+      s"Downloading active contract set (${timestamp.fold("head")(ts => s"at $ts")}) to ${target} for parties ${parties}"
+    )
     val first = new AtomicBoolean(true)
     Using(openStream()) { writer =>
       syncDomainPersistentStateManager.getAll.toList.sortBy(_._1.uid.id.unwrap).traverse {
@@ -181,35 +184,71 @@ class SyncStateInspection(
           writer.write("\n")
           val storeF = for {
             // fetch acs
-            acs <- EitherT(currentAcsSnapshot(state))
+            acs <- EitherT(
+              timestamp.fold(currentAcsSnapshot(state))(ts =>
+                state.activeContractStore.snapshot(ts)
+              )
+            )
+            useProtocolVersion <- EitherT.right(
+              protocolVersion.fold(
+                state.parameterStore.lastParameters
+                  .map(_.map(_.protocolVersion).getOrElse(ProtocolVersion.latest))
+              )(Future.successful)
+            )
             // sort acs by coid (for easier comparison ...)
             grouped = acs.toList.sortBy(_._1.coid).grouped(batchSize.value)
             // fetch contracts
-            _ <- EitherT.right[AcsError](MonadUtil.sequentialTraverse_(grouped) { batch =>
-              logger.debug(
-                s"Loading next batch of ${batch.size} contracts, looking for matching stakeholders."
-              )
-              val loadedF = state.contractStore.lookupManyUncached(batch.map(_._1))
-              val storedF = loadedF.map { contracts =>
-                contracts.foreach {
-                  case Some(stored)
-                      // filter for parties
-                      if lfParties.exists(stored.contract.metadata.stakeholders.contains) =>
-                    // write contract as base64 text to file
-                    val byteStr = stored.contract.toByteString(protocolVersion)
-                    writer.write(encoder.encodeToString(byteStr.toByteArray))
-                    writer.write("\n")
-                  case _ =>
+            counted = grouped.foldLeft(Future.successful(0L) :: Nil) {
+              case (acc :: rest, batch) =>
+                logger.debug(
+                  s"Loading next batch of ${batch.size} contracts, looking for matching stakeholders."
+                )
+                val next = for {
+                  // we synchronise on the previous result after loading the contracts from the db.
+                  // we have to throttle here, as otherwise, we just load contracts at once
+                  // therefore, we resynchronize at the older result here before loading
+                  // this will mean that we will keep on pre-loading max-num batches
+                  _ <- rest.lastOption.map(_.map(_ => ())).getOrElse(Future.unit)
+                  contracts <- state.contractStore.lookupManyUncached(batch.map(_._1))
+                  // wait for previous write to have finished before kicking off this one
+                  counter <- acc
+                } yield {
+                  contracts.foldLeft(counter) {
+                    case (count, Some(stored))
+                        // filter for parties
+                        if lfParties.exists(stored.contract.metadata.stakeholders.contains) =>
+                      // write domain-id if this is the first entry
+                      if (count == 0) {
+                        writer.write(SyncStateInspection.DomainIdPrefix)
+                        writer.write(domainIdStr)
+                        writer.write("\n")
+                      }
+                      // write contract as base64 text to file
+                      val byteStr = stored.contract.toByteString(useProtocolVersion)
+                      writer.write(encoder.encodeToString(byteStr.toByteArray))
+                      writer.write("\n")
+                      count + 1
+                    case (count, _) => count
+                  }
                 }
-              }
-              storedF
-            })
-          } yield ()
+                next :: acc :: rest.take(maxDbConnections)
+              case (Nil, _) =>
+                throw new IllegalStateException(
+                  "List can not be null"
+                ) // we are always passing in something, so list can't be 0
+            }
+            loaded <- EitherT.right[AcsError](counted.sequence)
+            // the head of the list aggregates the count. all other items are there just for throtteling / synchronizing the batch reads
+          } yield (domainId, loaded.headOption.getOrElse(0L))
+
           timeouts.unbounded
             .await(s"Downloading ACS of ${domainId}", logFailing = Some(Level.WARN))(storeF.value)
-        case _ => Right(())
+        case (domainId, _) => Right((domainId, 0L))
       }
-    }.fold(x => Left(x.getMessage), _.leftMap(_.toString).map(_ => ()))
+    }.fold(
+      x => Left(x.getMessage),
+      _.map(_.filter { case (_, count) => count > 0 }.toMap).leftMap(_.toString),
+    )
   }
 
   def contractCount(domain: DomainAlias)(implicit traceContext: TraceContext): Future[Int] = {

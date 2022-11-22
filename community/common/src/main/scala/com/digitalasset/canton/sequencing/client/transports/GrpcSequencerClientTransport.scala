@@ -27,9 +27,8 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Context.CancellableContext
 import io.grpc.{CallOptions, Context, ManagedChannel}
 
@@ -98,7 +97,6 @@ class GrpcSequencerClientTransport(
   override def sendAsyncSigned(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
 
     val response = CantonGrpcUtil
@@ -121,7 +119,6 @@ class GrpcSequencerClientTransport(
   override def sendAsync(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
@@ -130,7 +127,6 @@ class GrpcSequencerClientTransport(
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
@@ -261,7 +257,7 @@ class GrpcSequencerClientTransport(
     val subscription = GrpcSequencerSubscription(context, handler, metrics, timeouts, loggerFactory)
 
     context.run(() =>
-      traceContext.intoGrpcContext {
+      TraceContextGrpc.withGrpcContext(traceContext) {
         if (requiresAuthentication)
           sequencerServiceClient.subscribe(subscriptionRequest.toProtoV0, subscription.observer)
         else
@@ -303,6 +299,11 @@ class GrpcSequencerClientTransport(
         logger.debug(s"Acknowledged timestamp: $timestamp")
     }
   }
+
+  override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] =
+    EitherT.right(acknowledge(request.content))
 
   override protected def onClosed(): Unit =
     Lifecycle.close(

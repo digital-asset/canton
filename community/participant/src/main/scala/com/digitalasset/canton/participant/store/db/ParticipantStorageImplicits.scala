@@ -7,7 +7,7 @@ import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.store.SerializableLedgerSyncEvent
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.version.{UntypedVersionedMessage, VersionedMessage}
 import slick.jdbc.GetResult
 
@@ -39,10 +39,8 @@ object ParticipantStorageImplicits {
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[Traced[LedgerSyncEvent]] =
     GetResult { r =>
-      import TraceContext.hasVersionedWrapperGetResult
-
       val event = GetResult[SerializableLedgerSyncEvent].apply(r).ledgerSyncEvent
-      implicit val traceContext: TraceContext = GetResult[TraceContext].apply(r)
+      implicit val traceContext: TraceContext = GetResult[SerializableTraceContext].apply(r).unwrap
 
       Traced(event)
     }

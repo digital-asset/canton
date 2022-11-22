@@ -4,15 +4,15 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.crypto.{v0 as cryptoproto}
-import com.digitalasset.canton.domain.api.{v0 as v0domain}
+import com.digitalasset.canton.crypto.v0 as cryptoproto
+import com.digitalasset.canton.domain.api.v0 as v0domain
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.SequencerTestUtils.MockMessageContent
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
@@ -61,7 +61,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
           timestampOfSigningKey = None,
         )
       ),
-      Some(TraceContext.empty.toProtoV0),
+      Some(SerializableTraceContext.empty.toProtoV0),
     )
 
   val RequestDescription = "request description"
@@ -223,7 +223,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
           // receive some items
           sut.observer.onNext(
             v0domain.SubscriptionResponse.defaultInstance
-              .copy(traceContext = Some(TraceContext.empty.toProtoV0))
+              .copy(traceContext = Some(SerializableTraceContext.empty.toProtoV0))
           )
           sut.observer.onError(Status.INTERNAL.asRuntimeException())
           sut.close()

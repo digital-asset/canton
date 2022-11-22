@@ -182,6 +182,9 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
   val seedGenerator = new SeedGenerator(pureCrypto)
 
+  private val cantonContractIdVersion =
+    CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)
+
   private val coordination: TransferCoordination =
     TestTransferCoordination(
       Set(sourceDomain, targetDomain),
@@ -226,7 +229,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
     )
 
-    val contractId = ContractId.fromDiscriminator(
+    val contractId = cantonContractIdVersion.fromDiscriminator(
       ExampleTransactionFactory.lfHash(10),
       Unicum(pureCrypto.digest(HashPurpose.MerkleTreeInnerNode, ByteString.copyFromUtf8("unicum"))),
     )
@@ -636,7 +639,6 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         signedResult <- SignedProtocolMessage.tryCreate(
           transferResult,
           cryptoSnapshot,
-          pureCrypto,
           testedProtocolVersion,
         )
         deliver: Deliver[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] = {

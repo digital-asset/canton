@@ -8,18 +8,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.telemetry as damlTelemetry
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.v0
-import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedMessageCompanionDbHelpers,
-  HasVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-}
-import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.context.Context as OpenTelemetryContext
 
@@ -28,28 +17,17 @@ import scala.collection.immutable
 /** Container for values tracing operations through canton.
   */
 class TraceContext private[tracing] (val context: OpenTelemetryContext)
-    extends HasVersionedWrapper[TraceContext]
-    with Equals
+    extends Equals
     with Serializable
     with NoCopy
     with PrettyPrinting {
 
-  override protected def companionObj = TraceContext
-
   lazy val asW3CTraceContext: Option[W3CTraceContext] =
     W3CTraceContext.fromOpenTelemetryContext(context)
-
-  /** Expose this trace context into the GRPC context */
-  def intoGrpcContext[A](fn: => A): A = TraceContextGrpc.withGrpcContext(this)(fn)
 
   lazy val traceId: Option[String] = Option(Span.fromContextOrNull(context))
     .filter(_.getSpanContext.isValid)
     .map(_.getSpanContext.getTraceId)
-
-  def toProtoV0: v0.TraceContext = {
-    val w3cTraceContext = asW3CTraceContext
-    v0.TraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
-  }
 
   /** Convert to ledger-api server's telemetry context to facilitate integration
     */
@@ -84,20 +62,7 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
   def showTraceId: Shown = Shown(s"tid:${traceId.getOrElse("")}")
 }
 
-object TraceContext
-    extends HasVersionedMessageCompanion[TraceContext]
-    with HasVersionedMessageCompanionDbHelpers[TraceContext] {
-  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v2,
-      supportedProtoVersion(v0.TraceContext)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    )
-  )
-
-  /** The name of the class as used for pretty-printing */
-  override protected def name: String = "TraceContext"
-
+object TraceContext {
   private[tracing] def apply(context: OpenTelemetryContext): TraceContext = new TraceContext(
     context
   )
@@ -119,11 +84,6 @@ object TraceContext
   /** Used for where a trace context should ideally be passed but support has not yet been added. */
   val todo: TraceContext = empty
 
-  /** Run a block taking a TraceContext which has been constructed from the GRPC context.
-    * Typically used to wrap GRPC server methods.
-    */
-  def fromGrpcContext[A](fn: TraceContext => A): A = fn(TraceContextGrpc.fromGrpcContext)
-
   /** Run a block with an entirely new TraceContext. */
   def withNewTraceContext[A](fn: TraceContext => A): A = {
     val newSpan = NoReportingTracerProvider.tracer.spanBuilder("newSpan").startSpan()
@@ -141,29 +101,6 @@ object TraceContext
   def fromW3CTraceParent(traceParent: String): TraceContext = W3CTraceContext(
     traceParent
   ).toTraceContext
-
-  /** Construct a TraceContext from provided protobuf bytes.
-    * Errors will be logged at a WARN level using the provided storageLogger and an empty TraceContext will be returned.
-    */
-  def fromByteArraySafe(logger: Logger)(bytes: Array[Byte]): TraceContext =
-    safely(logger)(fromByteArray)(bytes)
-
-  /** Construct a TraceContext from provided protobuf structure.
-    * Errors will be logged at a WARN level using the provided storageLogger and an empty TraceContext will be returned.
-    */
-  def fromProtoSafeV0Opt(logger: Logger)(traceContextP: Option[v0.TraceContext]): TraceContext =
-    safely(logger)(fromProtoV0Opt)(traceContextP)
-
-  def fromProtoV0Opt(
-      traceContextP: Option[v0.TraceContext]
-  ): ParsingResult[TraceContext] =
-    for {
-      tcP <- ProtoConverter.required("traceContext", traceContextP)
-      tc <- fromProtoV0(tcP)
-    } yield tc
-
-  def fromProtoV0(tc: v0.TraceContext): ParsingResult[TraceContext] =
-    Right(W3CTraceContext.toTraceContext(tc.traceparent, tc.tracestate))
 
   /** Where we use batching operations create a separate trace-context but mention this in a debug log statement
     * linking it to the trace ids of the contained items. This will allow manual tracing via logs if ever needed.
@@ -185,16 +122,6 @@ object TraceContext
           }
     }
   }
-
-  private def safely[A](
-      logger: Logger
-  )(fn: A => ParsingResult[TraceContext])(a: A): TraceContext =
-    fn(a) match {
-      case Left(err) =>
-        logger.warn(s"Failed to deserialize provided trace context: $err")
-        TraceContext.empty
-      case Right(traceContext) => traceContext
-    }
 
   /** Java serialization and deserialization support for TraceContext */
   private class JavaSerializedTraceContext(w3CTraceContextO: Option[W3CTraceContext])

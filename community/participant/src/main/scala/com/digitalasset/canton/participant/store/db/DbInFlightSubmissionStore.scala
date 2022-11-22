@@ -29,7 +29,7 @@ import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbBulkUpdateProcessor.BulkUpdatePendingCheck
 import com.digitalasset.canton.store.db.{DbBulkUpdateProcessor, DbSerializationException}
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, OptionUtil, SingleUseCell, retry}
@@ -302,8 +302,8 @@ object DbInFlightSubmissionStore {
 
     override def kind: String = "in-flight submission"
 
-    private implicit val setParameterTraceContext: SetParameter[TraceContext] =
-      TraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
+    private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =
+      SerializableTraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
     private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =
       SubmissionTrackingData.getVersionedSetParameter
 
@@ -432,7 +432,7 @@ object DbInFlightSubmissionStore {
         pp >> submission.messageUuid
         pp >> submission.sequencingInfo.timeout
         pp >> submission.sequencingInfo.trackingData
-        pp >> submission.submissionTraceContext
+        pp >> SerializableTraceContext(submission.submissionTraceContext)
       }
       // We need a synchronous commit here to ensure that there can be at most one submission
       // for the same change ID in flight. Without synchronous commits,

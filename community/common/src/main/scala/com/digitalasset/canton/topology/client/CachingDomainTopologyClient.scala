@@ -210,7 +210,7 @@ object CachingDomainTopologyClient {
     store.timestamp(useStateStore = true).map { x =>
       x.foreach { case (sequenced, effective) =>
         caching
-          .updateHead(effective, ApproximateTime(sequenced.value), potentialTopologyChange = true)
+          .updateHead(effective, effective.toApproximate, potentialTopologyChange = true)
       }
       caching
     }

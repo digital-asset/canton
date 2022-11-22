@@ -130,7 +130,7 @@ trait Sequencer extends FlagCloseable with HasCloseContext {
     */
   def acknowledgeSigned(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): EitherT[Future, String, Unit]
 
   /** Return a structure containing the members registered with the sequencer and the latest positions of clients
     * reading events.

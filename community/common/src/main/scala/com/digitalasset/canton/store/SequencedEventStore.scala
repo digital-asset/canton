@@ -28,7 +28,7 @@ import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbType
 import com.digitalasset.canton.store.db.{DbSequencedEventStore, SequencerClientDiscriminator}
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
-import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
+import com.digitalasset.canton.tracing.{HasTraceContext, SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -165,7 +165,7 @@ object SequencedEventStore {
       v0.PossiblyIgnoredSequencedEvent(
         counter = counter.toProtoPrimitive,
         timestamp = Some(timestamp.toProtoPrimitive),
-        traceContext = Some(traceContext.toProtoV0),
+        traceContext = Some(SerializableTraceContext(traceContext).toProtoV0),
         isIgnored = isIgnored,
         underlying = underlying.map(_.toProtoV0),
       )
@@ -282,14 +282,16 @@ object SequencedEventStore {
           .flatMap(CantonTimestamp.fromProtoPrimitive)
         traceContext <- ProtoConverter
           .required("trace_context", traceContextPO)
-          .flatMap(TraceContext.fromProtoV0)
+          .flatMap(SerializableTraceContext.fromProtoV0)
         possiblyIgnoredSequencedEvent <-
           if (isIgnored) {
-            Right(IgnoredSequencedEvent(timestamp, sequencerCounter, underlyingO)(traceContext))
+            Right(
+              IgnoredSequencedEvent(timestamp, sequencerCounter, underlyingO)(traceContext.unwrap)
+            )
           } else
             ProtoConverter
               .required("underlying", underlyingO)
-              .map(OrdinarySequencedEvent(_)(traceContext))
+              .map(OrdinarySequencedEvent(_)(traceContext.unwrap))
       } yield possiblyIgnoredSequencedEvent
     }
   }

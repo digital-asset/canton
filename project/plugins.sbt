@@ -44,3 +44,9 @@ addSbtPlugin("com.github.cb372" % "sbt-explicit-dependencies" % "0.2.16")
 
 // Allows using some convenient Cats syntax in build files
 libraryDependencies += "org.typelevel" %% "cats-core" % "2.6.1"
+
+libraryDependencies ++= Seq(
+  "io.circe" %% "circe-core" % "0.13.0",
+  "io.circe" %% "circe-generic" % "0.13.0",
+  "io.circe" %% "circe-parser" % "0.13.0",
+)

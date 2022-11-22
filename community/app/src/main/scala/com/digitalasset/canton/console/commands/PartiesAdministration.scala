@@ -126,6 +126,20 @@ class ParticipantPartiesAdministrationGroup(
     )
   }
 
+  @Help.Summary("Find a party from a filter string")
+  @Help.Description(
+    """Will search for all parties that match this filter string. If it finds exactly one party, it 
+      |will return that one. Otherwise, the function will throw."""
+  )
+  def find(filterParty: String): PartyId = {
+    list(filterParty).map(_.party).distinct.toList match {
+      case one :: Nil => one
+      case Nil => throw new IllegalArgumentException(s"No party matching ${filterParty}")
+      case more =>
+        throw new IllegalArgumentException(s"Multiple parties match ${filterParty}: ${more}")
+    }
+  }
+
   @Help.Summary("Enable/add party to participant")
   @Help.Description("""This function registers a new party with the current participant within the participants
       |namespace. The function fails if the participant does not have appropriate signing keys
@@ -141,9 +155,11 @@ class ParticipantPartiesAdministrationGroup(
   def enable(
       name: String,
       displayName: Option[String] = None,
+      // TODO(i10809) replace wait for domain for a clean topology synchronisation using the dispatcher info
       waitForDomain: DomainChoice = DomainChoice.Only(Seq()),
       synchronizeParticipants: Seq[ParticipantReference] = Seq(),
   ): PartyId = {
+
     def registered(lst: => Seq[ListPartiesResult]): Set[DomainId] = {
       lst
         .flatMap(_.participants.flatMap(_.domains))

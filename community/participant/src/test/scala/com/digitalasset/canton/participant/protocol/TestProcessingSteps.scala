@@ -14,14 +14,13 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
+  RequestType,
   WrapsProcessorError,
 }
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
-  NoMediatorError,
-  PendingRequestDataOrReplayData,
-}
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor.NoMediatorError
 import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestPendingRequestData,
+  TestPendingRequestDataType,
   TestProcessingError,
   TestProcessorError,
   TestViewTree,
@@ -40,7 +39,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{LfContractId, RequestId, RootHash, ViewHash, v0}
+import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -58,9 +57,6 @@ import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Future}
 
 class TestProcessingSteps(
-    pendingRequestMap: concurrent.Map[RequestId, PendingRequestDataOrReplayData[
-      TestPendingRequestData
-    ]],
     pendingSubmissionMap: concurrent.Map[Int, Unit],
     pendingRequestData: Option[TestPendingRequestData],
 )(implicit val ec: ExecutionContext)
@@ -72,7 +68,6 @@ class TestProcessingSteps(
       TestProcessingError,
     ]
     with BaseTest {
-  override type PendingRequestData = TestPendingRequestData
   override type SubmissionResultArgs = Unit
   override type PendingDataAndResponseArgs = Unit
   override type RejectionArgs = Unit
@@ -82,6 +77,9 @@ class TestProcessingSteps(
   override type SubmissionSendError = TestProcessingError
   override type RequestError = TestProcessingError
   override type ResultError = TestProcessingError
+
+  override type RequestType = TestPendingRequestDataType
+  override val requestType = TestPendingRequestDataType
 
   override def embedRequestError(
       err: ProtocolProcessor.RequestProcessingError
@@ -101,12 +99,6 @@ class TestProcessingSteps(
       pendingSubmissionId: Int,
   ): Option[Unit] =
     pendingSubmissions.remove(pendingSubmissionId)
-
-  override def pendingRequestMap
-      : SyncDomainEphemeralState => concurrent.Map[RequestId, PendingRequestDataOrReplayData[
-        PendingRequestData
-      ]] =
-    x => pendingRequestMap
 
   override def requestKind: String = "test"
 
@@ -239,7 +231,7 @@ class TestProcessingSteps(
   override def getCommitSetAndContractsToBeStoredAndEvent(
       event: SignedContent[Deliver[DefaultOpenEnvelope]],
       result: Either[MalformedMediatorRequestResult, TransactionResultMessage],
-      pendingRequestData: PendingRequestData,
+      pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
@@ -259,6 +251,13 @@ class TestProcessingSteps(
   override def postProcessResult(verdict: Verdict, pendingSubmissionO: Unit)(implicit
       traceContext: TraceContext
   ): Unit = ()
+
+  override def authenticateInputContracts(
+      pendingDataAndResponseArgs: Unit
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TestProcessingError, Unit] =
+    EitherT.rightT(())
 }
 
 object TestProcessingSteps {
@@ -290,6 +289,12 @@ object TestProcessingSteps {
       requestSequencerCounter: SequencerCounter,
       pendingContracts: Set[LfContractId],
   ) extends PendingRequestData
+
+  case object TestPendingRequestDataType extends RequestType {
+    override type PendingRequestData = TestPendingRequestData
+  }
+
+  type TestPendingRequestDataType = TestPendingRequestDataType.type
 
   sealed trait TestProcessingError extends WrapsProcessorError
 

@@ -282,7 +282,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       AcsCommitment.create(domainId, remote, localId, period, cmt, testedProtocolVersion)
 
     snapshotF.flatMap { snapshot =>
-      SignedProtocolMessage.tryCreate(payload, snapshot, crypto.pureCrypto, testedProtocolVersion)
+      SignedProtocolMessage.tryCreate(payload, snapshot, testedProtocolVersion)
     }
   }
 
@@ -535,12 +535,12 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         assert(received.size === 2)
       }
     }
-    // TODO(#9800) migrate to stable version
+
     /*
      This test is disabled for protocol versions for which the reconciliation interval is
      static because the described setting cannot occur.
      */
-    if (testedProtocolVersion >= ProtocolVersion.dev) {
+    if (testedProtocolVersion >= ProtocolVersion.v4) {
       "work when commitment tick falls between two participants connection to the domain" in {
         /*
         The goal here is to check that ACS commitment processing works even when

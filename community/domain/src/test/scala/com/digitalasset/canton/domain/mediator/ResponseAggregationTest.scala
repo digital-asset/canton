@@ -104,7 +104,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         LocalReject.ConsistencyRejections.LockedContracts.Reject(Seq())(testedProtocolVersion)
       val fullInformeeTree =
         FullInformeeTree.tryCreate(
-          GenTransactionTree(hashOps)(
+          GenTransactionTree.tryCreate(hashOps)(
             b(0),
             commonMetadataSignatory,
             b(2),
@@ -146,7 +146,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             testedProtocolVersion,
           )
         val fullInformeeTreeThresholdTooLow = FullInformeeTree.tryCreate(
-          GenTransactionTree(hashOps)(
+          GenTransactionTree.tryCreate(hashOps)(
             b(0),
             commonMetadataSignatory,
             b(2),
@@ -415,7 +415,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       val informeeMessage = InformeeMessage(
         FullInformeeTree.tryCreate(
-          GenTransactionTree(hashOps)(
+          GenTransactionTree.tryCreate(hashOps)(
             b(0),
             commonMetadataSignatory,
             b(2),
@@ -521,7 +521,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         testedProtocolVersion,
       )
       val fullInformeeTree = FullInformeeTree.tryCreate(
-        GenTransactionTree(hashOps)(
+        GenTransactionTree.tryCreate(hashOps)(
           b(0),
           commonMetadata,
           b(2),

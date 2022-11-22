@@ -7,11 +7,13 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequest.usingSignedSubmissionRequest
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.HasFlushFuture
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -93,16 +95,26 @@ object PeriodicAcknowledgements {
       clock: Clock,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): PeriodicAcknowledgements =
+      protocolVersion: ProtocolVersion,
+  )(implicit executionContext: ExecutionContext): PeriodicAcknowledgements = {
+    val sigCheckSupported = usingSignedSubmissionRequest(protocolVersion)
     new PeriodicAcknowledgements(
       isHealthy,
       interval,
       fetchCleanTimestamp,
-      Traced.lift(client.acknowledge(_)(_)),
+      Traced.lift((ts, tc) =>
+        if (sigCheckSupported)
+          client
+            .acknowledgeSigned(ts)(tc)
+            .value
+            .flatMap(_.fold(e => Future.failed(new RuntimeException(e)), _ => Future.unit))
+        else client.acknowledge(ts)(tc)
+      ),
       clock,
       timeouts,
       loggerFactory,
     )
+  }
 
   def fetchCleanCounterFromStore(
       counterTrackerStore: SequencerCounterTrackerStore

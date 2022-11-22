@@ -15,7 +15,7 @@ import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, MediatorRequest, Verdict}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
@@ -124,8 +124,8 @@ private[mediator] class DbFinalizedResponseStore(
 
   private implicit val setParameterVerdict: SetParameter[Verdict] =
     Verdict.getVersionedSetParameter
-  private implicit val setParameterTraceContext: SetParameter[TraceContext] =
-    TraceContext.getVersionedSetParameter(protocolVersion)
+  private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =
+    SerializableTraceContext.getVersionedSetParameter(protocolVersion)
 
   implicit val getResultMediatorRequest: GetResult[MediatorRequest] = GetResult(r =>
     EnvelopeContent
@@ -158,11 +158,16 @@ private[mediator] class DbFinalizedResponseStore(
               sqlu"""insert 
                      /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( response_aggregations ( request_id ) ) */
                      into response_aggregations(request_id, mediator_request, version, verdict, request_trace_context)
-                     values(${request.requestId},${request.request},${request.version},${verdict}, ${request.requestTraceContext})"""
+                     values (
+                       ${request.requestId},${request.request},${request.version},${verdict},
+                       ${SerializableTraceContext(request.requestTraceContext)}
+                     )"""
             case _ =>
               sqlu"""insert into response_aggregations(request_id, mediator_request, version, verdict, request_trace_context)
-                          values(${request.requestId},${request.request},${request.version},${verdict}, ${request.requestTraceContext})
-                          on conflict do nothing"""
+                     values (
+                       ${request.requestId},${request.request},${request.version},${verdict},
+                       ${SerializableTraceContext(request.requestTraceContext)}
+                     ) on conflict do nothing"""
           }
 
           storage.update_(
@@ -181,18 +186,21 @@ private[mediator] class DbFinalizedResponseStore(
       storage.querySingle(
         sql"""select request_id, mediator_request, version, verdict, request_trace_context 
               from response_aggregations where request_id=${requestId.unwrap}
-           """.as[(RequestId, MediatorRequest, CantonTimestamp, Verdict, TraceContext)].map {
-          _.headOption.map { case (reqId, mediatorRequest, version, verdict, requestTraceContext) =>
-            ResponseAggregation(
-              reqId,
-              mediatorRequest,
-              version,
-              verdict,
-              protocolVersion,
-              requestTraceContext,
-            )(loggerFactory)
-          }
-        },
+           """
+          .as[(RequestId, MediatorRequest, CantonTimestamp, Verdict, SerializableTraceContext)]
+          .map {
+            _.headOption.map {
+              case (reqId, mediatorRequest, version, verdict, requestTraceContext) =>
+                ResponseAggregation(
+                  reqId,
+                  mediatorRequest,
+                  version,
+                  verdict,
+                  protocolVersion,
+                  requestTraceContext.unwrap,
+                )(loggerFactory)
+            }
+          },
         operationName = s"${this.getClass}: fetch request $requestId",
       )
     }

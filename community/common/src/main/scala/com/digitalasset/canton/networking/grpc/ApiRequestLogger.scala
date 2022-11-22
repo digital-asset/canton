@@ -6,7 +6,7 @@ package com.digitalasset.canton.networking.grpc
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall
@@ -240,7 +240,7 @@ class ApiRequestLogger(
           .traceContext
       ).toOption
       tc <- ProtoConverter.required("traceContextOfMessage", maybeTraceContextP).toOption
-      traceContext <- TraceContext.fromProtoV0(tc).toOption
-    } yield traceContext
+      traceContext <- SerializableTraceContext.fromProtoV0(tc).toOption
+    } yield traceContext.unwrap
   }
 }

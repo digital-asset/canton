@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.Hash
   * Must be paired with a discriminator to obtain a complete contract ID.
   */
 case class Unicum(unwrap: Hash) extends AnyVal {
-  def toContractIdSuffix: Bytes =
-    ContractId.suffixPrefix ++ Bytes.fromByteString(unwrap.getCryptographicEvidence)
+  def toContractIdSuffix(contractIdVersion: CantonContractIdVersion): Bytes =
+    contractIdVersion.versionPrefixBytes ++
+      Bytes.fromByteString(unwrap.getCryptographicEvidence)
 }

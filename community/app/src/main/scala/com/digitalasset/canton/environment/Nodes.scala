@@ -228,7 +228,8 @@ class ManagedNodes[
         }
       }
       val retryConfig =
-        if (storageConfig.failFastOnStartup) RetryConfig.failFast else RetryConfig.forever
+        if (storageConfig.parameters.failFastOnStartup) RetryConfig.failFast
+        else RetryConfig.forever
 
       val result = migrations
         .checkAndMigrate(params, retryConfig)

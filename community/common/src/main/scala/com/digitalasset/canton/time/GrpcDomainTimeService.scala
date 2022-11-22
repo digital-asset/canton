@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
 import com.google.protobuf.empty.Empty
 import io.grpc.Status
@@ -28,47 +28,47 @@ class GrpcDomainTimeService(
     extends v0.DomainTimeServiceGrpc.DomainTimeService
     with NamedLogging {
 
-  override def fetchTime(requestP: v0.FetchTimeRequest): Future[v0.FetchTimeResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      handle {
-        for {
-          request <- EitherT
-            .fromEither[Future](FetchTimeRequest.fromProto(requestP))
-            .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
-          timeTracker <- EitherT
-            .fromEither[Future](lookupTimeTracker(request.domainIdO))
-            .leftMap(Status.INVALID_ARGUMENT.withDescription)
-          timestamp <- EitherT(
-            timeTracker
-              .fetchTime(request.freshnessBound)
-              .map(Right(_))
-              .onShutdown(Left(Status.ABORTED.withDescription("shutdown")))
-          )
-        } yield FetchTimeResponse(timestamp).toProtoV0
-      }
+  override def fetchTime(requestP: v0.FetchTimeRequest): Future[v0.FetchTimeResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    handle {
+      for {
+        request <- EitherT
+          .fromEither[Future](FetchTimeRequest.fromProto(requestP))
+          .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+        timeTracker <- EitherT
+          .fromEither[Future](lookupTimeTracker(request.domainIdO))
+          .leftMap(Status.INVALID_ARGUMENT.withDescription)
+        timestamp <- EitherT(
+          timeTracker
+            .fetchTime(request.freshnessBound)
+            .map(Right(_))
+            .onShutdown(Left(Status.ABORTED.withDescription("shutdown")))
+        )
+      } yield FetchTimeResponse(timestamp).toProtoV0
     }
+  }
 
-  override def awaitTime(requestP: v0.AwaitTimeRequest): Future[Empty] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      handle {
-        for {
-          request <- EitherT
-            .fromEither[Future](AwaitTimeRequest.fromProto(requestP))
-            .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
-          timeTracker <- EitherT
-            .fromEither[Future](lookupTimeTracker(request.domainIdO))
-            .leftMap(Status.INVALID_ARGUMENT.withDescription)
-          _ = logger.debug(
-            s"Waiting for domain [${request.domainIdO}] to reach time ${request.timestamp} (is at ${timeTracker.latestTime})"
-          )
-          _ <- EitherT.liftF(
-            timeTracker
-              .awaitTick(request.timestamp)
-              .fold(Future.unit)(_.void)
-          )
-        } yield Empty()
-      }
+  override def awaitTime(requestP: v0.AwaitTimeRequest): Future[Empty] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    handle {
+      for {
+        request <- EitherT
+          .fromEither[Future](AwaitTimeRequest.fromProto(requestP))
+          .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+        timeTracker <- EitherT
+          .fromEither[Future](lookupTimeTracker(request.domainIdO))
+          .leftMap(Status.INVALID_ARGUMENT.withDescription)
+        _ = logger.debug(
+          s"Waiting for domain [${request.domainIdO}] to reach time ${request.timestamp} (is at ${timeTracker.latestTime})"
+        )
+        _ <- EitherT.liftF(
+          timeTracker
+            .awaitTick(request.timestamp)
+            .fold(Future.unit)(_.void)
+        )
+      } yield Empty()
     }
+  }
 
   private def handle[A](handler: EitherT[Future, Status, A]): Future[A] =
     EitherTUtil.toFuture(handler.leftMap(_.asRuntimeException()))

@@ -179,7 +179,8 @@ object LfTransactionUtil {
   }
 
   private[this] def suffixForDiscriminator(
-      unicumOfDiscriminator: LfHash => Option[Unicum]
+      unicumOfDiscriminator: LfHash => Option[Unicum],
+      cantonContractId: CantonContractIdVersion,
   )(discriminator: LfHash): Bytes = {
     /* If we can't find the discriminator we leave it unchanged,
      * because this could refer to an input contract of the transaction.
@@ -187,23 +188,25 @@ object LfTransactionUtil {
      * i.e., we suffix a discriminator either everywhere in the transaction or nowhere
      * even though the map from discriminators to unicum is built up in post-order of the nodes.
      */
-    unicumOfDiscriminator(discriminator).fold(Bytes.Empty)(unicum => unicum.toContractIdSuffix)
+    unicumOfDiscriminator(discriminator).fold(Bytes.Empty)(_.toContractIdSuffix(cantonContractId))
   }
 
   def suffixContractInst(
-      unicumOfDiscriminator: LfHash => Option[Unicum]
+      unicumOfDiscriminator: LfHash => Option[Unicum],
+      cantonContractId: CantonContractIdVersion,
   )(contractInst: LfContractInst): Either[String, LfContractInst] = {
     contractInst.unversioned
-      .suffixCid(suffixForDiscriminator(unicumOfDiscriminator))
+      .suffixCid(suffixForDiscriminator(unicumOfDiscriminator, cantonContractId))
       .map(unversionedContractInst => // traverse being added in daml-lf
         contractInst.map(_ => unversionedContractInst)
       )
   }
 
   def suffixNode(
-      unicumOfDiscriminator: LfHash => Option[Unicum]
+      unicumOfDiscriminator: LfHash => Option[Unicum],
+      cantonContractId: CantonContractIdVersion,
   )(node: LfActionNode): Either[String, LfActionNode] = {
-    node.suffixCid(suffixForDiscriminator(unicumOfDiscriminator))
+    node.suffixCid(suffixForDiscriminator(unicumOfDiscriminator, cantonContractId))
   }
 
   /** Monadic visit to all nodes of the transaction in execution order.

@@ -4,7 +4,9 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.lf.value.Value
+import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -17,6 +19,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
 
   "SerializableContractInstance" should {
     "deserialize correctly" in {
+      val someContractSalt = TestSalt.generateSalt(0)
       val contractId = ExampleTransactionFactory.suffixedId(0, 0)
 
       val metadata = ContractMetadata.tryCreate(
@@ -35,6 +38,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
         ExampleTransactionFactory.contractInstance(Seq(contractId)),
         metadata,
         CantonTimestamp.now(),
+        Option.when(testedProtocolVersion >= ProtocolVersion.v4)(someContractSalt),
       )
       SerializableContract.fromProtoVersioned(
         sci.toProtoVersioned(testedProtocolVersion)
