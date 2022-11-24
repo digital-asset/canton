@@ -108,6 +108,8 @@ import scala.util.{Failure, Success, Try}
   * @param skipSequencedEventValidation if true, sequenced event validation will be skipped. the default setting is false.
   *                                     this option should only be enabled if a defective validation is blocking processing.
   *                                     therefore, unless you know what you are doing, you shouldn't touch this setting.
+  * @param overrideMaxRequestSize overrides the maxRequestSize configured in the dynamic domain parameters. If overrideMaxRequestSize,
+  *                               is set, modifying the maxRequestSize won't have any effect.
   */
 case class SequencerClientConfig(
     eventInboxSize: PositiveInt = PositiveInt.tryCreate(100),
@@ -125,6 +127,7 @@ case class SequencerClientConfig(
     // TODO(#10040) remove optimistic validation
     optimisticSequencedEventValidation: Boolean = true,
     skipSequencedEventValidation: Boolean = false,
+    overrideMaxRequestSize: Option[NonNegativeInt] = None,
 )
 
 /** What type of message is being sent.
@@ -1170,6 +1173,7 @@ object SequencerClient {
         }
         val sequencerDomainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
           domainParameters,
+          config.overrideMaxRequestSize,
           topologyClient,
           futureSupervisor,
           loggerFactory,

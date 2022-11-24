@@ -259,8 +259,10 @@ abstract class TransactionTreeFactoryImpl(
       case Seq() =>
       case subview +: toVisit =>
         addSaltsFrom(subview)
-        val subviews = subview.subviews.map(tv => checked(tv.tryUnwrap))
-        go(subviews ++ toVisit)
+        subview.subviews.assertAllUnblinded(hash =>
+          s"View ${subview.viewHash} contains an unexpected blinded subview ${hash}"
+        )
+        go(subview.subviews.unblindedElements ++ toVisit)
     }
 
     go(Seq(view.view))

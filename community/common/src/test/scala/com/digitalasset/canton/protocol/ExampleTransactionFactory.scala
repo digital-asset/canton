@@ -27,7 +27,7 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.{
   SameView,
   createWithConfirmationPolicy,
 }
-import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
+import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -501,7 +501,8 @@ class ExampleTransactionFactory(
   def rootViewPosition(index: Int, total: Int): ViewPosition =
     ViewPosition(List(MerkleSeq.indicesFromSeq(total)(index)))
 
-  def subViewIndex(index: Int): MerklePathElement = ListIndex(index)
+  def subViewIndex(index: Int, total: Int): MerklePathElement =
+    TransactionSubviews.indices(protocolVersion, total)(index)
 
   @SuppressWarnings(Array("org.wartremover.warts.TryPartial", "org.wartremover.warts.AsInstanceOf"))
   def view(
@@ -560,10 +561,11 @@ class ExampleTransactionFactory(
       protocolVersion,
     )
 
+    val subViews = TransactionSubviews(subviews)(protocolVersion, cryptoOps)
     TransactionView.tryCreate(cryptoOps)(
       viewCommonData,
       viewParticipantData,
-      subviews,
+      subviews = subViews,
       protocolVersion,
     )
   }
@@ -626,10 +628,15 @@ class ExampleTransactionFactory(
   ): TransactionView =
     view match {
       case TransactionView(viewCommonData, viewParticipantData, _) =>
+        val subViews =
+          TransactionSubviews(subviews)(
+            protocolVersion,
+            cryptoOps,
+          )
         TransactionView.tryCreate(cryptoOps)(
           viewCommonData,
           blinded(viewParticipantData),
-          subviews,
+          subviews = subViews,
           protocolVersion,
         )
     }
@@ -658,10 +665,15 @@ class ExampleTransactionFactory(
   def leafsBlinded(view: TransactionView, subviews: MerkleTree[TransactionView]*): TransactionView =
     view match {
       case TransactionView(viewCommonData, viewParticipantData, _) =>
+        val subViews =
+          TransactionSubviews(subviews)(
+            protocolVersion,
+            cryptoOps,
+          )
         TransactionView.tryCreate(cryptoOps)(
           blinded(viewCommonData),
           blinded(viewParticipantData),
-          subviews,
+          subviews = subViews,
           protocolVersion,
         )
     }
@@ -1314,7 +1326,7 @@ class ExampleTransactionFactory(
     val create130SerInst: SerializableRawContractInstance = asSerializableRaw(create130Inst)
     val (salt130Id, create130Id): (Salt, LfContractId) =
       fromDiscriminator(
-        subViewIndex(0) +: rootViewPosition(1, 2),
+        subViewIndex(0, 2) +: rootViewPosition(1, 2),
         2,
         0,
         create130Inst,
@@ -1330,7 +1342,7 @@ class ExampleTransactionFactory(
     val create1310SerInst: SerializableRawContractInstance = asSerializableRaw(create1310Inst)
     val (salt1310Id, create1310Id): (Salt, LfContractId) =
       fromDiscriminator(
-        subViewIndex(0) +: subViewIndex(1) +: rootViewPosition(1, 2),
+        subViewIndex(0, 1) +: subViewIndex(1, 2) +: rootViewPosition(1, 2),
         4,
         0,
         create1310Inst,
@@ -1793,7 +1805,7 @@ class ExampleTransactionFactory(
     val create100SerInst: SerializableRawContractInstance = asSerializableRaw(create100Inst)
     val (salt100Id, create100Id): (Salt, LfContractId) =
       fromDiscriminator(
-        subViewIndex(0) +: subViewIndex(0) +: rootViewPosition(1, 3),
+        subViewIndex(0, 1) +: subViewIndex(0, 2) +: rootViewPosition(1, 3),
         3,
         0,
         create100Inst,
@@ -1816,7 +1828,7 @@ class ExampleTransactionFactory(
     val create120SerInst: SerializableRawContractInstance = asSerializableRaw(create120Inst)
     val (salt120Id, create120Id): (Salt, LfContractId) =
       fromDiscriminator(
-        subViewIndex(0) +: subViewIndex(1) +: rootViewPosition(1, 3),
+        subViewIndex(0, 1) +: subViewIndex(1, 2) +: rootViewPosition(1, 3),
         5,
         0,
         create120Inst,
@@ -2285,7 +2297,7 @@ class ExampleTransactionFactory(
     val create110SerInst: SerializableRawContractInstance = asSerializableRaw(create110Inst)
     val (salt110Id, create110Id): (Salt, LfContractId) =
       fromDiscriminator(
-        subViewIndex(0) +: rootViewPosition(1, 2),
+        subViewIndex(0, 1) +: rootViewPosition(1, 2),
         2,
         0,
         create110Inst,

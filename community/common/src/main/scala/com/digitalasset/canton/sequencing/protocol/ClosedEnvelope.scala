@@ -3,14 +3,21 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.messages.ProtocolMessage
+import com.digitalasset.canton.protocol.messages.{
+  DefaultOpenEnvelope,
+  EnvelopeContent,
+  ProtocolMessage,
+}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
+import monocle.Lens
 
 /** A [[ClosedEnvelope]]'s contents are serialized as a [[com.google.protobuf.ByteString]]. */
 case class ClosedEnvelope(
@@ -42,4 +49,15 @@ object ClosedEnvelope {
       recipients <- Recipients.fromProtoV0(tree)
     } yield ClosedEnvelope(contentP, recipients)
   }
+
+  def tryDefaultOpenEnvelope(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+  ): Lens[ClosedEnvelope, DefaultOpenEnvelope] =
+    Lens[ClosedEnvelope, DefaultOpenEnvelope](
+      _.openEnvelope(
+        EnvelopeContent.messageFromByteString(protocolVersion, hashOps),
+        protocolVersion,
+      ).valueOr(err => throw new IllegalArgumentException(s"Failed to open envelope: $err"))
+    )(newOpenEnvelope => _ => newOpenEnvelope.closeEnvelope)
 }

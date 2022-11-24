@@ -39,9 +39,11 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     val alice = PlainInformee(LfPartyId.assertFromString("alice"))
     val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2)
     val hashOps = new SymbolicPureCrypto
+
     def h(i: Int): Hash = TestHash.digest(i)
     def rh(index: Int): RootHash = RootHash(h(index))
     def s(i: Int): Salt = TestSalt.generateSalt(i)
+
     val viewCommonData =
       ViewCommonData.create(hashOps)(
         Set(alice, bob),
@@ -52,7 +54,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     val view = TransactionView.tryCreate(hashOps)(
       viewCommonData,
       BlindedNode(rh(0)),
-      Nil,
+      TransactionSubviews.empty(testedProtocolVersion, hashOps),
       testedProtocolVersion,
     )
     val commonMetadata = CommonMetadata(hashOps)(

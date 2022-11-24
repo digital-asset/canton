@@ -862,6 +862,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       val maxRequestSizeLookup =
         DomainParametersLookup.forSequencerDomainParameters(
           domainParameters,
+          None,
           topologyClient,
           FutureSupervisor.Noop,
           loggerFactory,

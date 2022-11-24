@@ -9,6 +9,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.sequencing.{EnvelopeBox, RawSignedContentEnvelopeBox}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.DomainId
@@ -59,8 +60,7 @@ sealed trait SequencedEvent[+Env <: Envelope[_]]
   protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  // TODO(Andreas): Restrict visibility of this method
-  private[sequencing] def traverse[F[_], Env2 <: Envelope[_]](f: Env => F[Env2])(implicit
+  protected def traverse[F[_], Env2 <: Envelope[_]](f: Env => F[Env2])(implicit
       F: Applicative[F]
   ): F[SequencedEvent[Env2]]
 }
@@ -167,6 +167,24 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
       }): ParsingResult[SequencedEvent[Env]]
     } yield event
   }
+
+  implicit val sequencedEventEnvelopeBox: EnvelopeBox[SequencedEvent] =
+    new EnvelopeBox[SequencedEvent] {
+      override private[sequencing] def traverse[G[_], A <: Envelope[_], B <: Envelope[_]](
+          event: SequencedEvent[A]
+      )(f: A => G[B])(implicit G: Applicative[G]): G[SequencedEvent[B]] =
+        event.traverse(f)
+    }
+
+  // It would be nice if we could appeal to a generic composition theorem here,
+  // but the `MemoizeEvidence` bound in `SignedContent` doesn't allow a generic `Traverse` instance.
+  implicit val signedContentEnvelopeBox: EnvelopeBox[RawSignedContentEnvelopeBox] =
+    new EnvelopeBox[RawSignedContentEnvelopeBox] {
+      override private[sequencing] def traverse[G[_], Env1 <: Envelope[_], Env2 <: Envelope[_]](
+          signedEvent: SignedContent[SequencedEvent[Env1]]
+      )(f: Env1 => G[Env2])(implicit G: Applicative[G]): G[RawSignedContentEnvelopeBox[Env2]] =
+        signedEvent.traverse(_.traverse(f))
+    }
 }
 
 sealed abstract case class DeliverError private[sequencing] (
@@ -189,7 +207,7 @@ sealed abstract case class DeliverError private[sequencing] (
     deliverErrorReason = Some(reason.toProtoV0),
   )
 
-  private[sequencing] override def traverse[F[_], Env <: Envelope[_]](f: Nothing => F[Env])(implicit
+  override protected def traverse[F[_], Env <: Envelope[_]](f: Nothing => F[Env])(implicit
       F: Applicative[F]
   ): F[SequencedEvent[Env]] = F.pure(this)
 
@@ -252,7 +270,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     deliverErrorReason = None,
   )
 
-  override private[sequencing] def traverse[F[_], Env2 <: Envelope[_]](
+  protected def traverse[F[_], Env2 <: Envelope[_]](
       f: Env => F[Env2]
   )(implicit F: Applicative[F]) =
     F.map(batch.traverse(f))(

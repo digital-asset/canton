@@ -20,7 +20,6 @@ import com.digitalasset.canton.{DiscardOps, LfPackageId}
 
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.concurrent
-import scala.collection.immutable.Seq
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
@@ -57,12 +56,11 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
           .put(packageId, (pkgArchive, sourceDescription))
           .discard[Option[(DamlLf.Archive, String256M)]]
       else
-        // TODO(andreas) This is not thread-safe
         pkgData
-          .put(
-            packageId,
-            (pkgArchive, pkgData.get(packageId).map(_._2).getOrElse(defaultPackageDescription)),
-          )
+          .updateWith(packageId) {
+            case None => Some(pkgArchive -> defaultPackageDescription)
+            case Some((_, oldDescription)) => Some(pkgArchive -> oldDescription)
+          }
           .discard[Option[(DamlLf.Archive, String256M)]]
     }
 

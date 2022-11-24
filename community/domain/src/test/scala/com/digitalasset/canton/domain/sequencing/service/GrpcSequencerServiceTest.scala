@@ -132,6 +132,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           maxRatePerParticipant = maxRatePerParticipant.unwrap,
           maxRequestSize = maxRequestSize.unwrap,
         ),
+        None,
         topologyClient,
         FutureSupervisor.Noop,
         loggerFactory,

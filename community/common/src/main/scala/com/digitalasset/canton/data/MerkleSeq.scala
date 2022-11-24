@@ -8,27 +8,14 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleSeq.MerkleSeqElement
-import com.digitalasset.canton.data.MerkleTree.{
-  BlindSubtree,
-  BlindingCommand,
-  RevealIfNeedBe,
-  RevealSubtree,
-  VersionedMerkleTree,
-}
+import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
 import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndex}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{
-  HasProtocolVersionedWithContextCompanion,
-  HasProtocolVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-  UntypedVersionedMessage,
-}
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
 import scala.annotation.tailrec
@@ -67,6 +54,21 @@ case class MerkleSeq[+M <: VersionedMerkleTree[_]](
     case None => Seq.empty
   }
 
+  /** Converts this to a Seq.
+    * The resulting seq may be shorter than the underlying fully unblinded seq,
+    * because neighbouring blinded elements may be blinded into a single node.
+    */
+  lazy val toSeq: Seq[MerkleTree[M]] = rootOrEmpty match {
+    case Some(t) => MerkleSeqElement.seqOf(t)
+    case None => Seq.empty
+  }
+
+  def blindFully: MerkleSeq[M] = rootOrEmpty.fold(this)(root =>
+    MerkleSeq(Some(root.blindFully), representativeProtocolVersion)(hashOps)
+  )
+
+  def isFullyBlinded: Boolean = rootOrEmpty.fold(true)(_.unwrap.isLeft)
+
   private[data] def doBlind(
       optimizedBlindingPolicy: PartialFunction[RootHash, BlindingCommand]
   ): MerkleSeq[M] =
@@ -93,7 +95,8 @@ case class MerkleSeq[+M <: VersionedMerkleTree[_]](
     v1.MerkleSeq(rootOrEmpty = rootOrEmpty.map(MerkleTree.toBlindableNodeV1))
 
   override def pretty: Pretty[MerkleSeq.this.type] = prettyOfClass(
-    unnamedParamIfDefined(_.rootOrEmpty)
+    param("root hash", _.rootOrEmpty.map(_.rootHash), _.rootOrEmpty.exists(!_.isBlinded)),
+    unnamedParamIfDefined(_.rootOrEmpty),
   )
 
   def mapM[A <: VersionedMerkleTree[A]](f: M => A): MerkleSeq[A] = {
@@ -157,6 +160,8 @@ object MerkleSeq
       builder.result()
     }.toSeq
 
+    def toSeq: Seq[MerkleTree[M]]
+
     private[MerkleSeq] def foreachBlindedElement(body: RootHash => Unit): Unit
 
     // We repeat this here to enforce a more specific return type.
@@ -198,6 +203,9 @@ object MerkleSeq
       with MerkleSeqElement[M] {
 
     override def subtrees: Seq[MerkleTree[_]] = Seq(first, second)
+
+    override def toSeq: Seq[MerkleTree[M]] =
+      MerkleSeqElement.seqOf(first) ++ MerkleSeqElement.seqOf(second)
 
     override private[data] def withBlindedSubtrees(
         optimizedBlindingPolicy: PartialFunction[RootHash, MerkleTree.BlindingCommand]
@@ -283,6 +291,8 @@ object MerkleSeq
 
     override def subtrees: Seq[MerkleTree[_]] = Seq(data)
 
+    override def toSeq: Seq[MerkleTree[M]] = Seq(data)
+
     override private[data] def withBlindedSubtrees(
         optimizedBlindingPolicy: PartialFunction[RootHash, MerkleTree.BlindingCommand]
     ): Singleton[M] =
@@ -327,6 +337,13 @@ object MerkleSeq
         (HashOps, ByteString => ParsingResult[MerkleTree[VersionedMerkleTree[_]]]),
       ] {
     override protected val name: String = "MerkleSeqElement"
+
+    def seqOf[M <: VersionedMerkleTree[_]](
+        elementTree: MerkleTree[MerkleSeqElement[M]]
+    ): Seq[MerkleTree[M]] = elementTree.unwrap match {
+      case Right(element) => element.toSeq
+      case Left(rootHash) => Seq(BlindedNode(rootHash))
+    }
 
     override def supportedProtoVersions: SupportedProtoVersions =
       SupportedProtoVersions(
@@ -544,7 +561,7 @@ object MerkleSeq
       hashOps: HashOps
   )(elements: Seq[MerkleTree[M]], protocolVersion: ProtocolVersion): MerkleSeq[M] = {
     if (elements.isEmpty) {
-      MerkleSeq[M](None, protocolVersionRepresentativeFor(protocolVersion))(hashOps)
+      MerkleSeq.empty(protocolVersion, hashOps)
     } else {
       // elements is non-empty
 
@@ -576,6 +593,13 @@ object MerkleSeq
   )(hashOps: HashOps): MerkleSeq[M] = {
     MerkleSeq(rootOrEmpty, protocolVersionRepresentativeFor(protocolVersion))(hashOps)
   }
+
+  /** Create an empty MerkleSeq */
+  def empty[M <: VersionedMerkleTree[_]](
+      protocolVersion: ProtocolVersion,
+      hashOps: HashOps,
+  ): MerkleSeq[M] =
+    MerkleSeq(None, protocolVersion)(hashOps)
 
   /** Arranges a non-empty sequence of `elements` in a balanced binary tree.
     *

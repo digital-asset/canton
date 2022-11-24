@@ -17,7 +17,6 @@ import com.digitalasset.canton.data.ActionDescription.{
 }
 import com.digitalasset.canton.data.TransactionView.InvalidView
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
-import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
@@ -44,6 +43,8 @@ import com.digitalasset.canton.{
 }
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
+import monocle.macros.GenLens
 
 /** Encapsulates a subaction of the underlying transaction.
   *
@@ -53,7 +54,7 @@ import com.google.protobuf.ByteString
 case class TransactionView private (
     viewCommonData: MerkleTree[ViewCommonData],
     viewParticipantData: MerkleTree[ViewParticipantData],
-    subviews: Seq[MerkleTree[TransactionView]],
+    subviews: TransactionSubviews,
 )(
     hashOps: HashOps,
     override val representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
@@ -64,17 +65,17 @@ case class TransactionView private (
   override val companionObj: HasProtocolVersionedWrapperCompanion[TransactionView] = TransactionView
 
   if (viewCommonData.unwrap.isRight) {
-    subviews
-      .find(_.unwrap.exists(_.viewCommonData == viewCommonData))
-      .foreach(subview => {
+    subviews.unblindedElementsWithIndex
+      .find { case (view, _path) => view.viewCommonData == viewCommonData }
+      .foreach { case (_view, path) =>
         throw InvalidView(
-          s"The subview with index ${subviews.indexOf(subview)} has an equal viewCommonData."
+          s"The subview with index $path has an equal viewCommonData."
         )
-      })
+      }
   }
 
   override def subtrees: Seq[MerkleTree[_]] =
-    Seq[MerkleTree[_]](viewCommonData, viewParticipantData) ++ subviews
+    Seq[MerkleTree[_]](viewCommonData, viewParticipantData) ++ subviews.trees
 
   def tryUnblindViewParticipantData(
       fieldName: String
@@ -104,19 +105,18 @@ case class TransactionView private (
     TransactionView.tryCreate(
       viewCommonData.doBlind(blindingCommandPerNode), // O(1)
       viewParticipantData.doBlind(blindingCommandPerNode), // O(1)
-      subviews.map(_.doBlind(blindingCommandPerNode)), // O(#subviews)
+      subviews.doBlind(blindingCommandPerNode), // O(#subviews)
       representativeProtocolVersion,
     )(hashOps)
 
   val viewHash: ViewHash = ViewHash.fromRootHash(rootHash)
 
-  /** Traverses all subviews `v1, v2, v3, ...` in pre-order and yields
-    * `f(...f(f(v1, z), v2)..., vn)`
+  /** Traverses all unblinded subviews `v1, v2, v3, ...` in pre-order and yields
+    * `f(...f(f(z, v1), v2)..., vn)`
     */
   def foldLeft[A](z: A)(f: (A, TransactionView) => A): A =
-    subviews
+    subviews.unblindedElements
       .to(LazyList)
-      .flatMap(_.unwrap.toSeq) // filter out blinded subviews
       .foldLeft(f(z, this))((acc, subView) => subView.foldLeft(acc)(f))
 
   /** Yields all (direct and indirect) subviews of this view in pre-order.
@@ -124,9 +124,6 @@ case class TransactionView private (
     */
   def flatten: Seq[TransactionView] =
     foldLeft(Seq.newBuilder[TransactionView])((acc, v) => acc += v).result()
-
-  def subviewsWithIndex: Seq[(MerkleTree[TransactionView], MerklePathElement)] =
-    subviews.zipWithIndex.map { case (view, index) => view -> ListIndex(index) }
 
   override def pretty: Pretty[TransactionView] = prettyOfClass(
     param("root hash", _.rootHash),
@@ -139,38 +136,31 @@ case class TransactionView private (
   private[data] def copy(
       viewCommonData: MerkleTree[ViewCommonData] = this.viewCommonData,
       viewParticipantData: MerkleTree[ViewParticipantData] = this.viewParticipantData,
-      subviews: Seq[MerkleTree[TransactionView]] = this.subviews,
+      subviews: TransactionSubviews = this.subviews,
   ) =
     new TransactionView(viewCommonData, viewParticipantData, subviews)(
       hashOps,
       representativeProtocolVersion,
     )
 
-  /** If the view with the given hash appears as a (possibly blinded) descendant of this view ,
-    * replace it by the given view. Note that this view also counts as a descendant
-    * of itself for this purpose.
+  /** If the view with the given hash appears either as this view or one of its unblinded descendants,
+    * replace it by the given view.
     * TODO(M40): not stack safe unless we have limits on the depths of views.
     */
-  def replace(h: ViewHash, v: TransactionView): TransactionView = {
+  def replace(h: ViewHash, v: TransactionView): TransactionView =
     if (viewHash == h) v
-    else
-      this.copy(subviews =
-        subviews.map(sv =>
-          sv.unwrap.fold(h2 => if (h2.unwrap == h.unwrap) v else sv, tv => tv.replace(h, v))
-        )
-      )
-  }
+    else this.copy(subviews = subviews.mapUnblinded(_.replace(h, v)))
 
   protected def toProtoV0: v0.ViewNode = v0.ViewNode(
     viewCommonData = Some(MerkleTree.toBlindableNodeV0(viewCommonData)),
     viewParticipantData = Some(MerkleTree.toBlindableNodeV0(viewParticipantData)),
-    subviews = subviews.map(subview => MerkleTree.toBlindableNodeV0(subview)),
+    subviews = subviews.toProtoV0,
   )
 
   protected def toProtoV1: v1.ViewNode = v1.ViewNode(
     viewCommonData = Some(MerkleTree.toBlindableNodeV1(viewCommonData)),
     viewParticipantData = Some(MerkleTree.toBlindableNodeV1(viewParticipantData)),
-    subviews = subviews.map(subview => MerkleTree.toBlindableNodeV1(subview)),
+    subviews = Some(subviews.toProtoV1),
   )
 
   /** The global key inputs that the [[com.daml.lf.transaction.ContractStateMachine]] computes
@@ -199,10 +189,14 @@ case class TransactionView private (
         )
       }
 
-      subviews.foldLeft(viewParticipantData.resolvedKeysWithMaintainers) { (acc, subview) =>
-        val unblindedSubview = tryUnblindSubview(subview, "Global key inputs")
-        val subviewGki = unblindedSubview.globalKeyInputs
-        MapsUtil.mergeWith(acc, subviewGki) { (accRes, _subviewRes) => accRes }
+      subviews.assertAllUnblinded(hash =>
+        s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but ${hash} is blinded"
+      )
+
+      subviews.unblindedElements.foldLeft(viewParticipantData.resolvedKeysWithMaintainers) {
+        (acc, subview) =>
+          val subviewGki = subview.globalKeyInputs
+          MapsUtil.mergeWith(acc, subviewGki) { (accRes, _subviewRes) => accRes }
       }
     }
 
@@ -235,12 +229,14 @@ case class TransactionView private (
       )
     )
     val currentRollbackScope = vpd.rollbackContext.rollbackScope
-    val subviewInputsAndCreated = subviews.map { subview =>
-      val unblindedSubview = tryUnblindSubview(subview, "Inputs and created contracts")
+    subviews.assertAllUnblinded(hash =>
+      s"Inputs and created contracts of view $viewHash can be computed only if all subviews are unblinded, but ${hash} is blinded"
+    )
+    val subviewInputsAndCreated = subviews.unblindedElements.map { subview =>
       val subviewVpd =
-        unblindedSubview.tryUnblindViewParticipantData("Inputs and created contracts")
-      val created = unblindedSubview.createdContracts
-      val inputs = unblindedSubview.inputContracts
+        subview.tryUnblindViewParticipantData("Inputs and created contracts")
+      val created = subview.createdContracts
+      val inputs = subview.inputContracts
       val subviewRollbackScope = subviewVpd.rollbackContext.rollbackScope
       // If the subview sits under a Rollback node in the view's core,
       // then the created contracts of the subview are all rolled back,
@@ -427,7 +423,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
   private def tryCreate(
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
-      subviews: Seq[MerkleTree[TransactionView]],
+      subviews: TransactionSubviews,
       representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
   )(hashOps: HashOps): TransactionView =
     new TransactionView(viewCommonData, viewParticipantData, subviews)(
@@ -442,7 +438,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
   def tryCreate(hashOps: HashOps)(
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
-      subviews: Seq[MerkleTree[TransactionView]],
+      subviews: TransactionSubviews,
       protocolVersion: ProtocolVersion,
   ): TransactionView =
     tryCreate(
@@ -455,7 +451,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
   private def createFromRepresentativePV(hashOps: HashOps)(
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
-      subviews: Seq[MerkleTree[TransactionView]],
+      subviews: TransactionSubviews,
       representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
   ): Either[String, TransactionView] =
     Either
@@ -476,7 +472,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
   def create(hashOps: HashOps)(
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
-      subviews: Seq[MerkleTree[TransactionView]],
+      subviews: TransactionSubviews,
       protocolVersion: ProtocolVersion,
   ): Either[String, TransactionView] =
     Either
@@ -489,6 +485,21 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
         )
       )
       .leftMap(_.message)
+
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
+  @VisibleForTesting
+  val viewCommonDataUnsafe: Lens[TransactionView, MerkleTree[ViewCommonData]] =
+    GenLens[TransactionView](_.viewCommonData)
+
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
+  @VisibleForTesting
+  val viewParticipantDataUnsafe: Lens[TransactionView, MerkleTree[ViewParticipantData]] =
+    GenLens[TransactionView](_.viewParticipantData)
+
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
+  @VisibleForTesting
+  val subviewsUnsafe: Lens[TransactionView, TransactionSubviews] =
+    GenLens[TransactionView](_.subviews)
 
   private def fromProtoV0(
       hashOps: HashOps,
@@ -503,7 +514,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(hashOps),
       )
-      subViews <- deserializeViewsV0(hashOps)(protoView.subviews)
+      subViews <- TransactionSubviews.fromProtoV0(hashOps, protoView.subviews)
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,
@@ -528,7 +539,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(hashOps),
       )
-      subViews <- deserializeViewsV1(hashOps)(protoView.subviews)
+      subViews <- TransactionSubviews.fromProtoV1(hashOps, protoView.subviews)
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,
@@ -539,26 +550,6 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
       )
     } yield view
   }
-
-  private[data] def deserializeViewsV0(
-      hashOps: HashOps
-  )(protoViews: Seq[v0.BlindableNode]): ParsingResult[Seq[MerkleTree[TransactionView]]] =
-    protoViews.traverse(protoView =>
-      MerkleTree.fromProtoOptionV0(
-        Some(protoView),
-        fromByteString(ProtoVersion(0))(hashOps),
-      )
-    )
-
-  private[data] def deserializeViewsV1(
-      hashOps: HashOps
-  )(protoViews: Seq[v1.BlindableNode]): ParsingResult[Seq[MerkleTree[TransactionView]]] =
-    protoViews.traverse(protoView =>
-      MerkleTree.fromProtoOptionV1(
-        Some(protoView),
-        fromByteString(ProtoVersion(1))(hashOps),
-      )
-    )
 
   /** Indicates an attempt to create an invalid view. */
   case class InvalidView(message: String) extends RuntimeException(message)
@@ -585,7 +576,7 @@ object ParticipantTransactionView {
       .toValidatedNec
       .product(
         view.viewParticipantData.unwrap
-          .leftMap(rh => s"Participant data blinded (hash $rh")
+          .leftMap(rh => s"Participant data blinded (hash $rh)")
           .toValidatedNec
       )
     validated
@@ -650,12 +641,12 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
   )
 
   @VisibleForTesting
-  private[data] def copy(
+  def copy(
       informees: Set[Informee] = this.informees,
       threshold: NonNegativeInt = this.threshold,
       salt: Salt = this.salt,
   ): ViewCommonData =
-    new ViewCommonData(informees, threshold, salt)(hashOps, representativeProtocolVersion, None)
+    ViewCommonData(informees, threshold, salt)(hashOps, representativeProtocolVersion, None)
 }
 
 object ViewCommonData

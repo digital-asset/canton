@@ -63,6 +63,10 @@ trait DomainAdministration {
   type Status <: NodeStatus.Status
   def health: HealthAdministration[Status]
 
+  // The DomainTopologyTransactionMessage is about 2500 bytes and each recipient about 100 bytes.
+  // with this minimum we can have up to 275 recipients for a domain transaction change.
+  private val minimumMaxRequestSizeBytes = NonNegativeInt.tryCreate(30000)
+
   @Help.Summary("Manage participant permissions")
   @Help.Group("Participants")
   object participants extends Helpful {
@@ -319,13 +323,20 @@ trait DomainAdministration {
     """)
     @Help.AvailableFrom(ProtocolVersion.v4)
     def set_max_request_size(
-        maxRequestSize: NonNegativeInt
+        maxRequestSize: NonNegativeInt,
+        force: Boolean = false,
     ): Unit =
       TraceContext.withNewTraceContext { implicit tc =>
-        update_dynamic_domain_parameters_v1(
-          _.copy(maxRequestSize = maxRequestSize),
-          "update max request size",
-        )
+        if (maxRequestSize < minimumMaxRequestSizeBytes && !force)
+          logger.warn(
+            s"""|The maxRequestSize requested is lower than the minimum advised value ($minimumMaxRequestSizeBytes) which can crash Canton.
+                |To set this value anyway, set force to true.""".stripMargin
+          )
+        else
+          update_dynamic_domain_parameters_v1(
+            _.copy(maxRequestSize = maxRequestSize),
+            "update max request size",
+          )
         logger.info(
           "Please restart the sequencer node to take into account the new value for max-request-size."
         )

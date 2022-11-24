@@ -241,7 +241,7 @@ case class RemoteParticipantConfig(
   * @param keepAliveServer                 keep-alive configuration for ledger api requests
   * @param maxContractStateCacheSize       maximum caffeine cache size of mutable state cache of contracts
   * @param maxContractKeyStateCacheSize    maximum caffeine cache size of mutable state cache of contract keys
-  * @param maxInboundMessageSize     maximum inbound message size
+  * @param maxInboundMessageSize maximum inbound message size on the ledger api
   * @param databaseConnectionTimeout database connection timeout
   * @param enableInMemoryFanOutForLedgerApi enable the "in-memory fan-out" performance optimization (default false; not tested for production yet)
   * @param maxTransactionsInMemoryFanOutBufferSize maximum number of transactions to hold in the "in-memory fanout" (if enabled)

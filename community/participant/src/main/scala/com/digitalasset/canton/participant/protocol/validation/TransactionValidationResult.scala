@@ -15,7 +15,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlar
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfPartyId, WorkflowId}
 
-// TODO(Andreas, M40): Push model conformance down to individual views, not just for the transaction as a whole
+// TODO(M40): Push model conformance down to individual views, not just for the transaction as a whole
 case class TransactionValidationResult(
     transactionId: TransactionId,
     confirmationPolicies: NonEmpty[Set[ConfirmationPolicy]],

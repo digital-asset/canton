@@ -497,7 +497,6 @@ object InMemoryActiveContractStore {
 
     /** Returns a contract status that has all changes removed whose request counter is at least `criterion`. */
     def deleteSince(criterion: RequestCounter): ContractStatus = {
-      // TODO(Andreas): Logical reordering will break the assumptions that request counters and timestamps increase in lock-step
       val affected = changes.headOption.exists { case (change, details) =>
         change.toc.rc >= criterion
       }

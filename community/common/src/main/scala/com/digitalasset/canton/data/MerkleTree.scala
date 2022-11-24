@@ -14,6 +14,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.HasProtocolVersionedWrapper
 import com.digitalasset.canton.{DiscardOps, ProtoDeserializationError}
 import com.google.protobuf.ByteString
+import monocle.Lens
 
 import scala.collection.mutable
 
@@ -163,7 +164,7 @@ abstract class MerkleTreeLeaf[+A <: HasCryptographicEvidence](val hashOps: HashO
 
   /** The `HashPurpose` to be used for computing the root hash.
     * Must uniquely identify the type of this instance.
-    * Must be different from `HashPurpose.MerkleRoseTreeNode`.
+    * Must be different from `HashPurpose.MerkleTreeInnerNode`.
     *
     * @see [[com.digitalasset.canton.crypto.HashBuilder]]
     */
@@ -246,7 +247,7 @@ object MerkleTree {
       protoNode: Option[v0.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] = {
-    import v0.BlindableNode.{BlindedOrNot as BON}
+    import v0.BlindableNode.BlindedOrNot as BON
     protoNode.map(_.blindedOrNot) match {
       case Some(BON.BlindedHash(hashBytes)) =>
         RootHash
@@ -265,7 +266,7 @@ object MerkleTree {
       protoNode: Option[v1.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] = {
-    import v1.BlindableNode.{BlindedOrNot as BON}
+    import v1.BlindableNode.BlindedOrNot as BON
     protoNode.map(_.blindedOrNot) match {
       case Some(BON.BlindedHash(hashBytes)) =>
         RootHash
@@ -279,4 +280,7 @@ object MerkleTree {
         Left(ProtoDeserializationError.OtherError(s"Missing blindedOrNot specification"))
     }
   }
+
+  def tryUnwrap[A <: MerkleTree[A]]: Lens[MerkleTree[A], A] =
+    Lens[MerkleTree[A], A](_.tryUnwrap)(unwrapped => _ => unwrapped)
 }

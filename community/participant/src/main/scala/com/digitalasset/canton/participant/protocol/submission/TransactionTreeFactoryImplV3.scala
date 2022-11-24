@@ -12,7 +12,6 @@ import com.daml.lf.transaction.Transaction.{KeyActive, KeyCreate, KeyInput, Nega
 import com.daml.lf.transaction.{ContractKeyUniquenessMode, ContractStateMachine}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
-import com.digitalasset.canton.data.ViewPosition.ListIndex
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
@@ -185,8 +184,12 @@ class TransactionTreeFactoryImplV3(
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var createIndex = 0
-    @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    var subviewCount = 0
+
+    val nbSubViews = view.allNodes.count {
+      case _: TransactionViewDecomposition.NewView => true
+      case _ => false
+    }
+    val subviewIndex = TransactionSubviews.indices(protocolVersion, nbSubViews).iterator
     val createdInView = mutable.Set.empty[LfContractId]
 
     def fromEither[A <: TransactionTreeConversionError, B](
@@ -206,10 +209,9 @@ class TransactionTreeFactoryImplV3(
       _ <- MonadUtil.sequentialTraverse_(view.allNodes) {
         case childView: TransactionViewDecomposition.NewView =>
           // Compute subviews, recursively
-          createView(childView, ListIndex(subviewCount) +: viewPosition, state, contractOfId)
+          createView(childView, subviewIndex.next() +: viewPosition, state, contractOfId)
             .map { v =>
               childViewsBuilder += v
-              subviewCount += 1
               val createdInSubview = state.createdContractsInView
               createdInView ++= createdInSubview
               val keyResolutionsInSubview = v.globalKeyInputs.fmap(_.asSerializable)
@@ -322,11 +324,12 @@ class TransactionTreeFactoryImplV3(
       )
     } yield {
       // Compute the result
+      val subviews = TransactionSubviews(childViews)(protocolVersion, cryptoOps)
       val transactionView =
         TransactionView.tryCreate(cryptoOps)(
           viewCommonData,
           viewParticipantData,
-          childViews,
+          subviews,
           protocolVersion,
         )
 
