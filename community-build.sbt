@@ -16,6 +16,9 @@ lazy val `daml-copy-macro` = CommunityProjects.`daml-copy-macro`
 lazy val `daml-copy-common` = CommunityProjects.`daml-copy-common`
 lazy val `daml-copy-testing` = CommunityProjects.`daml-copy-testing`
 lazy val `daml-copy-participant` = CommunityProjects.`daml-copy-participant`
+lazy val `util-external` = CommunityProjects.`util-external`
+lazy val `util-internal` = CommunityProjects.`util-internal`
+lazy val `sequencer-driver` = CommunityProjects.`sequencer-driver`
 
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
 
@@ -37,4 +40,7 @@ lazy val root = (project in file("."))
     `daml-copy-testing`,
     `daml-copy-participant`,
     `wartremover-extension`,
+    `util-external`,
+    `util-internal`,
+    `sequencer-driver`,
   )

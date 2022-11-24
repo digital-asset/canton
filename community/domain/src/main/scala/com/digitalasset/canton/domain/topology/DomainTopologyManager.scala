@@ -438,7 +438,10 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
   )
   @Resolution("""Consult the error details.""")
   object FailedToAddMember
-      extends ErrorCode(id = "FAILED_TO_ADD_MEMBER", ErrorCategory.MaliciousOrFaultyBehaviour) {
+      extends ErrorCode(
+        id = "FAILED_TO_ADD_MEMBER",
+        ErrorCategory.SystemInternalAssumptionViolated,
+      ) {
     case class Failure(reason: String)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "The add member hook failed"

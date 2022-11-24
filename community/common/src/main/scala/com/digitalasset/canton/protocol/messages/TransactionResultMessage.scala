@@ -35,6 +35,15 @@ case class TransactionResultMessage private (
     with HasProtocolVersionedWrapper[TransactionResultMessage]
     with PrettyPrinting {
 
+  def copy(
+      requestId: RequestId = this.requestId,
+      verdict: Verdict = this.verdict,
+      notificationTree: InformeeTree = this.notificationTree,
+  ): TransactionResultMessage = TransactionResultMessage(requestId, verdict, notificationTree)(
+    representativeProtocolVersion,
+    None,
+  )
+
   override def domainId: DomainId = notificationTree.domainId
 
   override def viewType: TransactionViewType = TransactionViewType

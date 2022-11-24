@@ -4,23 +4,21 @@
 package com.digitalasset.canton.tracing
 
 import cats.Show.Shown
+import com.daml.lf.data.NoCopy
 import com.daml.nonempty.NonEmpty
 import com.daml.telemetry as damlTelemetry
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.util.NoCopy
 import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.context.Context as OpenTelemetryContext
 
-import scala.collection.immutable
+import scala.collection.{immutable, mutable}
 
 /** Container for values tracing operations through canton.
   */
 class TraceContext private[tracing] (val context: OpenTelemetryContext)
     extends Equals
     with Serializable
-    with NoCopy
-    with PrettyPrinting {
+    with NoCopy {
 
   lazy val asW3CTraceContext: Option[W3CTraceContext] =
     W3CTraceContext.fromOpenTelemetryContext(context)
@@ -54,10 +52,17 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
   }
   override def hashCode(): Int = this.asW3CTraceContext.hashCode
 
-  override def pretty: Pretty[TraceContext] = prettyOfClass(
-    paramIfDefined("trace id", _.traceId.map(_.unquoted)),
-    paramIfDefined("W3C context", _.asW3CTraceContext),
-  )
+  override def toString: String = {
+    val sb = new mutable.StringBuilder()
+    sb.append("TraceContext(")
+    traceId.foreach(tid => sb.append("trace id=").append(tid))
+    asW3CTraceContext.foreach { w3c =>
+      if (traceId.nonEmpty) sb.append(", ")
+      sb.append("W3C context=").append(w3c.toString)
+    }
+    sb.append(")")
+    sb.result()
+  }
 
   def showTraceId: Shown = Shown(s"tid:${traceId.getOrElse("")}")
 }

@@ -16,6 +16,9 @@ import com.digitalasset.canton.version.{
 }
 import com.typesafe.scalalogging.Logger
 
+/** Wrapper around [[TraceContext]] to keep serialization out of the [[TraceContext]] itself
+  * and thereby reduce its dependencies.
+  */
 case class SerializableTraceContext(traceContext: TraceContext)
     extends HasVersionedWrapper[SerializableTraceContext] {
 

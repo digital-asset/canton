@@ -65,13 +65,17 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   "A view" when {
     "a child view has the same view common data" must {
       val view = factory.SingleCreate(seed = ExampleTransactionFactory.lfHash(3)).view0
+      val subViews = TransactionSubviews(Seq(view))(testedProtocolVersion, factory.cryptoOps)
       "reject creation" in {
+        val firstSubviewIndex = TransactionSubviews.indices(testedProtocolVersion, 1).head.toString
         TransactionView.create(hashOps)(
           view.viewCommonData,
           view.viewParticipantData,
-          Seq(view),
+          subViews,
           testedProtocolVersion,
-        ) shouldEqual Left("The subview with index 0 has an equal viewCommonData.")
+        ) shouldEqual Left(
+          s"The subview with index $firstSubviewIndex has an equal viewCommonData."
+        )
       }
     }
   }

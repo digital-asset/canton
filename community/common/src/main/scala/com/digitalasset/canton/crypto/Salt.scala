@@ -6,8 +6,14 @@ package com.digitalasset.canton.crypto
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.{
+  AuthenticatedContractIdVersion,
+  CantonContractIdVersion,
+  NonAuthenticatedContractIdVersion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeterministicEncoding}
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
 /** A seed to derive further salts from.
@@ -70,12 +76,32 @@ final case class Salt private (private val salt: ByteString, private val algorit
     s"Salt size ${salt.size()} must match salt algorithm length ${algorithm.length}",
   )
 
+  /** Returns the serialization used for networking/storing, must NOT be used for hashing. */
   def toProtoV0: v0.Salt = v0.Salt(salt = salt, algorithm = algorithm.toProtoOneOf)
 
-  def toByteString: ByteString = toProtoV0.toByteString
+  /** Returns the salt used for hashing, must NOT be used for networking/storing.
+    *
+    * For backwards compatibility this method takes the contract id version.
+    */
+  def forHashing(contractIdVersion: CantonContractIdVersion): ByteString =
+    contractIdVersion match {
+      case NonAuthenticatedContractIdVersion =>
+        // Before PV4 we used the non-deterministic protobuf serialization as part of hashing, which is not correct.
+        // We keep the behaviour for previous contract id versions for backwards compatibility.
+        // For the unlikely case that a future protobuf library upgrade changes the serialization, we have to inline
+        // the serializer code to produce the same serialization.
+        toProtoV0.toByteString
+      case AuthenticatedContractIdVersion =>
+        salt
+    }
 
-  /** Returns the raw salt used for hashing, must NOT be used for serialization. */
-  def unwrap: ByteString = salt
+  /** Returns the salt used for hashing, must NOT be used for networking/storing. */
+  def forHashing: ByteString = salt
+
+  def size: Int = salt.size()
+
+  @VisibleForTesting
+  private[crypto] def unwrap: ByteString = salt
 
   override val pretty: Pretty[Salt] = prettyOfParam(_.salt)
 }
@@ -121,8 +147,13 @@ object Salt {
   def tryDeriveSalt(seed: SaltSeed, bytes: ByteString, hmacOps: HmacOps): Salt =
     deriveSalt(seed, bytes, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
 
-  def tryDeriveSalt(seed: Salt, bytes: ByteString, hmacOps: HmacOps): Salt =
-    deriveSalt(seed.toByteString, bytes, hmacOps).valueOr(err =>
+  def tryDeriveSalt(
+      seed: Salt,
+      bytes: ByteString,
+      contractIdVersion: CantonContractIdVersion,
+      hmacOps: HmacOps,
+  ): Salt =
+    deriveSalt(seed.forHashing(contractIdVersion), bytes, hmacOps).valueOr(err =>
       throw new IllegalStateException(err.toString)
     )
 

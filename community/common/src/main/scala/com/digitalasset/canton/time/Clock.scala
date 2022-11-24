@@ -167,7 +167,6 @@ abstract class Clock() extends AutoCloseable with NamedLogging {
       }
     go()
   }
-
 }
 
 object Clock extends ClockErrorGroup {

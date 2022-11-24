@@ -7,9 +7,10 @@ import akka.NotUsed
 import io.grpc.Metadata
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
 import io.opentelemetry.context.propagation.{TextMapGetter, TextMapSetter}
-import io.opentelemetry.context.{Context as OpenTelemetryContext}
+import io.opentelemetry.context.Context as OpenTelemetryContext
 
 import java.lang
+import scala.collection.mutable
 
 /** Our representation of the w3c trace context values: https://www.w3.org/TR/trace-context/
   */
@@ -23,6 +24,16 @@ case class W3CTraceContext(parent: String, state: Option[String] = None) extends
     */
   @transient lazy val asHeaders: Map[String, String] =
     Map(TRACEPARENT_HEADER_NAME -> parent) ++ state.map(TRACESTATE_HEADER_NAME -> _).toList
+
+  override def toString: String = {
+    val sb = new mutable.StringBuilder()
+    sb.append(this.getClass.getSimpleName)
+    sb.append("(parent=")
+    sb.append(parent)
+    state.foreach(s => sb.append(", state=").append(s))
+    sb.append(")")
+    sb.result()
+  }
 }
 
 object W3CTraceContext {

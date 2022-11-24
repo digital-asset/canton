@@ -64,7 +64,7 @@ final case class X509Certificate(private val cert: JX509Certificate) {
 
   def unwrap: JX509Certificate = cert
 
-  // TODO(soren): We may want to use a combination of public key fingerprint and serial as the id
+  // TODO(i11013): We may want to use a combination of public key fingerprint and serial as the id
   // We assume this `tryCreate` is always safe to do, as the certificate ID has a limited amount of data
   // https://datatracker.ietf.org/doc/html/rfc3280#page-17
   def id: CertificateId = CertificateId.tryCreate(cert.getSerialNumber.toString)
@@ -269,7 +269,7 @@ class X509CertificateGenerator(
                   subjectAltNames <- subjectAlternativeNames.traverse { name =>
                     Either
                       .catchNonFatal(
-                        // TODO(soren): Consider to have the unique identifiers or member ids in a standard format
+                        // TODO(i11014): Consider to have the unique identifiers or member ids in a standard format
                         // Uses a DNS name format although we are not strictly setting a DNS name. However, CCF's mbedtls only supports DNS names right now.
                         new GeneralName(GeneralName.dNSName, new DERIA5String(name, true))
                       )

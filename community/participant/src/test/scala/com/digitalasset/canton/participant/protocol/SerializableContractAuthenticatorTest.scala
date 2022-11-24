@@ -16,12 +16,12 @@ import java.time.Duration
 import java.util.UUID
 
 class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
-  private val unicumGenerator = new UnicumGenerator(new SymbolicPureCrypto())
-  private val contractAuthenticator = new SerializableContractAuthenticator(unicumGenerator)
+  private lazy val unicumGenerator = new UnicumGenerator(new SymbolicPureCrypto())
+  private lazy val contractAuthenticator = new SerializableContractAuthenticator(unicumGenerator)
 
-  private val contractInstance = ExampleTransactionFactory.contractInstance()
-  private val ledgerTime = CantonTimestamp.MinValue
-  private val (contractSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
+  private lazy val contractInstance = ExampleTransactionFactory.contractInstance()
+  private lazy val ledgerTime = CantonTimestamp.MinValue
+  private lazy val (contractSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
     domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::da")),
     mediatorId = MediatorId(UniqueIdentifier.tryCreate("mediator", "other")),
     transactionUuid = new UUID(1L, 1L),
@@ -30,14 +30,15 @@ class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
     createIndex = 0,
     ledgerTime = ledgerTime,
     suffixedContractInstance = ExampleTransactionFactory.asSerializableRaw(contractInstance),
+    contractIdVersion = AuthenticatedContractIdVersion,
   )
 
-  private val contractId = AuthenticatedContractIdVersion.fromDiscriminator(
+  private lazy val contractId = AuthenticatedContractIdVersion.fromDiscriminator(
     ExampleTransactionFactory.lfHash(1337),
     unicum,
   )
 
-  private val contract =
+  private lazy val contract =
     SerializableContract(
       contractId = contractId,
       contractInstance = contractInstance,
@@ -118,6 +119,7 @@ class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
         contractSalt = testedSalt,
         ledgerTime = testedLedgerTime,
         suffixedContractInstance = testedContractInstance,
+        contractIdVersion = AuthenticatedContractIdVersion,
       )
       .valueOrFail("Failed unicum computation")
     val actualSuffix = unicum.toContractIdSuffix(AuthenticatedContractIdVersion)

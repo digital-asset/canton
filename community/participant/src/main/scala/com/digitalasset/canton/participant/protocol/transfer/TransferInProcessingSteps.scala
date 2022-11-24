@@ -810,7 +810,7 @@ object TransferInProcessingSteps {
         ledgerEffectiveTime = contract.ledgerCreateTime.toLf,
         workflowId = None,
         submissionTime =
-          contract.ledgerCreateTime.toLf, // TODO(Andreas): Upstream mismatch, replace with enter/leave view
+          contract.ledgerCreateTime.toLf, // TODO(M41): Upstream mismatch, replace with enter/leave view
         submissionSeed = LedgerEvent.noOpSeed,
         optUsedPackages = None,
         optNodeSeeds = None,

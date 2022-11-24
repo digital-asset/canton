@@ -312,6 +312,40 @@ object FlagCloseable {
   */
 final case class CloseContext(flagCloseable: FlagCloseable)
 
+object CloseContext {
+
+  /** Combines the 2 given close contexts such that if any of them gets closed,
+    * the returned close context is also closed. Works like an OR operator.
+    * However if this returned close context is closed directly, the 2 given
+    * closed contexts are _NOT_ closed, neither will it wait for any pending
+    * tasks on any of the 2 given close context to finish.
+    */
+  def combine(
+      closeContext1: CloseContext,
+      closeContext2: CloseContext,
+      processingTimeout: ProcessingTimeout,
+      tracedLogger: TracedLogger,
+  )(implicit
+      traceContext: TraceContext
+  ): CloseContext = {
+    val flagCloseable = new FlagCloseable {
+      override protected def timeouts: ProcessingTimeout = processingTimeout
+      override protected def logger: TracedLogger = tracedLogger
+    }
+    closeContext1.flagCloseable.runOnShutdown(new RunOnShutdown {
+      override def name: String = s"combined-close-ctx1"
+      override def done: Boolean = flagCloseable.isClosing
+      override def run(): Unit = flagCloseable.close()
+    })
+    closeContext2.flagCloseable.runOnShutdown(new RunOnShutdown {
+      override def name: String = s"combined-close-ctx2"
+      override def done: Boolean = flagCloseable.isClosing
+      override def run(): Unit = flagCloseable.close()
+    })
+    CloseContext(flagCloseable)
+  }
+}
+
 /** Mix-in to obtain a [[CloseContext]] implicit based on the class's [[FlagCloseable]] */
 trait HasCloseContext { self: FlagCloseable =>
   implicit val closeContext: CloseContext = CloseContext(self)

@@ -300,10 +300,25 @@ class GrpcSequencerClientTransport(
     }
   }
 
-  override def acknowledgeSigned(request: SignedContent[AcknowledgeRequest])(implicit
+  override def acknowledgeSigned(signedRequest: SignedContent[AcknowledgeRequest])(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit] =
-    EitherT.right(acknowledge(request.content))
+  ): EitherT[Future, String, Unit] = {
+    val request = signedRequest.content
+    val timestamp = request.timestamp
+    val requestP = signedRequest.toProtoV0
+    logger.debug(s"Acknowledging timestamp: $timestamp")
+    CantonGrpcUtil
+      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
+        _.acknowledgeSigned(requestP),
+        requestDescription = s"acknowledge-signed/$timestamp",
+        timeout = timeouts.network.duration,
+        logger = logger,
+        logPolicy = noLoggingShutdownErrorsLogPolicy,
+        retryPolicy = retryPolicy(retryOnUnavailable = false),
+      )
+      .leftMap(_.toString)
+      .map(_ => logger.debug(s"Acknowledged timestamp: $timestamp"))
+  }
 
   override protected def onClosed(): Unit =
     Lifecycle.close(

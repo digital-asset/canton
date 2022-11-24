@@ -111,6 +111,7 @@ class DomainNodeBootstrap(
       grpcVaultServiceFactory,
       parentLogger.append(DomainNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
+      metrics.grpcMetrics,
     )
     with DomainTopologyManagerIdentityInitialization {
 
@@ -424,6 +425,7 @@ class DomainNodeBootstrap(
         )
         domainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
           staticDomainParameters,
+          config.publicApi.overrideMaxRequestSize,
           topologyClient,
           futureSupervisor,
           loggerFactory,
@@ -447,6 +449,7 @@ class DomainNodeBootstrap(
           agreementManager,
           staticDomainParameters,
           syncCrypto,
+          metrics.grpcMetrics,
         )
 
         topologyManagementArtefacts <- TopologyManagementInitialization(

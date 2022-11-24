@@ -186,7 +186,7 @@ class TopologyTransactionProcessor(
       )
       clientInitTimes.foreach { case (effective, approximate) =>
         // if the effective time is in the future, schedule a clock to update the time accordingly
-        // TODO(ratko/andreas) This should be scheduled via the DomainTimeTracker or something similar
+        // TODO(#11004) This should be scheduled via the DomainTimeTracker or something similar
         //  rather than via the participant's local clock
         if (effective.value > clock.now) {
           // set approximate time now and schedule task to update the approximate time to the effective time in the future

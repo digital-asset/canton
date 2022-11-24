@@ -11,21 +11,16 @@ import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
-import com.digitalasset.canton.domain.mediator.ResponseAggregation.{
-  ViewState,
-  alarmMediatorRequestNotFound,
-}
+import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0}
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.protocol.{RequestId, ViewHash, v0}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -50,6 +45,7 @@ private[mediator] object ResponseAggregation {
 
   private def initialState(
       request: MediatorRequest,
+      requestId: RequestId,
       protocolVersion: ProtocolVersion,
   )(implicit loggingContext: ErrorLoggingContext): Either[Verdict, Map[ViewHash, ViewState]] = {
     val minimumThreshold = request.confirmationPolicy.minimumThreshold
@@ -61,7 +57,7 @@ private[mediator] object ResponseAggregation {
           viewHash -> ViewState(confirmingParties, threshold.unwrap, Nil),
           MediatorError.MalformedMessage
             .Reject(
-              s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=$viewHash, threshold=$threshold",
+              s"Received a mediator request with id $requestId having threshold $threshold for transaction view $viewHash, which is below the confirmation policy's minimum threshold of $minimumThreshold. Rejecting request...",
               v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
               protocolVersion,
             )
@@ -78,7 +74,7 @@ private[mediator] object ResponseAggregation {
       ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
     val version = requestId.unwrap
     val initial = for {
-      pending <- initialState(request, protocolVersion)
+      pending <- initialState(request, requestId, protocolVersion)
       _ <- Either.cond(
         pending.values.exists(_.distanceToThreshold > 0),
         (),
@@ -121,21 +117,6 @@ private[mediator] object ResponseAggregation {
       protocolVersion,
       requestTraceContext,
     )(loggerFactory)
-
-  def alarmMediatorRequestNotFound(
-      requestId: RequestId,
-      sender: Member,
-      viewHashO: Option[ViewHash],
-      rootHashO: Option[RootHash],
-      protocolVersion: ProtocolVersion,
-  )(implicit loggingContext: ErrorLoggingContext): Unit = {
-    val viewHashMsg = viewHashO.fold("")(viewHash => show" for view hash $viewHash")
-    val rootHashMsg = rootHashO.fold("")(rootHash => show" for root hash $rootHash")
-    val cause =
-      s"Unknown request $requestId: received mediator response by $sender$viewHashMsg$rootHashMsg"
-    val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
-    alarm.report()
-  }
 }
 
 /** @param requestId The request Id of the [[com.digitalasset.canton.protocol.messages.InformeeMessage]]
@@ -211,7 +192,7 @@ private[mediator] final case class ResponseAggregation private (
               else {
                 MediatorError.MalformedMessage
                   .Reject(
-                    s"Request ${requestId.unwrap}: unexpected mediator response for view $viewHash by $sender on behalf of $unexpectedConfirmingParties.",
+                    s"Received a mediator response at $responseTimestamp by $sender for request $requestId with unexpected confirming parties $unexpectedConfirmingParties. Discarding response...",
                     protocolVersion,
                   )
                   .report()
@@ -230,7 +211,7 @@ private[mediator] final case class ResponseAggregation private (
               else {
                 MediatorError.MalformedMessage
                   .Reject(
-                    s"Request ${requestId.unwrap}: unauthorized mediator response for view $viewHash by $sender on behalf of $unauthorizedConfirmingParties",
+                    s"Received an unauthorized mediator response at $responseTimestamp by $sender for request $requestId on behalf of $unauthorizedConfirmingParties. Discarding response...",
                     protocolVersion,
                   )
                   .report()
@@ -308,13 +289,11 @@ private[mediator] final case class ResponseAggregation private (
       _ <- OptionT.fromOption[Future](rootHashO.traverse_ { rootHash =>
         if (request.rootHash.forall(_ == rootHash)) Some(())
         else {
-          alarmMediatorRequestNotFound(
-            requestId,
-            response.sender,
-            viewHashO,
-            Some(rootHash),
-            protocolVersion,
-          )
+          val cause =
+            show"Received a mediator response at $responseTimestamp by $sender for request $requestId with an invalid root hash $rootHash instead of ${request.rootHash.showValueOrNone}. Discarding response..."
+          val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
+          alarm.report()
+
           None
         }
       })
@@ -365,13 +344,11 @@ private[mediator] final case class ResponseAggregation private (
                 request.informeesAndThresholdByView
                   .get(viewHash)
                   .orElse {
-                    alarmMediatorRequestNotFound(
-                      requestId,
-                      response.sender,
-                      viewHashO,
-                      rootHashO,
-                      protocolVersion,
-                    )
+                    val cause =
+                      s"Received a mediator response at $responseTimestamp by $sender for request $requestId with an unknown view hash $viewHash. Discarding response..."
+                    val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
+                    alarm.report()
+
                     None
                   }
               )

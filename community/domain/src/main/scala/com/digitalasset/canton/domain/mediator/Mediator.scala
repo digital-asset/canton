@@ -47,7 +47,7 @@ private[mediator] class Mediator(
     @VisibleForTesting
     val sequencerClient: SequencerClient,
     val topologyClient: DomainTopologyClientWithInit,
-    syncCrypto: DomainSyncCryptoClient,
+    private[canton] val syncCrypto: DomainSyncCryptoClient,
     topologyTransactionProcessor: TopologyTransactionProcessor,
     timeTrackerConfig: DomainTimeTrackerConfig,
     state: MediatorState,

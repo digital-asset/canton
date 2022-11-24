@@ -10,7 +10,11 @@ import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
-import com.digitalasset.canton.sequencing.protocol.{SignedContent, SubmissionRequest}
+import com.digitalasset.canton.sequencing.protocol.{
+  AcknowledgeRequest,
+  SignedContent,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.topology.Member
 
 trait SequencerError extends CantonError with Product with Serializable
@@ -21,16 +25,35 @@ object SequencerError extends SequencerErrorGroup {
                  |This error indicates that the member has acknowledged a timestamp that is after the events 
                  |it has received. This violates the sequencing protocol. 
                  |""")
-  object InvalidAcknowledgement extends AlarmErrorCode("INVALID_ACKNOWLEDGEMENT_TIMESTAMP") {
-
+  object InvalidAcknowledgementTimestamp
+      extends AlarmErrorCode("INVALID_ACKNOWLEDGEMENT_TIMESTAMP") {
     case class Error(
         member: Member,
-        acked_timestamp: CantonTimestamp,
-        latest_valid_timestamp: CantonTimestamp,
+        ackedTimestamp: CantonTimestamp,
+        latestValidTimestamp: CantonTimestamp,
     )(implicit override val loggingContext: ErrorLoggingContext)
         extends Alarm(
-          s"Member $member has acknowledged the timestamp $acked_timestamp when only events with timestamps at most $latest_valid_timestamp have been delivered."
+          s"Member $member has acknowledged the timestamp $ackedTimestamp when only events with timestamps at most $latestValidTimestamp have been delivered."
         )
+        with CantonError
+  }
+
+  @Explanation("""
+                 |This error indicates that the sequencer has detected an invalid acknowledgement request signature.
+                 |This most likely indicates that the request is bogus and has been created by a malicious sequencer.
+                 |So it will not get processed.
+                 |""")
+  object InvalidAcknowledgementSignature
+      extends AlarmErrorCode("INVALID_ACKNOWLEDGEMENT_SIGNATURE") {
+    case class Error(
+        signedAcknowledgeRequest: SignedContent[AcknowledgeRequest],
+        latestValidTimestamp: CantonTimestamp,
+        error: SignatureCheckError,
+    )(implicit override val loggingContext: ErrorLoggingContext)
+        extends Alarm({
+          val ack = signedAcknowledgeRequest.content
+          s"Member ${ack.member} has acknowledged the timestamp ${ack.timestamp} but signature from ${signedAcknowledgeRequest.timestampOfSigningKey} failed to be verified at $latestValidTimestamp: $error"
+        })
         with CantonError
   }
 

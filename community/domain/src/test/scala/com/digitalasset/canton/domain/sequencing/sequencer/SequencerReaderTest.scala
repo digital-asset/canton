@@ -19,6 +19,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
+  CloseContext,
   FlagCloseableAsync,
   SyncCloseable,
 }
@@ -125,6 +126,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       loggerFactory,
     )
     val defaultTimeout = 20.seconds
+    implicit val closeContext = CloseContext(reader)
 
     def ts(epochSeconds: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(epochSeconds.toLong)
 

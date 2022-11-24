@@ -59,6 +59,7 @@ private[mediator] class ConfirmationResponseProcessor(
       callerTraceContext: TraceContext,
   ): HandlerResult = {
     val future = for {
+      // FIXME(M40): do not block if requestId is far in the future
       snapshot <- crypto.ips.awaitSnapshot(requestId.unwrap)(callerTraceContext)
       domainParameters <- snapshot.findDynamicDomainParametersOrDefault(protocolVersion)(
         callerTraceContext
@@ -387,15 +388,12 @@ private[mediator] class ConfirmationResponseProcessor(
           }
 
         responseAggregation <- mediatorState.fetch(response.requestId).orElse {
-          // we assume that informee message has already been persisted in mediatorStorage before any participant responds
-          ResponseAggregation
-            .alarmMediatorRequestNotFound(
-              response.requestId,
-              response.sender,
-              response.viewHash,
-              response.rootHash,
-              protocolVersion,
-            )
+          // We assume the informee message has already been persisted in mediatorStorage before any participant responds
+          val cause =
+            s"Received a mediator response at $ts by ${response.sender} with an unknown request id ${response.requestId}. Discarding response..."
+          val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
+          alarm.report()
+
           OptionT.none
         }
 

@@ -226,7 +226,7 @@ class CantonSyncService(
   }
 
   // A connected domain is ready if recovery has succeeded
-  private def readySyncDomainById(domainId: DomainId): Option[SyncDomain] =
+  private[canton] def readySyncDomainById(domainId: DomainId): Option[SyncDomain] =
     connectedDomainsMap.get(domainId).filter(_.ready)
 
   private def existsReadyDomain: Boolean = connectedDomainsMap.exists { case (_, sync) =>

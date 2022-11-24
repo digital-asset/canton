@@ -137,14 +137,14 @@ class SyncDomain(
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
-  private val sequencerClient = domainHandle.sequencerClient
+  private[canton] val sequencerClient = domainHandle.sequencerClient
   val timeTracker: DomainTimeTracker = ephemeral.timeTracker
   val staticDomainParameters: StaticDomainParameters = domainHandle.staticParameters
 
   private val seedGenerator =
     new SeedGenerator(domainCrypto.crypto.pureCrypto)
 
-  private val requestGenerator =
+  private[canton] val requestGenerator =
     ConfirmationRequestFactory(participantId, domainId, staticDomainParameters.protocolVersion)(
       domainCrypto.crypto.pureCrypto,
       seedGenerator,

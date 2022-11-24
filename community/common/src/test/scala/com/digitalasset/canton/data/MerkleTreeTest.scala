@@ -52,7 +52,7 @@ class MerkleTreeTest extends AnyWordSpec with BaseTest {
     val data = DeterministicEncoding.encodeInt(index)
     val hashBuilder = TestHash.build
     hashBuilder
-      .add(salt.unwrap)
+      .add(salt.forHashing)
       .add(data)
       .finish()
   }
