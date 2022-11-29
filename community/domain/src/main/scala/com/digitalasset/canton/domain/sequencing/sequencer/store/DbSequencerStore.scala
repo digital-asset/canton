@@ -18,7 +18,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerMemberStatus,
   SequencerPruningStatus,
 }
-import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
@@ -839,7 +839,12 @@ class DbSequencerStore(
   override def saveCounterCheckpoint(
       memberId: SequencerMemberId,
       checkpoint: CounterCheckpoint,
-  )(implicit traceContext: TraceContext): EitherT[Future, SaveCounterCheckpointError, Unit] =
+  )(implicit
+      traceContext: TraceContext,
+      externalCloseContext: CloseContext,
+  ): EitherT[Future, SaveCounterCheckpointError, Unit] = {
+    val combinedCloseContext =
+      CloseContext.combine(closeContext, externalCloseContext, timeouts, logger)
     EitherT {
       val CounterCheckpoint(counter, ts, latestTopologyClientTimestamp) = checkpoint
       storage.queryAndUpdate(
@@ -872,7 +877,7 @@ class DbSequencerStore(
             .headOption
         } yield id,
         functionFullName,
-      ) map {
+      )(traceContext, combinedCloseContext) map {
         case None =>
           // we should always return a value from the db statement so this is a bug or unexpected behavior
           ErrorUtil.internalError(
@@ -892,6 +897,7 @@ class DbSequencerStore(
           )
       }
     }
+  }
 
   override def fetchClosestCheckpointBefore(memberId: SequencerMemberId, counter: SequencerCounter)(
       implicit traceContext: TraceContext

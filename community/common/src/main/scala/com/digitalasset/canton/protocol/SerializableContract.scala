@@ -7,6 +7,7 @@ import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
+import com.digitalasset.canton.crypto
 import com.digitalasset.canton.crypto.Salt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -21,7 +22,6 @@ import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
 }
-import com.digitalasset.canton.{ProtoDeserializationError, crypto}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 
@@ -151,7 +151,7 @@ object SerializableContract
       metadataP: Option[v0.SerializableContract.Metadata],
       ledgerCreateTime: Option[Timestamp],
       contractSaltO: Option[crypto.v0.Salt],
-  ): Either[ProtoDeserializationError, SerializableContract] =
+  ): ParsingResult[SerializableContract] =
     for {
       contractId <- LfContractId.fromProtoPrimitive(contractIdP)
       raw <- SerializableRawContractInstance

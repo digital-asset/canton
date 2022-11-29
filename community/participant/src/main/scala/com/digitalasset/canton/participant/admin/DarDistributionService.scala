@@ -158,7 +158,6 @@ class DarDistributionService(
   import cats.syntax.either.*
 
   /** Async processing of the transaction.
-    * TODO(danilo): promote async processing to [[AdminWorkflowService]] and our LedgerConnection
     */
   override private[admin] def processTransaction(
       tx: Transaction

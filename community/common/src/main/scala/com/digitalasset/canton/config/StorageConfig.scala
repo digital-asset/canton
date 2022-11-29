@@ -315,7 +315,7 @@ object DbConfig extends NoTracing {
           enforcePgMode(enforceSingleConnection(writeH2UrlIfNotSet(h2.config)))
         ).withFallback(h2.defaultConfig)
       case postgres: PostgresDbConfig => postgres.config
-      // TODO(soren): this other is a workaround for supporting oracle without referencing the oracle config
+      // TODO(i11009): this other is a workaround for supporting oracle without referencing the oracle config
       case other => other.config
     }).withFallback(commonDefaults)
   }

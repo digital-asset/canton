@@ -5,7 +5,6 @@ package com.digitalasset.canton.data
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
-import com.digitalasset.canton.data.{RichFullInformeeTree, RichInformeeTree}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.transaction.{
@@ -105,7 +104,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
           informeeTree
         )
 
-        forAll(example.transactionTree.allLightTransactionViewTrees) { lt =>
+        forAll(example.transactionTree.allLightTransactionViewTrees(testedProtocolVersion)) { lt =>
           LightTransactionViewTree.fromByteString(example.cryptoOps)(
             lt.toByteString(testedProtocolVersion)
           ) shouldBe Right(lt)
@@ -113,21 +112,27 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
       }
 
       "correctly reconstruct the full transaction view trees from the lightweight ones" in {
-        val neAllLightTrees = NonEmpty.from(example.transactionTree.allLightTransactionViewTrees)
+        val neAllLightTrees =
+          NonEmpty.from(example.transactionTree.allLightTransactionViewTrees(testedProtocolVersion))
         val neAllTrees = NonEmpty.from(example.transactionTree.allTransactionViewTrees)
         neAllLightTrees.flatMap(lvts =>
-          LightTransactionViewTree.toAllFullViewTrees(lvts).toOption
+          LightTransactionViewTree
+            .toAllFullViewTrees(testedProtocolVersion, factory.cryptoOps)(lvts)
+            .toOption
         ) shouldBe neAllTrees
       }
 
       "correctly reconstruct the top-level transaction view trees from the lightweight ones" in {
-        val allLightTrees = example.transactionTree.allLightTransactionViewTrees
+        val allLightTrees =
+          example.transactionTree.allLightTransactionViewTrees(testedProtocolVersion)
         val neAllLightTrees = NonEmpty.from(allLightTrees)
         val neAllTrees =
           NonEmpty.from(example.transactionTree.allTransactionViewTrees.filter(_.isTopLevel))
 
         neAllLightTrees.flatMap(lvts =>
-          LightTransactionViewTree.toToplevelFullViewTrees(lvts).toOption
+          LightTransactionViewTree
+            .toToplevelFullViewTrees(testedProtocolVersion, factory.cryptoOps)(lvts)
+            .toOption
         ) shouldBe neAllTrees
       }
 
@@ -160,7 +165,9 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
             allLightTrees.filter(_._2.flatten.contains(inf)).map(_._1).toList
           val res =
             LightTransactionViewTree
-              .toToplevelFullViewTrees(NonEmptyUtil.fromUnsafe(allLightWeightForInf))
+              .toToplevelFullViewTrees(testedProtocolVersion, factory.cryptoOps)(
+                NonEmptyUtil.fromUnsafe(allLightWeightForInf)
+              )
               .value
           res.toList shouldBe topLevelForInf
         }
@@ -207,7 +214,8 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
         val childViewCommonData =
           singleCreateView.viewCommonData.tryUnwrap.copy(salt = factory.commonDataSalt(1))
         val childView = singleCreateView.copy(viewCommonData = childViewCommonData)
-        val parentView = singleCreateView.copy(subviews = Seq(childView))
+        val subviews = TransactionSubviews(Seq(childView))(testedProtocolVersion, factory.cryptoOps)
+        val parentView = singleCreateView.copy(subviews = subviews)
 
         GenTransactionTree.create(factory.cryptoOps)(
           factory.submitterMetadata,
@@ -299,7 +307,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
         val submitterMetadata = example.transactionTree.submitterMetadata
 
         val submitterMetadataUnblinded =
-          nonRootViewTree.tree.copy(submitterMetadata = submitterMetadata)(factory.cryptoOps)
+          nonRootViewTree.tree.copy(submitterMetadata = submitterMetadata)
 
         TransactionViewTree.create(submitterMetadataUnblinded) shouldEqual Left(
           "The submitter metadata must be unblinded if and only if the represented view is top-level. " +
@@ -348,7 +356,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
             submitterMetadata = factory.submitterMetadata,
             commonMetadata = ExampleTransactionFactory.blinded(factory.commonMetadata),
             participantMetadata = factory.participantMetadata,
-          )(factory.cryptoOps)
+          )
 
         val corruptedGlobalMetadataMessage = Left(
           "The submitter metadata of an informee tree must be blinded. " +
@@ -386,7 +394,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
         )
 
         val treeWithViewMetadataUnblinded =
-          informeeTree.copy(rootViews = rootViews)(factory.cryptoOps)
+          informeeTree.copy(rootViews = rootViews)
 
         val corruptedViewMetadataMessage = "(?s)" +
           "The view participant data in an informee tree must be blinded\\. Found .*\\."
@@ -436,7 +444,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
               rootViewsWithCommonDataBlinded,
               testedProtocolVersion,
             )
-          )(factory.cryptoOps)
+          )
 
         FullInformeeTree
           .create(viewCommonDataBlinded, testedProtocolVersion)

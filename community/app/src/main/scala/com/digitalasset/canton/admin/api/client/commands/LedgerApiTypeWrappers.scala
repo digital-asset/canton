@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
+import com.daml.api.util.TimestampConversion
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
+import com.daml.lf.data.Time
 import com.digitalasset.canton.crypto.Salt
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{DriverContractMetadata, LfContractId}
 
 /** Wrapper class to make scalapb LedgerApi classes more convenient to access
   */
@@ -59,15 +61,33 @@ object LedgerApiTypeWrappers {
           .getOrElse(
             throw new IllegalArgumentException(s"Illegal Contract Id: ${event.contractId}")
           )
+
+      val contractSaltO = for {
+        metadataP <- event.metadata
+        if !metadataP.driverMetadata.isEmpty
+        parsed = DriverContractMetadata.fromByteString(metadataP.driverMetadata)
+      } yield parsed.fold[Salt](
+        err =>
+          throw new IllegalArgumentException(
+            s"Could not deserialize driver contract metadata: ${err.message}"
+          ),
+        _.salt,
+      )
+
+      val ledgerCreateTimeO = for {
+        metadata <- event.metadata
+        createdAt <- metadata.createdAt
+      } yield TimestampConversion.toLf(createdAt, TimestampConversion.ConversionMode.Exact)
+
       ContractData(
         templateId = templateId,
         createArguments = createArguments,
         signatories = event.signatories.toSet,
         inheritedContractId = lfContractId,
-        contractSalt = None, // TODO(#9795): Extract and populate from created event
+        contractSalt = contractSaltO,
+        ledgerCreateTime = ledgerCreateTimeO,
       )
     }
-
   }
 
   /** Holder of "core" contract defining fields (particularly those relevant for importing contracts) */
@@ -77,6 +97,7 @@ object LedgerApiTypeWrappers {
       signatories: Set[String], // track signatories for use as auth validation by daml engine
       inheritedContractId: LfContractId,
       contractSalt: Option[Salt],
+      ledgerCreateTime: Option[Time.Timestamp],
   )
 
 }

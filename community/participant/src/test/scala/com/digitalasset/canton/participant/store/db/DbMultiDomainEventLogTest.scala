@@ -104,6 +104,7 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
       indexedStringStore,
       loggerFactory,
       maxBatchSize = 3,
+      participantEventLogId = participantEventLogId,
     )
   }
 

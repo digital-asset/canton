@@ -14,44 +14,24 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.GenTransactionTree.InvalidGenTransactionTree
 import com.digitalasset.canton.data.InformeeTree.InvalidInformeeTree
 import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransactionViewTree
 import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.TransactionViewTree.InvalidTransactionViewTree
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{
-  ConfirmationPolicy,
-  RootHash,
-  SerializableDeduplicationPeriod,
-  TransactionId,
-  ViewHash,
-  v0,
-  v1,
-}
+import com.digitalasset.canton.protocol.{v0, *}
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
-import com.digitalasset.canton.topology.{
-  DomainId,
-  MediatorId,
-  Member,
-  ParticipantId,
-  UniqueIdentifier,
-}
-import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWithContextCompanion,
-  HasProtocolVersionedWithContextCompanion,
-  HasProtocolVersionedWrapper,
-  HasVersionedMessageWithContextCompanion,
-  HasVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.util.{EitherUtil, MonadUtil}
+import com.digitalasset.canton.version.*
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
+import monocle.macros.GenLens
 
 import java.util.UUID
 import scala.annotation.tailrec
@@ -60,10 +40,9 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** Partially blinded version of a transaction tree.
   * This class is also used to represent transaction view trees and informee trees.
-  *
-  * @throws GenTransactionTree$.InvalidGenTransactionTree if two subtrees have the same root hash
   */
-case class GenTransactionTree(
+// private constructor, because object invariants are checked by factory methods
+case class GenTransactionTree private (
     submitterMetadata: MerkleTree[SubmitterMetadata],
     commonMetadata: MerkleTree[CommonMetadata],
     participantMetadata: MerkleTree[ParticipantMetadata],
@@ -71,25 +50,36 @@ case class GenTransactionTree(
 )(hashOps: HashOps)
     extends MerkleTreeInnerNode[GenTransactionTree](hashOps) {
 
-  {
+  def validated: Either[String, this.type] = {
     // Check that every subtree has a unique root hash
     val usedHashes = mutable.Set[RootHash]()
 
-    def checkUniqueness(tree: MerkleTree[_]): Unit = {
+    def go(tree: MerkleTree[_]): Either[String, this.type] = {
       val rootHash = tree.rootHash
-      if (usedHashes.contains(rootHash)) {
-        throw InvalidGenTransactionTree(
-          "A transaction tree must contain a hash at most once. " +
-            s"Found the hash ${rootHash.toString} twice."
-        )
-      }
 
-      usedHashes.add(rootHash).discard
-      tree.subtrees.foreach(checkUniqueness)
+      for {
+        _ <- EitherUtil.condUnitE(
+          !usedHashes.contains(rootHash),
+          "A transaction tree must contain a hash at most once. " +
+            s"Found the hash ${rootHash.toString} twice.",
+        )
+        _ = usedHashes.add(rootHash).discard
+        _ <- MonadUtil.sequentialTraverse(tree.subtrees)(go)
+      } yield this
     }
 
-    checkUniqueness(this)
+    go(this)
   }
+
+  @VisibleForTesting
+  // Private, because it does not check object invariants and is therefore unsafe.
+  private[data] def copy(
+      submitterMetadata: MerkleTree[SubmitterMetadata] = this.submitterMetadata,
+      commonMetadata: MerkleTree[CommonMetadata] = this.commonMetadata,
+      participantMetadata: MerkleTree[ParticipantMetadata] = this.participantMetadata,
+      rootViews: MerkleSeq[TransactionView] = this.rootViews,
+  ): GenTransactionTree =
+    GenTransactionTree(submitterMetadata, commonMetadata, participantMetadata, rootViews)(hashOps)
 
   override def subtrees: Seq[MerkleTree[_]] =
     Seq[MerkleTree[_]](
@@ -154,8 +144,12 @@ case class GenTransactionTree(
     viewTree <- rootViewTree +: nonRootViewTrees
   } yield viewTree
 
-  lazy val allLightTransactionViewTrees: Seq[LightTransactionViewTree] =
-    allTransactionViewTrees.map(LightTransactionViewTree.fromTransactionViewTree)
+  def allLightTransactionViewTrees(
+      protocolVersion: ProtocolVersion
+  ): Seq[LightTransactionViewTree] =
+    allTransactionViewTrees.map(
+      LightTransactionViewTree.fromTransactionViewTree(_, protocolVersion)
+    )
 
   /** All lightweight transaction trees in this [[GenTransactionTree]], accompanied by their witnesses and randomness
     * suitable for deriving encryption keys for encrypted view messages.
@@ -202,7 +196,7 @@ case class GenTransactionTree(
     witnessAndSeedMapE.map { witnessAndSeedMap =>
       allTransactionViewTrees.map { tvt =>
         val (witnesses, seed) = witnessAndSeedMap(tvt.viewPosition)
-        (LightTransactionViewTree.fromTransactionViewTree(tvt), witnesses, seed)
+        (LightTransactionViewTree.fromTransactionViewTree(tvt, protocolVersion), witnesses, seed)
       }
     }
   }
@@ -223,9 +217,8 @@ case class GenTransactionTree(
       rootViews = Some(rootViews.toProtoV1),
     )
 
-  def topLevelViewMap(f: TransactionView => TransactionView): GenTransactionTree = {
-    this.copy(rootViews = rootViews.mapM(f))(hashOps)
-  }
+  def mapUnblindedRootViews(f: TransactionView => TransactionView): GenTransactionTree =
+    this.copy(rootViews = rootViews.mapM(f))
 
   override def pretty: Pretty[GenTransactionTree] = prettyOfClass(
     param("submitter metadata", _.submitterMetadata),
@@ -245,8 +238,8 @@ object GenTransactionTree {
       participantMetadata: MerkleTree[ParticipantMetadata],
       rootViews: MerkleSeq[TransactionView],
   ): GenTransactionTree =
-    new GenTransactionTree(submitterMetadata, commonMetadata, participantMetadata, rootViews)(
-      hashOps
+    create(hashOps)(submitterMetadata, commonMetadata, participantMetadata, rootViews).valueOr(
+      err => throw InvalidGenTransactionTree(err)
     )
 
   /** Creates a [[GenTransactionTree]].
@@ -258,16 +251,28 @@ object GenTransactionTree {
       participantMetadata: MerkleTree[ParticipantMetadata],
       rootViews: MerkleSeq[TransactionView],
   ): Either[String, GenTransactionTree] =
-    Either
-      .catchOnly[InvalidGenTransactionTree](
-        new GenTransactionTree(submitterMetadata, commonMetadata, participantMetadata, rootViews)(
-          hashOps
-        )
-      )
-      .leftMap(_.message)
+    GenTransactionTree(submitterMetadata, commonMetadata, participantMetadata, rootViews)(
+      hashOps
+    ).validated
 
   /** Indicates an attempt to create an invalid [[GenTransactionTree]]. */
   case class InvalidGenTransactionTree(message: String) extends RuntimeException(message) {}
+
+  @VisibleForTesting
+  val submitterMetadataUnsafe: Lens[GenTransactionTree, MerkleTree[SubmitterMetadata]] =
+    GenLens[GenTransactionTree](_.submitterMetadata)
+
+  @VisibleForTesting
+  val commonMetadataUnsafe: Lens[GenTransactionTree, MerkleTree[CommonMetadata]] =
+    GenLens[GenTransactionTree](_.commonMetadata)
+
+  @VisibleForTesting
+  val participantMetadataUnsafe: Lens[GenTransactionTree, MerkleTree[ParticipantMetadata]] =
+    GenLens[GenTransactionTree](_.participantMetadata)
+
+  @VisibleForTesting
+  val rootViewsUnsafe: Lens[GenTransactionTree, MerkleSeq[TransactionView]] =
+    GenLens[GenTransactionTree](_.rootViews)
 
   def fromProtoV0(
       hashOps: HashOps,
@@ -370,17 +375,14 @@ case class TransactionViewTree(tree: GenTransactionTree) extends ViewTree with P
 
   @tailrec
   private def findTheView(
-      viewsWithIndex: Seq[(MerkleTree[TransactionView], MerklePathElement)],
+      viewsWithIndex: Seq[(TransactionView, MerklePathElement)],
       viewPosition: ViewPosition = ViewPosition.root,
   ): (TransactionView, ViewPosition) = {
-    val partiallyUnblindedViewsWithIndex = viewsWithIndex.mapFilter { case (view, index) =>
-      view.unwrap.toOption.map(_ -> index)
-    }
-    partiallyUnblindedViewsWithIndex match {
+    viewsWithIndex match {
       case Seq() =>
         throw InvalidTransactionViewTree("A transaction view tree must contain an unblinded view.")
       case Seq((singleView, index)) if singleView.hasAllLeavesBlinded =>
-        findTheView(singleView.subviewsWithIndex, index +: viewPosition)
+        findTheView(singleView.subviews.unblindedElementsWithIndex, index +: viewPosition)
       case Seq((singleView, index)) if singleView.isFullyUnblinded =>
         (singleView, index +: viewPosition)
       case Seq((singleView, _index)) =>
@@ -402,6 +404,12 @@ case class TransactionViewTree(tree: GenTransactionTree) extends ViewTree with P
   val (view: TransactionView, viewPosition: ViewPosition) = findTheView(
     tree.rootViews.unblindedElementsWithIndex
   )
+
+  /** Returns the hashes of the direct subviews of the view represented by this tree.
+    * By definition, all subviews are unblinded, therefore this will also work when the subviews
+    * are stored in a MerkleSeq.
+    */
+  def subviewHashes: Seq[ViewHash] = view.subviews.trySubviewHashes
 
   lazy val flatten: Seq[ParticipantTransactionView] = view.flatten.map(sv =>
     ParticipantTransactionView
@@ -481,15 +489,16 @@ object TransactionViewTree {
 }
 
 /** Encapsulates a [[GenTransactionTree]] that is also an informee tree.
-  *
-  * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
   */
+// private constructor, because object invariants are checked by factory methods
 case class InformeeTree private (tree: GenTransactionTree)(
     val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree]
 ) extends HasProtocolVersionedWrapper[InformeeTree] {
 
-  InformeeTree.checkGlobalMetadata(tree)
-  InformeeTree.checkViews(tree.rootViews, assertFull = false)
+  def validated: Either[String, this.type] = for {
+    _ <- InformeeTree.checkGlobalMetadata(tree)
+    _ <- InformeeTree.checkViews(tree.rootViews, assertFull = false)
+  } yield this
 
   override protected def companionObj = InformeeTree
 
@@ -500,7 +509,7 @@ case class InformeeTree private (tree: GenTransactionTree)(
       hash -> viewCommonData.informees
     }
 
-  private val commonMetadata = checked(tree.commonMetadata.tryUnwrap)
+  private lazy val commonMetadata = checked(tree.commonMetadata.tryUnwrap)
 
   def domainId: DomainId = commonMetadata.domainId
 
@@ -527,10 +536,15 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
     ),
   )
 
+  /** Creates an informee tree from a [[GenTransactionTree]].
+    * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
+    */
   def tryCreate(
       tree: GenTransactionTree,
       protocolVersion: ProtocolVersion,
-  ): InformeeTree = InformeeTree(tree)(protocolVersionRepresentativeFor(protocolVersion))
+  ): InformeeTree = create(tree, protocolVersionRepresentativeFor(protocolVersion)).valueOr(err =>
+    throw InvalidInformeeTree(err)
+  )
 
   /** Creates an [[InformeeTree]] from a [[GenTransactionTree]].
     * Yields `Left(...)` if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
@@ -538,10 +552,7 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
   private[data] def create(
       tree: GenTransactionTree,
       representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree],
-  ): Either[String, InformeeTree] =
-    Either
-      .catchOnly[InvalidInformeeTree](InformeeTree(tree)(representativeProtocolVersion))
-      .leftMap(_.message)
+  ): Either[String, InformeeTree] = InformeeTree(tree)(representativeProtocolVersion).validated
 
   /** Creates an [[InformeeTree]] from a [[GenTransactionTree]].
     * Yields `Left(...)` if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
@@ -551,7 +562,7 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
       protocolVersion: ProtocolVersion,
   ): Either[String, InformeeTree] = create(tree, protocolVersionRepresentativeFor(protocolVersion))
 
-  private[data] def checkGlobalMetadata(tree: GenTransactionTree): Unit = {
+  private[data] def checkGlobalMetadata(tree: GenTransactionTree): Either[String, Unit] = {
     val errors = Seq.newBuilder[String]
 
     if (tree.submitterMetadata.unwrap.isRight)
@@ -562,42 +573,52 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
       errors += "The participant metadata of an informee tree must be blinded."
 
     val message = errors.result().mkString(" ")
-    if (message.nonEmpty)
-      throw InvalidInformeeTree(message)
+    EitherUtil.condUnitE(message.isEmpty, message)
   }
 
-  private[data] def checkViews(rootViews: MerkleSeq[TransactionView], assertFull: Boolean): Unit = {
+  private[data] def checkViews(
+      rootViews: MerkleSeq[TransactionView],
+      assertFull: Boolean,
+  ): Either[String, Unit] = {
 
     val errors = Seq.newBuilder[String]
 
-    if (assertFull) {
-      rootViews.blindedElements.foreach(hash =>
-        errors += s"All views in a full informee tree must be unblinded. Found $hash."
-      )
-    }
+    def checkIsEmpty(blinded: Seq[RootHash]): Unit =
+      if (assertFull && blinded.nonEmpty) {
+        val hashes = blinded.map(_.toString).mkString(", ")
+        errors += s"All views in a full informee tree must be unblinded. Found $hashes"
+      }
 
-    def go(wrappedViews: Seq[MerkleTree[TransactionView]]): Unit =
-      wrappedViews.map(_.unwrap).foreach {
-        case Left(hash) =>
-          if (assertFull)
-            errors += s"All views in a full informee tree must be unblinded. Found $hash."
+    checkIsEmpty(rootViews.blindedElements)
 
-        case Right(view) =>
-          if (assertFull && view.viewCommonData.unwrap.isLeft)
-            errors += s"The view common data in a full informee tree must be unblinded. Found ${view.viewCommonData}."
+    def go(wrappedViews: Seq[TransactionView]): Unit =
+      wrappedViews.foreach { view =>
+        checkIsEmpty(view.subviews.blindedElements)
 
-          if (view.viewParticipantData.unwrap.isRight)
-            errors += s"The view participant data in an informee tree must be blinded. Found ${view.viewParticipantData}."
+        if (assertFull && view.viewCommonData.unwrap.isLeft)
+          errors += s"The view common data in a full informee tree must be unblinded. Found ${view.viewCommonData}."
 
-          go(view.subviews)
+        if (view.viewParticipantData.unwrap.isRight)
+          errors += s"The view participant data in an informee tree must be blinded. Found ${view.viewParticipantData}."
+
+        go(view.subviews.unblindedElements)
       }
 
     go(rootViews.unblindedElements)
 
     val message = errors.result().mkString("\n")
-    if (message.nonEmpty)
-      throw InvalidInformeeTree(message)
+    EitherUtil.condUnitE(message.isEmpty, message)
   }
+
+  /** Lens for modifying the [[GenTransactionTree]] inside of an informee tree.
+    * It does not check if the new `tree` actually constitutes a valid informee tree, therefore:
+    * DO NOT USE IN PRODUCTION.
+    */
+  @VisibleForTesting
+  def genTransactionTreeUnsafe: Lens[InformeeTree, GenTransactionTree] =
+    Lens[InformeeTree, GenTransactionTree](_.tree)(newTree =>
+      oldInformeeTree => InformeeTree(newTree)(oldInformeeTree.representativeProtocolVersion)
+    )
 
   private[data] def viewCommonDataByView(tree: GenTransactionTree): Map[ViewHash, ViewCommonData] =
     tree.rootViews.unblindedElements
@@ -635,17 +656,17 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
 }
 
 /** Wraps a [[GenTransactionTree]] that is also a full informee tree.
-  *
-  * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
   */
+// private constructor, because object invariants are checked by factory methods
 case class FullInformeeTree private (tree: GenTransactionTree)(
     val representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree]
 ) extends HasProtocolVersionedWrapper[FullInformeeTree]
     with PrettyPrinting {
 
-  InformeeTree.checkGlobalMetadata(tree)
-
-  InformeeTree.checkViews(tree.rootViews, assertFull = true)
+  def validated: Either[String, this.type] = for {
+    _ <- InformeeTree.checkGlobalMetadata(tree)
+    _ <- InformeeTree.checkViews(tree.rootViews, assertFull = true)
+  } yield this
 
   override protected def companionObj = FullInformeeTree
 
@@ -723,22 +744,35 @@ object FullInformeeTree
     ),
   )
 
+  /** Creates a full informee tree from a [[GenTransactionTree]].
+    * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
+    */
   def tryCreate(tree: GenTransactionTree, protocolVersion: ProtocolVersion): FullInformeeTree =
-    FullInformeeTree(tree)(protocolVersionRepresentativeFor(protocolVersion))
+    create(tree, protocolVersionRepresentativeFor(protocolVersion)).valueOr(err =>
+      throw InvalidInformeeTree(err)
+    )
 
   private[data] def create(
       tree: GenTransactionTree,
       representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree],
   ): Either[String, FullInformeeTree] =
-    Either
-      .catchOnly[InvalidInformeeTree](FullInformeeTree(tree)(representativeProtocolVersion))
-      .leftMap(_.message)
+    FullInformeeTree(tree)(representativeProtocolVersion).validated
 
   private[data] def create(
       tree: GenTransactionTree,
       protocolVersion: ProtocolVersion,
   ): Either[String, FullInformeeTree] =
     create(tree, protocolVersionRepresentativeFor(protocolVersion))
+
+  /** Lens for modifying the [[GenTransactionTree]] inside of a full informee tree.
+    * It does not check if the new `tree` actually constitutes a valid full informee tree, therefore:
+    * DO NOT USE IN PRODUCTION.
+    */
+  @VisibleForTesting
+  lazy val genTransactionTreeUnsafe: Lens[FullInformeeTree, GenTransactionTree] =
+    Lens[FullInformeeTree, GenTransactionTree](_.tree)(newTree =>
+      fullInformeeTree => FullInformeeTree(newTree)(fullInformeeTree.representativeProtocolVersion)
+    )
 
   def fromProtoV0(
       hashOps: HashOps,
@@ -1131,20 +1165,23 @@ object ParticipantMetadata
   * @throws LightTransactionViewTree$.InvalidLightTransactionViewTree if [[tree]] is not a light transaction view tree
   *                                    (i.e. the wrong set of nodes is blinded)
   */
-case class LightTransactionViewTree(tree: GenTransactionTree)
+abstract class LightTransactionViewTree private[data] (val tree: GenTransactionTree)
     extends ViewTree
     with HasVersionedWrapper[LightTransactionViewTree]
     with PrettyPrinting {
+  val subviewHashes: Seq[ViewHash]
 
   override protected def companionObj = LightTransactionViewTree
 
-  private def findTheView(views: Seq[MerkleTree[TransactionView]]): TransactionView = {
+  private def findTheView(
+      views: Seq[MerkleTree[TransactionView]]
+  ): TransactionView = {
     val lightUnblindedViews = views.mapFilter { view =>
       for {
         v <- view.unwrap.toOption
         _cmd <- v.viewCommonData.unwrap.toOption
         _pmd <- v.viewParticipantData.unwrap.toOption
-        _ <- if (v.subviews.forall(_.isBlinded)) Some(()) else None
+        _ <- if (v.subviews.areFullyBlinded) Some(()) else None
       } yield v
     }
     lightUnblindedViews match {
@@ -1162,11 +1199,11 @@ case class LightTransactionViewTree(tree: GenTransactionTree)
   lazy val transactionUuid: UUID = checked(tree.commonMetadata.tryUnwrap).uuid
 
   /** The unblinded view. */
-  val view: TransactionView = findTheView(tree.rootViews.unblindedElements.flatMap(_.flatten))
+  val view: TransactionView = findTheView(
+    tree.rootViews.unblindedElements.flatMap(_.flatten)
+  )
 
   override val viewHash: ViewHash = ViewHash.fromRootHash(view.rootHash)
-
-  val subviewHashes: Seq[ViewHash] = view.subviews.map(sv => ViewHash.fromRootHash(sv.rootHash))
 
   private[this] val commonMetadata: CommonMetadata =
     tree.commonMetadata.unwrap
@@ -1204,7 +1241,10 @@ case class LightTransactionViewTree(tree: GenTransactionTree)
     v0.LightTransactionViewTree(tree = Some(tree.toProtoV0))
 
   def toProtoV1: v1.LightTransactionViewTree =
-    v1.LightTransactionViewTree(tree = Some(tree.toProtoV1))
+    v1.LightTransactionViewTree(
+      tree = Some(tree.toProtoV1),
+      subviewHashes = subviewHashes.map(_.toProtoPrimitive),
+    )
 
   override lazy val toBeSigned: Option[RootHash] =
     tree.rootViews.unblindedElements
@@ -1215,6 +1255,26 @@ case class LightTransactionViewTree(tree: GenTransactionTree)
 
   override lazy val pretty: Pretty[LightTransactionViewTree] = prettyOfClass(unnamedParam(_.tree))
 }
+
+/** Specialization of `LightTransactionViewTree` when subviews are a sequence of `TransactionViews`.
+  * The hashes of all the direct subviews are computed directly from the sequence of subviews.
+  */
+case class LightTransactionViewTreeV0 private[data] (override val tree: GenTransactionTree)
+    extends LightTransactionViewTree(tree) {
+  override val subviewHashes: Seq[ViewHash] = view.subviews.trySubviewHashes
+}
+
+/** Specialization of `LightTransactionViewTree` when subviews are a MerkleSeq of `TransactionViews`.
+  * In this case, the subview hashes need to be provided because the extra blinding provided by MerkleSeqs
+  * could hide some of the subviews.
+  *
+  * @param subviewHashes: view hashes of all direct subviews
+  */
+case class LightTransactionViewTreeV1 private[data] (
+    override val tree: GenTransactionTree,
+    override val subviewHashes: Seq[ViewHash],
+) extends LightTransactionViewTree(tree)
+// TODO(i10962): Validate on construction that the `subviewHashes` are consistent with `tree`.
 
 object LightTransactionViewTree
     extends HasVersionedMessageWithContextCompanion[LightTransactionViewTree, HashOps] {
@@ -1239,14 +1299,28 @@ object LightTransactionViewTree
 
   /** @throws InvalidLightTransactionViewTree if the tree is not a legal lightweight transaction view tree
     */
-  def apply(tree: GenTransactionTree): LightTransactionViewTree =
-    new LightTransactionViewTree(tree)
-
-  def create(tree: GenTransactionTree): Either[String, LightTransactionViewTree] = {
-    Either
-      .catchOnly[InvalidLightTransactionViewTree](new LightTransactionViewTree(tree))
-      .leftMap(_.message)
+  def tryCreate(
+      tree: GenTransactionTree,
+      subviewHashes: Seq[ViewHash],
+      protocolVersion: ProtocolVersion,
+  ): LightTransactionViewTree = {
+    if (protocolVersion >= ProtocolVersion.v4)
+      LightTransactionViewTreeV1(tree, subviewHashes)
+    else LightTransactionViewTreeV0(tree)
   }
+
+  private def createV0(tree: GenTransactionTree): Either[String, LightTransactionViewTree] =
+    Either
+      .catchOnly[InvalidLightTransactionViewTree](LightTransactionViewTreeV0(tree))
+      .leftMap(_.message)
+
+  private def createV1(
+      tree: GenTransactionTree,
+      subviewHashes: Seq[ViewHash],
+  ): Either[String, LightTransactionViewTree] =
+    Either
+      .catchOnly[InvalidLightTransactionViewTree](LightTransactionViewTreeV1(tree, subviewHashes))
+      .leftMap(_.message)
 
   def fromProtoV0(
       hashOps: HashOps,
@@ -1256,7 +1330,7 @@ object LightTransactionViewTree
       protoTree <- ProtoConverter.required("tree", protoT.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
       result <- LightTransactionViewTree
-        .create(tree)
+        .createV0(tree)
         .leftMap(e =>
           ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e")
         )
@@ -1269,8 +1343,9 @@ object LightTransactionViewTree
     for {
       protoTree <- ProtoConverter.required("tree", protoT.tree)
       tree <- GenTransactionTree.fromProtoV1(hashOps, protoTree)
+      subviewHashes <- protoT.subviewHashes.traverse(ViewHash.fromProtoPrimitive)
       result <- LightTransactionViewTree
-        .create(tree)
+        .createV1(tree, subviewHashes)
         .leftMap(e =>
           ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e")
         )
@@ -1281,22 +1356,27 @@ object LightTransactionViewTree
     * The unused suffix normally describes other full transaction view trees, and the function may be called again on the
     * suffix.
     * Errors on an empty sequence, or a sequence whose prefix doesn't describe a full transaction view tree.
+    * A valid full transaction view tree results from traversing a forest of views in preorder.
     */
-  private def toFullViewTree(trees: NonEmpty[Seq[LightTransactionViewTree]]): Either[
+  private def toFullViewTree(protocolVersion: ProtocolVersion, hashOps: HashOps)(
+      trees: NonEmpty[Seq[LightTransactionViewTree]]
+  ): Either[
     InvalidLightTransactionViewTreeSequence,
     (TransactionViewTree, Seq[LightTransactionViewTree]),
   ] = {
-
     def toFullView(trees: NonEmpty[Seq[LightTransactionViewTree]]): Either[
       InvalidLightTransactionViewTreeSequence,
       (TransactionView, Seq[LightTransactionViewTree]),
     ] = {
       val headView = trees.head1.view
-      if (headView.subviews.isEmpty)
+      // We cannot get the number of subviews from the `subviews` member, because in case it is a MerkleSeq,
+      // it can be partly blinded and won't know the actual number
+      val nbOfSubViews = trees.head1.subviewHashes.length
+      if (nbOfSubViews == 0)
         Right(headView -> trees.tail1)
       else {
         for {
-          subViewsAndRemaining <- ((1 to headView.subviews.length): Seq[Int])
+          subViewsAndRemaining <- ((1 to nbOfSubViews): Seq[Int])
             .foldM(Seq.empty[TransactionView] -> trees.tail1) {
               case ((leftSiblings, remaining), _) =>
                 NonEmpty.from(remaining) match {
@@ -1315,21 +1395,25 @@ object LightTransactionViewTree
             }
           (subViewsReversed, remaining) = subViewsAndRemaining
           subViews = subViewsReversed.reverse
-          // Check that the ordering of the reconstructed transaction view trees matches the expected one
+
+          newSubViews = TransactionSubviews(subViews)(protocolVersion, hashOps)
+          newView = headView.copy(subviews = newSubViews)
+
+          // Check that the new view still has the same hash
+          // (which implicitly validates the ordering of the reconstructed subviews)
           _ <- Either.cond(
-            subViews.map(_.rootHash) == headView.subviews.map(_.rootHash),
+            newView.viewHash == headView.viewHash,
             (),
             InvalidLightTransactionViewTreeSequence(
-              s"Mismatch in expected hashes of subtrees and what was found"
+              s"Mismatch in expected hashes of old and new view"
             ),
           )
-          newView = headView.copy(subviews = subViews)
         } yield (newView, remaining)
       }
     }
     val t = trees.head1
     toFullView(trees).flatMap { case (tv, remaining) =>
-      val wrappedEnrichedTree = t.tree.topLevelViewMap(_.replace(tv.viewHash, tv))
+      val wrappedEnrichedTree = t.tree.mapUnblindedRootViews(_.replace(tv.viewHash, tv))
       TransactionViewTree
         .create(checked(wrappedEnrichedTree.tryUnwrap))
         .bimap(InvalidLightTransactionViewTreeSequence, tvt => tvt -> remaining)
@@ -1342,19 +1426,22 @@ object LightTransactionViewTree
     * [[toAllFullViewTrees]]([[GenTransactionTree.allLightTransactionViewTrees]]) ==
     * ([[GenTransactionTree.allTransactionViewTrees]])
     */
-  def toAllFullViewTrees(
+  def toAllFullViewTrees(protocolVersion: ProtocolVersion, hashOps: HashOps)(
       trees: NonEmpty[Seq[LightTransactionViewTree]]
   ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] =
-    sequenceConsumer(trees, true)
+    sequenceConsumer(protocolVersion, hashOps)(trees, repeats = true)
 
   /** Returns the top-level full transaction view trees described by a sequence of lightweight ones */
-  def toToplevelFullViewTrees(
+  def toToplevelFullViewTrees(protocolVersion: ProtocolVersion, hashOps: HashOps)(
       trees: NonEmpty[Seq[LightTransactionViewTree]]
   ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] =
-    sequenceConsumer(trees, false)
+    sequenceConsumer(protocolVersion, hashOps)(trees, repeats = false)
 
   // Extracts the common logic behind extracting all full trees and just top-level ones
   private def sequenceConsumer(
+      protocolVersion: ProtocolVersion,
+      hashOps: HashOps,
+  )(
       trees: NonEmpty[Seq[LightTransactionViewTree]],
       repeats: Boolean,
   ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] = {
@@ -1363,7 +1450,7 @@ object LightTransactionViewTree
     def go(
         ts: NonEmpty[Seq[LightTransactionViewTree]]
     ): Option[InvalidLightTransactionViewTreeSequence] = {
-      toFullViewTree(ts) match {
+      toFullViewTree(protocolVersion, hashOps)(ts) match {
         case Right((fvt, rest)) =>
           resBuilder += fvt
           NonEmpty.from(if (repeats) ts.tail1 else rest) match {
@@ -1381,10 +1468,15 @@ object LightTransactionViewTree
   }
 
   /** Turns a full transaction view tree into a lightweight one. Not stack-safe. */
-  def fromTransactionViewTree(tvt: TransactionViewTree): LightTransactionViewTree = {
-    val withBlindedSubviews = tvt.view.copy(subviews = tvt.view.subviews.map(_.blindFully))
-    val genTransactionTree = tvt.tree.topLevelViewMap(_.replace(tvt.viewHash, withBlindedSubviews))
-    LightTransactionViewTree(genTransactionTree)
+  def fromTransactionViewTree(
+      tvt: TransactionViewTree,
+      protocolVersion: ProtocolVersion,
+  ): LightTransactionViewTree = {
+    val withBlindedSubviews = tvt.view.copy(subviews = tvt.view.subviews.blindFully)
+    val genTransactionTree =
+      tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, withBlindedSubviews))
+    // By definition, the view in a TransactionViewTree has all subviews unblinded
+    LightTransactionViewTree.tryCreate(genTransactionTree, tvt.subviewHashes, protocolVersion)
   }
 
 }

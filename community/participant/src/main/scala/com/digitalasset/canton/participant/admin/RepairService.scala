@@ -10,10 +10,10 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.value.{Identifier, Record}
-import com.daml.ledger.api.validation.ValueValidator as LedgerApiValueValidator
+import com.daml.ledger.api.validation.StricterValueValidator as LedgerApiValueValidator
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
-import com.daml.lf.data.{ImmArray, Ref}
+import com.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.daml.lf.value.Value
 import com.daml.platform.participant.util.LfEngineToApi
 import com.daml.platform.server.api.validation.FieldValidations as LedgerApiFieldValidations
@@ -202,22 +202,36 @@ class RepairService(
           contractsToPublishUpstreamO <- MonadUtil.sequentialTraverse(contractsToAdd)(
             addContract(repair, ignoreAlreadyAdded, ignoreStakeholderCheck)
           )
-          contractsToPublishUpstream = contractsToPublishUpstreamO.toList.flattenOption
+          contractsAndSaltsToPublishUpstream = contractsToPublishUpstreamO.view.flatten
+
+          (contractsToPublishUpstream, contractIdSalts) =
+            contractsAndSaltsToPublishUpstream.map { case (cId, (metadata, saltO)) =>
+              (cId -> metadata) -> (cId -> saltO)
+            }.unzip
+
+          contractMetadata = contractIdSalts.collect { case (cId, Some(salt)) =>
+            val driverContractMetadataBytes =
+              DriverContractMetadata(salt).toLfBytes(repair.domainParameters.protocolVersion)
+            cId -> driverContractMetadataBytes
+          }.toMap
 
           // Publish added contracts upstream as created via the ledger api.
           _ <- EitherT.right(
-            scheduleUpstreamEventPublishUponDomainStart(contractsToPublishUpstream, repair) {
-              case (contractId, contractWithMetadata) =>
-                LfNodeCreate(
-                  coid = contractId,
-                  templateId = contractWithMetadata.instance.unversioned.template,
-                  arg = contractWithMetadata.instance.unversioned.arg,
-                  agreementText = "",
-                  signatories = contractWithMetadata.signatories,
-                  stakeholders = contractWithMetadata.stakeholders,
-                  key = contractWithMetadata.keyWithMaintainers,
-                  version = contractWithMetadata.instance.version,
-                )
+            scheduleUpstreamEventPublishUponDomainStart(
+              contractsToPublishUpstream.toList,
+              contractMetadata,
+              repair,
+            ) { case (contractId, contractWithMetadata) =>
+              LfNodeCreate(
+                coid = contractId,
+                templateId = contractWithMetadata.instance.unversioned.template,
+                arg = contractWithMetadata.instance.unversioned.arg,
+                agreementText = "",
+                signatories = contractWithMetadata.signatories,
+                stakeholders = contractWithMetadata.stakeholders,
+                key = contractWithMetadata.keyWithMaintainers,
+                version = contractWithMetadata.instance.version,
+              )
             }
           )
 
@@ -258,28 +272,32 @@ class RepairService(
 
           // Publish purged contracts upstream as archived via the ledger api.
           _ <- EitherT.right(
-            scheduleUpstreamEventPublishUponDomainStart(contractsToPublishUpstream, repair)(
-              contract =>
-                LfNodeExercises(
-                  targetCoid = contract.contractId,
-                  templateId = contract.rawContractInstance.contractInstance.unversioned.template,
-                  interfaceId = None,
-                  choiceId = Ref.ChoiceName.assertFromString(s"Archive"),
-                  consuming = true,
-                  actingParties = contract.metadata.signatories,
-                  chosenValue = contract.rawContractInstance.contractInstance.unversioned.arg,
-                  stakeholders = contract.metadata.stakeholders,
-                  signatories = contract.metadata.signatories,
-                  choiceObservers =
-                    Set.empty[LfPartyId], // default archive choice has no choice observers
-                  children = ImmArray.empty[LfNodeId],
-                  exerciseResult = Some(Value.ValueNone),
-                  // Not setting the contract key as the indexer deletes contract keys along with contracts.
-                  // If the contract keys were needed, we'd have to reinterpret the contract to look up the key.
-                  key = None,
-                  byKey = false,
-                  version = contract.rawContractInstance.contractInstance.version,
-                )
+            scheduleUpstreamEventPublishUponDomainStart(
+              contracts = contractsToPublishUpstream,
+              // Only exercise nodes are created here, so no need to forward contract metadata
+              driverContractMetadata = Map.empty,
+              repair = repair,
+            )(contract =>
+              LfNodeExercises(
+                targetCoid = contract.contractId,
+                templateId = contract.rawContractInstance.contractInstance.unversioned.template,
+                interfaceId = None,
+                choiceId = Ref.ChoiceName.assertFromString(s"Archive"),
+                consuming = true,
+                actingParties = contract.metadata.signatories,
+                chosenValue = contract.rawContractInstance.contractInstance.unversioned.arg,
+                stakeholders = contract.metadata.stakeholders,
+                signatories = contract.metadata.signatories,
+                choiceObservers =
+                  Set.empty[LfPartyId], // default archive choice has no choice observers
+                children = ImmArray.empty[LfNodeId],
+                exerciseResult = Some(Value.ValueNone),
+                // Not setting the contract key as the indexer deletes contract keys along with contracts.
+                // If the contract keys were needed, we'd have to reinterpret the contract to look up the key.
+                key = None,
+                byKey = false,
+                version = contract.rawContractInstance.contractInstance.version,
+              )
             )
           )
 
@@ -461,7 +479,7 @@ class RepairService(
       contractToAdd: SerializableContractWithWitnesses
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Option[(LfContractId, ContractWithMetadata)]] = {
+  ): EitherT[Future, String, Option[(LfContractId, (ContractWithMetadata, Option[Salt]))]] = {
     val topologySnapshot = repair.topologySnapshot
 
     def runStakeholderCheck[L](check: => EitherT[Future, L, Unit]): EitherT[Future, L, Unit] =
@@ -662,7 +680,9 @@ class RepairService(
         )
       )
     } yield
-      if (needToAddContract) Some(contract.contractId -> computedContractWithMetadata) else None
+      if (needToAddContract)
+        Some(contract.contractId -> (computedContractWithMetadata -> contract.contractSalt))
+      else None
   }
 
   private def purgeContract(repair: RepairRequest, ignoreAlreadyPurged: Boolean)(
@@ -1015,6 +1035,7 @@ class RepairService(
 
   private def scheduleUpstreamEventPublishUponDomainStart[C](
       contracts: Seq[C],
+      driverContractMetadata: Map[LfContractId, Bytes],
       repair: RepairRequest,
   )(buildLfNode: C => LfNode)(implicit traceContext: TraceContext): Future[Unit] =
     contracts match {
@@ -1050,7 +1071,7 @@ class RepairService(
             recordTime = repair.ts.toLf,
             divulgedContracts = List.empty, // create and plain archive don't involve divulgence
             blindingInfo = None,
-            contractMetadata = Map(), // TODO(#9795) wire proper value
+            contractMetadata = driverContractMetadata,
           ),
           repair.rc.asLocalOffset,
           None,
@@ -1410,7 +1431,10 @@ object RepairService {
 
     def contractInstanceToData(
         contract: SerializableContract
-    ): Either[String, (Identifier, Record, Set[String], LfContractId, Option[Salt])] = {
+    ): Either[
+      String,
+      (Identifier, Record, Set[String], LfContractId, Option[Salt], CantonTimestamp),
+    ] = {
       val contractInstance = contract.rawContractInstance.contractInstance
       LfEngineToApi
         .lfValueToApiRecord(verbose = true, contractInstance.unversioned.arg)
@@ -1424,6 +1448,7 @@ object RepairService {
               contract.metadata.signatories.map(_.toString),
               contract.contractId,
               contract.contractSalt,
+              contract.ledgerCreateTime,
             ),
         )
     }

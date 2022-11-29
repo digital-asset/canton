@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton
 
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import org.scalatest.Reporter
 import org.scalatest.events.*
+import org.slf4j
 
 /** Logs when a test case or suite is started or completed.
   * To use it, register this class with "-C" when ScalaTest is started.
   */
-class LogReporter extends Reporter with NamedLogging with NoTracing {
+class LogReporter extends Reporter {
 
-  override protected def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
+  private[this] val logger: slf4j.Logger = NamedLoggerFactory.root.getLogger(getClass)
 
   override def apply(event: Event): Unit = event match {
     case _: RunStarting => logger.info("Starting test run...")

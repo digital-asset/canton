@@ -47,7 +47,7 @@ private[mediator] class Mediator(
     @VisibleForTesting
     val sequencerClient: SequencerClient,
     val topologyClient: DomainTopologyClientWithInit,
-    syncCrypto: DomainSyncCryptoClient,
+    private[canton] val syncCrypto: DomainSyncCryptoClient,
     topologyTransactionProcessor: TopologyTransactionProcessor,
     timeTrackerConfig: DomainTimeTrackerConfig,
     state: MediatorState,
@@ -214,10 +214,11 @@ private[mediator] class Mediator(
     ], DefaultOpenEnvelope] {
       override def name: String = s"mediator-${mediatorId}"
 
-      override def subscriptionStartsAt(start: SubscriptionStart)(implicit
-          traceContext: TraceContext
-      ): FutureUnlessShutdown[Unit] =
-        topologyTransactionProcessor.subscriptionStartsAt(start)
+      override def subscriptionStartsAt(
+          start: SubscriptionStart,
+          domainTimeTracker: DomainTimeTracker,
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+        topologyTransactionProcessor.subscriptionStartsAt(start, domainTimeTracker)
 
       override def apply(tracedEvents: Traced[Seq[OrdinaryProtocolEvent]]): HandlerResult = {
         tracedEvents.withTraceContext { implicit traceContext => events =>

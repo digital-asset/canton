@@ -23,7 +23,7 @@ object ExtractUsedContractsFromRootViews {
         })
         .getOrElse(List.empty)
 
-      view.subviews.foreach(_.unwrap.foreach(go))
+      view.subviews.unblindedElements.foreach(go)
     }
 
     rootViews.foreach(go)

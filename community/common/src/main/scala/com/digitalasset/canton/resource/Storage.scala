@@ -564,7 +564,7 @@ object DbStorage {
     config match {
       case _: H2DbConfig => H2(H2Profile)
       case _: PostgresDbConfig => Postgres(PostgresProfile)
-      // TODO(soren): assume unknown config is for oracle until we have proper oracle factory support
+      // TODO(i11009): assume unknown config is for oracle until we have proper oracle factory support
       case _ => Oracle(OracleProfile)
     }
 

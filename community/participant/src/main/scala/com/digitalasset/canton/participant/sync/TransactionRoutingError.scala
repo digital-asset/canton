@@ -132,9 +132,28 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
 
-      case class Error(submitter: String)
+      case class Error(problem: String)
           extends TransactionErrorImpl(
-            cause = "Unable to parse submitter."
+            cause = "Unable to parse workflow ID."
+          )
+          with TransactionRoutingError
+    }
+
+    @Explanation(
+      """The WorkflowID defined in the transaction metadata contains an invalid domain id."""
+    )
+    @Resolution(
+      """Check that the workflow ID (if specified) corresponds to a valid domain ID after the ``domain-id:`` marker string."""
+    )
+    object InvalidDomainId
+        extends ErrorCode(
+          id = "INVALID_DOMAIN_ID",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+
+      case class Error(invalidDomainId: String)
+          extends TransactionErrorImpl(
+            cause = "Unable to parse workflow ID."
           )
           with TransactionRoutingError
     }

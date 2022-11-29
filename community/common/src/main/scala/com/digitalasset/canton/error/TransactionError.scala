@@ -42,19 +42,6 @@ abstract class TransactionErrorImpl(
 )(implicit override val code: ErrorCode)
     extends TransactionError
 
-abstract class LoggingTransactionErrorImpl(
-    cause: String,
-    throwableO: Option[Throwable] = None,
-    definiteAnswer: Boolean = false,
-)(implicit code: ErrorCode, loggingContext: ErrorLoggingContext)
-    extends TransactionErrorImpl(cause, throwableO, definiteAnswer)(code) {
-
-  def log(): Unit = logWithContext()(loggingContext)
-
-  // automatically log the error on generation
-  log()
-}
-
 trait TransactionParentError[T <: TransactionError]
     extends TransactionError
     with ParentCantonError[T]

@@ -10,7 +10,10 @@ import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.engine.Blinding
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors
-import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors.InvalidDomainAlias
+import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors.{
+  InvalidDomainAlias,
+  InvalidDomainId,
+}
 import com.digitalasset.canton.protocol.{LfContractId, LfVersionedTransaction, WithContractMetadata}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.{DomainAlias, LfPackageId, LfPartyId, LfWorkflowId}
@@ -48,7 +51,9 @@ private[routing] object TransactionData {
       ec: ExecutionContext
   ): EitherT[Future, TransactionRoutingError, TransactionData] = {
     for {
-      prescribedDomainO <- EitherT.fromEither[Future](toDomainId(workflowIdO, domainIdResolver))
+      prescribedDomainO <- EitherT.fromEither[Future](
+        toDomainId(workflowIdO, domainIdResolver)
+      )
 
       contractsDomainData <- EitherT.liftF(
         ContractsDomainData.create(domainOfContracts, inputContractsMetadata)
@@ -94,15 +99,39 @@ private[routing] object TransactionData {
     } yield transactionData
   }
 
-  private def toDomainId(
+  private[routing] def toDomainId(
       maybeWorkflowId: Option[LfWorkflowId],
       domainIdResolver: DomainAlias => Option[DomainId],
-  ): Either[TransactionRoutingError, Option[DomainId]] = {
-    for {
-      domainAliasO <- maybeWorkflowId
-        .traverse(DomainAlias.create(_))
-        .leftMap[TransactionRoutingError](InvalidDomainAlias.Error)
-      res = domainAliasO.flatMap(domainIdResolver(_))
-    } yield res
+  ): Either[TransactionRoutingError, Option[DomainId]] =
+    maybeWorkflowId match {
+      case Some(workflowId) if workflowId contains DomainIdMarker =>
+        asDomainId(workflowId).map(Some(_))
+
+      case Some(workflowId) =>
+        asDomainAlias(workflowId).map(domainIdResolver)
+
+      case None =>
+        Right(None)
+    }
+
+  private def asDomainAlias(
+      workflowId: LfWorkflowId
+  ): Either[TransactionRoutingError, DomainAlias] =
+    DomainAlias
+      .create(workflowId)
+      .leftMap(InvalidDomainAlias.Error)
+
+  private val DomainIdMarker: String = "domain-id:"
+
+  private def asDomainId(
+      workflowId: LfWorkflowId
+  ): Either[TransactionRoutingError, DomainId] = {
+    val markerIndex = workflowId.indexOf(DomainIdMarker)
+    DomainId
+      .fromString(
+        // whole postfix after the marker is the domain id
+        workflowId.substring(markerIndex + DomainIdMarker.length)
+      )
+      .leftMap(InvalidDomainId.Error)
   }
 }

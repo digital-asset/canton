@@ -11,27 +11,39 @@ import com.digitalasset.canton.crypto.{SigningPublicKey, X509Certificate}
 import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.environment.CantonNodeBootstrapBase
-import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.{
-  DomainParametersChange,
-  NamespaceDelegation,
-  OwnerToKeyMapping,
-}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.Future
 
-trait DomainTopologyManagerIdentityInitialization {
+trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
   self: CantonNodeBootstrapBase[_, _, DomainNodeParameters] =>
+
+  protected def authorizeDomainGovernance[E <: CantonError](
+      manager: TopologyManager[E],
+      key: SigningPublicKey,
+      mapping: DomainGovernanceMapping,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] =
+    authorizeIfNew(
+      manager,
+      DomainGovernanceTransaction(mapping, protocolVersion),
+      key,
+      protocolVersion,
+    )
 
   def initializeTopologyManagerIdentity(
       name: InstanceName,
       legalIdentityHook: X509Certificate => EitherT[Future, String, Unit],
       initialDynamicDomainParameters: DynamicDomainParameters,
-      protocolVersion: ProtocolVersion,
       initConfigBase: InitConfigBase,
+      staticDomainParametersFromConfig: StaticDomainParameters,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, (NodeId, DomainTopologyManager, SigningPublicKey)] = {
@@ -48,7 +60,11 @@ trait DomainTopologyManagerIdentityInitialization {
       uid = UniqueIdentifier(id, Namespace(namespaceKey.fingerprint))
       nodeId = NodeId(uid)
       // now, we kick off the topology manager services so we can start building topology transactions
-      topologyManager <- initializeIdentityManagerAndServices(nodeId).toEitherT[Future]
+      topologyManager <- initializeIdentityManagerAndServices(
+        nodeId,
+        staticDomainParametersFromConfig,
+      )
+        .toEitherT[Future]
       // first, we issue the root namespace delegation for our namespace
       _ <- authorizeStateUpdate(
         topologyManager,
@@ -58,14 +74,14 @@ trait DomainTopologyManagerIdentityInitialization {
           namespaceKey,
           isRootDelegation = true,
         ),
-        protocolVersion,
+        staticDomainParametersFromConfig.protocolVersion,
       )
       // then, we initialise the domain parameters
       _ <- authorizeDomainGovernance(
         topologyManager,
         namespaceKey,
         DomainParametersChange(DomainId(uid), initialDynamicDomainParameters),
-        protocolVersion,
+        staticDomainParametersFromConfig.protocolVersion,
       )
 
       // now, we assign the topology manager key with the domain topology manager
@@ -74,7 +90,7 @@ trait DomainTopologyManagerIdentityInitialization {
         topologyManager,
         namespaceKey,
         OwnerToKeyMapping(domainTopologyManagerId, topologyManagerSigningKey),
-        protocolVersion,
+        staticDomainParametersFromConfig.protocolVersion,
       )
 
       // Setup the legal identity of the domain nodes
@@ -94,7 +110,8 @@ trait DomainTopologyManagerIdentityInitialization {
   }
 
   protected def initializeIdentityManagerAndServices(
-      nodeId: NodeId
+      nodeId: NodeId,
+      staticDomainParameters: StaticDomainParameters,
   ): Either[String, DomainTopologyManager]
 
 }

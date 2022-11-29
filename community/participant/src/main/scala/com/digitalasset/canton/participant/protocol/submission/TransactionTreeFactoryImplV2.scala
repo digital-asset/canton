@@ -297,10 +297,11 @@ final class TransactionTreeFactoryImplV2(
       state.resolvedKeysInView = resolvedKeysInView
 
       // Compute the result
+      val subviews = TransactionSubviews(childViews)(protocolVersion, cryptoOps)
       TransactionView.tryCreate(cryptoOps)(
         viewCommonData,
         viewParticipantData,
-        childViews,
+        subviews,
         protocolVersion,
       )
     }

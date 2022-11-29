@@ -91,7 +91,7 @@ abstract class BaseSequencer(
         )
         EitherT.pure[Future, WriteRequestRefused](())
       case OperationError(RegisterMemberError.UnexpectedError(member, message)) =>
-        // TODO(danilo/arne) consider whether to propagate these errors further
+        // TODO(11062) consider whether to propagate these errors further
         logger.error(s"An unexpected error occurred whilst registering member $member: $message")
         EitherT.pure[Future, WriteRequestRefused](())
       case error: WriteRequestRefused => EitherT.leftT(error)

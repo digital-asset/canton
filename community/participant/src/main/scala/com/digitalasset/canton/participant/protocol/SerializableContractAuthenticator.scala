@@ -24,6 +24,7 @@ class SerializableContractAuthenticator(unicumGenerator: UnicumGenerator) {
                 contractSalt = salt,
                 ledgerTime = contract.ledgerCreateTime,
                 suffixedContractInstance = contract.rawContractInstance,
+                contractIdVersion = AuthenticatedContractIdVersion,
               )
             recomputedSuffix = recomputedUnicum.toContractIdSuffix(AuthenticatedContractIdVersion)
             _ <- Either.cond(

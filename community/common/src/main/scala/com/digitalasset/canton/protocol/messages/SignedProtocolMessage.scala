@@ -38,6 +38,12 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     with ProtocolMessageV1
     with HasProtocolVersionedWrapper[SignedProtocolMessage[SignedProtocolMessageContent]] {
 
+  def copy[MM <: SignedProtocolMessageContent](
+      message: MM = this.message,
+      signature: Signature = this.signature,
+  ): SignedProtocolMessage[MM] =
+    SignedProtocolMessage(message, signature)(representativeProtocolVersion)
+
   override def domainId: DomainId = message.domainId
 
   override def companionObj = SignedProtocolMessage
@@ -62,7 +68,7 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
   )(implicit F: Functor[F]): F[SignedProtocolMessage[MM]] = {
     F.map(f(message)) { newMessage =>
       if (newMessage eq message) this.asInstanceOf[SignedProtocolMessage[MM]]
-      else this.copy(message = newMessage)(representativeProtocolVersion)
+      else this.copy(message = newMessage)
     }
   }
 

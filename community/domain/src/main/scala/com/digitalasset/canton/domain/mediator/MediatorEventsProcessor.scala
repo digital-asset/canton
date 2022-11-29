@@ -67,8 +67,6 @@ private[mediator] object MediatorEventStage {
 /** Attempt to process a sequence of sequential events from the sequencer for the mediator in an optimal manner.
   * We could correctly process them sequentially however this is suboptimal.
   * We can parallelize their processing by respecting the following rules:
-  *  - TODO(soren) Only the active mediator for the domain can send messages to sequencer, and this active state could change
-  *    within the events we are processing. So this must be determined before processing any Mediator requests.
   *  - Mediator requests/responses with different request ids can be processed in parallel.
   *    For events referencing the same request-id we can provide these to the confirmation request processor as a group
   *    so it can make optimizations such as deferring persistence of a response state until the final message

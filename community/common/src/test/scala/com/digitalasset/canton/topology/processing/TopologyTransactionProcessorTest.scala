@@ -40,7 +40,6 @@ class TopologyTransactionProcessorTest
       DefaultTestIdentities.domainId,
       crypto,
       store,
-      clock,
       _ => (),
       FutureSupervisor.Noop,
       DefaultProcessingTimeouts.testing,

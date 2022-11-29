@@ -14,7 +14,7 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.config.{InitConfigBase, TestingConfigInternal}
+import com.digitalasset.canton.config.{CryptoConfig, InitConfigBase, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.{
   CommunityGrpcVaultServiceFactory,
@@ -28,6 +28,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.{DomainServiceGrpc, SequencerVersionServiceGrpc}
 import com.digitalasset.canton.domain.admin.grpc as admingrpc
 import com.digitalasset.canton.domain.config.*
+import com.digitalasset.canton.domain.config.store.{
+  DomainNodeSettingsStore,
+  StoredDomainNodeSettings,
+}
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.initialization.*
 import com.digitalasset.canton.domain.mediator.{
@@ -111,8 +115,23 @@ class DomainNodeBootstrap(
       grpcVaultServiceFactory,
       parentLogger.append(DomainNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
+      metrics.grpcMetrics,
     )
-    with DomainTopologyManagerIdentityInitialization {
+    with DomainTopologyManagerIdentityInitialization[StoredDomainNodeSettings] {
+
+  private val staticDomainParametersFromConfig =
+    DomainNodeBootstrap.tryStaticDomainParamsFromConfig(
+      config.init.domainParameters,
+      config.crypto,
+      parentLogger,
+    )
+  private val settingsStore = DomainNodeSettingsStore.create(
+    storage,
+    staticDomainParametersFromConfig,
+    config.init.domainParameters.resetStoredStaticConfig,
+    timeouts,
+    loggerFactory,
+  )
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var topologyManager: Option[DomainTopologyManager] = None
@@ -127,19 +146,23 @@ class DomainNodeBootstrap(
           name,
           legalIdentityHook,
           DynamicDomainParameters.initialValues(clock, protocolVersion),
-          protocolVersion,
           initConfigBase,
+          staticDomainParametersFromConfig,
         )
         (nodeId, topologyManager, namespaceKey) = initialized
         domainId = DomainId(nodeId.identity)
         _ <- initializeMediator(domainId, namespaceKey, topologyManager)
         _ <- initializeSequencerServices
         _ <- initializeSequencer(domainId, topologyManager, namespaceKey)
+        // store the static domain parameters in our settings store
+        _ <- settingsStore
+          .saveSettings(StoredDomainNodeSettings(staticDomainParametersFromConfig))
+          .leftMap(_.toString)
         // finally, store the node id (which means we have completed initialisation)
         // as all methods above are idempotent, if we die during initialisation, we should come back here
         // and resume until we've stored the node id
         _ <- storeId(nodeId)
-        _ <- startDomain(topologyManager)
+        _ <- startDomain(topologyManager, staticDomainParametersFromConfig)
       } yield ()
     }
 
@@ -149,9 +172,6 @@ class DomainNodeBootstrap(
       super.onClosed()
     }
   }
-
-  private lazy val staticDomainParameters: Either[String, StaticDomainParameters] =
-    config.init.domainParameters.toStaticDomainParameters(config.crypto, logger)
 
   private def initializeMediator(
       domainId: DomainId,
@@ -192,28 +212,26 @@ class DomainNodeBootstrap(
   } yield sequencerKey
 
   override protected def initializeIdentityManagerAndServices(
-      nodeId: NodeId
+      nodeId: NodeId,
+      staticDomainParameters: StaticDomainParameters,
   ): Either[String, DomainTopologyManager] = {
     // starts second stage
     ErrorUtil.requireState(topologyManager.isEmpty, "Topology manager is already initialized.")
 
     logger.debug("Starting domain topology manager")
-    staticDomainParameters.map { staticDomainParameters =>
-      val manager = new DomainTopologyManager(
-        DomainTopologyManagerId(nodeId.identity),
-        clock,
-        topologyStoreFactory.forId(AuthorizedStore),
-        addMemberHook,
-        crypto,
-        parameters.processingTimeouts,
-        staticDomainParameters.protocolVersion,
-        loggerFactory,
-      )
-      topologyManager = Some(manager)
-      startTopologyManagementWriteService(manager, manager.store)
-      manager
-    }
-
+    val manager = new DomainTopologyManager(
+      DomainTopologyManagerId(nodeId.identity),
+      clock,
+      topologyStoreFactory.forId(AuthorizedStore),
+      addMemberHook,
+      crypto,
+      parameters.processingTimeouts,
+      staticDomainParameters.protocolVersion,
+      loggerFactory,
+    )
+    topologyManager = Some(manager)
+    startTopologyManagementWriteService(manager, manager.store)
+    Right(manager)
   }
 
   /** If we're running a sequencer within the domain node itself, then locally start some core services */
@@ -229,9 +247,22 @@ class DomainNodeBootstrap(
   }
 
   override protected def initialize(id: NodeId): EitherT[Future, String, Unit] = {
-    val topologyManager = initializeIdentityManagerAndServices(id)
-
-    EitherT.fromEither[Future](topologyManager).flatMap(startIfDomainManagerReadyOrDefer)
+    for {
+      // TODO(#11052) fix node initialization such that we don't store "inconsistent" init data
+      //    domain nodes get first initialized with init_id and then subsequently they get initialized
+      //    with another init call (which then writes to the node config store).
+      //    fix this and either support crash recovery for init data or only persist once everything
+      //    is properly initialized
+      staticDomainParameters <- settingsStore.fetchSettings
+        .map(
+          _.fold(staticDomainParametersFromConfig)(_.staticDomainParameters)
+        )
+        .leftMap(_.toString)
+      manager <- EitherT.fromEither[Future](
+        initializeIdentityManagerAndServices(id, staticDomainParameters)
+      )
+      _ <- startIfDomainManagerReadyOrDefer(manager, staticDomainParameters)
+    } yield ()
   }
 
   /** The Domain cannot be started until the domain manager has keys for all domain entities available. These keys
@@ -247,7 +278,8 @@ class DomainNodeBootstrap(
     *                       I don't believe we currently have a means of doing this.
     */
   private def startIfDomainManagerReadyOrDefer(
-      manager: DomainTopologyManager
+      manager: DomainTopologyManager,
+      staticDomainParameters: StaticDomainParameters,
   ): EitherT[Future, String, Unit] = {
     def deferStart: EitherT[Future, String, Unit] = {
       val attemptedStart = new AtomicBoolean(false)
@@ -270,7 +302,7 @@ class DomainNodeBootstrap(
                 // we're now the top level error handler of starting a domain so log appropriately
                 val domainStarted =
                   initTimeout.await("Domain startup awaiting domain ready to handle requests")(
-                    startDomain(manager).value
+                    startDomain(manager, staticDomainParameters).value
                   )
                 domainStarted match {
                   case Left(error) =>
@@ -290,12 +322,15 @@ class DomainNodeBootstrap(
       // if the domain is starting up after previously running its identity will have been stored and will be immediately available
       alreadyInitialized <- EitherT.right(manager.isInitialized(mustHaveActiveMediator = true))
       // if not, then create an observer of topology transactions that will check each time whether full identity has been generated
-      _ <- if (alreadyInitialized) startDomain(manager) else deferStart
+      _ <- if (alreadyInitialized) startDomain(manager, staticDomainParameters) else deferStart
     } yield ()
   }
 
   /** Attempt to create the domain and only return and call setInstance once it is ready to handle requests */
-  private def startDomain(manager: DomainTopologyManager): EitherT[Future, String, Unit] =
+  private def startDomain(
+      manager: DomainTopologyManager,
+      staticDomainParameters: StaticDomainParameters,
+  ): EitherT[Future, String, Unit] =
     startInstanceUnlessClosing {
       // store with all topology transactions which were timestamped and distributed via sequencer
       val domainId = manager.id.domainId
@@ -329,8 +364,6 @@ class DomainNodeBootstrap(
           )
         )
         (topologyProcessor, topologyClient) = processorAndClient
-
-        staticDomainParameters <- EitherT.fromEither[Future](staticDomainParameters)
 
         sequencerClientFactoryFactory = (client: DomainTopologyClientWithInit) =>
           new DomainNodeSequencerClientFactory(
@@ -424,6 +457,7 @@ class DomainNodeBootstrap(
         )
         domainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
           staticDomainParameters,
+          config.publicApi.overrideMaxRequestSize,
           topologyClient,
           futureSupervisor,
           loggerFactory,
@@ -447,6 +481,7 @@ class DomainNodeBootstrap(
           agreementManager,
           staticDomainParameters,
           syncCrypto,
+          metrics.grpcMetrics,
         )
 
         topologyManagementArtefacts <- TopologyManagementInitialization(
@@ -532,7 +567,25 @@ object DomainNodeBootstrap {
         ec: ExecutionContextIdlenessExecutorService,
         traceContext: TraceContext,
     ): Either[String, DomainNodeBootstrap]
+
+    protected def buildDomainName(name: String): Either[String, InstanceName] =
+      InstanceName.create(name).leftMap(_.toString)
+
   }
+
+  private[domain] def tryStaticDomainParamsFromConfig(
+      domainParametersConfig: DomainParametersConfig,
+      cryptoConfig: CryptoConfig,
+      parentLogger: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext): StaticDomainParameters =
+    domainParametersConfig
+      .toStaticDomainParameters(
+        cryptoConfig,
+        parentLogger.getTracedLogger(getClass),
+      )
+      .valueOr(err =>
+        throw new IllegalArgumentException(s"Failed to convert static domain params: ${err}")
+      )
 
   object CommunityDomainFactory extends Factory[CommunityDomainConfig] {
 
@@ -553,7 +606,7 @@ object DomainNodeBootstrap {
         traceContext: TraceContext,
     ): Either[String, DomainNodeBootstrap] = {
       for {
-        domainName <- InstanceName.create(name).leftMap(_.toString)
+        domainName <- buildDomainName(name)
       } yield new DomainNodeBootstrap(
         domainName,
         config,

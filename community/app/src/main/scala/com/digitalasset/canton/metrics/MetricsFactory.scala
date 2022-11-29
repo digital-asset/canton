@@ -5,8 +5,10 @@ package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
 import com.codahale.metrics.{Metric, MetricFilter}
-import com.daml.metrics.JvmMetricSet
 import com.daml.metrics.api.MetricName
+import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
+import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
+import com.daml.metrics.{JvmMetricSet, OpenTelemetryMeterOwner}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.domain.metrics.{
   DomainMetrics,
@@ -20,7 +22,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.typesafe.scalalogging.LazyLogging
 import io.opentelemetry.api.metrics.Meter
 import io.opentelemetry.exporter.prometheus.PrometheusCollector
-import io.opentelemetry.sdk.metrics.{SdkMeterProvider, SdkMeterProviderBuilder}
+import io.opentelemetry.sdk.metrics.SdkMeterProviderBuilder
 import io.prometheus.client.dropwizard.DropwizardExports
 
 import java.io.File
@@ -101,6 +103,7 @@ case class MetricsFactory(
     meter: Meter,
 ) extends AutoCloseable {
 
+  private val openTelemetryFactory = new OpenTelemetryFactory(meter)
   private val envMetrics = new EnvMetrics(registry)
   private val participants = TrieMap[String, ParticipantMetrics]()
   private val domains = TrieMap[String, DomainMetrics]()
@@ -141,7 +144,11 @@ case class MetricsFactory(
     domains.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "domain", domains)
-        new DomainMetrics(MetricsFactory.prefix, newRegistry(metricName))
+        new DomainMetrics(
+          MetricsFactory.prefix,
+          newRegistry(metricName),
+          grpcMetricsForComponent("domain"),
+        )
       },
     )
   }
@@ -150,7 +157,11 @@ case class MetricsFactory(
     sequencers.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "sequencer", sequencers)
-        new SequencerMetrics(MetricsFactory.prefix, newRegistry(metricName))
+        new SequencerMetrics(
+          MetricsFactory.prefix,
+          newRegistry(metricName),
+          grpcMetricsForComponent("sequencer"),
+        )
       },
     )
   }
@@ -159,10 +170,17 @@ case class MetricsFactory(
     mediators.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "mediator", mediators)
-        new MediatorNodeMetrics(MetricsFactory.prefix, newRegistry(metricName))
+        new MediatorNodeMetrics(
+          MetricsFactory.prefix,
+          newRegistry(metricName),
+          grpcMetricsForComponent("mediator"),
+        )
       },
     )
   }
+
+  def grpcMetricsForComponent(component: String): GrpcServerMetrics =
+    new DamlGrpcServerMetrics(openTelemetryFactory, component)
 
   /** de-duplicate name if there is someone using the same name for another type of node (not sure that will ever happen)
     */
@@ -211,7 +229,7 @@ object MetricsFactory extends LazyLogging {
 
   def forConfig(config: MetricsConfig): MetricsFactory = {
     val registry = new metrics.MetricRegistry()
-    val meterProviderBuilder = SdkMeterProvider.builder()
+    val meterProviderBuilder = OpenTelemetryMeterOwner.buildProviderWithViews
     val reporter = registerReporter(config, registry, meterProviderBuilder)
     val meterProvider = meterProviderBuilder.build()
     new MetricsFactory(

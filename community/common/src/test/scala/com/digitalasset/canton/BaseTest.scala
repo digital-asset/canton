@@ -53,26 +53,15 @@ trait ScalaFuturesWithPatience extends ScalaFutures {
     PatienceConfig(timeout = Span(5, Seconds), interval = Span(20, Millis))
 }
 
-/** Base traits for tests. Makes syntactic sugar available.
+/** Tests' essentials disaggregated from scalatest's traits.
   */
-trait BaseTest
-    extends Matchers
+trait TestEssentials
+    extends ScalaFuturesWithPatience
     // There are many MockitoSugar implementations, but only this one is not deprecated and
     // supports when, verify, ...
     with org.mockito.MockitoSugar
     with ArgumentMatchersSugar
-    with Inspectors
-    with LoneElement
-    with TableDrivenPropertyChecks
-    with Inside
-    with EitherValues
-    with OptionValues
-    with TryValues
-    with ScalaFuturesWithPatience
-    with AppendedClues
-    with NamedLogging { self =>
-
-  import scala.language.implicitConversions
+    with NamedLogging {
 
   protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
@@ -117,6 +106,23 @@ trait BaseTest
     * so that tests don't have to deal with imports.
     */
   lazy val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
+}
+
+/** Base traits for tests. Makes syntactic sugar available.
+  */
+trait BaseTest
+    extends TestEssentials
+    with Matchers
+    with Inspectors
+    with LoneElement
+    with TableDrivenPropertyChecks
+    with Inside
+    with EitherValues
+    with OptionValues
+    with TryValues
+    with AppendedClues { self =>
+
+  import scala.language.implicitConversions
 
   /** Allows for invoking `myEitherT.futureValue` when `myEitherT: EitherT[Future, _, _]`.
     */

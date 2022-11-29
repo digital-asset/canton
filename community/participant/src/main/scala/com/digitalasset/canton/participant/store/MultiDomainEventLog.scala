@@ -114,6 +114,17 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed]
 
+  // TODO(#11002) This serves the PoC implementation of multi-domain Ledger API. In case PoC concluded this might be eligible for removal.
+  /** Yields an akka source with all stored events for one domain. This will include all the transaction accepted and command rejected events.
+    */
+  def subscribeForDomainUpdates(
+      startExclusive: GlobalOffset,
+      endInclusive: GlobalOffset,
+      domainId: DomainId,
+  )(implicit
+      traceContext: TraceContext
+  ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed]
+
   /** Yields all events with offset up to `upToInclusive`. */
   def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
@@ -291,6 +302,7 @@ object MultiDomainEventLog {
           timeouts,
           indexedStringStore,
           loggerFactory,
+          participantEventLogId = participantEventLog.id,
         )
     }
 

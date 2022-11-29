@@ -9,6 +9,7 @@ import akka.stream.scaladsl.Source
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -226,7 +227,7 @@ class CantonSyncService(
   }
 
   // A connected domain is ready if recovery has succeeded
-  private def readySyncDomainById(domainId: DomainId): Option[SyncDomain] =
+  private[canton] def readySyncDomainById(domainId: DomainId): Option[SyncDomain] =
     connectedDomainsMap.get(domainId).filter(_.ready)
 
   private def existsReadyDomain: Boolean = connectedDomainsMap.exists { case (_, sync) =>
@@ -793,12 +794,7 @@ class CantonSyncService(
         FutureUnlessShutdown(
           connectQueue.execute(
             migrationService
-              .migrateDomain(
-                source,
-                target,
-                targetDomainInfo.domainId,
-                targetDomainInfo.parameters,
-              )
+              .migrateDomain(source, target, targetDomainInfo.domainId)
               .leftMap[SyncServiceError](
                 SyncServiceError.SyncServiceMigrationError(source, target.domain, _)
               )
@@ -1348,6 +1344,7 @@ class CantonSyncService(
       aliasT: Traced[DomainAlias]
   ): EitherT[FutureUnlessShutdown, SyncDomainMigrationError, Unit] = aliasT.withTraceContext {
     implicit tx => alias =>
+      logger.debug(s"Preparing connection to $alias for migration")
       (for {
         _ <- performDomainConnection(alias, startSyncDomain = true, skipStatusCheck = true)
         success <- identityPusher
@@ -1357,14 +1354,14 @@ class CantonSyncService(
         syncService <- EitherT.fromEither[FutureUnlessShutdown](
           syncDomainForAlias(alias).toRight(SyncServiceError.SyncServiceUnknownDomain.Error(alias))
         )
+        tick = syncService.topologyClient.approximateTimestamp
+        _ = logger.debug(s"Awaiting tick at $tick from $alias for migration")
         _ <- EitherT.right(
           FutureUnlessShutdown.outcomeF(
-            syncService.timeTracker
-              .awaitTick(syncService.topologyClient.approximateTimestamp)
-              .map(_.map(_ => ()))
-              .getOrElse(Future.unit)
+            syncService.timeTracker.awaitTick(tick).fold(Future.unit)(_.void)
           )
         )
+        _ = logger.debug(s"Received timestamp from $alias for migration")
         _ <- EitherT.fromEither[FutureUnlessShutdown](performDomainDisconnect(alias))
       } yield success)
         .leftMap[SyncDomainMigrationError](err =>

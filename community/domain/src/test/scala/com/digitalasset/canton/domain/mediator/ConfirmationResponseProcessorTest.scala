@@ -42,6 +42,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.annotation.nowarn
 import scala.concurrent.Future
+import scala.language.reflectiveCalls
 
 @nowarn("msg=match may not be exhaustive")
 class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
@@ -192,16 +193,21 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           )
           .toString
       )
-    lazy val shouldBeViewThresholdBelowMinimumAlarm: LogEntry => Assertion =
+    def shouldBeViewThresholdBelowMinimumAlarm(
+        requestId: RequestId,
+        viewHash: ViewHash,
+    ): LogEntry => Assertion =
       _.shouldBeCantonError(
         MediatorError.MalformedMessage,
-        _ should fullyMatch regex raw"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=ViewHash\(SHA-256:[0-9a-f]*...\), threshold=0",
+        _ shouldBe s"Received a mediator request with id $requestId having threshold 0 for transaction view $viewHash, which is below the confirmation policy's minimum threshold of 1. Rejecting request...",
         checkTestedProtocolVersion,
       )
 
     "timestamp of mediator request is propagated" in {
       val sut = Fixture()
       val testMediatorRequest = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
+        val (firstFaultyViewHash: ViewHash, _) = super.informeesAndThresholdByView.head
+
         override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           super.informeesAndThresholdByView map { case (key, (informee, _)) =>
             (key, (informee, NonNegativeInt.zero))
@@ -221,7 +227,10 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             testMediatorRequest,
             List.empty,
           ),
-          shouldBeViewThresholdBelowMinimumAlarm,
+          shouldBeViewThresholdBelowMinimumAlarm(
+            RequestId(requestTimestamp),
+            testMediatorRequest.firstFaultyViewHash,
+          ),
         )
 
       } yield {
@@ -233,12 +242,14 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     "request timestamp is propagated to mediator result when response aggregation is performed" should {
       // Send mediator request
       val informeeMessage = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
+        val faultyViewHash: ViewHash = super.informeesAndThresholdByView.collectFirst {
+          case (key, (informee, _)) if informee != Set(submitter) => key
+        }.value
+
         override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
-          val top = super.informeesAndThresholdByView
-          top map { case (key, (informee, _)) =>
-            if (informee == Set(submitter))
-              (key, (informee, NonNegativeInt.one))
-            else (key, (informee, NonNegativeInt.zero))
+          super.informeesAndThresholdByView map { case (key, (informee, _)) =>
+            if (key == faultyViewHash) (key, (informee, NonNegativeInt.zero))
+            else (key, (informee, NonNegativeInt.one))
           }
         }
 
@@ -301,7 +312,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
               informeeMessage,
               List.empty,
             ),
-            shouldBeViewThresholdBelowMinimumAlarm,
+            shouldBeViewThresholdBelowMinimumAlarm(reqId, informeeMessage.faultyViewHash),
           )
           _ <- sut.processResponse(
             CantonTimestamp.Epoch,
@@ -393,7 +404,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           ), {
             _.shouldBeCantonError(
               MediatorError.MalformedMessage,
-              _ shouldBe show"Unknown request $requestId: received mediator response by $participant for view hash ${view.viewHash} for root hash ${mediatorRequest.rootHash.value}",
+              _ shouldBe show"Received a mediator response at ${ts.immediateSuccessor} by $participant with an unknown request id $requestId. Discarding response...",
               checkTestedProtocolVersion,
             )
           },

@@ -17,6 +17,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerMemberStatus,
   SequencerPruningStatus,
 }
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{
@@ -37,7 +38,11 @@ import scala.collection.immutable.SortedSet
 import scala.concurrent.Future
 
 @nowarn("msg=match may not be exhaustive")
-trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
+trait SequencerStoreTest
+    extends AsyncWordSpec
+    with BaseTest
+    with HasCloseContext
+    with FlagCloseable {
   def sequencerStore(mk: () => SequencerStore): Unit = {
 
     val instanceIndex: Int = 0

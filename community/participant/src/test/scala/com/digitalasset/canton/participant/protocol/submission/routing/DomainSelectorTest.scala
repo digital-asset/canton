@@ -214,6 +214,15 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         selector.forMultiDomain.futureValue shouldBe defaultDomainRank
       }
 
+      "return correct response when prescribed domain as a domain ID is the current one" in {
+        val selector = selectorForExerciseByInterface(
+          prescribedDomainId = Some(da)
+        )
+
+        selector.forSingleDomain.futureValue shouldBe defaultDomainRank
+        selector.forMultiDomain.futureValue shouldBe defaultDomainRank
+      }
+
       "return an error when prescribed domain is incorrect" in {
         val selector = selectorForExerciseByInterface(
           prescribedDomainAlias = Some("acme"),
@@ -347,6 +356,7 @@ private[routing] object DomainSelectorTest {
       NonEmpty.mk(Set, da)
 
     private val defaultPrescribedDomainAlias: Option[String] = None
+    private val defaultPrescribedDomainId: Option[DomainId] = None
 
     // TODO(i10964): Make this dependent on CANTON_PROTOCOL_VERSION?
     private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ => ProtocolVersion.v4
@@ -361,6 +371,7 @@ private[routing] object DomainSelectorTest {
         domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]] =
           defaultDomainsOfSubmittersAndInformees,
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
+        prescribedDomainId: Option[DomainId] = defaultPrescribedDomainId,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
         transactionVersion: LanguageVersion = defaultTransactionVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
@@ -389,6 +400,7 @@ private[routing] object DomainSelectorTest {
         connectedDomains,
         domainsOfSubmittersAndInformees,
         prescribedDomainAlias,
+        prescribedDomainId,
         domainProtocolVersion,
         transactionVersion,
         vettedPackages,
@@ -431,6 +443,7 @@ private[routing] object DomainSelectorTest {
         connectedDomains,
         domainsOfSubmittersAndInformees,
         prescribedDomainAlias,
+        None,
         domainProtocolVersion,
         transactionVersion,
         vettedPackages,
@@ -445,6 +458,7 @@ private[routing] object DomainSelectorTest {
         connectedDomains: Set[DomainId],
         domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]],
         prescribedDomainAlias: Option[String],
+        prescribedDomainId: Option[DomainId],
         domainProtocolVersion: DomainId => ProtocolVersion,
         transactionVersion: LanguageVersion,
         vettedPackages: Seq[LfPackageId],
@@ -490,7 +504,13 @@ private[routing] object DomainSelectorTest {
         .create(
           submitters = Set(signatory),
           transaction = tx,
-          workflowIdO = prescribedDomainAlias.map(LfWorkflowId.assertFromString),
+          workflowIdO = prescribedDomainAlias
+            .map(LfWorkflowId.assertFromString)
+            .orElse(
+              prescribedDomainId
+                .map(domainId => s"workflow data domain-id:${domainId.toProtoPrimitive}")
+                .map(LfWorkflowId.assertFromString)
+            ),
           domainOfContracts = ids => Future.successful(domainOfContracts(ids)),
           domainIdResolver = domainAliasResolver,
           inputContractsMetadata = inputContractsMetadata,

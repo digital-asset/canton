@@ -20,6 +20,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerPruningStatus,
   WriteNotification,
 }
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -478,7 +479,10 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
   def saveCounterCheckpoint(
       memberId: SequencerMemberId,
       checkpoint: CounterCheckpoint,
-  )(implicit traceContext: TraceContext): EitherT[Future, SaveCounterCheckpointError, Unit]
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): EitherT[Future, SaveCounterCheckpointError, Unit]
 
   /** Fetch a checkpoint with a counter value less than the provided counter. */
   def fetchClosestCheckpointBefore(memberId: SequencerMemberId, counter: SequencerCounter)(implicit

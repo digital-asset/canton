@@ -67,6 +67,7 @@ class InMemoryMultiDomainEventLog(
         LocalOffset,
     ) => Future[Seq[LocalOffset]],
     byEventId: NamedLoggingContext => EventId => OptionT[Future, (EventLogId, LocalOffset)],
+    participantEventLogId: ParticipantEventLogId,
     clock: Clock,
     metrics: ParticipantMetrics,
     override val indexedStringStore: IndexedStringStore,
@@ -254,6 +255,56 @@ class InMemoryMultiDomainEventLog(
     )
   }
 
+  override def subscribeForDomainUpdates(
+      startExclusive: GlobalOffset,
+      endInclusive: GlobalOffset,
+      domainId: DomainId,
+  )(implicit
+      traceContext: TraceContext
+  ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed] = {
+    logger.debug(show"Subscribing for domain $domainId at $startExclusive...")
+
+    def eventBelongsToDomain(
+        eventLogId: EventLogId,
+        timestampedEvent: TimestampedEventAndCausalChange,
+    ): Boolean =
+      eventLogId match {
+        case EventLogId.DomainEventLogId(indexedDomain) =>
+          // Covers all events in the single domain event logs
+          indexedDomain.domainId == domainId
+
+        case `participantEventLogId` =>
+          // Covers CommandRejected events in the participant event log
+          timestampedEvent.tse.eventId.exists(_.associatedDomain.exists(_ == domainId))
+
+        case _ =>
+          false
+      }
+
+    dispatcher.startingAt(
+      startExclusive = startExclusive,
+      subSource = RangeSource { (fromExcl, toIncl) =>
+        Source(entriesRef.get.referencesByOffset.range(fromExcl + 1, toIncl + 1))
+          .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
+            case (globalOffset, (id, localOffset, _processingTime)) =>
+              for {
+                eventAndCausalChange <- lookupEvent(namedLoggingContext)(id, localOffset)
+              } yield {
+                if (eventBelongsToDomain(id, eventAndCausalChange))
+                  List(
+                    globalOffset -> Traced(eventAndCausalChange.tse.event)(
+                      eventAndCausalChange.tse.traceContext
+                    )
+                  )
+                else Nil
+              }
+          }
+          .flatMapConcat(Source(_))
+      },
+      endInclusive = Some(endInclusive),
+    )
+  }
+
   override def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
   ): Future[Seq[(GlobalOffset, TimestampedEventAndCausalChange)]] = {
@@ -425,6 +476,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
       lookupEvent(allEventLogs),
       lookupOffsetsBetween(allEventLogs),
       byEventId(allEventLogs),
+      participantEventLog.id,
       clock,
       metrics,
       indexedStringStore,

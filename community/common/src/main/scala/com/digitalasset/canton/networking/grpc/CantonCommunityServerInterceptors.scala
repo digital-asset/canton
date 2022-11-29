@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.daml.metrics.grpc.{GrpcMetricsServerInterceptor, GrpcServerMetrics}
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.tracing.{TraceContextGrpc, TracingConfig}
@@ -22,6 +23,7 @@ class CantonCommunityServerInterceptors(
     tracingConfig: TracingConfig,
     apiLoggingConfig: ApiLoggingConfig,
     loggerFactory: NamedLoggerFactory,
+    grpcMetrics: GrpcServerMetrics,
 ) extends CantonServerInterceptors {
   private def interceptForLogging(
       service: ServerServiceDefinition,
@@ -42,6 +44,11 @@ class CantonCommunityServerInterceptors(
         intercept(service, TraceContextGrpc.serverInterceptor)
     }
 
+  private def addMetricsInterceptor(
+      service: ServerServiceDefinition
+  ): ServerServiceDefinition =
+    intercept(service, new GrpcMetricsServerInterceptor(grpcMetrics))
+
   def addAllInterceptors(
       service: ServerServiceDefinition,
       withLogging: Boolean,
@@ -49,4 +56,5 @@ class CantonCommunityServerInterceptors(
     service
       .pipe(interceptForLogging(_, withLogging))
       .pipe(addTraceContextInterceptor)
+      .pipe(addMetricsInterceptor)
 }

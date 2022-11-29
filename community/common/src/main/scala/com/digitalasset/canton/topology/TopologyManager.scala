@@ -388,7 +388,8 @@ abstract class TopologyManager[E <: CantonError](
       transaction: TopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): EitherT[Future, E, Fingerprint] = {
     for {
-      // need to execute signing key finding sequentially, as the caches in the validator are not thread safe
+      // need to execute signing key finding sequentially, as the validator is expecting incremental in-memory updates
+      // to the "autohrization graph"
       keys <- EitherT.right(
         validator.getValidSigningKeysForMapping(clock.uniqueTime(), transaction.element.mapping)
       )
@@ -538,20 +539,20 @@ abstract class TopologyManager[E <: CantonError](
             filterNamespace = nsFilter,
           )
         )
-        reverse <- rawTxs.adds.toDomainTopologyTransactions.view
-          .filter(
-            _.transaction.element.mapping.isReplacedBy(
-              transaction.transaction.element.mapping
+        reverse <- MonadUtil.sequentialTraverse(
+          rawTxs.adds.toDomainTopologyTransactions
+            .filter(
+              _.transaction.element.mapping.isReplacedBy(
+                transaction.transaction.element.mapping
+              )
             )
+        )(x =>
+          build(
+            x.transaction.reverse,
+            None,
+            protocolVersion,
           )
-          .toList
-          .parTraverse(x =>
-            build(
-              x.transaction.reverse,
-              None,
-              protocolVersion,
-            )
-          )
+        )
       } yield reverse
     }
 

@@ -20,6 +20,7 @@ import com.digitalasset.canton.domain.admin.v0.{
   TopologyBootstrapServiceGrpc,
 }
 import com.digitalasset.canton.domain.api.v0
+import com.digitalasset.canton.domain.config.PublicServerConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.{
   SequencerAuthenticationServerInterceptor,
@@ -102,6 +103,7 @@ class SequencerRuntime(
     sequencerFactory: SequencerFactory,
     staticDomainParameters: StaticDomainParameters,
     localNodeParameters: LocalNodeParameters,
+    publicServerConfig: PublicServerConfig,
     timeTrackerConfig: DomainTimeTrackerConfig,
     testingConfig: TestingConfigInternal,
     val metrics: SequencerMetrics,
@@ -150,6 +152,7 @@ class SequencerRuntime(
       clock,
       topologyClientMember,
       syncCrypto,
+      futureSupervisor,
       initialState,
       localNodeParameters,
       staticDomainParameters.protocolVersion,
@@ -207,6 +210,7 @@ class SequencerRuntime(
   private val sequencerDomainParamsLookup: DomainParametersLookup[SequencerDomainParameters] =
     DomainParametersLookup.forSequencerDomainParameters(
       staticDomainParameters,
+      publicServerConfig.overrideMaxRequestSize,
       topologyClient,
       futureSupervisor,
       loggerFactory,

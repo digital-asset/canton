@@ -137,14 +137,14 @@ class SyncDomain(
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
-  private val sequencerClient = domainHandle.sequencerClient
+  private[canton] val sequencerClient = domainHandle.sequencerClient
   val timeTracker: DomainTimeTracker = ephemeral.timeTracker
   val staticDomainParameters: StaticDomainParameters = domainHandle.staticParameters
 
   private val seedGenerator =
     new SeedGenerator(domainCrypto.crypto.pureCrypto)
 
-  private val requestGenerator =
+  private[canton] val requestGenerator =
     ConfirmationRequestFactory(participantId, domainId, staticDomainParameters.protocolVersion)(
       domainCrypto.crypto.pureCrypto,
       seedGenerator,
@@ -244,7 +244,6 @@ class SyncDomain(
     domainId,
     domainCrypto.pureCrypto,
     domainHandle.topologyStore,
-    clock,
     acsCommitmentProcessor.scheduleTopologyTick,
     futureSupervisor,
     parameters.processingTimeouts,
@@ -576,9 +575,10 @@ class SyncDomain(
           override def name: String = s"sync-domain-$domainId"
 
           override def subscriptionStartsAt(
-              start: SubscriptionStart
+              start: SubscriptionStart,
+              domainTimeTracker: DomainTimeTracker,
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-            topologyProcessor.subscriptionStartsAt(start)(traceContext)
+            topologyProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext)
 
           override def apply(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
             messageDispatcher.handleAll(events)

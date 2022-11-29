@@ -89,9 +89,11 @@ object ParticipantInitializeTopology {
       val eventHandler = new UnsignedProtocolEventHandler {
         override def name: String = s"participant-initialize-topology-$alias"
 
-        override def subscriptionStartsAt(start: SubscriptionStart)(implicit
-            traceContext: TraceContext
-        ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
+        override def subscriptionStartsAt(
+            start: SubscriptionStart,
+            domainTimeTracker: DomainTimeTracker,
+        )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+          FutureUnlessShutdown.unit
 
         override def apply(
             events: BoxedEnvelope[UnsignedEnvelopeBox, DefaultOpenEnvelope]

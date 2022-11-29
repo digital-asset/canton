@@ -47,10 +47,12 @@ trait PublicServerConfig extends ServerConfig {
 
   override def serverCertChainFile: Option[ExistingFile] = tls.map(_.certChainFile)
 
+  /** overrides the default maximum request size in bytes on the sequencer node */
+  def overrideMaxRequestSize: Option[NonNegativeInt]
+
   /** This setting has no effect. Therfore hardcoding it to 0.
     */
   override final def maxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(0)
-
   def connection: String = {
     val scheme = tls.fold("http")(_ => "https")
     s"$scheme://$address:$port"
@@ -66,6 +68,7 @@ case class CommunityPublicServerConfig(
       NonNegativeFiniteDuration.ofMinutes(1),
     override val tokenExpirationTime: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofHours(1),
+    override val overrideMaxRequestSize: Option[NonNegativeInt] = None,
 ) extends PublicServerConfig
     with CommunityServerConfig
 

@@ -136,6 +136,7 @@ object DomainParametersLookup {
   @nowarn("msg=deprecated")
   def forSequencerDomainParameters(
       staticDomainParameters: StaticDomainParameters,
+      overrideMaxRequestSize: Option[NonNegativeInt],
       topologyClient: DomainTopologyClient,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
@@ -149,7 +150,11 @@ object DomainParametersLookup {
       )
     else {
       new DynamicDomainParametersLookup(
-        params => SequencerDomainParameters(params.maxRatePerParticipant, params.maxRequestSize),
+        params =>
+          SequencerDomainParameters(
+            params.maxRatePerParticipant,
+            overrideMaxRequestSize.map(MaxRequestSize).getOrElse(params.maxRequestSize),
+          ),
         topologyClient,
         staticDomainParameters.protocolVersion,
         futureSupervisor,
