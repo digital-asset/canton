@@ -79,21 +79,19 @@ object DamlPlugin extends AutoPlugin {
         val log = streams.value.log
 
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
-          settings.flatMap {
-            // TODO(soren): Derive project directory automatically from DAR file
-            case (damlProjectDirectory, darFile, packageName) =>
-              Seq((Codegen.Scala, scalaOutputDirectory))
-                .flatMap { case (codegen, outputDirectory) =>
-                  generateCode(
-                    log,
-                    damlProjectDirectory,
-                    darFile,
-                    packageName,
-                    codegen,
-                    outputDirectory,
-                    damlCompilerVersion.value,
-                  )
-                }
+          settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
+            Seq((Codegen.Scala, scalaOutputDirectory))
+              .flatMap { case (codegen, outputDirectory) =>
+                generateCode(
+                  log,
+                  damlProjectDirectory,
+                  darFile,
+                  packageName,
+                  codegen,
+                  outputDirectory,
+                  damlCompilerVersion.value,
+                )
+              }
           }.toSet
         }
         cache(settings.map(_._2).toSet).toSeq

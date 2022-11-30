@@ -354,7 +354,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       }
     }
 
-    "fail if there is no active medaitor" in {
+    "fail if there is no active mediator" in {
       val crypto2 = TestingIdentityFactory(
         TestingTopology(mediators = Set.empty),
         loggerFactory,

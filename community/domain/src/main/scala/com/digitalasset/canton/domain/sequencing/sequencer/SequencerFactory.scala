@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.LocalNodeParameters
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -22,6 +23,7 @@ trait SequencerFactory {
       clock: Clock,
       topologyClientMember: Member,
       domainSyncCryptoApi: DomainSyncCryptoClient,
+      futureSupervisor: FutureSupervisor,
       initialState: Option[SequencerInitialState],
       localNodeParameters: LocalNodeParameters,
       protocolVersion: ProtocolVersion,
@@ -40,6 +42,7 @@ object SequencerFactory {
           clock: Clock,
           topologyClientMember: Member,
           domainSyncCryptoApi: DomainSyncCryptoClient,
+          futureSupervisor: FutureSupervisor,
           initialState: Option[SequencerInitialState],
           localNodeParameters: LocalNodeParameters,
           sequencerProtocolVersion: ProtocolVersion,

@@ -87,6 +87,7 @@ message TransactionAccepted {
     google.protobuf.Timestamp record_time = 5;
     repeated DivulgedContract divulged_contracts = 6;
     BlindingInfo blinding_info = 7; // optional
+    map<string, bytes> contract_metadata = 8; //optional
 }
 
 message CompletionInfo {

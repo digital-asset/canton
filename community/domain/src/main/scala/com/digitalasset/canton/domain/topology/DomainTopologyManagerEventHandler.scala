@@ -21,6 +21,7 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClient,
 }
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -63,8 +64,8 @@ class DomainTopologyManagerEventHandler(
     )
   }
 
-  override def subscriptionStartsAt(start: SubscriptionStart)(implicit
-      traceContext: TraceContext
+  override def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(
+      implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 
   private def handle(

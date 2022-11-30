@@ -10,13 +10,14 @@ import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.ParticipantReject
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.Assertion
 import org.scalatest.funspec.PathAnyFunSpec
@@ -43,6 +44,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1)
     val solo = ParticipantId("solo")
 
+    val emptySubviews = TransactionSubviews.empty(testedProtocolVersion, hashOps)
+
     val viewCommonData2 =
       ViewCommonData.create(hashOps)(
         Set(bob, charlie),
@@ -58,9 +61,20 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         testedProtocolVersion,
       )
     val view2 =
-      TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil, testedProtocolVersion)
+      TransactionView.tryCreate(hashOps)(
+        viewCommonData2,
+        b(100),
+        emptySubviews,
+        testedProtocolVersion,
+      )
+    val view1Subviews = TransactionSubviews(view2 :: Nil)(testedProtocolVersion, hashOps)
     val view1 =
-      TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), view2 :: Nil, testedProtocolVersion)
+      TransactionView.tryCreate(hashOps)(
+        viewCommonData1,
+        b(8),
+        view1Subviews,
+        testedProtocolVersion,
+      )
 
     val requestId = RequestId(CantonTimestamp.Epoch)
 
@@ -142,7 +156,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           TransactionView.tryCreate(hashOps)(
             viewcommonDataThresholdTooLow,
             b(100),
-            Nil,
+            emptySubviews,
             testedProtocolVersion,
           )
         val fullInformeeTreeThresholdTooLow = FullInformeeTree.tryCreate(
@@ -155,8 +169,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           testedProtocolVersion,
         )
 
+        val informeeMessage =
+          InformeeMessage(fullInformeeTreeThresholdTooLow)(testedProtocolVersion)
+
         val alarmMsg =
-          s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=${viewThresholdTooLow.viewHash}, threshold=0"
+          show"Received a mediator request with id $requestId having threshold 0 for transaction view ${viewThresholdTooLow.viewHash}, which is below the confirmation policy's minimum threshold of 1. Rejecting request..."
+
         val alarm = MediatorError.MalformedMessage.Reject(
           alarmMsg,
           v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
@@ -166,7 +184,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         val sut = loggerFactory.assertLogs(
           ResponseAggregation(
             requestId,
-            InformeeMessage(fullInformeeTreeThresholdTooLow)(testedProtocolVersion),
+            informeeMessage,
             testedProtocolVersion,
           )(loggerFactory),
           _.shouldBeCantonError(
@@ -190,14 +208,15 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           domainId,
           testedProtocolVersion,
         )
+        val responseTs = requestId.unwrap.plusSeconds(1)
         val result = loggerFactory.assertLogs(
           sut
-            .progress(requestId.unwrap.plusSeconds(1), responseWithWrongRootHash, topologySnapshot)
+            .progress(responseTs, responseWithWrongRootHash, topologySnapshot)
             .value
             .futureValue,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
-            _ shouldBe s"Unknown request $requestId: received mediator response by $solo for view hash ${view1.viewHash} for root hash ${someOtherRootHash.value}",
+            _ shouldBe show"Received a mediator response at $responseTs by $solo for request $requestId with an invalid root hash ${someOtherRootHash.showValue} instead of ${rootHash.showValue}. Discarding response...",
             checkTestedProtocolVersion,
           ),
         )
@@ -409,9 +428,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         testedProtocolVersion,
       )
       val view2 =
-        TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil, testedProtocolVersion)
+        TransactionView.tryCreate(hashOps)(
+          viewCommonData2,
+          b(100),
+          emptySubviews,
+          testedProtocolVersion,
+        )
       val view1 =
-        TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), Nil, testedProtocolVersion)
+        TransactionView.tryCreate(hashOps)(
+          viewCommonData1,
+          b(8),
+          emptySubviews,
+          testedProtocolVersion,
+        )
 
       val informeeMessage = InformeeMessage(
         FullInformeeTree.tryCreate(
@@ -564,14 +593,15 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             rootHash,
           )
 
+        val responseTs = requestId.unwrap.plusSeconds(1)
         loggerFactory.assertLogs(
           sut
-            .progress(requestId.unwrap.plusSeconds(1), response, topologySnapshotVip)
+            .progress(responseTs, response, topologySnapshotVip)
             .value
             .futureValue shouldBe None,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
-            _ shouldBe s"Request ${requestId.unwrap}: unauthorized mediator response for view ${view1.viewHash} by $solo on behalf of ${Set(bob.party)}",
+            _ shouldBe show"Received an unauthorized mediator response at $responseTs by $solo for request $requestId on behalf of Set(bob). Discarding response...",
             checkTestedProtocolVersion,
           ),
         )

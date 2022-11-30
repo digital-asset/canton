@@ -16,9 +16,9 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerReader.ReadState
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol.*
@@ -33,6 +33,7 @@ import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
+import java.sql.SQLTransientConnectionException
 import scala.concurrent.{ExecutionContext, Future}
 
 /** We throw this if a [[store.SaveCounterCheckpointError.CounterCheckpointInconsistent]] error is returned when saving a new member
@@ -156,25 +157,51 @@ class SequencerReader(
     private def recordCheckpointFlow(implicit
         traceContext: TraceContext
     ): Flow[UnsignedEventData, UnsignedEventData, (KillSwitch, Future[Done])] = {
-      val recordCheckpointSink: Sink[UnsignedEventData, (KillSwitch, Future[Done])] =
+      val recordCheckpointSink: Sink[UnsignedEventData, (KillSwitch, Future[Done])] = {
+        // in order to make sure database operations do not keep being retried (in case of connectivity issues)
+        // after we start closing the subscription, we create a flag closeable that gets closed when this
+        // subscriptions kill switch is activated. This flag closeable is wrapped in a close context below
+        // which is passed down to saveCounterCheckpoint.
+        val killSwitchFlagCloseable = new FlagCloseable {
+          override protected def timeouts: ProcessingTimeout = SequencerReader.this.timeouts
+          override protected def logger: TracedLogger = SequencerReader.this.logger
+        }
+        val closeContextKillSwitch = new KillSwitch {
+          override def shutdown(): Unit = killSwitchFlagCloseable.close()
+          override def abort(ex: Throwable): Unit = killSwitchFlagCloseable.close()
+        }
         Flow[UnsignedEventData]
           .buffer(1, OverflowStrategy.dropTail) // we only really need one event and can drop others
           .throttle(1, config.checkpointInterval.toScala)
           // The kill switch must sit after the throttle because throttle will pass the completion downstream
           // only after the bucket with unprocessed events has been drained, which happens only every checkpoint interval
           .viaMat(KillSwitches.single)(Keep.right)
+          .mapMaterializedValue(killSwitch =>
+            new CombinedKillSwitch(killSwitch, closeContextKillSwitch)
+          )
           .mapAsync(parallelism = 1) { unsignedEventData =>
             val event = unsignedEventData.event
             logger.debug(s"Preparing counter checkpoint for $member at ${event.timestamp}")
             val checkpoint =
               CounterCheckpoint(event, unsignedEventData.latestTopologyClientTimestamp)
             performUnlessClosingF(functionFullName) {
+              implicit val closeContext: CloseContext = CloseContext(killSwitchFlagCloseable)
               saveCounterCheckpoint(member, registeredMember.memberId, checkpoint)
             }.onShutdown {
               logger.info("Skip saving the counter checkpoint due to shutdown")
+            }.recover {
+              case e: SQLTransientConnectionException if killSwitchFlagCloseable.isClosing =>
+                // after the subscription is closed, any retries will stop and possibly return an error
+                // if there are connection problems with the db at the time of subscription close.
+                // so in order to cleanly shutdown, we should recover from this kind of error.
+                logger.debug(
+                  "Database connection problems while closing subscription. It can be safely ignored.",
+                  e,
+                )
             }
           }
           .toMat(Sink.ignore)(Keep.both)
+      }
 
       // Essentially the Source.wireTap implementation except that we return the completion future of the sink
       Flow.fromGraph(GraphDSL.createGraph(recordCheckpointSink) {
@@ -378,8 +405,9 @@ class SequencerReader(
         member: Member,
         memberId: SequencerMemberId,
         checkpoint: CounterCheckpoint,
-    )(implicit traceContext: TraceContext): Future[Unit] = {
+    )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Unit] = {
       logger.debug(s"Saving counter checkpoint for [$member] with value [$checkpoint]")
+
       store.saveCounterCheckpoint(memberId, checkpoint).valueOr {
         case SaveCounterCheckpointError.CounterCheckpointInconsistent(
               existingTimestamp,

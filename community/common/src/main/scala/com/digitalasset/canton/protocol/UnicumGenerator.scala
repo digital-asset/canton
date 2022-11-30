@@ -110,6 +110,7 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
       createIndex: Int,
       ledgerTime: CantonTimestamp,
       suffixedContractInstance: SerializableRawContractInstance,
+      contractIdVersion: CantonContractIdVersion,
   ): (ContractSalt, Unicum) = {
     val contractSalt =
       ContractSalt.create(cryptoOps)(
@@ -119,12 +120,14 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
         viewParticipantDataSalt,
         createIndex,
         viewPosition,
+        contractIdVersion,
       )
     val unicumHash =
       computeUnicumHash(
         ledgerTime = ledgerTime,
         suffixedContractInstance = suffixedContractInstance,
         contractSalt = contractSalt.unwrap,
+        contractIdVersion = contractIdVersion,
       )
 
     contractSalt -> Unicum(unicumHash)
@@ -142,11 +145,14 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
       contractSalt: Salt,
       ledgerTime: CantonTimestamp,
       suffixedContractInstance: SerializableRawContractInstance,
+      contractIdVersion: CantonContractIdVersion,
   ): Either[String, Unicum] = {
-    val contractSaltSize = contractSalt.unwrap.size()
+    val contractSaltSize = contractSalt.size
     Either.cond(
       contractSaltSize.toLong == cryptoOps.defaultHmacAlgorithm.hashAlgorithm.length,
-      Unicum(computeUnicumHash(ledgerTime, suffixedContractInstance, contractSalt)),
+      Unicum(
+        computeUnicumHash(ledgerTime, suffixedContractInstance, contractSalt, contractIdVersion)
+      ),
       s"Invalid contract salt size ($contractSaltSize)",
     )
   }
@@ -155,12 +161,13 @@ class UnicumGenerator(cryptoOps: HashOps with HmacOps) {
       ledgerTime: CantonTimestamp,
       suffixedContractInstance: SerializableRawContractInstance,
       contractSalt: Salt,
+      contractIdVersion: CantonContractIdVersion,
   ): Hash =
     cryptoOps
       .build(HashPurpose.Unicum)
       // The salt's length is determined by the hash algorithm and the contract ID version determines the hash algorithm,
       // so salts have fixed length.
-      .addWithoutLengthPrefix(contractSalt.toByteString)
+      .addWithoutLengthPrefix(contractSalt.forHashing(contractIdVersion))
       .addWithoutLengthPrefix(DeterministicEncoding.encodeInstant(ledgerTime.toInstant))
       // The contract instance has variable length, but it is the last block of bytes to be hashed,
       // so we don't need a length prefix.

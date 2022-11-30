@@ -8,6 +8,7 @@ package com.digitalasset.canton.domain.admin.v0;
 import "google/protobuf/empty.proto";
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 
+// TODO(#9014) rename to DomainManagerInitializationService
 service DomainInitializationService {
     // triggers the initialization of a domain node that has been setup with an external sequencer
     // this should be called after the external sequencer's (and optionally other initial sequencers') keys have been

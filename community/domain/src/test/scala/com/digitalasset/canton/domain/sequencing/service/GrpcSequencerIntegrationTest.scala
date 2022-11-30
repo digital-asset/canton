@@ -117,6 +117,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
       BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant =
         maxRatePerParticipant.unwrap
       ),
+      None,
       topologyClient,
       futureSupervisor,
       loggerFactory,

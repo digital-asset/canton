@@ -19,6 +19,7 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
 }
+import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Forwards only [[com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent]]s
@@ -36,9 +37,9 @@ class DiscardIgnoredEvents[Env <: Envelope[_]](
 
   override def name: String = handler.name
 
-  override def subscriptionStartsAt(start: SubscriptionStart)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = handler.subscriptionStartsAt(start)
+  override def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(
+      implicit traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = handler.subscriptionStartsAt(start, domainTimeTracker)
 
   override def apply(
       tracedEvents: BoxedEnvelope[PossiblyIgnoredEnvelopeBox, Env]

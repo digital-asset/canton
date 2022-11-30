@@ -26,7 +26,7 @@ class HttpSubscriptionErrorRetryPolicy
         case _ => false
       }
 
-    // TODO(Danilo): when the CCF sequencer supports participant activeness check, we can remove the retry condition below
+    // TODO(11067): when the CCF sequencer supports participant activeness check, we can remove the retry condition below
     // retry on SubscriptionReadError(TransactionCheckFailed(_,_,HttpRequestProtocolError(403,Failed to submit request: Could not find matching user certificate and status code: 403)))
     case SubscriptionReadError(_: TransactionCheckFailed) => true
     case SubscriptionReadError(_readError) => false

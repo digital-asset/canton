@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.*
@@ -143,6 +144,7 @@ object CantonServerBuilder {
       loggerFactory: NamedLoggerFactory,
       apiLoggingConfig: ApiLoggingConfig,
       tracing: TracingConfig,
+      grpcMetrics: GrpcServerMetrics,
   ): CantonServerBuilder = {
     val builder =
       NettyServerBuilder
@@ -159,7 +161,13 @@ object CantonServerBuilder {
 
     new BaseBuilder(
       reifyBuilder(configureKeepAlive(config.keepAliveServer, builderWithSsl)),
-      config.instantiateServerInterceptors(tracing, apiLoggingConfig, nodeMetrics, loggerFactory),
+      config.instantiateServerInterceptors(
+        tracing,
+        apiLoggingConfig,
+        nodeMetrics,
+        loggerFactory,
+        grpcMetrics,
+      ),
     )
   }
 

@@ -66,7 +66,11 @@ trait FlagCloseable extends AutoCloseable {
   @VisibleForTesting
   protected def runStateChanged(waitingState: Boolean = false): Unit = {} // used for unit testing
 
-  /** Register a task that will run onClose after all "performUnlessShutdown" tasks have finished */
+  /** Register a task to run when shutdown is initiated.
+    *
+    * You can use this for example to register tasks that cancel long-running computations,
+    * whose termination you can then wait for in "closeAsync".
+    */
   def runOnShutdown[T](
       task: RunOnShutdown
   )(implicit traceContext: TraceContext): Unit = {
@@ -311,6 +315,40 @@ object FlagCloseable {
   * executing an operation is closed.
   */
 final case class CloseContext(flagCloseable: FlagCloseable)
+
+object CloseContext {
+
+  /** Combines the 2 given close contexts such that if any of them gets closed,
+    * the returned close context is also closed. Works like an OR operator.
+    * However if this returned close context is closed directly, the 2 given
+    * closed contexts are _NOT_ closed, neither will it wait for any pending
+    * tasks on any of the 2 given close context to finish.
+    */
+  def combine(
+      closeContext1: CloseContext,
+      closeContext2: CloseContext,
+      processingTimeout: ProcessingTimeout,
+      tracedLogger: TracedLogger,
+  )(implicit
+      traceContext: TraceContext
+  ): CloseContext = {
+    val flagCloseable = new FlagCloseable {
+      override protected def timeouts: ProcessingTimeout = processingTimeout
+      override protected def logger: TracedLogger = tracedLogger
+    }
+    closeContext1.flagCloseable.runOnShutdown(new RunOnShutdown {
+      override def name: String = s"combined-close-ctx1"
+      override def done: Boolean = flagCloseable.isClosing
+      override def run(): Unit = flagCloseable.close()
+    })
+    closeContext2.flagCloseable.runOnShutdown(new RunOnShutdown {
+      override def name: String = s"combined-close-ctx2"
+      override def done: Boolean = flagCloseable.isClosing
+      override def run(): Unit = flagCloseable.close()
+    })
+    CloseContext(flagCloseable)
+  }
+}
 
 /** Mix-in to obtain a [[CloseContext]] implicit based on the class's [[FlagCloseable]] */
 trait HasCloseContext { self: FlagCloseable =>

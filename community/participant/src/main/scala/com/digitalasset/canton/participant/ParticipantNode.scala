@@ -120,7 +120,10 @@ class ParticipantNodeBootstrap(
     meteringReportKey: MeteringReportKey,
     envQueueName: String,
     envQueueSize: () => Long,
-    additionalGrpcServices: CantonSyncService => List[BindableService] = _ => Nil,
+    additionalGrpcServices: (
+        CantonSyncService,
+        ParticipantNodePersistentState,
+    ) => List[BindableService] = (_, _) => Nil,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -141,6 +144,7 @@ class ParticipantNodeBootstrap(
       grpcVaultServiceFactory,
       parentLogger.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
+      metrics.ledgerApiServer.daml.grpc,
     ) {
 
   /** per session created admin token for in-process connections to ledger-api */
@@ -174,6 +178,7 @@ class ParticipantNodeBootstrap(
       ledgerId: String,
       participantId: LedgerParticipantId,
       sync: CantonSyncService,
+      participantNodePersistentState: ParticipantNodePersistentState,
   ): EitherT[Future, String, CantonLedgerApiServerWrapper.LedgerApiServerState] = {
 
     val ledgerTestingTimeService = (config.testingTime, clock) match {
@@ -228,7 +233,8 @@ class ParticipantNodeBootstrap(
           ),
           // start ledger API server iff participant replica is active
           startLedgerApiServer = sync.isActive(),
-          createExternalServices = () => additionalGrpcServices(sync),
+          createExternalServices =
+            () => additionalGrpcServices(sync, participantNodePersistentState),
         )(executionContext, actorSystem)
         .leftMap { err =>
           // The MigrateOnEmptySchema exception is private, thus match on the expected message
@@ -563,6 +569,7 @@ class ParticipantNodeBootstrap(
         ledgerId = ledgerId,
         participantId = ledgerApiParticipantId,
         sync = sync,
+        participantNodePersistentState = persistentState,
       )
     } yield {
       val ledgerApiDependentServices =

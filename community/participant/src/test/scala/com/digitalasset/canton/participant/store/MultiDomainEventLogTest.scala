@@ -27,7 +27,11 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
 }
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.{OnPublish, PublicationData}
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
-import com.digitalasset.canton.participant.sync.TimestampedEvent.TransactionEventId
+import com.digitalasset.canton.participant.sync.TimestampedEvent.{
+  EventId,
+  TimelyRejectionEventId,
+  TransactionEventId,
+}
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.sequencing.protocol.MessageId
@@ -69,12 +73,20 @@ trait MultiDomainEventLogTest
 
   private def timestampAtRc(rc: Long): CantonTimestamp = CantonTimestamp.assertFromLong(rc * 1000)
 
-  def timestampedEvent(eventLogIndex: Int, localOffset: LocalOffset): TimestampedEvent =
+  def timestampedEvent(
+      eventLogIndex: Int,
+      localOffset: LocalOffset,
+      maybeEventId: Option[EventId] = None,
+  ): TimestampedEvent =
     TimestampedEvent(
       DefaultDamlValues.dummyStateUpdate(timestampAtRc(localOffset)),
       localOffset,
       None,
-      Some(TransactionEventId(LedgerTransactionId.assertFromString(s"$eventLogIndex-$localOffset"))),
+      Some(
+        maybeEventId.getOrElse(
+          TransactionEventId(LedgerTransactionId.assertFromString(s"$eventLogIndex-$localOffset"))
+        )
+      ),
     )
 
   lazy val allTestEvents: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] = Seq(
@@ -93,7 +105,20 @@ trait MultiDomainEventLogTest
       InFlightByMessageId(domainIds(0), MessageId.fromUuid(new UUID(1, 1))).some,
     ),
     (eventLogIds(3), timestampedEvent(3, 1), None),
-    (eventLogIds(3), timestampedEvent(3, 2), None),
+    (
+      eventLogIds(3),
+      timestampedEvent(
+        eventLogIndex = 3,
+        localOffset = 2,
+        maybeEventId = Some(
+          TimelyRejectionEventId(
+            domainId = domainIds(1),
+            uuid = new UUID(3, 2),
+          )
+        ),
+      ),
+      None,
+    ),
     (eventLogIds(1), timestampedEvent(1, 6), None),
     // from here on, events are published through recovery
     (eventLogIds(0), timestampedEvent(0, 4), None),
@@ -224,6 +249,20 @@ trait MultiDomainEventLogTest
       AkkaUtil.runSupervised(throw _, flow)
     }
 
+    def eventsFromPerDomainSubscription(
+        domainId: DomainId,
+        startExclusive: GlobalOffset,
+        endInclusive: GlobalOffset,
+    ): Future[Seq[(GlobalOffset, Traced[LedgerSyncEvent])]] = {
+      val flow = eventLog
+        .subscribeForDomainUpdates(startExclusive, endInclusive, domainId)
+        .takeWithin {
+          1.second // generous timeout to avoid flaky test failures
+        }
+        .toMat(Sink.seq)(Keep.right)
+      AkkaUtil.runSupervised(throw _, flow)
+    }
+
     def publishEvents(
         events: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])]
     ): Unit = {
@@ -280,6 +319,31 @@ trait MultiDomainEventLogTest
     ): Future[Assertion] =
       for {
         storedEventsWithOffsets <- eventsFromSubscription(beginWith)
+      } yield {
+        val storedEvents = storedEventsWithOffsets.map { case (_, event) => event }
+        val storedOffsets = storedEventsWithOffsets.map { case (offset, _) => offset }
+
+        val expectedEvents = expectedTimestampedEvents.map { case (_, timestampedEvent, _) =>
+          Traced(timestampedEvent.event)(timestampedEvent.traceContext)
+        }
+        storedEvents shouldBe expectedEvents
+
+        storedOffsets.toSet should have size storedOffsets.size.toLong
+      }
+
+    // TODO(#11002) refactor for dry with subscribeAndCheckEvents if this test overlives the PoC phase
+    def subscribeAndCheckPerDomainEvents(
+        domainId: DomainId,
+        startExclusive: GlobalOffset,
+        endInclusive: GlobalOffset,
+        expectedTimestampedEvents: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])],
+    ): Future[Assertion] =
+      for {
+        storedEventsWithOffsets <- eventsFromPerDomainSubscription(
+          domainId,
+          startExclusive,
+          endInclusive,
+        )
       } yield {
         val storedEvents = storedEventsWithOffsets.map { case (_, event) => event }
         val storedOffsets = storedEventsWithOffsets.map { case (offset, _) => offset }
@@ -384,6 +448,30 @@ trait MultiDomainEventLogTest
           }
         }
 
+        "return no events through per domain subscription" in {
+          val someOptionalBounds = optionalBounds.collect { case Some(bound) => bound }
+          val tests = for {
+            domainId <- domainIds
+            startExclusive <- someOptionalBounds
+            endInclusive <- someOptionalBounds
+            if startExclusive >= MultiDomainEventLog.ledgerFirstOffset
+            if endInclusive >= MultiDomainEventLog.ledgerFirstOffset
+            if startExclusive <= endInclusive
+          } yield (domainId, startExclusive, endInclusive) -> eventsFromPerDomainSubscription(
+            domainId = domainId,
+            startExclusive = startExclusive,
+            endInclusive = endInclusive,
+          )
+
+          forEvery(tests) { case ((domainId, startExclusive, endInclusive), eventsF) =>
+            withClue(
+              s"domainId = $domainId startExclusive = $startExclusive endInclusive = $endInclusive"
+            ) {
+              eventsF.futureValue shouldBe empty
+            }
+          }
+        }
+
         "return no events through range query" in {
           forEvery(optionalBounds) { upToInclusive =>
             eventLog.lookupEventRange(upToInclusive, None).futureValue shouldBe empty
@@ -480,6 +568,81 @@ trait MultiDomainEventLogTest
             withClue(hint) {
               assertionF.futureValue
             }
+          }
+        }
+
+        "yield correct events through per domain subscription" in {
+          updateGlobalOffsets(initialTestEvents.size)
+
+          val globalOffset1 = globalOffsets(0)
+          val globalOffset2 = globalOffsets(1)
+          val globalOffset3 = globalOffsets(2)
+          val globalOffset4 = globalOffsets(3)
+          val globalOffset5 = globalOffsets(4)
+
+          // (start offset exclusive, end offset inclusive, domain id)
+          type TestParam = (GlobalOffset, GlobalOffset, DomainId)
+
+          val testCases: List[(TestParam, List[Int])] = List(
+            (0L, globalOffset5, domainIds(0)) -> List(0),
+            (0L, globalOffset5, domainIds(1)) -> List(1, 3, 4),
+            (0L, globalOffset5, domainIds(2)) -> Nil,
+            (globalOffset5 + 1, globalOffset5 + 2, domainIds(0)) -> Nil,
+            (globalOffset5 + 1, globalOffset5 + 2, domainIds(1)) -> Nil,
+            (globalOffset5 + 1, globalOffset5 + 2, domainIds(2)) -> Nil,
+            (Long.MaxValue, Long.MaxValue, domainIds(0)) -> Nil,
+            (Long.MaxValue, Long.MaxValue, domainIds(1)) -> Nil,
+            (Long.MaxValue, Long.MaxValue, domainIds(2)) -> Nil,
+            (globalOffset1, globalOffset5, domainIds(0)) -> Nil,
+            (globalOffset1, globalOffset5, domainIds(1)) -> List(1, 3, 4),
+            (globalOffset1, globalOffset5, domainIds(2)) -> Nil,
+            (globalOffset2, globalOffset5, domainIds(0)) -> Nil,
+            (globalOffset2, globalOffset5, domainIds(1)) -> List(3, 4),
+            (globalOffset2, globalOffset5, domainIds(2)) -> Nil,
+            (globalOffset3, globalOffset5, domainIds(0)) -> Nil,
+            (globalOffset3, globalOffset5, domainIds(1)) -> List(3, 4),
+            (globalOffset3, globalOffset5, domainIds(2)) -> Nil,
+            (globalOffset4, globalOffset5, domainIds(0)) -> Nil,
+            (globalOffset4, globalOffset5, domainIds(1)) -> List(4),
+            (globalOffset4, globalOffset5, domainIds(2)) -> Nil,
+            (globalOffset5, globalOffset5, domainIds(0)) -> Nil,
+            (globalOffset5, globalOffset5, domainIds(1)) -> Nil,
+            (globalOffset5, globalOffset5, domainIds(2)) -> Nil,
+            (0L, Long.MaxValue, domainIds(0)) -> List(0),
+            (0L, Long.MaxValue, domainIds(1)) -> List(1, 3, 4),
+            (0L, Long.MaxValue, domainIds(2)) -> Nil,
+            (0L, globalOffset5 + 1, domainIds(0)) -> List(0),
+            (0L, globalOffset5 + 1, domainIds(1)) -> List(1, 3, 4),
+            (0L, globalOffset5 + 1, domainIds(2)) -> Nil,
+            (0L, globalOffset1, domainIds(0)) -> List(0),
+            (0L, globalOffset1, domainIds(1)) -> Nil,
+            (0L, globalOffset1, domainIds(2)) -> Nil,
+            (0L, globalOffset2, domainIds(0)) -> List(0),
+            (0L, globalOffset2, domainIds(1)) -> List(1),
+            (0L, globalOffset2, domainIds(2)) -> Nil,
+            (0L, globalOffset3, domainIds(0)) -> List(0),
+            (0L, globalOffset3, domainIds(1)) -> List(1),
+            (0L, globalOffset3, domainIds(2)) -> Nil,
+            (0L, globalOffset4, domainIds(0)) -> List(0),
+            (0L, globalOffset4, domainIds(1)) -> List(1, 3),
+            (0L, globalOffset4, domainIds(2)) -> Nil,
+            (0L, globalOffset5, domainIds(0)) -> List(0),
+            (0L, globalOffset5, domainIds(1)) -> List(1, 3, 4),
+            (0L, globalOffset5, domainIds(2)) -> Nil,
+          )
+
+          forEvery(testCases) {
+            case ((startExclusive, endInclusive, domainId), expectedEventIndexes) =>
+              withClue(
+                s"startExclusive = $startExclusive endInclusive = $endInclusive domainId = $domainId"
+              ) {
+                subscribeAndCheckPerDomainEvents(
+                  domainId = domainId,
+                  startExclusive = startExclusive,
+                  endInclusive = endInclusive,
+                  expectedTimestampedEvents = expectedEventIndexes.map(initialTestEvents),
+                ).futureValue
+              }
           }
         }
 

@@ -82,12 +82,12 @@ class TopologyAdministrationGroup(
 
   @Help.Summary("Initialize the node with a unique identifier")
   @Help.Description("""Every node in Canton is identified using a unique identifier, which is composed
-      |from a user-chosen string and a fingerprint of a signing key. The signing key is the root key of
+      |of a user-chosen string and the fingerprint of a signing key. The signing key is the root key of
       |said namespace.
       |During initialisation, we have to pick such a unique identifier.
       |By default, initialisation happens automatically, but it can be turned off by setting the auto-init
       |option to false.
-      |Automatic node initialisation is usually turned off to preseve the identity of a participant or domain
+      |Automatic node initialisation is usually turned off to preserve the identity of a participant or domain
       |node (during major version upgrades) or if the topology transactions are managed through
       |a different topology manager than the one integrated into this node.""")
   def init_id(identifier: Identifier, fingerprint: Fingerprint): UniqueIdentifier =
@@ -181,6 +181,7 @@ class TopologyAdministrationGroup(
       |key. The keys are referred to using their fingerprints. They need to be either locally generated or have been
       |previously imported.
     ops: Either Add or Remove the delegation.
+    namespace: The namespace whose authorization authority is delegated.
     signedBy: Optional fingerprint of the authorizing key. The authorizing key needs to be either the authorizedKey
               for root certificates. Otherwise, the signedBy key needs to refer to a previously authorized key, which
               means that we use the signedBy key to refer to a locally available CA.

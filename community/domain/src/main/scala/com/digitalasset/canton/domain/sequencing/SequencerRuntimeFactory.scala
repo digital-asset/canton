@@ -99,6 +99,7 @@ object SequencerRuntimeFactory {
         SequencerFactory.database(sequencerConfig, loggerFactory),
         staticDomainParameters,
         localParameters,
+        domainConfig.publicApi,
         domainConfig.timeTracker,
         testingConfig,
         metrics,

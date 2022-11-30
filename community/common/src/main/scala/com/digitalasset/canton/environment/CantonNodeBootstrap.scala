@@ -8,6 +8,7 @@ import better.files.File
 import cats.data.{EitherT, OptionT}
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
+import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.InstanceName
@@ -113,6 +114,7 @@ abstract class CantonNodeBootstrapBase[
     grpcVaultServiceFactory: GrpcVaultServiceFactory,
     val loggerFactory: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
+    grpcMetrics: GrpcServerMetrics,
 )(
     implicit val executionContext: ExecutionContextIdlenessExecutorService,
     implicit val scheduler: ScheduledExecutorService,
@@ -178,7 +180,7 @@ abstract class CantonNodeBootstrapBase[
 
   val timeouts: ProcessingTimeout = parameterConfig.processingTimeouts
 
-  // TODO(soren): Move to a error-safe node initialization approach
+  // TODO(i3168): Move to a error-safe node initialization approach
   protected val storage =
     storageFactory
       .tryCreate(
@@ -235,6 +237,7 @@ abstract class CantonNodeBootstrapBase[
         loggerFactory,
         parameterConfig.loggingConfig.api,
         parameterConfig.tracing,
+        grpcMetrics,
       )
 
     val registry = builder.mutableHandlerRegistry()
@@ -259,6 +262,7 @@ abstract class CantonNodeBootstrapBase[
       .addService(
         InitializationServiceGrpc
           .bindService(
+            // TODO(#11052) the init_id method of this service conflicts with the mediator / sequencer / topology manager init services
             new GrpcInitializationService(clock, this, crypto.cryptoPublicStore),
             executionContext,
           )
@@ -324,7 +328,6 @@ abstract class CantonNodeBootstrapBase[
   protected def startWithStoredNodeId(id: NodeId): EitherT[Future, String, Unit] = {
     if (nodeId.compareAndSet(None, Some(id))) {
       logger.info(s"Resuming as existing instance with uid=${id}")
-
       initialize(id).leftMap { err =>
         logger.info(s"Failed to initialize node, trying to clean up: $err")
         close()
@@ -394,6 +397,8 @@ abstract class CantonNodeBootstrapBase[
       initConfigBase: InitConfigBase
   ): EitherT[Future, String, Unit]
 
+  // TODO(#11052) this method is only used by the generic init service and it doesn't work with
+  //             mediator, domain topology manager or sequencer nodes
   /** Initialize the node with an externally provided identity. */
   def initializeWithProvidedId(nodeId: NodeId): EitherT[Future, String, Unit] = {
     for {
@@ -460,7 +465,7 @@ abstract class CantonNodeBootstrapBase[
       protocolVersion,
     )
 
-  private def authorizeIfNew[E <: CantonError, Op <: TopologyChangeOp](
+  protected def authorizeIfNew[E <: CantonError, Op <: TopologyChangeOp](
       manager: TopologyManager[E],
       transaction: TopologyTransaction[Op],
       signingKey: SigningPublicKey,
@@ -481,21 +486,6 @@ abstract class CantonNodeBootstrapBase[
           .leftMap(_.toString)
           .map(_ => ())
   } yield res
-
-  protected def authorizeDomainGovernance[E <: CantonError](
-      manager: TopologyManager[E],
-      key: SigningPublicKey,
-      mapping: DomainGovernanceMapping,
-      protocolVersion: ProtocolVersion,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, Unit] =
-    authorizeIfNew(
-      manager,
-      DomainGovernanceTransaction(mapping, protocolVersion),
-      key,
-      protocolVersion,
-    )
 
   protected def getOrCreateSigningKey(
       name: String

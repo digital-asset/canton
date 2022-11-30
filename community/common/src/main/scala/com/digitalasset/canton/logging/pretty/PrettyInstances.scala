@@ -23,18 +23,9 @@ import com.daml.lf.transaction.Transaction.{
 }
 import com.daml.lf.value.Value
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.protocol.{
-  AuthenticatedContractIdVersion,
-  CantonContractIdVersion,
-  LfContractId,
-  LfGlobalKey,
-  LfHash,
-  LfNodeId,
-  LfTransactionVersion,
-  NonAuthenticatedContractIdVersion,
-}
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.UniqueIdentifier
-import com.digitalasset.canton.tracing.W3CTraceContext
+import com.digitalasset.canton.tracing.{TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.ShowUtil.HashLength
 import com.digitalasset.canton.util.{ErrorUtil, HexString}
 import com.digitalasset.canton.{LedgerApplicationId, LfPartyId, LfTimestamp}
@@ -398,6 +389,11 @@ trait PrettyInstances {
   implicit val prettyW3CTraceContext: Pretty[W3CTraceContext] = prettyOfClass(
     param("parent", _.parent.unquoted),
     paramIfDefined("state", _.state.map(_.unquoted)),
+  )
+
+  implicit val prettyTraceContext: Pretty[TraceContext] = prettyOfClass(
+    paramIfDefined("trace id", _.traceId.map(_.unquoted)),
+    paramIfDefined("W3C context", _.asW3CTraceContext),
   )
 
   implicit val prettyKeyInputError: Pretty[KeyInputError] = {

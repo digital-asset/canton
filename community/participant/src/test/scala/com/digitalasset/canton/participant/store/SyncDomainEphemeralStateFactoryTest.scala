@@ -64,6 +64,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
           ),
       lookupOffsetsBetween = _ => _ => (_, _) => Future.successful(Seq.empty),
       byEventId = _ => _ => OptionT(Future.successful(Option.empty)),
+      participantEventLogId = ParticipantEventLog.ProductionParticipantEventLogId,
       new SimClock(loggerFactory = loggerFactory),
       ParticipantTestMetrics,
       indexedStringStore = indexedStringStore,

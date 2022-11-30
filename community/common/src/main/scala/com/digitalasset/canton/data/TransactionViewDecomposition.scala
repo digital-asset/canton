@@ -105,7 +105,6 @@ object TransactionViewDecomposition {
     }
 
     override def pretty: Pretty[NewView] = prettyOfClass(
-      // TODO(Andreas) A bit more information would be nice, but we don't want to print the full node for confidentiality reasons
       param("root node template", _.rootNode.templateId),
       param("informees", _.informees),
       param("threshold", _.threshold),
@@ -123,7 +122,6 @@ object TransactionViewDecomposition {
   ) extends TransactionViewDecomposition {
 
     override def pretty: Pretty[SameView] = prettyOfClass(
-      // TODO(Andreas) A bit more information would be nice, but we don't want to print the full node for confidentiality reasons
       param("lf node template", _.lfNode.templateId),
       param("node ID", _.nodeId),
       param("rollback context", _.rbContext),

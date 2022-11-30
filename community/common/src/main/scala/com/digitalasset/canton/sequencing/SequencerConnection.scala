@@ -17,12 +17,7 @@ import com.digitalasset.canton.sequencing.client.http.HttpSequencerEndpoints
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
-import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-}
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 import io.grpc.netty.NettyChannelBuilder
 
@@ -170,7 +165,10 @@ object GrpcSequencerConnection {
     }
 }
 
-object SequencerConnection extends HasVersionedMessageCompanion[SequencerConnection] {
+object SequencerConnection
+    extends HasVersionedMessageCompanion[SequencerConnection]
+    with HasVersionedMessageCompanionDbHelpers[SequencerConnection] {
+
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
       ProtocolVersion.v2,

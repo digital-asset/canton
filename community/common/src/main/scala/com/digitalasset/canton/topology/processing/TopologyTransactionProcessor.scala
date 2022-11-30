@@ -8,7 +8,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -22,7 +22,7 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, DeliverError}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   StoreBasedDomainTopologyClient,
@@ -101,7 +101,6 @@ class TopologyTransactionProcessor(
     domainId: DomainId,
     cryptoPureApi: CryptoPureApi,
     store: TopologyStore[TopologyStoreId.DomainStore],
-    clock: Clock,
     acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
@@ -131,7 +130,8 @@ class TopologyTransactionProcessor(
   }
 
   private def initialise(
-      start: SubscriptionStart
+      start: SubscriptionStart,
+      domainTimeTracker: DomainTimeTracker,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
     ErrorUtil.requireState(
@@ -182,30 +182,26 @@ class TopologyTransactionProcessor(
       }
     } yield {
       logger.debug(
-        s"Initialising topology processing for start=$start with effective ts ${clientInitTimes.map(_._1)}"
+        s"Initializing topology processing for start=$start with effective ts ${clientInitTimes.map(_._1)}"
       )
+      val directExecutionContext = DirectExecutionContext(logger)
       clientInitTimes.foreach { case (effective, approximate) =>
         // if the effective time is in the future, schedule a clock to update the time accordingly
-        // TODO(ratko/andreas) This should be scheduled via the DomainTimeTracker or something similar
-        //  rather than via the participant's local clock
-        if (effective.value > clock.now) {
-          // set approximate time now and schedule task to update the approximate time to the effective time in the future
-          if (effective.value != approximate.value) {
-            listenersUpdateHead(effective, approximate, potentialChanges = true)
-          }
-          FutureUtil.doNotAwait(
-            clock
-              .scheduleAt(
-                _ =>
-                  listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true),
-                effective.value,
-              )
-              .unwrap,
-            "Notifying listeners to the topology processor's head",
-          )
-        } else {
-          // if the effective time is in the past, directly advance our approximate time to the respective effective time
-          listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)
+        domainTimeTracker.awaitTick(effective.value) match {
+          case None =>
+            // The effective time is in the past. Directly advance our approximate time to the respective effective time
+            listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)
+          case Some(tickF) =>
+            // set approximate time now and schedule task to update the approximate time to the effective time in the future
+            if (effective.value != approximate.value) {
+              listenersUpdateHead(effective, approximate, potentialChanges = true)
+            }
+            FutureUtil.doNotAwait(
+              tickF.map(_ =>
+                listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)
+              )(directExecutionContext),
+              "Notifying listeners to the topology processor's head",
+            )
         }
       }
     }
@@ -520,9 +516,9 @@ class TopologyTransactionProcessor(
       .map(_.protocolMessage)
 
   /** Inform the topology manager where the subscription starts when using [[processEnvelopes]] rather than [[createHandler]] */
-  def subscriptionStartsAt(start: SubscriptionStart)(implicit
+  def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = initialise(start)
+  ): FutureUnlessShutdown[Unit] = initialise(start, domainTimeTracker)
 
   /** process envelopes mostly asynchronously
     *
@@ -640,9 +636,10 @@ class TopologyTransactionProcessor(
       }
 
       override def subscriptionStartsAt(
-          start: SubscriptionStart
+          start: SubscriptionStart,
+          domainTimeTracker: DomainTimeTracker,
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        TopologyTransactionProcessor.this.subscriptionStartsAt(start)
+        TopologyTransactionProcessor.this.subscriptionStartsAt(start, domainTimeTracker)
     }
 
   override def onClosed(): Unit = Lifecycle.close(timeAdjuster, store)(logger)
@@ -669,7 +666,6 @@ object TopologyTransactionProcessor {
       domainId,
       pureCrypto,
       topologyStore,
-      clock,
       acsCommitmentScheduleEffectiveTime = _ => (),
       futureSupervisor,
       parameters.processingTimeouts,

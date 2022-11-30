@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing
 
 import cats.{Applicative, Traverse}
-import com.digitalasset.canton.sequencing.protocol.{Envelope, SequencedEvent, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{Envelope, SequencedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
@@ -45,24 +45,6 @@ object EnvelopeBox {
 
   def apply[Box[+_ <: Envelope[_]]](implicit Box: EnvelopeBox[Box]): EnvelopeBox[Box] = Box
 
-  implicit val sequencedEventEnvelopeBox: EnvelopeBox[SequencedEvent] =
-    new EnvelopeBox[SequencedEvent] {
-      override private[sequencing] def traverse[G[_], A <: Envelope[_], B <: Envelope[_]](
-          event: SequencedEvent[A]
-      )(f: A => G[B])(implicit G: Applicative[G]): G[SequencedEvent[B]] =
-        event.traverse(f)
-    }
-
-  // It would be nice if we could appeal to a generic composition theorem here,
-  // but the `MemoizeEvidence` bound in `SignedContent` doesn't allow a generic `Traverse` instance.
-  implicit val signedContentEnvelopeBox: EnvelopeBox[RawSignedContentEnvelopeBox] =
-    new EnvelopeBox[RawSignedContentEnvelopeBox] {
-      override private[sequencing] def traverse[G[_], Env1 <: Envelope[_], Env2 <: Envelope[_]](
-          signedEvent: SignedContent[SequencedEvent[Env1]]
-      )(f: Env1 => G[Env2])(implicit G: Applicative[G]): G[RawSignedContentEnvelopeBox[Env2]] =
-        signedEvent.traverse(_.traverse(f))
-    }
-
   implicit val unsignedEnvelopeBox: EnvelopeBox[UnsignedEnvelopeBox] = {
     type TracedSeqTraced[+A] = Traced[Seq[Traced[A]]]
     EnvelopeBox[SequencedEvent].revCompose(
@@ -75,9 +57,10 @@ object EnvelopeBox {
       ordinaryEvent: OrdinarySequencedEvent[A]
   )(f: A => G[B])(implicit G: Applicative[G]): G[OrdinarySequencedEvent[B]] = {
     val oldSignedEvent = ordinaryEvent.signedEvent
-    G.map(signedContentEnvelopeBox.traverse(ordinaryEvent.signedEvent)(f)) { newSignedEvent =>
-      if (newSignedEvent eq oldSignedEvent) ordinaryEvent.asInstanceOf[OrdinarySequencedEvent[B]]
-      else ordinaryEvent.copy(signedEvent = newSignedEvent)(ordinaryEvent.traceContext)
+    G.map(SequencedEvent.signedContentEnvelopeBox.traverse(ordinaryEvent.signedEvent)(f)) {
+      newSignedEvent =>
+        if (newSignedEvent eq oldSignedEvent) ordinaryEvent.asInstanceOf[OrdinarySequencedEvent[B]]
+        else ordinaryEvent.copy(signedEvent = newSignedEvent)(ordinaryEvent.traceContext)
     }
   }
 
@@ -86,9 +69,9 @@ object EnvelopeBox {
       event: IgnoredSequencedEvent[A]
   )(f: A => G[B])(implicit G: Applicative[G]): G[IgnoredSequencedEvent[B]] =
     event.underlying match {
-      case none @ None => G.pure(event.asInstanceOf[IgnoredSequencedEvent[B]])
+      case None => G.pure(event.asInstanceOf[IgnoredSequencedEvent[B]])
       case Some(signedEvent) =>
-        G.map(signedContentEnvelopeBox.traverse(signedEvent)(f)) { newSignedEvent =>
+        G.map(SequencedEvent.signedContentEnvelopeBox.traverse(signedEvent)(f)) { newSignedEvent =>
           if (newSignedEvent eq signedEvent) event.asInstanceOf[IgnoredSequencedEvent[B]]
           else event.copy(underlying = Some(newSignedEvent))(event.traceContext)
         }

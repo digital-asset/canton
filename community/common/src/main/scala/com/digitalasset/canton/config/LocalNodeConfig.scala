@@ -38,6 +38,10 @@ object LocalNodeConfig {
             "storage.ledger-api-jdbc-url",
             "storage.parameters.ledger-api-jdbc-url",
           ),
+          DeprecatedConfigUtils.MovedConfigPath(
+            "storage.connection-timeout",
+            "storage.parameters.connection-timeout",
+          ),
         )
       }
   }

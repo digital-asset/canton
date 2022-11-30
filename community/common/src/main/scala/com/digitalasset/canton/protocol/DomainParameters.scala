@@ -311,8 +311,9 @@ object StaticDomainParameters
   *                                   Moreover, if this timeout is zero, no automatic transfer-ins will occur.
   *                                   Choose a low value, if you want to lower the time that contracts can be inactive
   *                                   due to ongoing transfers.
-  *                                   TODO(andreas): Choosing a high value currently has no practical benefit, but
+  *                                   Choosing a high value currently has no practical benefit, but
   *                                   will have benefits in a future version.
+  * TODO(M41): Document those benefits
   * @param topologyChangeDelay determines the offset applied to the topology transactions before they become active,
   *                            in order to support parallel transaction processing
   * @param ledgerTimeRecordTimeTolerance the maximum absolute difference between the ledger time and the

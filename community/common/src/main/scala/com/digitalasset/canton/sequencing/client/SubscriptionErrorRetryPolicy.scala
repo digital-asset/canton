@@ -27,7 +27,7 @@ trait SubscriptionErrorRetryPolicy {
 
 /** Allows implementors to only specify policy for an error hierarchy they've defined.
   * Avoids adding type parameters to all sequencer client components.
-  * TODO(danilo): work out if type parameters are really required and if so are they that bad
+  * TODO(11067): work out if type parameters are really required and if so are they that bad
   */
 abstract class CheckedSubscriptionErrorRetryPolicy[SE <: SubscriptionError](implicit
     classTag: ClassTag[SE]

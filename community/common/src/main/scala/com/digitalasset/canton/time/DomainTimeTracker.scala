@@ -252,30 +252,31 @@ class DomainTimeTracker(
     }
   }
 
+  /** Inform the domain time tracker about the first message the sequencer client resubscribes to from the sequencer.
+    * This is never considered a time proof event.
+    */
+  def subscriptionResumesAfter(
+      timestamp: CantonTimestamp
+  )(implicit traceContext: TraceContext): Unit = {
+    withLock {
+      logger.debug(s"Initializing domain time tracker for resubscription at $timestamp")
+      updateTimestampRef(timestamp)
+      removeTicks(timestamp)
+    }
+  }
+
   @VisibleForTesting
   private[time] def update(events: Seq[OrdinarySequencedEvent[Envelope[_]]])(implicit
       batchTraceContext: TraceContext
   ): Unit = {
     withLock {
       def updateOne(event: OrdinarySequencedEvent[Envelope[_]]): Unit = {
-        val oldTimestamp =
-          timestampRef.getAndSet(LatestAndNext(received(event.timestamp).some, None))
-        oldTimestamp.next.foreach(_.trySuccess(UnlessShutdown.Outcome(event.timestamp)))
+        updateTimestampRef(event.timestamp)
 
         TimeProof.fromEventO(event).foreach { proof =>
           val oldTimeProof = timeProofRef.getAndSet(LatestAndNext(received(proof).some, None))
           oldTimeProof.next.foreach(_.trySuccess(UnlessShutdown.Outcome(proof)))
           timeRequestSubmitter.handleTimeProof(proof)
-        }
-      }
-
-      @SuppressWarnings(Array("org.wartremover.warts.While"))
-      def removeTicks(ts: CantonTimestamp): Unit = {
-        // remove pending ticks up to and including this timestamp
-        while (Option(pendingTicks.peek()).exists(_.ts <= ts)) {
-          val removed = pendingTicks.poll()
-          // complete any futures waiting for them
-          removed.complete()
         }
       }
 
@@ -287,6 +288,24 @@ class DomainTimeTracker(
       events.lastOption.foreach(event => removeTicks(event.timestamp))
     }
     maybeScheduleUpdate()
+  }
+
+  /** Must only be used inside [[withLock]] */
+  private def updateTimestampRef(newTimestamp: CantonTimestamp): Unit = {
+    val oldTimestamp =
+      timestampRef.getAndSet(LatestAndNext(received(newTimestamp).some, None))
+    oldTimestamp.next.foreach(_.trySuccess(UnlessShutdown.Outcome(newTimestamp)))
+  }
+
+  /** Must only be used inside [[withLock]] */
+  @SuppressWarnings(Array("org.wartremover.warts.While"))
+  private def removeTicks(ts: CantonTimestamp): Unit = {
+    // remove pending ticks up to and including this timestamp
+    while (Option(pendingTicks.peek()).exists(_.ts <= ts)) {
+      val removed = pendingTicks.poll()
+      // complete any futures waiting for them
+      removed.complete()
+    }
   }
 
   private def fetch[A](
@@ -346,15 +365,18 @@ class DomainTimeTracker(
     * However if the domain is far behind but regularly producing events we will wait until we haven't
     * witnessed an event for the patience duration.
     */
-  private def nextScheduledCheck(): Option[CantonTimestamp] = {
+  private def nextScheduledCheck()(implicit traceContext: TraceContext): Option[CantonTimestamp] = {
     // if we're not waiting for an event, then we don't need to see one
-    earliestExpectedObservationTime().map { expectedEvent =>
-      timestampRef
-        .get()
-        .latest
-        .fold(expectedEvent)(
-          _.receivedAt.add(config.patienceDuration.unwrap).max(expectedEvent)
+    // Only request an event if the time tracker has observed a time;
+    // otherwise the submission may fail because the node does not have any signing keys registered
+    earliestExpectedObservationTime().flatMap { expectedEvent =>
+      val latest = timestampRef.get().latest
+      if (latest.isEmpty) {
+        logger.debug(
+          s"Not scheduling a next check at $expectedEvent because no timestamp has been observed from the domain"
         )
+      }
+      latest.map(_.receivedAt.add(config.patienceDuration.unwrap).max(expectedEvent))
     }
   }
 
@@ -365,7 +387,8 @@ class DomainTimeTracker(
     new AtomicReference[Option[CantonTimestamp]](None)
 
   /** After [[pendingTicks]] or [[timestampRef]] have been updated, call this to determine whether a scheduled update is required.
-    * It will be scheduled if there isn't an existing or earlier update pending.
+    * It will be scheduled if there isn't an existing or earlier update pending and
+    * the time tracker has observed at least some timestamp.
     */
   private def maybeScheduleUpdate()(implicit traceContext: TraceContext): Unit = {
 

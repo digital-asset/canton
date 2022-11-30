@@ -24,7 +24,17 @@ import java.util.concurrent.atomic.AtomicReference
   * or [[scala.concurrent.Await]].
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
-trait HasExecutorService extends BeforeAndAfterAll { this: Suite with NamedLogging =>
+trait HasExecutorService extends BeforeAndAfterAll with HasExecutorServiceGeneric { this: Suite =>
+  def handleFailure(message: String): ExecutionContextIdlenessExecutorService = fail(message)
+
+  override def afterAll(): Unit =
+    try super.afterAll()
+    finally {
+      closeExecutor()
+    }
+}
+
+trait HasExecutorServiceGeneric extends NamedLogging {
 
   private case class ExecutorState(
       scheduler: ScheduledExecutorService,
@@ -72,11 +82,13 @@ trait HasExecutorService extends BeforeAndAfterAll { this: Suite with NamedLoggi
     ExecutorState(scheduler, executor, monitor)
   }
 
+  def handleFailure(message: String): ExecutionContextIdlenessExecutorService
+
   private def getOrCreateExecutor(): ExecutionContextIdlenessExecutorService =
     executorStateRef
       .updateAndGet(_.orElse(Some(createExecutorState())))
       .map(_.executor)
-      .getOrElse(fail("Executor was not created"))
+      .getOrElse(handleFailure("Executor was not created"))
 
   private lazy val executorStateRef: AtomicReference[Option[ExecutorState]] =
     new AtomicReference[Option[ExecutorState]](None)
@@ -87,17 +99,13 @@ trait HasExecutorService extends BeforeAndAfterAll { this: Suite with NamedLoggi
 
   protected def executorService: ExecutionContextIdlenessExecutorService = getOrCreateExecutor()
 
-  override def afterAll(): Unit = {
-    try super.afterAll()
-    finally {
-      val executorStateClose: AutoCloseable = () => {
-        executorStateRef.updateAndGet { executorStateO =>
-          executorStateO.foreach(_.close())
-          None
-        }
+  protected def closeExecutor(): Unit = {
+    val executorStateClose: AutoCloseable = () => {
+      executorStateRef.updateAndGet { executorStateO =>
+        executorStateO.foreach(_.close())
+        None
       }
-
-      Lifecycle.close(executorStateClose)(logger)
     }
+    Lifecycle.close(executorStateClose)(logger)
   }
 }

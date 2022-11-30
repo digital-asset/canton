@@ -143,12 +143,27 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     "request time proof if we surpass the time we're expecting" in { env =>
       import env.*
 
+      timeTracker.subscriptionResumesAfter(ts(1))
       timeTracker.requestTick(ts(2))
 
       for {
         _ <- advanceTo(2)
         _ = requestSubmitter.hasRequestedTime shouldBe false
         _ <- advanceAndFlush(observationLatencySecs)
+      } yield requestSubmitter.hasRequestedTime shouldBe true
+    }
+
+    "request time proof only after we have received the first event" in { env =>
+      import env.*
+
+      timeTracker.requestTick(ts(2))
+      for {
+        _ <- advanceTo(2)
+        _ = requestSubmitter.hasRequestedTime shouldBe false
+        _ = clock.advance(Duration.ofSeconds(observationLatencySecs.toLong))
+        _ = requestSubmitter.hasRequestedTime shouldBe false
+        _ = observeTimestamp(1)
+        _ = advanceAndFlush(patienceDurationSecs)
       } yield requestSubmitter.hasRequestedTime shouldBe true
     }
 
@@ -221,6 +236,9 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
   "fetch" should {
     "timestamp should resolve on any received event" in { env =>
       import env.*
+
+      timeTracker.subscriptionResumesAfter(ts(0))
+      clock.advance(Duration.ofSeconds(patienceDurationSecs.toLong))
 
       // make two distinct requests for the next timestamp to ensure they will all be resolved by the same event
       val fetchP1 = timeTracker.fetchTime()
@@ -334,6 +352,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     "should ask for time if a sufficient amount of local time progresses" in { env =>
       import env.*
 
+      timeTracker.subscriptionResumesAfter(ts(0))
       // advance to our min observation duration without witnessing a time
       clock.advance(config.minObservationDuration.duration.plusMillis(1))
       // we should request one

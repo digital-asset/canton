@@ -67,7 +67,7 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
         .listCertificates()
         .leftMap(err => s"Failed to list certificates in public crypto store: $err")
         .map(
-          // TODO(soren) once we use proper uids for subject alternative names, we should include them in the filter
+          // TODO(i11014) once we use proper uids for subject alternative names, we should include them in the filter
           _.find(_.subjectCommonName.contains(uid.toProtoPrimitive))
         )
       certificate <- certificateO.fold(generateCertificate(uid, alternativeNames))(current =>

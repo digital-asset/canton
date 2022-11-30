@@ -508,7 +508,7 @@ object LocalReject extends LocalRejectionGroup {
       case class Reject(override val _details: String)(
           override val protocolVersion: ProtocolVersion
       ) extends Malformed(
-            _causePrefix = "Rejected transaction due to model conformance check failed "
+            _causePrefix = "Rejected transaction due to a failed model conformance check: "
           )
     }
 

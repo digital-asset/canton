@@ -84,7 +84,6 @@ class RequireBlockingTest extends AnyWordSpec with Matchers {
         import x.{synchronized as foo}
         foo(19)
       }
-      // TODO(Andreas) We currently don't detect renamed references to synchronized
       // assertIsErrorSynchronized(result)
       result.errors shouldBe Seq.empty
     }
@@ -110,7 +109,6 @@ class RequireBlockingTest extends AnyWordSpec with Matchers {
         import Thread.{sleep as foo}
         foo(1)
       }
-      // TODO(Andreas) We currently don't detect renamed references to sleep
       // assertIsErrorThreadSleep(result)
       result.errors shouldBe Seq.empty
     }

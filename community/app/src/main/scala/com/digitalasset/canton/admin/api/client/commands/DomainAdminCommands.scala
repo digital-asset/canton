@@ -5,14 +5,10 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.admin.api.client.data.{
-  StaticDomainParameters as StaticDomainParametersConfig
-}
-import com.digitalasset.canton.domain.admin.{v0 as adminproto}
-import com.digitalasset.canton.domain.config.store.DomainNodeSequencerConfig
+import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters as StaticDomainParametersConfig
+import com.digitalasset.canton.domain.admin.v0 as adminproto
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
-import com.digitalasset.canton.protocol.{StaticDomainParameters as StaticDomainParametersInternal}
-import com.digitalasset.canton.sequencing.SequencerConnection
+import com.digitalasset.canton.protocol.StaticDomainParameters as StaticDomainParametersInternal
 import com.google.protobuf.empty.Empty
 import io.grpc.{ManagedChannel, Status}
 
@@ -20,28 +16,6 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object DomainAdminCommands {
-
-  final case class Initialize(sequencerConnection: SequencerConnection)
-      extends GrpcAdminCommand[adminproto.DomainInitRequest, Empty, Unit] {
-    override type Svc = adminproto.DomainInitializationServiceGrpc.DomainInitializationServiceStub
-    override def createService(
-        channel: ManagedChannel
-    ): adminproto.DomainInitializationServiceGrpc.DomainInitializationServiceStub =
-      adminproto.DomainInitializationServiceGrpc.stub(channel)
-
-    override def createRequest(): Either[String, adminproto.DomainInitRequest] =
-      Right(
-        adminproto.DomainInitRequest(Some(DomainNodeSequencerConfig(sequencerConnection).toProtoV0))
-      )
-
-    override def submitRequest(
-        service: adminproto.DomainInitializationServiceGrpc.DomainInitializationServiceStub,
-        request: adminproto.DomainInitRequest,
-    ): Future[Empty] =
-      service.init(request)
-
-    override def handleResponse(response: Empty): Either[String, Unit] = Right(())
-  }
 
   abstract class BaseDomainServiceCommand[Req, Rep, Res] extends GrpcAdminCommand[Req, Rep, Res] {
     override type Svc = adminproto.DomainServiceGrpc.DomainServiceStub

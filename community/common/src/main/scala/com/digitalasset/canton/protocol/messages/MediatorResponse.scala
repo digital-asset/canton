@@ -17,7 +17,10 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.version.*
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
+import monocle.macros.GenLens
 
 /** Payload of a response sent to the mediator in reaction to a request.
   *
@@ -61,6 +64,25 @@ case class MediatorResponse private (
     with HasProtocolVersionedWrapper[MediatorResponse]
     with HasDomainId
     with PrettyPrinting {
+
+  // Private copy method so that callers do not trigger exceptions by accident.
+  private def copy(
+      requestId: RequestId = requestId,
+      sender: ParticipantId = sender,
+      viewHash: Option[ViewHash] = viewHash,
+      localVerdict: LocalVerdict = localVerdict,
+      rootHash: Option[RootHash] = rootHash,
+      confirmingParties: Set[LfPartyId] = confirmingParties,
+      domainId: DomainId = domainId,
+  ): MediatorResponse = MediatorResponse(
+    requestId,
+    sender,
+    viewHash,
+    localVerdict,
+    rootHash,
+    confirmingParties,
+    domainId,
+  )(representativeProtocolVersion, None)
 
   // If an object invariant is violated, throw an exception specific to the class.
   // Thus, the exception can be caught during deserialization and translated to a human readable error message.
@@ -204,6 +226,38 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       confirmingParties,
       domainId,
     )(protocolVersionRepresentativeFor(protocolVersion), None)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val requestIdUnsafe: Lens[MediatorResponse, RequestId] = GenLens[MediatorResponse](_.requestId)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val senderUnsafe: Lens[MediatorResponse, ParticipantId] = GenLens[MediatorResponse](_.sender)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val viewHashUnsafe: Lens[MediatorResponse, Option[ViewHash]] =
+    GenLens[MediatorResponse](_.viewHash)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val localVerdictUnsafe: Lens[MediatorResponse, LocalVerdict] =
+    GenLens[MediatorResponse](_.localVerdict)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val rootHashUnsafe: Lens[MediatorResponse, Option[RootHash]] =
+    GenLens[MediatorResponse](_.rootHash)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val confirmingPartiesUnsafe: Lens[MediatorResponse, Set[LfPartyId]] =
+    GenLens[MediatorResponse](_.confirmingParties)
+
+  /** DO NOT USE IN PRODUCTION, as this does not necessarily check object invariants. */
+  @VisibleForTesting
+  val domainIdUnsafe: Lens[MediatorResponse, DomainId] = GenLens[MediatorResponse](_.domainId)
 
   private def fromProtoV0(mediatorResponseP: v0.MediatorResponse)(
       bytes: ByteString

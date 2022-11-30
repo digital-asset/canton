@@ -73,7 +73,7 @@ class CantonErrorTest extends BaseTestWordSpec {
     "log with level WARN including the error category and details" in {
       implicit val traceContext: TraceContext = nonEmptyTraceContext1
       val traceId = traceContext.traceId.value
-      val errorCodeStr = s"TEST_MALICIOUS_BEHAVIOR(15,${traceId.take(8)})"
+      val errorCodeStr = s"TEST_MALICIOUS_BEHAVIOR(5,${traceId.take(8)})"
 
       loggerFactory.assertLogs(
         TestAlarmErrorCode.MyAlarm().report(),

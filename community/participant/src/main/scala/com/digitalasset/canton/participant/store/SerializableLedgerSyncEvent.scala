@@ -459,8 +459,11 @@ case class SerializableTransactionAccepted(
       recordTime,
       divulgedContracts,
       blindingInfo,
-      _contractMetadata,
+      contractMetadata,
     ) = transactionAccepted
+    val contractMetadataP = contractMetadata.view.map { case (contractId, bytes) =>
+      contractId.toProtoPrimitive -> bytes.toByteString
+    }.toMap
     v0.TransactionAccepted(
       optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV0),
       Some(SerializableTransactionMeta(transactionMeta).toProtoV0),
@@ -477,6 +480,7 @@ case class SerializableTransactionAccepted(
       Some(SerializableLfTimestamp(recordTime).toProtoV0),
       divulgedContracts.map(SerializableDivulgedContract(_).toProtoV0),
       blindingInfo.map(SerializableBlindingInfo(_).toProtoV0),
+      contractMetadata = contractMetadataP,
     )
   }
 }
@@ -493,6 +497,7 @@ object SerializableTransactionAccepted {
       recordTimeP,
       divulgedContractsP,
       blindingInfoP,
+      contractMetadataP,
     ) = transactionAcceptedP
     for {
       optCompletionInfo <- completionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
@@ -515,6 +520,13 @@ object SerializableTransactionAccepted {
       blindingInfo <- blindingInfoP.fold(
         Right(None): ParsingResult[Option[BlindingInfo]]
       )(SerializableBlindingInfo.fromProtoV0(_).map(Some(_)))
+      contractMetadataSeq <- contractMetadataP.toList.traverse {
+        case (contractIdP, driverContractMetadataBytes) =>
+          LfContractId
+            .fromProtoPrimitive(contractIdP)
+            .map(_ -> LfBytes.fromByteString(driverContractMetadataBytes))
+      }
+      contractMetadata = contractMetadataSeq.toMap
     } yield LedgerSyncEvent.TransactionAccepted(
       optCompletionInfo,
       transactionMeta,
@@ -523,7 +535,7 @@ object SerializableTransactionAccepted {
       recordTime,
       divulgedContracts,
       blindingInfo,
-      contractMetadata = Map(), // TODO(#9795) wire proper value
+      contractMetadata = contractMetadata,
     )
   }
 }

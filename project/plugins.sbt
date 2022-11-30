@@ -50,3 +50,6 @@ libraryDependencies ++= Seq(
   "io.circe" %% "circe-generic" % "0.13.0",
   "io.circe" %% "circe-parser" % "0.13.0",
 )
+
+// JMH for benchmarking purposes
+addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.3")

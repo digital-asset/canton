@@ -4,7 +4,7 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.either.*
-import com.daml.error.ErrorCategory.MaliciousOrFaultyBehaviour
+import com.daml.error.ErrorCategory.SecurityAlert
 import com.daml.error.{ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
@@ -146,8 +146,7 @@ object HandshakeErrors extends HandshakeErrorGroup {
   @Resolution(
     """Migrate to a new domain that uses the most recent protocol version."""
   )
-  object DeprecatedProtocolVersion
-      extends ErrorCode("DEPRECATED_PROTOCOL_VERSION", MaliciousOrFaultyBehaviour) {
+  object DeprecatedProtocolVersion extends ErrorCode("DEPRECATED_PROTOCOL_VERSION", SecurityAlert) {
     case class WarnSequencerClient(domainAlias: DomainAlias, version: ProtocolVersion)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(

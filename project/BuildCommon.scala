@@ -1,7 +1,7 @@
 import DamlPlugin.autoImport._
 import Dependencies._
 import com.typesafe.sbt.SbtLicenseReport.autoImportImpl._
-import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerSources, headerResources}
+import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
 import org.scalafmt.sbt.ScalafmtPlugin
 import sbt.Keys._
 import sbt.internal.util.ManagedLogger
@@ -373,7 +373,7 @@ object BuildCommon {
     wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
   ).flatMap(_.settings)
 
-  // applies to all Canton-based sub-projects (descendants of community-common)
+  // applies to all Canton-based sub-projects (descendants of util-external)
   lazy val sharedCantonSettings: Seq[Def.Setting[_]] = sharedSettings ++ cantonWarts ++ Seq(
     // Enable logging of begin and end of test cases, test suites, and test runs.
     Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter"),
@@ -426,6 +426,70 @@ object BuildCommon {
     conf / headerSources ++= (((conf / sourceDirectory).value / relativeDir) ** filePattern).get
 
   object CommunityProjects {
+
+    // Project for utilities that are also used outside of the Canton repo
+    lazy val `util-external` = project
+      .in(file("community/util-external"))
+      .dependsOn(
+        `akka-fork`,
+        `wartremover-extension` % "compile->compile;test->test",
+        `daml-copy-common`,
+        `daml-copy-testing` % "test->test",
+      )
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          logback_classic,
+          logback_core,
+          scala_logging,
+          scala_collection_contrib,
+          scalatest % Test,
+          mockito_scala % Test,
+          scalatestMockito % Test,
+          cats,
+          jul_to_slf4j % Test,
+          log4j_core,
+          log4j_api,
+          monocle_macro, // Include it here, even if unused, so that it can be used everywhere
+          pureconfig, // Only dependencies may be needed, but it is simplest to include it like this
+          opentelemetry_api,
+          opentelemetry_sdk,
+          opentelemetry_sdk_autoconfigure,
+          opentelemetry_instrumentation_grpc,
+          opentelemetry_zipkin,
+          opentelemetry_jaeger,
+        ),
+        dependencyOverrides ++= Seq(log4j_core, log4j_api),
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    // Project for general utilities used inside the Canton repo only
+    lazy val `util-internal` = project
+      .in(file("community/util"))
+      .dependsOn(
+        `util-external`
+      )
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          logback_classic,
+          logback_core,
+          scala_logging,
+          scala_collection_contrib,
+          scalatest % Test,
+          mockito_scala % Test,
+          scalatestMockito % Test,
+          cats,
+          cats_law % Test,
+          jul_to_slf4j % Test,
+          log4j_core,
+          log4j_api,
+          monocle_macro, // Include it here, even if unused, so that it can be used everywhere
+          pureconfig, // Only dependencies may be needed, but it is simplest to include it like this
+        ),
+        dependencyOverrides ++= Seq(log4j_core, log4j_api),
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
 
     lazy val `community-app` = project
       .in(file("community/app"))
@@ -490,6 +554,8 @@ object BuildCommon {
         `wartremover-extension` % "compile->compile;test->test",
         `daml-copy-common`,
         `daml-copy-testing` % "test->test",
+        `util-external` % "compile->compile;test->test",
+        `util-internal` % "compile->compile;test->test",
       )
       .settings(
         sharedCantonSettings,
@@ -693,6 +759,37 @@ object BuildCommon {
         damlFixedDars := Seq("AdminWorkflows.dar"),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    // Project for specifying the sequencer driver API
+    lazy val `sequencer-driver` = project
+      .in(file("community/sequencer-driver"))
+      .dependsOn(
+        `akka-fork`,
+        `util-external`,
+        `daml-copy-common`,
+        `daml-copy-testing` % "test->test",
+      )
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          logback_classic,
+          logback_core,
+          scala_logging,
+          scala_collection_contrib,
+          scalatest % Test,
+          mockito_scala % Test,
+          scalatestMockito % Test,
+          better_files,
+          cats,
+          jul_to_slf4j % Test,
+          log4j_core,
+          log4j_api,
+          monocle_macro, // Include it here, even if unused, so that it can be used everywhere
+          pureconfig,
+        ),
+        dependencyOverrides ++= Seq(log4j_core, log4j_api),
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
@@ -974,8 +1071,8 @@ object BuildCommon {
             "language-support/scala/bindings/src/main/2.13",
             "ledger/participant-local-store/src/main/scala",
             "ledger/ledger-api-auth/src/main/scala",
-            "ledger-service/jwt/src/main/scala",
             "libs-scala/build-info/src/main/scala",
+            "libs-scala/jwt/src/main/scala",
             "libs-scala/struct-json/src/main/scala",
             "ledger/ledger-api-client/src/main/scala",
             "ledger/ledger-api-auth-client/src/main/java",

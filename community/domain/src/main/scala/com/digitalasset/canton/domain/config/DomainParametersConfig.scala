@@ -35,6 +35,7 @@ import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
   * @param protocolVersion                        The protocol version spoken on the domain. All participants and domain nodes attempting to connect to the sequencer need to support this protocol version to connect.
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
   * @param dontWarnOnDeprecatedPV If true, then this domain will not emit a warning when configured to use a deprecated protocol version (such as 2.0.0).
+  * @param resetStoredStaticConfig DANGEROUS: If true, then the stored static configuration parameters will be reset to the ones in the configuration file
   */
 final case class DomainParametersConfig(
     reconciliationInterval: PositiveSeconds = StaticDomainParameters.defaultReconciliationInterval,
@@ -52,6 +53,7 @@ final case class DomainParametersConfig(
     ),
     willCorruptYourSystemDevVersionSupport: Boolean = false,
     dontWarnOnDeprecatedPV: Boolean = false,
+    resetStoredStaticConfig: Boolean = false,
 ) {
 
   /** Converts the domain parameters config into a domain parameters protocol message.
@@ -124,15 +126,15 @@ final case class DomainParametersConfig(
       logger: TracedLogger
   )(implicit traceContext: TraceContext): Unit = {
 
-    def logMessage[A](
+    def logMessage(
         name: String,
         setConsoleCommand: String,
-        configuredValue: A,
-        defaultValue: A,
+        configuredValue: String,
+        defaultValue: String,
     ) =
       s"""|Starting from protocol version ${ProtocolVersion.v4}, $name is a dynamic parameter that cannot be configured within the configuration file.
           |The configured value `$configuredValue` is ignored. The default value is ${defaultValue}.
-          |Please use the admin api to set this parameter: domain-name.service.set_$setConsoleCommand($configuredValue)
+          |Please use the admin api to set this parameter: domain-name.service.$setConsoleCommand($configuredValue)
           |""".stripMargin
 
     val currentPV = protocolVersion.version
@@ -141,18 +143,18 @@ final case class DomainParametersConfig(
         logger.warn(
           logMessage(
             "reconciliationInterval",
-            "reconciliation_interval",
-            reconciliationInterval,
-            StaticDomainParameters.defaultReconciliationInterval,
+            "set_reconciliation_interval",
+            reconciliationInterval.toFiniteDuration.toString(),
+            StaticDomainParameters.defaultReconciliationInterval.toFiniteDuration.toString(),
           )
         )
       if (maxRatePerParticipant != StaticDomainParameters.defaultMaxRatePerParticipant)
         logger.warn(
           logMessage(
             "max rate per participant",
-            "max_rate_per_participant",
-            maxRatePerParticipant,
-            StaticDomainParameters.defaultMaxRatePerParticipant,
+            "set_max_rate_per_participant",
+            maxRatePerParticipant.value.toString,
+            StaticDomainParameters.defaultMaxRatePerParticipant.value.toString,
           )
         )
 
@@ -161,8 +163,8 @@ final case class DomainParametersConfig(
           logMessage(
             "max request size (previously: max inbound message size)",
             "set_max_request_size",
-            maxInboundMessageSize,
-            StaticDomainParameters.defaultMaxRequestSize,
+            maxInboundMessageSize.unwrap.toString,
+            StaticDomainParameters.defaultMaxRequestSize.unwrap.toString,
           )
         )
     }
