@@ -10,4 +10,5 @@ import scala.concurrent.Future
 /** A running instance of a canton node */
 trait CantonNode extends AutoCloseable {
   def status: Future[NodeStatus.Status]
+  def isActive: Boolean
 }

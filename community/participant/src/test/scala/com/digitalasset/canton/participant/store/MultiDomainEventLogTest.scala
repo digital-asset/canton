@@ -32,8 +32,13 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.{
   TimelyRejectionEventId,
   TransactionEventId,
 }
-import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
+import com.digitalasset.canton.participant.sync.{
+  DefaultLedgerSyncEvent,
+  LedgerSyncEvent,
+  TimestampedEvent,
+  TimestampedEventAndCausalChange,
+}
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{Clock, SimClock}
@@ -79,7 +84,7 @@ trait MultiDomainEventLogTest
       maybeEventId: Option[EventId] = None,
   ): TimestampedEvent =
     TimestampedEvent(
-      DefaultDamlValues.dummyStateUpdate(timestampAtRc(localOffset)),
+      DefaultLedgerSyncEvent.dummyStateUpdate(timestampAtRc(localOffset)),
       localOffset,
       None,
       Some(

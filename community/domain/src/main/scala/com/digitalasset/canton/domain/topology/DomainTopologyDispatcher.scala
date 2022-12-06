@@ -137,6 +137,7 @@ private[domain] class DomainTopologyDispatcher(
   )
   private val staticDomainMembers = DomainMember.list(domainId, addressSequencerAsDomainMember)
   private val flushing = new AtomicBoolean(false)
+  private val initialized = new AtomicBoolean(false)
   private val queue = mutable.Queue[Traced[StoredTopologyTransaction[TopologyChangeOp]]]()
   private val lock = new Object()
   private val catchup = new MemberTopologyCatchup(authorizedStore, loggerFactory)
@@ -159,6 +160,7 @@ private[domain] class DomainTopologyDispatcher(
   def init(
       flushSequencer: => FutureUnlessShutdown[Unit]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    ErrorUtil.requireState(!initialized.get(), "dispatcher has already been initialized")
     for {
       initiallyPending <- FutureUnlessShutdown.outcomeF(determinePendingTransactions())
       // synchronise topology processing if necessary to avoid duplicate submissions and ugly warnings
@@ -175,17 +177,32 @@ private[domain] class DomainTopologyDispatcher(
           } yield pending
         } else FutureUnlessShutdown.pure(initiallyPending)
     } yield {
-      queue.appendAll(actuallyPending)
       actuallyPending.lastOption match {
         case Some(ts) =>
+          val racy = blocking {
+            lock.synchronized {
+              // the domain manager might have pushed transactions already into the queue.
+              // some of these transactions might have been picked up when we looked at the store.
+              // we resolve the situation by trivially deduplicating
+              val racy = queue
+                .removeAll()
+                .filterNot(racyItem => actuallyPending.exists(_.value == racyItem.value))
+              queue.appendAll(actuallyPending)
+              queue.appendAll(racy)
+              racy
+            }
+          }
           updateTopologyClientTs(ts.value.validFrom.value)
+          val all = actuallyPending ++ racy
           logger.info(
-            show"Resuming topology dispatching with ${actuallyPending.length} transactions: ${actuallyPending
+            show"Resuming topology dispatching with ${all.length} transactions: ${all
                 .map(x => (x.value.transaction.operation, x.value.transaction.transaction.element.mapping))}"
           )
-          flush()
-        case None => logger.debug("Started domain topology dispatching (nothing to catch up)")
+        case None =>
+          logger.debug("Started domain topology dispatching (nothing to catch up)")
       }
+      initialized.set(true)
+      flush()
     }
   }
 
@@ -335,7 +352,7 @@ private[domain] class DomainTopologyDispatcher(
   }
 
   def flush()(implicit traceContext: TraceContext): Unit = {
-    if (!flushing.getAndSet(true)) {
+    if (initialized.get() && queue.nonEmpty && !flushing.getAndSet(true)) {
       val ret = for {
         pending <- EitherT.right(performUnlessClosingF(functionFullName)(Future {
           blocking {
@@ -527,9 +544,7 @@ private[domain] object DomainTopologyDispatcher {
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): DomainTopologyDispatcher = {
-
-    val logger = loggerFactory.getTracedLogger(DomainTopologyDispatcher.getClass)
+  ): FutureUnlessShutdown[DomainTopologyDispatcher] = {
 
     val sender = new DomainTopologySender.Impl(
       domainId,
@@ -559,28 +574,8 @@ private[domain] object DomainTopologyDispatcher {
       loggerFactory,
     )
 
-    // schedule init on domain topology manager to avoid race conditions between
-    // queue filling and store scanning. however, we can't do that synchronously here
-    // as starting the domain might be kicked off by the domain manager (in manual init scenarios)
-    FutureUtil.doNotAwait(
-      domainTopologyManager.executeSequential(
-        {
-          for {
-            _ <- dispatcher.init(flushSequencerWithTimeProof(timeTracker, targetClient))
-          } yield {
-            domainTopologyManager.addObserver(dispatcher)
-          }
-        }.onShutdown(
-          logger.debug("Stopped dispatcher initialization due to shutdown")(
-            TraceContext.empty
-          )
-        ),
-        "initializing domain topology dispatcher",
-      ),
-      "domain topology manager sequential init failed",
-    )(ErrorLoggingContext.fromTracedLogger(logger))
-
-    dispatcher
+    domainTopologyManager.addObserver(dispatcher)
+    dispatcher.init(flushSequencerWithTimeProof(timeTracker, targetClient)).map { _ => dispatcher }
 
   }
 

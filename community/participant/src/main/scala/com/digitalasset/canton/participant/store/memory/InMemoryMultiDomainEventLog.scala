@@ -40,11 +40,12 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, TransactionEventId}
 import com.digitalasset.canton.participant.sync.{
+  LedgerSyncEvent,
   SyncDomainPersistentStateLookup,
   TimestampedEvent,
   TimestampedEventAndCausalChange,
 }
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId

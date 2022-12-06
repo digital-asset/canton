@@ -7,8 +7,6 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.Help.forInstance
 import org.scalatest.funsuite.AnyFunSuite
 
-import scala.annotation.nowarn
-
 class HelpTest extends AnyFunSuite with BaseTest {
 
   object Example {
@@ -51,7 +49,6 @@ class HelpTest extends AnyFunSuite with BaseTest {
     def thing(): Unit = ()
   }
 
-  @nowarn("cat=unused")
   object ImplicitsExample extends TestHelpful {
     @Help.Summary("Implicit should not be visible")
     def thing(implicit someImplicit: Int): Unit = ()

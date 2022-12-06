@@ -36,8 +36,12 @@ import com.digitalasset.canton.participant.store.MultiDomainEventLog.{
 import com.digitalasset.canton.participant.store.db.DbMultiDomainEventLog.*
 import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLog}
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TransactionEventId
-import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
+import com.digitalasset.canton.participant.sync.{
+  LedgerSyncEvent,
+  TimestampedEvent,
+  TimestampedEventAndCausalChange,
+}
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Implicits.{
   getResultLfPartyId as _,
@@ -422,7 +426,9 @@ class DbMultiDomainEventLog private[db] (
                   from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
                   where global_offset > $batchFromExcl and global_offset <= $batchToIncl
                   order by global_offset asc"""
-                .as[(GlobalOffset, Traced[LedgerSyncEvent])],
+                .as[
+                  (GlobalOffset, Traced[LedgerSyncEvent])
+                ],
               functionFullName,
             )
           }

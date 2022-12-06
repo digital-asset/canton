@@ -84,16 +84,8 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
         staticDomainParametersFromConfig.protocolVersion,
       )
 
-      // now, we assign the topology manager key with the domain topology manager
-      domainTopologyManagerId = DomainTopologyManagerId(uid)
-      _ <- authorizeStateUpdate(
-        topologyManager,
-        namespaceKey,
-        OwnerToKeyMapping(domainTopologyManagerId, topologyManagerSigningKey),
-        staticDomainParametersFromConfig.protocolVersion,
-      )
-
       // Setup the legal identity of the domain nodes
+      domainTopologyManagerId = DomainTopologyManagerId(uid)
       _ <-
         if (initConfig.identity.exists(_.generateLegalIdentityCertificate)) {
           (new LegalIdentityInit(certificateGenerator, crypto))
@@ -105,6 +97,13 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
         } else {
           EitherT.rightT[Future, String](())
         }
+      // now, we assign the topology manager key with the domain topology manager
+      _ <- authorizeStateUpdate(
+        topologyManager,
+        namespaceKey,
+        OwnerToKeyMapping(domainTopologyManagerId, topologyManagerSigningKey),
+        staticDomainParametersFromConfig.protocolVersion,
+      )
 
     } yield (nodeId, topologyManager, namespaceKey)
   }

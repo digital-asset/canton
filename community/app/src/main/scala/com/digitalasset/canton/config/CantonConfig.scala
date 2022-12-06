@@ -21,6 +21,7 @@ import com.digitalasset.canton.config.ConfigErrors.{
   NoConfigFiles,
   SubstitutionError,
 }
+import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.{
   InvalidLengthString,
@@ -78,14 +79,29 @@ object CheckConfig {
       timeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(10),
   ) extends CheckConfig
 
-  /** Returns the isActive state of a Participant.
-    * Intended for a HA participant where only one of potentially many replicas will be active concurrently.
-    * @param participant If unset will default to picking the only configured participant as this is the likely usage of this check,
-    *                    however if many participants are available within the process it will throw an error on startup.
-    *                    If using many participants in process then set to the configured name of the participant to return
+  object IsActive {
+    trait IsActiveConfigDeprecationsImplicits {
+      implicit def deprecatedHealthConfig[X <: IsActive]: DeprecatedFieldsFor[X] =
+        new DeprecatedFieldsFor[IsActive] {
+          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+            DeprecatedConfigUtils.MovedConfigPath(
+              "participant",
+              "node",
+            )
+          )
+        }
+    }
+    object DeprecatedImplicits extends IsActiveConfigDeprecationsImplicits
+  }
+
+  /** Returns the isActive state of a node.
+    * Intended for a HA node where only one of potentially many replicas will be active concurrently.
+    * @param node If unset will default to picking the only configured node as this is the likely usage of this check.
+    *                    If many nodes are available within the process it will pick the first participant node.
+    *                    If using many nodes in process then set to the configured name of the node to return
     *                    the active status of.
     */
-  case class IsActive(participant: Option[String] = None) extends CheckConfig
+  case class IsActive(node: Option[String] = None) extends CheckConfig
 }
 
 /** Configuration of health server backend. */
@@ -498,10 +514,11 @@ object CantonConfig {
     allowUnknownKeys = false,
   )
 
-  object ConfigReaders {
+  class ConfigReaders(implicit private val elc: ErrorLoggingContext) {
     import DeprecatedConfigUtils.*
     import CantonConfigUtil.*
     import ParticipantInitConfig.DeprecatedImplicits.*
+    import com.digitalasset.canton.config.CheckConfig.IsActive.DeprecatedImplicits.*
 
     lazy implicit val lengthLimitedStringReader: ConfigReader[LengthLimitedString] = {
       ConfigReader.fromString[LengthLimitedString] { str =>
@@ -681,9 +698,7 @@ object CantonConfig {
       deriveReader[NodeIdentifierConfig.Explicit]
     lazy implicit val nodeNameReader: ConfigReader[NodeIdentifierConfig] =
       deriveReader[NodeIdentifierConfig]
-    implicit def participantInitConfigReader(implicit
-        elc: ErrorLoggingContext
-    ): ConfigReader[ParticipantInitConfig] =
+    lazy implicit val participantInitConfigReader: ConfigReader[ParticipantInitConfig] =
       deriveReader[ParticipantInitConfig].applyDeprecations
         .enableNestedOpt("auto-init", _.copy(identity = None))
     lazy implicit val domainInitConfigReader: ConfigReader[DomainInitConfig] =
@@ -834,7 +849,7 @@ object CantonConfig {
     lazy implicit val checkConfigPingReader: ConfigReader[CheckConfig.Ping] =
       deriveReader[CheckConfig.Ping]
     lazy implicit val checkConfigIsActiveReader: ConfigReader[CheckConfig.IsActive] =
-      deriveReader[CheckConfig.IsActive]
+      deriveReader[CheckConfig.IsActive].applyDeprecations
     lazy implicit val checkConfigReader: ConfigReader[CheckConfig] = deriveReader[CheckConfig]
     lazy implicit val healthServerConfigReader: ConfigReader[HealthServerConfig] =
       deriveReader[HealthServerConfig]
@@ -868,7 +883,7 @@ object CantonConfig {
       deriveReader[ApiLoggingConfig]
     lazy implicit val loggingConfigReader: ConfigReader[LoggingConfig] =
       deriveReader[LoggingConfig]
-    lazy implicit val monitoringConfigReader: ConfigReader[MonitoringConfig] =
+    implicit lazy val monitoringConfigReader: ConfigReader[MonitoringConfig] =
       deriveReader[MonitoringConfig]
     lazy implicit val consoleCommandTimeoutReader: ConfigReader[ConsoleCommandTimeout] =
       deriveReader[ConsoleCommandTimeout]

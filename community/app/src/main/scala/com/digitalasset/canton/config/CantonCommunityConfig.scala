@@ -85,7 +85,8 @@ object CantonCommunityConfig {
   private implicit def cantonCommunityConfigReader(implicit
       elc: ErrorLoggingContext
   ): ConfigReader[CantonCommunityConfig] = { // memoize it so we get the same instance every time
-    import CantonConfig.ConfigReaders.*
+    val configReaders: ConfigReaders = new ConfigReaders()
+    import configReaders.*
     import DeprecatedConfigUtils.*
     import CantonDeprecationImplicits.*
 

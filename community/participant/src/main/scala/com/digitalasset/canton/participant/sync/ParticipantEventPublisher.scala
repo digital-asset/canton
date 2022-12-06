@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
 import com.digitalasset.canton.participant.store.*
@@ -18,7 +19,6 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.{
   TimelyRejectionEventId,
   TransactionEventId,
 }
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -87,7 +87,7 @@ class ParticipantEventPublisher(
       show"RecordTime not initialized with 'now' literal. Participant event: $event",
     )
     executionQueue.execute(
-      publishInternal(LedgerEvent.setTimestamp(event, participantClock.uniqueTime().toLf)),
+      publishInternal(event.setTimestamp(participantClock.uniqueTime().toLf)),
       s"publish event ${event.description} with record time ${event.recordTime}",
     )
   }

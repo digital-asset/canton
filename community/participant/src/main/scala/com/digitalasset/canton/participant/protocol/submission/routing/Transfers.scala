@@ -71,6 +71,7 @@ private[routing] class ContractsTransferer(
           TargetProtocolVersion(targetSyncDomain.staticDomainParameters.protocolVersion),
         )
         .leftMap(_.toString)
+        .semiflatMap(identity)
       outStatus <- EitherT.right[String](outResult.transferOutCompletionF)
       _outApprove <- EitherT.cond[Future](
         outStatus.code == com.google.rpc.Code.OK_VALUE,
@@ -88,6 +89,7 @@ private[routing] class ContractsTransferer(
           SourceProtocolVersion(sourceSyncDomain.staticDomainParameters.protocolVersion),
         )
         .leftMap[String](err => s"Transfer in failed with error ${err}")
+        .semiflatMap(identity)
 
       inStatus <- EitherT.right[String](inResult.transferInCompletionF)
       _inApprove <- EitherT.cond[Future](

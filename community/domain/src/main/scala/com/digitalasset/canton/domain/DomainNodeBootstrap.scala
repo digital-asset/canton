@@ -282,15 +282,13 @@ class DomainNodeBootstrap(
       staticDomainParameters: StaticDomainParameters,
   ): EitherT[Future, String, Unit] = {
     def deferStart: EitherT[Future, String, Unit] = {
-      val attemptedStart = new AtomicBoolean(false)
-
       logger.info("Deferring domain startup until domain manager has been fully initialized")
       manager.addObserver(new DomainIdentityStateObserver {
+        val attemptedStart = new AtomicBoolean(false)
         override def addedSignedTopologyTransaction(
             timestamp: CantonTimestamp,
             transaction: Seq[SignedTopologyTransaction[TopologyChangeOp]],
         )(implicit traceContext: TraceContext): Unit = {
-          // we can't unsubscribe observers so instead just ignore transactions once we've attempted to start once
           if (!attemptedStart.get()) {
             val initTimeout = parameters.processingTimeouts.unbounded
             val managerInitialized =
@@ -299,6 +297,7 @@ class DomainNodeBootstrap(
               )(manager.isInitialized(mustHaveActiveMediator = true))
             if (managerInitialized) {
               if (attemptedStart.compareAndSet(false, true)) {
+                manager.removeObserver(this)
                 // we're now the top level error handler of starting a domain so log appropriately
                 val domainStarted =
                   initTimeout.await("Domain startup awaiting domain ready to handle requests")(
@@ -314,7 +313,6 @@ class DomainNodeBootstrap(
           }
         }
       })
-
       EitherT.pure[Future, String](())
     }
 
@@ -364,7 +362,6 @@ class DomainNodeBootstrap(
           )
         )
         (topologyProcessor, topologyClient) = processorAndClient
-
         sequencerClientFactoryFactory = (client: DomainTopologyClientWithInit) =>
           new DomainNodeSequencerClientFactory(
             domainId,
@@ -381,7 +378,6 @@ class DomainNodeBootstrap(
           )
 
         auditLogger = ParticipantAuditor.factory(loggerFactory, config.auditLogging)
-
         // add audit logging to the domain manager
         _ = if (config.auditLogging) {
           manager.addObserver(new DomainIdentityStateObserver {
@@ -422,7 +418,6 @@ class DomainNodeBootstrap(
               )
           }
           .toEitherT[Future]
-
         sequencerRuntime = sequencerRuntimeFactory
           .create(
             domainId,
@@ -447,7 +442,6 @@ class DomainNodeBootstrap(
             loggerFactory,
             logger,
           )
-
         domainIdentityService = DomainTopologyManagerRequestService.create(
           config.topology,
           manager,
@@ -483,7 +477,6 @@ class DomainNodeBootstrap(
           syncCrypto,
           metrics.grpcMetrics,
         )
-
         topologyManagementArtefacts <- TopologyManagementInitialization(
           config,
           domainId,
@@ -505,7 +498,6 @@ class DomainNodeBootstrap(
           indexedStringStore,
           loggerFactory,
         )
-
         mediatorRuntime <- EmbeddedMediatorInitialization(
           domainId,
           parameters,
@@ -662,6 +654,8 @@ class Domain(
   registerAdminServices()
 
   logger.debug("Domain successfully initialized")
+
+  override def isActive: Boolean = true
 
   override def status: Future[DomainStatus] =
     for {

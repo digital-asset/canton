@@ -55,6 +55,13 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
     def deprecatedConfigChecks(config: CantonCommunityConfig) = {
       import scala.concurrent.duration.*
 
+      config.monitoring.health.foreach { health =>
+        health.check match {
+          case CheckConfig.IsActive(node) => node shouldBe Some("my_node")
+          case _ =>
+        }
+      }
+
       val participant = config.participants.headOption.value._2
       participant.init.ledgerApi.maxDeduplicationDuration.duration.toSeconds shouldBe 10.minutes.toSeconds
       participant.init.parameters.uniqueContractKeys shouldBe false

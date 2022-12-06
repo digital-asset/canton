@@ -39,7 +39,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 
-import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordering.Implicits.infixOrderingOps
 
@@ -561,7 +560,6 @@ abstract class TopologyManager[E <: CantonError](
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): Future[Unit]
 
-  @nowarn("cat=unused")
   protected def preNotifyObservers(transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]])(
       implicit traceContext: TraceContext
   ): Unit = {}

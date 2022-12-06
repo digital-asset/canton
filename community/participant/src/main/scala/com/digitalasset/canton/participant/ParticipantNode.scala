@@ -814,6 +814,8 @@ class ParticipantNode(
     with HasUptime
     with NoTracing {
 
+  override def isActive = sync.isActive()
+
   def reconnectDomainsIgnoreFailures()(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,

@@ -5,11 +5,12 @@ package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
 import com.codahale.metrics.{Metric, MetricFilter}
-import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
+import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
 import com.daml.metrics.{JvmMetricSet, OpenTelemetryMeterOwner}
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.domain.metrics.{
   DomainMetrics,
   EnvMetrics,
@@ -103,7 +104,12 @@ case class MetricsFactory(
     meter: Meter,
 ) extends AutoCloseable {
 
-  private val openTelemetryFactory = new OpenTelemetryFactory(meter)
+  private val openTelemetryFactory = new OpenTelemetryFactory(meter) {
+    override val globalMetricsContext: MetricsContext = MetricsContext(
+      "daml_version" -> BuildInfo.damlLibrariesVersion,
+      "canton_version" -> BuildInfo.version,
+    )
+  }
   private val envMetrics = new EnvMetrics(registry)
   private val participants = TrieMap[String, ParticipantMetrics]()
   private val domains = TrieMap[String, DomainMetrics]()

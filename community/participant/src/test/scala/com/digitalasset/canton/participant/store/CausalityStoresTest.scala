@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.ledger.participant.state.v2.Update.PublicPackageUploadRejected
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
-import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.participant.sync.LedgerSyncEvent.PublicPackageUploadRejected
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore

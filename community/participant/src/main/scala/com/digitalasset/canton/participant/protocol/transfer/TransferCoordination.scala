@@ -92,7 +92,9 @@ class TransferCoordination(
       inSubmission <- EitherT.fromEither[Future](
         inSubmissionById(id).toRight(UnknownDomain(id, "When transfering in"))
       )
-      submissionResult <- inSubmission.submitTransferIn(partyId, transferId, sourceProtocolVersion)
+      submissionResult <- inSubmission
+        .submitTransferIn(partyId, transferId, sourceProtocolVersion)
+        .semiflatMap(identity)
     } yield submissionResult
   }
 
@@ -276,7 +278,7 @@ trait TransferSubmissionHandle {
       targetProtocolVersion: TargetProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, TransferOutProcessingSteps.SubmissionResult]
+  ): EitherT[Future, TransferProcessorError, Future[TransferOutProcessingSteps.SubmissionResult]]
 
   def submitTransferIn(
       submittingParty: LfPartyId,
@@ -284,5 +286,5 @@ trait TransferSubmissionHandle {
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult]
+  ): EitherT[Future, TransferProcessorError, Future[TransferInProcessingSteps.SubmissionResult]]
 }

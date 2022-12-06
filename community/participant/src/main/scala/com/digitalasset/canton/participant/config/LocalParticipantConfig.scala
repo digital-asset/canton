@@ -250,6 +250,8 @@ case class RemoteParticipantConfig(
   * @param inMemoryFanOutThreadPoolSize Size of the thread-pool backing the Ledger API in-memory fan-out.
   *                                     If not set, defaults to ((number of thread)/4 + 1)
   * @param rateLimit limit the ledger api server request rates based on system metrics
+  * @param preparePackageMetadataTimeOutWarning Timeout for package metadata preparation after which a warning will be logged
+  * @param completionsPageSize database / akka page size for batching of ledger api server index ledger completion queries
   */
 case class LedgerApiServerConfig(
     address: String = "127.0.0.1",
@@ -287,6 +289,7 @@ case class LedgerApiServerConfig(
     rateLimit: Option[RateLimitingConfig] = Some(DefaultRateLimit),
     preparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultPreparePackageMetadataTimeOutWarning,
+    completionsPageSize: Int = LedgerApiServerConfig.DefaultCompletionsPageSize,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
@@ -327,6 +330,7 @@ object LedgerApiServerConfig {
       maxUsedHeapSpacePercentage = 100,
       minFreeHeapSpaceBytes = 0,
     )
+  val DefaultCompletionsPageSize = 1000
 
   def DefaultInMemoryFanOutThreadPoolSize(implicit loggingContext: ErrorLoggingContext): Int = {
     val numberOfThreads =
@@ -358,6 +362,7 @@ object LedgerApiServerConfig {
       _timeProviderType,
       tlsConfiguration,
       _userManagement,
+      _identityProviderManagement,
     ) = apiServerConfig
 
     val DamlIndexServiceConfig(
@@ -377,6 +382,7 @@ object LedgerApiServerConfig {
       inMemoryStateUpdaterParallelism,
       inMemoryFanOutThreadPoolSize,
       preparePackageMetadataTimeOutWarning,
+      completionsPageSize,
     ) = indexServiceConfig
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
@@ -433,6 +439,7 @@ object LedgerApiServerConfig {
       inMemoryFanOutThreadPoolSize = Some(inMemoryFanOutThreadPoolSize),
       preparePackageMetadataTimeOutWarning =
         NonNegativeFiniteDuration(preparePackageMetadataTimeOutWarning.toJava),
+      completionsPageSize = completionsPageSize,
     ).discard
   }
 

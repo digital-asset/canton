@@ -13,7 +13,6 @@ import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.config.{
   ParticipantNodeParameters,
   PartyNotificationConfig,

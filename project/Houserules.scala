@@ -91,6 +91,7 @@ object JvmRulesPlugin extends AutoPlugin {
             "-Ywarn-unused:imports",
             "-Ywarn-unused:implicits",
             "-Ywarn-unused:locals",
+            "-Ywarn-unused:nowarn",
             "-Vimplicits",
             "-Vtype-diffs",
             "-Xsource:3",

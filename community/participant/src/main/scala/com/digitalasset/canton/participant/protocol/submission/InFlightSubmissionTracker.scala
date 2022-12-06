@@ -15,14 +15,14 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightBySequencingInfo
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.{DeduplicationInfo, OnPublish}
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
 import com.digitalasset.canton.sequencing.protocol.{DeliverError, MessageId}
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.DomainId
@@ -302,10 +302,10 @@ class InFlightSubmissionTracker(
     * and informs the [[CommandDeduplicator]] about the published events.
     *
     * @param upToInclusive Upper bound on the sequencing time of the submissions to be recovered.
-    *                      The [[com.digitalasset.canton.participant.LedgerSyncEvent]]s for all sequenced submissions
+    *                      The [[com.digitalasset.canton.participant.sync.LedgerSyncEvent]]s for all sequenced submissions
     *                      up to this bound must have been published to the
     *                      [[com.digitalasset.canton.participant.store.MultiDomainEventLog]].
-    *                      The [[com.digitalasset.canton.participant.LedgerSyncEvent]]s for all sequenced submissions
+    *                      The [[com.digitalasset.canton.participant.sync.LedgerSyncEvent]]s for all sequenced submissions
     *                      in the [[com.digitalasset.canton.participant.store.InFlightSubmissionStore]] must not yet
     *                      have been pruned from the [[com.digitalasset.canton.participant.store.MultiDomainEventLog]].
     */

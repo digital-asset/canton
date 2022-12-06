@@ -35,7 +35,6 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   NamedLoggingContext,
 }
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.event.RecordTime
@@ -45,7 +44,7 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
 import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
 import com.digitalasset.canton.participant.sync.{
-  LedgerEvent,
+  LedgerSyncEvent,
   SyncDomainPersistentStateManager,
   TimestampedEvent,
   TimestampedEventAndCausalChange,
@@ -1061,7 +1060,8 @@ class RepairService(
               ledgerEffectiveTime = repair.ts.toLf,
               workflowId = None,
               submissionTime = repair.ts.toLf,
-              submissionSeed = LedgerEvent.noOpSeed, // "fake" transaction - None no longer allowed
+              submissionSeed =
+                LedgerSyncEvent.noOpSeed, // "fake" transaction - None no longer allowed
               optUsedPackages = None,
               optNodeSeeds = None,
               optByKeyNodes = None,

@@ -10,8 +10,6 @@ import com.daml.lf.transaction.{ContractStateMachine, Versioned}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.data.{Counter, CounterCompanion}
 
-import scala.annotation.nowarn
-
 package object canton {
 
   // Lf type for other ledger scalars, e.g. application, command and workflow id
@@ -125,7 +123,7 @@ package object canton {
 
   /** Evaluate the expression and discard the result. */
   implicit final class DiscardOps[A](private val a: A) extends AnyVal {
-    @nowarn("cat=unused") @inline
+    @inline
     def discard[B](implicit ev: A =:= B): Unit = ()
   }
 

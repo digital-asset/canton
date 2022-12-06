@@ -204,6 +204,19 @@ class DomainTopologyDispatcherTest
     )
     val dispatcher = mkDispatcher
 
+    def init(flusher: Future[Unit] = Future.unit): Future[Unit] = {
+      initDispatcher(dispatcher, flusher)
+    }
+
+    def initDispatcher(
+        dispatcher: DomainTopologyDispatcher,
+        flusher: Future[Unit],
+    ): Future[Unit] = {
+      dispatcher
+        .init(FutureUnlessShutdown.outcomeF(flusher))
+        .failOnShutdown("dispatcher initialization")
+    }
+
     def close(): Unit = {}
 
     def submit(
@@ -267,6 +280,7 @@ class DomainTopologyDispatcherTest
         import f.*
         val grabF = expect(3)
         for {
+          _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, txs.id1k1)
           _ <- submit(ts1, txs.id2k2)
           res <- grabF
@@ -278,6 +292,7 @@ class DomainTopologyDispatcherTest
         import f.*
         val grabF = expect(2)
         for {
+          _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, txs.ps1, txs.id1k1)
           res <- grabF
           grab2 = expect(3)
@@ -306,6 +321,7 @@ class DomainTopologyDispatcherTest
         val dpc1 = dpc(1)
         val dpc2 = dpc(2)
         for {
+          _ <- f.init()
           _ <- submit(ts0, dpc2)
           res <- expect(1)
           _ <- submit(ts1, dpc1)
@@ -330,6 +346,7 @@ class DomainTopologyDispatcherTest
         import f.*
         loggerFactory.assertLogs(
           for {
+            _ <- f.init()
             _ <- submit(ts0, txs.ns1k1)
           } yield { assert(true) },
           _.errorMessage should include("Halting topology dispatching"),
@@ -351,9 +368,11 @@ class DomainTopologyDispatcherTest
         import f.*
         logger.debug("restarting when idle")
         for {
+          _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, txs.id1k1)
           _ <- expect(2)
           d2 = f.mkDispatcher
+          _ <- f.initDispatcher(d2, Future.unit)
           _ <- submit(d2, ts1, txs.okm1, txs.ns1k2)
           res <- expect(2)
         } yield {
@@ -373,15 +392,28 @@ class DomainTopologyDispatcherTest
           _ <- f.append(sourceStore, ts1, Seq(txs.ns1k1, txs.okm1))
           _ <- f.targetStore.updateDispatchingWatermark(ts0)
           _ <- f.append(targetStore, ts1, Seq(txs.ns1k2, txs.ns1k1))
-          _ <- f.dispatcher
-            .init(FutureUnlessShutdown.outcomeF(flusher.foo))
-            .failOnShutdown("dispatcher initialization")
+          _ <- f.init(flusher.foo)
           res <- f.expect(1)
         } yield {
           // ensure we've flushed the system
           verify(flusher, times(1)).foo
           // first tx should not be submitted due to watermark, and second should be filtered out
           res.compare(txs.okm1)
+        }
+      }
+      "racy start" in { f =>
+        import f.*
+        for {
+          // add one into the store
+          _ <- f.append(sourceStore, ts0, Seq(txs.ns1k2))
+          // now add one into the store and into the queue
+          _ <- submit(ts1, txs.ns1k1)
+          // now add one just into the queue (so won't be picked up during init when we read from the store)
+          _ = f.dispatcher.addedSignedTopologyTransaction(ts2, Seq(txs.okm1))
+          _ <- f.init()
+          res <- expect(3)
+        } yield {
+          res.compare(txs.ns1k2, txs.ns1k1, txs.okm1)
         }
       }
     }
@@ -391,6 +423,7 @@ class DomainTopologyDispatcherTest
         import f.*
         val grabF = expect(1)
         for {
+          _ <- f.init()
           _ <- submit(ts0, txs.dpc1)
           res1 <- grabF
           grab2F = expect(4)
@@ -411,6 +444,7 @@ class DomainTopologyDispatcherTest
       "keep distributing on non-deactivation changes" in { f =>
         import f.*
         for {
+          _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, mpsO)
           _ <- expect(2)
           _ <- submit(ts1, txs.okm1)
@@ -446,6 +480,7 @@ class DomainTopologyDispatcherTest
         val rmpsS = revert(mpsS)
         val rmpsD = revert(mpsD)
         for {
+          _ <- f.init()
           _ <- submit(ts0, txs.ns1k1, mpsS)
           _ <- submit(ts0.immediateSuccessor, mpsD)
           _ <- expect(3)

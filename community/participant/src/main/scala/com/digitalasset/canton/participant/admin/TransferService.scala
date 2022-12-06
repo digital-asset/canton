@@ -42,6 +42,7 @@ class TransferService(
 
       transferId <- submissionHandle
         .submitTransferOut(submittingParty, contractId, targetDomainId, targetProtocolVersion)
+        .semiflatMap(Predef.identity)
         .biflatMap(
           error => EitherT.leftT[Future, TransferId](error.toString),
           result =>
@@ -75,6 +76,7 @@ class TransferService(
       )
       result <- submisisonHandle
         .submitTransferIn(submittingParty, transferId, sourceProtocolVersion)
+        .semiflatMap(Predef.identity)
         .leftMap(_.toString)
       _ <- EitherT(
         result.transferInCompletionF.map(status =>
