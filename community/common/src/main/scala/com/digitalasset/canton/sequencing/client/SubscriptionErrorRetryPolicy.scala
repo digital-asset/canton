@@ -7,7 +7,6 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.SubscriptionError
 import com.digitalasset.canton.tracing.TraceContext
 
-import scala.annotation.nowarn
 import scala.reflect.ClassTag
 
 /** Policy for what errors are considered retryable.
@@ -19,7 +18,6 @@ trait SubscriptionErrorRetryPolicy {
       traceContext: TraceContext
   ): Boolean
 
-  @nowarn("cat=unused")
   def retryOnException(ex: Throwable, Logger: TracedLogger)(implicit
       traceContext: TraceContext
   ): Boolean = false

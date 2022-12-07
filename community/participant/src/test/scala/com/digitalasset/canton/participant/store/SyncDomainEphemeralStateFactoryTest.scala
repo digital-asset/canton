@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryMultiDomainEventLog,
   InMemoryRequestJournalStore,
 }
-import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.participant.sync.{DefaultLedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -32,7 +32,7 @@ import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DefaultDamlValues, RequestCounter, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, RequestCounter, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -73,7 +73,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     )
 
   def dummyTimestampedEvent(localOffset: LocalOffset): TimestampedEvent =
-    TimestampedEvent(DefaultDamlValues.dummyStateUpdate(), localOffset, None)
+    TimestampedEvent(DefaultLedgerSyncEvent.dummyStateUpdate(), localOffset, None)
 
   "startingPoints" when {
     "there is no clean request" should {

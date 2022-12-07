@@ -741,10 +741,10 @@ class SyncDomain(
       targetProtocolVersion: TargetProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, TransferOutProcessingSteps.SubmissionResult] =
+  ): EitherT[Future, TransferProcessorError, Future[TransferOutProcessingSteps.SubmissionResult]] =
     performUnlessClosingEitherT[
       TransferProcessorError,
-      TransferOutProcessingSteps.SubmissionResult,
+      Future[TransferOutProcessingSteps.SubmissionResult],
     ](functionFullName, DomainNotReady(domainId, "The domain is shutting down.")) {
       if (!ready)
         DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard
@@ -754,7 +754,6 @@ class SyncDomain(
             .SubmissionParam(submittingParty, contractId, targetDomain, targetProtocolVersion)
         )
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
-        .semiflatMap(Predef.identity)
     }
 
   def submitTransferIn(
@@ -763,8 +762,10 @@ class SyncDomain(
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult] =
-    performUnlessClosingEitherT[TransferProcessorError, TransferInProcessingSteps.SubmissionResult](
+  ): EitherT[Future, TransferProcessorError, Future[TransferInProcessingSteps.SubmissionResult]] =
+    performUnlessClosingEitherT[TransferProcessorError, Future[
+      TransferInProcessingSteps.SubmissionResult
+    ]](
       functionFullName,
       DomainNotReady(domainId, "The domain is shutting down."),
     ) {
@@ -777,7 +778,6 @@ class SyncDomain(
             .SubmissionParam(submittingParty, transferId, sourceProtocolVersion)
         )
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
-        .semiflatMap(Predef.identity)
     }
 
   def numberOfDirtyRequests(): Int = ephemeral.requestJournal.numberOfDirtyRequests

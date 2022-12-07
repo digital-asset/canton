@@ -8,7 +8,6 @@ import cats.syntax.option.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.ledger.configuration.LedgerTimeModel
-import com.daml.ledger.participant.state.v2.Update.PublicPackageUpload
 import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.CantonOnly.LfVersionedTransaction
 import com.daml.lf.data.{ImmArray, Ref}
@@ -119,9 +118,4 @@ object DefaultDamlValues {
     LfVersionedTransaction(LfTransactionVersion.VDev, Map.empty, ImmArray.empty)
   lazy val emptyCommittedTransaction: LfCommittedTransaction =
     LfCommittedTransaction.subst[Id](emptyVersionedTransaction)
-
-  def dummyStateUpdate(
-      timestamp: CantonTimestamp = CantonTimestamp.Epoch
-  ): com.daml.ledger.participant.state.v2.Update =
-    PublicPackageUpload(List.empty, None, timestamp.toLf, None)
 }

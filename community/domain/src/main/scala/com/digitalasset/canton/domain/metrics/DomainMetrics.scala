@@ -7,7 +7,7 @@ import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
 import com.daml.metrics.api.dropwizard.DropwizardGauge
-import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
+import com.daml.metrics.api.{MetricDoc, MetricName}
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.metrics.{DbStorageMetrics, MetricHandle, SequencerClientMetrics}
 
@@ -74,7 +74,7 @@ class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Fac
   def registerExecutionContextQueueSize(f: () => Long): Unit = {
     gaugeWithSupplier(
       executionContextQueueSizeName,
-      () => () => f -> MetricsContext.Empty,
+      f,
     )
   }
 

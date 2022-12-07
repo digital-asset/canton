@@ -32,15 +32,13 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
-import scala.annotation.nowarn
-import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future, blocking}
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Simple callback trait to inform system about changes on the topology manager
   */
 trait DomainIdentityStateObserver {
   // receive update on domain topology transaction change AFTER the local change was added to the state
-  @nowarn("cat=unused")
   def addedSignedTopologyTransaction(
       timestamp: CantonTimestamp,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
@@ -182,13 +180,16 @@ class DomainTopologyManager(
     )(ec)
     with RequestProcessingStrategy.ManagerHooks {
 
-  private val observers = mutable.ListBuffer[DomainIdentityStateObserver]()
-  def addObserver(observer: DomainIdentityStateObserver): Unit = blocking(synchronized {
-    val _ = observers += observer
-  })
-
-  private def sendToObservers(action: DomainIdentityStateObserver => Unit): Unit =
-    blocking(synchronized(observers.foreach(action)))
+  private val observers = new AtomicReference[List[DomainIdentityStateObserver]](List.empty)
+  def addObserver(observer: DomainIdentityStateObserver): Unit = {
+    observers.updateAndGet(_ :+ observer).discard
+  }
+  def removeObserver(observer: DomainIdentityStateObserver): Unit = {
+    observers.updateAndGet(_.filterNot(_ == observer)).discard
+  }
+  private def sendToObservers(action: DomainIdentityStateObserver => Unit): Unit = {
+    observers.get().foreach(action)
+  }
 
   /** Authorizes a new topology transaction by signing it and adding it to the topology state
     *
@@ -392,12 +393,6 @@ class DomainTopologyManager(
         mustHaveActiveMediator,
         loggerFactory,
       )
-
-  def executeSequential(fut: => Future[Unit], description: String)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    sequentialQueue.execute(fut, description)
-  }
 
   override def issueParticipantStateForDomain(participantId: ParticipantId)(implicit
       traceContext: TraceContext

@@ -5,15 +5,14 @@ package com.digitalasset.canton.participant.sync
 
 import cats.syntax.either.*
 import cats.syntax.option.*
-import com.daml.ledger.participant.state.v2.Update.TransactionAccepted
 import com.daml.lf.data.ImmArray
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightByMessageId
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.DomainId
@@ -39,7 +38,7 @@ case class TimestampedEvent(
     */
   def normalized: TimestampedEvent = {
     val normalizeEvent = event match {
-      case ta: TransactionAccepted =>
+      case ta: LedgerSyncEvent.TransactionAccepted =>
         val normalizedTransactionMeta = ta.transactionMeta.optNodeSeeds match {
           case _: Some[_] => ta.transactionMeta
           case None => ta.transactionMeta.copy(optNodeSeeds = Some(ImmArray.empty))
@@ -85,7 +84,7 @@ object TimestampedEvent {
 
   /** The size of the event for the metric in the [[com.digitalasset.canton.participant.store.MultiDomainEventLog]]. */
   def eventSize(event: LedgerSyncEvent): Int = event match {
-    case event: TransactionAccepted => event.transaction.roots.length
+    case event: LedgerSyncEvent.TransactionAccepted => event.transaction.roots.length
     case _ => 1
   }
 
@@ -140,7 +139,7 @@ object TimestampedEvent {
 
     def fromLedgerSyncEvent(event: LedgerSyncEvent): Option[EventId] = {
       val optTransactionId = event match {
-        case at: TransactionAccepted => Some(at.transactionId)
+        case at: LedgerSyncEvent.TransactionAccepted => Some(at.transactionId)
         case _ => None
       }
       optTransactionId.map(TransactionEventId)

@@ -14,8 +14,7 @@ import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.LedgerSyncEvent
-import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{

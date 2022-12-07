@@ -7,10 +7,6 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.ledger.configuration.*
-import com.daml.ledger.participant.state.v2.Update.CommandRejected.{
-  FinalReason,
-  RejectionReasonTemplate,
-}
 import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.crypto.Hash as LfHash
 import com.daml.lf.data.Time.Timestamp
@@ -23,9 +19,9 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   ValueConversionError,
 }
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.v0
 import com.digitalasset.canton.participant.store.DamlLfSerializers.*
+import com.digitalasset.canton.participant.sync.LedgerSyncEvent
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{
   LfCommittedTransaction,
@@ -64,13 +60,13 @@ import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as RpcStatus
 import slick.jdbc.{GetResult, SetParameter}
 
-/** Wrapper for converting a [[LedgerSyncEvent]] to its protobuf companion.
+/** Wrapper for converting a [[com.digitalasset.canton.participant.sync.LedgerSyncEvent]] to its protobuf companion.
   * Currently only Intended only for storage due to the unusual exceptions which are thrown that are only permitted in a storage context.
   *
   * @throws canton.store.db.DbSerializationException if transactions or contracts fail to serialize
   * @throws canton.store.db.DbDeserializationException if transactions or contracts fail to deserialize
   */
-final case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)(
+final case class SerializableLedgerSyncEvent(event: LedgerSyncEvent)(
     val representativeProtocolVersion: RepresentativeProtocolVersion[SerializableLedgerSyncEvent]
 ) extends HasProtocolVersionedWrapper[SerializableLedgerSyncEvent] {
 
@@ -80,7 +76,7 @@ final case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)(
     val SyncEventP = v0.LedgerSyncEvent.Value
 
     v0.LedgerSyncEvent(
-      ledgerSyncEvent match {
+      event match {
         case configurationChanged: LedgerSyncEvent.ConfigurationChanged =>
           SyncEventP.ConfigurationChanged(
             SerializableConfigurationChanged(configurationChanged).toProtoV0
@@ -130,10 +126,10 @@ object SerializableLedgerSyncEvent
   )
 
   def apply(
-      ledgerSyncEvent: LedgerSyncEvent,
+      event: LedgerSyncEvent,
       protocolVersion: ProtocolVersion,
   ): SerializableLedgerSyncEvent =
-    SerializableLedgerSyncEvent(ledgerSyncEvent)(protocolVersionRepresentativeFor(protocolVersion))
+    SerializableLedgerSyncEvent(event)(protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV0(
       ledgerSyncEventP: v0.LedgerSyncEvent
@@ -924,7 +920,9 @@ object SerializableBlindingInfo {
   }
 }
 
-case class SerializableRejectionReasonTemplate(rejectionReason: RejectionReasonTemplate) {
+case class SerializableRejectionReasonTemplate(
+    rejectionReason: LedgerSyncEvent.CommandRejected.FinalReason
+) {
   def toProtoV0: v0.CommandRejected.GrpcRejectionReasonTemplate =
     v0.CommandRejected.GrpcRejectionReasonTemplate(rejectionReason.status.toByteString)
 }
@@ -932,9 +930,9 @@ case class SerializableRejectionReasonTemplate(rejectionReason: RejectionReasonT
 object SerializableRejectionReasonTemplate {
   def fromProtoV0(
       reasonP: v0.CommandRejected.GrpcRejectionReasonTemplate
-  ): ParsingResult[RejectionReasonTemplate] = {
+  ): ParsingResult[LedgerSyncEvent.CommandRejected.FinalReason] = {
     for {
       rpcStatus <- ProtoConverter.protoParser(RpcStatus.parseFrom)(reasonP.status)
-    } yield FinalReason(rpcStatus)
+    } yield LedgerSyncEvent.CommandRejected.FinalReason(rpcStatus)
   }
 }

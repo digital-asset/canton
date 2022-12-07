@@ -8,7 +8,6 @@ import cats.Id
 import cats.data.EitherT
 import cats.implicits.*
 import com.daml.ledger.participant.state.v2.ChangeId
-import com.daml.ledger.participant.state.v2.Update.TransactionAccepted
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.CommittedTransaction
@@ -26,7 +25,6 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.{Fingerprint, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.SuppressingLogger
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.{
   AdminWorkflowConfig,
   PackageService,
@@ -50,6 +48,7 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryParticipantEventLog,
   InMemoryParticipantSettingsStore,
 }
+import com.digitalasset.canton.participant.sync.LedgerSyncEvent.TransactionAccepted
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,

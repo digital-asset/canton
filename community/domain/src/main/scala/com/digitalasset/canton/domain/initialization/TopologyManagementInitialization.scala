@@ -222,7 +222,6 @@ object TopologyManagementInitialization {
           loggerFactory,
         )
       )
-
       // before starting the domain identity dispatcher, we need to make sure the initial topology transactions
       // have been sequenced. in the case of external sequencers this is done with admin commands and we just need to wait,
       // but for embedded sequencers we need to explicitly sequence these transactions here if that's not already been done.
@@ -250,23 +249,26 @@ object TopologyManagementInitialization {
         // that initial topology data has been sequenced before starting the topology dispatcher
         case _ => EitherT.right(initializationObserver.waitUntilInitialisedAndEffective.unwrap)
       }
-      dispatcher <- EitherT.rightT(
-        DomainTopologyDispatcher.create(
-          id,
-          domainTopologyManager,
-          topologyClient,
-          topologyProcessor,
-          initialKeys,
-          sequencedTopologyStore,
-          newClient,
-          timeTracker,
-          crypto,
-          clock,
-          addressSequencerAsDomainMember,
-          parameters,
-          futureSupervisor,
-          dispatcherLoggerFactory,
-        )
+      dispatcher <- EitherT(
+        DomainTopologyDispatcher
+          .create(
+            id,
+            domainTopologyManager,
+            topologyClient,
+            topologyProcessor,
+            initialKeys,
+            sequencedTopologyStore,
+            newClient,
+            timeTracker,
+            crypto,
+            clock,
+            addressSequencerAsDomainMember,
+            parameters,
+            futureSupervisor,
+            dispatcherLoggerFactory,
+          )
+          .map(Right(_))
+          .onShutdown(Left("Initialization aborted due to shutdown"))
       )
     } yield TopologyManagementComponents(
       topologyClient,

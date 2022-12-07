@@ -5,19 +5,18 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
-import com.daml.ledger.participant.state.v2.Update.CommandRejected
-import com.daml.ledger.participant.state.v2.Update.CommandRejected.RejectionReasonTemplate
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.{TransactionProcessor, v0}
 import com.digitalasset.canton.participant.store.{
   SerializableCompletionInfo,
   SerializableRejectionReasonTemplate,
 }
+import com.digitalasset.canton.participant.sync.LedgerSyncEvent
+import com.digitalasset.canton.participant.sync.LedgerSyncEvent.CommandRejected
 import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -101,7 +100,7 @@ final case class TransactionSubmissionTrackingData(
       recordTime: CantonTimestamp
   )(implicit loggingContext: NamedLoggingContext): LedgerSyncEvent = {
 
-    val reasonTemplate = rejectionCause.asRejectionReasonTemplate(recordTime)
+    val reasonTemplate = rejectionCause.asFinalReason(recordTime)
     CommandRejected(recordTime.toLf, completionInfo, reasonTemplate)
   }
 
@@ -160,9 +159,9 @@ object TransactionSubmissionTrackingData {
 
   trait RejectionCause extends Product with Serializable with PrettyPrinting {
 
-    def asRejectionReasonTemplate(observedTimestamp: CantonTimestamp)(implicit
+    def asFinalReason(observedTimestamp: CantonTimestamp)(implicit
         loggingContext: ErrorLoggingContext
-    ): RejectionReasonTemplate
+    ): CommandRejected.FinalReason
 
     def toProtoV0: v0.TransactionSubmissionTrackingData.RejectionCause
   }
@@ -186,12 +185,12 @@ object TransactionSubmissionTrackingData {
 
   case object TimeoutCause extends RejectionCause {
 
-    override def asRejectionReasonTemplate(
+    override def asFinalReason(
         observedTimestamp: CantonTimestamp
-    )(implicit loggingContext: ErrorLoggingContext): RejectionReasonTemplate = {
+    )(implicit loggingContext: ErrorLoggingContext): CommandRejected.FinalReason = {
       val error = TransactionProcessor.SubmissionErrors.TimeoutError.Error(observedTimestamp)
       error.logWithContext()
-      error.createRejection
+      CommandRejected.FinalReason(error.rpcStatus())
     }
 
     override def toProtoV0: v0.TransactionSubmissionTrackingData.RejectionCause =
@@ -206,10 +205,10 @@ object TransactionSubmissionTrackingData {
     )
   }
 
-  final case class CauseWithTemplate(template: RejectionReasonTemplate) extends RejectionCause {
-    override def asRejectionReasonTemplate(_observedTimestamp: CantonTimestamp)(implicit
+  final case class CauseWithTemplate(template: CommandRejected.FinalReason) extends RejectionCause {
+    override def asFinalReason(_observedTimestamp: CantonTimestamp)(implicit
         loggingContext: ErrorLoggingContext
-    ): RejectionReasonTemplate = template
+    ): CommandRejected.FinalReason = template
 
     override def toProtoV0: v0.TransactionSubmissionTrackingData.RejectionCause =
       v0.TransactionSubmissionTrackingData.RejectionCause(
@@ -226,13 +225,13 @@ object TransactionSubmissionTrackingData {
   object CauseWithTemplate {
 
     /** Log the `error`` and then convert it into a
-      * [[com.daml.ledger.participant.state.v2.Update.CommandRejected.RejectionReasonTemplate]]
+      * [[com.digitalasset.canton.participant.sync.LedgerSyncEvent.CommandRejected.FinalReason]]
       */
     def apply(
         error: TransactionError
     )(implicit loggingContext: ErrorLoggingContext): CauseWithTemplate = {
       error.logWithContext()
-      CauseWithTemplate(error.createRejection)
+      CauseWithTemplate(CommandRejected.FinalReason(error.rpcStatus()))
     }
 
     def fromProtoV0(

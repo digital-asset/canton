@@ -5,25 +5,10 @@ package com.digitalasset.canton.error
 
 import com.daml.error.ErrorCode
 import com.daml.ledger.participant.state.v2.SubmissionResult
-import com.daml.ledger.participant.state.v2.Update.CommandRejected.{
-  FinalReason,
-  RejectionReasonTemplate,
-}
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.rpc.code.Code
 import com.google.rpc.status.{Status as RpcStatus}
-import io.grpc.Status
 
 trait TransactionError extends BaseCantonError {
-
-  @Deprecated
-  def createRejectionDeprecated(
-      rewrite: Map[ErrorCode, Status.Code]
-  )(implicit loggingContext: ErrorLoggingContext): RejectionReasonTemplate =
-    FinalReason(rpcStatus(rewrite.get(this.code)))
-
-  def createRejection(implicit loggingContext: ErrorLoggingContext): RejectionReasonTemplate =
-    FinalReason(rpcStatus())
 
   // Determines the value of the `definite_answer` key in the error details
   def definiteAnswer: Boolean = false

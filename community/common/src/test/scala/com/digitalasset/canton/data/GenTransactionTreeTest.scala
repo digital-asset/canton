@@ -3,7 +3,12 @@
 
 package com.digitalasset.canton.data
 
+import cats.syntax.option.*
+import cats.syntax.semigroup.*
+import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric
+import com.digitalasset.canton.crypto.{Salt, TestSalt}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
@@ -13,8 +18,10 @@ import com.digitalasset.canton.topology.transaction.{
   TrustLevel,
 }
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
-import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTestWordSpec, DefaultDamlValues, HasExecutionContext, LfPartyId}
 
+import java.time.Duration
 import scala.annotation.nowarn
 
 @nowarn("msg=match may not be exhaustive")
@@ -460,6 +467,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
 
     "correctly compute recipients from witnesses" in {
       def mkWitnesses(setup: Seq[Set[Int]]): Witnesses = Witnesses(setup.map(_.map(informee)))
+
       // Maps parties to participants; parties have IDs that start at 1, participants have IDs that start at 11
       def topology =
         TestingIdentityFactory(
@@ -482,6 +490,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
               .toMap
           },
         ).topologySnapshot()
+
       val witnesses = mkWitnesses(
         Seq(
           Set(1, 2),
@@ -523,10 +532,194 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
       )
     }
   }
+
+  "A transaction tree" when {
+    // Check transaction trees with 2^n views for n in [1..10]
+    forEvery(for { i <- 0 until 10 } yield 2 << i) { nViews =>
+      // Protocol V3 was the last one before the change to MerkleSeq subviews
+      lazy val (nLeavesP3, nBlindedP3) = countAll(mkTransactionTree(ProtocolVersion.v3)(nViews))
+
+      s"it contains $nViews subviews" must {
+        // We only check that the number of leaf nodes did not change between protocols V3 and V4,
+        // leaving future changes possible
+        if (testedProtocolVersion == ProtocolVersion.v4) {
+          "have the same number of leaves in its set of transaction view trees when using MerkleSeq subviews" in {
+            val (nLeavesP4, _) = countAll(mkTransactionTree(ProtocolVersion.v4)(nViews))
+            nLeavesP3 shouldBe nLeavesP4
+          }
+        }
+
+        // We check for non-regression of the size reduction for all protocol versions >= V4
+        if (testedProtocolVersion >= ProtocolVersion.v4)
+          "use significant less space for its set of transaction view trees when using MerkleSeq subviews" in {
+            // With subtrees as a sequence, the number of blinded nodes is roughly O(n^2);
+            // thanks to the MerkleSeq, this gets down to roughly O(n * log_2(n));
+            // the ratio is therefore roughly O(n / log_2(n))
+            val (_, nBlindedTested) = countAll(mkTransactionTree(testedProtocolVersion)(nViews))
+            val actualRatio = nBlindedP3.toDouble / nBlindedTested
+            val expectedRatio = {
+              val n = nViews.toDouble
+              n / (Math.log(n) / Math.log(2))
+            }
+
+            // We give a bit of leeway and check against half the expected ratio
+            actualRatio should be >= expectedRatio / 2
+          }
+      }
+    }
+
+    def mkTransactionTree(protocolVersion: ProtocolVersion)(nViews: Int): GenTransactionTree = {
+      val submitterMetadata = mkSubmitterMetadata(protocolVersion)
+      val commonMetadata = mkCommonMetadata(protocolVersion)
+      val participantMetadata = mkParticipantMetadata(protocolVersion)
+
+      val subviews = for {
+        index <- 1 until nViews
+        viewCommonData = mkViewCommonData(protocolVersion)(index)
+        viewParticipantData = mkViewParticipantData(protocolVersion)(index)
+      } yield TransactionView.tryCreate(factory.cryptoOps)(
+        viewCommonData,
+        viewParticipantData,
+        TransactionSubviews.empty(protocolVersion, factory.cryptoOps),
+        protocolVersion,
+      )
+
+      val rootView = TransactionView.tryCreate(factory.cryptoOps)(
+        mkViewCommonData(protocolVersion)(0),
+        mkViewParticipantData(protocolVersion)(0),
+        TransactionSubviews(subviews)(protocolVersion, factory.cryptoOps),
+        protocolVersion,
+      )
+
+      GenTransactionTree.tryCreate(factory.cryptoOps)(
+        submitterMetadata,
+        commonMetadata,
+        participantMetadata,
+        MerkleSeq.fromSeq(factory.cryptoOps)(Seq(rootView), protocolVersion),
+      )
+    }
+
+    // Return the number of leaf nodes and blinded nodes in all the transaction view trees from this transaction tree
+    def countAll(tree: GenTransactionTree): (Int, Int) =
+      tree.allTransactionViewTrees.map(tvt => count(tvt.tree)).reduceLeft(_ |+| _)
+
+    // Return the number of leaf nodes and blinded nodes in the tree
+    def count(node: MerkleTree[?]): (Int, Int) = node match {
+      case _: MerkleTreeLeaf[?] => (1, 0)
+      case _: BlindedNode[?] => (0, 1)
+      case other => other.subtrees.map(count).reduceLeft(_ |+| _)
+    }
+
+    // Helper functions to build the transaction trees
+    // Most of these are inspired by ExampleTransactionTree but taken here for easy adaptation
+
+    def mkSubmitterMetadata(protocolVersion: ProtocolVersion): SubmitterMetadata =
+      SubmitterMetadata(
+        NonEmpty(Set, ExampleTransactionFactory.submitter),
+        ExampleTransactionFactory.applicationId,
+        ExampleTransactionFactory.commandId,
+        ExampleTransactionFactory.submitterParticipant,
+        mkTestSalt(0),
+        DefaultDamlValues.submissionId().some,
+        DeduplicationDuration(Duration.ofSeconds(100)),
+        factory.cryptoOps,
+        protocolVersion,
+      )
+
+    def mkCommonMetadata(protocolVersion: ProtocolVersion): CommonMetadata =
+      CommonMetadata(factory.cryptoOps)(
+        factory.confirmationPolicy,
+        factory.domainId,
+        factory.mediatorId,
+        mkTestSalt(0),
+        factory.transactionUuid,
+        protocolVersion,
+      )
+
+    def mkParticipantMetadata(protocolVersion: ProtocolVersion): ParticipantMetadata =
+      ParticipantMetadata(factory.cryptoOps)(
+        factory.ledgerTime,
+        factory.submissionTime,
+        Some(ExampleTransactionFactory.workflowId),
+        mkTestSalt(0),
+        protocolVersion,
+      )
+
+    def mkViewCommonData(protocolVersion: ProtocolVersion)(index: Int) =
+      ViewCommonData.create(factory.cryptoOps)(
+        Set.empty,
+        NonNegativeNumeric.tryCreate(0),
+        mkTestSalt(index),
+        protocolVersion,
+      )
+
+    def mkViewParticipantData(protocolVersion: ProtocolVersion)(index: Int): ViewParticipantData = {
+      val createdId = mkCreatedId(protocolVersion)
+      val actionDescription = mkActionDescription(protocolVersion)(createdId)
+      val createdContracts = mkCreatedContracts(protocolVersion)(createdId)
+
+      ViewParticipantData(factory.cryptoOps)(
+        Map.empty,
+        createdContracts,
+        Set.empty,
+        Map.empty,
+        actionDescription,
+        RollbackContext.empty,
+        mkTestSalt(index),
+        protocolVersion,
+      )
+    }
+
+    def mkCreatedId(protocolVersion: ProtocolVersion): LfContractId = {
+      val cantonContractIdVersion: CantonContractIdVersion =
+        CantonContractIdVersion.fromProtocolVersion(protocolVersion)
+
+      cantonContractIdVersion.fromDiscriminator(
+        ExampleTransactionFactory.lfHash(0),
+        ExampleTransactionFactory.unicum(0),
+      )
+    }
+
+    def mkActionDescription(
+        protocolVersion: ProtocolVersion
+    )(createdId: LfContractId): ActionDescription =
+      ActionDescription.tryFromLfActionNode(
+        ExampleTransactionFactory
+          .createNode(createdId, ExampleTransactionFactory.contractInstance()),
+        Some(ExampleTransactionFactory.lfHash(0)),
+        protocolVersion,
+      )
+
+    def mkCreatedContracts(
+        protocolVersion: ProtocolVersion
+    )(createdId: LfContractId): Seq[CreatedContract] = {
+      val serializable = ExampleTransactionFactory.asSerializable(
+        createdId,
+        contractInstance = ExampleTransactionFactory.contractInstance(),
+        metadata = ContractMetadata.empty,
+        salt = Option.when(protocolVersion >= ProtocolVersion.v4)(TestSalt.generateSalt(0)),
+      )
+      val createdContract = CreatedContract
+        .create(
+          serializable,
+          consumedInCore = false,
+          rolledBack = false,
+          checkContractIdVersion = _ => Right(NonAuthenticatedContractIdVersion),
+        )
+        .value
+
+      Seq(createdContract)
+    }
+
+    def mkTestSalt(index: Int) =
+      Salt.tryDeriveSalt(factory.transactionSeed, index, factory.cryptoOps)
+  }
 }
 
 object GenTransactionTreeTest {
   private[data] def party(i: Int): LfPartyId = LfPartyId.assertFromString(s"party$i::1")
+
   private[data] def informee(i: Int): Informee = PlainInformee(party(i))
+
   private[data] def participant(i: Int): ParticipantId = ParticipantId(s"participant$i")
 }

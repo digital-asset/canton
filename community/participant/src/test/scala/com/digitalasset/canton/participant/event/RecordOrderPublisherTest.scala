@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
 import com.digitalasset.canton.participant.store.MultiDomainEventLog
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
 import com.digitalasset.canton.participant.store.memory.*
-import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.participant.sync.{DefaultLedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.store.IndexedDomain
@@ -35,7 +35,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
-  DefaultDamlValues,
   HasExecutionContext,
   LfPartyId,
   RequestCounter,
@@ -105,7 +104,7 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
     val id = TransferId(domain1, domain1Ts1)
 
     def timestampedEvent(timestamp: CantonTimestamp) =
-      TimestampedEvent(DefaultDamlValues.dummyStateUpdate(timestamp), 1L, None)
+      TimestampedEvent(DefaultLedgerSyncEvent.dummyStateUpdate(timestamp), 1L, None)
 
     "publish events to the multi-domain causality store" in {
       val fixture = createSut(domain1)

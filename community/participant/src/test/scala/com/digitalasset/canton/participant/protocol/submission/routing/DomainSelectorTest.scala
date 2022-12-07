@@ -358,8 +358,8 @@ private[routing] object DomainSelectorTest {
     private val defaultPrescribedDomainAlias: Option[String] = None
     private val defaultPrescribedDomainId: Option[DomainId] = None
 
-    // TODO(i10964): Make this dependent on CANTON_PROTOCOL_VERSION?
-    private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ => ProtocolVersion.v4
+    private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ =>
+      BaseTest.testedProtocolVersion
 
     private val defaultTransactionVersion: LanguageVersion = LanguageVersion.v1_14
 

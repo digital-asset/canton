@@ -54,7 +54,6 @@ trait HealthDumpGenerator[Status <: CantonStatus] {
     }
   }
 
-  @nowarn("cat=unused")
   @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
   def generateHealthDump(
       outputFile: File,

@@ -10,8 +10,7 @@ import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
 import com.daml.ledger.client.binding.Primitive
 import com.daml.ledger.participant.state.v2
-import com.daml.ledger.participant.state.v2.Update.CommandRejected.RejectionReasonTemplate
-import com.daml.ledger.participant.state.v2.{ChangeId, Update}
+import com.daml.ledger.participant.state.v2.ChangeId
 import com.daml.ledger.{configuration, offset}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
@@ -277,86 +276,6 @@ trait PrettyInstances {
     param("submissionTime", _.submissionTime),
     customParam(_ => "..."),
   )
-
-  implicit def prettyV2RejectionReasonTemplate: Pretty[RejectionReasonTemplate] = prettyOfClass(
-    unnamedParam(_.status)
-  )
-
-  implicit def prettyUpdateConfigurationChanged: Pretty[Update.ConfigurationChanged] =
-    prettyOfClass(
-      param("participantId", _.participantId),
-      param("recordTime", _.recordTime),
-      param("submissionId", _.submissionId),
-      param("newConfiguration", _.newConfiguration),
-    )
-
-  implicit def prettyUpdateConfigurationChangeRejected: Pretty[Update.ConfigurationChangeRejected] =
-    prettyOfClass(
-      param("participantId", _.participantId),
-      param("recordTime", _.recordTime),
-      param("submissionId", _.submissionId),
-      param("rejectionReason", _.rejectionReason.doubleQuoted),
-      param("proposedConfiguration", _.proposedConfiguration),
-    )
-
-  implicit def prettyUpdatePartyAddedToParticipant: Pretty[Update.PartyAddedToParticipant] =
-    prettyOfClass(
-      param("participantId", _.participantId),
-      param("recordTime", _.recordTime),
-      param("submissionId", _.submissionId.showValueOrNone),
-      param("party", _.party),
-      param("displayName", _.displayName.singleQuoted),
-    )
-
-  implicit def prettyUpdatePartyAllocationRejected: Pretty[Update.PartyAllocationRejected] =
-    prettyOfClass(
-      param("participantId", _.participantId),
-      param("recordTime", _.recordTime),
-      param("submissionId", _.submissionId),
-      param("rejectionReason", _.rejectionReason.doubleQuoted),
-    )
-
-  implicit def prettyUpdatePublicPackageUpload: Pretty[Update.PublicPackageUpload] = prettyOfClass(
-    param("recordTime", _.recordTime),
-    param("submissionId", _.submissionId.showValueOrNone),
-    param("sourceDescription", _.sourceDescription.map(_.doubleQuoted).showValueOrNone),
-    paramWithoutValue("archives"),
-  )
-
-  implicit def prettyUpdatePublicPackageUploadRejected: Pretty[Update.PublicPackageUploadRejected] =
-    prettyOfClass(
-      param("recordTime", _.recordTime),
-      param("submissionId", _.submissionId),
-      param("rejectionReason", _.rejectionReason.doubleQuoted),
-    )
-
-  implicit def prettyUpdateTransactionAccepted: Pretty[Update.TransactionAccepted] = prettyOfClass(
-    param("recordTime", _.recordTime),
-    param("transactionId", _.transactionId),
-    paramIfDefined("completion info", _.optCompletionInfo),
-    param("transactionMeta", _.transactionMeta),
-    paramWithoutValue("transaction"),
-    paramWithoutValue("divulgedContracts"),
-    paramWithoutValue("blindingInfo"),
-  )
-
-  implicit def prettyUpdateCommandRejected: Pretty[Update.CommandRejected] = prettyOfClass(
-    param("recordTime", _.recordTime),
-    param("completionInfo", _.completionInfo),
-    param("reason", _.reasonTemplate),
-  )
-
-  implicit def prettyUpdate: Pretty[Update] = {
-    case u: Update.ConfigurationChanged => prettyUpdateConfigurationChanged.treeOf(u)
-    case u: Update.ConfigurationChangeRejected => prettyUpdateConfigurationChangeRejected.treeOf(u)
-    case u: Update.PartyAddedToParticipant => prettyUpdatePartyAddedToParticipant.treeOf(u)
-    case u: Update.PartyAllocationRejected => prettyUpdatePartyAllocationRejected.treeOf(u)
-    case u: Update.PublicPackageUpload => prettyUpdatePublicPackageUpload.treeOf(u)
-    case u: Update.PublicPackageUploadRejected => prettyUpdatePublicPackageUploadRejected.treeOf(u)
-    case u: Update.TransactionAccepted => prettyUpdateTransactionAccepted.treeOf(u)
-    case u: Update.CommandRejected => prettyUpdateCommandRejected.treeOf(u)
-  }
-
   implicit def prettyCompletion: Pretty[Completion] =
     prettyOfClass(
       unnamedParamIfDefined(_.status),

@@ -26,7 +26,6 @@ import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -1034,7 +1033,7 @@ class TransactionProcessingSteps(
               .Reject(inconsistentKeyReject.cause)
               .rpcStatus()
           )
-        case reason => reason.createRejection
+        case reason => LedgerSyncEvent.CommandRejected.FinalReason(reason.rpcStatus())
       }
 
     val tse = submitterParticipantSubmitterInfo.map(info =>
@@ -1148,7 +1147,7 @@ class TransactionProcessingSteps(
           submissionTime = lfTx.metadata.submissionTime.toLf,
           // Set the submission seed to zeros one (None no longer accepted) because it is pointless for projected
           // transactions and it leaks the structure of the omitted parts of the transaction.
-          submissionSeed = LedgerEvent.noOpSeed,
+          submissionSeed = LedgerSyncEvent.noOpSeed,
           optUsedPackages = None,
           optNodeSeeds = Some(lfTx.metadata.seeds.to(ImmArray)),
           optByKeyNodes = None, // optByKeyNodes is unused by the indexer

@@ -8,9 +8,8 @@ import com.daml.ledger.api.v1.transaction.{TransactionTree, TreeEvent}
 import com.daml.ledger.api.v1.value.Value
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.{LocalDomainReference, LocalParticipantReference}
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.SyncStateInspection
-import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{DomainAlias, LfTimestamp}

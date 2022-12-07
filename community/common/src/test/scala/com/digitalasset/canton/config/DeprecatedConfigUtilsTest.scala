@@ -27,10 +27,8 @@ class DeprecatedConfigUtilsTest extends AnyWordSpec with BaseTest {
       )
     }
 
-  @nowarn("cat=unused")
   implicit val nestedTestConfigReader: ConfigReader[NestedTestConfig] =
     deriveReader[NestedTestConfig]
-  @nowarn("cat=unused")
   implicit val testConfigReader: ConfigReader[TestConfig] =
     deriveReader[TestConfig].applyDeprecations
 

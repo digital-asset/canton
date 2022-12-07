@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.store.{
   SingleDimensionEventLogTest,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, TimelyRejectionEventId}
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LedgerSyncRecordTime, LocalOffset}
+import com.digitalasset.canton.participant.{LedgerSyncRecordTime, LocalOffset}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}

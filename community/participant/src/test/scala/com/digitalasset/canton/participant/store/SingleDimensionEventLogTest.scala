@@ -8,16 +8,16 @@ import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Time}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.LedgerSyncEvent.PublicPackageUploadRejected
 import com.digitalasset.canton.participant.protocol.TransactionUpdate
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
+import com.digitalasset.canton.participant.sync.LedgerSyncEvent.PublicPackageUploadRejected
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
 import com.digitalasset.canton.participant.sync.{
-  LedgerEvent,
+  LedgerSyncEvent,
   TimestampedEvent,
   TimestampedEventAndCausalChange,
 }
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LedgerSyncRecordTime, LocalOffset}
+import com.digitalasset.canton.participant.{LedgerSyncRecordTime, LocalOffset}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
@@ -52,7 +52,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         ledgerEffectiveTime = Time.Timestamp.Epoch,
         workflowId = None,
         submissionTime = Time.Timestamp.Epoch,
-        submissionSeed = LedgerEvent.noOpSeed,
+        submissionSeed = LedgerSyncEvent.noOpSeed,
         optUsedPackages = None,
         optNodeSeeds = None,
         optByKeyNodes = None,

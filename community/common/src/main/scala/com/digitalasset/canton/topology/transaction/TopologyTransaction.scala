@@ -178,7 +178,7 @@ final case class DomainGovernanceElement(mapping: DomainGovernanceMapping)
 
   lazy val id: TopologyElementId = TopologyElementId(mapping.domainId.toLengthLimitedString)
   lazy val uniquePath: UniquePathSignedDomainGovernanceTransaction =
-    mapping.uniquePath(id) // TODO(Rafael): id is not used for the path ; improve API?
+    mapping.uniquePath(id) // TODO(#11111): id is not used for the path ; improve API?
 }
 
 /** Defines the required authorization chain */

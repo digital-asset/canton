@@ -20,7 +20,7 @@ import com.daml.ledger.api.health.HealthStatus
 import com.daml.ledger.configuration.*
 import com.daml.ledger.participant.state
 import com.daml.ledger.participant.state.v2.*
-import com.daml.lf.command.DisclosedContract
+import com.daml.lf.command.ProcessedDisclosedContract
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.Versioned
@@ -359,7 +359,7 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       _estimatedInterpretationCost: Long,
       keyResolver: LfKeyResolver,
-      explicitlyDisclosedContracts: ImmArray[Versioned[DisclosedContract]],
+      explicitlyDisclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
   )(implicit
       _loggingContext: LoggingContext, // not used - contains same properties as canton named logger
       telemetryContext: TelemetryContext,
@@ -532,7 +532,7 @@ class CantonSyncService(
     */
   override def stateUpdates(
       beginAfterOffset: Option[LedgerSyncOffset]
-  )(implicit loggingContext: LoggingContext): Source[(LedgerSyncOffset, LedgerSyncEvent), NotUsed] =
+  )(implicit loggingContext: LoggingContext): Source[(LedgerSyncOffset, Update), NotUsed] =
     TraceContext.withNewTraceContext { implicit traceContext =>
       logger.debug(s"Subscribing to stateUpdates from $beginAfterOffset")
       // Plus one since dispatchers use inclusive offsets.
@@ -543,11 +543,11 @@ class CantonSyncService(
           beginStartingAt =>
             participantNodePersistentState.multiDomainEventLog
               .subscribe(beginStartingAt)
-              .map[LedgerSyncEventWithOffset] { case (offset, tracedEvent) =>
-                implicit val traceContext = tracedEvent.traceContext
+              .map[(LedgerSyncOffset, Update)] { case (offset, tracedEvent) =>
+                implicit val traceContext: TraceContext = tracedEvent.traceContext
                 val event = augmentTransactionStatistics(tracedEvent.value)
                 logger.debug(show"Emitting event at offset $offset. Event: $event")
-                (UpstreamOffsetConvert.fromGlobalOffset(offset), event)
+                (UpstreamOffsetConvert.fromGlobalOffset(offset), event.toDamlUpdate)
               },
         )
     }

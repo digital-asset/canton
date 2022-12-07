@@ -10,7 +10,6 @@ import cats.data.OptionT
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.ChangeId
-import com.daml.ledger.participant.state.v2.Update.{CommandRejected, TransactionAccepted}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -28,11 +27,12 @@ import com.digitalasset.canton.participant.store.db.DbMultiDomainEventLog
 import com.digitalasset.canton.participant.store.memory.InMemoryMultiDomainEventLog
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.sync.{
+  LedgerSyncEvent,
   SyncDomainPersistentStateLookup,
   TimestampedEvent,
   TimestampedEventAndCausalChange,
 }
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
@@ -320,13 +320,13 @@ object MultiDomainEventLog {
     *
     * Unlike [[MultiDomainEventLog.subscribe]], notification can be lost when the participant crashes.
     * Conversely, [[OnPublish.Publication]] contains more information than just the
-    * [[com.digitalasset.canton.participant.LedgerSyncEvent]].
+    * [[com.digitalasset.canton.participant.sync.LedgerSyncEvent]].
     */
   trait OnPublish {
 
     /** This method is called after the [[MultiDomainEventLog]] has assigned
       * new [[com.digitalasset.canton.participant.GlobalOffset]]s to a batch of
-      * [[com.digitalasset.canton.participant.LedgerSyncEvent]]s.
+      * [[com.digitalasset.canton.participant.sync.LedgerSyncEvent]]s.
       *
       * If this method throws a [[scala.util.control.NonFatal]] exception, the [[MultiDomainEventLog]]
       * logs and discards the exception. That is, throwing an exception does not interrupt processing or cause a shutdown.
@@ -382,7 +382,7 @@ object MultiDomainEventLog {
         eventTraceContext: TraceContext,
     ): Option[DeduplicationInfo] =
       event match {
-        case accepted: TransactionAccepted =>
+        case accepted: LedgerSyncEvent.TransactionAccepted =>
           // The indexer outputs a completion event iff the completion info is set.
           accepted.optCompletionInfo.map { completionInfo =>
             val changeId = completionInfo.changeId
@@ -393,7 +393,7 @@ object MultiDomainEventLog {
               eventTraceContext,
             )
           }
-        case CommandRejected(recordTime, completionInfo, reason) =>
+        case LedgerSyncEvent.CommandRejected(recordTime, completionInfo, reason) =>
           val changeId = completionInfo.changeId
           DeduplicationInfo(
             changeId,

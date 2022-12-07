@@ -25,7 +25,14 @@ import com.daml.platform.indexer.{
   IndexerServiceOwner,
   IndexerStartupMode,
 }
-import com.daml.platform.localstore.{PersistentPartyRecordStore, PersistentUserManagementStore}
+import com.daml.platform.localstore.api.UserManagementStore
+import com.daml.platform.localstore.{
+  CachedIdentityProviderConfigStore,
+  IdentityProviderManagementConfig,
+  PersistentIdentityProviderConfigStore,
+  PersistentPartyRecordStore,
+  PersistentUserManagementStore,
+}
 import com.daml.platform.services.time.TimeProviderType
 import com.daml.platform.store.DbSupport
 import com.daml.platform.store.DbSupport.ParticipantDataSourceConfig
@@ -39,7 +46,7 @@ import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 import io.functionmeta.functionFullName
-import io.grpc.BindableService
+import io.grpc.{BindableService, ServerInterceptor}
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 
 import java.util.concurrent.atomic.AtomicReference
@@ -222,52 +229,25 @@ class StartableStoppableLedgerApiServer(
         engine = config.engine,
         inMemoryState = inMemoryState,
       )
-      userManagementStore =
-        PersistentUserManagementStore.cached(
-          dbSupport = dbSupport,
-          metrics = config.metrics,
-          timeProvider = TimeProvider.UTC,
-          cacheExpiryAfterWriteInSeconds =
-            config.serverConfig.userManagementService.cacheExpiryAfterWriteInSeconds,
-          maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,
-          maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
-        )(executionContext, loggingContext)
+      userManagementStore = getUserManagementStore(dbSupport)
       partyRecordStore = new PersistentPartyRecordStore(
         dbSupport = dbSupport,
         metrics = config.metrics,
         timeProvider = TimeProvider.UTC,
         executionContext = executionContext,
       )
-      ledgerApiServerConfig = ApiServerConfig(
-        address = Some(config.serverConfig.address),
-        apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap.toScala,
-        command = config.serverConfig.commandService.damlConfig,
-        configurationLoadTimeout = config.serverConfig.configurationLoadTimeout.toScala,
-        initialLedgerConfiguration =
-          None, // CantonSyncService provides ledger configuration via ReadService bypassing the WriteService
-        managementServiceTimeout = config.serverConfig.managementServiceTimeout.toScala,
-        maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
-        port = Port(config.serverConfig.port.unwrap),
-        portFile = None,
-        rateLimit = config.serverConfig.rateLimit,
-        seeding = config.cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
-        timeProviderType = config.testingTimeService match {
-          case Some(_) => TimeProviderType.Static
-          case None => TimeProviderType.WallClock
-        },
-        tls = config.serverConfig.tls
-          .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
-        userManagement = config.serverConfig.userManagementService.damlConfig,
-      )
+
+      apiServerConfig = getApiServerConfig
 
       timedWriteService = new TimedWriteService(config.syncService, config.metrics)
       _ <- ApiServiceOwner(
         indexService = indexService,
         userManagementStore = userManagementStore,
+        identityProviderConfigStore = getIdentityProviderConfigStore(dbSupport, apiServerConfig),
         partyRecordStore = partyRecordStore,
         ledgerId = config.ledgerId,
         participantId = config.participantId,
-        config = ledgerApiServerConfig,
+        config = apiServerConfig,
         optWriteService = Some(timedWriteService),
         healthChecks = new HealthChecks(
           "read" -> timedReadService,
@@ -277,49 +257,11 @@ class StartableStoppableLedgerApiServer(
         metrics = config.metrics,
         timeServiceBackend = config.testingTimeService,
         otherServices = Nil,
-        otherInterceptors = List(
-          new ApiRequestLogger(
-            config.loggerFactory,
-            config.cantonParameterConfig.loggingConfig.api,
-          ),
-          GrpcTracing
-            .builder(config.tracerProvider.openTelemetry)
-            .build()
-            .newServerInterceptor(),
-        ) ::: config.serverConfig.rateLimit
-          .map(rateLimit =>
-            RateLimitingInterceptor(
-              metrics = config.metrics,
-              config = rateLimit,
-              additionalChecks = List(
-                ThreadpoolCheck(
-                  name = "Environment Execution Threadpool",
-                  prefix = config.envQueueName,
-                  queueSize = config.envQueueSize,
-                  limit = rateLimit.maxApiServicesQueueSize,
-                )
-              ),
-            )
-          )
-          .toList,
+        otherInterceptors = getInterceptors,
         engine = config.engine,
         servicesExecutionContext = executionContext,
         checkOverloaded = config.syncService.checkOverloaded,
-        ledgerFeatures = LedgerFeatures(
-          staticTime = config.testingTimeService.isDefined,
-          CommandDeduplicationFeatures.of(
-            Some(
-              CommandDeduplicationPeriodSupport.of(
-                offsetSupport =
-                  CommandDeduplicationPeriodSupport.OffsetSupport.OFFSET_NATIVE_SUPPORT,
-                durationSupport =
-                  CommandDeduplicationPeriodSupport.DurationSupport.DURATION_CONVERT_TO_OFFSET,
-              )
-            ),
-            CommandDeduplicationType.ASYNC_AND_CONCURRENT_SYNC,
-            maxDeduplicationDurationEnforced = false,
-          ),
-        ),
+        ledgerFeatures = getLedgerFeatures,
         authService = new CantonAdminTokenAuthService(
           config.adminToken,
           parent = config.serverConfig.authServices.map(
@@ -335,4 +277,88 @@ class StartableStoppableLedgerApiServer(
       )
     } yield ()
   }
+
+  private def getIdentityProviderConfigStore(
+      dbSupport: DbSupport,
+      apiServerConfig: ApiServerConfig,
+  ): CachedIdentityProviderConfigStore = PersistentIdentityProviderConfigStore.cached(
+    dbSupport = dbSupport,
+    metrics = config.metrics,
+    cacheExpiryAfterWrite = apiServerConfig.identityProviderManagement.cacheExpiryAfterWrite,
+    maxIdentityProviders = IdentityProviderManagementConfig.MaxIdentityProviders,
+  )(executionContext, loggingContext)
+
+  private def getUserManagementStore(dbSupport: DbSupport): UserManagementStore =
+    PersistentUserManagementStore.cached(
+      dbSupport = dbSupport,
+      metrics = config.metrics,
+      timeProvider = TimeProvider.UTC,
+      cacheExpiryAfterWriteInSeconds =
+        config.serverConfig.userManagementService.cacheExpiryAfterWriteInSeconds,
+      maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,
+      maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
+    )(executionContext, loggingContext)
+
+  private def getInterceptors: List[ServerInterceptor] = List(
+    new ApiRequestLogger(
+      config.loggerFactory,
+      config.cantonParameterConfig.loggingConfig.api,
+    ),
+    GrpcTracing
+      .builder(config.tracerProvider.openTelemetry)
+      .build()
+      .newServerInterceptor(),
+  ) ::: config.serverConfig.rateLimit
+    .map(rateLimit =>
+      RateLimitingInterceptor(
+        metrics = config.metrics,
+        config = rateLimit,
+        additionalChecks = List(
+          ThreadpoolCheck(
+            name = "Environment Execution Threadpool",
+            prefix = config.envQueueName,
+            queueSize = config.envQueueSize,
+            limit = rateLimit.maxApiServicesQueueSize,
+          )
+        ),
+      )
+    )
+    .toList
+
+  private def getLedgerFeatures: LedgerFeatures = LedgerFeatures(
+    staticTime = config.testingTimeService.isDefined,
+    CommandDeduplicationFeatures.of(
+      Some(
+        CommandDeduplicationPeriodSupport.of(
+          offsetSupport = CommandDeduplicationPeriodSupport.OffsetSupport.OFFSET_NATIVE_SUPPORT,
+          durationSupport =
+            CommandDeduplicationPeriodSupport.DurationSupport.DURATION_CONVERT_TO_OFFSET,
+        )
+      ),
+      CommandDeduplicationType.ASYNC_AND_CONCURRENT_SYNC,
+      maxDeduplicationDurationEnforced = false,
+    ),
+  )
+
+  private def getApiServerConfig: ApiServerConfig = ApiServerConfig(
+    address = Some(config.serverConfig.address),
+    apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap.toScala,
+    command = config.serverConfig.commandService.damlConfig,
+    configurationLoadTimeout = config.serverConfig.configurationLoadTimeout.toScala,
+    initialLedgerConfiguration =
+      None, // CantonSyncService provides ledger configuration via ReadService bypassing the WriteService
+    managementServiceTimeout = config.serverConfig.managementServiceTimeout.toScala,
+    maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
+    port = Port(config.serverConfig.port.unwrap),
+    portFile = None,
+    rateLimit = config.serverConfig.rateLimit,
+    seeding = config.cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
+    timeProviderType = config.testingTimeService match {
+      case Some(_) => TimeProviderType.Static
+      case None => TimeProviderType.WallClock
+    },
+    tls = config.serverConfig.tls
+      .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
+    userManagement = config.serverConfig.userManagementService.damlConfig,
+  )
 }

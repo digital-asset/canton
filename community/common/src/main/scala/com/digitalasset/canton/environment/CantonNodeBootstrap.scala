@@ -63,6 +63,7 @@ import io.functionmeta.functionFullName
 import io.grpc.ServerServiceDefinition
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
+import org.slf4j.event.Level
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -201,7 +202,10 @@ abstract class CantonNodeBootstrapBase[
       loggerFactory,
     )
 
-  override val crypto: Crypto = timeouts.unbounded.await("initialize CryptoFactory")(
+  override val crypto: Crypto = timeouts.unbounded.await(
+    description = "initialize CryptoFactory",
+    logFailing = Some(Level.ERROR),
+  )(
     CryptoFactory
       .create(
         cryptoConfig,

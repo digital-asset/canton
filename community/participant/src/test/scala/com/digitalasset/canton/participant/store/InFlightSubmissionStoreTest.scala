@@ -11,6 +11,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightByMessageId,
   InFlightBySequencingInfo,
 }
+import com.digitalasset.canton.participant.sync.LedgerSyncEvent
 import com.digitalasset.canton.sequencing.protocol.{DeliverErrorReason, MessageId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
@@ -48,9 +49,11 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
   lazy val trackingData3 = TransactionSubmissionTrackingData(
     completionInfo,
     TransactionSubmissionTrackingData.CauseWithTemplate(
-      TransactionProcessor.SubmissionErrors.SequencerDeliver
-        .Error(DeliverErrorReason.BatchInvalid("Some invalid batch"))
-        .createRejection
+      LedgerSyncEvent.CommandRejected.FinalReason(
+        TransactionProcessor.SubmissionErrors.SequencerDeliver
+          .Error(DeliverErrorReason.BatchInvalid("Some invalid batch"))
+          .rpcStatus()
+      )
     ),
     testedProtocolVersion,
   )

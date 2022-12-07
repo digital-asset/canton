@@ -190,5 +190,6 @@ object TransactionSubviews {
       MerkleSeq.indicesFromSeq(nbOfSubviews)
     else indicesV0(nbOfSubviews)
 
-  def indicesV0(nbOfSubviews: Int): Seq[ListIndex] = (0 until nbOfSubviews).map(ListIndex)
+  private[data] def indicesV0(nbOfSubviews: Int): Seq[ListIndex] =
+    (0 until nbOfSubviews).map(ListIndex)
 }

@@ -21,7 +21,6 @@ import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
@@ -42,7 +41,7 @@ import com.digitalasset.canton.participant.protocol.{
   TransferInUpdate,
 }
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.sync.{LedgerEvent, TimestampedEvent}
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
@@ -826,7 +825,7 @@ object TransferInProcessingSteps {
         workflowId = None,
         submissionTime =
           contract.ledgerCreateTime.toLf, // TODO(M41): Upstream mismatch, replace with enter/leave view
-        submissionSeed = LedgerEvent.noOpSeed,
+        submissionSeed = LedgerSyncEvent.noOpSeed,
         optUsedPackages = None,
         optNodeSeeds = None,
         optByKeyNodes = None,
