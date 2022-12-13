@@ -713,7 +713,7 @@ class PingService(
         duplicate ++= filteredDuplicates
 
         val filteredMerges = merges.filter(x => x._1.pingId != id)
-        // TODO(rv): abort ping and cleanup ledger
+        // TODO(#11182): properly clean up stray contracts
         merges.clear()
         merges ++= filteredMerges
       },

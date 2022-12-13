@@ -79,6 +79,10 @@ trait SigningPrivateOps {
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningPublicKey]
+
+  protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair]
 }
 
 /** A default implementation with a private key store */
@@ -89,11 +93,6 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
   protected val store: CryptoPrivateStore
 
   protected val signingOps: SigningOps
-
-  /** Internal method to generate and return the entire signing key pair */
-  protected def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair]
 
   override protected[crypto] def sign(
       bytes: ByteString,

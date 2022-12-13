@@ -174,7 +174,7 @@ class GrpcSequencerService(
         .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
     lazy val sendF = for {
       maxRequestSize <- domainParamsLookup
-        .getApproximate(
+        .getApproximateOrDefaultValue(
           warnOnUsingDefaults(senderFromMetadata)
         )
         .map(_.maxRequestSize)
@@ -207,7 +207,7 @@ class GrpcSequencerService(
         .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
     lazy val sendF = for {
       maxRequestSize <- domainParamsLookup
-        .getApproximate(
+        .getApproximateOrDefaultValue(
           warnOnUsingDefaults(senderFromMetadata)
         )
         .map(_.maxRequestSize)
@@ -322,7 +322,7 @@ class GrpcSequencerService(
         for {
           maxRequestSize <- EitherTUtil
             .fromFuture(
-              domainParamsLookup.getApproximate(),
+              domainParamsLookup.getApproximateOrDefaultValue(),
               e => SendAsyncError.Internal(s"Unable to retrieve domain parameters: ${e.getMessage}"),
             )
             .map(_.maxRequestSize)
@@ -563,7 +563,7 @@ class GrpcSequencerService(
         for {
           maxRatePerParticipant <- EitherTUtil
             .fromFuture(
-              domainParamsLookup.getApproximate(),
+              domainParamsLookup.getApproximateOrDefaultValue(),
               e => SendAsyncError.Internal(s"Unable to retrieve domain parameters: ${e.getMessage}"),
             )
             .map(_.maxRatePerParticipant)

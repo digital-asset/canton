@@ -12,7 +12,7 @@ import com.digitalasset.canton.resource.DatabaseStorageError.DatabaseConnectionL
 import com.digitalasset.canton.resource.DbStorage.{DbAction, DbStorageCreationException}
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, ResourceUtil}
+import com.digitalasset.canton.util.ResourceUtil
 import slick.jdbc.JdbcBackend.Database
 
 import java.sql.SQLException
@@ -78,7 +78,7 @@ class DbStorageSingle private (
       )
     } catch {
       case e: SQLException =>
-        DatabaseConnectionLost(ErrorUtil.messageWithStacktrace(e)).discard
+        DatabaseConnectionLost(e.getMessage, e).discard
         false
     })).map(isActiveRef.set)
   }

@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   TimeoutType,
 }
 import com.digitalasset.canton.admin.api.client.data.CertificateResult
+import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
 import com.digitalasset.canton.crypto.admin.v0
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc.VaultServiceStub
 import com.digitalasset.canton.crypto.{PublicKeyWithName, v0 as cryptoproto, *}
@@ -29,11 +30,11 @@ object VaultAdminCommands {
       v0.VaultServiceGrpc.stub(channel)
   }
 
-  abstract class ListKeys(
+  abstract class ListKeys[R, T](
       filterFingerprint: String,
       filterName: String,
-      filterPurpose: Set[KeyPurpose],
-  ) extends BaseVaultAdminCommand[v0.ListKeysRequest, v0.ListKeysResponse, Seq[PublicKeyWithName]] {
+      filterPurpose: Set[KeyPurpose] = Set.empty,
+  ) extends BaseVaultAdminCommand[v0.ListKeysRequest, R, Seq[T]] {
 
     override def createRequest(): Either[String, v0.ListKeysRequest] =
       Right(
@@ -43,12 +44,6 @@ object VaultAdminCommands {
           filterPurpose = filterPurpose.map(_.toProtoEnum).toSeq,
         )
       )
-
-    // returns a sequence of (Fingerprint, Context, Serialized PublicKey)
-    override def handleResponse(
-        response: v0.ListKeysResponse
-    ): Either[String, Seq[PublicKeyWithName]] =
-      response.publicKeys.traverse(PublicKeyWithName.fromProtoV0).leftMap(_.toString)
   }
 
   // list keys in my key vault
@@ -56,13 +51,22 @@ object VaultAdminCommands {
       filterFingerprint: String,
       filterName: String,
       filterPurpose: Set[KeyPurpose] = Set.empty,
-  ) extends ListKeys(filterFingerprint, filterName, filterPurpose) {
+  ) extends ListKeys[v0.ListMyKeysResponse, PrivateKeyMetadata](
+        filterFingerprint,
+        filterName,
+        filterPurpose,
+      ) {
 
     override def submitRequest(
         service: VaultServiceStub,
         request: v0.ListKeysRequest,
-    ): Future[v0.ListKeysResponse] =
+    ): Future[v0.ListMyKeysResponse] =
       service.listMyKeys(request)
+
+    override def handleResponse(
+        response: v0.ListMyKeysResponse
+    ): Either[String, Seq[PrivateKeyMetadata]] =
+      response.privateKeysMetadata.traverse(PrivateKeyMetadata.fromProtoV0).leftMap(_.toString)
   }
 
   // list public keys in key registry
@@ -70,12 +74,22 @@ object VaultAdminCommands {
       filterFingerprint: String,
       filterName: String,
       filterPurpose: Set[KeyPurpose] = Set.empty,
-  ) extends ListKeys(filterFingerprint, filterName, filterPurpose) {
+  ) extends ListKeys[v0.ListKeysResponse, PublicKeyWithName](
+        filterFingerprint,
+        filterName,
+        filterPurpose,
+      ) {
+
     override def submitRequest(
         service: VaultServiceStub,
         request: v0.ListKeysRequest,
     ): Future[v0.ListKeysResponse] =
       service.listPublicKeys(request)
+
+    override def handleResponse(
+        response: v0.ListKeysResponse
+    ): Either[String, Seq[PublicKeyWithName]] =
+      response.publicKeys.traverse(PublicKeyWithName.fromProtoV0).leftMap(_.toString)
   }
 
   abstract class BaseImportPublicKey
@@ -197,6 +211,32 @@ object VaultAdminCommands {
     }
 
     override def handleResponse(response: Empty): Either[String, Unit] = Right(())
+
+  }
+
+  case class GetWrapperKeyId()
+      extends BaseVaultAdminCommand[
+        v0.GetWrapperKeyIdRequest,
+        v0.GetWrapperKeyIdResponse,
+        String,
+      ] {
+
+    override def createRequest(): Either[String, v0.GetWrapperKeyIdRequest] =
+      Right(
+        v0.GetWrapperKeyIdRequest()
+      )
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.GetWrapperKeyIdRequest,
+    ): Future[v0.GetWrapperKeyIdResponse] = {
+      service.getWrapperKeyId(request)
+    }
+
+    override def handleResponse(
+        response: v0.GetWrapperKeyIdResponse
+    ): Either[String, String] =
+      Right(response.wrapperKeyId)
 
   }
 

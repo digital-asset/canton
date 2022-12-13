@@ -9,7 +9,7 @@ import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreement
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.config.ParticipantNodeParameters
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
 import com.digitalasset.canton.participant.domain.grpc.{
   GrpcDomainServiceClient,

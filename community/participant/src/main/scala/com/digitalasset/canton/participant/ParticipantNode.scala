@@ -55,6 +55,7 @@ import com.digitalasset.canton.participant.domain.{
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
 import com.digitalasset.canton.participant.ledger.api.*
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
+import com.digitalasset.canton.participant.scheduler.ParticipantSchedulersParameters
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.db.{DbDamlPackageStore, DbServiceAgreementStore}
 import com.digitalasset.canton.participant.store.memory.{
@@ -74,6 +75,7 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManager,
 }
 import com.digitalasset.canton.resource.*
+import com.digitalasset.canton.scheduler.SchedulersWithPruning
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
@@ -124,6 +126,8 @@ class ParticipantNodeBootstrap(
         CantonSyncService,
         ParticipantNodePersistentState,
     ) => List[BindableService] = (_, _) => Nil,
+    createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithPruning] = _ =>
+      Future.successful(SchedulersWithPruning.noop),
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -512,6 +516,19 @@ class ParticipantNodeBootstrap(
 
       resourceManagementService = resourceManagementServiceFactory(persistentState.settingsStore)
 
+      schedulers <-
+        EitherT.liftF(
+          createSchedulers(
+            ParticipantSchedulersParameters(
+              isActive,
+              persistentState.multiDomainEventLog,
+              storage,
+              adminToken,
+              cantonParameterConfig.stores.maxPruningBatchSize,
+            )
+          )
+        )
+
       // Sync Service
       sync = cantonSyncServiceFactory.create(
         participantId,
@@ -537,6 +554,7 @@ class ParticipantNodeBootstrap(
         resourceManagementService,
         cantonParameterConfig,
         indexedStringStore,
+        schedulers,
         metrics,
         futureSupervisor,
         loggerFactory,
@@ -600,6 +618,7 @@ class ParticipantNodeBootstrap(
         cantonParameterConfig.processingTimeouts,
         loggerFactory,
       )
+
       adminServerRegistry
         .addServiceU(
           PartyNameManagementServiceGrpc.bindService(
@@ -644,7 +663,7 @@ class ParticipantNodeBootstrap(
       adminServerRegistry
         .addServiceU(
           PruningServiceGrpc.bindService(
-            new GrpcPruningService(sync, loggerFactory),
+            new GrpcPruningService(sync, () => schedulers.getPruningScheduler, loggerFactory),
             executionContext,
           )
         )
@@ -668,6 +687,7 @@ class ParticipantNodeBootstrap(
         adminToken,
         recordSequencerInteractions,
         replaySequencerConfig,
+        schedulers,
         loggerFactory,
       )
 
@@ -808,6 +828,7 @@ class ParticipantNode(
     val adminToken: CantonAdminToken,
     val recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
+    val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
 ) extends CantonNode
     with NamedLogging
@@ -871,6 +892,7 @@ class ParticipantNode(
   override def close(): Unit = {
     logger.info("Stopping participant node")
     Lifecycle.close(
+      schedulers,
       ledgerApiDependentCantonServices,
       ledgerApiServer,
       identityPusher,

@@ -12,6 +12,7 @@ import com.digitalasset.canton.time.{
 }
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.FutureUtil.defaultStackTraceFilter
+import com.google.protobuf.duration.Duration as PbDuration
 import io.circe.Encoder
 import org.slf4j.event.Level
 
@@ -103,6 +104,9 @@ trait RefinedNonNegativeDurationCompanion[D <: RefinedNonNegativeDuration[D]] {
     case Left(err) => throw new IllegalArgumentException(err)
     case Right(x) => x
   }
+
+  def fromJavaDuration(duration: java.time.Duration): Either[String, D] =
+    fromDuration(Duration.fromNanos(duration.toNanos))
 
   def tryFromJavaDuration(duration: java.time.Duration): D =
     tryFromDuration(Duration.fromNanos(duration.toNanos))
@@ -246,4 +250,8 @@ object PositiveDurationSeconds
       case Duration.Inf => Left(s"Expecting finite duration but found Duration.Inf")
       case x => Left(s"Duration $x is not a valid duration that can be used for timeouts.")
     }
+
+  def fromProtoPrimitive(durationP: PbDuration): Either[String, PositiveDurationSeconds] =
+    fromJavaDuration(JDuration.of(durationP.seconds, java.time.temporal.ChronoUnit.SECONDS))
+
 }

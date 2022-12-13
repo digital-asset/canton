@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.errors
 
 import com.daml.error.{Explanation, Resolution}
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.SignatureCheckError
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
@@ -132,5 +133,21 @@ object SequencerError extends SequencerErrorGroup {
         with CantonError {
       override val logOnCreation: Boolean = false
     }
+  }
+
+  @Explanation("""
+      |The sequencer has detected that some event that was placed on the ledger cannot be parsed.
+      |This may be due to some sequencer node acting maliciously or faulty.
+      |The event is ignored and processing continues as usual.
+      |""")
+  object InvalidLedgerEvent extends AlarmErrorCode("INVALID_LEDGER_EVENT") {
+    case class Error(
+        blockHeight: Long,
+        protoDeserializationError: ProtoDeserializationError,
+    )(implicit override val loggingContext: ErrorLoggingContext)
+        extends Alarm(
+          s"At block $blockHeight could not parse an event from the ledger. Event is being ignored. $protoDeserializationError"
+        )
+        with CantonError
   }
 }

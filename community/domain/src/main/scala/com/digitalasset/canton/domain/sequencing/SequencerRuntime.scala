@@ -8,11 +8,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{
-  LocalNodeParameters,
-  ProcessingTimeout,
-  TestingConfigInternal,
-}
+import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.admin.v0.{
   SequencerAdministrationServiceGrpc,
@@ -41,6 +37,7 @@ import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -102,7 +99,7 @@ object SequencerAuthenticationConfig {
 class SequencerRuntime(
     sequencerFactory: SequencerFactory,
     staticDomainParameters: StaticDomainParameters,
-    localNodeParameters: LocalNodeParameters,
+    localNodeParameters: CantonNodeParameters,
     publicServerConfig: PublicServerConfig,
     timeTrackerConfig: DomainTimeTrackerConfig,
     testingConfig: TestingConfigInternal,

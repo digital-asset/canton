@@ -157,7 +157,6 @@ object RawLedgerBlock {
   sealed trait RawBlockEvent extends Product with Serializable
 
   object RawBlockEvent {
-
     case class Send(
         request: ByteString,
         microsecondsSinceEpoch: Long,

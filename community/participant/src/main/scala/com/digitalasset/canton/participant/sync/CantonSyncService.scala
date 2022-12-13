@@ -44,10 +44,8 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.Pruning.*
-import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
-import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -72,9 +70,11 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.participant.{ParticipantNodeParameters, *}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.scheduler.Schedulers
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
@@ -1457,6 +1457,7 @@ object CantonSyncService {
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
         indexedStringStore: IndexedStringStore,
+        schedulers: Schedulers,
         metrics: ParticipantMetrics,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
@@ -1488,6 +1489,7 @@ object CantonSyncService {
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
         indexedStringStore: IndexedStringStore,
+        schedulers: Schedulers,
         metrics: ParticipantMetrics,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,

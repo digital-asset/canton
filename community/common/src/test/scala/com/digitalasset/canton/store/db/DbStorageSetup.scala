@@ -146,11 +146,13 @@ class PostgresCISetup(
   /** name of db to use for the tests (avoiding flyway migration conflicts) */
   private lazy val useDb = envDb + (if (migrationMode == MigrationMode.DevVersion) "_dev" else "")
 
+  private lazy val useHost = sys.env.getOrElse("POSTGRES_HOST", "localhost")
+
   override lazy val basicConfig: DbBasicConfig = DbBasicConfig(
     env("POSTGRES_USER"),
     env("POSTGRES_PASSWORD"),
     useDb,
-    "localhost",
+    useHost,
     5432,
   )
 

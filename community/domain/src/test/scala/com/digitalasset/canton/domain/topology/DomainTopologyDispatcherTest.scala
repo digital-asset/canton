@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.config.DomainNodeParameters
+import com.digitalasset.canton.domain.DomainNodeParameters
 import com.digitalasset.canton.domain.topology.DomainTopologySender.{
   TopologyDispatchingDegradation,
   TopologyDispatchingInternalError,

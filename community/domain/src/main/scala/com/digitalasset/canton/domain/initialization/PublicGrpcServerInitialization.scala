@@ -5,8 +5,9 @@ package com.digitalasset.canton.domain.initialization
 
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
+import com.digitalasset.canton.domain.DomainNodeParameters
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.domain.config.{DomainConfig, DomainNodeParameters}
+import com.digitalasset.canton.domain.config.DomainConfig
 import com.digitalasset.canton.domain.sequencing.SequencerRuntime
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.SequencerConnectServerInterceptor
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerConnectService

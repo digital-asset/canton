@@ -1,0 +1,54 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.pruning.admin.v0;
+
+import "google/protobuf/duration.proto";
+
+message SetSchedule {
+  message Request {
+    PruningSchedule schedule = 1;
+  }
+  message Response {}
+}
+
+message GetSchedule {
+  message Request {}
+  message Response {
+    PruningSchedule schedule = 1;
+  }
+}
+
+message PruningSchedule {
+  string cron = 1;
+  google.protobuf.Duration max_duration = 2;
+  google.protobuf.Duration retention = 3;
+}
+
+message ClearSchedule {
+  message Request {}
+  message Response {}
+}
+
+message UpdateCron {
+  message Request {
+    string cron = 1;
+  }
+  message Response {}
+}
+
+message UpdateMaxDuration {
+  message Request {
+    google.protobuf.Duration max_duration = 1;
+  }
+  message Response {}
+}
+
+message UpdateRetention {
+  message Request {
+    google.protobuf.Duration retention = 1;
+  }
+  message Response {}
+}

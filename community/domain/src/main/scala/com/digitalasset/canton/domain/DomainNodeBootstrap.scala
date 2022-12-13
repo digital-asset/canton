@@ -13,7 +13,7 @@ import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
 }
-import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt}
 import com.digitalasset.canton.config.{CryptoConfig, InitConfigBase, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.{
@@ -51,6 +51,7 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableServer
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonMutableHandlerRegistry
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
   DynamicDomainParameters,
@@ -123,7 +124,6 @@ class DomainNodeBootstrap(
     DomainNodeBootstrap.tryStaticDomainParamsFromConfig(
       config.init.domainParameters,
       config.crypto,
-      parentLogger,
     )
   private val settingsStore = DomainNodeSettingsStore.create(
     storage,
@@ -456,12 +456,15 @@ class DomainNodeBootstrap(
           futureSupervisor,
           loggerFactory,
         )
+
         maxRequestSize <- EitherTUtil
           .fromFuture(
-            domainParamsLookup.getApproximate(warnOnUsingDefaults = false),
+            domainParamsLookup.getApproximate(),
             error => s"Unable to retrieve the domain parameters: ${error.getMessage}",
           )
-          .map(_.maxRequestSize)
+          .map(paramsO =>
+            paramsO.map(_.maxRequestSize).getOrElse(MaxRequestSize(NonNegativeInt.maxValue))
+          )
         // must happen before the init of topology management since it will call the embedded sequencer's public api
         publicServer = PublicGrpcServerInitialization(
           config,
@@ -568,15 +571,13 @@ object DomainNodeBootstrap {
   private[domain] def tryStaticDomainParamsFromConfig(
       domainParametersConfig: DomainParametersConfig,
       cryptoConfig: CryptoConfig,
-      parentLogger: NamedLoggerFactory,
-  )(implicit traceContext: TraceContext): StaticDomainParameters =
+  ): StaticDomainParameters =
     domainParametersConfig
-      .toStaticDomainParameters(
-        cryptoConfig,
-        parentLogger.getTracedLogger(getClass),
-      )
+      .toStaticDomainParameters(cryptoConfig)
       .valueOr(err =>
-        throw new IllegalArgumentException(s"Failed to convert static domain params: ${err}")
+        throw new IllegalArgumentException(
+          s"Failed to convert static domain params: ${err}"
+        )
       )
 
   object CommunityDomainFactory extends Factory[CommunityDomainConfig] {

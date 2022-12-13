@@ -24,11 +24,8 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
-import com.digitalasset.canton.participant.config.{
-  IndexerConfig,
-  LedgerApiServerConfig,
-  ParticipantNodeParameters,
-}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.config.{IndexerConfig, LedgerApiServerConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.util.LoggingContextUtil
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}

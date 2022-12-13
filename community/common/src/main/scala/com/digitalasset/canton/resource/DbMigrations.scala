@@ -5,7 +5,8 @@ package com.digitalasset.canton.resource
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.config.{DbConfig, LocalNodeParameters, ProcessingTimeout}
+import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout}
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{CloseContext, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -181,7 +182,7 @@ trait DbMigrations { this: NamedLogging =>
       .toEitherT[UnlessShutdown]
   }
 
-  def checkAndMigrate(params: LocalNodeParameters, retryConfig: RetryConfig)(implicit
+  def checkAndMigrate(params: CantonNodeParameters, retryConfig: RetryConfig)(implicit
       tc: TraceContext
   ): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
     val standardConfig = !params.nonStandardConfig

@@ -12,7 +12,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.config.DomainNodeParameters
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyDispatchingErrorGroup
 import com.digitalasset.canton.error.{CantonError, HasDegradationState}
 import com.digitalasset.canton.lifecycle.{
@@ -34,13 +34,7 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
 }
-import com.digitalasset.canton.topology.processing.{
-  ApproximateTime,
-  EffectiveTime,
-  SequencedTime,
-  TopologyTransactionProcessingSubscriber,
-  TopologyTransactionProcessor,
-}
+import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
@@ -99,7 +93,7 @@ private[domain] class DomainTopologyDispatcher(
     crypto: Crypto,
     clock: Clock,
     addressSequencerAsDomainMember: Boolean,
-    parameters: DomainNodeParameters,
+    parameters: CantonNodeParameters,
     futureSupervisor: FutureSupervisor,
     sender: DomainTopologySender,
     protected val loggerFactory: NamedLoggerFactory,
@@ -538,7 +532,7 @@ private[domain] object DomainTopologyDispatcher {
       crypto: Crypto,
       clock: Clock,
       addressSequencerAsDomainMember: Boolean,
-      parameters: DomainNodeParameters,
+      parameters: CantonNodeParameters,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit

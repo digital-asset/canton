@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 trait HasExecutorService extends BeforeAndAfterAll with HasExecutorServiceGeneric { this: Suite =>
-  def handleFailure(message: String): ExecutionContextIdlenessExecutorService = fail(message)
+  def handleFailure(message: String): Nothing = fail(message)
 
   override def afterAll(): Unit =
     try super.afterAll()
@@ -82,13 +82,21 @@ trait HasExecutorServiceGeneric extends NamedLogging {
     ExecutorState(scheduler, executor, monitor)
   }
 
-  def handleFailure(message: String): ExecutionContextIdlenessExecutorService
+  def handleFailure(message: String): Nothing
 
-  private def getOrCreateExecutor(): ExecutionContextIdlenessExecutorService =
+  private def getOrCreateExecutorState(): Option[ExecutorState] =
     executorStateRef
       .updateAndGet(_.orElse(Some(createExecutorState())))
+
+  private def getOrCreateExecutor(): ExecutionContextIdlenessExecutorService =
+    getOrCreateExecutorState()
       .map(_.executor)
       .getOrElse(handleFailure("Executor was not created"))
+
+  private def getOrCreateScheduler(): ScheduledExecutorService =
+    getOrCreateExecutorState()
+      .map(_.scheduler)
+      .getOrElse(handleFailure("Scheduler was not created"))
 
   private lazy val executorStateRef: AtomicReference[Option[ExecutorState]] =
     new AtomicReference[Option[ExecutorState]](None)
@@ -98,6 +106,8 @@ trait HasExecutorServiceGeneric extends NamedLogging {
   protected def exitOnFatal: Boolean = true
 
   protected def executorService: ExecutionContextIdlenessExecutorService = getOrCreateExecutor()
+
+  protected def scheduledExecutor(): ScheduledExecutorService = getOrCreateScheduler()
 
   protected def closeExecutor(): Unit = {
     val executorStateClose: AutoCloseable = () => {

@@ -22,10 +22,8 @@ import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.Adm
 import com.digitalasset.canton.error.{CantonError, DecodedRpcStatus}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.config.{
-  LocalParticipantConfig,
-  ParticipantNodeParameters,
-}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.config.LocalParticipantConfig
 import com.digitalasset.canton.participant.ledger.api.CantonAdminToken
 import com.digitalasset.canton.participant.ledger.api.client.{LedgerConnection, LedgerSubscription}
 import com.digitalasset.canton.participant.sync.CantonSyncService

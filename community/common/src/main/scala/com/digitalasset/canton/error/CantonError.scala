@@ -16,8 +16,10 @@ object ErrorCodeUtils {
 
   import cats.syntax.either.*
 
-  /** regex suitable to parse an error code string and extract the error recoverability code */
-  lazy val errorCodeCategoryRegexp: Regex = "^[0-9A-Z_]+\\(([0-9]+),[A-Za-z0-9]+\\).*".r
+  /** regex suitable to parse an error code string and extract the error recoverability code
+    * the (?s) supports multi-line matches
+    */
+  lazy val errorCodeCategoryRegexp: Regex = "(?s)^[0-9A-Z_]+\\(([0-9]+),[A-Za-z0-9]+\\).*".r
 
   def errorCategoryFromString(str: String): Option[ErrorCategory] = {
     str match {

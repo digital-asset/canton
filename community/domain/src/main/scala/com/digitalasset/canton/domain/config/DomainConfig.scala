@@ -11,8 +11,6 @@ import com.digitalasset.canton.domain.sequencing.sequencer.CommunitySequencerCon
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
-import com.digitalasset.canton.tracing.TracingConfig
-import com.digitalasset.canton.version.ProtocolVersion
 import io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens.*
 
@@ -71,22 +69,6 @@ case class CommunityPublicServerConfig(
     override val overrideMaxRequestSize: Option[NonNegativeInt] = None,
 ) extends PublicServerConfig
     with CommunityServerConfig
-
-case class DomainNodeParameters(
-    tracing: TracingConfig,
-    delayLoggingThreshold: NonNegativeFiniteDuration,
-    loggingConfig: LoggingConfig,
-    logQueryCost: Option[QueryCostMonitoringConfig],
-    enableAdditionalConsistencyChecks: Boolean,
-    enablePreviewFeatures: Boolean,
-    processingTimeouts: ProcessingTimeout,
-    sequencerClient: SequencerClientConfig,
-    cachingConfigs: CachingConfigs,
-    nonStandardConfig: Boolean,
-    devVersionSupport: Boolean,
-    dontWarnOnDeprecatedPV: Boolean,
-    initialProtocolVersion: ProtocolVersion,
-) extends LocalNodeParameters
 
 object DomainBaseConfig {
 

@@ -6,11 +6,7 @@ package com.digitalasset.canton.domain.sequencing
 import akka.actor.ActorSystem
 import cats.syntax.option.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{
-  LocalNodeParameters,
-  ProcessingTimeout,
-  TestingConfigInternal,
-}
+import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministrationServiceGrpc
 import com.digitalasset.canton.domain.config.DomainConfig
@@ -20,6 +16,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerFactory,
 }
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -51,7 +48,7 @@ trait SequencerRuntimeFactory {
       processingTimeout: ProcessingTimeout,
       auditLogger: TracedLogger,
       agreementManager: Option[ServiceAgreementManager],
-      localParameters: LocalNodeParameters,
+      localParameters: CantonNodeParameters,
       metrics: SequencerMetrics,
       indexedStringStore: IndexedStringStore,
       futureSupervisor: FutureSupervisor,
@@ -83,7 +80,7 @@ object SequencerRuntimeFactory {
         processingTimeout: ProcessingTimeout,
         auditLogger: TracedLogger,
         agreementManager: Option[ServiceAgreementManager],
-        localParameters: LocalNodeParameters,
+        localParameters: CantonNodeParameters,
         metrics: SequencerMetrics,
         indexedStringStore: IndexedStringStore,
         futureSupervisor: FutureSupervisor,

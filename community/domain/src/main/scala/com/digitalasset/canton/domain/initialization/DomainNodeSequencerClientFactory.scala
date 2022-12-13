@@ -9,8 +9,8 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.TestingConfigInternal
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.Domain
-import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.metrics.DomainMetrics
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
@@ -38,7 +38,7 @@ class DomainNodeSequencerClientFactory(
     metrics: DomainMetrics,
     topologyClient: DomainTopologyClientWithInit,
     sequencerConnection: SequencerConnection,
-    cantonParameterConfig: DomainNodeParameters,
+    cantonNodeParameters: CantonNodeParameters,
     crypto: Crypto,
     domainParameters: StaticDomainParameters,
     testingConfig: TestingConfigInternal,
@@ -89,8 +89,8 @@ class DomainNodeSequencerClientFactory(
         id,
         topologyClient,
         crypto,
-        cantonParameterConfig.cachingConfigs,
-        cantonParameterConfig.processingTimeouts,
+        cantonNodeParameters.cachingConfigs,
+        cantonNodeParameters.processingTimeouts,
         futureSupervisor,
         loggerFactory,
       )
@@ -102,11 +102,11 @@ class DomainNodeSequencerClientFactory(
       sequencerClientSyncCrypto,
       crypto,
       None,
-      cantonParameterConfig.sequencerClient,
-      cantonParameterConfig.tracing.propagation,
+      cantonNodeParameters.sequencerClient,
+      cantonNodeParameters.tracing.propagation,
       testingConfig,
       domainParameters,
-      cantonParameterConfig.processingTimeouts,
+      cantonNodeParameters.processingTimeouts,
       clock,
       topologyClient,
       futureSupervisor,
@@ -118,12 +118,10 @@ class DomainNodeSequencerClientFactory(
       member =>
         Domain.replaySequencerConfig.get().lift(member).map(Domain.defaultReplayPath(member)),
       clientMetrics,
-      cantonParameterConfig.loggingConfig,
+      cantonNodeParameters.loggingConfig,
       clientLoggerFactory,
-      supportedProtocolVersions =
-        ProtocolVersionCompatibility.supportedProtocolsDomain(includeUnstableVersions =
-          cantonParameterConfig.devVersionSupport
-        ),
+      supportedProtocolVersions = ProtocolVersionCompatibility
+        .supportedProtocolsDomain(includeUnstableVersions = cantonNodeParameters.devVersionSupport),
       minimumProtocolVersion = None,
     )
   }

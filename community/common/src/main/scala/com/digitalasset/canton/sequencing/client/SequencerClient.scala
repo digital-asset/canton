@@ -336,7 +336,7 @@ class SequencerClient(
       }
       val domainParamsF =
         EitherTUtil.fromFuture(
-          domainParametersLookup.getApproximate(warnOnUsingDefaults),
+          domainParametersLookup.getApproximateOrDefaultValue(warnOnUsingDefaults),
           throwable =>
             SendAsyncClientError.RequestFailed(
               s"failed to retrieve maxRequestSize because ${throwable.getMessage}"

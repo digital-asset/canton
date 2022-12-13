@@ -3,15 +3,14 @@
 
 package com.digitalasset.canton.domain.config
 
+import cats.syntax.contravariantSemigroupal.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.{CryptoConfig, ProtocolConfig}
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
 
 /** Configuration of domain parameters that all members connecting to a domain must adhere to.
@@ -54,18 +53,17 @@ final case class DomainParametersConfig(
     willCorruptYourSystemDevVersionSupport: Boolean = false,
     dontWarnOnDeprecatedPV: Boolean = false,
     resetStoredStaticConfig: Boolean = false,
-) {
+) extends ProtocolConfig {
+
+  override def initialProtocolVersion: ProtocolVersion = protocolVersion.version
 
   /** Converts the domain parameters config into a domain parameters protocol message.
     *
     * Sets the required crypto schemes based on the provided crypto config if they are unset in the config.
     */
   def toStaticDomainParameters(
-      cryptoConfig: CryptoConfig,
-      logger: TracedLogger,
-  )(implicit traceContext: TraceContext): Either[String, StaticDomainParameters] = {
-
-    warnOnNonDefaultValues(logger)
+      cryptoConfig: CryptoConfig
+  ): Either[String, StaticDomainParameters] = {
 
     def selectSchemes[S](
         configuredRequired: Option[NonEmpty[Set[S]]],
@@ -84,6 +82,8 @@ final case class DomainParametersConfig(
 
     // Set to allowed schemes if none required schemes are specified
     for {
+      _ <- validateNonDefaultValues()
+
       newRequiredSigningKeySchemes <- selectSchemes(
         requiredSigningKeySchemes,
         CryptoFactory.selectAllowedSigningKeyScheme,
@@ -119,14 +119,13 @@ final case class DomainParametersConfig(
     }
   }
 
-  /** We emit a warning for the domain parameters that are dynamic
-    * for which we ignore the configured value in the configuration file.
+  /** Return an error if one parameter which is dynamic has non-default
+    * value specified in the config. The reason for the error is that
+    * such a config value would be ignored.
     */
-  private def warnOnNonDefaultValues(
-      logger: TracedLogger
-  )(implicit traceContext: TraceContext): Unit = {
+  private def validateNonDefaultValues(): Either[String, Unit] = {
 
-    def logMessage(
+    def errorMessage(
         name: String,
         setConsoleCommand: String,
         configuredValue: String,
@@ -138,35 +137,46 @@ final case class DomainParametersConfig(
           |""".stripMargin
 
     val currentPV = protocolVersion.version
-    if (currentPV >= ProtocolVersion.v4) {
-      if (reconciliationInterval != StaticDomainParameters.defaultReconciliationInterval)
-        logger.warn(
-          logMessage(
-            "reconciliationInterval",
-            "set_reconciliation_interval",
-            reconciliationInterval.toFiniteDuration.toString(),
-            StaticDomainParameters.defaultReconciliationInterval.toFiniteDuration.toString(),
-          )
-        )
-      if (maxRatePerParticipant != StaticDomainParameters.defaultMaxRatePerParticipant)
-        logger.warn(
-          logMessage(
-            "max rate per participant",
-            "set_max_rate_per_participant",
-            maxRatePerParticipant.value.toString,
-            StaticDomainParameters.defaultMaxRatePerParticipant.value.toString,
-          )
-        )
 
-      if (maxInboundMessageSize != StaticDomainParameters.defaultMaxRequestSize)
-        logger.warn(
-          logMessage(
-            "max request size (previously: max inbound message size)",
-            "set_max_request_size",
-            maxInboundMessageSize.unwrap.toString,
-            StaticDomainParameters.defaultMaxRequestSize.unwrap.toString,
-          )
-        )
+    if (currentPV < ProtocolVersion.v4) {
+      Right(())
+    } else {
+      val reconciliationIntervalValid = Either.cond(
+        reconciliationInterval == StaticDomainParameters.defaultReconciliationInterval,
+        (),
+        errorMessage(
+          "reconciliation interval",
+          "set_reconciliation_interval",
+          reconciliationInterval.toFiniteDuration.toString(),
+          StaticDomainParameters.defaultReconciliationInterval.toFiniteDuration.toString(),
+        ),
+      )
+
+      val maxRatePerParticipantValid = Either.cond(
+        maxRatePerParticipant == StaticDomainParameters.defaultMaxRatePerParticipant,
+        (),
+        errorMessage(
+          "max rate per participant",
+          "set_max_rate_per_participant",
+          maxRatePerParticipant.value.toString,
+          StaticDomainParameters.defaultMaxRatePerParticipant.value.toString,
+        ),
+      )
+
+      val maxRequestSizeValid = Either.cond(
+        maxInboundMessageSize == StaticDomainParameters.defaultMaxRequestSize,
+        (),
+        errorMessage(
+          "max request size (previously: max inbound message size)",
+          "set_max_request_size",
+          maxInboundMessageSize.unwrap.toString,
+          StaticDomainParameters.defaultMaxRequestSize.unwrap.toString,
+        ),
+      )
+
+      (reconciliationIntervalValid, maxRatePerParticipantValid, maxRequestSizeValid).tupled.map(_ =>
+        ()
+      )
     }
   }
 }

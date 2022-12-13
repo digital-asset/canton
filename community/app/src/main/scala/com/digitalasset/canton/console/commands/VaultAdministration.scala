@@ -11,8 +11,10 @@ import com.digitalasset.canton.admin.api.client.data.ListKeyOwnersResult
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
 import com.digitalasset.canton.crypto.store.CryptoPublicStoreError
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.{KeyOwner, KeyOwnerCode}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
@@ -39,7 +41,7 @@ class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
       filterFingerprint: String = "",
       filterName: String = "",
       purpose: Set[KeyPurpose] = Set.empty,
-  ): Seq[PublicKeyWithName] =
+  ): Seq[PrivateKeyMetadata] =
     consoleEnvironment.run {
       adminCommand(VaultAdminCommands.ListMyKeys(filterFingerprint, filterName, purpose))
     }
@@ -87,6 +89,13 @@ class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
     }
   }
 
+  @Help.Summary("Get the wrapper key id that is used for the encrypted private keys store")
+  def get_wrapper_key_id(): String = {
+    consoleEnvironment.run {
+      adminCommand(VaultAdminCommands.GetWrapperKeyId())
+    }
+  }
+
 }
 
 class LocalSecretKeyAdministration(
@@ -107,6 +116,23 @@ class LocalSecretKeyAdministration(
     }
   }
 
+  private def parseKeyPair(
+      keyPairBytes: ByteString
+  ): Either[String, CryptoKeyPair[_ <: PublicKey, _ <: PrivateKey]] = {
+    CryptoKeyPair
+      .fromByteString(keyPairBytes)
+      .leftFlatMap { firstErr =>
+        // Fallback to parse the old protobuf message format
+        ProtoConverter
+          .parse(
+            v0.CryptoKeyPair.parseFrom,
+            CryptoKeyPair.fromProtoCryptoKeyPairV0,
+            keyPairBytes,
+          )
+          .leftMap(secondErr => s"Failed to parse crypto key pair: $firstErr, $secondErr")
+      }
+  }
+
   @Help.Summary("Upload (load and import) a key pair from file")
   def upload(filename: String, name: Option[String]): Unit = TraceContext.withNewTraceContext {
     implicit traceContext =>
@@ -115,10 +141,7 @@ class LocalSecretKeyAdministration(
           BinaryFileUtil.readByteStringFromFile(filename)
         )
         validatedName <- name.traverse(KeyName.create).toEitherT[Future]
-        keyPair <- CryptoKeyPair
-          .fromByteString(keyPairContent)
-          .leftMap(_.toString)
-          .toEitherT[Future]
+        keyPair <- parseKeyPair(keyPairContent).toEitherT[Future]
         _ <- loadKeyPair(validatedName, keyPair)
       } yield ()
       run(cmd, "importing key pair")
@@ -132,10 +155,7 @@ class LocalSecretKeyAdministration(
     TraceContext.withNewTraceContext { implicit traceContext =>
       val cmd = for {
         validatedName <- name.traverse(KeyName.create).toEitherT[Future]
-        keyPair <- CryptoKeyPair
-          .fromByteString(pairBytes)
-          .leftMap(_.toString)
-          .toEitherT[Future]
+        keyPair <- parseKeyPair(pairBytes).toEitherT[Future]
         _ <- loadKeyPair(validatedName, keyPair)
       } yield ()
       run(cmd, "importing key pair")

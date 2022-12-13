@@ -6,12 +6,13 @@ package com.digitalasset.canton.domain.mediator
 import cats.data.{EitherT, NonEmptySeq}
 import cats.instances.future.*
 import cats.syntax.bifunctor.*
-import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.Mediator.PruningError
 import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   Lifecycle,
@@ -53,7 +54,7 @@ private[mediator] class Mediator(
     state: MediatorState,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
     sequencedEventStore: SequencedEventStore,
-    parameters: LocalNodeParameters,
+    parameters: CantonNodeParameters,
     protocolVersion: ProtocolVersion,
     clock: Clock,
     metrics: MediatorMetrics,

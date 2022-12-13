@@ -148,7 +148,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       val transactionVersion = LfTransactionVersion.VDev
 
       val selectorOldPV = selectorForExerciseByInterface(
-        transactionVersion = LanguageVersion.v1_dev, // requires protocol version dev
+        languageVersion = LanguageVersion.v1_dev, // requires protocol version dev
         domainProtocolVersion = _ => oldPV,
       )
 
@@ -171,7 +171,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
 
       // Happy path
       val selectorNewPV = selectorForExerciseByInterface(
-        transactionVersion = LanguageVersion.v1_dev, // requires protocol version dev
+        languageVersion = LanguageVersion.v1_dev, // requires protocol version dev
         domainProtocolVersion = _ => newPV,
       )
 
@@ -284,12 +284,13 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
     import SimpleTopology.*
 
     "minimize the number of transfers" in {
-      import ThreeExercises.*
+      val threeExercises = ThreeExercises(languageVersion)
 
       val domains = NonEmpty.mk(Set, acme, da, repair)
 
       def selectDomain(domainOfContracts: Map[LfContractId, DomainId]): DomainRank =
         selectorForThreeExercises(
+          threeExercises = threeExercises,
           connectedDomains = domains,
           domainsOfSubmittersAndInformees = domains,
           domainOfContracts = _ => domainOfContracts,
@@ -300,11 +301,14 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         Expected: transfer to acme
        */
       {
-        val domainsOfContracts =
-          Map(inputContract1Id -> acme, inputContract2Id -> acme, inputContract3Id -> repair)
+        val domainsOfContracts = Map(
+          threeExercises.inputContract1Id -> acme,
+          threeExercises.inputContract2Id -> acme,
+          threeExercises.inputContract3Id -> repair,
+        )
 
         val expectedDomainRank = DomainRank(
-          transfers = Map(inputContract3Id -> (signatory, repair)),
+          transfers = Map(threeExercises.inputContract3Id -> (signatory, repair)),
           priority = 0,
           domainId = acme, // transfer to acme
         )
@@ -317,11 +321,14 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         Expected: transfer to repair
        */
       {
-        val domainsOfContracts =
-          Map(inputContract1Id -> acme, inputContract2Id -> repair, inputContract3Id -> repair)
+        val domainsOfContracts = Map(
+          threeExercises.inputContract1Id -> acme,
+          threeExercises.inputContract2Id -> repair,
+          threeExercises.inputContract3Id -> repair,
+        )
 
         val expectedDomainRank = DomainRank(
-          transfers = Map(inputContract1Id -> (signatory, acme)),
+          transfers = Map(threeExercises.inputContract1Id -> (signatory, acme)),
           priority = 0,
           domainId = repair, // transfer to repair
         )
@@ -361,7 +368,7 @@ private[routing] object DomainSelectorTest {
     private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ =>
       BaseTest.testedProtocolVersion
 
-    private val defaultTransactionVersion: LanguageVersion = LanguageVersion.v1_14
+    private val defaultLanguageVersion: LanguageVersion = languageVersion
 
     def selectorForExerciseByInterface(
         priorityOfDomain: DomainId => Int = defaultPriorityOfDomain,
@@ -373,7 +380,7 @@ private[routing] object DomainSelectorTest {
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
         prescribedDomainId: Option[DomainId] = defaultPrescribedDomainId,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
-        transactionVersion: LanguageVersion = defaultTransactionVersion,
+        languageVersion: LanguageVersion = defaultLanguageVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
     )(implicit
         ec: ExecutionContext,
@@ -381,7 +388,7 @@ private[routing] object DomainSelectorTest {
         loggerFactory: NamedLoggerFactory,
     ): Selector = {
 
-      val exerciseByInterface = ExerciseByInterface(transactionVersion)
+      val exerciseByInterface = ExerciseByInterface(languageVersion)
 
       val inputContractsMetadata = Set(
         WithContractMetadata[LfContractId](
@@ -402,7 +409,6 @@ private[routing] object DomainSelectorTest {
         prescribedDomainAlias,
         prescribedDomainId,
         domainProtocolVersion,
-        transactionVersion,
         vettedPackages,
         exerciseByInterface.tx,
         inputContractsMetadata,
@@ -410,6 +416,7 @@ private[routing] object DomainSelectorTest {
     }
 
     def selectorForThreeExercises(
+        threeExercises: ThreeExercises,
         priorityOfDomain: DomainId => Int = defaultPriorityOfDomain,
         domainOfContracts: Seq[LfContractId] => Map[LfContractId, DomainId] =
           defaultDomainOfContracts,
@@ -418,7 +425,7 @@ private[routing] object DomainSelectorTest {
           defaultDomainsOfSubmittersAndInformees,
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
-        transactionVersion: LanguageVersion = defaultTransactionVersion,
+        languageVersion: LanguageVersion = defaultLanguageVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
     )(implicit
         ec: ExecutionContext,
@@ -426,7 +433,7 @@ private[routing] object DomainSelectorTest {
         loggerFactory: NamedLoggerFactory,
     ): Selector = {
 
-      val inputContractsMetadata = ThreeExercises.inputContractIds.map { inputContractId =>
+      val inputContractsMetadata = threeExercises.inputContractIds.map { inputContractId =>
         WithContractMetadata[LfContractId](
           inputContractId,
           ContractMetadata.tryCreate(
@@ -445,9 +452,8 @@ private[routing] object DomainSelectorTest {
         prescribedDomainAlias,
         None,
         domainProtocolVersion,
-        transactionVersion,
         vettedPackages,
-        ThreeExercises.tx,
+        threeExercises.tx,
         inputContractsMetadata,
       )
     }
@@ -460,7 +466,6 @@ private[routing] object DomainSelectorTest {
         prescribedDomainAlias: Option[String],
         prescribedDomainId: Option[DomainId],
         domainProtocolVersion: DomainId => ProtocolVersion,
-        transactionVersion: LanguageVersion,
         vettedPackages: Seq[LfPackageId],
         tx: LfVersionedTransaction,
         inputContractsMetadata: Set[WithContractMetadata[LfContractId]],

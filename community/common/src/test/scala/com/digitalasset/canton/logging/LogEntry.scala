@@ -55,6 +55,7 @@ case class LogEntry(
       errorCode: ErrorCode,
       messageAssertion: String => Assertion,
       contextAssertion: Map[String, String] => Assertion = _ => succeed,
+      loggerAssertion: String => Assertion = _ => succeed,
   )(implicit pos: source.Position): Assertion = {
     // Decompose the log entry's message
     // NOTE: The format is defined by code in `com.daml.error.ErrorCode`
@@ -72,6 +73,10 @@ case class LogEntry(
     // Check the context
     mdc.keySet should contain("location")
     contextAssertion(mdc)
+
+    // Check the logger name
+    loggerAssertion(loggerName)
+
   } withClue s"\n\nThe LogEntry is:\n$this\n\nand contains:\n- message: \"$message\"\n- context: $mdc"
 
   val CommandFailureLoggerNames: Seq[String] =

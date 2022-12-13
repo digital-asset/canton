@@ -6,9 +6,10 @@ package com.digitalasset.canton.data
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
+import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import java.time.Instant
+import java.util.Date
 
 trait Timestamp extends PrettyPrinting {
   def underlying: LfTimestamp
@@ -27,6 +28,8 @@ trait Timestamp extends PrettyPrinting {
   def toEpochMilli: Long = underlying.toInstant.toEpochMilli
 
   def toInstant: Instant = underlying.toInstant
+
+  def toDate: Date = Date.from(underlying.toInstant)
 
   def toMicros: Long = underlying.micros
 

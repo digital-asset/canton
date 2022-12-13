@@ -12,8 +12,7 @@ import scala.math.Ordered.orderingToOrdered
 object DamlLfVersionToProtocolVersions {
 
   /** This Map links the Daml Lf-version to the minimum protocol version that supports it. */
-  private val damlLfVersionToMinimumProtocolVersions
-      : SortedMap[TransactionVersion, ProtocolVersion] =
+  val damlLfVersionToMinimumProtocolVersions: SortedMap[TransactionVersion, ProtocolVersion] =
     SortedMap(
       TransactionVersion.V14 -> ProtocolVersion.v2,
       // Interfaces

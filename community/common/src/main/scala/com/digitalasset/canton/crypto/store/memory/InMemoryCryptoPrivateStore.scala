@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto.store.memory
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.crypto.store.{
@@ -186,6 +187,11 @@ class InMemoryCryptoPrivateStore(
         } yield ()
       }
       .map(_ => ())
+
+  private[crypto] def encrypted(keyId: Fingerprint)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Option[String300]] =
+    EitherT.rightT[Future, CryptoPrivateStoreError](None)
 
   override def close(): Unit = ()
 }
