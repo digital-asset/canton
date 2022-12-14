@@ -67,6 +67,15 @@ class CantonErrorTest extends BaseTestWordSpec {
         ErrorCategory.ContentionOnSharedResources
       )
     }
+
+    "Extract code from multi-line strings" in {
+      ErrorCodeUtils.errorCategoryFromString(
+        "DB_CONNECTION_LOST(13,0):  It was not possible to establish a valid connection\nFull Error\n"
+      ) should contain(
+        ErrorCategory.BackgroundProcessDegradationWarning
+      )
+    }
+
   }
 
   "An alarm" should {

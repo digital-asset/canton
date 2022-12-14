@@ -105,13 +105,13 @@ class ReferenceDemoScript(
     darPath.map(path => s"$path/${dar}.dar").getOrElse(s"${rootPath}/dars/${dar}.dar")
 
   private val lookupTimeoutSeconds: Long =
-    System.getProperty("canton.demo.lookup-timeout-seconds", "40").toLong
+    System.getProperty("canton-demo.lookup-timeout-seconds", "40").toLong
   private val lookupTimeout =
     NonNegativeDuration.tryFromJavaDuration(java.time.Duration.ofSeconds(lookupTimeoutSeconds))
   private val syncTimeout = Some(
     NonNegativeDuration.tryFromJavaDuration(
       java.time.Duration.ofSeconds(
-        System.getProperty("canton.demo.sync-timeout-seconds", "30").toLong
+        System.getProperty("canton-demo.sync-timeout-seconds", "30").toLong
       )
     )
   )

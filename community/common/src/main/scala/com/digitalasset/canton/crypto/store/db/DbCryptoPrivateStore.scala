@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -221,6 +222,23 @@ class DbCryptoPrivateStore(
       err => CryptoPrivateStoreError.FailedToDeleteKey(keyId, err.toString),
     )
 
+  private[crypto] def encrypted(
+      keyId: Fingerprint
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Option[String300]] =
+    (for {
+      sigStoreKey <- readPrivateKey(keyId, Signing)
+      storedKey <- sigStoreKey.fold(readPrivateKey(keyId, Encryption))(key =>
+        EitherT.rightT(Some(key))
+      )
+    } yield storedKey).flatMap {
+      case Some(key) =>
+        EitherT.rightT(key.wrapperKeyId)
+      case None =>
+        EitherT.leftT(CryptoPrivateStoreError.FailedToReadKey(keyId, s"could not read key"))
+    }
+
   private[crypto] def getWrapperKeyId()(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Option[String300]] =
@@ -228,15 +246,14 @@ class DbCryptoPrivateStore(
       .fromFuture(
         queryTime
           .event(
-            storage
-              .query(
-                {
-                  sql"select distinct wrapper_key_id from crypto_private_keys"
-                    .as[String300]
-                    .map(_.toSeq)
-                },
-                functionFullName,
-              )
+            storage.query(
+              {
+                sql"select distinct wrapper_key_id from crypto_private_keys"
+                  .as[Option[String300]]
+                  .map(_.toSeq)
+              },
+              functionFullName,
+            )
           ),
         err => CryptoPrivateStoreError.FailedToGetWrapperKeyId(err.toString),
       )
@@ -249,6 +266,6 @@ class DbCryptoPrivateStore(
                 .FailedToGetWrapperKeyId("Found more than one distinct wrapper_key_id")
             )
           else
-            Right(wrapper_keys.headOption)
+            Right(wrapper_keys.flatten.headOption)
       }
 }

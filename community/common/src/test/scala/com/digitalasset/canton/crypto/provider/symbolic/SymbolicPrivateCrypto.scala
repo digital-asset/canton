@@ -34,7 +34,7 @@ class SymbolicPrivateCrypto(pureCrypto: SymbolicPureCrypto, override val store: 
     keypair(id, publicKey, privateKey)
   }
 
-  override protected def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+  override protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair] =
     EitherT.rightT(

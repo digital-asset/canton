@@ -4,15 +4,18 @@
 package com.digitalasset.canton.data
 
 import cats.Order
+import cats.syntax.either.*
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.ProtoDeserializationError.TimestampConversionError
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
+import com.digitalasset.canton.util.TryUtil
+import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.time.{Duration, Instant}
+import java.util.Date
 
 /** A timestamp implementation for canton, which currently uses a [[LfTimestamp]].
   * @param underlying A [[LfTimestamp]], holding the value of this [[CantonTimestamp]].
@@ -108,6 +111,12 @@ object CantonTimestamp {
 
   def fromInstant(i: Instant): Either[String, CantonTimestamp] =
     LfTimestamp.fromInstant(i).map(t => new CantonTimestamp(t))
+
+  def fromDate(javaDate: Date): Either[String, CantonTimestamp] =
+    for {
+      instant <- TryUtil.tryCatchInterrupted(javaDate.toInstant).toEither.leftMap(_.getMessage)
+      cantonTimestamp <- CantonTimestamp.fromInstant(instant)
+    } yield cantonTimestamp
 
   // TODO(error handling) these throw an IllegalArgumentException with the error message "cannot interpret ... as Timestamp"
   // Consider changing the error message or removing these methods

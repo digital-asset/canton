@@ -211,7 +211,7 @@ class DatabaseSequencer(
     EitherT.right(store.registerMember(member, CantonTimestamp.assertFromLong(uniqueMicros)).void)
   }
 
-  override protected def sendAsyncInternal(submission: SubmissionRequest)(implicit
+  override def sendAsyncInternal(submission: SubmissionRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncError, Unit] =
     writer.send(submission)

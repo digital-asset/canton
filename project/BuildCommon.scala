@@ -331,7 +331,7 @@ object BuildCommon {
       case PathList("google", "protobuf", _*) => MergeStrategy.first
       case PathList("org", "apache", "logging", _*) => MergeStrategy.first
       case PathList("ch", "qos", "logback", _*) => MergeStrategy.first
-      // TODO(rv) daml error pulls many dependencies in multiple times via the proto definitions
+      // TODO(#10677) daml error pulls many dependencies in multiple times via the proto definitions
       case PathList("com", "daml", _*) => MergeStrategy.first
       case PathList(
             "META-INF",
@@ -915,8 +915,6 @@ object BuildCommon {
           scaffeine,
           // didn't want to build protobuf
           daml_ledger_api_scalapb,
-          // akka grpc is something pretty special, needs some build engineering
-          daml_ledger_api_akka,
           // needs the lf_1_dev archive java protos, but i couldn't find them quickly
           // daml_lf_archive_reader,
           daml_lf_dev_archive_java_proto,
@@ -938,7 +936,10 @@ object BuildCommon {
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
+            "observability/metrics/src/main/scala",
+            "observability/telemetry/src/main/scala",
             "libs-scala/concurrent/src/main/scala",
+            "libs-scala/executors/src/main/scala",
             "libs-scala/resources/src/main/2.13",
             "libs-scala/resources/src/main/scala",
             "libs-scala/resources-akka/src/main/scala",
@@ -953,6 +954,8 @@ object BuildCommon {
             "libs-scala/safe-proto/src/main/scala",
             "libs-scala/crypto/src/main/scala",
             "libs-scala/build-info/src/main/scala",
+            "ledger-api/rs-grpc-bridge/src/main/java",
+            "ledger-api/rs-grpc-akka/src/main/scala",
             "ledger/metrics/src/main/scala",
             "ledger/ledger-resources/src/main/scala",
             "ledger/error/src/main/scala",
@@ -969,6 +972,8 @@ object BuildCommon {
             "ledger/ledger-api-health/src/main/scala",
             // depends on ledger-api-errors, needed for community-common/tls
             "ledger/ledger-api-common/src/main/scala",
+            "language-support/scala/bindings/src/main/scala",
+            "language-support/scala/bindings/src/main/2.13",
             // used by engine
             "daml-lf/archive/src/main/scala",
             "daml-lf/data/src/main/scala",
@@ -1012,6 +1017,7 @@ object BuildCommon {
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
+            "observability/metrics/src/test/lib/scala",
             "libs-scala/test-evidence/generator/src/main/scala",
             "libs-scala/test-evidence/scalatest/src/main/scala",
             "libs-scala/test-evidence/tag/src/main/scala",
@@ -1066,9 +1072,6 @@ object BuildCommon {
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
-            "ledger-api/rs-grpc-bridge/src/main/java",
-            "language-support/scala/bindings/src/main/scala",
-            "language-support/scala/bindings/src/main/2.13",
             "ledger/participant-local-store/src/main/scala",
             "ledger/ledger-api-auth/src/main/scala",
             "libs-scala/build-info/src/main/scala",

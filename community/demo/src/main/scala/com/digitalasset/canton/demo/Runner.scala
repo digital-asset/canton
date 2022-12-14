@@ -71,7 +71,8 @@ class DemoRunner(ui: DemoUI)(implicit env: ConsoleEnvironment) extends FlagClose
     if (!this.isClosing) {
       close()
       env.close()
-      // TODO(rv) figure out how to cleanly shutdown ammonite repl from this thread
+      // we can not shutdown ammonite from another thread, so the only way
+      // here is to just exit the VM
       sys.exit(0)
     }
   }

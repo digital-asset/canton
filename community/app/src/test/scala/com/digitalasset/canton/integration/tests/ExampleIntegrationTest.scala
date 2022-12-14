@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests
 
 import better.files.*
 import com.digitalasset.canton.ConsoleScriptRunner
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.integration.CommunityTests.{
   CommunityIntegrationTest,
@@ -38,8 +39,16 @@ abstract class ExampleIntegrationTest(configPaths: File*)
       .addConfigTransform(
         CommunityConfigTransforms.uniqueH2DatabaseNames
       ) // but lets not share databases
-      .addConfigTransform(config =>
-        config.focus(_.monitoring.tracing.propagation).replace(TracingConfig.Propagation.Enabled)
+      .addConfigTransform(
+        _.focus(_.monitoring.tracing.propagation).replace(TracingConfig.Propagation.Enabled)
+      )
+      .addConfigTransform(
+        CommunityConfigTransforms.updateAllParticipantConfigs { case (_, config) =>
+          // to make sure that the picked up time for the snapshot is the most recent one
+          config
+            .focus(_.parameters.transferTimeProofFreshnessProportion)
+            .replace(NonNegativeInt.zero)
+        }
       )
 }
 

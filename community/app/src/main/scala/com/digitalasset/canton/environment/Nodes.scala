@@ -7,24 +7,19 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.{Applicative, Id}
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.{
-  DbConfig,
-  LocalNodeConfig,
-  LocalNodeParameters,
-  ProcessingTimeout,
-  StorageConfig,
-}
-import com.digitalasset.canton.domain.config.{DomainConfig, DomainNodeParameters}
-import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap}
+import com.digitalasset.canton.config.{DbConfig, LocalNodeConfig, ProcessingTimeout, StorageConfig}
+import com.digitalasset.canton.domain.config.DomainConfig
+import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap, DomainNodeParameters}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.config.{
-  LocalParticipantConfig,
-  ParticipantNodeParameters,
-}
+import com.digitalasset.canton.participant.config.LocalParticipantConfig
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.MigrateSchemaConfig
-import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
+import com.digitalasset.canton.participant.{
+  ParticipantNode,
+  ParticipantNodeBootstrap,
+  ParticipantNodeParameters,
+}
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.resource.{DbMigrations, DbMigrationsFactory}
 import com.digitalasset.canton.tracing.TraceContext
@@ -70,14 +65,14 @@ trait Nodes[+Node <: CantonNode, +NodeBootstrap <: CantonNodeBootstrap[Node]]
 class ManagedNodes[
     Node <: CantonNode,
     NodeConfig <: LocalNodeConfig,
-    NodeParameters <: LocalNodeParameters,
+    NodeParameters <: CantonNodeParameters,
     NodeBootstrap <: CantonNodeBootstrap[Node],
 ](
     create: (String, NodeConfig) => NodeBootstrap,
     migrationsFactory: DbMigrationsFactory,
     override protected val timeouts: ProcessingTimeout,
     configs: Map[String, NodeConfig],
-    parametersFor: String => LocalNodeParameters,
+    parametersFor: String => CantonNodeParameters,
     protected val loggerFactory: NamedLoggerFactory,
 ) extends Nodes[Node, NodeBootstrap]
     with NamedLogging
@@ -149,7 +144,7 @@ class ManagedNodes[
 
   private def configAndParams(
       name: String
-  ): Either[StartupError, (NodeConfig, LocalNodeParameters)] = {
+  ): Either[StartupError, (NodeConfig, CantonNodeParameters)] = {
     for {
       config <- configs.get(name).toRight(ConfigurationNotFound(name): StartupError)
       _ <- checkNotRunning(name)
@@ -211,7 +206,7 @@ class ManagedNodes[
   private def checkMigration(
       name: String,
       storageConfig: StorageConfig,
-      params: LocalNodeParameters,
+      params: CantonNodeParameters,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig: DbConfig =>
       val migrations = migrationsFactory.create(dbConfig, name, params.devVersionSupport)

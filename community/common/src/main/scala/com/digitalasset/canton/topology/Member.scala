@@ -5,9 +5,9 @@ package com.digitalasset.canton.topology
 
 import cats.kernel.Order
 import cats.syntax.either.*
-import com.daml.ledger.client.binding.Primitive.{Party as ClientParty}
+import com.daml.ledger.client.binding.Primitive.Party as ClientParty
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String300}
+import com.digitalasset.canton.config.RequireTypes.{String255, String3, String300}
 import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -32,7 +32,7 @@ sealed trait Identity extends Product with Serializable with PrettyPrinting {
 
 sealed trait KeyOwnerCode {
 
-  def threeLetterId: LengthLimitedString
+  def threeLetterId: String3
 
   def toProtoPrimitive: String = threeLetterId.unwrap
 
@@ -41,7 +41,7 @@ sealed trait KeyOwnerCode {
 object KeyOwnerCode {
 
   def fromProtoPrimitive_(code: String): Either[String, KeyOwnerCode] =
-    LengthLimitedString.create(code, 3).flatMap {
+    String3.create(code).flatMap {
       case MediatorId.Code.threeLetterId => Right(MediatorId.Code)
       case DomainTopologyManagerId.Code.threeLetterId => Right(DomainTopologyManagerId.Code)
       case ParticipantId.Code.threeLetterId => Right(ParticipantId.Code)
@@ -186,7 +186,7 @@ case class UnauthenticatedMemberId(uid: UniqueIdentifier) extends Member {
 
 object UnauthenticatedMemberId {
   object Code extends KeyOwnerCode {
-    val threeLetterId: LengthLimitedString = LengthLimitedString.tryCreate("UNM", 3)
+    val threeLetterId: String3 = String3.tryCreate("UNM")
   }
 
   private val RandomIdentifierNumberOfBytes = 20
@@ -246,7 +246,7 @@ case class ParticipantId(uid: UniqueIdentifier) extends AuthenticatedMember {
 
 object ParticipantId {
   object Code extends AuthenticatedMemberCode {
-    val threeLetterId: LengthLimitedString = LengthLimitedString.tryCreate("PAR", 3)
+    val threeLetterId: String3 = String3.tryCreate("PAR")
   }
   def apply(identifier: Identifier, namespace: Namespace): ParticipantId =
     ParticipantId(UniqueIdentifier(identifier, namespace))
@@ -354,7 +354,7 @@ case class MediatorId(uid: UniqueIdentifier) extends DomainMember {
 
 object MediatorId {
   object Code extends AuthenticatedMemberCode {
-    val threeLetterId = LengthLimitedString.tryCreate("MED", 3)
+    val threeLetterId = String3.tryCreate("MED")
   }
 
   def apply(identifier: Identifier, namespace: Namespace): MediatorId =
@@ -389,7 +389,7 @@ case class DomainTopologyManagerId(uid: UniqueIdentifier) extends DomainMember {
 object DomainTopologyManagerId {
 
   object Code extends AuthenticatedMemberCode {
-    val threeLetterId = LengthLimitedString.tryCreate("DOM", 3)
+    val threeLetterId = String3.tryCreate("DOM")
   }
 
   def apply(identifier: Identifier, namespace: Namespace): DomainTopologyManagerId =
@@ -405,7 +405,7 @@ case class SequencerId(uid: UniqueIdentifier) extends DomainMember {
 object SequencerId {
 
   object Code extends AuthenticatedMemberCode {
-    val threeLetterId = LengthLimitedString.tryCreate("SEQ", 3)
+    val threeLetterId = String3.tryCreate("SEQ")
   }
 
   def apply(identifier: Identifier, namespace: Namespace): SequencerId =

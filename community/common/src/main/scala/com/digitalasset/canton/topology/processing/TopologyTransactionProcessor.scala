@@ -9,9 +9,10 @@ import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
-import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.{
@@ -654,7 +655,7 @@ object TopologyTransactionProcessor {
       protocolVersion: ProtocolVersion,
       pureCrypto: CryptoPureApi,
       initKeys: Map[KeyOwner, Seq[PublicKey]],
-      parameters: LocalNodeParameters,
+      parameters: CantonNodeParameters,
       clock: Clock,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,

@@ -20,7 +20,7 @@ class DemoExampleIntegrationTest
     nodes.local.start()
     ExampleIntegrationTest.ensureSystemProperties(
       "demo-test" -> "1",
-      "canton.demo.sync-timeout-seconds" -> "40", // in rare cases, the demo test flaked, but just because it was overloaded
+      "canton-demo.sync-timeout-seconds" -> "40", // in rare cases, the demo test flaked, but just because it was overloaded
     )
     runScript(referenceDemo / "demo.sc")(env.environment)
   }

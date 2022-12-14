@@ -7,7 +7,7 @@ import akka.actor.ActorSystem
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
-import com.digitalasset.canton.domain.config.DomainNodeParameters
+import com.digitalasset.canton.domain.DomainNodeParameters
 import com.digitalasset.canton.domain.mediator.{MediatorRuntime, MediatorRuntimeFactory}
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.logging.NamedLoggerFactory

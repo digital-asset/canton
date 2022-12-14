@@ -81,7 +81,8 @@ class PackageInspectionOpsImpl(
 
     import cats.syntax.functorFilter.*
 
-    val store = TopologyStoreFactory.apply(storage, timeouts, loggerFactory)
+    val store =
+      TopologyStoreFactory.apply(storage, timeouts, loggerFactory)
 
     def snapshotFromStore(id: TopologyStoreId) = {
       val domainStore = store.forId(id)

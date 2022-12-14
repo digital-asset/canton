@@ -33,9 +33,9 @@ service VaultService {
      * The request includes a filter for fingerprints which can be used for lookups.
      *
      * @param ListMyKeysRequest: request with optional fingerprint filter
-     * @return: all serialized keys and their fingerprints that have the fingerprint filter as a substring in their fingerprint
+     * @return: all serialized keys and metadata that have the fingerprint filter as a substring in their fingerprint
      */
-    rpc ListMyKeys(ListKeysRequest) returns (ListKeysResponse);
+    rpc ListMyKeys(ListKeysRequest) returns (ListMyKeysResponse);
 
     /**
      * Generates a new public / private key pair for signing.
@@ -87,6 +87,8 @@ service VaultService {
      */
     rpc RotateWrapperKey(RotateWrapperKeyRequest) returns (google.protobuf.Empty);
 
+
+    rpc GetWrapperKeyId(GetWrapperKeyIdRequest) returns (GetWrapperKeyIdResponse);
 }
 
 message GenerateCertificateRequest {
@@ -147,6 +149,18 @@ message ListKeysRequest {
     repeated com.digitalasset.canton.crypto.v0.KeyPurpose filter_purpose = 3;
 }
 
+message PrivateKeyMetadata {
+    com.digitalasset.canton.crypto.v0.PublicKeyWithName public_key_with_name = 1;
+
+    // If set the private key is stored encrypted by the wrapper key
+    string wrapper_key_id = 2;
+}
+
+
+message ListMyKeysResponse {
+    repeated PrivateKeyMetadata private_keys_metadata = 1;
+}
+
 message ListKeysResponse {
     repeated com.digitalasset.canton.crypto.v0.PublicKeyWithName public_keys = 1;
 }
@@ -175,4 +189,11 @@ message GenerateEncryptionKeyResponse {
 
 message RotateWrapperKeyRequest {
     string new_wrapper_key_id = 1;
+}
+
+message GetWrapperKeyIdRequest {
+}
+
+message GetWrapperKeyIdResponse {
+    string wrapper_key_id = 1;
 }

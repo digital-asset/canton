@@ -212,4 +212,13 @@ final case class PositiveSeconds(duration: Duration) extends RefinedDuration wit
 object PositiveSeconds extends RefinedDurationCompanion[PositiveSeconds] {
   implicit val toPositiveSecondsConfig: Transformer[PositiveSeconds, ConfigPositiveSeconds] =
     _.toConfig
+
+  implicit val getResultPositiveSeconds: GetResult[PositiveSeconds] =
+    GetResult(r => ofSeconds(r.nextLong()))
+
+  implicit def setParameterPositiveSeconds(implicit
+      setParameterLong: SetParameter[Long]
+  ): SetParameter[PositiveSeconds] =
+    (d, pp) => pp >> d.duration.getSeconds
+
 }

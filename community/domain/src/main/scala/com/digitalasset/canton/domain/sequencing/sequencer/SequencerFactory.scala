@@ -5,8 +5,8 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.LocalNodeParameters
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
@@ -25,7 +25,7 @@ trait SequencerFactory {
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
       initialState: Option[SequencerInitialState],
-      localNodeParameters: LocalNodeParameters,
+      localNodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
   )(implicit ec: ExecutionContext, tracer: Tracer, actorMaterializer: Materializer): Sequencer
 }
@@ -44,7 +44,7 @@ object SequencerFactory {
           domainSyncCryptoApi: DomainSyncCryptoClient,
           futureSupervisor: FutureSupervisor,
           initialState: Option[SequencerInitialState],
-          localNodeParameters: LocalNodeParameters,
+          localNodeParameters: CantonNodeParameters,
           sequencerProtocolVersion: ProtocolVersion,
       )(implicit
           ec: ExecutionContext,

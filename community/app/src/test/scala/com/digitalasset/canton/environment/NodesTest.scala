@@ -38,7 +38,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def clientAdminApi = adminApi.clientConfig
     override def withDefaults(ports: DefaultPorts): TestNodeConfig = this
   }
-  object TestNodeParameters extends LocalNodeParameters {
+  object TestNodeParameters extends CantonNodeParameters {
     override def delayLoggingThreshold: NonNegativeFiniteDuration = ???
     override def enablePreviewFeatures: Boolean = ???
     override def enableAdditionalConsistencyChecks: Boolean = ???

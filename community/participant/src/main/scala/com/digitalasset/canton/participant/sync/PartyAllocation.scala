@@ -13,10 +13,8 @@ import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.config.{
-  ParticipantNodeParameters,
-  PartyNotificationConfig,
-}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.config.PartyNotificationConfig
 import com.digitalasset.canton.participant.store.ParticipantNodeEphemeralState
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.participant.topology.{

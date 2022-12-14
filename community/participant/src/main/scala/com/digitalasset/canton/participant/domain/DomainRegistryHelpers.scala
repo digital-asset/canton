@@ -14,10 +14,8 @@ import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingC
 import com.digitalasset.canton.crypto.{CryptoHandshakeValidator, SyncCryptoApiProvider}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
-import com.digitalasset.canton.participant.config.{
-  ParticipantNodeParameters,
-  ParticipantProtocolConfig,
-}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.config.ParticipantProtocolConfig
 import com.digitalasset.canton.participant.domain.DomainRegistryError.HandshakeErrors.DomainIdMismatch
 import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.DomainHandle
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics

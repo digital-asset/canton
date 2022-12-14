@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.InitConfigBase
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.{SigningPublicKey, X509Certificate}
-import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.environment.CantonNodeBootstrapBase
 import com.digitalasset.canton.error.CantonError
@@ -21,7 +20,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.Future
 
 trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
-  self: CantonNodeBootstrapBase[_, _, DomainNodeParameters] =>
+  self: CantonNodeBootstrapBase[_, _, _] =>
 
   protected def authorizeDomainGovernance[E <: CantonError](
       manager: TopologyManager[E],

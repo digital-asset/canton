@@ -41,6 +41,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       submissionTime: CantonTimestamp,
       rootSeed: Option[LfHash],
       inRollback: Boolean,
+      viewHash: ViewHash,
       traceContext: TraceContext,
   ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)] = {
 
@@ -140,7 +141,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
     "transaction id is inconsistent" must {
       val sut = new ModelConformanceChecker(
-        (_, _, _, _, _, _, _, _) => throw new UnsupportedOperationException(),
+        (_, _, _, _, _, _, _, _, _) => throw new UnsupportedOperationException(),
         transactionTreeFactory,
         loggerFactory,
       )
@@ -159,9 +160,9 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     }
 
     "reinterpretation fails" must {
-      val error = DAMLeError(mock[engine.Error])
+      val error = DAMLeError(mock[engine.Error], mock[ViewHash])
       val sut = new ModelConformanceChecker(
-        (_, _, _, _, _, _, _, _) =>
+        (_, _, _, _, _, _, _, _, _) =>
           EitherT.leftT[Future, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)](
             error
           ),
@@ -196,7 +197,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           ),
         )
         val sut = new ModelConformanceChecker(
-          (_, _, _, _, _, _, _, _) =>
+          (_, _, _, _, _, _, _, _, _) =>
             EitherT.pure[Future, DAMLeError](
               (reinterpreted, subviewMissing.metadata, subviewMissing.keyResolver)
             ),

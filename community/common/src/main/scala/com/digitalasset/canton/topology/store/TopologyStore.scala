@@ -155,14 +155,18 @@ trait TopologyStoreFactory extends AutoCloseable {
 }
 
 object TopologyStoreFactory {
-  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit ec: ExecutionContext
+  def apply(
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+      maxItemsInSqlQuery: Int = 1000,
+  )(implicit
+      ec: ExecutionContext
   ): TopologyStoreFactory =
     storage match {
       case _: MemoryStorage => new InMemoryTopologyStoreFactory(loggerFactory)
       case jdbc: DbStorage =>
-        // TODO(rv) propagate this value into config values
-        new DbTopologyStoreFactory(jdbc, maxItemsInSqlQuery = 100, timeouts, loggerFactory)
+        new DbTopologyStoreFactory(jdbc, maxItemsInSqlQuery, timeouts, loggerFactory)
     }
 }
 

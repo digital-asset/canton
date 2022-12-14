@@ -8,13 +8,11 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonMutableHandlerRegistry
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.grpc.{GrpcPackageService, GrpcPingService}
 import com.digitalasset.canton.participant.admin.v0.{PackageServiceGrpc, PingServiceGrpc}
 import com.digitalasset.canton.participant.admin.{AdminWorkflowServices, PackageService}
-import com.digitalasset.canton.participant.config.{
-  LocalParticipantConfig,
-  ParticipantNodeParameters,
-}
+import com.digitalasset.canton.participant.config.LocalParticipantConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.ParticipantId

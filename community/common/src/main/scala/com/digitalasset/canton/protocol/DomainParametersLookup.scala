@@ -33,11 +33,17 @@ sealed trait DomainParametersLookup[+P] {
   ): Future[P]
 
   /** If the parameter is static, return its value.
-    *       If the parameter is dynamic, return the value of the topology snapshot approximation.
+    *       If the parameter is dynamic, return the value of the topology snapshot approximation
+    *       or the default value.
     */
-  def getApproximate(warnOnUsingDefaults: Boolean = true)(implicit
+  def getApproximateOrDefaultValue(warnOnUsingDefaults: Boolean = true)(implicit
       traceContext: TraceContext
   ): Future[P]
+
+  /** If the parameter is static, return its value.
+    * If the parameter is dynamic, return the value of the topology snapshot approximation.
+    */
+  def getApproximate()(implicit traceContext: TraceContext): Future[Option[P]]
 
   /** Return a list of parameters, together with their validity interval,
     * @param warnOnUsingDefaults Log a warning if dynamic domain parameters are not set
@@ -61,8 +67,13 @@ class StaticDomainParametersLookup[P](parameters: P) extends DomainParametersLoo
       traceContext: TraceContext
   ): Future[P] = Future.successful(parameters)
 
-  def getApproximate(warnOnUsingDefaults: Boolean)(implicit traceContext: TraceContext): Future[P] =
+  def getApproximateOrDefaultValue(warnOnUsingDefaults: Boolean)(implicit
+      traceContext: TraceContext
+  ): Future[P] =
     Future.successful(parameters)
+
+  def getApproximate()(implicit traceContext: TraceContext): Future[Option[P]] =
+    Future.successful(Some(parameters))
 
   def getAll(validAt: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -91,12 +102,17 @@ class DynamicDomainParametersLookup[P](
     .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion, warnOnUsingDefaults))
     .map(projector)
 
-  def getApproximate(warnOnUsingDefaults: Boolean)(implicit
+  def getApproximateOrDefaultValue(warnOnUsingDefaults: Boolean)(implicit
       traceContext: TraceContext
   ): Future[P] =
     topologyClient.currentSnapshotApproximation
       .findDynamicDomainParametersOrDefault(protocolVersion, warnOnUsingDefaults)
       .map(projector)
+
+  def getApproximate()(implicit traceContext: TraceContext): Future[Option[P]] =
+    topologyClient.currentSnapshotApproximation
+      .findDynamicDomainParameters()
+      .map(_.map(projector))
 
   def getAll(validAt: CantonTimestamp)(implicit
       traceContext: TraceContext

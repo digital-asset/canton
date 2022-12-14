@@ -147,7 +147,7 @@ object JvmRulesPlugin extends AutoPlugin {
       // allow sbt to pull scaladoc from managed dependencies if referenced in our ScalaDoc links
       autoAPIMappings := true,
       //
-      // 'slowpoke'/notification message if tests run for more than 5mins, repeat at 30s intervals from there
+      // 'slowpoke'/notification message if tests run for more than 2mins, repeat at 30s intervals from there
       Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-W", "120", "30"),
       //
       // CHP: Disable output for successful tests

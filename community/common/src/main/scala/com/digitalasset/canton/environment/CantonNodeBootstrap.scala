@@ -12,12 +12,7 @@ import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.config.{
-  InitConfigBase,
-  LocalNodeConfig,
-  LocalNodeParameters,
-  ProcessingTimeout,
-}
+import com.digitalasset.canton.config.{InitConfigBase, LocalNodeConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.GrpcVaultServiceFactory
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
@@ -103,7 +98,7 @@ trait CantonNodeBootstrap[+T <: CantonNode] extends FlagCloseable with NamedLogg
 abstract class CantonNodeBootstrapBase[
     T <: CantonNode,
     NodeConfig <: LocalNodeConfig,
-    ParameterConfig <: LocalNodeParameters,
+    ParameterConfig <: CantonNodeParameters,
 ](
     override val name: InstanceName,
     config: NodeConfig,
@@ -219,7 +214,8 @@ abstract class CantonNodeBootstrapBase[
   )
   val certificateGenerator = new X509CertificateGenerator(crypto, loggerFactory)
 
-  protected val topologyStoreFactory = TopologyStoreFactory(storage, timeouts, loggerFactory)
+  protected val topologyStoreFactory =
+    TopologyStoreFactory(storage, timeouts, loggerFactory)
   protected val ips = new IdentityProvidingServiceClient()
 
   protected def isActive: Boolean

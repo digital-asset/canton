@@ -425,11 +425,30 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: TransactionSubviews,
       representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
-  )(hashOps: HashOps): TransactionView =
+  )(hashOps: HashOps): TransactionView = {
+    // Check consistency between protocol version and subviews structure
+    val isProtoV0 =
+      representativeProtocolVersion == protocolVersionRepresentativeFor(ProtocolVersion.v2)
+    val isProtoV1 =
+      representativeProtocolVersion == protocolVersionRepresentativeFor(ProtocolVersion.v4)
+    val (isSubviewsV0, isSubviewsV1) = subviews match {
+      case _: TransactionSubviewsV0 => (true, false)
+      case _: TransactionSubviewsV1 => (false, true)
+    }
+    require(
+      !isSubviewsV0 || !isProtoV1,
+      s"TransactionSubviewsV0 cannot be used with representativeProtocolVersion $representativeProtocolVersion",
+    )
+    require(
+      !isSubviewsV1 || !isProtoV0,
+      s"TransactionSubviewsV1 cannot be used with representativeProtocolVersion $representativeProtocolVersion",
+    )
+
     new TransactionView(viewCommonData, viewParticipantData, subviews)(
       hashOps,
       representativeProtocolVersion,
     )
+  }
 
   /** Creates a view.
     *

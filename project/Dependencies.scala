@@ -263,7 +263,6 @@ object Dependencies {
     "com.daml" % "daml-lf-transaction-java-proto" % daml_libraries_version
   lazy val daml_ledger_configuration_java_proto =
     "com.daml" % "participant-state-ledger-configuration-java-proto" % daml_libraries_version
-  lazy val daml_ledger_api_akka = "com.daml" %% "ledger-api-akka" % daml_libraries_version
   lazy val daml_lf_dev_archive_java_proto =
     "com.daml" % "daml-lf-dev-archive-java-proto" % daml_libraries_version
   lazy val daml_lf_value_java_proto =

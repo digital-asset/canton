@@ -16,7 +16,8 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.{LfPackageId, LfPartyId, LfValue}
+import com.digitalasset.canton.version.DamlLfVersionToProtocolVersions
+import com.digitalasset.canton.{BaseTest, LfPackageId, LfPartyId, LfValue}
 
 private[submission] object DomainSelectionFixture {
   def unknownPackageFor(participantId: ParticipantId, missingPackage: LfPackageId) =
@@ -25,6 +26,23 @@ private[submission] object DomainSelectionFixture {
       "package does not exist on local node",
       participantId,
     )
+
+  /*
+   We cannot take the maximum transaction version available. The reason is that if the test is run
+   with a low protocol version, then some filter will reject the transaction (because high transaction
+   version needs high protocol version).
+   */
+  lazy val languageVersion = {
+    val transactionVersion =
+      DamlLfVersionToProtocolVersions.damlLfVersionToMinimumProtocolVersions.collect {
+        case (txVersion, protocolVersion) if protocolVersion <= BaseTest.testedProtocolVersion =>
+          txVersion
+      }.last
+
+    LanguageVersion
+      .fromString(s"1.${transactionVersion.protoValue}")
+      .fold(err => throw new IllegalArgumentException(err), identity)
+  }
 
   /*
   Simple topology, with two parties (signatory, observer) each connected to one
@@ -116,11 +134,13 @@ private[submission] object DomainSelectionFixture {
       }
     }
 
-    object ThreeExercises {
+    case class ThreeExercises(
+        version: language.LanguageVersion = LanguageVersion.StableVersions.max
+    ) {
 
       import SimpleTopology.*
 
-      private val builder = TransactionBuilder()
+      private val builder = TransactionBuilder(_ => version)
 
       val inputContract1Id: LfContractId = builder.newCid
       val inputContract2Id: LfContractId = builder.newCid

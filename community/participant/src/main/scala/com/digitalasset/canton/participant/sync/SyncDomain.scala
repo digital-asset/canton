@@ -17,8 +17,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.{CantonError, HasDegradationState}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageService
-import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.{
   DomainHandle,
   DomainRegistryError,

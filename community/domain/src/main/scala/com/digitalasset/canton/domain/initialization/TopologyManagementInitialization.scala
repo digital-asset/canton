@@ -14,10 +14,11 @@ import com.digitalasset.canton.crypto.{
   DomainSyncCryptoClient,
   PublicKey,
 }
-import com.digitalasset.canton.domain.config.{DomainBaseConfig, DomainConfig, DomainNodeParameters}
+import com.digitalasset.canton.domain.config.{DomainBaseConfig, DomainConfig}
 import com.digitalasset.canton.domain.topology.*
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
@@ -125,7 +126,7 @@ object TopologyManagementInitialization {
       topologyClient: DomainTopologyClientWithInit,
       initialKeys: Map[KeyOwner, Seq[PublicKey]],
       sequencerClientFactory: SequencerClientFactory,
-      parameters: DomainNodeParameters,
+      parameters: CantonNodeParameters,
       futureSupervisor: FutureSupervisor,
       indexedStringStore: IndexedStringStore,
       loggerFactory: NamedLoggerFactory,

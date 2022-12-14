@@ -62,7 +62,7 @@ class TinkPrivateCrypto private (
       )
     } yield keypair
 
-  override protected def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+  override protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair] = {
     for {

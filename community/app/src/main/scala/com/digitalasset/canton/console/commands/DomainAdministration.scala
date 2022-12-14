@@ -287,6 +287,17 @@ trait DomainAdministration {
         .discard[ByteString]
     }
 
+    @Help.Summary("Update the Dynamic Domain Parameters for the domain")
+    @Help.Description(
+      """force: Enable potentially dangerous changes. Required to increase ``ledgerTimeRecordTimeTolerance``.
+        |Use ``set_ledger_time_record_time_tolerance_securely`` to securely increase ``ledgerTimeRecordTimeTolerance``."""
+    )
+    @deprecated("Use set_max_request_size instead", "2.5.0")
+    def update_dynamic_parameters(
+        modifier: DynamicDomainParameters => DynamicDomainParameters,
+        force: Boolean = false,
+    ): Unit = update_dynamic_domain_parameters(modifier, force)
+
     @Help.Summary("Try to update the reconciliation interval for the domain")
     @Help.Description("""If the reconciliation interval is dynamic, update the value.
         If the reconciliation interval is not dynamic (i.e., if the domain is running
@@ -314,6 +325,19 @@ trait DomainAdministration {
         _.copy(maxRatePerParticipant = maxRatePerParticipant),
         "update max rate per participant",
       )
+
+    @Help.Summary("Try to update the max rate per participant for the domain")
+    @Help.Description("""If the max request size is dynamic, update the value.
+                         The update won't have any effect unless the sequencer server is restarted.
+    If the max request size is not dynamic (i.e., if the domain is running
+    on protocol version lower than `4`), then it will throw an error.
+    """)
+    @Help.AvailableFrom(ProtocolVersion.v4)
+    @deprecated("Use set_max_request_size instead", "2.5.0")
+    def set_max_inbound_message_size(
+        maxRequestSize: NonNegativeInt,
+        force: Boolean = false,
+    ): Unit = set_max_request_size(maxRequestSize, force)
 
     @Help.Summary("Try to update the max rate per participant for the domain")
     @Help.Description("""If the max request size is dynamic, update the value.
@@ -373,7 +397,7 @@ trait DomainAdministration {
         |because the command may override concurrent changes.
         |
         |force: update ``ledgerTimeRecordTimeTolerance`` immediately without blocking. 
-        |Only do this, if security is not a concern (e.g. during testing)."""
+        |This is safe to do during domain bootstrapping and in test environments, but should not be done in operational production systems.."""
     )
     def set_ledger_time_record_time_tolerance(
         newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,

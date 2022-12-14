@@ -27,7 +27,7 @@ object LedgerApiUser {
   def fromProtoV0(
       value: ProtoLedgerApiUser
   ): ParsingResult[LedgerApiUser] = {
-    val ProtoLedgerApiUser(id, primaryParty, isDeactivated, metadataO) = value
+    val ProtoLedgerApiUser(id, primaryParty, isDeactivated, metadataO, identityProviderId) = value
     Option
       .when(primaryParty.nonEmpty)(primaryParty)
       .traverse(LfPartyId.fromString)
@@ -48,18 +48,25 @@ object LedgerApiUser {
   }
 }
 
-case class UserRights(actAs: Set[LfPartyId], readAs: Set[LfPartyId], participantAdmin: Boolean)
+case class UserRights(
+    actAs: Set[LfPartyId],
+    readAs: Set[LfPartyId],
+    participantAdmin: Boolean,
+    identityProviderAdmin: Boolean,
+)
 object UserRights {
   def fromProtoV0(
       values: Seq[ProtoUserRight]
   ): ParsingResult[UserRights] = {
-    Right(values.map(_.kind).foldLeft(UserRights(Set(), Set(), false)) {
+    Right(values.map(_.kind).foldLeft(UserRights(Set(), Set(), false, false)) {
       case (acc, Kind.Empty) => acc
       case (acc, Kind.ParticipantAdmin(value)) => acc.copy(participantAdmin = true)
       case (acc, Kind.CanActAs(value)) =>
         acc.copy(actAs = acc.actAs + LfPartyId.assertFromString(value.party))
       case (acc, Kind.CanReadAs(value)) =>
         acc.copy(readAs = acc.readAs + LfPartyId.assertFromString(value.party))
+      case (acc, Kind.IdentityProviderAdmin(value)) =>
+        acc.copy(identityProviderAdmin = true)
     })
   }
 }

@@ -182,7 +182,6 @@ object KeyName extends LengthLimitedStringWrapperCompanion[String300, KeyName] {
   override def instanceName: String = "KeyName"
   override protected def companion: String300.type = String300
   override protected def factoryMethodWrapper(str: String300): KeyName = KeyName(str)
-
 }
 
 trait PublicKeyWithName

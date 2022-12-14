@@ -30,10 +30,13 @@ import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.{
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.console.{AmmoniteConsoleConfig, FeatureFlag}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.domain.DomainNodeParameters
 import com.digitalasset.canton.domain.config.*
 import com.digitalasset.canton.domain.sequencing.sequencer.*
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsPrefix, MetricsReporterConfig}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.config.ParticipantInitConfig.{
   ParticipantLedgerApiInitConfig,
@@ -349,19 +352,8 @@ trait CantonConfig {
   private lazy val domainNodeParameters_ : Map[InstanceName, DomainNodeParameters] = domains.fmap {
     domainConfig =>
       DomainNodeParameters(
-        monitoring.tracing,
-        monitoring.delayLoggingThreshold,
-        monitoring.getLoggingConfig,
-        monitoring.logQueryCost,
-        parameters.enableAdditionalConsistencyChecks,
-        features.enablePreviewCommands,
-        parameters.timeouts.processing,
-        domainConfig.sequencerClient,
-        domainConfig.caching,
-        parameters.nonStandardConfig,
-        domainConfig.init.domainParameters.willCorruptYourSystemDevVersionSupport,
-        domainConfig.init.domainParameters.dontWarnOnDeprecatedPV,
-        domainConfig.init.domainParameters.protocolVersion.unwrap,
+        general = CantonNodeParameterConverter.general(this, domainConfig),
+        protocol = CantonNodeParameterConverter.protocol(domainConfig.init.domainParameters),
       )
   }
 
@@ -376,24 +368,14 @@ trait CantonConfig {
   private lazy val participantNodeParameters_ : Map[InstanceName, ParticipantNodeParameters] =
     participants.fmap { participantConfig =>
       val participantParameters = participantConfig.parameters
-
       ParticipantNodeParameters(
-        monitoring.tracing,
-        monitoring.delayLoggingThreshold,
-        monitoring.getLoggingConfig,
-        monitoring.logQueryCost,
-        parameters.enableAdditionalConsistencyChecks,
-        features.enablePreviewCommands,
-        parameters.timeouts.processing,
-        parameters.nonStandardConfig,
+        general = CantonNodeParameterConverter.general(this, participantConfig),
         participantParameters.partyChangeNotification,
         participantParameters.adminWorkflow,
         participantParameters.maxUnzippedDarSize,
         participantParameters.stores,
-        participantConfig.caching,
-        participantConfig.sequencerClient,
         participantParameters.transferTimeProofFreshnessProportion,
-        ParticipantProtocolConfig(
+        protocolConfig = ParticipantProtocolConfig(
           minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
           devVersionSupport = participantParameters.willCorruptYourSystemDevVersionSupport,
           dontWarnOnDeprecatedPV = participantParameters.dontWarnOnDeprecatedPV,
@@ -471,6 +453,33 @@ trait CantonConfig {
       .getOrElse(Seq.empty)
       .flatMap(_.toList)
   }
+}
+
+object CantonNodeParameterConverter {
+
+  def general(parent: CantonConfig, node: LocalNodeConfig): CantonNodeParameters.General = {
+    CantonNodeParameters.General.Impl(
+      parent.monitoring.tracing,
+      parent.monitoring.delayLoggingThreshold,
+      parent.monitoring.logQueryCost,
+      parent.monitoring.getLoggingConfig,
+      parent.parameters.enableAdditionalConsistencyChecks,
+      parent.features.enablePreviewCommands,
+      parent.parameters.timeouts.processing,
+      node.sequencerClient,
+      node.caching,
+      parent.parameters.nonStandardConfig,
+    )
+  }
+
+  def protocol(config: ProtocolConfig): CantonNodeParameters.Protocol = {
+    CantonNodeParameters.Protocol.Impl(
+      devVersionSupport = config.willCorruptYourSystemDevVersionSupport,
+      dontWarnOnDeprecatedPV = config.dontWarnOnDeprecatedPV,
+      initialProtocolVersion = config.initialProtocolVersion,
+    )
+  }
+
 }
 
 @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072

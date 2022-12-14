@@ -913,6 +913,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
       |
       |Alternatively, add the ``force = true`` flag to your command, if security is not a concern for you. 
       |The security checks will be effective again after twice the new value of ``ledgerTimeRecordTimeTolerance``.
+      |Using ``force = true`` is safe upon domain bootstrapping.
       |"""
   )
   object IncreaseOfLedgerTimeRecordTimeTolerance

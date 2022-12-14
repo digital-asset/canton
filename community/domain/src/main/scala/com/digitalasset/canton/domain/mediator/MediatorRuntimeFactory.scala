@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
@@ -15,6 +15,7 @@ import com.digitalasset.canton.domain.mediator.store.{
   MediatorState,
 }
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
@@ -77,7 +78,7 @@ trait MediatorRuntimeFactory {
       topologyClient: DomainTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessor,
       timeTrackerConfig: DomainTimeTrackerConfig,
-      nodeParameters: LocalNodeParameters,
+      nodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
       clock: Clock,
       metrics: MediatorMetrics,
@@ -102,7 +103,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       topologyClient: DomainTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessor,
       timeTrackerConfig: DomainTimeTrackerConfig,
-      nodeParameters: LocalNodeParameters,
+      nodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
       clock: Clock,
       metrics: MediatorMetrics,
