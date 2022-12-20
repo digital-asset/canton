@@ -190,7 +190,7 @@ private[mediator] class Mediator(
     for {
       _ <- EitherT.fromEither {
         latestSafePruningTsO
-          .toRight(PruningError.MissingDataForValidPruningTsComputation(pruneAt))
+          .toRight(PruningError.MissingDomainParametersForValidPruningTsComputation(pruneAt))
           .flatMap { latestSafePruningTs =>
             Either.cond[PruningError, Unit](
               pruneAt <= latestSafePruningTs,
@@ -251,20 +251,31 @@ private[mediator] class Mediator(
 }
 
 private[mediator] object Mediator {
-  sealed trait PruningError
+  sealed trait PruningError {
+    def message: String
+  }
   object PruningError {
 
     /** The mediator has not yet processed enough data for any to be available for pruning */
-    case object NoDataAvailableForPruning extends PruningError
+    case object NoDataAvailableForPruning extends PruningError {
+      lazy val message: String = "There is no mediator data available for pruning"
+    }
 
     /** Dynamic domain parameters available for ts were not found */
-    case class MissingDataForValidPruningTsComputation(ts: CantonTimestamp) extends PruningError
+    case class MissingDomainParametersForValidPruningTsComputation(ts: CantonTimestamp)
+        extends PruningError {
+      override def message: String =
+        show"Dynamic domain parameters to compute earliest available pruning timestamp not found for ts [$ts]"
+    }
 
     /** The mediator can prune some data but data for the requested timestamp cannot yet be removed */
     case class CannotPruneAtTimestamp(
         requestedTimestamp: CantonTimestamp,
         earliestPruningTimestamp: CantonTimestamp,
-    ) extends PruningError
+    ) extends PruningError {
+      override def message: String =
+        show"Requested pruning timestamp [$requestedTimestamp] is later than the earliest available pruning timestamp [$earliestPruningTimestamp]"
+    }
   }
 
   sealed trait PruningSafetyCheck extends Product with Serializable

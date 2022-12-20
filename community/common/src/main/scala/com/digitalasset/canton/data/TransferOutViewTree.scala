@@ -392,7 +392,7 @@ object TransferOutView
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
       submitter <- ProtoConverter.parseLfPartyId(submitterP)
-      contractId <- LfContractId.fromProtoPrimitive(contractIdP)
+      contractId <- ProtoConverter.parseLfContractId(contractIdP)
       targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
 
       protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtoVersion(0))
@@ -426,7 +426,7 @@ object TransferOutView
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
       submitter <- ProtoConverter.parseLfPartyId(submitterP)
-      contractId <- LfContractId.fromProtoPrimitive(contractIdP)
+      contractId <- ProtoConverter.parseLfContractId(contractIdP)
       targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
 
       targetProtocolVersion = TargetProtocolVersion(ProtocolVersion(targetProtocolVersionP))

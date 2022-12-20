@@ -247,9 +247,13 @@ final case class PrivateKeyMetadata(
     wrapperKeyId: Option[String300],
 ) {
 
+  def id: Fingerprint = publicKey.id
+
   def publicKey: PublicKey = publicKeyWithName.publicKey
 
   def name: Option[KeyName] = publicKeyWithName.name
+
+  def purpose: KeyPurpose = publicKey.purpose
 
   def encrypted: Boolean = wrapperKeyId.isDefined
 

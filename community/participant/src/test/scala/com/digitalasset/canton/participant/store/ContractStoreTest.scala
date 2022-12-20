@@ -33,8 +33,7 @@ trait ContractStoreTest { this: AsyncWordSpec with BaseTest =>
     val contractId3 = ExampleTransactionFactory.suffixedId(3, 0)
     val contractId4 = ExampleTransactionFactory.suffixedId(4, 0)
     val contractId5 = ExampleTransactionFactory.suffixedId(5, 0)
-    val contract =
-      asSerializable(contractId, contractInstance = contractInstance(agreementText = "instance"))
+    val contract = asSerializable(contractId, contractInstance = contractInstance())
     val transactionId1 = transactionId(1)
     val transactionId2 = transactionId(2)
     val rc = RequestCounter(0)
@@ -47,10 +46,10 @@ trait ContractStoreTest { this: AsyncWordSpec with BaseTest =>
     val contract2 = asSerializable(
       contractId2,
       contractInstance = contractInstance(
-        agreementText = "text",
-        templateId = Ref.Identifier(pkgId2, QualifiedName.assertFromString("module:template")),
+        templateId = Ref.Identifier(pkgId2, QualifiedName.assertFromString("module:template"))
       ),
       ledgerTime = let2,
+      agreementText = "text",
     )
     val templateName3 = QualifiedName.assertFromString("Foo:Bar")
     val templateId3 = Ref.Identifier(packageId, templateName3)
@@ -64,18 +63,18 @@ trait ContractStoreTest { this: AsyncWordSpec with BaseTest =>
       asSerializable(
         contractId4,
         contractInstance = contractInstance(
-          agreementText = "instance",
-          templateId = Ref.Identifier(pkgId2, templateName3),
+          templateId = Ref.Identifier(pkgId2, templateName3)
         ),
+        agreementText = "instance",
       )
 
     val contract5 =
       asSerializable(
         contractId5,
         contractInstance = contractInstance(
-          agreementText = "instance",
-          templateId = Ref.Identifier(pkgId2, templateName3),
+          templateId = Ref.Identifier(pkgId2, templateName3)
         ),
+        agreementText = "instance",
       )
 
     "store and retrieve a created contract" in {

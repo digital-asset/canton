@@ -24,7 +24,7 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, NodeIdentity, ParticipantId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
 
@@ -37,8 +37,6 @@ trait InstanceReference
     with FeatureFlagFilter
     with PrettyPrinting
     with CertificateAdministration {
-
-  type InstanceId <: Identity
 
   val name: String
   protected val instanceType: String
@@ -68,7 +66,7 @@ trait InstanceReference
 
   type Status <: NodeStatus.Status
 
-  def id: InstanceId
+  def id: NodeIdentity
 
   def health: HealthAdministration[Status]
 
@@ -130,7 +128,7 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
   override def keys: LocalKeyAdministrationGroup = _keys
 
   private val _keys =
-    new LocalKeyAdministrationGroup(this, consoleEnvironment, crypto)
+    new LocalKeyAdministrationGroup(this, this, consoleEnvironment, crypto)
 
   private[console] def migrateDbCommand(): ConsoleCommandResult[Unit] =
     migrateInstanceDb().toResult(_.message, _ => ())
@@ -187,7 +185,7 @@ trait RemoteInstanceReference extends InstanceReference {
   @Help.Summary("Manage public and secret keys")
   @Help.Group("Keys")
   override val keys: KeyAdministrationGroup =
-    new KeyAdministrationGroup(this, consoleEnvironment)
+    new KeyAdministrationGroup(this, this, consoleEnvironment)
 }
 
 trait GrpcRemoteInstanceReference extends RemoteInstanceReference {
@@ -215,8 +213,6 @@ trait DomainReference
     with InstanceReferenceWithSequencerConnection {
   val consoleEnvironment: ConsoleEnvironment
   val name: String
-
-  override type InstanceId = DomainId
 
   override protected val instanceType: String = DomainReference.InstanceType
 
@@ -411,8 +407,6 @@ abstract class ParticipantReference(
     with ParticipantAdministration
     with LedgerApiAdministration
     with LedgerApiCommandRunner {
-
-  override type InstanceId = ParticipantId
 
   override protected val instanceType: String = ParticipantReference.InstanceType
 

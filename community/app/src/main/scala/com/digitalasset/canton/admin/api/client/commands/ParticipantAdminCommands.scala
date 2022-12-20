@@ -12,7 +12,6 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   TimeoutType,
 }
 import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
-import com.digitalasset.canton.config.PositiveDurationSeconds
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
@@ -29,8 +28,6 @@ import com.digitalasset.canton.participant.admin.v0.{ResourceLimits as _, *}
 import com.digitalasset.canton.participant.admin.{ResourceLimits, v0}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig as CDomainConnectionConfig
 import com.digitalasset.canton.protocol.{LfContractId, TransferId, v0 as v0proto}
-import com.digitalasset.canton.pruning.PruningSchedule
-import com.digitalasset.canton.pruning.admin.v0.{PruningSchedule as PruningScheduleP, *}
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -923,131 +920,6 @@ object ParticipantAdminCommands {
         service.prune(request)
 
       override def handleResponse(response: v0.PruneResponse): Either[String, Unit] = Right(())
-    }
-
-    final case class SetScheduleCommand(
-        cron: String,
-        maxDuration: PositiveDurationSeconds,
-        retention: PositiveDurationSeconds,
-    ) extends Base[SetSchedule.Request, SetSchedule.Response, Unit] {
-      override def createRequest(): Right[String, SetSchedule.Request] =
-        Right(
-          SetSchedule.Request(
-            Some(
-              PruningScheduleP(
-                cron,
-                Some(maxDuration.toProtoPrimitive),
-                Some(retention.toProtoPrimitive),
-              )
-            )
-          )
-        )
-
-      override def submitRequest(
-          service: PruningServiceStub,
-          request: SetSchedule.Request,
-      ): Future[SetSchedule.Response] =
-        service.setSchedule(request)
-
-      override def handleResponse(response: SetSchedule.Response): Either[String, Unit] =
-        response match {
-          case SetSchedule.Response() => Right(())
-        }
-    }
-
-    final case class ClearScheduleCommand()
-        extends Base[ClearSchedule.Request, ClearSchedule.Response, Unit] {
-      override def createRequest(): Right[String, ClearSchedule.Request] =
-        Right(ClearSchedule.Request())
-
-      override def submitRequest(
-          service: PruningServiceStub,
-          request: ClearSchedule.Request,
-      ): Future[ClearSchedule.Response] =
-        service.clearSchedule(request)
-
-      override def handleResponse(response: ClearSchedule.Response): Either[String, Unit] =
-        response match {
-          case ClearSchedule.Response() => Right(())
-        }
-    }
-
-    final case class UpdateCronCommand(cron: String)
-        extends Base[UpdateCron.Request, UpdateCron.Response, Unit] {
-      override def createRequest(): Right[String, UpdateCron.Request] =
-        Right(UpdateCron.Request(cron))
-
-      override def submitRequest(
-          service: PruningServiceStub,
-          request: UpdateCron.Request,
-      ): Future[UpdateCron.Response] =
-        service.updateCron(request)
-
-      override def handleResponse(response: UpdateCron.Response): Either[String, Unit] =
-        response match {
-          case UpdateCron.Response() => Right(())
-        }
-    }
-
-    final case class UpdateMaxDurationCommand(maxDuration: PositiveDurationSeconds)
-        extends Base[UpdateMaxDuration.Request, UpdateMaxDuration.Response, Unit] {
-      override def createRequest(): Right[String, UpdateMaxDuration.Request] =
-        Right(
-          UpdateMaxDuration.Request(Some(maxDuration.toProtoPrimitive))
-        )
-
-      override def submitRequest(
-          service: PruningServiceStub,
-          request: UpdateMaxDuration.Request,
-      ): Future[UpdateMaxDuration.Response] =
-        service.updateMaxDuration(request)
-
-      override def handleResponse(response: UpdateMaxDuration.Response): Either[String, Unit] =
-        response match {
-          case UpdateMaxDuration.Response() => Right(())
-        }
-    }
-
-    final case class UpdateRetentionCommand(retention: PositiveDurationSeconds)
-        extends Base[UpdateRetention.Request, UpdateRetention.Response, Unit] {
-      override def createRequest(): Right[String, UpdateRetention.Request] =
-        Right(UpdateRetention.Request(Some(retention.toProtoPrimitive)))
-
-      override def submitRequest(
-          service: PruningServiceStub,
-          request: UpdateRetention.Request,
-      ): Future[UpdateRetention.Response] =
-        service.updateRetention(request)
-
-      override def handleResponse(response: UpdateRetention.Response): Either[String, Unit] =
-        response match {
-          case UpdateRetention.Response() => Right(())
-        }
-    }
-
-    final case class GetScheduleCommand()
-        extends Base[
-          GetSchedule.Request,
-          GetSchedule.Response,
-          Option[PruningSchedule],
-        ] {
-      override def createRequest(): Right[String, GetSchedule.Request] =
-        Right(GetSchedule.Request())
-
-      override def submitRequest(
-          service: PruningServiceStub,
-          request: GetSchedule.Request,
-      ): Future[GetSchedule.Response] =
-        service.getSchedule(request)
-
-      override def handleResponse(
-          response: GetSchedule.Response
-      ): Either[
-        String,
-        Option[PruningSchedule],
-      ] = response.schedule.fold(
-        Right(None): Either[String, Option[PruningSchedule]]
-      )(PruningSchedule.fromProtoV0(_).map(Some(_)))
     }
   }
 

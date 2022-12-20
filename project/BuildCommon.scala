@@ -81,26 +81,12 @@ object BuildCommon {
       Global / excludeLintKeys += Compile / damlBuildOrder,
       Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
       Global / excludeLintKeys += `functionmeta` / wartremoverErrors,
-      Global / excludeLintKeys += `daml-fork` / wartremoverErrors,
-      Global / excludeLintKeys += `daml-copy-macro` / wartremoverErrors,
-      Global / excludeLintKeys += `daml-copy-common` / wartremoverErrors,
-      Global / excludeLintKeys += `daml-copy-testing` / wartremoverErrors,
-      Global / excludeLintKeys += `daml-copy-participant` / wartremoverErrors,
-      Global / excludeLintKeys += `blake2b` / autoAPIMappings,
-      Global / excludeLintKeys += `community-app` / autoAPIMappings,
-      Global / excludeLintKeys += `community-common` / autoAPIMappings,
-      Global / excludeLintKeys += `community-domain` / autoAPIMappings,
-      Global / excludeLintKeys += `community-participant` / autoAPIMappings,
-      Global / excludeLintKeys += `demo` / autoAPIMappings,
-      Global / excludeLintKeys += `functionmeta` / autoAPIMappings,
-      Global / excludeLintKeys += `slick-fork` / autoAPIMappings,
-      Global / excludeLintKeys += `akka-fork` / autoAPIMappings,
-      Global / excludeLintKeys += `daml-fork` / autoAPIMappings,
-      Global / excludeLintKeys += `daml-copy-macro` / autoAPIMappings,
-      Global / excludeLintKeys += `daml-copy-common` / autoAPIMappings,
-      Global / excludeLintKeys += `daml-copy-testing` / autoAPIMappings,
-      Global / excludeLintKeys += `daml-copy-participant` / autoAPIMappings,
+      Global / excludeLintKeys ++= (CommunityProjects.allProjects ++ DamlProjects.allProjects)
+        .map(
+          _ / autoAPIMappings
+        ),
       Global / excludeLintKeys += Global / damlCodeGeneration,
+      Global / excludeLintKeys ++= DamlProjects.allProjects.map(_ / wartremoverErrors),
     )
 
     // Inspired by https://www.viget.com/articles/two-ways-to-share-git-hooks-with-your-team/
@@ -331,8 +317,7 @@ object BuildCommon {
       case PathList("google", "protobuf", _*) => MergeStrategy.first
       case PathList("org", "apache", "logging", _*) => MergeStrategy.first
       case PathList("ch", "qos", "logback", _*) => MergeStrategy.first
-      // TODO(#10677) daml error pulls many dependencies in multiple times via the proto definitions
-      case PathList("com", "daml", _*) => MergeStrategy.first
+      case PathList("com", "daml", "ledger", "api", "v1", "package.proto") => MergeStrategy.first
       case PathList(
             "META-INF",
             "org",
@@ -427,14 +412,30 @@ object BuildCommon {
 
   object CommunityProjects {
 
+    lazy val allProjects = Set(
+      `util-external`,
+      `util-internal`,
+      `community-app`,
+      `community-common`,
+      `community-domain`,
+      `community-participant`,
+      `sequencer-driver`,
+      blake2b,
+      functionmeta,
+      `slick-fork`,
+      `wartremover-extension`,
+      `akka-fork`,
+      `demo`,
+    )
+
     // Project for utilities that are also used outside of the Canton repo
     lazy val `util-external` = project
       .in(file("community/util-external"))
       .dependsOn(
         `akka-fork`,
         `wartremover-extension` % "compile->compile;test->test",
-        `daml-copy-common`,
-        `daml-copy-testing` % "test->test",
+        DamlProjects.`daml-copy-common`,
+        DamlProjects.`daml-copy-testing` % "test->test",
       )
       .settings(
         sharedCantonSettings,
@@ -552,8 +553,8 @@ object BuildCommon {
         `slick-fork`,
         `akka-fork`,
         `wartremover-extension` % "compile->compile;test->test",
-        `daml-copy-common`,
-        `daml-copy-testing` % "test->test",
+        DamlProjects.`daml-copy-common`,
+        DamlProjects.`daml-copy-testing` % "test->test",
         `util-external` % "compile->compile;test->test",
         `util-internal` % "compile->compile;test->test",
       )
@@ -707,9 +708,9 @@ object BuildCommon {
       .in(file("community/participant"))
       .dependsOn(
         `community-common` % "compile->compile;test->test",
-        `daml-copy-common`,
-        `daml-copy-participant`,
-        `daml-copy-testing` % "test->test",
+        DamlProjects.`daml-copy-common`,
+        DamlProjects.`daml-copy-participant`,
+        DamlProjects.`daml-copy-testing` % "test->test",
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -768,8 +769,8 @@ object BuildCommon {
       .dependsOn(
         `akka-fork`,
         `util-external`,
-        `daml-copy-common`,
-        `daml-copy-testing` % "test->test",
+        DamlProjects.`daml-copy-common`,
+        DamlProjects.`daml-copy-testing` % "test->test",
       )
       .settings(
         sharedCantonSettings,
@@ -851,7 +852,78 @@ object BuildCommon {
         ),
       )
 
-    lazy val removeCompileFlagsForDaml = Seq("-Xsource:3", "-deprecation", "-Xfatal-warnings")
+    // TODO(#10617) remove when no longer needed
+    lazy val `akka-fork` = project
+      .in(file("community/lib/akka"))
+      .disablePlugins(ScalafixPlugin, ScalafmtPlugin, WartRemover)
+      .settings(
+        sharedSettings,
+        libraryDependencies ++= Seq(
+          akka_stream,
+          akka_stream_testkit % Test,
+          akka_slf4j,
+          scalatest % Test,
+        ),
+        // Exclude to apply our license header to any Scala files
+        headerSources / excludeFilter := "*.scala",
+        coverageEnabled := false,
+      )
+
+    lazy val `demo` = project
+      .in(file("community/demo"))
+      .enablePlugins(DamlPlugin)
+      .dependsOn(`community-app` % "compile->compile;test->test")
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          scalafx,
+          scalatest % Test,
+          scalacheck % Test,
+          scalatestScalacheck % Test,
+          mockito_scala % Test,
+          scalatestMockito % Test,
+        ) ++ javafx_all,
+        Compile / damlCodeGeneration := Seq(
+          (
+            (Compile / sourceDirectory).value / "daml" / "doctor",
+            (Compile / damlDarOutput).value / "doctor.dar",
+            "com.digitalasset.canton.demo.model.doctor",
+          ),
+          (
+            (Compile / sourceDirectory).value / "daml" / "ai-analysis",
+            (Compile / damlDarOutput).value / "ai-analysis.dar",
+            "com.digitalasset.canton.demo.model.ai",
+          ),
+        ),
+        Compile / damlBuildOrder := Seq(
+          "bank",
+          "medical-records",
+          "health-insurance",
+          "doctor",
+          "ai-analysis",
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        addFilesToHeaderCheck("*.sh", "../pack", Compile),
+        addFilesToHeaderCheck("*.daml", "daml", Compile),
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+  }
+  object DamlProjects {
+
+    lazy val allProjects = Set(
+      `daml-copy-macro`,
+      `daml-fork`,
+      `daml-copy-protobuf`,
+      `daml-copy-protobuf-java`,
+      `google-common-protos-scala`,
+      `daml-copy-common`,
+      `daml-copy-testing`,
+      `daml-copy-participant`,
+    )
+
+    lazy val removeCompileFlagsForDaml =
+      Seq("-Xsource:3", "-deprecation", "-Xfatal-warnings", "-Ywarn-unused", "-Ywarn-value-discard")
 
     lazy val `daml-copy-macro` = project
       .in(file("community/lib/daml-copy-marco"))
@@ -877,9 +949,123 @@ object BuildCommon {
         headerResources / excludeFilter := HiddenFileFilter || "*",
       )
 
+    // this project builds daml protobuf objects where
+    // we only need the java classes
+    lazy val `daml-copy-protobuf-java` = project
+      .in(file("community/lib/daml-copy-protobuf-java"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        dependencyOverrides ++= Seq(),
+        Compile / PB.protoSources ++= Seq(
+          "daml-lf/archive/src/main/protobuf",
+          "daml-lf/transaction/src/main/protobuf",
+        ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+        Compile / PB.targets := Seq(
+          PB.gens.java -> (Compile / sourceManaged).value
+        ),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+        libraryDependencies ++= Seq(
+          scalapb_runtime
+        ),
+      )
+
+    // this project builds scala protobuf versions that include
+    // java conversions of a few google standard items
+    // the google protobuf files are extracted from the provided jar files
+    lazy val `google-common-protos-scala` = project
+      .in(file("community/lib/google-common-protos-scala"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        // we restrict the compilation to a few files that we actually need, skipping the large majority ...
+        excludeFilter := HiddenFileFilter || "scalapb.proto",
+        PB.generate / includeFilter := "status.proto" || "code.proto" || "error_details.proto" || "health.proto",
+        dependencyOverrides ++= Seq(),
+        // compile proto files that we've extracted here
+        Compile / PB.protoSources += (target.value / "protobuf_external"),
+        Compile / PB.targets := Seq(
+          // with java conversions but no java classes!
+          scalapb.gen(
+            javaConversions = true,
+            flatPackage = false, // consistent with upstream daml
+          ) -> (Compile / sourceManaged).value
+        ),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+        libraryDependencies ++= Seq(
+          scalapb_runtime,
+          scalapb_runtime_grpc,
+          // the grpc services is necessary so we can build the
+          // scala version of the health services, without
+          // building the java protoc (to avoid duplicate symbols
+          // during assembly)
+          grpc_services,
+          // extract the protobuf to target/protobuf_external
+          // however, we'll only be including the ones in the includeFilter
+          grpc_services % "protobuf",
+          google_common_protos % "protobuf",
+          google_common_protos,
+        ),
+      )
+
+    lazy val `daml-copy-protobuf` = project
+      .in(file("community/lib/daml-copy-protobuf"))
+      .dependsOn(`google-common-protos-scala`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        dependencyOverrides ++= Seq(),
+        // Without this, we get conflicts when the protofiles from the below sources
+        // are copied by sbt to the target directory
+        excludeFilter := HiddenFileFilter || "*.bazel" || "scalapb.proto",
+        Compile / PB.protoSources ++= Seq(
+          "ledger-api/grpc-definitions",
+          "ledger/participant-integration-api/src/main/protobuf",
+          "ledger/ledger-configuration/protobuf",
+        ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+        Compile / PB.targets := Seq(
+          // build java codegen too
+          PB.gens.java -> (Compile / sourceManaged).value,
+          // build scala codegen with java conversions
+          scalapb.gen(
+            javaConversions = true,
+            flatPackage = false, // consistent with upstream daml
+          ) -> (Compile / sourceManaged).value,
+        ),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+        libraryDependencies ++= Seq(
+          scalapb_runtime,
+          scalapb_runtime_grpc,
+        ),
+      )
+
     lazy val `daml-copy-common` = project
       .in(file("community/lib/daml-copy-common"))
-      .dependsOn(`daml-copy-macro`)
+      .dependsOn(`daml-copy-macro`, `daml-copy-protobuf`, `daml-copy-protobuf-java`)
       .disablePlugins(
         ScalafixPlugin,
         ScalafmtPlugin,
@@ -909,19 +1095,9 @@ object BuildCommon {
           fasterjackson_core,
           grpc_api,
           grpc_netty,
-          google_protos,
           scalapb_runtime_grpc,
           spray,
           scaffeine,
-          // didn't want to build protobuf
-          daml_ledger_api_scalapb,
-          // needs the lf_1_dev archive java protos, but i couldn't find them quickly
-          // daml_lf_archive_reader,
-          daml_lf_dev_archive_java_proto,
-          // for the next three i have to build the java proto sources too
-          daml_lf_value_java_proto,
-          daml_lf_transaction_java_proto,
-          daml_ledger_configuration_java_proto,
           cats,
           apache_commons_text,
           typelevel_paiges,
@@ -929,11 +1105,6 @@ object BuildCommon {
           commons_codec,
         ),
         dependencyOverrides ++= Seq(),
-        Compile / PB.targets := Seq(
-          scalapb.gen(flatPackage =
-            false // consistent with upstream daml
-          ) -> (Compile / sourceManaged).value / "protobuf"
-        ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
             "observability/metrics/src/main/scala",
@@ -1031,7 +1202,6 @@ object BuildCommon {
         headerSources / excludeFilter := HiddenFileFilter || "*",
         headerResources / excludeFilter := HiddenFileFilter || "*",
       )
-
     lazy val `daml-copy-participant` = project
       .in(file("community/lib/daml-copy-participant"))
       .dependsOn(`daml-copy-common`)
@@ -1058,8 +1228,6 @@ object BuildCommon {
           h2,
           flyway,
           scaffeine,
-          daml_ports,
-          daml_participant_state_proto,
           h2,
           oracle,
           postgres,
@@ -1074,9 +1242,10 @@ object BuildCommon {
           Seq(
             "ledger/participant-local-store/src/main/scala",
             "ledger/ledger-api-auth/src/main/scala",
+            "libs-scala/ports/src/main/scala",
             "libs-scala/build-info/src/main/scala",
             "libs-scala/jwt/src/main/scala",
-            "libs-scala/struct-json/src/main/scala",
+            "libs-scala/struct-json/struct-spray-json/src/main/scala",
             "ledger/ledger-api-client/src/main/scala",
             "ledger/ledger-api-auth-client/src/main/java",
             "ledger/caching/src/main/scala",
@@ -1104,62 +1273,6 @@ object BuildCommon {
           ) -> (Compile / sourceManaged).value / "protobuf"
         ),
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
-      )
-
-    // TODO(#10617) remove when no longer needed
-    lazy val `akka-fork` = project
-      .in(file("community/lib/akka"))
-      .disablePlugins(ScalafixPlugin, ScalafmtPlugin, WartRemover)
-      .settings(
-        sharedSettings,
-        libraryDependencies ++= Seq(
-          akka_stream,
-          akka_stream_testkit % Test,
-          akka_slf4j,
-          scalatest % Test,
-        ),
-        // Exclude to apply our license header to any Scala files
-        headerSources / excludeFilter := "*.scala",
-        coverageEnabled := false,
-      )
-
-    lazy val `demo` = project
-      .in(file("community/demo"))
-      .enablePlugins(DamlPlugin)
-      .dependsOn(`community-app` % "compile->compile;test->test")
-      .settings(
-        sharedCantonSettings,
-        libraryDependencies ++= Seq(
-          scalafx,
-          scalatest % Test,
-          scalacheck % Test,
-          scalatestScalacheck % Test,
-          mockito_scala % Test,
-          scalatestMockito % Test,
-        ) ++ javafx_all,
-        Compile / damlCodeGeneration := Seq(
-          (
-            (Compile / sourceDirectory).value / "daml" / "doctor",
-            (Compile / damlDarOutput).value / "doctor.dar",
-            "com.digitalasset.canton.demo.model.doctor",
-          ),
-          (
-            (Compile / sourceDirectory).value / "daml" / "ai-analysis",
-            (Compile / damlDarOutput).value / "ai-analysis.dar",
-            "com.digitalasset.canton.demo.model.ai",
-          ),
-        ),
-        Compile / damlBuildOrder := Seq(
-          "bank",
-          "medical-records",
-          "health-insurance",
-          "doctor",
-          "ai-analysis",
-        ),
-        addProtobufFilesToHeaderCheck(Compile),
-        addFilesToHeaderCheck("*.sh", "../pack", Compile),
-        addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 

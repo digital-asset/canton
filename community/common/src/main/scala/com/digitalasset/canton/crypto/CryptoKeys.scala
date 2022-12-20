@@ -306,6 +306,7 @@ object CryptoKeyFormat {
 }
 
 sealed trait KeyPurpose extends Product with Serializable with PrettyPrinting {
+
   def name: String
 
   // An identifier for a key purpose that is used for serialization

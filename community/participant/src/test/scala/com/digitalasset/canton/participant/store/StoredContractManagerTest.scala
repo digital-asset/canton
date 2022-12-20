@@ -41,11 +41,11 @@ class StoredContractManagerTest extends AsyncWordSpec with BaseTest {
   private val contractId2 = suffixedId(2, 0)
 
   private val contract0 =
-    asSerializable(contractId0, contractInstance = contractInstance(agreementText = "instance0"))
+    asSerializable(contractId0, contractInstance = contractInstance(), agreementText = "instance0")
   private val contract1 =
-    asSerializable(contractId1, contractInstance = contractInstance(agreementText = "instance1"))
+    asSerializable(contractId1, contractInstance = contractInstance(), agreementText = "instance1")
   private val contract2 =
-    asSerializable(contractId2, contractInstance = contractInstance(agreementText = "instance2"))
+    asSerializable(contractId2, contractInstance = contractInstance(), agreementText = "instance2")
 
   private val rc0 = RequestCounter(0)
   private val rc1 = RequestCounter(1)
@@ -131,14 +131,16 @@ class StoredContractManagerTest extends AsyncWordSpec with BaseTest {
             WithTransactionId(
               asSerializable(
                 contract1.contractId,
-                contractInstance = contractInstance(agreementText = "instance1-modified"),
+                contractInstance = contractInstance(),
+                agreementText = "instance1-modified",
               ),
               transactionId1,
             ),
             WithTransactionId(
               asSerializable(
                 createdContract.contractId,
-                contractInstance = contractInstance(agreementText = "instance0-modified"),
+                contractInstance = contractInstance(),
+                agreementText = "instance0-modified",
               ),
               transactionId0,
             ),
@@ -150,7 +152,8 @@ class StoredContractManagerTest extends AsyncWordSpec with BaseTest {
             WithTransactionId(
               asSerializable(
                 createdContract.contractId,
-                contractInstance = contractInstance(agreementText = "instance0"),
+                contractInstance = contractInstance(),
+                agreementText = "instance0",
               ),
               transactionId1,
             )
@@ -173,7 +176,8 @@ class StoredContractManagerTest extends AsyncWordSpec with BaseTest {
         divulged <- manager.storeDivulgedContracts(rc0, Seq(divulgedContract.contract)).value
         modified = asSerializable(
           divulgedContract.contractId,
-          contractInstance = contractInstance(agreementText = "divulged-modified"),
+          contractInstance = contractInstance(),
+          agreementText = "divulged-modified",
         )
         add <- manager.addPendingContracts(rc0, Seq(WithTransactionId(modified, transactionId0)))
         lookup <- manager.lookup(divulgedContract.contractId).value
@@ -205,15 +209,18 @@ class StoredContractManagerTest extends AsyncWordSpec with BaseTest {
         add <- manager.addPendingContracts(rc2, Seq(WithTransactionId(contract2, transactionId0)))
         modifiedC = asSerializable(
           createdContract.contractId,
-          contractInstance = contractInstance(agreementText = "instance0-modified"),
+          contractInstance = contractInstance(),
+          agreementText = "instance0-modified",
         )
         modifiedD = asSerializable(
           divulgedContract.contractId,
-          contractInstance = contractInstance(agreementText = "instance1-modified"),
+          contractInstance = contractInstance(),
+          agreementText = "instance1-modified",
         )
         modifiedP = asSerializable(
           contract2.contractId,
-          contractInstance = contractInstance(agreementText = "instance2-modified"),
+          contractInstance = contractInstance(),
+          agreementText = "instance2-modified",
         )
         divulged <- manager.storeDivulgedContracts(rc2, Seq(modifiedC, modifiedD, modifiedP)).value
       } yield {

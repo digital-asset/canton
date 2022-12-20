@@ -1,4 +1,5 @@
 import BuildCommon.CommunityProjects
+import BuildCommon.DamlProjects
 
 BuildCommon.sbtSettings
 
@@ -11,36 +12,19 @@ lazy val blake2b = CommunityProjects.blake2b
 lazy val functionmeta = CommunityProjects.functionmeta
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
 lazy val `akka-fork` = CommunityProjects.`akka-fork`
-lazy val `daml-fork` = CommunityProjects.`daml-fork`
-lazy val `daml-copy-macro` = CommunityProjects.`daml-copy-macro`
-lazy val `daml-copy-common` = CommunityProjects.`daml-copy-common`
-lazy val `daml-copy-testing` = CommunityProjects.`daml-copy-testing`
-lazy val `daml-copy-participant` = CommunityProjects.`daml-copy-participant`
 lazy val `util-external` = CommunityProjects.`util-external`
 lazy val `util-internal` = CommunityProjects.`util-internal`
 lazy val `sequencer-driver` = CommunityProjects.`sequencer-driver`
-
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
+lazy val `daml-fork` = DamlProjects.`daml-fork`
+lazy val `daml-copy-macro` = DamlProjects.`daml-copy-macro`
+lazy val `daml-copy-protobuf` = DamlProjects.`daml-copy-protobuf`
+lazy val `daml-copy-protobuf-java` = DamlProjects.`daml-copy-protobuf-java`
+lazy val `google-common-protos-scala` = DamlProjects.`google-common-protos-scala`
+lazy val `daml-copy-common` = DamlProjects.`daml-copy-common`
+lazy val `daml-copy-testing` = DamlProjects.`daml-copy-testing`
+lazy val `daml-copy-participant` = DamlProjects.`daml-copy-participant`
 
 lazy val root = (project in file("."))
   .disablePlugins(WartRemover)
-  .aggregate(
-    `community-app`,
-    `community-common`,
-    `community-domain`,
-    `community-participant`,
-    demo,
-    blake2b,
-    functionmeta,
-    `slick-fork`,
-    `akka-fork`,
-    `daml-fork`,
-    `daml-copy-macro`,
-    `daml-copy-common`,
-    `daml-copy-testing`,
-    `daml-copy-participant`,
-    `wartremover-extension`,
-    `util-external`,
-    `util-internal`,
-    `sequencer-driver`,
-  )
+  .aggregate((CommunityProjects.allProjects ++ DamlProjects.allProjects).toSeq.map(_.project): _*)

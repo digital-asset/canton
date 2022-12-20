@@ -30,6 +30,10 @@ sealed trait Identity extends Product with Serializable with PrettyPrinting {
   override def pretty: Pretty[this.type] = prettyOfParam(_.uid)
 }
 
+sealed trait NodeIdentity extends Identity {
+  def keyOwner: KeyOwner
+}
+
 sealed trait KeyOwnerCode {
 
   def threeLetterId: String3
@@ -200,9 +204,12 @@ object UnauthenticatedMemberId {
     )
 }
 
-case class DomainId(uid: UniqueIdentifier) extends Identity {
+case class DomainId(uid: UniqueIdentifier) extends NodeIdentity {
   def unwrap: UniqueIdentifier = uid
   def toLengthLimitedString: String255 = uid.toLengthLimitedString
+
+  // The key owner of a domain identity is the domain topology manager
+  override def keyOwner: KeyOwner = DomainTopologyManagerId(uid)
 }
 
 object DomainId {
@@ -236,12 +243,14 @@ object DomainId {
 }
 
 /** A participant identifier */
-case class ParticipantId(uid: UniqueIdentifier) extends AuthenticatedMember {
+case class ParticipantId(uid: UniqueIdentifier) extends AuthenticatedMember with NodeIdentity {
 
   override def code: AuthenticatedMemberCode = ParticipantId.Code
 
   def adminParty: PartyId = PartyId(uid)
   def toLf: LedgerParticipantId = LedgerParticipantId.assertFromString(uid.toProtoPrimitive)
+
+  override def keyOwner: KeyOwner = this
 }
 
 object ParticipantId {
@@ -348,8 +357,10 @@ object DomainMember {
   def listAll(id: DomainId): Set[DomainMember] = list(id, includeSequencer = true)
 }
 
-case class MediatorId(uid: UniqueIdentifier) extends DomainMember {
+case class MediatorId(uid: UniqueIdentifier) extends DomainMember with NodeIdentity {
   override def code: AuthenticatedMemberCode = MediatorId.Code
+
+  override def keyOwner: KeyOwner = this
 }
 
 object MediatorId {
@@ -398,8 +409,10 @@ object DomainTopologyManagerId {
   def apply(domainId: DomainId): DomainTopologyManagerId = DomainTopologyManagerId(domainId.unwrap)
 }
 
-case class SequencerId(uid: UniqueIdentifier) extends DomainMember {
+case class SequencerId(uid: UniqueIdentifier) extends DomainMember with NodeIdentity {
   override def code: AuthenticatedMemberCode = SequencerId.Code
+
+  override def keyOwner: KeyOwner = this
 }
 
 object SequencerId {

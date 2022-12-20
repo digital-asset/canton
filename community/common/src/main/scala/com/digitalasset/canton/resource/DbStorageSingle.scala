@@ -70,6 +70,7 @@ class DbStorageSingle private (
       traceContext: TraceContext
   ): Future[Unit] = {
     Future(blocking(try {
+      // FIXME(i11240): if db is backed by a connection pool, this can fail even if the db is healthy, because the pool is busy executing long-running queries
       val connection =
         // this will timeout and throw a SQLException if can't establish a connection
         db.source.createConnection()

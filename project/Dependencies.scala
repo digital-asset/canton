@@ -73,11 +73,9 @@ object Dependencies {
 
   lazy val javax_annotations = "javax.annotation" % "javax.annotation-api" % "1.3.2"
 
-  lazy val googleapis_common_protos =
-    "com.google.api.grpc" % "googleapis-common-protos" % "0.0.3"
-
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
+
   // pick the version of boring ssl from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
   lazy val netty_boring_ssl = "io.netty" % "netty-tcnative-boringssl-static" % "2.0.46.Final"
@@ -256,21 +254,7 @@ object Dependencies {
   }
 
   // TODO(i10677): Pull in dependencies from daml submodule
-  lazy val daml_ports = "com.daml" %% "ports" % daml_libraries_version
-  lazy val daml_participant_state_proto =
-    "com.daml" %% "participant-integration-api-scala-proto" % daml_libraries_version
-  lazy val daml_lf_transaction_java_proto =
-    "com.daml" % "daml-lf-transaction-java-proto" % daml_libraries_version
-  lazy val daml_ledger_configuration_java_proto =
-    "com.daml" % "participant-state-ledger-configuration-java-proto" % daml_libraries_version
-  lazy val daml_lf_dev_archive_java_proto =
-    "com.daml" % "daml-lf-dev-archive-java-proto" % daml_libraries_version
-  lazy val daml_lf_value_java_proto =
-    "com.daml" % "daml-lf-value-java-proto" % daml_libraries_version
-  lazy val daml_ledger_api_scalapb = "com.daml" %% "ledger-api-scalapb" % daml_libraries_version
-  lazy val daml_ledger_api_proto = "com.daml" % "ledger-api-proto" % daml_libraries_version
   lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
-  lazy val da_grpc_bindings_ledger_client = "com.daml" %% "bindings-scala" % daml_libraries_version
 
   // daml repo dependencies
   // TODO(#10852) scalaz or cats. let's pick one.
@@ -280,6 +264,11 @@ object Dependencies {
   // TODO(#10852) yet another json library
   lazy val spray = damlDependency("io.spray", "spray-json")
   lazy val google_protos = damlDependency("com.google.protobuf", "protobuf-java")
+
+  // version depends actually on scalapb
+  lazy val google_common_protos =
+    damlDependency("com.google.api.grpc", "proto-google-common-protos")
+
   lazy val apache_commons_text = damlDependency("org.apache.commons", "commons-text")
   lazy val typelevel_paiges = damlDependency("org.typelevel", "paiges-core")
   lazy val commons_io = damlDependency("commons-io", "commons-io")

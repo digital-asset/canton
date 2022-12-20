@@ -45,6 +45,9 @@ trait MediatorRuntime extends FlagCloseable {
   def timeService: ServerServiceDefinition
   def enterpriseAdministrationService: ServerServiceDefinition
 
+  def start()(implicit ec: ExecutionContext, traceContext: TraceContext): Future[Unit] =
+    mediator.start()
+
   override protected def onClosed(): Unit = mediator.close()
 }
 

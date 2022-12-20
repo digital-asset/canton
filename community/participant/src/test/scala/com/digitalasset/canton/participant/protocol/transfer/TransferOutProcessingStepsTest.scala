@@ -59,6 +59,7 @@ import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetPr
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutorService,
+  LedgerTransactionId,
   LfPartyId,
   RequestCounter,
   SequencerCounter,
@@ -627,6 +628,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       val contractId = ExampleTransactionFactory.suffixedId(10, 0)
       val contractHash = ExampleTransactionFactory.lfHash(0)
       val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
+      val rootHash = mock[RootHash]
+      when(rootHash.asLedgerTransactionId).thenReturn(LedgerTransactionId.fromString("id1"))
       val transferResult =
         TransferResult.create(
           RequestId(CantonTimestamp.Epoch),
@@ -658,18 +661,23 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           SymbolicCrypto.emptySignature,
           None,
         )
+        transferInExclusivity = DynamicDomainParameters
+          .defaultValues(testedProtocolVersion)
+          .transferExclusivityLimitFor(timeEvent.timestamp)
         pendingOut = PendingTransferOut(
           RequestId(CantonTimestamp.Epoch),
           RequestCounter(1),
           SequencerCounter(1),
-          mock[RootHash],
+          rootHash,
           WithContractHash(contractId, contractHash),
           transferringParticipant = false,
+          submitter,
           transferId,
           targetDomain,
           Set(party1),
           Set(party1),
           timeEvent,
+          Some(transferInExclusivity),
         )
         _ <- valueOrFail(
           outProcessingSteps

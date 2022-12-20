@@ -22,6 +22,7 @@ import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import java.util.concurrent.ConcurrentHashMap
+import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Stores and retrieves finalized mediator response aggregations
@@ -48,6 +49,13 @@ private[mediator] trait FinalizedResponseStore extends AutoCloseable {
     * Primarily used for testing mediator pruning.
     */
   def count()(implicit traceContext: TraceContext): Future[Long]
+
+  /** Locate a timestamp relative to the earliest available finalized response
+    * Useful to monitor the progress of pruning and for pruning in batches.
+    */
+  def locatePruningTimestamp(skip: Int)(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]]
 }
 
 private[mediator] object FinalizedResponseStore {
@@ -101,6 +109,17 @@ private[mediator] class InMemoryFinalizedResponseStore(
 
   override def count()(implicit traceContext: TraceContext): Future[Long] =
     Future.successful(finalizedRequests.size.toLong)
+
+  override def locatePruningTimestamp(
+      skip: Int
+  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
+    Future.successful {
+      import cats.Order.*
+      val sortedSet =
+        SortedSet.empty[CantonTimestamp] ++ finalizedRequests.keySet
+      sortedSet.drop(skip).headOption
+    }
+  }
 
   override def close(): Unit = ()
 }
@@ -221,4 +240,16 @@ private[mediator] class DbFinalizedResponseStore(
       sql"select count(request_id) from response_aggregations".as[Long].head,
       functionFullName,
     )
+
+  override def locatePruningTimestamp(
+      skip: Int
+  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] =
+    storage
+      .query(
+        sql"select request_id from response_aggregations order by request_id asc #${storage.limit(1, skip.toLong)}"
+          .as[CantonTimestamp]
+          .headOption,
+        functionFullName,
+      )
+
 }

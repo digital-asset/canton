@@ -438,8 +438,8 @@ object DbStorage {
     }
 
     implicit val absCoidGetResult: GetResult[LfContractId] = GetResult(r =>
-      LfContractId
-        .fromProtoPrimitive(r.nextString())
+      ProtoConverter
+        .parseLfContractId(r.nextString())
         .fold(err => throw new DbDeserializationException(err.toString), Predef.identity)
     )
     implicit val absCoidSetParameter: SetParameter[LfContractId] =

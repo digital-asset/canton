@@ -122,9 +122,10 @@ object SerializableContract
       metadata: ContractMetadata,
       ledgerTime: CantonTimestamp,
       contractSalt: Option[Salt],
+      agreementText: AgreementText,
   ): Either[ValueCoder.EncodeError, SerializableContract] =
     SerializableRawContractInstance
-      .create(contractInstance)
+      .create(contractInstance, agreementText)
       .map(SerializableContract(contractId, _, metadata, ledgerTime, contractSalt))
 
   def fromProtoV0(
@@ -153,7 +154,7 @@ object SerializableContract
       contractSaltO: Option[crypto.v0.Salt],
   ): ParsingResult[SerializableContract] =
     for {
-      contractId <- LfContractId.fromProtoPrimitive(contractIdP)
+      contractId <- ProtoConverter.parseLfContractId(contractIdP)
       raw <- SerializableRawContractInstance
         .fromByteString(rawP)
         .leftMap(error => ValueConversionError("raw_contract_instance", error.toString))

@@ -7,11 +7,9 @@ import cats.syntax.either.*
 import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.client.binding.Primitive
 import com.daml.lf.data.Bytes
-import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -97,12 +95,6 @@ object ContractIdSyntax {
       */
     def toPrimUnchecked[Tpl]: Primitive.ContractId[Tpl] =
       Primitive.ContractId.apply(contractId.coid)
-  }
-
-  implicit class LfContractIdObjectSyntax(private val lfContractId: LfContractId.type)
-      extends AnyVal {
-    def fromProtoPrimitive(contractIdP: String): ParsingResult[LfContractId] =
-      LfContractId.fromString(contractIdP).leftMap(err => StringConversionError(err))
   }
 
   implicit val orderingLfContractId: Ordering[LfContractId] =

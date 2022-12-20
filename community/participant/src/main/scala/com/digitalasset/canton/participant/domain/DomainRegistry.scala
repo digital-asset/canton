@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
+import org.slf4j.event.Level
 
 /** A registry of domains. */
 trait DomainRegistry extends AutoCloseable {
@@ -172,6 +173,9 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(cause = s"The domain parameters have changed")
           with DomainRegistryError
+
+      override def logLevel: Level = Level.WARN
+
     }
   }
 
