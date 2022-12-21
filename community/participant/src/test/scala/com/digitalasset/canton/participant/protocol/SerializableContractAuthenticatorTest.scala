@@ -29,7 +29,8 @@ class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
     viewParticipantDataSalt = TestSalt.generateSalt(1),
     createIndex = 0,
     ledgerTime = ledgerTime,
-    suffixedContractInstance = ExampleTransactionFactory.asSerializableRaw(contractInstance),
+    suffixedContractInstance =
+      ExampleTransactionFactory.asSerializableRaw(contractInstance, agreementText = ""),
     contractIdVersion = AuthenticatedContractIdVersion,
   )
 
@@ -45,6 +46,7 @@ class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
       metadata = ContractMetadata.tryCreate(Set.empty, Set.empty, None), // Not used
       ledgerTime = ledgerTime,
       contractSalt = Some(contractSalt.unwrap),
+      agreementText = AgreementText.empty,
     ).valueOrFail("Failed creating serializable contract instance")
 
   classOf[SerializableContractAuthenticator].getSimpleName when {
@@ -90,10 +92,10 @@ class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
         )
         testFailedAuthentication(
           _.copy(rawContractInstance =
-            ExampleTransactionFactory.asSerializableRaw(changedContractInstance)
+            ExampleTransactionFactory.asSerializableRaw(changedContractInstance, "")
           ),
           testedContractInstance =
-            ExampleTransactionFactory.asSerializableRaw(changedContractInstance),
+            ExampleTransactionFactory.asSerializableRaw(changedContractInstance, ""),
         )
       }
     }
@@ -112,7 +114,7 @@ class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
       testedSalt: Salt = contractSalt.unwrap,
       testedLedgerTime: CantonTimestamp = ledgerTime,
       testedContractInstance: SerializableRawContractInstance =
-        ExampleTransactionFactory.asSerializableRaw(contractInstance),
+        ExampleTransactionFactory.asSerializableRaw(contractInstance, ""),
   ): Assertion = {
     val recomputedUnicum = unicumGenerator
       .recomputeUnicum(

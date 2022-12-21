@@ -3,10 +3,19 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.lf.transaction.{TransactionCoder, TransactionOuterClass}
+import com.daml.lf.CantonOnly
+import com.daml.lf.transaction.{Node, TransactionCoder, TransactionOuterClass, Versioned}
+import com.daml.lf.value.Value.ContractInstanceWithAgreement
 import com.daml.lf.value.ValueCoder
 import com.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
-import com.digitalasset.canton.protocol.{LfContractInst, LfVersionedTransaction}
+import com.digitalasset.canton.protocol
+import com.digitalasset.canton.protocol.{
+  AgreementText,
+  LfContractInst,
+  LfNodeCreate,
+  LfNodeId,
+  LfVersionedTransaction,
+}
 import com.google.protobuf.ByteString
 
 /** Serialization and deserialization utilities for transactions and contracts.
@@ -32,15 +41,55 @@ private[store] object DamlLfSerializers {
         TransactionOuterClass.Transaction.parseFrom(bytes),
       )
 
-  def serializeContract(contract: LfContractInst): Either[EncodeError, ByteString] =
+  def serializeContract(
+      contract: LfContractInst,
+      agreementText: AgreementText,
+  ): Either[EncodeError, ByteString] =
     TransactionCoder
-      .encodeContractInstance(ValueCoder.CidEncoder, contract)
+      .encodeContractInstance(
+        ValueCoder.CidEncoder,
+        contract.map(ContractInstanceWithAgreement(_, agreementText.v)),
+      )
       .map(_.toByteString)
 
-  def deserializeContract(bytes: ByteString): Either[DecodeError, LfContractInst] =
+  def deserializeContract(
+      bytes: ByteString
+  ): Either[DecodeError, Versioned[ContractInstanceWithAgreement]] =
     TransactionCoder
       .decodeVersionedContractInstance(
         ValueCoder.CidDecoder,
         TransactionOuterClass.ContractInstance.parseFrom(bytes),
       )
+
+  def deserializeCreateNode(
+      proto: TransactionOuterClass.Node
+  ): Either[DecodeError, protocol.LfNodeCreate] = {
+    for {
+      version <- TransactionCoder.decodeVersion(proto.getVersion)
+      nodeWithId <- CantonOnly.decodeVersionedNode(
+        TransactionCoder.NidDecoder,
+        ValueCoder.CidDecoder,
+        version,
+        proto,
+      )
+      createNode <- nodeWithId._2 match {
+        case create: Node.Create => Right(create)
+        case node => Left(DecodeError(s"Failed deserialize Create Node $node"))
+      }
+    } yield createNode
+  }
+
+  def serializeCreateNode(
+      create: LfNodeCreate
+  ): Either[EncodeError, ByteString] =
+    CantonOnly
+      .encodeNode(
+        TransactionCoder.NidEncoder,
+        ValueCoder.CidEncoder,
+        create.version,
+        LfNodeId(0),
+        create,
+      )
+      .map(_.toByteString)
+
 }

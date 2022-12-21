@@ -33,7 +33,7 @@ final class TransactionTreeFactoryImplV2(
     submitterParticipant: ParticipantId,
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
-    contractSerializer: LfContractInst => SerializableRawContractInstance,
+    contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
     packageInfoService: PackageInfoService,
     cryptoOps: HashOps with HmacOps,
     override protected val loggerFactory: NamedLoggerFactory,

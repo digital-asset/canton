@@ -129,7 +129,7 @@ object EmbeddedMediatorInitialization {
           futureSupervisor,
           loggerFactory,
         )
-      _ <- EitherT.right[String](mediatorRuntime.mediator.start())
+      _ <- EitherT.right[String](mediatorRuntime.start())
     } yield mediatorRuntime
   }
 }

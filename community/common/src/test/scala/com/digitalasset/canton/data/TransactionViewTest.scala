@@ -19,7 +19,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   val hashOps: HashOps = factory.cryptoOps
 
   val contractInst = ExampleTransactionFactory.contractInstance()
-  val serContractInst = ExampleTransactionFactory.asSerializableRaw(contractInst)
+  val serContractInst = ExampleTransactionFactory.asSerializableRaw(contractInst, "")
 
   val cantonContractIdVersion: CantonContractIdVersion =
     CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)

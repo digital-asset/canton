@@ -1161,7 +1161,7 @@ object ViewParticipantData
       .toMap
     createdCore <- createdCoreP.traverse(createdContractDeserializer)
     createdInSubviewArchivedInCore <- createdInSubviewArchivedInCoreP
-      .traverse(LfContractId.fromProtoPrimitive)
+      .traverse(ProtoConverter.parseLfContractId)
     resolvedKeys <- resolvedKeysP.traverse(
       ResolvedKey.fromProtoV0(_).map(rk => rk.key -> rk.resolution)
     )

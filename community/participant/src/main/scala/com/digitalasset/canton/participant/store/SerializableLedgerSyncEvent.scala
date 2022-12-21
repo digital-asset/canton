@@ -11,7 +11,7 @@ import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.crypto.Hash as LfHash
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Bytes as LfBytes, ImmArray, Ref, StringModule}
-import com.daml.lf.transaction.BlindingInfo
+import com.daml.lf.transaction.{BlindingInfo, TransactionOuterClass}
 import com.digitalasset.canton
 import com.digitalasset.canton.ProtoDeserializationError.{
   SubmissionIdConversionError,
@@ -24,10 +24,11 @@ import com.digitalasset.canton.participant.store.DamlLfSerializers.*
 import com.digitalasset.canton.participant.sync.LedgerSyncEvent
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{
+  AgreementText,
   LfCommittedTransaction,
-  LfContractId,
   LfNodeId,
   SerializableDeduplicationPeriod,
+  TransferId,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{
@@ -38,6 +39,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.{
   required,
 }
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
@@ -107,6 +109,12 @@ final case class SerializableLedgerSyncEvent(event: LedgerSyncEvent)(
           )
         case commandRejected: LedgerSyncEvent.CommandRejected =>
           SyncEventP.CommandRejected(SerializableCommandRejected(commandRejected).toProtoV0)
+
+        case transferOut: LedgerSyncEvent.TransferredOut =>
+          SyncEventP.TransferredOut(SerializableTransferredOut(transferOut).toProtoV0)
+
+        case transferIn: LedgerSyncEvent.TransferredIn =>
+          SyncEventP.TransferredIn(SerializableTransferredIn(transferIn).toProtoV0)
       }
     )
   }
@@ -154,6 +162,10 @@ object SerializableLedgerSyncEvent
         SerializableTransactionAccepted.fromProtoV0(transactionAccepted)
       case SyncEventP.CommandRejected(commandRejected) =>
         SerializableCommandRejected.fromProtoV0(commandRejected)
+      case SyncEventP.TransferredOut(transferOut) =>
+        SerializableTransferredOut.fromProtoV0(transferOut)
+      case SyncEventP.TransferredIn(transferIn) =>
+        SerializableTransferredIn.fromProtoV0(transferIn)
     }
 
     ledgerSyncEvent.map(
@@ -466,12 +478,11 @@ case class SerializableTransactionAccepted(
       serializeTransaction(
         committedTransaction
       ) // LfCommittedTransaction implicitly turned into LfVersionedTransaction by LF
-        .leftMap(err =>
-          new DbSerializationException(
+        .valueOr(err =>
+          throw new DbSerializationException(
             s"Failed to serialize versioned transaction: ${err.errorMessage}"
           )
-        )
-        .fold(throw _, identity),
+        ),
       transactionId,
       Some(SerializableLfTimestamp(recordTime).toProtoV0),
       divulgedContracts.map(SerializableDivulgedContract(_).toProtoV0),
@@ -518,8 +529,8 @@ object SerializableTransactionAccepted {
       )(SerializableBlindingInfo.fromProtoV0(_).map(Some(_)))
       contractMetadataSeq <- contractMetadataP.toList.traverse {
         case (contractIdP, driverContractMetadataBytes) =>
-          LfContractId
-            .fromProtoPrimitive(contractIdP)
+          ProtoConverter
+            .parseLfContractId(contractIdP)
             .map(_ -> LfBytes.fromByteString(driverContractMetadataBytes))
       }
       contractMetadata = contractMetadataSeq.toMap
@@ -541,9 +552,13 @@ case class SerializableDivulgedContract(divulgedContract: DivulgedContract) {
     val DivulgedContract(contractId, contractInst) = divulgedContract
     v0.DivulgedContract(
       contractId = contractId.toProtoPrimitive,
-      contractInst = serializeContract(contractInst)
-        .leftMap(err => new DbSerializationException(s"Failed to serialize contract: $err"))
-        .fold(throw _, identity),
+      // This is fine to use empty agreement text for divulged contract
+      contractInst = serializeContract(contractInst, AgreementText.empty)
+        .valueOr(err =>
+          throw new DbSerializationException(
+            s"Failed to serialize contract: ${err.errorMessage}"
+          )
+        ),
     )
   }
 }
@@ -554,10 +569,11 @@ object SerializableDivulgedContract {
   ): ParsingResult[DivulgedContract] = {
     val v0.DivulgedContract(contractIdP, contractInstP) = divulgedContract
     for {
-      contractId <- LfContractId.fromProtoPrimitive(contractIdP)
-      contractInst <- deserializeContract(contractInstP).leftMap(err =>
+      contractId <- ProtoConverter.parseLfContractId(contractIdP)
+      contractInstAndAgreementText <- deserializeContract(contractInstP).leftMap(err =>
         ValueConversionError("contractInst", err.errorMessage)
       )
+      contractInst = contractInstAndAgreementText.map(_.contractInstance)
     } yield DivulgedContract(contractId, contractInst)
   }
 }
@@ -907,8 +923,8 @@ object SerializableBlindingInfo {
         .map(_.toMap)
       divulgence <- divulgenceP.toList
         .traverse { case (contractIdP, parties) =>
-          LfContractId
-            .fromProtoPrimitive(contractIdP)
+          ProtoConverter
+            .parseLfContractId(contractIdP)
             .flatMap(contractId =>
               parties.parties
                 .traverse(ProtoConverter.parseLfPartyId)
@@ -934,5 +950,165 @@ object SerializableRejectionReasonTemplate {
     for {
       rpcStatus <- ProtoConverter.protoParser(RpcStatus.parseFrom)(reasonP.status)
     } yield LedgerSyncEvent.CommandRejected.FinalReason(rpcStatus)
+  }
+}
+
+final case class SerializableTransferredOut(transferOut: LedgerSyncEvent.TransferredOut) {
+  def toProtoV0: v0.TransferredOut = {
+    val LedgerSyncEvent.TransferredOut(
+      updateId,
+      optCompletionInfo,
+      submitter,
+      recordTime,
+      contractId,
+      source,
+      target,
+      transferInExclusivity,
+    ) = transferOut
+    v0.TransferredOut(
+      updateId = updateId,
+      completionInfo = optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV0),
+      submitter = submitter,
+      recordTime = Some(SerializableLfTimestamp(recordTime).toProtoV0),
+      contractId = contractId.toProtoPrimitive,
+      sourceDomain = source.toProtoPrimitive,
+      targetDomain = target.toProtoPrimitive,
+      transferInExclusivity = transferInExclusivity.map(SerializableLfTimestamp(_).toProtoV0),
+    )
+  }
+}
+
+object SerializableTransferredOut {
+  def fromProtoV0(
+      transferOutP: v0.TransferredOut
+  ): ParsingResult[LedgerSyncEvent.TransferredOut] = {
+    val v0.TransferredOut(
+      updateIdP,
+      optCompletionInfoP,
+      submitterP,
+      recordTimeP,
+      contractIdP,
+      sourceDomainIdP,
+      targetDomainIdP,
+      transferInExclusivityP,
+    ) = transferOutP
+
+    for {
+      updateId <- ProtoConverter.parseLedgerTransactionId(updateIdP)
+      optCompletionInfo <- optCompletionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
+      submitter <- ProtoConverter.parseLfPartyId(submitterP)
+      recordTime <- required("record_time", recordTimeP).flatMap(
+        SerializableLfTimestamp.fromProtoPrimitive
+      )
+      contractId <- ProtoConverter.parseLfContractId(contractIdP)
+      sourceDomainId <- DomainId.fromProtoPrimitive(sourceDomainIdP, "source_domain")
+      targetDomainId <- DomainId.fromProtoPrimitive(targetDomainIdP, "target_domain")
+      transferInExclusivity <- transferInExclusivityP
+        .map(SerializableLfTimestamp.fromProtoPrimitive)
+        .sequence
+
+    } yield LedgerSyncEvent.TransferredOut(
+      updateId = updateId,
+      optCompletionInfo = optCompletionInfo,
+      submitter = submitter,
+      recordTime = recordTime,
+      contractId = contractId,
+      sourceDomainId = sourceDomainId,
+      targetDomainId = targetDomainId,
+      transferInExclusivity = transferInExclusivity,
+    )
+  }
+}
+
+final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.TransferredIn) {
+  def toProtoV0: v0.TransferredIn = {
+    val LedgerSyncEvent.TransferredIn(
+      updateId,
+      optCompletionInfo,
+      submitter,
+      recordTime,
+      ledgerCreateTime,
+      createNode,
+      contractMetadata,
+      transferOutId,
+      targetDomain,
+      createTransactionAccepted,
+    ) = transferIn
+    val contractMetadataP = contractMetadata.toByteString
+    val createNodeByteString = DamlLfSerializers
+      .serializeCreateNode(createNode)
+      .valueOr(err =>
+        throw new DbSerializationException(
+          s"Failed to serialize versioned CreateNode: ${err.errorMessage}"
+        )
+      )
+    v0.TransferredIn(
+      updateId = updateId,
+      completionInfo = optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV0),
+      submitter = submitter,
+      recordTime = Some(SerializableLfTimestamp(recordTime).toProtoV0),
+      ledgerCreateTime = Some(SerializableLfTimestamp(ledgerCreateTime).toProtoV0),
+      contractMetadata = contractMetadataP,
+      createNode = createNodeByteString,
+      transferOutId = Some(transferOutId.toProtoV0),
+      targetDomain = targetDomain.toProtoPrimitive,
+      createTransactionAccepted = createTransactionAccepted,
+    )
+
+  }
+}
+
+object SerializableTransferredIn {
+  def fromProtoV0(transferInP: v0.TransferredIn): ParsingResult[LedgerSyncEvent.TransferredIn] = {
+    val v0.TransferredIn(
+      updateIdP,
+      optCompletionInfoP,
+      submitterP,
+      recordTimeP,
+      ledgerCreateTimeP,
+      createNodeP,
+      contractMetadataP,
+      transferOutIdP,
+      targetDomainIdP,
+      createTransactionAcceptedP,
+    ) = transferInP
+
+    for {
+      updateId <- ProtoConverter.parseLedgerTransactionId(updateIdP)
+      optCompletionInfo <- optCompletionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
+      submitter <- ProtoConverter.parseLfPartyId(submitterP)
+      recordTime <- required("record_time", recordTimeP).flatMap(
+        SerializableLfTimestamp.fromProtoPrimitive
+      )
+      ledgerCreateTime <- required("ledger_create_time", ledgerCreateTimeP).flatMap(
+        SerializableLfTimestamp.fromProtoPrimitive
+      )
+      contractMetadata = LfBytes.fromByteString(contractMetadataP)
+      transferOutId <- ProtoConverter.parseRequired(
+        TransferId.fromProtoV0,
+        "transfer_id",
+        transferOutIdP,
+      )
+      createNode <- ProtoConverter.parse(
+        TransactionOuterClass.Node.parseFrom,
+        (proto: TransactionOuterClass.Node) =>
+          DamlLfSerializers.deserializeCreateNode(proto).leftMap { err =>
+            ValueConversionError("create_node", err.errorMessage)
+          },
+        createNodeP,
+      )
+      targetDomainId <- DomainId.fromProtoPrimitive(targetDomainIdP, "target_domain")
+    } yield LedgerSyncEvent.TransferredIn(
+      updateId = updateId,
+      optCompletionInfo = optCompletionInfo,
+      submitter = submitter,
+      recordTime = recordTime,
+      ledgerCreateTime = ledgerCreateTime,
+      createNode = createNode,
+      contractMetadata = contractMetadata,
+      transferOutId = transferOutId,
+      targetDomain = targetDomainId,
+      createTransactionAccepted = createTransactionAcceptedP,
+    )
   }
 }

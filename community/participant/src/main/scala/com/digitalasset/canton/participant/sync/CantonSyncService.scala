@@ -543,12 +543,19 @@ class CantonSyncService(
           beginStartingAt =>
             participantNodePersistentState.multiDomainEventLog
               .subscribe(beginStartingAt)
-              .map[(LedgerSyncOffset, Update)] { case (offset, tracedEvent) =>
-                implicit val traceContext: TraceContext = tracedEvent.traceContext
-                val event = augmentTransactionStatistics(tracedEvent.value)
-                logger.debug(show"Emitting event at offset $offset. Event: $event")
-                (UpstreamOffsetConvert.fromGlobalOffset(offset), event.toDamlUpdate)
-              },
+              .map { case (offset, tracedEvent) =>
+                tracedEvent
+                  .map(augmentTransactionStatistics)
+                  .map(_.toDamlUpdate)
+                  .sequence
+                  .map { tracedUpdate =>
+                    implicit val traceContext: TraceContext = tracedEvent.traceContext
+                    logger
+                      .debug(show"Emitting event at offset $offset. Event: ${tracedEvent.value}")
+                    (UpstreamOffsetConvert.fromGlobalOffset(offset), tracedUpdate.value)
+                  }
+              }
+              .collect { case Some(tuple) => tuple },
         )
     }
 

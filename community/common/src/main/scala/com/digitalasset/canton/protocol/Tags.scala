@@ -46,6 +46,9 @@ case class RootHash(private val hash: Hash) extends PrettyPrinting with HasCrypt
 
   def toProtoPrimitive: ByteString = getCryptographicEvidence
 
+  def asLedgerTransactionId: Either[String, LedgerTransactionId] =
+    LedgerTransactionId.fromString(hash.toHexString)
+
   override def pretty: Pretty[RootHash] = prettyOfParam(_.unwrap)
 }
 

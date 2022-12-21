@@ -47,7 +47,7 @@ abstract class TransactionTreeFactoryImpl(
     submitterParticipant: ParticipantId,
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
-    contractSerializer: LfContractInst => SerializableRawContractInstance,
+    contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
     packageInfoService: PackageInfoService,
     cryptoOps: HashOps with HmacOps,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -348,7 +348,8 @@ abstract class TransactionTreeFactoryImpl(
           Predef.identity,
         )
     )
-    val serializedCantonContractInst = contractSerializer(cantonContractInst)
+    val serializedCantonContractInst =
+      contractSerializer(cantonContractInst, AgreementText(createNode.agreementText))
 
     val discriminator = createNode.coid match {
       case LfContractId.V1(discriminator, suffix) if suffix.isEmpty =>
@@ -546,10 +547,11 @@ object TransactionTreeFactoryImpl {
   }
 
   private[submission] def contractSerializer(
-      contractInst: LfContractInst
+      contractInst: LfContractInst,
+      agreementText: AgreementText,
   ): SerializableRawContractInstance =
     SerializableRawContractInstance
-      .create(contractInst)
+      .create(contractInst, agreementText)
       .leftMap { err: ValueCoder.EncodeError =>
         throw new IllegalArgumentException(
           s"Unable to serialize contract instance, although it is contained in a well-formed transaction.\n$err\n$contractInst"

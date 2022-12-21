@@ -81,9 +81,9 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
 
   "ExtendedContractLookup" should {
 
-    val instance0 = contractInstance(agreementText = "instance0")
+    val instance0 = contractInstance()
     val instance0Template = instance0.unversioned.template
-    val instance1 = contractInstance(agreementText = "instance1")
+    val instance1 = contractInstance()
     val transactionId0 = transactionId(0)
     val transactionId1 = transactionId(1)
     val transactionId2 = transactionId(2)

@@ -9,7 +9,7 @@ import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.ProtoDeserializationError.TimestampConversionError
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.util.TryUtil
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import slick.jdbc.{GetResult, SetParameter}
@@ -54,11 +54,15 @@ case class CantonTimestamp(underlying: LfTimestamp)
 
   override def compareTo(other: CantonTimestamp): Int = underlying.compareTo(other.underlying)
 
+  def min(that: CantonTimestamp): CantonTimestamp = if (compare(that) > 0) that else this
+
+  def max(that: CantonTimestamp): CantonTimestamp = if (compare(that) > 0) this else that
+
   def -(other: CantonTimestamp): Duration =
     Duration.ofNanos(1000L * (this.underlying.micros - other.underlying.micros))
 
-  def +(duration: NonNegativeFiniteDuration): CantonTimestamp = plus(duration.unwrap)
-  def -(duration: NonNegativeFiniteDuration): CantonTimestamp = minus(duration.unwrap)
+  def +(duration: RefinedDuration): CantonTimestamp = plus(duration.unwrap)
+  def -(duration: RefinedDuration): CantonTimestamp = minus(duration.unwrap)
 
   def <=(other: CantonTimestampSecond): Boolean = this <= other.forgetRefinement
   def <(other: CantonTimestampSecond): Boolean = this < other.forgetRefinement

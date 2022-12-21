@@ -36,8 +36,8 @@ object SerializableKeyResolution {
   ): ParsingResult[SerializableKeyResolution] =
     resolutionP match {
       case v0.ViewParticipantData.ResolvedKey.Resolution.ContractId(contractIdP) =>
-        LfContractId
-          .fromProtoPrimitive(contractIdP)
+        ProtoConverter
+          .parseLfContractId(contractIdP)
           .map(AssignedKey(_)(version))
       case v0.ViewParticipantData.ResolvedKey.Resolution
             .Free(v0.ViewParticipantData.FreeKey(maintainersP)) =>

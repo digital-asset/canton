@@ -32,7 +32,7 @@ class GrpcTransferService(service: TransferService)(implicit ec: ExecutionContex
         val res = for {
           sourceDomain <- mapErr(DomainAlias.create(sourceDomainP))
           targetDomain <- mapErr(DomainAlias.create(targetDomainP))
-          contractId <- mapErr(LfContractId.fromProtoPrimitive(contractIdP))
+          contractId <- mapErr(ProtoConverter.parseLfContractId(contractIdP))
           submittingParty <- mapErr(
             EitherT.fromEither[Future](ProtoConverter.parseLfPartyId(submittingPartyP))
           )
@@ -140,7 +140,7 @@ object TransferSearchResult {
             ) =>
         for {
           _ <- Either.cond(!contractIdP.isEmpty, (), FieldNotSet("contractId"))
-          contractId <- LfContractId.fromProtoPrimitive(contractIdP)
+          contractId <- ProtoConverter.parseLfContractId(contractIdP)
           transferId <- ProtoConverter
             .required("transferId", transferIdP)
             .flatMap(TransferId.fromProtoV0)

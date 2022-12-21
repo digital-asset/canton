@@ -45,11 +45,17 @@ trait SequencerDriverFactory {
     * @param timeProvider Time provider to obtain time readings from.
     *                     If [[usesTimeProvider]] returns true, must be used instead of system time
     *                     so that we can modify time in tests
+    * @param firstBlockHeight Initial block from which the driver will start serving the block subscription.
     * @param loggerFactory A logger factory through which all logging should be done.
     *                      Useful in tests as we can capture log entries and check them.
     */
-  def create(config: ConfigType, timeProvider: TimeProvider, loggerFactory: NamedLoggerFactory)(
-      implicit executionContext: ExecutionContext
+  def create(
+      config: ConfigType,
+      timeProvider: TimeProvider,
+      firstBlockHeight: Option[Long],
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      executionContext: ExecutionContext
   ): SequencerDriver
 
   /** Returns whether the [[SequencerDriver]] produced by [[create]] will use the [[com.digitalasset.canton.time.TimeProvider]]
@@ -110,7 +116,9 @@ trait SequencerDriver extends AutoCloseable {
   /** Register the given member.
     * Results in a [[com.digitalasset.canton.domain.block.RawLedgerBlock.RawBlockEvent.AddMember]].
     */
-  def registerMember(member: String)(implicit traceContext: TraceContext): Future[Unit]
+  def registerMember(member: String)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
 
   /** Distribute an acknowledgement request.
     * Results in a [[com.digitalasset.canton.domain.block.RawLedgerBlock.RawBlockEvent.Acknowledgment]].
@@ -124,7 +132,8 @@ trait SequencerDriver extends AutoCloseable {
 
   // Read operations
 
-  /** Delivers a stream of blocks starting with `firstBlockHeight` (if specified) or the first block serveable.
+  /** Delivers a stream of blocks starting with `firstBlockHeight` (if specified in the factory call)
+    * or the first block serveable.
     * Block heights must be consecutive.
     *
     * Fails if `firstBlockHeight` refers to a block whose sequencing the sequencer node has not yet observed
@@ -132,8 +141,12 @@ trait SequencerDriver extends AutoCloseable {
     *
     * Must succeed if an earlier call to `subscribe` delivered a block with height `firstBlockHeight`
     * unless the block has been pruned in between.
+    *
+    * This method will be called only once, so implementations do not have to try to create separate sources
+    * on every call to this method. It is acceptable to for the driver to have one internal source and just return
+    * it here.
     */
-  def subscribe(firstBlockHeight: Option[Long])(implicit
+  def subscribe()(implicit
       traceContext: TraceContext
   ): Source[RawLedgerBlock, KillSwitch]
 

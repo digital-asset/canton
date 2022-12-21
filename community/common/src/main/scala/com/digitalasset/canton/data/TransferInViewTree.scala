@@ -42,6 +42,8 @@ import com.google.protobuf.ByteString
 import java.util.UUID
 
 /** A blindable Merkle tree for transfer-in requests */
+
+// TODO(#11196): enrich with the participant that submitted the transfer
 case class TransferInViewTree(
     commonData: MerkleTree[TransferInCommonData],
     view: MerkleTree[TransferInView],

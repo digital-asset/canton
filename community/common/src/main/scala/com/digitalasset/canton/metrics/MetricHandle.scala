@@ -10,7 +10,7 @@ import com.daml.metrics.api.MetricDoc.MetricQualification.{
   Saturation,
   Traffic,
 }
-import com.daml.metrics.api.MetricDoc.{GroupTag, Tag}
+import com.daml.metrics.api.MetricDoc.{FanInstanceTag, FanTag, GroupTag, MetricQualification, Tag}
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.dropwizard.DropwizardFactory
 import com.daml.metrics.api.{MetricHandle as DamlMetricHandle, MetricName}
@@ -48,6 +48,34 @@ object MetricDoc {
     (tags, groupTags) match {
       case (List(tag), List()) => Some(Item(tag = tag, name = x.name, metricType = x.metricType))
       case (List(tag), _) => Some(groupTagToItem(tag, groupTags, x))
+      case _ => None
+    }
+
+  def fromFanTag(
+      tags: Seq[FanInstanceTag],
+      fanTags: Seq[FanTag],
+      x: DamlMetricHandle,
+  ): Option[Item] =
+    (tags, fanTags) match {
+      case (List(_), List(fanTag)) =>
+        val representative = fanTag.representative
+        Some(
+          Item(
+            tag = Tag(
+              summary = fanTag.summary,
+              description = fanTag.description,
+              qualification = fanTag.qualification,
+            ),
+            name = representative,
+            metricType = x.metricType,
+            groupingInfo = Some(
+              GroupInfo(
+                instances = Seq(x.name.substring(representative.indexOf('<'))),
+                fullNames = Seq(x.name),
+              )
+            ),
+          )
+        )
       case _ => None
     }
 
@@ -142,9 +170,7 @@ object MetricDoc {
     ungrouped ++ grouped
   }
 
-  @SuppressWarnings(
-    Array("org.wartremover.warts.AsInstanceOf", "org.wartremover.warts.Serializable")
-  )
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private def getItemsAll[T: ClassTag](
       instance: T,
       inheritedGroupTags: Seq[GroupTag],
@@ -158,6 +184,9 @@ object MetricDoc {
     symbols.toSeq.flatMap(symbol => {
       val classGroupTags =
         if (symbol.isClass) extractTag(symbol.annotations, groupTagParser) else Seq()
+      val fanTags = {
+        if (symbol.isClass) extractTag(symbol.annotations, fanTagParser) else Seq()
+      }
       symbol.typeSignature.members.flatMap { m =>
         // do not pick methods
         if (m.isMethod) {
@@ -180,18 +209,27 @@ object MetricDoc {
               } else {
                 rf.get match {
                   // if it is a metric handle, try to grab the annotation and the name
-                  case x: DamlMetricHandle =>
+                  case x: DamlMetricHandle
+                      // TODO(i11250): Remove badly annotated daml metric on next daml 2.6.0 upgrade:
+                      if x.name != "daml.indexer.metered_events" =>
                     val tag = extractTag(rf.symbol.annotations, tagParser)
-                    val groupTags = extractTag(rf.symbol.annotations, groupTagParser)
-                    val allGroupTags = inheritedGroupTags ++ classGroupTags ++ groupTags
-                    // collect the group tags that are relevant to the groupable class
-                    val groupTagsMatching =
-                      if (symbol.isClass)
-                        allGroupTags.filter(gt =>
-                          gt.groupableClass == mirror.runtimeClass(symbol.asClass)
-                        )
-                      else Seq()
-                    toItem(tag, groupTagsMatching, x).toList
+                    if (tag.isEmpty) {
+                      // if there is no Tag check if there exists a MetricDoc.FanInstanceTag
+                      val fanInstanceTag = extractTag(rf.symbol.annotations, _ => FanInstanceTag())
+                      fromFanTag(fanInstanceTag, fanTags, x).toList
+                    } else {
+                      val groupTags =
+                        extractTag(rf.symbol.annotations, groupTagParser)
+                      val allGroupTags = inheritedGroupTags ++ classGroupTags ++ groupTags
+                      // collect the group tags that are relevant to the groupable class
+                      val groupTagsMatching =
+                        if (symbol.isClass)
+                          allGroupTags.filter(gt =>
+                            gt.groupableClass == mirror.runtimeClass(symbol.asClass)
+                          )
+                        else Seq()
+                      toItem(tag, groupTagsMatching, x).toList
+                    }
                   // otherwise, continue scanning for metrics
                   case _ =>
                     val fm = rf.get
@@ -225,28 +263,32 @@ object MetricDoc {
     }
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def getString(tree: ru.Tree) = tree.asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
+
+  def getQualification(tree: ru.Tree): MetricQualification = {
+    val typeOfQualification: ru.Type = tree.tpe
+    typeOfQualification match {
+      case q if q =:= ru.typeOf[Latency.type] => Latency
+      case q if q =:= ru.typeOf[Traffic.type] => Traffic
+      case q if q =:= ru.typeOf[Errors.type] => Errors
+      case q if q =:= ru.typeOf[Saturation.type] => Saturation
+      case q if q =:= ru.typeOf[Debug.type] => Debug
+      case _ => throw new IllegalStateException("Unreachable code.")
+    }
+  }
+
   @SuppressWarnings(
     Array(
       "org.wartremover.warts.Product",
-      "org.wartremover.warts.AsInstanceOf",
       "org.wartremover.warts.Serializable",
     )
   )
   private def tagParser(tree: ru.Tree): Tag = {
     try {
-      Seq(1, 2).map(
-        tree.children(_).asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
-      ) match {
+      Seq(1, 2).map(pos => getString(tree.children(pos))) match {
         case s :: d :: Nil =>
-          val typeOfQ = tree.children(3).tpe
-          val q = typeOfQ match {
-            case q if q =:= ru.typeOf[Latency.type] => Latency
-            case q if q =:= ru.typeOf[Traffic.type] => Traffic
-            case q if q =:= ru.typeOf[Errors.type] => Errors
-            case q if q =:= ru.typeOf[Saturation.type] => Saturation
-            case q if q =:= ru.typeOf[Debug.type] => Debug
-            case _ => throw new IllegalStateException("Unreachable code.")
-          }
+          val q = getQualification(tree.children(3))
           Tag(summary = s, description = d.stripMargin, qualification = q)
         case _ => throw new IllegalStateException("Unreachable code.")
       }
@@ -256,7 +298,7 @@ object MetricDoc {
           """Failed to process Tag annotation:
             |summary and description need to be constant-string, i.e. don't apply stripmargin here ...),
             |and MetricQualification must be an object of MetricQualification:
-            |""" + tree.toString
+            |""".stripMargin + tree.toString
         )
         throw x
     }
@@ -264,13 +306,15 @@ object MetricDoc {
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private def groupTagParser(tree: ru.Tree): GroupTag = {
-    try {
-      val representative =
-        tree.children(1).asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
+    def getRuntimeClass(tree: ru.Tree) = {
       val gcClassSymbol =
-        tree.children(2).asInstanceOf[ru.Literal].value.tpe.typeArgs(0).typeSymbol.asClass
+        tree.asInstanceOf[ru.Literal].value.tpe.typeArgs(0).typeSymbol.asClass
       val mirror = ru.runtimeMirror(getClass.getClassLoader)
-      val groupableClass = mirror.runtimeClass(gcClassSymbol)
+      mirror.runtimeClass(gcClassSymbol)
+    }
+    try {
+      val representative = getString(tree.children(1))
+      val groupableClass = getRuntimeClass(tree.children(2))
       GroupTag(representative = representative, groupableClass = groupableClass)
     } catch {
       case x: RuntimeException =>
@@ -278,7 +322,33 @@ object MetricDoc {
           """Failed to process GroupTag annotation:
             |representative needs to be a constant-string, i.e. don't apply stripmargin here ...),
             |and groupableClass must be defined as classOf[CLASSNAME]:
-            |""" + tree.toString
+            |""".stripMargin + tree.toString
+        )
+        throw x
+    }
+  }
+
+  private def fanTagParser(tree: ru.Tree): FanTag = {
+    try {
+      Seq(1, 2, 3).map(pos => getString(tree.children(pos))) match {
+        case representative :: summary :: description :: Nil =>
+          val qualification = getQualification(tree.children(4))
+          FanTag(
+            representative = representative,
+            summary = summary,
+            description = description.stripMargin,
+            qualification = qualification,
+          )
+        case _ => throw new IllegalStateException("Unreachable code.")
+      }
+
+    } catch {
+      case x: RuntimeException =>
+        println(
+          """Failed to process FanTag annotation:
+            |representative, summary and description need to be constant-string, i.e. don't apply stripmargin here ...),
+            |and MetricQualification must be an object of MetricQualification:
+            |""".stripMargin + tree.toString
         )
         throw x
     }

@@ -1,7 +1,5 @@
-sdk-version: 2.6.0-snapshot.20221212.11134.0.1ac41995
+sdk-version: 2.6.0-snapshot.20221218.11169.0.9d007b31
 name: ai-analysis
-exposed-modules: 
-- AIAnalysis
 source: AIAnalysis.daml
 init-script: AIAnalysis:setup
 version: 2.6.0

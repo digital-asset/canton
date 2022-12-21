@@ -40,6 +40,7 @@ object DAMLe {
       stakeholders: Set[LfPartyId],
       templateId: LfTemplateId,
       keyWithMaintainers: Option[LfKeyWithMaintainers],
+      agreementText: AgreementText,
   ) {
     def metadataWithGlobalKey: Either[Error, ContractMetadata] = {
       keyWithMaintainers
@@ -204,11 +205,12 @@ class DAMLe(
               version,
             ) =>
           ContractWithMetadata(
-            LfContractInst(templateId, Versioned(version, arg), agreementText),
+            LfContractInst(templateId, Versioned(version, arg)),
             signatories,
             stakeholders,
             nc.templateId,
             key,
+            AgreementText(agreementText),
           )
         case node => throw new RuntimeException(s"DAMLe reinterpreted a create node as $node")
       }

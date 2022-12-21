@@ -320,4 +320,11 @@ object TransferProcessingSteps {
       source: SourceProtocolVersion,
       target: TargetProtocolVersion,
   ) extends TransferProcessorError
+
+  case class FieldConversionError(field: String, error: String) extends TransferProcessorError {
+    override def pretty: Pretty[FieldConversionError] = prettyOfClass(
+      param("field", _.field.unquoted),
+      param("error", _.error.unquoted),
+    )
+  }
 }

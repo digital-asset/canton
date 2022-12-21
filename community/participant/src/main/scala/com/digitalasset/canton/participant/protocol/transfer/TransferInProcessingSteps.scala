@@ -10,11 +10,11 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.ledger.participant.state.v2.TransactionMeta
-import com.daml.lf.CantonOnly
-import com.daml.lf.data.ImmArray
+import com.daml.ledger.participant.state.v2.CompletionInfo
+import com.daml.lf.data.{Bytes, Ref}
 import com.daml.lf.engine.Error as LfError
 import com.daml.lf.interpretation.Error as LfInterpretationError
+import com.daml.lf.transaction.Node.KeyWithMaintainers
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
@@ -59,7 +59,6 @@ import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, che
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
-import scala.collection.immutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 
 private[transfer] class TransferInProcessingSteps(
@@ -80,7 +79,7 @@ private[transfer] class TransferInProcessingSteps(
     ]
     with NamedLogging {
 
-  import TransferInProcessingSteps.createUpdateForTransferIn
+  import TransferInProcessingSteps.*
 
   override def requestKind: String = "TransferIn"
 
@@ -458,6 +457,7 @@ private[transfer] class TransferInProcessingSteps(
         sc,
         txInRequest.tree.rootHash,
         txInRequest.contract,
+        txInRequest.submitter,
         txInRequest.creatingTransactionId,
         transferringParticipant,
         transferId,
@@ -679,8 +679,9 @@ private[transfer] class TransferInProcessingSteps(
       requestId,
       requestCounter,
       requestSequencerCounter,
-      rootHash,
+      _rootHash,
       contract,
+      submitter,
       creatingTransactionId,
       transferringParticipant,
       transferId,
@@ -703,49 +704,103 @@ private[transfer] class TransferInProcessingSteps(
         val commitSetO = Some(Future.successful(commitSet))
         val contractsToBeStored = Set(contract.contractId)
 
-        /* Poor-man's heuristic for deciding when to signal the transfer-in to the ledger API server:
-         * Emit an event if the participant is not transferring, as a transferring participant
-         * must have known the contract already before the transfer.
-         *
-         * However, a non-transferring participant might have already known the contract,
-         * for example, if the participant hosts distinct stakeholders on the two domains.
-         * TODO(#4027): Generate an Enter event
-         */
-        val maybeEvent =
-          if (transferringParticipant) None
-          else {
-            val event = createUpdateForTransferIn(
-              contract,
-              creatingTransactionId,
-              requestId.unwrap,
+        for {
+          event <- createTransferIn(
+            contract,
+            creatingTransactionId,
+            requestId.unwrap,
+            submitter,
+            transferId,
+            createTransactionAccepted = !transferringParticipant,
+          )
+          timestampEvent = Some(
+            TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
+          )
+        } yield CommitAndStoreContractsAndPublishEvent(
+          commitSetO,
+          contractsToBeStored,
+          timestampEvent,
+          Some(
+            TransferInUpdate(
+              hostedStakeholders,
+              pendingRequestData.requestId.unwrap,
+              domainId,
+              requestCounter,
+              transferId,
               targetProtocolVersion,
             )
-            Some(
-              TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
-            )
-          }
-
-        EitherT.pure(
-          CommitAndStoreContractsAndPublishEvent(
-            commitSetO,
-            contractsToBeStored,
-            maybeEvent,
-            Some(
-              TransferInUpdate(
-                hostedStakeholders,
-                pendingRequestData.requestId.unwrap,
-                domainId,
-                requestCounter,
-                transferId,
-                targetProtocolVersion,
-              )
-            ),
-          )
+          ),
         )
 
       case Verdict.ParticipantReject(_) | (_: Verdict.MediatorReject) =>
         EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None, None))
     }
+  }
+
+  private[transfer] def createTransferIn(
+      contract: SerializableContract,
+      creatingTransactionId: TransactionId,
+      recordTime: CantonTimestamp,
+      submitter: LfPartyId,
+      transferOutId: TransferId,
+      createTransactionAccepted: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
+    val targetDomain = domainId
+    val lfTransactionId = creatingTransactionId.tryAsLedgerTransactionId
+    val contractInst = contract.contractInstance.unversioned
+    val createNode: LfNodeCreate =
+      LfNodeCreate(
+        contract.contractId,
+        contractInst.template,
+        contractInst.arg,
+        contract.rawContractInstance.agreementText.v,
+        contract.metadata.signatories,
+        contract.metadata.stakeholders,
+        key = contract.metadata.maybeKeyWithMaintainers.map(keyWithMaintainers =>
+          KeyWithMaintainers(keyWithMaintainers.globalKey.key, keyWithMaintainers.maintainers)
+        ),
+        contract.contractInstance.version,
+      )
+    val driverContractMetadata = contract.contractSalt
+      .map { salt =>
+        DriverContractMetadata(salt).toLfBytes(targetProtocolVersion.v)
+      }
+      .getOrElse(Bytes.Empty)
+
+    for {
+      targetIps <- transferCoordination.cryptoSnapshot(targetDomain, recordTime)
+      // TODO(i11196): this is a poor-man's solution to figuring out whether we need to produce a completion event.
+      // Fix it by adding the participant that submitted the transfer-in to the TransferInViewTree
+      isParticipantHostingSubmitter <- EitherT.right(
+        targetIps.ipsSnapshot.hostedOn(submitter, participantId).map(_.nonEmpty)
+      )
+      completionInfo =
+        Option.when(isParticipantHostingSubmitter)(
+          CompletionInfo(
+            actAs = List(submitter),
+            applicationId = Ref.ApplicationId.assertFromString(
+              "application-id"
+            ), // TODO(i11196): add this information
+            commandId = Ref.CommandId.assertFromString("command-id"),
+            optDeduplicationPeriod = None,
+            submissionId = None, // TODO(i11196): add this information
+            statistics = None,
+          )
+        )
+    } yield LedgerSyncEvent.TransferredIn(
+      updateId = lfTransactionId,
+      optCompletionInfo = completionInfo,
+      submitter = submitter,
+      recordTime = recordTime.toLf,
+      ledgerCreateTime = contract.ledgerCreateTime.toLf,
+      createNode = createNode,
+      contractMetadata = driverContractMetadata,
+      transferOutId = transferOutId,
+      targetDomain = targetDomain,
+      createTransactionAccepted = createTransactionAccepted,
+    )
   }
 }
 
@@ -765,6 +820,7 @@ object TransferInProcessingSteps {
       override val requestSequencerCounter: SequencerCounter,
       rootHash: RootHash,
       contract: SerializableContract,
+      submitter: LfPartyId,
       creatingTransactionId: TransactionId,
       transferringParticipant: Boolean,
       transferId: TransferId,
@@ -775,69 +831,6 @@ object TransferInProcessingSteps {
   }
 
   case class TransferInValidationResult(confirmingParties: Set[LfPartyId])
-
-  /** Workaround to create an update for informing the ledger API server about a transferred-in contract.
-    * Creates a TransactionAccepted event consisting of a single create action that creates the given contract.
-    *
-    * The transaction has the same ledger time and transaction id as the creation of the contract.
-    */
-  private[transfer] def createUpdateForTransferIn(
-      contract: SerializableContract,
-      creatingTransactionId: TransactionId,
-      recordTime: CantonTimestamp,
-      targetProtocolVersion: TargetProtocolVersion,
-  ): LedgerSyncEvent.TransactionAccepted = {
-    val nodeId = LfNodeId(0)
-    val contractInst = contract.contractInstance.unversioned
-    val createNode =
-      LfNodeCreate(
-        contract.contractId,
-        contractInst.template,
-        contractInst.arg,
-        contractInst.agreementText,
-        contract.metadata.signatories,
-        contract.metadata.stakeholders,
-        key = None,
-        contract.contractInstance.version,
-      )
-    val committedTransaction = LfCommittedTransaction(
-      CantonOnly.lfVersionedTransaction(
-        version = createNode.version,
-        nodes = HashMap((nodeId, createNode)),
-        roots = ImmArray(nodeId),
-      )
-    )
-    val lfTransactionId = creatingTransactionId.tryAsLedgerTransactionId
-
-    val driverContractMetadata = contract.contractSalt
-      .map { salt =>
-        val driverContractMetadataBytes = {
-          DriverContractMetadata(salt).toLfBytes(targetProtocolVersion.v)
-        }
-        Map(contract.contractId -> driverContractMetadataBytes)
-      }
-      .getOrElse(Map.empty)
-
-    LedgerSyncEvent.TransactionAccepted(
-      optCompletionInfo = None,
-      transactionMeta = TransactionMeta(
-        ledgerEffectiveTime = contract.ledgerCreateTime.toLf,
-        workflowId = None,
-        submissionTime =
-          contract.ledgerCreateTime.toLf, // TODO(M41): Upstream mismatch, replace with enter/leave view
-        submissionSeed = LedgerSyncEvent.noOpSeed,
-        optUsedPackages = None,
-        optNodeSeeds = None,
-        optByKeyNodes = None,
-      ),
-      transaction = committedTransaction,
-      transactionId = lfTransactionId,
-      recordTime = recordTime.toLf,
-      divulgedContracts = List.empty,
-      blindingInfo = None,
-      contractMetadata = driverContractMetadata,
-    )
-  }
 
   private[transfer] def makeFullTransferInTree(
       pureCrypto: CryptoPureApi,

@@ -37,7 +37,7 @@ import scala.util.{Random, Try}
   *
   * All public functions are thread-safe.
   */
-abstract class Clock() extends AutoCloseable with NamedLogging {
+abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging {
 
   protected val last = new AtomicReference[CantonTimestamp](CantonTimestamp.Epoch)
   private val backwardsClockAlerted = new AtomicReference[CantonTimestamp](CantonTimestamp.Epoch)
@@ -167,6 +167,8 @@ abstract class Clock() extends AutoCloseable with NamedLogging {
       }
     go()
   }
+
+  override def nowInMicrosecondsSinceEpoch: Long = uniqueTime().underlying.micros
 }
 
 object Clock extends ClockErrorGroup {

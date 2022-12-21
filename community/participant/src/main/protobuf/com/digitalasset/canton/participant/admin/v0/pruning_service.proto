@@ -31,11 +31,11 @@ service PruningService {
     //   or if invoked on a participant running the Community Edition.
     rpc SetSchedule(com.digitalasset.canton.pruning.admin.v0.SetSchedule.Request) returns (com.digitalasset.canton.pruning.admin.v0.SetSchedule.Response);
 
-    // Update individual pruning schedule parameters.
+    // Modify individual pruning schedule parameters.
     // - ``INVALID_ARGUMENT``: if the payload is malformed or no schedule is configured
-    rpc UpdateCron(com.digitalasset.canton.pruning.admin.v0.UpdateCron.Request) returns (com.digitalasset.canton.pruning.admin.v0.UpdateCron.Response);
-    rpc UpdateMaxDuration(com.digitalasset.canton.pruning.admin.v0.UpdateMaxDuration.Request) returns (com.digitalasset.canton.pruning.admin.v0.UpdateMaxDuration.Response);
-    rpc UpdateRetention(com.digitalasset.canton.pruning.admin.v0.UpdateRetention.Request) returns (com.digitalasset.canton.pruning.admin.v0.UpdateRetention.Response);
+    rpc SetCron(com.digitalasset.canton.pruning.admin.v0.SetCron.Request) returns (com.digitalasset.canton.pruning.admin.v0.SetCron.Response);
+    rpc SetMaxDuration(com.digitalasset.canton.pruning.admin.v0.SetMaxDuration.Request) returns (com.digitalasset.canton.pruning.admin.v0.SetMaxDuration.Response);
+    rpc SetRetention(com.digitalasset.canton.pruning.admin.v0.SetRetention.Request) returns (com.digitalasset.canton.pruning.admin.v0.SetRetention.Response);
 
     // Disable automatic pruning and remove the persisted schedule configuration.
     rpc ClearSchedule(com.digitalasset.canton.pruning.admin.v0.ClearSchedule.Request) returns (com.digitalasset.canton.pruning.admin.v0.ClearSchedule.Response);

@@ -9,12 +9,19 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.commands.{TopologyAdminCommands, VaultAdminCommands}
 import com.digitalasset.canton.admin.api.client.data.ListKeyOwnersResult
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
+import com.digitalasset.canton.console.{
+  AdminCommandRunner,
+  ConsoleEnvironment,
+  Help,
+  Helpful,
+  InstanceReference,
+}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
 import com.digitalasset.canton.crypto.store.CryptoPublicStoreError
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.{KeyOwner, KeyOwnerCode}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
@@ -29,10 +36,23 @@ import scala.concurrent.ExecutionContext.Implicits.*
 import scala.concurrent.Future
 import scala.jdk.CollectionConverters.*
 
-class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: ConsoleEnvironment)
-    extends Helpful {
+class SecretKeyAdministration(
+    instance: InstanceReference,
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+) extends Helpful {
 
   import runner.*
+
+  protected def regenerateKey(currentKey: PublicKey): PublicKey = {
+    currentKey match {
+      case encKey: EncryptionPublicKey =>
+        instance.keys.secret.generate_encryption_key(scheme = Some(encKey.scheme))
+      case signKey: SigningPublicKey =>
+        instance.keys.secret.generate_signing_key(scheme = Some(signKey.scheme))
+      case unknown => throw new IllegalArgumentException(s"Invalid public key type: $unknown")
+    }
+  }
 
   @Help.Summary("List keys in private vault")
   @Help.Description("""Returns all public keys to the corresponding private keys in the key vault.
@@ -76,6 +96,35 @@ class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
     }
   }
 
+  @Help.Summary("Rotate the node's public/private key pairs")
+  @Help.Description(
+    """
+      |For a participant node it rotates the signing and encryption key pair.
+      |For a domain or domain manager node it rotates the signing key pair as those nodes do not have an encryption key pair.
+      |For a sequencer or mediator node use `rotate_node_keys` with a domain manager reference as an argument.
+      |NOTE: Namespace root or intermediate signing keys are NOT rotated by this command."""
+  )
+  def rotate_node_keys(): Unit = {
+
+    val owner = instance.id.keyOwner
+
+    // Find the current keys
+    val currentKeys = instance.topology.owner_to_key_mappings
+      .list(filterStore = AuthorizedStore.filterName, filterKeyOwnerUid = owner.filterString)
+      .map(_.item.key)
+
+    currentKeys.foreach { currentKey =>
+      val newKey = regenerateKey(currentKey)
+
+      // Rotate the key for the node in the topology management
+      instance.topology.owner_to_key_mappings.rotate_key(
+        owner,
+        currentKey,
+        newKey,
+      )
+    }
+  }
+
   @Help.Summary("Change the wrapper key for encrypted private keys store")
   @Help.Description(
     """Change the wrapper key (e.g. AWS KMS key) being used to encrypt the private keys in the store.
@@ -99,10 +148,11 @@ class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
 }
 
 class LocalSecretKeyAdministration(
+    instance: InstanceReference,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     crypto: => Crypto,
-) extends SecretKeyAdministration(runner, consoleEnvironment) {
+) extends SecretKeyAdministration(instance, runner, consoleEnvironment) {
 
   private def run[V](eitherT: EitherT[Future, String, V], action: String): V = {
     import TraceContext.Implicits.Empty.*
@@ -374,13 +424,14 @@ class PublicKeyAdministration(
 }
 
 class KeyAdministrationGroup(
+    instance: InstanceReference,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
 ) extends Helpful {
 
   private lazy val publicAdmin =
     new PublicKeyAdministration(runner, consoleEnvironment)
-  private lazy val secretAdmin = new SecretKeyAdministration(runner, consoleEnvironment)
+  private lazy val secretAdmin = new SecretKeyAdministration(instance, runner, consoleEnvironment)
 
   @Help.Summary("Manage public keys")
   @Help.Group("Public keys")
@@ -393,13 +444,14 @@ class KeyAdministrationGroup(
 }
 
 class LocalKeyAdministrationGroup(
+    instance: InstanceReference,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     crypto: => Crypto,
-) extends KeyAdministrationGroup(runner, consoleEnvironment) {
+) extends KeyAdministrationGroup(instance, runner, consoleEnvironment) {
 
   private lazy val localSecretAdmin: LocalSecretKeyAdministration =
-    new LocalSecretKeyAdministration(runner, consoleEnvironment, crypto)
+    new LocalSecretKeyAdministration(instance, runner, consoleEnvironment, crypto)
 
   @Help.Summary("Manage secret keys")
   @Help.Group("Secret keys")

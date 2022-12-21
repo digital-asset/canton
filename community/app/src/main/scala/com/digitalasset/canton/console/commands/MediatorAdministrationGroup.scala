@@ -3,13 +3,18 @@
 
 package com.digitalasset.canton.console.commands
 
-import com.digitalasset.canton.admin.api.client.commands.DomainTimeCommands
 import com.digitalasset.canton.admin.api.client.commands.EnterpriseMediatorAdministrationCommands.{
   Initialize,
+  LocatePruningTimestampCommand,
   Prune,
+}
+import com.digitalasset.canton.admin.api.client.commands.{
+  DomainTimeCommands,
+  PruningSchedulerCommands,
 }
 import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters
 import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleEnvironment,
@@ -20,6 +25,8 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.crypto.PublicKey
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
+import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -65,7 +72,21 @@ class MediatorAdministrationGroup(
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     loggerFactory: NamedLoggerFactory,
-) extends Helpful {
+) extends PruningSchedulerAdministration(
+      runner,
+      consoleEnvironment,
+      new PruningSchedulerCommands[EnterpriseMediatorAdministrationServiceStub](
+        EnterpriseMediatorAdministrationServiceGrpc.stub,
+        _.setSchedule(_),
+        _.clearSchedule(_),
+        _.setCron(_),
+        _.setMaxDuration(_),
+        _.setRetention(_),
+        _.getSchedule(_),
+      ),
+      loggerFactory,
+    )
+    with Helpful {
   @Help.Summary("Initialize a mediator")
   def initialize(
       domainId: DomainId,
@@ -114,6 +135,22 @@ class MediatorAdministrationGroup(
   def prune_at(timestamp: CantonTimestamp): Unit = consoleEnvironment.run {
     runner.adminCommand(Prune(timestamp))
   }
+
+  @Help.Summary("Obtain a timestamp at or near the beginning of mediator state")
+  @Help.Description(
+    """This command provides insight into the current state of mediator pruning when called with
+      |the default value of `index` 1.
+      |When pruning the mediator manually via `prune_at` and with the intent to prune in batches, specify
+      |a value such as 1000 to obtain a pruning timestamp that corresponds to the "end" of the batch."""
+  )
+  def locate_pruning_timestamp(
+      index: PositiveInt = PositiveInt.tryCreate(1)
+  ): Option[CantonTimestamp] =
+    check(FeatureFlag.Preview) {
+      consoleEnvironment.run {
+        runner.adminCommand(LocatePruningTimestampCommand(index))
+      }
+    }
 
   private lazy val testing_ = new MediatorTestingGroup(runner, consoleEnvironment, loggerFactory)
   @Help.Summary("Testing functionality for the mediator")

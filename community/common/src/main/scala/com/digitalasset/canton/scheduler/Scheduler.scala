@@ -12,9 +12,7 @@ import scala.concurrent.Future
 /** Trait for an individual scheduler
   */
 trait Scheduler extends StartStoppable with AutoCloseable {
-  def clearSchedule()(implicit
-      traceContext: TraceContext
-  ): Future[Unit]
+  def clearSchedule()(implicit traceContext: TraceContext): Future[Unit]
 
   def updateCron(cron: Cron)(implicit traceContext: TraceContext): EitherT[Future, String, Unit]
 

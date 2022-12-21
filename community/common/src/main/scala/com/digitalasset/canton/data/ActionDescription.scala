@@ -218,7 +218,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   ): ParsingResult[CreateActionDescription] = {
     val v0.ActionDescription.CreateActionDescription(contractIdP, seedP, versionP) = c
     for {
-      contractId <- LfContractId.fromProtoPrimitive(contractIdP)
+      contractId <- ProtoConverter.parseLfContractId(contractIdP)
       seed <- LfHash.fromProtoPrimitive("node_seed", seedP)
       version <- lfVersionFromProtoVersioned(versionP)
     } yield CreateActionDescription(contractId, seed, version)(
@@ -246,7 +246,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         failed,
       ) = e
     for {
-      inputContractId <- LfContractId.fromProtoPrimitive(inputContractIdP)
+      inputContractId <- ProtoConverter.parseLfContractId(inputContractIdP)
       choice <- choiceFromProto(choiceP)
       interfaceId = None
       version <- lfVersionFromProtoVersioned(versionP)
@@ -288,7 +288,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         interfaceIdP,
       ) = e
     for {
-      inputContractId <- LfContractId.fromProtoPrimitive(inputContractIdP)
+      inputContractId <- ProtoConverter.parseLfContractId(inputContractIdP)
       choice <- choiceFromProto(choiceP)
       interfaceId <- interfaceIdP.traverse(InterfaceIdSyntax.fromProtoPrimitive)
       version <- lfVersionFromProtoVersioned(versionP)
@@ -333,7 +333,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   ): ParsingResult[FetchActionDescription] = {
     val v0.ActionDescription.FetchActionDescription(inputContractIdP, actorsP, byKey, versionP) = f
     for {
-      inputContractId <- LfContractId.fromProtoPrimitive(inputContractIdP)
+      inputContractId <- ProtoConverter.parseLfContractId(inputContractIdP)
       actors <- actorsP.traverse(ProtoConverter.parseLfPartyId).map(_.toSet)
       version <- lfVersionFromProtoVersioned(versionP)
     } yield FetchActionDescription(inputContractId, actors, byKey, version)(

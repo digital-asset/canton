@@ -176,6 +176,9 @@ object RequireTypes {
 
     def +(other: PositiveNumeric[T]) = PositiveNumeric.tryCreate(value + other.value)
     def tryAdd(other: T) = PositiveNumeric.tryCreate(value + other)
+
+    def toNonNegative: NonNegativeNumeric[T] =
+      NonNegativeNumeric.tryCreate(value) // always possible to convert positive to non negative num
   }
 
   type PositiveInt = PositiveNumeric[Int]
@@ -185,7 +188,6 @@ object RequireTypes {
     def tryCreate(n: Int): PositiveInt = PositiveNumeric.tryCreate(n)
 
     lazy val MaxValue: PositiveInt = PositiveInt.tryCreate(Int.MaxValue)
-
   }
 
   object PositiveNumeric {

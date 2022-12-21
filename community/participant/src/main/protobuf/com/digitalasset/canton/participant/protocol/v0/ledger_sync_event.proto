@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/wrappers.proto";
 import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v0/participant_transfer.proto";
 
 // LedgerSyncEvent is a canton type alias for the daml-on-x com.daml.ledger.participant.state.v2.Update
 message LedgerSyncEvent {
@@ -21,6 +22,8 @@ message LedgerSyncEvent {
         CommandRejected command_rejected = 6;
         PartyAllocationRejected party_allocation_rejected = 7;
         PublicPackageUploadRejected public_package_upload_rejected = 8;
+        TransferredOut transferred_out = 9;
+        TransferredIn transferred_in = 10;
     }
 }
 
@@ -139,4 +142,27 @@ message CommandRejected {
     message GrpcRejectionReasonTemplate {
         bytes status = 1;
     }
+}
+
+message TransferredOut {
+    string update_id = 1;
+    CompletionInfo completion_info = 2; // optional
+    string submitter = 3;
+    google.protobuf.Timestamp record_time = 4;
+    string contract_id = 5;
+    string source_domain = 6;
+    string target_domain = 7;
+    google.protobuf.Timestamp transfer_in_exclusivity = 8;
+}
+message TransferredIn {
+    string update_id = 1;
+    CompletionInfo completion_info = 2;  // optional
+    string submitter = 3;
+    google.protobuf.Timestamp record_time = 4;
+    google.protobuf.Timestamp ledger_create_time = 5;
+    bytes create_node = 6;
+    bytes contract_metadata = 7;
+    com.digitalasset.canton.protocol.v0.TransferId transfer_out_id = 8;
+    string target_domain = 9;
+    bool create_transaction_accepted = 10;
 }

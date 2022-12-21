@@ -422,7 +422,7 @@ object WellFormedTransaction {
       case (nodeId, create: LfNodeCreate) =>
         Checked.fromEitherNonabort(())(
           SerializableRawContractInstance
-            .create(create.versionedCoinst)
+            .create(create.versionedCoinst, AgreementText(create.agreementText))
             .leftMap(err =>
               show"unable to serialize contract instance in node $nodeId: ${err.errorMessage.unquoted}"
             )

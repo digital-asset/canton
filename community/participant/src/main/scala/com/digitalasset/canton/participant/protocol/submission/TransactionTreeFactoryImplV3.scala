@@ -39,7 +39,7 @@ class TransactionTreeFactoryImplV3(
     submitterParticipant: ParticipantId,
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
-    contractSerializer: LfContractInst => SerializableRawContractInstance,
+    contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
     packageInfoService: PackageInfoService,
     cryptoOps: HashOps with HmacOps,
     uniqueContractKeys: Boolean,

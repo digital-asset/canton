@@ -500,7 +500,7 @@ class RepairService(
           log(s"Failed to convert contract key ${err.message}")
         )
         rawContractInstance <- SerializableRawContractInstance
-          .create(computed.instance)
+          .create(computed.instance, computed.agreementText)
           .leftMap(err =>
             log(s"Failed to serialize contract ${inputContract.contractId}: ${err.errorMessage}")
           )
@@ -1406,14 +1406,14 @@ object RepairService {
           CantonOnly.DummyTransactionVersion, // Version is ignored by daml engine upon RepairService.addContract
         )
 
-        lfContractInst = LfContractInst(
-          template = template,
-          arg = argsVersionedValue,
-          agreementText = "",
-        )
+        lfContractInst = LfContractInst(template = template, arg = argsVersionedValue)
 
+        /*
+         It is fine to set the agreement text to empty because method `addContract` recomputes the agreement text
+         and will discard this value.
+         */
         serializableRawContractInst <- SerializableRawContractInstance
-          .create(lfContractInst)
+          .create(lfContractInst, AgreementText.empty)
           .leftMap(_.errorMessage)
 
         signatoriesAsParties <- signatories.toList.traverse(LfPartyId.fromString).map(_.toSet)

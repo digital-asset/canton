@@ -52,7 +52,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.protocol.ExampleTransactionFactory.submitterParticipant
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.{submitter, submitterParticipant}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -750,6 +750,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         SequencerCounter(1),
         mock[RootHash],
         contract,
+        submitter,
         transactionId1,
         transferringParticipant = false,
         transferId,

@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.pruning.admin.v0;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 
 message SetSchedule {
   message Request {
@@ -32,23 +33,35 @@ message ClearSchedule {
   message Response {}
 }
 
-message UpdateCron {
+message SetCron {
   message Request {
     string cron = 1;
   }
   message Response {}
 }
 
-message UpdateMaxDuration {
+message SetMaxDuration {
   message Request {
     google.protobuf.Duration max_duration = 1;
   }
   message Response {}
 }
 
-message UpdateRetention {
+message SetRetention {
   message Request {
     google.protobuf.Duration retention = 1;
   }
   message Response {}
+}
+
+message LocatePruningTimestamp {
+  message Request {
+    // the index to look up the offset for, needs to be 1 or larger
+    // i.e. 1 for returning the first timestamp, 2 for the second timestamp etc
+    int32 index = 1;
+  }
+  message Response {
+    // optional, not set if less than `index` events exist
+    google.protobuf.Timestamp timestamp = 1;
+  }
 }

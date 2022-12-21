@@ -10,6 +10,8 @@ import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import cats.{Applicative, MonoidK}
+import com.daml.ledger.participant.state.v2.CompletionInfo
+import com.daml.lf.data.Ref
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
@@ -44,6 +46,7 @@ import com.digitalasset.canton.participant.protocol.{
 }
 import com.digitalasset.canton.participant.store.TransferStore.TransferCompleted
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
@@ -335,13 +338,13 @@ class TransferOutProcessingSteps(
       storedContract <- contractLookup.lookupE(fullTree.contractId).leftMap(ContractStoreFailed)
 
       sourceIps = sourceSnapshot.ipsSnapshot
-      transferringParticipant <- validateTransferOutRequest(
+      validationRes <- validateTransferOutRequest(
         fullTree,
         storedContract.contract.metadata.stakeholders,
         sourceIps,
         recipients,
       )
-
+      (transferringParticipant, transferInExclusivity) = validationRes
       // Since the participant hosts a stakeholder, it should find the creating transaction ID in the contract store
       creatingTransactionId <- EitherT.fromEither[Future](
         storedContract.creatingTransactionIdO
@@ -361,11 +364,13 @@ class TransferOutProcessingSteps(
         fullTree.tree.rootHash,
         WithContractHash.fromContract(storedContract.contract, fullTree.contractId),
         transferringParticipant,
+        fullTree.submitter,
         transferId,
         fullTree.targetDomain,
         fullTree.stakeholders,
         hostedStks.toSet,
         fullTree.targetTimeProof,
+        transferInExclusivity,
       )
 
       sourceDomainParameters <- EitherT.right(
@@ -411,12 +416,14 @@ class TransferOutProcessingSteps(
       actualStakeholders: Set[LfPartyId],
       sourceIps: TopologySnapshot,
       recipients: Recipients,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Boolean] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferProcessorError, (Boolean, Option[CantonTimestamp])] = {
     val isTransferringParticipant =
       txOutRequest.adminParties.contains(participantId.adminParty.toLf)
+    val targetTimestamp = txOutRequest.targetTimeProof.timestamp
     val maybeTargetIpsF =
       if (isTransferringParticipant) {
-        val targetTimestamp = txOutRequest.targetTimeProof.timestamp
         for {
           awaitO <- EitherT.fromEither[Future](
             transferCoordination.awaitTimestamp(
@@ -456,17 +463,17 @@ class TransferOutProcessingSteps(
           // TODO(M40): Verify sequencer signature on time proof
         } yield Some(targetCrypto.ipsSnapshot)
       } else EitherT.pure[Future, TransferProcessorError](None)
-    maybeTargetIpsF
-      .flatMap(targetIps =>
-        validateTransferOutRequest(
-          txOutRequest,
-          actualStakeholders,
-          sourceIps,
-          targetIps,
-          recipients,
-        )
+
+    for {
+      targetIps <- maybeTargetIpsF
+      transferInExclusivity <- validateTransferOutRequest(
+        txOutRequest,
+        actualStakeholders,
+        sourceIps,
+        targetIps,
+        recipients,
       )
-      .map(_ => isTransferringParticipant)
+    } yield isTransferringParticipant -> transferInExclusivity
   }
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
@@ -482,15 +489,17 @@ class TransferOutProcessingSteps(
     val PendingTransferOut(
       requestId,
       requestCounter,
-      _requestSequencerCounter,
+      requestSequencerCounter,
       rootHash,
       WithContractHash(contractId, contractHash),
       transferringParticipant,
+      submitter,
       transferId,
       targetDomain,
       stakeholders,
       hostedStakeholders,
       _targetTimeProof,
+      transferInExclusivity,
     ) = pendingRequestData
 
     val pendingSubmissionData = pendingSubmissionMap.get(rootHash)
@@ -522,11 +531,26 @@ class TransferOutProcessingSteps(
             if (notInitiator && transferringParticipant)
               triggerTransferInWhenExclusivityTimeoutExceeded(pendingRequestData)
             else EitherT.pure[Future, TransferProcessorError](())
-          // TODO(#4027): Generate a Leave event unless the participant is transferring
+
+          transferOutEvent <- createTransferredOut(
+            requestId.unwrap,
+            contractId,
+            submitter,
+            transferId,
+            targetDomain,
+            rootHash,
+            transferInExclusivity,
+          )
         } yield CommitAndStoreContractsAndPublishEvent(
           commitSetFO,
           Set(),
-          None,
+          Some(
+            TimestampedEvent(
+              transferOutEvent,
+              requestCounter.asLocalOffset,
+              Some(requestSequencerCounter),
+            )
+          ),
           Some(
             TransferOutUpdate(
               hostedStakeholders,
@@ -545,6 +569,53 @@ class TransferOutProcessingSteps(
           }
         } yield CommitAndStoreContractsAndPublishEvent(None, Set(), None, None)
     }
+  }
+
+  private def createTransferredOut(
+      recordTime: CantonTimestamp,
+      contractId: LfContractId,
+      submitter: LfPartyId,
+      transferId: TransferId,
+      targetDomain: DomainId,
+      rootHash: RootHash,
+      transferInExclusivity: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredOut] = {
+    for {
+      updateId <- EitherT
+        .fromEither[Future](rootHash.asLedgerTransactionId)
+        .leftMap[TransferProcessorError](FieldConversionError("Transaction Id", _))
+
+      // TODO(#11196): fix when we create completion info
+      sourceIps <- transferCoordination.cryptoSnapshot(transferId.sourceDomain, recordTime)
+      // TODO(#11196): this is a poor-man's solution to figuring out whether we need to produce a completion event.
+      // Fix it by adding the participant that submitted the transfer-out to the TransferOutViewTree
+      isParticipantHostingSubmitter <- EitherT.right(
+        sourceIps.ipsSnapshot.hostedOn(submitter, participantId).map(_.nonEmpty)
+      )
+      completionInfo =
+        Option.when(isParticipantHostingSubmitter)(
+          CompletionInfo(
+            actAs = List(submitter),
+            applicationId =
+              Ref.ApplicationId.assertFromString("application-id"), // TODO(#11196): fix this
+            commandId = Ref.CommandId.assertFromString("command-id"),
+            optDeduplicationPeriod = None,
+            submissionId = None, // TODO(#11196): fix this
+            statistics = None,
+          )
+        )
+    } yield LedgerSyncEvent.TransferredOut(
+      updateId = updateId,
+      optCompletionInfo = completionInfo,
+      submitter = submitter,
+      recordTime = recordTime.toLf,
+      contractId = contractId,
+      sourceDomainId = transferId.sourceDomain,
+      targetDomainId = targetDomain,
+      transferInExclusivity = transferInExclusivity.map(_.toLf),
+    )
   }
 
   private[this] def triggerTransferInWhenExclusivityTimeoutExceeded(
@@ -577,7 +648,9 @@ class TransferOutProcessingSteps(
       sourceIps: TopologySnapshot,
       maybeTargetIps: Option[TopologySnapshot],
       recipients: Recipients,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Unit] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferProcessorError, Option[CantonTimestamp]] = {
     val stakeholders = request.stakeholders
     val adminParties = request.adminParties
 
@@ -637,7 +710,7 @@ class TransferOutProcessingSteps(
                   )
               )
           )
-        } yield ()
+        } yield None
       case Some(targetIps) =>
         for {
           _ <- EitherT.fromEither[Future](checkStakeholders)
@@ -649,6 +722,18 @@ class TransferOutProcessingSteps(
               targetIps,
               logger,
             )
+          targetDomainParams <- EitherT(
+            targetIps
+              .findDynamicDomainParameters()
+              .map(
+                _.toRight[TransferProcessorError](
+                  DomainNotReady(request.targetDomain, "Unable to fetch domain parameters")
+                )
+              )
+          )
+          transferInExclusivity = targetDomainParams.transferExclusivityLimitFor(
+            request.targetTimeProof.timestamp
+          )
           (expectedAdminParties, expectedParticipants) = expectedTransferOutRequest
           _ <- EitherTUtil.condUnitET[Future](
             adminParties == expectedAdminParties,
@@ -667,7 +752,7 @@ class TransferOutProcessingSteps(
               ),
             )
             .leftWiden[TransferProcessorError]
-        } yield ()
+        } yield Some(transferInExclusivity)
     }
   }
 
@@ -730,11 +815,13 @@ object TransferOutProcessingSteps {
       rootHash: RootHash,
       contractIdAndHash: WithContractHash[LfContractId],
       transferringParticipant: Boolean,
+      submitter: LfPartyId,
       transferId: TransferId,
       targetDomain: DomainId,
       stakeholders: Set[LfPartyId],
       hostedStakeholders: Set[LfPartyId],
       targetTimeProof: TimeProof,
+      transferInExclusivity: Option[CantonTimestamp],
   ) extends PendingTransfer
       with PendingRequestData {
     override def pendingContracts: Set[LfContractId] = Set()
