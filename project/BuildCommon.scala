@@ -710,6 +710,7 @@ object BuildCommon {
         `community-common` % "compile->compile;test->test",
         DamlProjects.`daml-copy-common`,
         DamlProjects.`daml-copy-participant`,
+        DamlProjects.`daml-copy-testing` % "test",
         DamlProjects.`daml-copy-testing` % "test->test",
       )
       .enablePlugins(DamlPlugin)
@@ -1188,7 +1189,6 @@ object BuildCommon {
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
-            "observability/metrics/src/test/lib/scala",
             "libs-scala/test-evidence/generator/src/main/scala",
             "libs-scala/test-evidence/scalatest/src/main/scala",
             "libs-scala/test-evidence/tag/src/main/scala",
@@ -1196,6 +1196,7 @@ object BuildCommon {
             "daml-lf/interface/src/main/scala",
             "daml-lf/data-scalacheck/src/main/scala",
             "daml-lf/transaction-test-lib/src/main/scala",
+            "observability/metrics/src/test/lib/scala",
           ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
         coverageEnabled := false,
         // skip header check

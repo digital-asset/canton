@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.concurrent
 
+import com.daml.error.ContextualizedErrorLogger
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
 
@@ -29,14 +29,13 @@ import scala.util.{Failure, Success}
 trait FutureSupervisor {
   def supervised[T](description: => String, warnAfter: Duration = 10.seconds)(fut: Future[T])(
       implicit
-      errorLoggingContext: ErrorLoggingContext,
+      errorLoggingContext: ContextualizedErrorLogger,
       executionContext: ExecutionContext,
   ): Future[T]
-
   def supervisedUS[T](description: => String, warnAfter: Duration = 10.seconds)(
       fut: FutureUnlessShutdown[T]
   )(implicit
-      errorLoggingContext: ErrorLoggingContext,
+      errorLoggingContext: ContextualizedErrorLogger,
       executionContext: ExecutionContext,
   ): FutureUnlessShutdown[T] = FutureUnlessShutdown(supervised(description, warnAfter)(fut.unwrap))
 }
@@ -47,7 +46,7 @@ object FutureSupervisor {
     override def supervised[T](description: => String, warnAfter: Duration)(
         fut: Future[T]
     )(implicit
-        errorLoggingContext: ErrorLoggingContext,
+        errorLoggingContext: ContextualizedErrorLogger,
         executionContext: ExecutionContext,
     ): Future[T] = fut
   }
@@ -63,7 +62,7 @@ object FutureSupervisor {
         description: () => String,
         startNanos: Long,
         warnNanos: Long,
-        errorLoggingContext: ErrorLoggingContext,
+        errorLoggingContext: ContextualizedErrorLogger,
     ) {
       val warnCounter = new AtomicInteger(1)
       def alertNow(currentNanos: Long): Boolean = {
@@ -91,12 +90,9 @@ object FutureSupervisor {
       val cur = scheduled.updateAndGet(_.filterNot(_.fut.isCompleted))
       cur.filter(x => x.alertNow(now)).foreach { blocked =>
         val dur = Duration.fromNanos(now - blocked.startNanos)
-        blocked.errorLoggingContext.logger
-          .warn(
-            s"${blocked.description()} has not completed after ${LoggerUtil.roundDurationForHumans(dur)}"
-          )(
-            blocked.errorLoggingContext.traceContext
-          )
+        blocked.errorLoggingContext.warn(
+          s"${blocked.description()} has not completed after ${LoggerUtil.roundDurationForHumans(dur)}"
+        )
       }
     }
 
@@ -104,7 +100,7 @@ object FutureSupervisor {
         description: => String,
         warnAfter: Duration = defaultWarningInterval.duration,
     )(fut: Future[T])(implicit
-        errorLoggingContext: ErrorLoggingContext,
+        errorLoggingContext: ContextualizedErrorLogger,
         executionContext: ExecutionContext,
     ): Future[T] = {
       val itm =
@@ -118,16 +114,16 @@ object FutureSupervisor {
       scheduled.updateAndGet(x => x.filterNot(_.fut.isCompleted) :+ itm)
       fut.thereafter {
         case Failure(exception) =>
-          errorLoggingContext.logger.warn(
+          errorLoggingContext.warn(
             s"${description} failed with exception after ${elapsed(itm)}",
             exception,
-          )(errorLoggingContext.traceContext)
+          )
         case Success(_) =>
           val time = elapsed(itm)
           if (time > warnAfter) {
-            errorLoggingContext.logger.info(
+            errorLoggingContext.info(
               s"${description} succeed successfully but slow after $time"
-            )(errorLoggingContext.traceContext)
+            )
           }
       }
     }

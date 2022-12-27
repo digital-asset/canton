@@ -139,7 +139,13 @@ case class MetricsFactory(
     participants.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "participant", participants)
-        new ParticipantMetrics(MetricsFactory.prefix, newRegistry(metricName), meter)
+        new ParticipantMetrics(
+          name,
+          MetricsFactory.prefix,
+          newRegistry(metricName),
+          meter,
+          openTelemetryFactory,
+        )
       },
     )
   }
