@@ -8,6 +8,7 @@ import com.daml.ledger.participant.state.v2.SubmissionResult
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
+import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.ParticipantOverloaded
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
@@ -18,6 +19,8 @@ import scala.math.Ordered.orderingToOrdered
 
 trait ResourceManagementService {
 
+  def metrics: ParticipantMetrics
+
   def warnIfOverloadedDuring: Option[NonNegativeFiniteDuration]
 
   private val lastSuccess: AtomicReference[CantonTimestamp] =
@@ -25,9 +28,12 @@ trait ResourceManagementService {
   private val lastWarning: AtomicReference[CantonTimestamp] =
     new AtomicReference[CantonTimestamp](CantonTimestamp.now())
 
+  metrics.registerMaxDirtyRequest(() => resourceLimits.maxDirtyRequests.map(_.unwrap))
+
   def checkOverloaded(currentLoad: Int)(implicit
       loggingContext: ErrorLoggingContext
   ): Option[SubmissionResult] = {
+    metrics.dirtyRequests.updateValue(currentLoad)
     val errorO = checkNumberOfDirtyRequests(currentLoad).orElse(checkAndUpdateRate())
     (errorO, warnIfOverloadedDuring) match {
       case (_, None) =>
@@ -80,7 +86,8 @@ trait ResourceManagementService {
 
 object ResourceManagementService {
   class CommunityResourceManagementService(
-      override val warnIfOverloadedDuring: Option[NonNegativeFiniteDuration]
+      override val warnIfOverloadedDuring: Option[NonNegativeFiniteDuration],
+      override val metrics: ParticipantMetrics,
   ) extends ResourceManagementService {
 
     override protected def checkAndUpdateRate()(implicit

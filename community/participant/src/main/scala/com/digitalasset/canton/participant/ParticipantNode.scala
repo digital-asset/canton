@@ -764,7 +764,8 @@ object ParticipantNodeBootstrap {
             (_ledgerApi, _ledgerApiDependentServices) => (),
             _ =>
               new ResourceManagementService.CommunityResourceManagementService(
-                participantConfig.parameters.warnIfOverloadedFor
+                participantConfig.parameters.warnIfOverloadedFor,
+                participantMetrics,
               ),
             _ =>
               StaticGrpcServices

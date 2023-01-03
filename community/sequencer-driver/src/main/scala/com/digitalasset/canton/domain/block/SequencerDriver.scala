@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.domain.block
 
-import akka.stream.KillSwitch
 import akka.stream.scaladsl.Source
+import akka.stream.{KillSwitch, Materializer}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.TimeProvider
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -55,13 +55,14 @@ trait SequencerDriverFactory {
       firstBlockHeight: Option[Long],
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      executionContext: ExecutionContext
+      executionContext: ExecutionContext,
+      materializer: Materializer,
   ): SequencerDriver
 
-  /** Returns whether the [[SequencerDriver]] produced by [[create]] will use the [[com.digitalasset.canton.time.TimeProvider]]
+  /** Returns whether the driver produced by [[create]] will use the [[com.digitalasset.canton.time.TimeProvider]]
     * for generating timestamps on [[com.digitalasset.canton.domain.block.RawLedgerBlock.RawBlockEvent.Send]] events.
     *
-    * This information is used to prevent using the [[SequencerDriver]] in an environment
+    * This information is used to prevent using the driver in an environment
     * that needs to control time, e.g., for testing.
     */
   def usesTimeProvider: Boolean

@@ -5,8 +5,9 @@ package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.{Counter, Meter}
-import com.daml.metrics.api.{MetricDoc, MetricName}
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
+import com.daml.metrics.api.dropwizard.DropwizardGauge
+import com.daml.metrics.api.{MetricDoc, MetricHandle as ApiMetricHandle, MetricName, MetricsContext}
 import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.TaskSchedulerMetrics
@@ -17,10 +18,14 @@ import io.opentelemetry.api.metrics
 import scala.collection.concurrent.TrieMap
 
 class ParticipantMetrics(
+    name: String,
     override val prefix: MetricName,
     override val registry: MetricRegistry,
     meter: metrics.Meter,
+    factory: ApiMetricHandle.Factory,
 ) extends NodeMetrics {
+
+  private implicit val mc: MetricsContext = MetricsContext("participant_name" -> name)
 
   object dbStorage extends DbStorageMetrics(prefix, registry)
 
@@ -41,6 +46,38 @@ class ParticipantMetrics(
     qualification = Debug,
   )
   val updatesPublished: Meter = meter(prefix :+ "updates-published")
+
+  @MetricDoc.Tag(
+    summary = "Number of requests being validated.",
+    description = """Number of requests that are currently being validated.
+                    |This also covers requests submitted by other participants.
+                    |""",
+    qualification = Debug,
+  )
+  val dirtyRequests: Gauge[Int] =
+    factory.gauge(prefix :+ "dirty_requests", 0, "Number of requests being validated.")
+
+  @MetricDoc.Tag(
+    summary = "Configured maximum number of requests currently being validated.",
+    description =
+      """Configuration for the maximum number of requests that are currently being validated.
+        |This also covers requests submitted by other participants.
+        |A negative value means no configuration value was provided and no limit is enforced.
+        |""",
+    qualification = Debug,
+  )
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  val maxDirtyRequestGaugeForDocs: Gauge[Int] =
+    DropwizardGauge(prefix :+ "max_dirty_requests", null)
+
+  def registerMaxDirtyRequest(value: () => Option[Int]): Unit =
+    factory.gaugeWithSupplier(
+      prefix :+ "max_dirty_requests",
+      () => value().getOrElse(-1),
+      """
+        |Configuration for the maximum number of requests that are currently being validated.
+        | If the value is negative then there is no configuration value and no limit is enforced.""".stripMargin,
+    )
 
 }
 
