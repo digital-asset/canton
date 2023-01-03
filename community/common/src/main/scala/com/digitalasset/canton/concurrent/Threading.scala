@@ -4,6 +4,7 @@
 package com.digitalasset.canton.concurrent
 
 import cats.syntax.either.*
+import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.lifecycle.ClosingException
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -119,8 +120,9 @@ object Threading extends NoTracing {
   def newExecutionContext(
       name: String,
       logger: TracedLogger,
+      metrics: ExecutorServiceMetrics,
   ): ExecutionContextIdlenessExecutorService =
-    newExecutionContext(name, logger, detectNumberOfThreads(logger))
+    newExecutionContext(name, logger, metrics, detectNumberOfThreads(logger))
 
   /** Yields an `ExecutionContext` like `scala.concurrent.ExecutionContext.global`,
     * except that it has its own thread pool.
@@ -132,6 +134,7 @@ object Threading extends NoTracing {
   def newExecutionContext(
       name: String,
       logger: TracedLogger,
+      metrics: ExecutorServiceMetrics,
       parallelism: Int,
       maxExtraThreads: Int = 256,
       exitOnFatal: Boolean = true,
@@ -153,6 +156,7 @@ object Threading extends NoTracing {
       .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
 
     val forkJoinPool = createForkJoinPool(parallelism, threadFactory, handler, logger)
+    metrics.monitorForkJoin(name, forkJoinPool)
 
     new ForkJoinIdlenessExecutorService(forkJoinPool, reporter, name)
   }

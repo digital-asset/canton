@@ -8,7 +8,7 @@ import com.codahale.metrics.{Metric, MetricFilter}
 import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
-import com.daml.metrics.{JvmMetricSet, OpenTelemetryMeterOwner}
+import com.daml.metrics.{ExecutorServiceMetrics, JvmMetricSet, OpenTelemetryMeterOwner}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.domain.metrics.{
@@ -119,6 +119,10 @@ case class MetricsFactory(
     Seq(participants, domains, sequencers, mediators)
   private def nodeMetricsExcept(toExclude: TrieMap[String, _]): Seq[TrieMap[String, _]] =
     allNodeMetrics filterNot (_ eq toExclude)
+
+  val executionServiceMetrics: ExecutorServiceMetrics = new ExecutorServiceMetrics(
+    openTelemetryFactory
+  )
 
   object benchmark extends MetricsGroup(MetricName(MetricsFactory.prefix :+ "benchmark"), registry)
 

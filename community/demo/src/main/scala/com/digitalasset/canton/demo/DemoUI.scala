@@ -15,6 +15,8 @@ import com.daml.ledger.api.v1.transaction_service.{
 }
 import com.daml.ledger.api.v1.value.{Record, Value}
 import com.daml.ledger.configuration.LedgerId
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.ParticipantReference
@@ -26,6 +28,7 @@ import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.util.LoggerUtil.clue
 import io.grpc.stub.StreamObserver
 import io.grpc.{ManagedChannel, Status}
+import io.opentelemetry.api.GlobalOpenTelemetry
 import scalafx.animation.PauseTransition
 import scalafx.application.{JFXApp3, Platform}
 import scalafx.beans.property.StringProperty
@@ -690,7 +693,11 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
   }
 
   private implicit val executionContext: ExecutionContextExecutor =
-    Threading.newExecutionContext("demo-ui", logger)
+    Threading.newExecutionContext(
+      "demo-ui",
+      logger,
+      new ExecutorServiceMetrics(new OpenTelemetryFactory(GlobalOpenTelemetry.getMeter("demo-ui"))),
+    )
   private implicit val actorSystem: ActorSystem = AkkaUtil.createActorSystem("demo-ui")
   private implicit val sequencerPool: ExecutionSequencerFactory =
     AkkaUtil.createExecutionSequencerFactory("demo-ui", logger)(

@@ -24,7 +24,10 @@ trait BackgroundWorkloadRunner[E <: Environment] {
       implicit env: TestEnvironment[E]
   ): T = {
     val stop = new AtomicBoolean(false)
-    val scheduler = Threading.singleThreadedExecutor("test-workload-runner", logger)
+    val scheduler = Threading.singleThreadedExecutor(
+      "test-workload-runner",
+      logger,
+    )
     try {
       scheduler.submit(new WorkloadRunner(scheduler, stop, participants))
       code

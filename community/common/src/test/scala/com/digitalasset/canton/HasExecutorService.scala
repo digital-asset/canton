@@ -34,7 +34,7 @@ trait HasExecutorService extends BeforeAndAfterAll with HasExecutorServiceGeneri
     }
 }
 
-trait HasExecutorServiceGeneric extends NamedLogging {
+trait HasExecutorServiceGeneric extends NamedLogging with TestMetrics {
 
   private case class ExecutorState(
       scheduler: ScheduledExecutorService,
@@ -61,6 +61,7 @@ trait HasExecutorServiceGeneric extends NamedLogging {
     val service = Threading.newExecutionContext(
       executionContextName,
       logger,
+      executorServiceMetrics,
       Threading.detectNumberOfThreads(logger)(TraceContext.empty),
       exitOnFatal = exitOnFatal,
     )

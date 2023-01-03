@@ -284,5 +284,7 @@ object Dependencies {
   lazy val scalapb_json4s = damlDependency("com.thesamet.scalapb", "scalapb-json4s")
   lazy val opentelemetry_prometheus =
     damlDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
+  // it should be kept up-to-date with the scaffeine version to avoid incompatibilities
+  lazy val caffeine = damlDependency("com.github.ben-manes.caffeine", "caffeine")
 
 }
