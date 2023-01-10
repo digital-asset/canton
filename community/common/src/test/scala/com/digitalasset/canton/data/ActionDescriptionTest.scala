@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -95,10 +95,9 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
           )
 
         val v3 = ProtocolVersion.v3
-        val v2 = ProtocolVersion.v2
         create(v3) shouldBe Left(
           InvalidActionDescription(
-            s"Protocol version is equivalent to $v2 but interface id is supported since protocol version ${ProtocolVersion.v4}"
+            s"Protocol version is equivalent to $v3 but interface id is supported since protocol version ${ProtocolVersion.v4}"
           )
         )
 

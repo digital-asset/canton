@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.config
@@ -225,6 +225,8 @@ case class RemoteParticipantConfig(
   * @param rateLimit limit the ledger api server request rates based on system metrics
   * @param preparePackageMetadataTimeOutWarning Timeout for package metadata preparation after which a warning will be logged
   * @param completionsPageSize database / akka page size for batching of ledger api server index ledger completion queries
+  * @param explicitDisclosureUnsafe enable usage of explicitly disclosed contracts in command submission and transaction validation.
+  *                                 This feature is deemed unstable and unsafe. Should NOT be enabled in production!
   */
 case class LedgerApiServerConfig(
     address: String = "127.0.0.1",
@@ -263,6 +265,7 @@ case class LedgerApiServerConfig(
     preparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultPreparePackageMetadataTimeOutWarning,
     completionsPageSize: Int = LedgerApiServerConfig.DefaultCompletionsPageSize,
+    explicitDisclosureUnsafe: Boolean = false,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.version
@@ -10,7 +10,7 @@ import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.ProtocolVersion.{deprecated, unstable}
+import com.digitalasset.canton.version.ProtocolVersion.{deleted, deprecated, unstable}
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
@@ -32,11 +32,15 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
   */
 // Internal only: for the full background, please refer to the following [design doc](https://docs.google.com/document/d/1kDiN-373bZOWploDrtOJ69m_0nKFu_23RNzmEXQOFc8/edit?usp=sharing).
 // or [code walkthrough](https://drive.google.com/file/d/199wHq-P5pVPkitu_AYLR4V3i0fJtYRPg/view?usp=sharing)
-final case class ProtocolVersion(v: Int) extends Ordered[ProtocolVersion] with PrettyPrinting {
+final case class ProtocolVersion private[version] (v: Int)
+    extends Ordered[ProtocolVersion]
+    with PrettyPrinting {
   def isDeprecated: Boolean = deprecated.contains(this)
 
   def isUnstable: Boolean = unstable.contains(this)
   def isStable: Boolean = !isUnstable
+
+  def isDeleted: Boolean = deleted.contains(this)
 
   private def isDev: Boolean = v == Int.MaxValue
 
@@ -133,6 +137,8 @@ object ProtocolVersion {
     */
   def tryCreate(rawVersion: String): ProtocolVersion = create(rawVersion).fold(sys.error, identity)
 
+  def fromProtoPrimitive(rawVersion: Int): ProtocolVersion = ProtocolVersion(rawVersion)
+
   def fromProtoPrimitiveS(rawVersion: String): ParsingResult[ProtocolVersion] =
     ProtocolVersion.create(rawVersion).leftMap(StringConversionError)
 
@@ -146,7 +152,9 @@ object ProtocolVersion {
         sys.error("Release needs to support at least one protocol version")
       )
 
-  private val deprecated: Seq[ProtocolVersion] = Seq(ProtocolVersion.v2)
+  private val deprecated: Seq[ProtocolVersion] = Seq()
+  val deleted: Seq[ProtocolVersion] = Seq(ProtocolVersion(2))
+
   val unstable: NonEmpty[List[ProtocolVersion]] =
     NonEmpty.mk(List, ProtocolVersion.v5, ProtocolVersion.dev)
 
@@ -161,13 +169,12 @@ object ProtocolVersion {
 
   lazy val dev: ProtocolVersion = ProtocolVersion(Int.MaxValue)
 
-  // Minimum stable protocol version introduced
-  lazy val minimum: ProtocolVersion = ProtocolVersion(2)
-
-  lazy val v2: ProtocolVersion = ProtocolVersion(2)
   lazy val v3: ProtocolVersion = ProtocolVersion(3)
   lazy val v4: ProtocolVersion = ProtocolVersion(4)
   lazy val v5: ProtocolVersion = ProtocolVersion(5)
+
+  // Minimum stable protocol version introduced
+  lazy val minimum: ProtocolVersion = v3
 
   /** @return Parsed protocol version if found in environment variable `CANTON_PROTOCOL_VERSION`
     * @throws java.lang.RuntimeException if the given parameter cannot be parsed to a protocol version

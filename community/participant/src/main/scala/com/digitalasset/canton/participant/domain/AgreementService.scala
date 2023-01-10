@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.domain
@@ -72,7 +72,7 @@ class AgreementService(
   ): EitherT[Future, AgreementServiceError, Option[ServiceAgreement]] =
     for {
       optAgreement <- {
-        if (protocolVersion > ProtocolVersion.v2) {
+        if (protocolVersion >= ProtocolVersion.v3) {
           val client = new GrpcSequencerConnectClient(
             sequencerConnection,
             timeouts,

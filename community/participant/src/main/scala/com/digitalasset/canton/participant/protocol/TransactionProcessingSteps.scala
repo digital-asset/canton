@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -49,7 +49,10 @@ import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissio
   TimeoutTooLow,
   UnknownDomain,
 }
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.UnknownPackageError
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
+  SerializableContractOfId,
+  UnknownPackageError,
+}
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
@@ -81,6 +84,7 @@ import com.digitalasset.canton.{
   WorkflowId,
   checked,
 }
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
 import scala.annotation.nowarn
@@ -156,7 +160,14 @@ class TransactionProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionSubmissionError, Submission] = {
-    val SubmissionParam(submitterInfo, transactionMeta, keyResolver, wfTransaction) = param
+    val SubmissionParam(
+      submitterInfo,
+      transactionMeta,
+      keyResolver,
+      wfTransaction,
+      disclosedContracts,
+    ) = param
+
     val tracked = new TrackedTransactionSubmission(
       submitterInfo,
       transactionMeta,
@@ -166,7 +177,9 @@ class TransactionProcessingSteps(
       recentSnapshot,
       ephemeralState.contractLookup,
       ephemeralState.observedTimestampLookup,
+      disclosedContracts,
     )
+
     EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError](tracked)
   }
 
@@ -182,6 +195,7 @@ class TransactionProcessingSteps(
       recentSnapshot: DomainSnapshotSyncCryptoApi,
       contractLookup: ContractLookup,
       watermarkLookup: WatermarkLookup[CantonTimestamp],
+      disclosedContracts: Map[LfContractId, SerializableContract],
   )(implicit traceContext: TraceContext)
       extends TrackedSubmission {
 
@@ -323,6 +337,15 @@ class TransactionProcessingSteps(
               )
           )
 
+        lookupContractsWithDisclosed: SerializableContractOfId =
+          (contractId: LfContractId) =>
+            disclosedContracts
+              .get(contractId)
+              .map(contract =>
+                EitherT.rightT[Future, TransactionTreeFactory.ContractLookupError](contract)
+              )
+              .getOrElse(TransactionTreeFactory.contractInstanceLookup(contractLookup)(contractId))
+
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
         // Perform phase 1 of the protocol that produces a confirmation request
         request <- confirmationRequestTimer.timeEitherT(
@@ -335,7 +358,7 @@ class TransactionProcessingSteps(
               keyResolver,
               mediatorId,
               recentSnapshot,
-              TransactionTreeFactory.contractInstanceLookup(contractLookup),
+              lookupContractsWithDisclosed,
               None,
               protocolVersion,
             )
@@ -553,9 +576,9 @@ class TransactionProcessingSteps(
         val info = HkdfInfo.subview(index)
         for {
           subviewRandomness <-
-            ProtocolCryptoApi
-              .hkdf(pureCrypto, protocolVersion)(
-                randomness,
+            pureCrypto
+              .computeHkdf(
+                randomness.unwrap,
                 randomness.unwrap.size,
                 info,
               )
@@ -693,23 +716,12 @@ class TransactionProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, Unit] =
-    if (protocolVersion < ProtocolVersion.v4) {
-      EitherT.rightT(())
-    } else {
-      pendingDataAndResponseArgs.enrichedTransaction match {
-        case Some(enrichedTransaction) =>
-          EitherT.fromEither(
-            enrichedTransaction.rootViewsWithUsedAndCreated.contracts.used.toList
-              .traverse_ { case (contractId, contract) =>
-                serializableContractAuthenticator
-                  .authenticate(contract)
-                  .leftMap(message =>
-                    ContractAuthenticationFailed.Error(contractId, message).reported()
-                  )
-              }
-          )
-        case None => EitherT.rightT(())
-      }
+    pendingDataAndResponseArgs.enrichedTransaction match {
+      case Some(enrichedTransaction) =>
+        authenticateInputContractsInternal(
+          enrichedTransaction.rootViewsWithUsedAndCreated.contracts.used
+        )
+      case None => EitherT.rightT(())
     }
 
   override def constructPendingDataAndResponse(
@@ -1045,6 +1057,26 @@ class TransactionProcessingSteps(
     )
     Right(tse)
   }
+
+  @VisibleForTesting
+  private[protocol] def authenticateInputContractsInternal(
+      inputContracts: Map[LfContractId, SerializableContract]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransactionProcessorError, Unit] =
+    if (protocolVersion < ProtocolVersion.v4)
+      EitherT.rightT(())
+    else
+      EitherT.fromEither(
+        inputContracts.toList
+          .traverse_ { case (contractId, contract) =>
+            serializableContractAuthenticator
+              .authenticate(contract)
+              .leftMap(message =>
+                ContractAuthenticationFailed.Error(contractId, message).reported()
+              )
+          }
+      )
 
   private def completionInfoFromSubmitterMetadata(meta: SubmitterMetadata): Option[CompletionInfo] =
     if (meta.submitterParticipant == participantId) {
@@ -1718,6 +1750,7 @@ object TransactionProcessingSteps {
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
       transaction: WellFormedTransaction[WithoutSuffixes],
+      disclosedContracts: Map[LfContractId, SerializableContract],
   )
 
   case class EnrichedTransaction(

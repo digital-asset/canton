@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.submission
@@ -521,30 +521,17 @@ object TransactionTreeFactoryImpl {
       packageService: PackageInfoService,
       uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,
-  )(implicit ex: ExecutionContext): TransactionTreeFactoryImpl = {
-    if (protocolVersion >= ProtocolVersion.v3) {
-      new TransactionTreeFactoryImplV3(
-        submitterParticipant,
-        domainId,
-        protocolVersion,
-        contractSerializer,
-        packageService,
-        cryptoOps,
-        uniqueContractKeys,
-        loggerFactory,
-      )
-    } else {
-      new TransactionTreeFactoryImplV2(
-        submitterParticipant,
-        domainId,
-        protocolVersion,
-        contractSerializer,
-        packageService,
-        cryptoOps,
-        loggerFactory,
-      )
-    }
-  }
+  )(implicit ex: ExecutionContext): TransactionTreeFactoryImpl =
+    new TransactionTreeFactoryImplV3(
+      submitterParticipant,
+      domainId,
+      protocolVersion,
+      contractSerializer,
+      packageService,
+      cryptoOps,
+      uniqueContractKeys,
+      loggerFactory,
+    )
 
   private[submission] def contractSerializer(
       contractInst: LfContractInst,

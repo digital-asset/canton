@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.sync
@@ -222,9 +222,8 @@ class CantonSyncService(
 
   // Track domains we would like to "keep on reconnecting until available"
   private val attemptReconnect: TrieMap[DomainAlias, AttemptReconnect] = TrieMap.empty
-  private def resolveReconnectAttempts(alias: DomainAlias): Unit = {
-    val _ = attemptReconnect.remove(alias)
-  }
+  private def resolveReconnectAttempts(alias: DomainAlias): Unit =
+    attemptReconnect.remove(alias).discard
 
   // A connected domain is ready if recovery has succeeded
   private[canton] def readySyncDomainById(domainId: DomainId): Option[SyncDomain] =
@@ -252,6 +251,7 @@ class CantonSyncService(
       connectedDomainsMap,
       domainConnectionConfigStore,
       aliasManager,
+      syncCrypto.pureCrypto,
       participantId,
       autoTransferTransaction = parameters.enablePreviewFeatures,
       parameters.processingTimeouts,
@@ -359,7 +359,7 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       _estimatedInterpretationCost: Long,
       keyResolver: LfKeyResolver,
-      explicitlyDisclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
+      disclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
   )(implicit
       _loggingContext: LoggingContext, // not used - contains same properties as canton named logger
       telemetryContext: TelemetryContext,
@@ -370,7 +370,13 @@ class CantonSyncService(
     withSpan("CantonSyncService.submitTransaction") { implicit traceContext => span =>
       span.setAttribute("command_id", submitterInfo.commandId)
       logger.debug(s"Received submit-transaction ${submitterInfo.commandId} from ledger-api server")
-      submitTransactionF(submitterInfo, transactionMeta, transaction, keyResolver)
+      submitTransactionF(
+        submitterInfo,
+        transactionMeta,
+        transaction,
+        keyResolver,
+        disclosedContracts,
+      )
     }.asJava
   }
 
@@ -452,6 +458,7 @@ class CantonSyncService(
       transactionMeta: TransactionMeta,
       transaction: LfSubmittedTransaction,
       keyResolver: LfKeyResolver,
+      explicitlyDisclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
   )(implicit traceContext: TraceContext): Future[SubmissionResult] = {
 
     val ack = SubmissionResult.Acknowledged
@@ -483,6 +490,7 @@ class CantonSyncService(
         transactionMeta,
         keyResolver,
         transaction,
+        explicitlyDisclosedContracts,
       )
       // TODO(i2794) retry command if token expired
       submittedFF.value.transformWith {
@@ -994,7 +1002,7 @@ class CantonSyncService(
     EitherT(
       // TODO(#6175) propagate the shutdown into the queue
       connectQueue.execute(
-        (if (keepRetrying && !attemptReconnect.exists(_._1 == domainAlias)) {
+        (if (keepRetrying && !attemptReconnect.isDefinedAt(domainAlias)) {
            EitherT.rightT[FutureUnlessShutdown, SyncServiceError](false)
          } else {
            performDomainConnection(domainAlias, startSyncDomain = true).transform {

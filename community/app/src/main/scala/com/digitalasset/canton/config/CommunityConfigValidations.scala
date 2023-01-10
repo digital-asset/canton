@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.config
@@ -192,7 +192,7 @@ object CommunityConfigValidations
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     config.participants.toSeq.foreach { case (name, config) =>
       val minimum = config.parameters.minimumProtocolVersion.map(_.unwrap)
-      val isMinimumDeprecatedVersion = minimum.getOrElse(ProtocolVersion.v2).isDeprecated
+      val isMinimumDeprecatedVersion = minimum.getOrElse(ProtocolVersion.minimum).isDeprecated
 
       if (isMinimumDeprecatedVersion && !config.parameters.dontWarnOnDeprecatedPV)
         DeprecatedProtocolVersion.WarnParticipant(name, minimum).discard

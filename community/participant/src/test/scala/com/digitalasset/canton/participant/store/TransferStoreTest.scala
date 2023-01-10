@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -617,11 +617,11 @@ object TransferStoreTest {
   ): Future[TransferData] = {
 
     /*
-      Method TransferOutView.fromProtoV0 set protocol version to v2 (not present in Protobuf v0).
+      Method TransferOutView.fromProtoV0 set protocol version to v3 (not present in Protobuf v0).
      */
     val targetProtocolVersion =
       if (protocolVersion <= ProtocolVersion.v3)
-        TargetProtocolVersion(ProtocolVersion.v2)
+        TargetProtocolVersion(ProtocolVersion.v3)
       else
         TargetProtocolVersion(protocolVersion)
 

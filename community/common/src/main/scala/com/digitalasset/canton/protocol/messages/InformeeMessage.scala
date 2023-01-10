@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -103,7 +103,7 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.InformeeMessage)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     ),
@@ -155,7 +155,7 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
         maybeFullInformeeTreeP,
       )
       fullInformeeTree <- FullInformeeTree.fromProtoV1(hashOps, fullInformeeTreeP)
-      protocolVersion = ProtocolVersion(protocolVersionP)
+      protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield new InformeeMessage(fullInformeeTree)(protocolVersion)
   }
 

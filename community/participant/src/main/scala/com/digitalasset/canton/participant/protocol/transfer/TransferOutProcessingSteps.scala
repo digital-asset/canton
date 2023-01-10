@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.transfer
@@ -535,6 +535,7 @@ class TransferOutProcessingSteps(
           transferOutEvent <- createTransferredOut(
             requestId.unwrap,
             contractId,
+            stakeholders,
             submitter,
             transferId,
             targetDomain,
@@ -574,6 +575,7 @@ class TransferOutProcessingSteps(
   private def createTransferredOut(
       recordTime: CantonTimestamp,
       contractId: LfContractId,
+      contractStakeholders: Set[LfPartyId],
       submitter: LfPartyId,
       transferId: TransferId,
       targetDomain: DomainId,
@@ -612,6 +614,7 @@ class TransferOutProcessingSteps(
       submitter = submitter,
       recordTime = recordTime.toLf,
       contractId = contractId,
+      contractStakeholders = contractStakeholders,
       sourceDomainId = transferId.sourceDomain,
       targetDomainId = targetDomain,
       transferInExclusivity = transferInExclusivity.map(_.toLf),

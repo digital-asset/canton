@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.sync
@@ -282,6 +282,7 @@ object LedgerSyncEvent {
       submitter: LfPartyId,
       recordTime: LfTimestamp,
       contractId: LfContractId,
+      contractStakeholders: Set[LfPartyId],
       sourceDomainId: DomainId,
       targetDomainId: DomainId,
       transferInExclusivity: Option[LfTimestamp],
@@ -289,7 +290,7 @@ object LedgerSyncEvent {
       with PrettyPrinting {
 
     override def description: String =
-      s"transfer out ${contractId} from $sourceDomainId to $targetDomainId"
+      s"transferred-out ${contractId} from $sourceDomainId to $targetDomainId"
 
     override def pretty: Pretty[TransferredOut] = prettyOfClass(
       param("updateId", _.updateId),
@@ -327,14 +328,17 @@ object LedgerSyncEvent {
       recordTime: LfTimestamp,
       ledgerCreateTime: LfTimestamp,
       createNode: LfNodeCreate,
+      creatingTransactionId: LedgerTransactionId,
       contractMetadata: Bytes,
       transferOutId: TransferId,
       targetDomain: DomainId,
       createTransactionAccepted: Boolean,
   ) extends LedgerSyncEvent
       with PrettyPrinting {
+    def sourceDomain: DomainId = transferOutId.sourceDomain
+
     override def description: String =
-      s"transfer in ${createNode.coid} from $targetDomain to ${transferOutId.sourceDomain}"
+      s"transferred-in ${createNode.coid} from $targetDomain to ${sourceDomain}"
     override def pretty: Pretty[TransferredIn] = prettyOfClass(
       param("updateId", _.updateId),
       param("ledgerCreateTime", _.ledgerCreateTime),

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -24,7 +24,7 @@ import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{BaseTest, LfPackageId, RequestCounter}
+import com.digitalasset.canton.{BaseTest, LfPackageId, RequestCounter, TestMetrics}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import java.time.Instant
@@ -32,7 +32,8 @@ import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 @nowarn("msg=match may not be exhaustive")
-trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLike with BaseTest =>
+trait ActiveContractStoreTest extends PrunableByTimeTest {
+  this: AsyncWordSpecLike & BaseTest & TestMetrics =>
 
   lazy val acsDomainStr: String300 = String300.tryCreate("active-contract-store::default")
   lazy val acsDomainId: DomainId = DomainId.tryFromString(acsDomainStr.unwrap)

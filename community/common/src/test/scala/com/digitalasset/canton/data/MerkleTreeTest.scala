@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -210,7 +210,7 @@ object MerkleTreeTest {
     override def supportedProtoVersions: data.MerkleTreeTest.AbstractLeaf.SupportedProtoVersions =
       SupportedProtoVersions(
         ProtoVersion(0) -> LegacyProtoConverter(
-          ProtocolVersion.v2,
+          ProtocolVersion.v3,
           fromProto(0),
           _.getCryptographicEvidence,
         ),

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -127,7 +127,7 @@ object SerializableLedgerSyncEvent
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.LedgerSyncEvent)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -953,7 +953,9 @@ object SerializableRejectionReasonTemplate {
   }
 }
 
-final case class SerializableTransferredOut(transferOut: LedgerSyncEvent.TransferredOut) {
+private[store] final case class SerializableTransferredOut(
+    transferOut: LedgerSyncEvent.TransferredOut
+) {
   def toProtoV0: v0.TransferredOut = {
     val LedgerSyncEvent.TransferredOut(
       updateId,
@@ -961,6 +963,7 @@ final case class SerializableTransferredOut(transferOut: LedgerSyncEvent.Transfe
       submitter,
       recordTime,
       contractId,
+      contractStakeholders,
       source,
       target,
       transferInExclusivity,
@@ -971,6 +974,7 @@ final case class SerializableTransferredOut(transferOut: LedgerSyncEvent.Transfe
       submitter = submitter,
       recordTime = Some(SerializableLfTimestamp(recordTime).toProtoV0),
       contractId = contractId.toProtoPrimitive,
+      contractStakeholders = contractStakeholders.toSeq,
       sourceDomain = source.toProtoPrimitive,
       targetDomain = target.toProtoPrimitive,
       transferInExclusivity = transferInExclusivity.map(SerializableLfTimestamp(_).toProtoV0),
@@ -978,7 +982,7 @@ final case class SerializableTransferredOut(transferOut: LedgerSyncEvent.Transfe
   }
 }
 
-object SerializableTransferredOut {
+private[store] object SerializableTransferredOut {
   def fromProtoV0(
       transferOutP: v0.TransferredOut
   ): ParsingResult[LedgerSyncEvent.TransferredOut] = {
@@ -988,6 +992,7 @@ object SerializableTransferredOut {
       submitterP,
       recordTimeP,
       contractIdP,
+      contractStakeholdersP,
       sourceDomainIdP,
       targetDomainIdP,
       transferInExclusivityP,
@@ -1001,11 +1006,11 @@ object SerializableTransferredOut {
         SerializableLfTimestamp.fromProtoPrimitive
       )
       contractId <- ProtoConverter.parseLfContractId(contractIdP)
+      contractStakeholders <- contractStakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       sourceDomainId <- DomainId.fromProtoPrimitive(sourceDomainIdP, "source_domain")
       targetDomainId <- DomainId.fromProtoPrimitive(targetDomainIdP, "target_domain")
       transferInExclusivity <- transferInExclusivityP
-        .map(SerializableLfTimestamp.fromProtoPrimitive)
-        .sequence
+        .traverse(SerializableLfTimestamp.fromProtoPrimitive)
 
     } yield LedgerSyncEvent.TransferredOut(
       updateId = updateId,
@@ -1013,6 +1018,7 @@ object SerializableTransferredOut {
       submitter = submitter,
       recordTime = recordTime,
       contractId = contractId,
+      contractStakeholders = contractStakeholders.toSet,
       sourceDomainId = sourceDomainId,
       targetDomainId = targetDomainId,
       transferInExclusivity = transferInExclusivity,
@@ -1029,6 +1035,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       recordTime,
       ledgerCreateTime,
       createNode,
+      creatingTransactionId,
       contractMetadata,
       transferOutId,
       targetDomain,
@@ -1050,6 +1057,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       ledgerCreateTime = Some(SerializableLfTimestamp(ledgerCreateTime).toProtoV0),
       contractMetadata = contractMetadataP,
       createNode = createNodeByteString,
+      creatingTransactionId = creatingTransactionId,
       transferOutId = Some(transferOutId.toProtoV0),
       targetDomain = targetDomain.toProtoPrimitive,
       createTransactionAccepted = createTransactionAccepted,
@@ -1067,6 +1075,7 @@ object SerializableTransferredIn {
       recordTimeP,
       ledgerCreateTimeP,
       createNodeP,
+      creatingTransactionIdP,
       contractMetadataP,
       transferOutIdP,
       targetDomainIdP,
@@ -1097,6 +1106,7 @@ object SerializableTransferredIn {
           },
         createNodeP,
       )
+      creatingTransactionId <- ProtoConverter.parseLedgerTransactionId(creatingTransactionIdP)
       targetDomainId <- DomainId.fromProtoPrimitive(targetDomainIdP, "target_domain")
     } yield LedgerSyncEvent.TransferredIn(
       updateId = updateId,
@@ -1105,6 +1115,7 @@ object SerializableTransferredIn {
       recordTime = recordTime,
       ledgerCreateTime = ledgerCreateTime,
       createNode = createNode,
+      creatingTransactionId = creatingTransactionId,
       contractMetadata = contractMetadata,
       transferOutId = transferOutId,
       targetDomain = targetDomainId,

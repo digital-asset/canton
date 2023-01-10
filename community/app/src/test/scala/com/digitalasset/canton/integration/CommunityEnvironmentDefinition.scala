@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.integration
@@ -20,13 +20,13 @@ import monocle.macros.syntax.lens.*
 case class CommunityEnvironmentDefinition(
     override val baseConfig: CantonCommunityConfig,
     override val testingConfig: TestingConfigInternal,
-    override val setup: CommunityTestConsoleEnvironment => Unit = _ => (),
+    override val setups: List[CommunityTestConsoleEnvironment => Unit] = Nil,
     override val teardown: Unit => Unit = _ => (),
     override val configTransforms: Seq[CantonCommunityConfig => CantonCommunityConfig],
 ) extends BaseEnvironmentDefinition[CommunityEnvironment, CommunityTestConsoleEnvironment](
       baseConfig,
       testingConfig,
-      setup,
+      setups,
       teardown,
       configTransforms,
     ) {
@@ -34,7 +34,7 @@ case class CommunityEnvironmentDefinition(
   def withManualStart: CommunityEnvironmentDefinition =
     copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(true))
   def withSetup(setup: CommunityTestConsoleEnvironment => Unit): CommunityEnvironmentDefinition =
-    copy(setup = setup)
+    copy(setups = setups :+ setup)
   def clearConfigTransforms(): CommunityEnvironmentDefinition = copy(configTransforms = Seq())
   def addConfigTransforms(
       transforms: CantonCommunityConfig => CantonCommunityConfig*

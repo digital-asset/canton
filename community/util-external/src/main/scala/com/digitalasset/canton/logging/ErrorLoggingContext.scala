@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.logging
@@ -19,8 +19,8 @@ import org.slf4j.event.Level
   * This class is primarily used with the `com.daml.error` framework
   * for logging an error when it is created.
   *
-  * @see NamedLoggingContext for another variant where the logger name is not fixed
-  * @see NamedLogging.errorLoggingContext converts
+  * @see [[NamedLoggingContext]] for another variant where the logger name is not fixed
+  * @see [[NamedLogging.errorLoggingContext]] converts
   */
 case class ErrorLoggingContext(
     logger: TracedLogger,

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.submission
@@ -223,9 +223,9 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           } else None
 
         val keySeed = tree.viewPosition.position.foldRight(testKeySeed) { case (pos, seed) =>
-          ProtocolCryptoApi
-            .hkdf(cryptoPureApi, testedProtocolVersion)(
-              seed,
+          cryptoPureApi
+            .computeHkdf(
+              seed.unwrap,
               cryptoPureApi.defaultSymmetricKeyScheme.keySizeInBytes,
               HkdfInfo.subview(pos),
             )
@@ -233,9 +233,9 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
         }
 
         val viewEncryptionScheme = cryptoPureApi.defaultSymmetricKeyScheme
-        val symmetricKeyRandomness = ProtocolCryptoApi
-          .hkdf(cryptoPureApi, testedProtocolVersion)(
-            keySeed,
+        val symmetricKeyRandomness = cryptoPureApi
+          .computeHkdf(
+            keySeed.unwrap,
             viewEncryptionScheme.keySizeInBytes,
             HkdfInfo.ViewKey,
           )

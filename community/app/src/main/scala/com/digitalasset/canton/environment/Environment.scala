@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.environment
@@ -64,6 +64,9 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   val testingConfig: TestingConfigInternal
 
   val loggerFactory: NamedLoggerFactory
+
+  // public for buildDocs task to be able to construct a fake participant and domain to document available metrics via reflection
+  val metricsFactory = MetricsFactory.forConfig(config.monitoring.metrics)
 
   protected def participantNodeFactory
       : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType]
@@ -138,7 +141,11 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-env-scheduler", logger)
 
   implicit val executionContext: ExecutionContextIdlenessExecutorService =
-    Threading.newExecutionContext(loggerFactory.threadName + "-env-execution-context", logger)
+    Threading.newExecutionContext(
+      loggerFactory.threadName + "-env-execution-context",
+      logger,
+      metricsFactory.executionServiceMetrics,
+    )
 
   private val deadlockConfig = config.monitoring.deadlockDetection
   protected def timeouts: ProcessingTimeout = config.parameters.timeouts.processing
@@ -216,8 +223,6 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   }
 
   private val testingTimeService = new TestingTimeService(clock, () => simClocks)
-  // public for buildDocs task to be able to construct a fake participant and domain to document available metrics via reflection
-  val metricsFactory = MetricsFactory.forConfig(config.monitoring.metrics)
 
   protected lazy val healthCheck: Option[HealthCheck] = config.monitoring.health.map(config =>
     HealthCheck(config.check, metricsFactory.health, timeouts, loggerFactory)(this)

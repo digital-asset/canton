@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.protocol
@@ -75,7 +75,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       (),
       _.toProtoV0.toByteString,
     )
@@ -87,7 +87,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
 
       val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
         ProtoVersion(0) -> ProtoCodec(
-          ProtocolVersion.v2,
+          ProtocolVersion.v3,
           supportedProtoVersion(v0.CompressedBatch) { (deserializer, proto) =>
             // TODO(i10428) Prevent zip bombing when decompressing the request
             fromProtoV0(deserializer)(proto, maxRequestSize = MaxRequestSizeToDeserialize.NoLimit)

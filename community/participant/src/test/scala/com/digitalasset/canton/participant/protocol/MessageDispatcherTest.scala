@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -1233,7 +1233,7 @@ private[protocol] object MessageDispatcherTest {
 
     val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
       ProtoVersion(0) -> VersionedProtoConverter(
-        ProtocolVersion.v2,
+        ProtocolVersion.v3,
         (),
         _ => throw new NotImplementedError("Serialization is not implemented"),
       )

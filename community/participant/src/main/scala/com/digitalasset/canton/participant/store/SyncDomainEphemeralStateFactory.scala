@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -25,7 +25,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{RequestCounter, SequencerCounter, checked}
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordering.Implicits.*
 
 trait SyncDomainEphemeralStateFactory {
   def createFromPersistent(

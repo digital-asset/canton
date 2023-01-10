@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.pruning
@@ -66,7 +66,6 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedSet
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordering.Implicits.*
 
 @nowarn("msg=match may not be exhaustive")
 sealed trait AcsCommitmentProcessorBaseTest
@@ -553,7 +552,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         - Remote participant (RP) connects to the domain at t=0
         - Local participant (LP) connects to the domain at t=6
         - A shared contract lives between t=8 and t=12
-        - RP sends a commitment with period (5, 10)
+        - RP sends a commitment with period (5, 10]
           Note: t=5 is not on a tick for LP
         - LP sends a commitment with period (0, 10]
 

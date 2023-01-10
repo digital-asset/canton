@@ -5,7 +5,7 @@
 // update parameters
 iou.service.update_dynamic_domain_parameters(
   _.update(transferExclusivityTimeout = Duration.Zero)
-) // disables automatic transfer-in
+) // disable automatic transfer-in
 
 paint.service.update_dynamic_domain_parameters(
   _.update(transferExclusivityTimeout = 2.seconds)
@@ -33,7 +33,7 @@ val HouseOwner = participant2.parties.enable("House Owner")
 val Painter = participant3.parties.enable("Painter")
 
 // Wait until the party enabling has taken effect and has been observed at the participants
-val partyAssignment = Set(HouseOwner -> participant2, Painter -> participant3)
+val partyAssignment = Set(Bank -> participant1, HouseOwner -> participant2, Painter -> participant3)
 participant2.parties.await_topology_observed(partyAssignment)
 participant3.parties.await_topology_observed(partyAssignment)
 

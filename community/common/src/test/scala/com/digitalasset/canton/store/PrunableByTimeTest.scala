@@ -1,10 +1,9 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.store
 
 import cats.instances.future.catsStdInstancesForFuture
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
@@ -12,6 +11,7 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
+import com.digitalasset.canton.{BaseTest, TestMetrics}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import java.time.Instant
@@ -20,7 +20,7 @@ import scala.Ordered.orderingToOrdered
 import scala.concurrent.{ExecutionContext, Future}
 
 trait PrunableByTimeTest {
-  this: AsyncWordSpecLike with BaseTest =>
+  this: AsyncWordSpecLike & BaseTest & TestMetrics =>
 
   def prunableByTime[E](mkPrunable: ExecutionContext => PrunableByTime[E]): Unit = {
 
@@ -56,7 +56,8 @@ trait PrunableByTimeTest {
     }
 
     "pruning timestamps advance under concurrent pruning" in {
-      val parallelEc = Threading.newExecutionContext("pruning-parallel-ec", logger)
+      val parallelEc =
+        Threading.newExecutionContext("pruning-parallel-ec", logger, executorServiceMetrics)
       val prunable = mkPrunable(parallelEc)
       val iterations = 100
 

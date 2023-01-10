@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.integration
@@ -16,7 +16,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 abstract class BaseEnvironmentDefinition[E <: Environment, TCE <: TestConsoleEnvironment[E]](
     val baseConfig: E#Config,
     val testingConfig: TestingConfigInternal,
-    val setup: TCE => Unit = (_: TCE) => (),
+    val setups: List[TCE => Unit] = Nil,
     val teardown: Unit => Unit = _ => (),
     val configTransforms: Seq[E#Config => E#Config],
 ) {

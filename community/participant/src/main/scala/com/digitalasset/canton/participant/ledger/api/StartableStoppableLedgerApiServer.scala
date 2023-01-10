@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.ledger.api
@@ -11,6 +11,7 @@ import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationFeatures,
   CommandDeduplicationPeriodSupport,
   CommandDeduplicationType,
+  ExperimentalExplicitDisclosure,
 }
 import com.daml.ledger.participant.state.v2.metrics.{TimedReadService, TimedWriteService}
 import com.daml.ledger.resources.{Resource, ResourceContext}
@@ -274,6 +275,7 @@ class StartableStoppableLedgerApiServer(
           config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
         meteringReportKey = config.meteringReportKey,
         createExternalServices = createExternalServices,
+        explicitDisclosureUnsafeEnabled = config.serverConfig.explicitDisclosureUnsafe,
       )
     } yield ()
   }
@@ -338,6 +340,8 @@ class StartableStoppableLedgerApiServer(
       CommandDeduplicationType.ASYNC_AND_CONCURRENT_SYNC,
       maxDeduplicationDurationEnforced = false,
     ),
+    explicitDisclosure =
+      ExperimentalExplicitDisclosure.of(config.serverConfig.explicitDisclosureUnsafe),
   )
 
   private def getApiServerConfig: ApiServerConfig = ApiServerConfig(

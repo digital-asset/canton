@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store.db
@@ -46,7 +46,6 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter, TransactionIso
 
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordering.Implicits.*
 
 class DbAcsCommitmentStore(
     override protected val storage: DbStorage,
@@ -292,71 +291,6 @@ class DbAcsCommitmentStore(
     )
   }
 
-  // To avoid interactive transactions and auxiliary DB fields/tables, we want to do two things in a single SQL statement:
-  // 1. delete all outstanding intervals that intersect with the received commitment
-  // 2. for any interval (there's at most one) that's only partially covered by the commitment and where only its end is covered,
-  //    insert a new outstanding interval for the remaining (left) portion of the interval
-  // 3. for any interval (there's at most one) that's only partially covered by the commitment and where only its beginning is covered,
-  //    insert a new outstanding interval for the remaining (right) portion of the interval
-  // H2 doesn't support RETURNING, so we can't delete the overlaps and get a hold on the deleted rows in a WITH.
-  // Instead we have to get a bit clever; we compute the overlapping intervals, then the (possible) "remaining" bits,
-  // then insert all three and delete on conflicts, to delete the overlapping intervals.
-  private def markSafeH2(counterParticipant: ParticipantId, period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    val query =
-      sqlu"""with overlapping as
-           (select domain_id, from_exclusive, to_inclusive, counter_participant, true as is_overlapping from outstanding_acs_commitments
-                      where domain_id = $domainId and counter_participant = $counterParticipant
-                      and from_exclusive < ${period.toInclusive} and to_inclusive > ${period.fromExclusive}),
-         new_left as
-           (select domain_id, from_exclusive, cast(${period.fromExclusive} as long) as to_inclusive, counter_participant, false as is_overlapping from overlapping
-             where from_exclusive < ${period.fromExclusive}),
-         new_right as
-           (select domain_id, cast(${period.toInclusive} as long) as from_exclusive, to_inclusive, counter_participant, false as is_overlapping from overlapping
-             where to_inclusive > ${period.toInclusive}),
-         source(domain_id, from_exclusive, to_inclusive, counter_participant, is_overlapping) as
-           (select * from overlapping union
-            select * from new_left union
-            select * from new_right)
-       merge into outstanding_acs_commitments as target
-         using source
-         on source.domain_id = target.domain_id and source.counter_participant = target.counter_participant and source.from_exclusive = target.from_exclusive and source.to_inclusive = target.to_inclusive
-         when matched and is_overlapping then delete
-         when not matched then insert
-         (domain_id, from_exclusive, to_inclusive, counter_participant)
-         values (source.domain_id, source.from_exclusive, source.to_inclusive, source.counter_participant)
-    """
-
-    storage.update_(
-      query.withTransactionIsolation(Serializable),
-      operationName = "commitments: mark period safe",
-    )
-  }
-
-  private def markSafePostgres(counterParticipant: ParticipantId, period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    val query =
-      sqlu"""with overlapping as (delete from outstanding_acs_commitments
-                where domain_id = $domainId and counter_participant = $counterParticipant
-                and from_exclusive < ${period.toInclusive} and to_inclusive > ${period.fromExclusive}
-                returning *)
-      insert into outstanding_acs_commitments(domain_id, from_exclusive, to_inclusive, counter_participant)
-      (
-        (select $domainId, from_exclusive, ${period.fromExclusive}, $counterParticipant from overlapping
-        where from_exclusive < ${period.fromExclusive})
-        union
-        (select $domainId, ${period.toInclusive}, to_inclusive, $counterParticipant from overlapping
-        where to_inclusive > ${period.toInclusive})
-      ) on conflict do nothing"""
-
-    storage.update_(
-      query.withTransactionIsolation(Serializable),
-      operationName = "commitments: mark period safe",
-    )
-  }
-
   override def markSafe(
       counterParticipant: ParticipantId,
       period: CommitmentPeriod,
@@ -393,6 +327,12 @@ class DbAcsCommitmentStore(
             |  values (input.domain_id, input.from_exclusive, input.to_inclusive, input.counter_participant)""".stripMargin
       }
 
+      /*
+      This is a three steps process:
+      - First, we select the outstanding intervals that are overlapping with the new one.
+      - Then, we delete the overlapping intervals.
+      - Finally, we insert what we need (non-empty intersections)
+       */
       for {
         overlappingIntervals <-
           sql"""select from_exclusive, to_inclusive from outstanding_acs_commitments
@@ -441,7 +381,8 @@ class DbAcsCommitmentStore(
             dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
               TransactionIsolation.Serializable
             ),
-            operationName = "commitments: mark period safe",
+            operationName =
+              s"commitments: mark period safe (${period.fromExclusive}, ${period.toInclusive}]",
           )
         } yield ()
       },

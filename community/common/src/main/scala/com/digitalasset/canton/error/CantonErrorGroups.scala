@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.error
@@ -13,13 +13,7 @@ object CantonErrorGroups {
 
   abstract class CommandErrorGroup extends ErrorGroup()
 
-  abstract class EthereumErrorGroup extends ErrorGroup
-
-  abstract class VmbcErrorGroup extends ErrorGroup
-
   abstract class HandshakeErrorGroup extends ErrorGroup
-
-  abstract class FabricErrorGroup extends ErrorGroup
 
   abstract class ProtoDeserializationErrorGroup extends ErrorGroup
 

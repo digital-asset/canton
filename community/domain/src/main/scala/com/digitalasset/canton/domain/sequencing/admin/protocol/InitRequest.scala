@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.admin.protocol
@@ -52,7 +52,7 @@ object InitRequest extends HasProtocolVersionedCompanion[InitRequest] {
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> LegacyProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.InitRequest)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
@@ -250,7 +250,7 @@ object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.SymmetricKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -345,7 +345,7 @@ object EncryptionPublicKey
     with HasVersionedMessageCompanionDbHelpers[EncryptionPublicKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.EncryptionPublicKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -415,7 +415,7 @@ final case class EncryptionPrivateKey private[crypto] (
 object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.EncryptionPrivateKey)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
