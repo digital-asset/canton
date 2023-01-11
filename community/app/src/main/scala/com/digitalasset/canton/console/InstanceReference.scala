@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console
@@ -452,6 +452,12 @@ abstract class ParticipantReference(
 
   def config: BaseParticipantConfig
 
+  @Help.Summary("Manage participant replication")
+  @Help.Group("Replication")
+  def replication: ParticipantReplicationAdministrationGroup = replicationGroup
+  lazy private val replicationGroup =
+    new ParticipantReplicationAdministrationGroup(this, consoleEnvironment)
+
 }
 
 class RemoteParticipantReference(environment: ConsoleEnvironment, override val name: String)
@@ -543,12 +549,6 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
   // above command needs to be def such that `Help` works.
   lazy private val partiesGroup =
     new LocalParticipantPartiesAdministrationGroup(this, this, consoleEnvironment, loggerFactory)
-
-  @Help.Summary("Manage participant replication")
-  @Help.Group("Replication")
-  def replication: ParticipantReplicationAdministrationGroup = replicationGroup
-  lazy private val replicationGroup =
-    new ParticipantReplicationAdministrationGroup(this, consoleEnvironment)
 
   /** secret, not publicly documented way to get the admin token */
   def adminToken: Option[String] = underlying.map(_.adminToken.secret)

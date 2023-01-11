@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.submission.routing
@@ -425,7 +425,6 @@ private[routing] object DomainSelectorTest {
           defaultDomainsOfSubmittersAndInformees,
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
-        languageVersion: LanguageVersion = defaultLanguageVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
     )(implicit
         ec: ExecutionContext,

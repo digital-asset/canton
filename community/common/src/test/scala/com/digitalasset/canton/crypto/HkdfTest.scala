@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
@@ -100,28 +100,6 @@ trait HkdfTest {
 
   def hkdfProvider(providerF: => Future[HkdfOps with RandomOps]): Unit = {
     "HKDF provider" should {
-      "produce an output of the specified length" in {
-        val algo = HmacAlgorithm.HmacSha256
-        val algoLen = algo.hashAlgorithm.length
-        providerF.map { provider =>
-          val secret = provider.generateSecureRandomness(algoLen.toInt)
-
-          // Test a few key sizes that we might need
-          forAll(0L until (5L * algoLen)) { i =>
-            val expanded =
-              provider
-                .hkdfExpand(
-                  secret,
-                  i.toInt,
-                  algorithm = algo,
-                  info = HkdfInfo.testOnly(ByteString.EMPTY),
-                )
-                .valueOrFail(s"Failed to compute hkdfExpand with length $i")
-            expanded.unwrap.size shouldBe i
-          }
-        }
-      }
-
       "pass golden tests from RFC 5869 for extract-and-expand" in {
         val algo = HmacAlgorithm.HmacSha256
         providerF.map { provider =>
@@ -133,24 +111,6 @@ trait HkdfTest {
                   testCase.length,
                   HkdfInfo.testOnly(testCase.info),
                   testCase.salt,
-                  algo,
-                )
-                .valueOrFail("Could not compute the HMAC for test vector")
-            expanded.unwrap shouldBe testCase.okm
-          }
-        }
-      }
-
-      "pass golden tests from RFC 5869 for expand" in {
-        val algo = HmacAlgorithm.HmacSha256
-        providerF.map { provider =>
-          forAll(testCases) { testCase =>
-            val expanded =
-              provider
-                .hkdfExpand(
-                  SecureRandomness(testCase.prk),
-                  testCase.length,
-                  HkdfInfo.testOnly(testCase.info),
                   algo,
                 )
                 .valueOrFail("Could not compute the HMAC for test vector")

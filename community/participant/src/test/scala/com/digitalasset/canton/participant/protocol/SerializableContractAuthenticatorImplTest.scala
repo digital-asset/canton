@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -15,9 +15,11 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.time.Duration
 import java.util.UUID
 
-class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
+class SerializableContractAuthenticatorImplTest extends AnyWordSpec with BaseTest {
   private lazy val unicumGenerator = new UnicumGenerator(new SymbolicPureCrypto())
-  private lazy val contractAuthenticator = new SerializableContractAuthenticator(unicumGenerator)
+  private lazy val contractAuthenticator = new SerializableContractAuthenticatorImpl(
+    unicumGenerator
+  )
 
   private lazy val contractInstance = ExampleTransactionFactory.contractInstance()
   private lazy val ledgerTime = CantonTimestamp.MinValue
@@ -49,7 +51,7 @@ class SerializableContractAuthenticatorTest extends AnyWordSpec with BaseTest {
       agreementText = AgreementText.empty,
     ).valueOrFail("Failed creating serializable contract instance")
 
-  classOf[SerializableContractAuthenticator].getSimpleName when {
+  classOf[SerializableContractAuthenticatorImpl].getSimpleName when {
     s"provided with a $AuthenticatedContractIdVersion" should {
       "correctly authenticate the contract" in {
         contractAuthenticator.authenticate(contract) shouldBe Right(())

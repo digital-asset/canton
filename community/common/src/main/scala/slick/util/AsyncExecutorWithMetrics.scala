@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package slick.util
@@ -185,18 +185,21 @@ class AsyncExecutorWithMetrics(
           def alert: Boolean = TimeUnit.NANOSECONDS.toMillis(now - last) > warnIntervalMs
           // if item is expired and if this warning process isn't running concurrently, emit a new warning
           if (isSlow && alert && lastAlert.compareAndSet(last, now)) {
+            item.reportAsSlow()
             import scala.jdk.CollectionConverters.*
-            val queries = running
+            val queries = (running
               .iterator()
               .asScala
-              .filter(_.isDone)
-              .toSeq
+              .filterNot(_.isDone)
+              .toSeq :+ item)
               .sortBy(_.getScheduledNanos)
               .map(x =>
                 s"${x.callsite} running-for=${TimeUnit.NANOSECONDS.toMillis(now - x.getScheduledNanos)} ms"
               )
               .mkString("\n  ")
-            logger.warn("Very slow or blocked queries detected:\n  " + queries)
+            if (queries.nonEmpty) {
+              logger.warn("Very slow or blocked queries detected:\n  " + queries)
+            }
           }
           // put it back
           running.add(item).discard
@@ -224,6 +227,8 @@ class AsyncExecutorWithMetrics(
       private val added = System.nanoTime()
       private val scheduledNanos = new AtomicReference[Long](0)
       private val done = new AtomicBoolean(false)
+      private val reportedAsSlow = new AtomicBoolean(false)
+
       // increase queue counter on creation
       metrics.queue.inc()
 
@@ -236,6 +241,10 @@ class AsyncExecutorWithMetrics(
         if (warnOnSlowQuery) {
           running.add(this).discard
         }
+      }
+
+      def reportAsSlow(): Unit = {
+        reportedAsSlow.set(true)
       }
 
       def isDone: Boolean = done.get()
@@ -251,6 +260,11 @@ class AsyncExecutorWithMetrics(
           QueryCostTracker.track(callsite, tm - started)
         } else {
           QueryCostTracker.track(s"$callsite - missing start time", tm - added)
+        }
+        if (reportedAsSlow.get()) {
+          logger.warn(
+            s"Slow query ${callsite} finished after ${TimeUnit.NANOSECONDS.toMillis(tm - started)} ms"
+          )
         }
         cleanupAndAlert(tm)
       }

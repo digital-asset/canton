@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
@@ -62,15 +62,17 @@ class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
   CantonContractIdVersion.getClass.getSimpleName when {
     "fromProtocolVersion" should {
       "return the correct canton contract id version" in {
-        CantonContractIdVersion.fromProtocolVersion(
-          ProtocolVersion.v2
-        ) shouldBe NonAuthenticatedContractIdVersion
-        CantonContractIdVersion.fromProtocolVersion(
-          ProtocolVersion.v3
-        ) shouldBe NonAuthenticatedContractIdVersion
-        CantonContractIdVersion.fromProtocolVersion(
-          ProtocolVersion.v4
-        ) shouldBe AuthenticatedContractIdVersion
+        val nonAuthenticatedContractIdVersion = Seq(ProtocolVersion.v3)
+        val authenticatedContractIdVersion =
+          Seq(ProtocolVersion.v4, ProtocolVersion.v5, ProtocolVersion.dev)
+
+        forAll(nonAuthenticatedContractIdVersion) { pv =>
+          CantonContractIdVersion.fromProtocolVersion(pv) shouldBe NonAuthenticatedContractIdVersion
+        }
+
+        forAll(authenticatedContractIdVersion) { pv =>
+          CantonContractIdVersion.fromProtocolVersion(pv) shouldBe AuthenticatedContractIdVersion
+        }
       }
     }
   }

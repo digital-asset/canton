@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -27,13 +27,13 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
   // Serializer defined for the EnvelopeContent can throw
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> LegacyProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.EnvelopeContent)(fromProtoV0),
       _.message match {
         case messageV0: ProtocolMessageV0 => messageV0.toProtoEnvelopeContentV0.toByteString
         case message =>
           throw new IllegalArgumentException(
-            s"Trying to serialize message $message for incompatible protocol version ${ProtocolVersion.v2}"
+            s"Trying to serialize message $message for incompatible protocol version ${ProtocolVersion.v3}"
           )
       },
     ),

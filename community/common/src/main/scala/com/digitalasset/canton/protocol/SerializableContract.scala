@@ -1,10 +1,12 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
 
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
+import com.daml.lf.command.ProcessedDisclosedContract
+import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.crypto
@@ -103,7 +105,7 @@ object SerializableContract
     with HasVersionedMessageCompanionDbHelpers[SerializableContract] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.SerializableContract)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
@@ -127,6 +129,58 @@ object SerializableContract
     SerializableRawContractInstance
       .create(contractInstance, agreementText)
       .map(SerializableContract(contractId, _, metadata, ledgerTime, contractSalt))
+
+  def fromDisclosedContract(
+      disclosedContract: Versioned[ProcessedDisclosedContract]
+  ): Either[String, SerializableContract] = {
+    val unversionedDisclosedContract = disclosedContract.unversioned
+    val contractMetadata = unversionedDisclosedContract.metadata
+    val ledgerTime = CantonTimestamp(contractMetadata.createdAt)
+    val driverContractMetadataBytes = contractMetadata.driverMetadata.toArray
+
+    for {
+      disclosedContractIdVersion <- CantonContractIdVersion
+        .ensureCantonContractId(unversionedDisclosedContract.contractId)
+        .leftMap(err => s"Invalid disclosed contract id: ${err.toString}")
+      _ <- disclosedContractIdVersion match {
+        case NonAuthenticatedContractIdVersion =>
+          Left(
+            s"Disclosed contract with non-authenticated contract id: ${unversionedDisclosedContract.contractId.toString}"
+          )
+        case AuthenticatedContractIdVersion => Right(())
+      }
+      salt <- {
+        if (driverContractMetadataBytes.isEmpty)
+          Left[String, Option[Salt]](
+            value = "Missing driver contract metadata in provided disclosed contract"
+          )
+        else
+          DriverContractMetadata
+            .fromByteArray(driverContractMetadataBytes)
+            .leftMap(err => s"Failed parsing disclosed contract driver contract metadata: $err")
+            .map(m => Some(m.salt))
+      }
+      contractInstance =
+        LfContractInst(
+          version = disclosedContract.version,
+          template = unversionedDisclosedContract.templateId,
+          arg = unversionedDisclosedContract.argument,
+        )
+      cantonContractMetadata <- ContractMetadata.create(
+        signatories = contractMetadata.signatories,
+        stakeholders = contractMetadata.stakeholders,
+        maybeKeyWithMaintainers = contractMetadata.maybeKeyWithMaintainers,
+      )
+      contract <- SerializableContract(
+        contractId = unversionedDisclosedContract.contractId,
+        contractInstance = contractInstance,
+        metadata = cantonContractMetadata,
+        ledgerTime = ledgerTime,
+        contractSalt = salt,
+        agreementText = AgreementText(disclosedContract.unversioned.metadata.agreementText),
+      ).leftMap(err => s"Failed creating serializable contract from disclosed contract: $err")
+    } yield contract
+  }
 
   def fromProtoV0(
       serializableContractInstanceP: v0.SerializableContract

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.version
@@ -160,9 +160,11 @@ object EthereumContractVersion extends CompanionTrait {
 
   /** Which revisions of the Sequencer.sol contract are supported and can be deployed by a certain release? */
   def tryReleaseVersionToEthereumContractVersions(
-      v: ReleaseVersion
+      v: ReleaseVersion,
+      includeDeletedProtocolVersions: Boolean = false,
   ): NonEmpty[List[EthereumContractVersion]] = {
-    assert(ReleaseVersionToProtocolVersions.get(v).isDefined)
+    assert(ReleaseVersionToProtocolVersions.get(v, includeDeletedProtocolVersions).isDefined)
+
     if (v < ReleaseVersions.v2_3_0)
       NonEmpty(List, v1_0_0)
     else

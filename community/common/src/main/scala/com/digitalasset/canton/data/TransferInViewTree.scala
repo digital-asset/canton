@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -78,7 +78,7 @@ object TransferInViewTree
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.TransferViewTree)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
@@ -174,7 +174,7 @@ object TransferInCommonData
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
@@ -237,7 +237,7 @@ object TransferInCommonData
       targetMediator <- MediatorId.fromProtoPrimitive(targetMediatorP, "target_mediator")
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
-      protocolVersion = ProtocolVersion(protocolVersionP)
+      protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
       TargetProtocolVersion(protocolVersion),
@@ -310,7 +310,7 @@ object TransferInView
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
@@ -414,7 +414,9 @@ object TransferInView
         .required("contract", contractP)
         .flatMap(SerializableContract.fromProtoV1)
 
-      sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion(sourceProtocolVersionP))
+      sourceProtocolVersion = SourceProtocolVersion(
+        ProtocolVersion.fromProtoPrimitive(sourceProtocolVersionP)
+      )
 
       // TransferOutResultEvent deserialization
       transferOutResultEventP <- ProtoConverter

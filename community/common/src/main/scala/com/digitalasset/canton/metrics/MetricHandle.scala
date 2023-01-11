@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.metrics
@@ -209,9 +209,7 @@ object MetricDoc {
               } else {
                 rf.get match {
                   // if it is a metric handle, try to grab the annotation and the name
-                  case x: DamlMetricHandle
-                      // TODO(i11250): Remove badly annotated daml metric on next daml 2.6.0 upgrade:
-                      if x.name != "daml.indexer.metered_events" =>
+                  case x: DamlMetricHandle =>
                     val tag = extractTag(rf.symbol.annotations, tagParser)
                     if (tag.isEmpty) {
                       // if there is no Tag check if there exists a MetricDoc.FanInstanceTag

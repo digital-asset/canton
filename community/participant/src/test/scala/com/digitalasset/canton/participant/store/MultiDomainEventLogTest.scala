@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -281,7 +281,7 @@ trait MultiDomainEventLogTest
     def expectPublication(
         events: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])]
     ): OnPublishListener = {
-      val eventReferences = events.map { case (eventLogId, event, reference) =>
+      val eventReferences = events.map { case (_eventLogId, _event, reference) =>
         reference
       }
       val listener = new OnPublishListener(eventReferences)
@@ -298,7 +298,7 @@ trait MultiDomainEventLogTest
           published: Seq[OnPublish.Publication]
       )(implicit batchTraceContext: TraceContext): Unit = {
         val eventReferences = published.map(_.inFlightReference)
-        val _ = outstanding.getAndUpdate {
+        outstanding.getAndUpdate {
           case Right(old) =>
             if (old.startsWith(eventReferences)) {
               Right(old.drop(published.size))
@@ -309,7 +309,7 @@ trait MultiDomainEventLogTest
                 )
               )
           case err @ Left(_) => err
-        }
+        }.discard
       }
 
       def checkAllNotified: Assertion = {
@@ -325,8 +325,7 @@ trait MultiDomainEventLogTest
       for {
         storedEventsWithOffsets <- eventsFromSubscription(beginWith)
       } yield {
-        val storedEvents = storedEventsWithOffsets.map { case (_, event) => event }
-        val storedOffsets = storedEventsWithOffsets.map { case (offset, _) => offset }
+        val (storedOffsets, storedEvents) = storedEventsWithOffsets.unzip
 
         val expectedEvents = expectedTimestampedEvents.map { case (_, timestampedEvent, _) =>
           Traced(timestampedEvent.event)(timestampedEvent.traceContext)
@@ -350,8 +349,7 @@ trait MultiDomainEventLogTest
           endInclusive,
         )
       } yield {
-        val storedEvents = storedEventsWithOffsets.map { case (_, event) => event }
-        val storedOffsets = storedEventsWithOffsets.map { case (offset, _) => offset }
+        val (storedOffsets, storedEvents) = storedEventsWithOffsets.unzip
 
         val expectedEvents = expectedTimestampedEvents.map { case (_, timestampedEvent, _) =>
           Traced(timestampedEvent.event)(timestampedEvent.traceContext)

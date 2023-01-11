@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 syntax = "proto3";
@@ -150,10 +150,12 @@ message TransferredOut {
     string submitter = 3;
     google.protobuf.Timestamp record_time = 4;
     string contract_id = 5;
-    string source_domain = 6;
-    string target_domain = 7;
-    google.protobuf.Timestamp transfer_in_exclusivity = 8;
+    repeated string contract_stakeholders = 6;
+    string source_domain = 7;
+    string target_domain = 8;
+    google.protobuf.Timestamp transfer_in_exclusivity = 9;
 }
+
 message TransferredIn {
     string update_id = 1;
     CompletionInfo completion_info = 2;  // optional
@@ -161,8 +163,9 @@ message TransferredIn {
     google.protobuf.Timestamp record_time = 4;
     google.protobuf.Timestamp ledger_create_time = 5;
     bytes create_node = 6;
-    bytes contract_metadata = 7;
-    com.digitalasset.canton.protocol.v0.TransferId transfer_out_id = 8;
-    string target_domain = 9;
-    bool create_transaction_accepted = 10;
+    string creating_transaction_id = 7;
+    bytes contract_metadata = 8;
+    com.digitalasset.canton.protocol.v0.TransferId transfer_out_id = 9;
+    string target_domain = 10;
+    bool create_transaction_accepted = 11;
 }

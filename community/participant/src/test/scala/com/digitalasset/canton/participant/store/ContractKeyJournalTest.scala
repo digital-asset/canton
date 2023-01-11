@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
@@ -19,7 +19,7 @@ import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{LfTransactionBuilder, MonadUtil}
-import com.digitalasset.canton.{BaseTest, RequestCounter}
+import com.digitalasset.canton.{BaseTest, RequestCounter, TestMetrics}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import java.time.Instant
@@ -28,7 +28,8 @@ import scala.concurrent.ExecutionContext
 import scala.util.Random
 
 @nowarn("msg=match may not be exhaustive")
-trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLike with BaseTest =>
+trait ContractKeyJournalTest extends PrunableByTimeTest {
+  this: AsyncWordSpecLike & BaseTest & TestMetrics =>
   import ContractKeyJournalTest.*
 
   def contractKeyJournal(mkCkj: ExecutionContext => ContractKeyJournal): Unit = {

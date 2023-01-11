@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.submission.routing
@@ -9,8 +9,12 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
+import com.daml.lf.command.ProcessedDisclosedContract
+import com.daml.lf.data.ImmArray
+import com.daml.lf.transaction.Versioned
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
@@ -18,6 +22,10 @@ import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
   TransactionSubmitted,
+}
+import com.digitalasset.canton.participant.protocol.{
+  SerializableContractAuthenticator,
+  SerializableContractAuthenticatorImpl,
 }
 import com.digitalasset.canton.participant.store.ActiveContractStore.Active
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
@@ -73,9 +81,11 @@ class DomainRouter(
         LfKeyResolver,
         WellFormedTransaction[WithoutSuffixes],
         TraceContext,
+        Map[LfContractId, SerializableContract],
     ) => EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]],
     contractsTransferer: ContractsTransferer,
     snapshotProvider: DomainId => Either[TransactionRoutingError, TopologySnapshot],
+    serializableContractAuthenticator: SerializableContractAuthenticator,
     autoTransferTransaction: Boolean,
     domainSelectorFactory: DomainSelectorFactory,
     override protected val timeouts: ProcessingTimeout,
@@ -91,6 +101,7 @@ class DomainRouter(
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
       transaction: LfSubmittedTransaction,
+      explicitlyDisclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]] = {
@@ -103,6 +114,19 @@ class DomainRouter(
             MalformedInputErrors.InvalidPartyIdentifier.Error(err)
         }
       )
+
+      inputDisclosedContracts <- EitherT
+        .fromEither[Future](
+          for {
+            inputDisclosedContracts <-
+              explicitlyDisclosedContracts.toList
+                .parTraverse(SerializableContract.fromDisclosedContract)
+                .leftMap(MalformedInputErrors.InvalidDisclosedContract.Error)
+            _ <- inputDisclosedContracts
+              .traverse_(serializableContractAuthenticator.authenticate)
+              .leftMap(MalformedInputErrors.DisclosedContractAuthenticationFailed.Error)
+          } yield inputDisclosedContracts
+        )
 
       metadata <- EitherT
         .fromEither[Future](TransactionMetadata.fromTransactionMeta(transactionMeta))
@@ -158,6 +182,7 @@ class DomainRouter(
         keyResolver,
         wfTransaction,
         traceContext,
+        inputDisclosedContracts.view.map(sc => sc.contractId -> sc).toMap,
       )
     } yield transactionSubmittedF
   }
@@ -257,6 +282,7 @@ object DomainRouter {
       connectedDomainsMap: TrieMap[DomainId, SyncDomain],
       domainConnectionConfigStore: DomainConnectionConfigStore,
       domainAliasManager: DomainAliasManager,
+      cryptoPureApi: CryptoPureApi,
       participantId: ParticipantId,
       autoTransferTransaction: Boolean,
       timeouts: ProcessingTimeout,
@@ -288,6 +314,12 @@ object DomainRouter {
       loggerFactory = loggerFactory,
     )
 
+    val serializableContractAuthenticator = new SerializableContractAuthenticatorImpl(
+      // This unicum generator is used for all domains uniformly. This means that domains cannot specify
+      // different unicum generator strategies (e.g., different hash functions).
+      new UnicumGenerator(cryptoPureApi)
+    )
+
     new DomainRouter(
       participantId,
       domainOfContract(connectedDomainsMap),
@@ -295,6 +327,7 @@ object DomainRouter {
       submit(connectedDomainsMap),
       transfer,
       stateProvider,
+      serializableContractAuthenticator,
       autoTransferTransaction = autoTransferTransaction,
       domainSelectorFactory,
       timeouts,
@@ -491,6 +524,7 @@ object DomainRouter {
       keyResolver: LfKeyResolver,
       tx: WellFormedTransaction[WithoutSuffixes],
       traceContext: TraceContext,
+      disclosedContracts: Map[LfContractId, SerializableContract],
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]] =
@@ -502,7 +536,13 @@ object DomainRouter {
       )
       _ <- EitherT.cond[Future](domain.ready, (), SubmissionDomainNotReady.Error(domainId))
       result <- wrapSubmissionError(domain.domainId)(
-        domain.submitTransaction(submitterInfo, transactionMeta, keyResolver, tx)(traceContext)
+        domain.submitTransaction(
+          submitterInfo,
+          transactionMeta,
+          keyResolver,
+          tx,
+          disclosedContracts,
+        )(traceContext)
       )
     } yield result
 

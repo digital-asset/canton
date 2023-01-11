@@ -5,7 +5,7 @@
 // update parameters
 iou.service.update_dynamic_domain_parameters(
   _.update(transferExclusivityTimeout = Duration.Zero)
-) // disables automatic transfer-in
+) // disable automatic transfer-in
 
 paint.service.update_dynamic_domain_parameters(
   _.update(transferExclusivityTimeout = 2.seconds)

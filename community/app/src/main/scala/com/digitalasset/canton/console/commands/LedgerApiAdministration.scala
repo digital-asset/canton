@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console.commands
@@ -11,7 +11,7 @@ import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.v1.admin.package_management_service.PackageDetails
 import com.daml.ledger.api.v1.admin.party_management_service.PartyDetails as ProtoPartyDetails
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint
-import com.daml.ledger.api.v1.commands.Command
+import com.daml.ledger.api.v1.commands.{Command, DisclosedContract}
 import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_configuration_service.LedgerConfiguration
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
@@ -359,6 +359,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
+          disclosedContracts: Seq[DisclosedContract] = Seq.empty,
       ): TransactionTree = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -371,6 +372,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               deduplicationPeriod,
               submissionId,
               minLedgerTimeAbs,
+              disclosedContracts,
             )
           )
         }
@@ -402,6 +404,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
+          disclosedContracts: Seq[DisclosedContract] = Seq.empty,
       ): Transaction = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
@@ -414,6 +417,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               deduplicationPeriod,
               submissionId,
               minLedgerTimeAbs,
+              disclosedContracts,
             )
           )
         }
@@ -434,6 +438,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
           readAs: Seq[PartyId] = Seq.empty,
+          disclosedContracts: Seq[DisclosedContract] = Seq.empty,
       ): Unit = check(FeatureFlag.Testing) {
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -446,6 +451,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               deduplicationPeriod,
               submissionId,
               minLedgerTimeAbs,
+              disclosedContracts,
             )
           )
         }

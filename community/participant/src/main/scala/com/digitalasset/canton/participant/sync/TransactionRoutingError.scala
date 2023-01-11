@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.sync
@@ -178,6 +178,48 @@ object TransactionRoutingError extends RoutingErrorGroup {
           with TransactionRoutingError
     }
 
+    @Explanation(
+      """A provided disclosed contract could not be processed."""
+    )
+    @Resolution(
+      """Ensure that disclosed contracts provided with command submission have an authenticated contract id
+        |(i.e. have been created in participant nodes running Canton protocol version 4 or higher) and
+        |match the original contract creation format and content as sourced from the Ledger API.
+        |If the problem persists, contact the participant operator."""
+    )
+    object InvalidDisclosedContract
+        extends ErrorCode(
+          id = "INVALID_DISCLOSED_CONTRACT",
+          ErrorCategory.InvalidIndependentOfSystemState,
+        ) {
+
+      case class Error(err: String)
+          extends TransactionErrorImpl(
+            cause = s"Invalid disclosed contract: $err"
+          )
+          with TransactionRoutingError
+    }
+
+    @Explanation(
+      """A provided disclosed contract could not be authenticated against the provided contract id."""
+    )
+    @Resolution(
+      """Ensure that disclosed contracts provided with command submission match the original contract creation 
+        |content as sourced from the Ledger API.
+        |If the problem persists, contact the participant operator."""
+    )
+    object DisclosedContractAuthenticationFailed
+        extends ErrorCode(
+          id = "DISCLOSED_CONTRACT_AUTHENTICATION_FAILED",
+          ErrorCategory.InvalidIndependentOfSystemState,
+        ) {
+
+      case class Error(err: String)
+          extends TransactionErrorImpl(
+            cause = s"Disclosed contract authentication failed: $err"
+          )
+          with TransactionRoutingError
+    }
   }
 
   object TopologyErrors extends ErrorGroup() {

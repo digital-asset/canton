@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.store
@@ -16,14 +16,14 @@ import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, SequencerCounter, TestMetrics}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
 
 trait SequencedEventStoreTest extends PrunableByTimeTest {
-  this: AsyncWordSpec with BaseTest =>
+  this: AsyncWordSpec & BaseTest & TestMetrics =>
 
   val sequencerKey: Fingerprint = Fingerprint.tryCreate("sequencer")
   val crypto: Crypto =

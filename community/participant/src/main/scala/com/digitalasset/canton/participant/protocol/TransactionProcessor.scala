@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
@@ -86,7 +86,7 @@ class TransactionProcessor(
         crypto,
         ephemeral.storedContractManager,
         metrics,
-        new SerializableContractAuthenticator(new UnicumGenerator(crypto.pureCrypto)),
+        new SerializableContractAuthenticatorImpl(new UnicumGenerator(crypto.pureCrypto)),
         loggerFactory,
       ),
       inFlightSubmissionTracker,
@@ -101,6 +101,7 @@ class TransactionProcessor(
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
       transaction: WellFormedTransaction[WithoutSuffixes],
+      disclosedContracts: Map[LfContractId, SerializableContract],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessor.TransactionSubmissionError, Future[
@@ -112,6 +113,7 @@ class TransactionProcessor(
         transactionMeta,
         keyResolver,
         transaction,
+        disclosedContracts,
       )
     )
 }
@@ -309,7 +311,7 @@ object TransactionProcessor {
     object ContractAuthenticationFailed extends AlarmErrorCode("CONTRACT_AUTHENTICATION_FAILED") {
       case class Error(contractId: LfContractId, message: String)
           extends Alarm(
-            cause = s"Contract with id ($contractId) could not be authenticated: $message"
+            cause = s"Contract with id (${contractId.coid}) could not be authenticated: $message"
           )
           with TransactionSubmissionError
     }

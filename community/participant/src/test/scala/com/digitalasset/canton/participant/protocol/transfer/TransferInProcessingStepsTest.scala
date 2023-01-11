@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.transfer
@@ -744,11 +744,13 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           metadata = ContractMetadata.tryCreate(Set(party1), Set(party1), None),
         )
       val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
+      val rootHash = mock[RootHash]
+      when(rootHash.asLedgerTransactionId).thenReturn(LedgerTransactionId.fromString("id1"))
       val pendingRequestData = TransferInProcessingSteps.PendingTransferIn(
         RequestId(CantonTimestamp.Epoch),
         RequestCounter(1),
         SequencerCounter(1),
-        mock[RootHash],
+        rootHash,
         contract,
         submitter,
         transactionId1,

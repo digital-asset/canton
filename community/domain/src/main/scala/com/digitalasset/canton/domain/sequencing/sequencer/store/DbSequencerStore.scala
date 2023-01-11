@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
@@ -43,7 +43,6 @@ import slick.jdbc.*
 
 import java.sql.{Connection, JDBCType, SQLException, SQLNonTransientException}
 import java.util.UUID
-import scala.Ordering.Implicits.*
 import scala.annotation.tailrec
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}

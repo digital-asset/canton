@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.version
@@ -18,16 +18,16 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
   /*
       proto               0         1    2
-      protocolVersion     2    3    4    5    6  ...
+      protocolVersion     3    4    5    6    7  ...
    */
   "HasVersionedWrapperV2" should {
     "use correct proto version depending on the protocol version for serialization" in {
       def message(i: Int): Message = Message("Hey", 1, 2.0, protocolVersionRepresentative(i))(None)
-      message(2).toProtoVersioned.version shouldBe 0
       message(3).toProtoVersioned.version shouldBe 0
-      message(4).toProtoVersioned.version shouldBe 1
-      message(5).toProtoVersioned.version shouldBe 2
+      message(4).toProtoVersioned.version shouldBe 0
+      message(5).toProtoVersioned.version shouldBe 1
       message(6).toProtoVersioned.version shouldBe 2
+      message(7).toProtoVersioned.version shouldBe 2
     }
 
     "set correct protocol version depending on the proto version" in {
@@ -38,7 +38,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         .value
 
       val messageV0 = VersionedMessageV0("Hey").toByteString
-      val expectedV0Deserialization = Message("Hey", 0, 0, protocolVersionRepresentative(2))(None)
+      val expectedV0Deserialization = Message("Hey", 0, 0, protocolVersionRepresentative(3))(None)
       Message
         .fromByteString(ProtoVersion(0))(
           messageV0
@@ -54,7 +54,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       val messageV1 = VersionedMessageV1("Hey", 42).toByteString
       val expectedV1Deserialization =
-        Message("Hey", 42, 1.0, protocolVersionRepresentative(4))(None)
+        Message("Hey", 42, 1.0, protocolVersionRepresentative(5))(None)
       fromByteString(messageV1, 1) shouldBe expectedV1Deserialization
 
       // Round trip serialization
@@ -66,7 +66,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       val messageV2 = VersionedMessageV2("Hey", 42, 43.0).toByteString
       val expectedV2Deserialization =
-        Message("Hey", 42, 43.0, protocolVersionRepresentative(5))(None)
+        Message("Hey", 42, 43.0, protocolVersionRepresentative(6))(None)
       fromByteString(messageV2, 2) shouldBe expectedV2Deserialization
 
       // Round trip serialization
@@ -78,12 +78,12 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
     }
 
     "return the protocol representative" in {
-      protocolVersionRepresentative(2).representative shouldBe ProtocolVersion(2)
-      protocolVersionRepresentative(3).representative shouldBe ProtocolVersion(2)
-      protocolVersionRepresentative(4).representative shouldBe ProtocolVersion(4)
-      protocolVersionRepresentative(5).representative shouldBe ProtocolVersion(5)
-      protocolVersionRepresentative(6).representative shouldBe ProtocolVersion(5)
-      protocolVersionRepresentative(7).representative shouldBe ProtocolVersion(5)
+      protocolVersionRepresentative(3).representative shouldBe ProtocolVersion.v3
+      protocolVersionRepresentative(4).representative shouldBe ProtocolVersion.v3
+      protocolVersionRepresentative(5).representative shouldBe ProtocolVersion.v5
+      protocolVersionRepresentative(6).representative shouldBe ProtocolVersion(6)
+      protocolVersionRepresentative(7).representative shouldBe ProtocolVersion(6)
+      protocolVersionRepresentative(8).representative shouldBe ProtocolVersion(6)
     }
   }
 }
@@ -113,21 +113,21 @@ object HasProtocolVersionedWrapperTest {
 
     /*
       proto               0         1    2
-      protocolVersion     2    3    4    5    6  ...
+      protocolVersion     3    4    5    6    7  ...
      */
     val supportedProtoVersions = SupportedProtoVersions(
       ProtoVersion(1) -> VersionedProtoConverter(
-        ProtocolVersion(4),
+        ProtocolVersion.v5,
         supportedProtoVersionMemoized(VersionedMessageV1)(fromProtoV1),
         _.toProtoV1.toByteString,
       ),
       ProtoVersion(0) -> LegacyProtoConverter(
-        ProtocolVersion(2),
+        ProtocolVersion.v3,
         supportedProtoVersionMemoized(VersionedMessageV0)(fromProtoV0),
         _.toProtoV0.toByteString,
       ),
       ProtoVersion(2) -> VersionedProtoConverter(
-        ProtocolVersion(5),
+        ProtocolVersion(6),
         supportedProtoVersionMemoized(VersionedMessageV2)(fromProtoV2),
         _.toProtoV2.toByteString,
       ),

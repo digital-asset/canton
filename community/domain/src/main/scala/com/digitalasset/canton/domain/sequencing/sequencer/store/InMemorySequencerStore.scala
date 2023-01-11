@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
@@ -27,7 +27,6 @@ import com.google.protobuf.ByteString
 import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentSkipListMap}
-import scala.Ordering.Implicits.*
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}

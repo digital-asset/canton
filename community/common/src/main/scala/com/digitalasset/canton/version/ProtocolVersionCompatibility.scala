@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.version
@@ -39,8 +39,9 @@ object ProtocolVersionCompatibility {
   }
 
   /** Returns the protocol versions supported by the domain of the current release.
+    * Fails if no stable protocol versions are found
     */
-  def supportedProtocolsDomain(
+  def trySupportedProtocolsDomain(
       release: ReleaseVersion = ReleaseVersion.current,
       includeUnstableVersions: Boolean,
   ): NonEmpty[List[ProtocolVersion]] = {
@@ -56,9 +57,6 @@ object ProtocolVersionCompatibility {
       ),
     ) ++ unstable
   }
-
-  def getLatestSupportedProtocolDomain(release: ReleaseVersion): ProtocolVersion =
-    supportedProtocolsDomain(release, includeUnstableVersions = false).max1
 
   final case class UnsupportedVersion(version: ProtocolVersion, supported: Seq[ProtocolVersion])
       extends FailureReason {
@@ -105,7 +103,7 @@ object ProtocolVersionCompatibility {
       haveDevVersionSupport: Boolean,
       protocolVersion: ProtocolVersion,
   ): Either[String, Unit] = {
-    val supported = supportedProtocolsDomain(includeUnstableVersions = haveDevVersionSupport)
+    val supported = trySupportedProtocolsDomain(includeUnstableVersions = haveDevVersionSupport)
     ProtocolVersionCompatibility
       .canClientConnectToServer(supported, protocolVersion, None)
       .leftMap(_.description)
@@ -188,12 +186,14 @@ object DomainProtocolVersion {
           // we support development versions when parsing, but catch dev versions without
           // the safety flag during config validation
           ProtocolVersionCompatibility
-            .supportedProtocolsDomain(includeUnstableVersions = true)
+            .trySupportedProtocolsDomain(includeUnstableVersions = true)
             .contains(version),
           (),
           UnsupportedVersion(
             version,
-            ProtocolVersionCompatibility.supportedProtocolsDomain(includeUnstableVersions = false),
+            ProtocolVersionCompatibility.trySupportedProtocolsDomain(includeUnstableVersions =
+              false
+            ),
           ),
         )
       } yield DomainProtocolVersion(version)

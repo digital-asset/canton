@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer
@@ -233,8 +233,7 @@ class SequencerReader(
           Future.successful(Some(signingTimestamp) -> signingSnaphot)
         case None =>
           val warnIfApproximate =
-            (event.counter > SequencerCounter.Genesis) && member.isAuthenticated &&
-              protocolVersion != ProtocolVersion.v2
+            (event.counter > SequencerCounter.Genesis) && member.isAuthenticated
           SyncCryptoClient
             .getSnapshotForTimestamp(
               syncCryptoApi,
@@ -306,7 +305,7 @@ class SequencerReader(
               protocolVersion,
               // This warning should only trigger on unauthenticated members,
               // but batches addressed to unauthenticated members must not specify a signing key timestamp.
-              warnIfApproximate = protocolVersion != ProtocolVersion.v2,
+              warnIfApproximate = true,
             )
             .value
             .flatMap {

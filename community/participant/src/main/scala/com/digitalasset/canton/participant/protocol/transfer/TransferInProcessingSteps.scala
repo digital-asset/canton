@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.transfer
@@ -679,7 +679,7 @@ private[transfer] class TransferInProcessingSteps(
       requestId,
       requestCounter,
       requestSequencerCounter,
-      _rootHash,
+      rootHash,
       contract,
       submitter,
       creatingTransactionId,
@@ -705,12 +705,13 @@ private[transfer] class TransferInProcessingSteps(
         val contractsToBeStored = Set(contract.contractId)
 
         for {
-          event <- createTransferIn(
+          event <- createTransferredIn(
             contract,
             creatingTransactionId,
             requestId.unwrap,
             submitter,
             transferId,
+            rootHash,
             createTransactionAccepted = !transferringParticipant,
           )
           timestampEvent = Some(
@@ -737,18 +738,18 @@ private[transfer] class TransferInProcessingSteps(
     }
   }
 
-  private[transfer] def createTransferIn(
+  private[transfer] def createTransferredIn(
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
       recordTime: CantonTimestamp,
       submitter: LfPartyId,
       transferOutId: TransferId,
+      rootHash: RootHash,
       createTransactionAccepted: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
     val targetDomain = domainId
-    val lfTransactionId = creatingTransactionId.tryAsLedgerTransactionId
     val contractInst = contract.contractInstance.unversioned
     val createNode: LfNodeCreate =
       LfNodeCreate(
@@ -776,6 +777,19 @@ private[transfer] class TransferInProcessingSteps(
       isParticipantHostingSubmitter <- EitherT.right(
         targetIps.ipsSnapshot.hostedOn(submitter, participantId).map(_.nonEmpty)
       )
+
+      updateId <- EitherT.fromEither[Future](
+        rootHash.asLedgerTransactionId.leftMap[TransferProcessorError](
+          FieldConversionError("Transaction id (root hash)", _)
+        )
+      )
+
+      ledgerCreatingTransactionId <- EitherT.fromEither[Future](
+        creatingTransactionId.asLedgerTransactionId.leftMap[TransferProcessorError](
+          FieldConversionError("Transaction id (creating transaction)", _)
+        )
+      )
+
       completionInfo =
         Option.when(isParticipantHostingSubmitter)(
           CompletionInfo(
@@ -790,12 +804,13 @@ private[transfer] class TransferInProcessingSteps(
           )
         )
     } yield LedgerSyncEvent.TransferredIn(
-      updateId = lfTransactionId,
+      updateId = updateId,
       optCompletionInfo = completionInfo,
       submitter = submitter,
       recordTime = recordTime.toLf,
       ledgerCreateTime = contract.ledgerCreateTime.toLf,
       createNode = createNode,
+      creatingTransactionId = ledgerCreatingTransactionId,
       contractMetadata = driverContractMetadata,
       transferOutId = transferOutId,
       targetDomain = targetDomain,

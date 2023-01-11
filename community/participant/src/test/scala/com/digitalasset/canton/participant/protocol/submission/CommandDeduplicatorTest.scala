@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.submission
@@ -54,7 +54,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     recordTime = CantonTimestamp.Epoch.toLf,
     divulgedContracts = List.empty,
     blindingInfo = None,
-    contractMetadata = Map(), // TODO(#9795) wire proper value
+    contractMetadata = Map(),
   )
   lazy val changeId1 = event1.optCompletionInfo.value.changeId
   lazy val changeId1Hash = ChangeIdHash(changeId1)

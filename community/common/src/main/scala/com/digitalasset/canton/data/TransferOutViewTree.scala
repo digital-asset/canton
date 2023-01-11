@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
@@ -72,7 +72,7 @@ object TransferOutViewTree
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.TransferViewTree)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     )
@@ -192,7 +192,7 @@ object TransferOutCommonData
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersionMemoized(v0.TransferOutCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
@@ -274,7 +274,7 @@ object TransferOutCommonData
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       adminParties <- adminPartiesP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
-      protocolVersion = ProtocolVersion(protocolVersionP)
+      protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield TransferOutCommonData(
       salt,
       sourceDomain,
@@ -351,7 +351,7 @@ object TransferOutView
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersionMemoized(v0.TransferOutView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
@@ -429,7 +429,9 @@ object TransferOutView
       contractId <- ProtoConverter.parseLfContractId(contractIdP)
       targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
 
-      targetProtocolVersion = TargetProtocolVersion(ProtocolVersion(targetProtocolVersionP))
+      targetProtocolVersion = TargetProtocolVersion(
+        ProtocolVersion.fromProtoPrimitive(targetProtocolVersionP)
+      )
 
       targetTimeProof <- ProtoConverter
         .required("targetTimeProof", targetTimeProofP)

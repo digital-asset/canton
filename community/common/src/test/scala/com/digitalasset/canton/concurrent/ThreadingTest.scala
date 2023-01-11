@@ -1,20 +1,20 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.concurrent
 
 import cats.syntax.parallel.*
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{LazyValWithContext, ResourceUtil}
+import com.digitalasset.canton.{BaseTest, TestMetrics}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.concurrent.{Semaphore, TimeUnit}
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
-class ThreadingTest extends AnyWordSpec with BaseTest {
+class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
 
   lazy val expectedNumberOfParallelTasks: Int = Threading.detectNumberOfThreads(logger)
   val expectedNumberOfParallelTasksWrappedInBlocking: Int = 200
@@ -232,7 +232,11 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
       logger.debug("Entering 'the parallel ExecutionContext should be stack-safe in general'...")
 
       val parallelExecutionContext =
-        Threading.newExecutionContext("threading-test-execution-context", logger)
+        Threading.newExecutionContext(
+          "threading-test-execution-context",
+          logger,
+          executorServiceMetrics,
+        )
 
       def rec(n: Int): Future[Int] = {
         Future
@@ -337,7 +341,11 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
   def withNewExecutionContext(body: ExecutionContext => Unit): Unit =
     ResourceUtil.withResource(
       ExecutorServiceExtensions(
-        Threading.newExecutionContext("threading-test-execution-context", logger)
+        Threading.newExecutionContext(
+          "threading-test-execution-context",
+          logger,
+          executorServiceMetrics,
+        )
       )(logger, DefaultProcessingTimeouts.testing)
     ) { case ExecutorServiceExtensions(ec) =>
       body(ec)

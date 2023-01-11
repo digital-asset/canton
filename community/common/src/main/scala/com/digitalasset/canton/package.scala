@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset
@@ -81,6 +81,9 @@ package object canton {
 
   type LfFetchByKeyCommand = LfCommand.FetchByKey
   val LfFetchByKeyCommand: LfCommand.FetchByKey.type = LfCommand.FetchByKey
+
+  type LfIdentifier = Ref.Identifier
+  val LfIdentifier: Ref.Identifier.type = Ref.Identifier
 
   type LfLookupByKeyCommand = LfCommand.LookupByKey
   val LfLookupByKeyCommand: LfCommand.LookupByKey.type = LfCommand.LookupByKey

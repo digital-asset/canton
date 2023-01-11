@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol.messages
@@ -432,7 +432,7 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.EncryptedViewMessage)(EncryptedViewMessageV0.fromProto),
       _.toByteString,
     ),
@@ -478,8 +478,8 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
       )
       viewKeyRandomness <-
         eitherT(
-          ProtocolCryptoApi
-            .hkdf(pureCrypto, protocolVersion)(viewRandomness, viewKeyLength, HkdfInfo.ViewKey)
+          pureCrypto
+            .computeHkdf(viewRandomness.unwrap, viewKeyLength, HkdfInfo.ViewKey)
             .leftMap(EncryptedViewMessageDecryptionError.HkdfExpansionError(_, encrypted))
         )
       viewKey <- eitherT(

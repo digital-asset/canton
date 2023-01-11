@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store.db
@@ -99,6 +99,18 @@ class DbTransferStore(
   private implicit val getResultTransferData: GetResult[TransferData] = GetResult { r =>
     val sourceProtocolVersion = SourceProtocolVersion(GetResult[ProtocolVersion].apply(r))
 
+    /*
+      Context: Prior to Canton 2.4.0, we were missing the source protocol version in the
+      transfer store. In Canton 2.4.0, it was added with the default value of 2 (see in
+      the migration file). Now that pv=2 is removed, this confuses the deserializer of the
+      EnvelopeContent when deserializing the transfer-out result.
+      To solve that, we use at least ProtocolVersion.v3 for the derialization of the
+      transfer-out result.
+     */
+    val fixedSourceProtocolVersion =
+      if (sourceProtocolVersion.v >= ProtocolVersion.v3) sourceProtocolVersion
+      else SourceProtocolVersion(ProtocolVersion.v3)
+
     TransferData(
       sourceProtocolVersion = sourceProtocolVersion,
       transferOutTimestamp = GetResult[CantonTimestamp].apply(r),
@@ -107,7 +119,7 @@ class DbTransferStore(
       transferOutDecisionTime = GetResult[CantonTimestamp].apply(r),
       contract = GetResult[SerializableContract].apply(r),
       creatingTransactionId = GetResult[TransactionId].apply(r),
-      getResultDeliveredTransferOutResult(sourceProtocolVersion).apply(r),
+      transferOutResult = getResultDeliveredTransferOutResult(fixedSourceProtocolVersion).apply(r),
     )
   }
 

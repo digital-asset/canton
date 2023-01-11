@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.store
@@ -1234,7 +1234,7 @@ trait TopologyStoreTest
             protocolVersion,
           )
 
-        val oldTx = factory.mkTrans(addTx(ProtocolVersion.v2), namespaceKey)
+        val oldTx = factory.mkTrans(addTx(ProtocolVersion.v3), namespaceKey)
         val newTx = factory.mkTrans(addTx(ProtocolVersion.v4), namespaceKey)
 
         for {

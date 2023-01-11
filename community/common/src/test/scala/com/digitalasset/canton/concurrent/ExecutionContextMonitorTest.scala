@@ -1,12 +1,12 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.concurrent
 
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.logging.{LogEntry, SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.{BaseTest, TestMetrics}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -15,7 +15,7 @@ import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
-class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest {
+class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest with TestMetrics {
 
   def runAndCheck(loggerFactory: SuppressingLogger, check: Seq[LogEntry] => Assertion): Unit = {
     val logger = TracedLogger(loggerFactory.getLogger(getClass))
@@ -23,7 +23,7 @@ class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest {
       Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-test-scheduler", logger)
 
     val ecName = loggerFactory.threadName + "test-my-ec"
-    implicit val ec = Threading.newExecutionContext(ecName, logger)
+    implicit val ec = Threading.newExecutionContext(ecName, logger, executorServiceMetrics)
     val monitor =
       new ExecutionContextMonitor(
         loggerFactory,

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.time
@@ -25,7 +25,6 @@ import io.functionmeta.functionFullName
 
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicReference
-import scala.Ordering.Implicits.*
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
 /** Configuration for the domain time tracker.

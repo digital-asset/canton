@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
@@ -108,7 +108,7 @@ object StaticDomainParameters
     with ProtocolVersionedCompanionDbHelpers[StaticDomainParameters] {
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(protoV0.StaticDomainParameters)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
@@ -270,7 +270,7 @@ object StaticDomainParameters
         requiredCryptoKeyFormatsP,
         CryptoKeyFormat.fromProtoEnum,
       )
-      protocolVersion = ProtocolVersion(protocolVersionP)
+      protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield StaticDomainParameters(
       StaticDomainParameters.defaultReconciliationInterval,
       StaticDomainParameters.defaultMaxRatePerParticipant,
@@ -526,7 +526,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2,
+      ProtocolVersion.v3,
       supportedProtoVersion(protoV0.DynamicDomainParameters)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),

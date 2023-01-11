@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.protocol
@@ -17,6 +17,8 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
+import monocle.macros.GenLens
 import slick.jdbc.{GetResult, SetParameter}
 
 /** Represents a serializable contract instance and memoizes the serialization.
@@ -50,9 +52,24 @@ case class SerializableRawContractInstance private (
       contractInstance.unversioned.template,
       contractInstance.unversioned.arg,
     )
+
+  private def copy(
+      contractInstance: LfContractInst = this.contractInstance,
+      agreementText: AgreementText = this.agreementText,
+  ): SerializableRawContractInstance =
+    SerializableRawContractInstance(contractInstance, agreementText)(None)
 }
 
 object SerializableRawContractInstance {
+
+  @VisibleForTesting
+  lazy val contractInstanceUnsafe: Lens[SerializableRawContractInstance, LfContractInst] =
+    GenLens[SerializableRawContractInstance](_.contractInstance)
+
+  @VisibleForTesting
+  lazy val agreementTextUnsafe: Lens[SerializableRawContractInstance, AgreementText] =
+    GenLens[SerializableRawContractInstance](_.agreementText)
+
   implicit def contractGetResult(implicit
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[SerializableRawContractInstance] = GetResult { r =>

@@ -27,20 +27,18 @@ object JvmRulesPlugin extends AutoPlugin {
     headerLicense := Some(
       HeaderLicense
         .Custom( // When updating the year here, also update .circleci/enterpriseAppHeaderCheck.sh and damlRepoHeaderSettings below
-          """|Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates
+          """|Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates
              |
              |Proprietary code. All rights reserved.
              |""".stripMargin
         )
     ),
-    // Add license header to SQL files too
     headerMappings := headerMappings.value ++ Map(
       HeaderFileType("daml") -> dashCommentStyle,
       HeaderFileType("java") -> HeaderCommentStyle.cppStyleLineComment,
       HeaderFileType("proto") -> HeaderCommentStyle.cppStyleLineComment,
       HeaderFileType.scala -> HeaderCommentStyle.cppStyleLineComment,
       HeaderFileType.sh -> HeaderCommentStyle.hashLineComment,
-      HeaderFileType("sql") -> dashCommentStyle,
       HeaderFileType("rst") -> dotCommentStyle,
     ),
   )
@@ -52,7 +50,7 @@ object JvmRulesPlugin extends AutoPlugin {
     headerLicense := Some(
       HeaderLicense
         .Custom( // When updating the year here, also update .circleci/enterpriseAppHeaderCheck.sh and cantonRepoHeaderSettings above
-          """|Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+          """|Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
              |SPDX-License-Identifier: Apache-2.0
              |""".stripMargin
         )

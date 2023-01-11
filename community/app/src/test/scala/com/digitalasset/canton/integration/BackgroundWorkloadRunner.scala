@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.integration
@@ -24,7 +24,10 @@ trait BackgroundWorkloadRunner[E <: Environment] {
       implicit env: TestEnvironment[E]
   ): T = {
     val stop = new AtomicBoolean(false)
-    val scheduler = Threading.singleThreadedExecutor("test-workload-runner", logger)
+    val scheduler = Threading.singleThreadedExecutor(
+      "test-workload-runner",
+      logger,
+    )
     try {
       scheduler.submit(new WorkloadRunner(scheduler, stop, participants))
       code
