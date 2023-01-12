@@ -7,8 +7,9 @@ import better.files.File
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.console.BufferedProcessLogger
+import com.digitalasset.canton.logging.LogEntry
 import org.scalatest.wordspec.FixtureAnyWordSpec
-import org.scalatest.{Outcome, SuiteMixin}
+import org.scalatest.{Assertion, Outcome, SuiteMixin}
 
 import java.io.ByteArrayInputStream
 import scala.sys.process.*
@@ -215,7 +216,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
     }
 
     "let the demo run in the enterprise release" in { processLogger =>
-      val ret = Process(
+      val exitCode = Process(
         Seq(
           "bin/canton",
           "-Ddemo-test=2",
@@ -227,13 +228,92 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
         ),
         Some(new java.io.File(cantonDir)),
       ) ! processLogger
-      logger.debug(s"The process has ended now with $ret")
+      logger.debug(s"The process has ended now with $exitCode")
       val out = processLogger.output()
       logger.debug("Stdout is\n" + out)
+      exitCode shouldBe 0
       out should include(successMsg)
-
     }
 
+    "return failure exit code on script failure" when {
+      def test(
+          scriptFirstLine: String,
+          isDaemon: Boolean,
+          expectedExitCode: Int,
+          expectedErrorLines: Seq[String],
+      )(
+          extraOutputAssertion: String => Assertion = _ => succeed
+      )(processLogger: FixtureParam): Unit = {
+        File.usingTemporaryFile(prefix = "script-", suffix = ".sc") { scriptFile =>
+          scriptFile.appendLine(scriptFirstLine)
+
+          val runModeArgs =
+            if (isDaemon) Seq("daemon", "--bootstrap", scriptFile.toString)
+            else Seq("run", scriptFile.toString)
+
+          val exitCode = Process(
+            Seq("bin/canton") ++ runModeArgs ++ Seq("-c", "demo/demo.conf"),
+            Some(new java.io.File(cantonDir)),
+          ) ! processLogger
+
+          val out = processLogger.output()
+          logger.debug(s"The process has ended now with $exitCode")
+
+          loggerFactory.assertLogsUnordered(
+            out
+              .split("\\n")
+              .foreach(msg => if (msg.contains("ERROR")) logger.error(msg) else logger.debug(msg)),
+            expectedErrorLines
+              .map(expectedErrorLine =>
+                (logEntry: LogEntry) => logEntry.errorMessage should include(expectedErrorLine)
+              ) *,
+          )
+
+          exitCode shouldBe expectedExitCode
+          expectedErrorLines.foreach(expectedLine => out should include(expectedLine))
+          extraOutputAssertion(out)
+        }
+      }
+
+      "script (run) does not compile" in {
+        test(
+          scriptFirstLine = "I shall not compile",
+          isDaemon = false,
+          expectedExitCode = 1,
+          expectedErrorLines = Seq("Script execution failed: Compilation Failed"),
+        )(_ should include("not found: value I"))
+      }
+
+      "script (run) compiles but throws" in {
+        test(
+          scriptFirstLine = """throw new RuntimeException("some exception")""",
+          isDaemon = false,
+          expectedExitCode = 1,
+          expectedErrorLines =
+            Seq("Script execution failed: java.lang.RuntimeException: some exception"),
+        )()
+      }
+
+      "script (daemon) does not compile" in {
+        test(
+          scriptFirstLine = "I shall not compile",
+          isDaemon = true,
+          expectedExitCode = 3, // Bootstrap scripts exit with 3
+          expectedErrorLines = Seq("Bootstrap script terminated with an error"),
+        )(_ should include("not found: value I"))
+      }
+
+      "script (daemon) compiles but throws" in {
+        test(
+          scriptFirstLine = """throw new RuntimeException("some exception")""",
+          isDaemon = true,
+          expectedExitCode = 3, // Bootstrap scripts exit with 3
+          expectedErrorLines = Seq(
+            "Bootstrap script terminated with an error: java.lang.RuntimeException: some exception"
+          ),
+        )()
+      }
+    }
   }
 
   private def checkOutput(

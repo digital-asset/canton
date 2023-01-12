@@ -4,6 +4,8 @@
 package com.digitalasset.canton.config
 
 import com.daml.ledger.api.tls.TlsVersion
+import com.daml.metrics.api.MetricHandle.Factory
+import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
@@ -11,7 +13,6 @@ import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt
 import com.digitalasset.canton.config.SequencerConnectionConfig.CertificateFile
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.networking.grpc.{
   CantonCommunityServerInterceptors,
   CantonServerBuilder,
@@ -80,7 +81,8 @@ trait ServerConfig extends Product with Serializable {
   def instantiateServerInterceptors(
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
-      metrics: MetricHandle.Factory,
+      metricsPrefix: MetricName,
+      metrics: Factory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ): CantonServerInterceptors
@@ -91,7 +93,8 @@ trait CommunityServerConfig extends ServerConfig {
   override def instantiateServerInterceptors(
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
-      metrics: MetricHandle.Factory,
+      metricsPrefix: MetricName,
+      metrics: Factory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ) = new CantonCommunityServerInterceptors(

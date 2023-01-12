@@ -5,17 +5,17 @@ package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricName
-import com.daml.metrics.api.testing.InMemoryMetricsFactory
+import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.metrics.MetricHandle.CantonDropwizardMetricsFactory
 import io.opentelemetry.sdk.metrics.SdkMeterProvider
 
 object ParticipantTestMetrics
     extends ParticipantMetrics(
       "test_participant",
       MetricName("test"),
-      new MetricRegistry(),
-      SdkMeterProvider.builder().build().meterBuilder("test").build(),
-      InMemoryMetricsFactory,
+      new CantonDropwizardMetricsFactory(new MetricRegistry()),
+      new OpenTelemetryFactory(SdkMeterProvider.builder().build().meterBuilder("test").build()),
     ) {
 
   val domain: SyncDomainMetrics = this.domainMetrics(DomainAlias.tryCreate("test"))

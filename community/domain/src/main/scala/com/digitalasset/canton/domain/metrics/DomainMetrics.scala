@@ -3,22 +3,23 @@
 
 package com.digitalasset.canton.domain.metrics
 
-import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
-import com.daml.metrics.api.dropwizard.DropwizardGauge
-import com.daml.metrics.api.{MetricDoc, MetricName}
-import com.daml.metrics.grpc.GrpcServerMetrics
-import com.digitalasset.canton.metrics.{DbStorageMetrics, MetricHandle, SequencerClientMetrics}
+import com.daml.metrics.api.noop.NoOpGauge
+import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
+import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
+import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
+import com.digitalasset.canton.metrics.{DbStorageMetrics, SequencerClientMetrics}
 
 class SequencerMetrics(
     parent: MetricName,
-    val registry: MetricRegistry,
-    val grpcMetrics: GrpcServerMetrics,
-) extends MetricHandle.NodeMetrics {
-  override val prefix = MetricName(parent :+ "sequencer")
+    val factory: MetricsFactory,
+) {
+  val prefix: MetricName = MetricName(parent :+ "sequencer")
+  val grpcMetrics = new DamlGrpcServerMetrics(factory, "sequencer")
 
-  object sequencerClient extends SequencerClientMetrics(prefix, registry)
+  object sequencerClient extends SequencerClientMetrics(prefix, factory)
 
   @MetricDoc.Tag(
     summary = "Number of active sequencer subscriptions",
@@ -27,14 +28,15 @@ class SequencerMetrics(
         |served subscriptions at the sequencer.""",
     qualification = Debug,
   )
-  val subscriptionsGauge: Gauge[Int] = gauge[Int](MetricName(prefix :+ "subscriptions"), 0)
+  val subscriptionsGauge: Gauge[Int] =
+    factory.gauge[Int](MetricName(prefix :+ "subscriptions"), 0)(MetricsContext.Empty)
   @MetricDoc.Tag(
     summary = "Number of messages processed by the sequencer",
     description = """This metric measures the number of successfully validated messages processed
                     |by the sequencer since the start of this process.""",
     qualification = Debug,
   )
-  val messagesProcessed: Meter = meter(prefix :+ "processed")
+  val messagesProcessed: Meter = factory.meter(prefix :+ "processed")
 
   @MetricDoc.Tag(
     summary = "Number of message bytes processed by the sequencer",
@@ -42,7 +44,7 @@ class SequencerMetrics(
       """This metric measures the total number of message bytes processed by the sequencer.""",
     qualification = Debug,
   )
-  val bytesProcessed: Meter = meter(prefix :+ "processed-bytes")
+  val bytesProcessed: Meter = factory.meter(prefix :+ "processed-bytes")
 
   @MetricDoc.Tag(
     summary = "Number of time requests received by the sequencer",
@@ -53,13 +55,13 @@ class SequencerMetrics(
         |need to be revised to deal with different clock skews and latencies between the sequencer and participants.""",
     qualification = Debug,
   )
-  val timeRequests: Meter = meter(prefix :+ "time-requests")
+  val timeRequests: Meter = factory.meter(prefix :+ "time-requests")
 
-  object dbStorage extends DbStorageMetrics(prefix, registry)
+  object dbStorage extends DbStorageMetrics(prefix, factory)
 }
 
-class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Factory {
-  override def prefix: MetricName = MetricName("env")
+class EnvMetrics(factory: MetricsFactory) {
+  def prefix: MetricName = MetricName("env")
 
   val executionContextQueueSizeName: MetricName = prefix :+ "execution-context" :+ "queue-size"
   @MetricDoc.Tag(
@@ -69,13 +71,15 @@ class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Fac
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private val executionContextQueueSizeDoc: Gauge[Long] = // For docs only
-    DropwizardGauge(executionContextQueueSizeName, null)
+    NoOpGauge(executionContextQueueSizeName, 0L)
 
   def registerExecutionContextQueueSize(f: () => Long): Unit = {
-    gaugeWithSupplier(
-      executionContextQueueSizeName,
-      f,
-    )
+    factory
+      .gaugeWithSupplier(
+        executionContextQueueSizeName,
+        f,
+      )(MetricsContext.Empty)
+      .discard
   }
 
 }
@@ -85,36 +89,38 @@ class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Fac
   groupableClass = classOf[SequencerClientMetrics],
 )
 class DomainMetrics(
-    override val prefix: MetricName,
-    override val registry: MetricRegistry,
-    val grpcMetrics: GrpcServerMetrics,
-) extends MetricHandle.NodeMetrics {
+    val prefix: MetricName,
+    val metricsFactory: MetricsFactory,
+) {
 
-  object dbStorage extends DbStorageMetrics(prefix, registry)
+  val grpcMetrics: GrpcServerMetrics =
+    new DamlGrpcServerMetrics(metricsFactory = metricsFactory, component = "domain")
+  object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
-  object sequencer extends SequencerMetrics(prefix, registry, grpcMetrics)
+  object sequencer extends SequencerMetrics(prefix, metricsFactory)
 
-  object mediator extends MediatorMetrics(prefix, registry)
+  object mediator extends MediatorMetrics(prefix, metricsFactory)
 
-  object topologyManager extends IdentityManagerMetrics(prefix, registry)
+  object topologyManager extends IdentityManagerMetrics(prefix, metricsFactory)
 }
 
 class MediatorNodeMetrics(
-    override val prefix: MetricName,
-    override val registry: MetricRegistry,
-    val grpcMetrics: GrpcServerMetrics,
-) extends MetricHandle.NodeMetrics {
-  object dbStorage extends DbStorageMetrics(prefix, registry)
+    val prefix: MetricName,
+    val metricsFactory: MetricsFactory,
+) {
 
-  object mediator extends MediatorMetrics(prefix, registry)
+  val grpcMetrics: GrpcServerMetrics =
+    new DamlGrpcServerMetrics(metricsFactory = metricsFactory, component = "mediator")
+  object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
+
+  object mediator extends MediatorMetrics(prefix, metricsFactory)
 }
 
-class MediatorMetrics(basePrefix: MetricName, override val registry: MetricRegistry)
-    extends MetricHandle.Factory {
+class MediatorMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
 
-  override val prefix: MetricName = basePrefix :+ "mediator"
+  val prefix: MetricName = basePrefix :+ "mediator"
 
-  object sequencerClient extends SequencerClientMetrics(prefix, registry)
+  object sequencerClient extends SequencerClientMetrics(prefix, metricsFactory)
 
   @MetricDoc.Tag(
     summary = "Number of currently outstanding requests",
@@ -122,7 +128,8 @@ class MediatorMetrics(basePrefix: MetricName, override val registry: MetricRegis
                     |with the mediator.""",
     qualification = Debug,
   )
-  val outstanding: Gauge[Int] = this.gauge(prefix :+ "outstanding-requests", 0)
+  val outstanding: Gauge[Int] =
+    metricsFactory.gauge(prefix :+ "outstanding-requests", 0)(MetricsContext.Empty)
 
   @MetricDoc.Tag(
     summary = "Number of totally processed requests",
@@ -130,13 +137,12 @@ class MediatorMetrics(basePrefix: MetricName, override val registry: MetricRegis
                     |has been started.""",
     qualification = Debug,
   )
-  val requests: Meter = this.meter(prefix :+ "requests")
+  val requests: Meter = metricsFactory.meter(prefix :+ "requests")
 
 }
 
-class IdentityManagerMetrics(basePrefix: MetricName, override val registry: MetricRegistry)
-    extends MetricHandle.Factory {
-  override val prefix: MetricName = basePrefix :+ "topology-manager"
+class IdentityManagerMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
+  val prefix: MetricName = basePrefix :+ "topology-manager"
 
-  object sequencerClient extends SequencerClientMetrics(prefix, registry)
+  object sequencerClient extends SequencerClientMetrics(prefix, metricsFactory)
 }

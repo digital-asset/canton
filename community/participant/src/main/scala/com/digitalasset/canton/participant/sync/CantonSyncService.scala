@@ -502,7 +502,7 @@ class CantonSyncService(
             case Success(_) =>
               logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
             case Failure(ex) =>
-              logger.error(s"Command submissision for ${submitterInfo.commandId} failed", ex)
+              logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
           }
           Future.successful(ack)
         case Success(Left(submissionError)) =>
@@ -720,18 +720,6 @@ class CantonSyncService(
       .mapFilter {
         case (id, sync) if sync.ready =>
           aliasManager.aliasForDomainId(id).map(_ -> ((id, sync.readyForSubmission)))
-        case _ => None
-      }
-      .toMap
-
-  /** Returns the recovering domains this sync service is connected to.
-    * "Recovering" means connected, but not yet ready to use.
-    */
-  def recoveringDomains: Map[DomainAlias, DomainId] =
-    connectedDomainsMap
-      .to(LazyList)
-      .mapFilter {
-        case (id, sync) if !sync.ready => aliasManager.aliasForDomainId(id).map(_ -> id)
         case _ => None
       }
       .toMap

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.initialization
 
+import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.DomainNodeParameters
@@ -15,7 +16,7 @@ import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
 import com.digitalasset.canton.lifecycle.Lifecycle.{CloseableServer, toCloseableServer}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.metrics.MetricHandle
+import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -33,7 +34,8 @@ object PublicGrpcServerInitialization {
   def apply(
       config: DomainConfig,
       maxRequestSize: MaxRequestSize,
-      metrics: MetricHandle.Factory,
+      metricsPrefix: MetricName,
+      metrics: MetricsFactory,
       cantonParameterConfig: DomainNodeParameters,
       loggerFactory: NamedLoggerFactory,
       logger: TracedLogger,
@@ -50,6 +52,7 @@ object PublicGrpcServerInitialization {
     val serverBuilder = CantonServerBuilder
       .forConfig(
         config.publicApi,
+        metricsPrefix,
         metrics,
         executionContext,
         loggerFactory,

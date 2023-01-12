@@ -89,15 +89,25 @@ class ConsoleScriptRunner[E <: Environment](
     scriptPath: CantonScript,
     override val loggerFactory: NamedLoggerFactory,
 ) extends Runner[E] {
-  override def run(environment: E): Unit =
-    try {
-      ConsoleScriptRunner.run(environment, scriptPath, logger) match {
-        case Right(_unit) => // everything ok
-        case Left(err) => logger.error(s"Script execution failed: $err")(TraceContext.empty)
+  private val Ok = 0
+  private val Error = 1
+
+  override def run(environment: E): Unit = {
+    val exitCode =
+      try {
+        ConsoleScriptRunner.run(environment, scriptPath, logger) match {
+          case Right(_unit) =>
+            Ok
+          case Left(err) =>
+            logger.error(s"Script execution failed: $err")(TraceContext.empty)
+            Error
+        }
+      } finally {
+        environment.close()
       }
-    } finally {
-      environment.close()
-    }
+
+    sys.exit(exitCode)
+  }
 }
 
 private class CopyOutputWriter(parent: OutputStream, logger: TracedLogger)

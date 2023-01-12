@@ -8,6 +8,7 @@ import better.files.File
 import cats.data.{EitherT, OptionT}
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
+import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -25,7 +26,8 @@ import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
 import com.digitalasset.canton.health.admin.v0.StatusServiceGrpc
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.MetricHandle.NodeMetrics
+import com.digitalasset.canton.metrics.DbStorageMetrics
+import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.resource.StorageFactory
 import com.digitalasset.canton.store.IndexedStringStore
@@ -104,7 +106,9 @@ abstract class CantonNodeBootstrapBase[
     config: NodeConfig,
     parameterConfig: ParameterConfig,
     val clock: Clock,
-    nodeMetrics: NodeMetrics,
+    metricsPrefix: MetricName,
+    metricsFactory: MetricsFactory,
+    dbStorageMetrics: DbStorageMetrics,
     storageFactory: StorageFactory,
     cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
     grpcVaultServiceFactory: GrpcVaultServiceFactory,
@@ -119,7 +123,6 @@ abstract class CantonNodeBootstrapBase[
     with HasCloseContext
     with NoTracing {
 
-  protected val dbStorageMetrics = nodeMetrics.dbStorage
   protected val cryptoConfig = config.crypto
   protected val adminApiConfig = config.adminApi
   protected val initConfig = config.init
@@ -232,7 +235,8 @@ abstract class CantonNodeBootstrapBase[
     val builder = CantonServerBuilder
       .forConfig(
         adminApiConfig,
-        nodeMetrics,
+        metricsPrefix,
+        metricsFactory,
         executionContext,
         loggerFactory,
         parameterConfig.loggingConfig.api,

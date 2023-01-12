@@ -393,7 +393,7 @@ object MultiDomainEventLog {
               eventTraceContext,
             )
           }
-        case LedgerSyncEvent.CommandRejected(recordTime, completionInfo, reason) =>
+        case LedgerSyncEvent.CommandRejected(_recordTime, completionInfo, _reason) =>
           val changeId = completionInfo.changeId
           DeduplicationInfo(
             changeId,

@@ -33,15 +33,23 @@ import com.digitalasset.canton.util.EitherTUtil
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Errors from pruning */
-sealed trait PruningError extends Product with Serializable
+sealed trait PruningError {
+  def message: String
+}
+
 object PruningError {
 
   /** The sequencer implementation does not support pruning */
-  case object NotSupported extends PruningError
+  case object NotSupported extends PruningError {
+    lazy val message: String = "This sequencer does not support pruning"
+  }
 
   /** The requested timestamp would cause data for enabled members to be removed potentially permanently breaking them. */
   case class UnsafePruningPoint(requestedTimestamp: CantonTimestamp, safeTimestamp: CantonTimestamp)
-      extends PruningError
+      extends PruningError {
+    override def message: String =
+      s"Could not prune at [$requestedTimestamp] as the earliest safe pruning point is [$safeTimestamp]"
+  }
 }
 
 /** Interface for sequencer operations.

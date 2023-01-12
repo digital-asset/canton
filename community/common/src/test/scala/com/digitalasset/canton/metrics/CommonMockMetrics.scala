@@ -3,15 +3,14 @@
 
 package com.digitalasset.canton.metrics
 
-import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricName
+import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 
 object CommonMockMetrics {
 
   private val prefix = MetricName("test")
-  private lazy val registry = new MetricRegistry()
 
-  object sequencerClient extends SequencerClientMetrics(prefix, registry)
-  object dbStorage extends DbStorageMetrics(prefix, registry)
+  object sequencerClient extends SequencerClientMetrics(prefix, NoOpMetricsFactory)
+  object dbStorage extends DbStorageMetrics(prefix, NoOpMetricsFactory)
 
 }
