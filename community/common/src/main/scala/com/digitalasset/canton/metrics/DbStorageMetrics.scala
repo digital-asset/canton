@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.metrics
 
-import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Timer}
-import com.daml.metrics.api.dropwizard.{DropwizardGauge, DropwizardTimer}
+import com.daml.metrics.api.noop.{NoOpGauge, NoOpTimer}
 import com.daml.metrics.api.{MetricDoc, MetricName}
+import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 
 import scala.concurrent.duration.*
 
@@ -15,13 +15,12 @@ import scala.concurrent.duration.*
   representative = "canton.db-storage.<service>.executor",
   groupableClass = classOf[DbQueueMetrics],
 )
-class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegistry)
-    extends MetricHandle.Factory {
-  override val prefix: MetricName = basePrefix :+ "db-storage"
+class DbStorageMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
+  val prefix: MetricName = basePrefix :+ "db-storage"
 
   def loadGaugeM(name: String): TimedLoadGauge = {
-    val timerM = timer(prefix :+ name)
-    loadGauge(prefix :+ name :+ "load", 1.second, timerM)
+    val timerM = metricsFactory.timer(prefix :+ name)
+    metricsFactory.loadGauge(prefix :+ name :+ "load", 1.second, timerM)
   }
 
   @MetricDoc.Tag(
@@ -30,7 +29,7 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
     qualification = Debug,
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  val timerExampleForDocs: Timer = DropwizardTimer(prefix :+ "<storage>", null)
+  val timerExampleForDocs: Timer = NoOpTimer(prefix :+ "<storage>")
 
   @MetricDoc.Tag(
     summary = "The load on the given storage",
@@ -41,21 +40,20 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   val loadExampleForDocs: Gauge[Double] =
-    DropwizardGauge(prefix :+ "<storage>" :+ "load", null)
+    NoOpGauge(prefix :+ "<storage>" :+ "load", 0d)
 
-  object alerts extends DbAlertMetrics(prefix, registry)
+  object alerts extends DbAlertMetrics(prefix, metricsFactory)
 
-  object queue extends DbQueueMetrics(prefix :+ "general", registry)
+  object queue extends DbQueueMetrics(prefix :+ "general", metricsFactory)
 
-  object writeQueue extends DbQueueMetrics(prefix :+ "write", registry)
+  object writeQueue extends DbQueueMetrics(prefix :+ "write", metricsFactory)
 
-  object locks extends DbQueueMetrics(prefix :+ "locks", registry)
+  object locks extends DbQueueMetrics(prefix :+ "locks", metricsFactory)
 
 }
 
-class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegistry)
-    extends MetricHandle.Factory {
-  override val prefix: MetricName = basePrefix :+ "executor"
+class DbQueueMetrics(basePrefix: MetricName, factory: MetricsFactory) {
+  val prefix: MetricName = basePrefix :+ "executor"
 
   @MetricDoc.Tag(
     summary = "Number of database access tasks waiting in queue",
@@ -67,7 +65,7 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |will be retried, but won't show up in this metric.""",
     qualification = Debug,
   )
-  val queue = counter(prefix :+ "queued")
+  val queue = factory.counter(prefix :+ "queued")
 
   @MetricDoc.Tag(
     summary = "Number of database access tasks currently running",
@@ -75,7 +73,7 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |the current number of tasks running in parallel.""",
     qualification = Debug,
   )
-  val running = counter(prefix :+ "running")
+  val running = factory.counter(prefix :+ "running")
 
   @MetricDoc.Tag(
     summary = "Scheduling time metric for database tasks",
@@ -83,13 +81,12 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |The time a task is waiting in this queue is monitored using this metric.""",
     qualification = Debug,
   )
-  val waitTimer = timer(prefix :+ "waittime")
+  val waitTimer = factory.timer(prefix :+ "waittime")
 
 }
 
-class DbAlertMetrics(basePrefix: MetricName, override val registry: MetricRegistry)
-    extends MetricHandle.Factory {
-  override val prefix: MetricName = basePrefix :+ "alerts"
+class DbAlertMetrics(basePrefix: MetricName, factory: MetricsFactory) {
+  val prefix: MetricName = basePrefix :+ "alerts"
 
   @MetricDoc.Tag(
     summary = "Number of failed writes to the event log",
@@ -102,7 +99,7 @@ class DbAlertMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |""",
     qualification = Debug,
   )
-  val failedEventLogWrites: Counter = counter(prefix :+ "single-dimension-event-log")
+  val failedEventLogWrites: Counter = factory.counter(prefix :+ "single-dimension-event-log")
 
   @MetricDoc.Tag(
     summary = "Number of failed writes to the multi-domain event log",
@@ -115,6 +112,6 @@ class DbAlertMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |""",
     qualification = Debug,
   )
-  val failedMultiDomainEventLogWrites: Counter = counter(prefix :+ "multi-domain-event-log")
+  val failedMultiDomainEventLogWrites: Counter = factory.counter(prefix :+ "multi-domain-event-log")
 
 }

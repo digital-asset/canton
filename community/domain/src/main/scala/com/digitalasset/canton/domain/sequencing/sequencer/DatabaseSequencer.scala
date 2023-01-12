@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.syntax.functor.*
+import cats.syntax.option.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -17,6 +18,7 @@ import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
   SendAsyncError,
@@ -40,6 +42,7 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
+import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -83,6 +86,8 @@ object DatabaseSequencer {
       timeouts,
       storage,
       None,
+      None,
+      None,
       clock,
       domainId,
       topologyClientMember,
@@ -102,6 +107,8 @@ class DatabaseSequencer(
     onlineSequencerCheckConfig: OnlineSequencerCheckConfig,
     override protected val timeouts: ProcessingTimeout,
     storage: Storage,
+    exclusiveStorage: Option[Storage],
+    pruningSchedulerBuilder: Option[(Storage, Sequencer) => PruningScheduler],
     health: Option[SequencerHealthConfig],
     clock: Clock,
     domainId: DomainId,
@@ -141,9 +148,23 @@ class DatabaseSequencer(
     protocolVersion,
     loggerFactory,
   )
+
+  private val pruningScheduler =
+    pruningSchedulerBuilder.map(_(exclusiveStorage.getOrElse(storage), this))
+
   withNewTraceContext { implicit traceContext =>
     timeouts.unbounded.await(s"Waiting for sequencer writer to fully start")(
       writer.startOrLogError()
+    )
+
+    pruningScheduler.foreach(ps =>
+      // default wait should be enough since scheduler start only involves single database access
+      timeouts.default.await(
+        s"Waiting for pruning scheduler to start",
+        logFailing = Level.INFO.some, // in case we're shutting down at start-up
+      )(
+        ps.start()
+      )
     )
   }
 
@@ -302,6 +323,8 @@ class DatabaseSequencer(
   override def onClosed(): Unit = {
     super.onClosed()
     Lifecycle.close(
+      () => pruningScheduler foreach (Lifecycle.close(_)(logger)),
+      () => exclusiveStorage foreach (Lifecycle.close(_)(logger)),
       writer,
       reader,
       eventSignaller,

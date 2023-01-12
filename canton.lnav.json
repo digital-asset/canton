@@ -1,0 +1,90 @@
+{
+  "canton_log" : {
+    "title" : "Canton Log",
+    "description" : "A custom format for the lnav log file viewer for Canton logs. Register this format with `lnav -i canton.lnav.json`. See canton.io/docs/dev/user-manual/usermanual/monitoring.html#lnav for more information",
+    "regex" : {
+      "std" : {
+        "pattern" : "^(?<timestamp>\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2},\\d{3})\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<level>[A-Z]+)\\s+(?<classname>[^:\\s]*)(:(?<testname>[^\\/]*?)(\\/(?<log_context>.*?))?)?(\\s+tid:(?<trace_id>[^- ]+)(-(?<trace_subid>\\S+))?)?\\s+-\\s+(?<body>(?s:.*))$"
+      },
+      "docker" : {
+        "pattern" : "^(?<timestamp>\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2},\\d{3})\\s+\\[(?<thread>[^\\]]*)\\]\\s+(?<level>[A-Z]+)\\s+🐳\\s+\\[(?<container>[^\\]]*)\\]\\s+-\\s+(?<body>(?s:.*))$"
+      }
+    },
+    "timestamp-format" : [ "%Y-%m-%d %H:%M:%S,%L" ],
+    "level" : {
+      "fatal" : "FATAL",
+      "critical" : "CRITICAL",
+      "error" : "ERROR|SEVERE",
+      "warning" : "WARN|WARNING",
+      "info" : "INFO",
+      "debug" : "DEBUG",
+      "trace" : "TRACE"
+    },
+    "opid-field" : "trace_id",
+    "value" : {
+      "thread" : {
+        "kind" : "string",
+        "hidden" : true
+      },
+      "classname" : {
+        "kind" : "string"
+      },
+      "testname" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "trace_id" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "trace_subid" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "log_context" : {
+        "kind" : "string",
+        "identifier" : true
+      }
+    },
+    "highlights" : {
+      "exception" : {
+        "pattern" : "\\S+(?-i:Exception|Error)(?::\\s.*)?$",
+        "color" : "#FF0000"
+      },
+      "stacktrace-element" : {
+        "pattern" : "^\\s+at\\s+[[:alpha:]](?:\\.|\\$|[[:alnum:]])+",
+        "color" : "#FF00FF"
+      }
+    },
+    "sample" : [
+      {
+        "line" : "2019-12-24 10:24:30,545 [ScalaTest-run-running-ScenarioRunnerTest] INFO  c.d.c.d.DomainInit:ScenarioRunnerTest/domain=da - Starting admin-api services on port 9019",
+        "level" : "info"
+      },
+      {
+        "line" : "2019-12-24 10:24:30,545 [thread with spaces] WARN  c.d.c.d.DomainInit:name-with-hyphens - Starting admin-api services on port 9019",
+        "level" : "warning"
+      },
+      {
+        "line" : "2019-12-24 10:24:30,545 [thread with spaces] WARN  c.d.c.d.DomainInit:name with space - Starting admin-api services on port 9019",
+        "level" : "warning"
+      },
+      {
+        "line" : "2019-12-23 10:24:31,826 [ScalaTest-run-running-ScenarioRunnerTest] DEBUG  - an exception has been thrown:\\njava.lang.IllegalStateException: A book has a null property\\n  at com.example.myproject.Author.getBookIds(Author.java:38)",
+        "level" : "debug"
+      },
+      {
+        "line" : "2020-08-06 13:57:29,509 [grpc-default-executor-0] DEBUG c.d.c.s.c.t.GrpcSequencerClientTransport:ParticipantRestartStaticTimeTest/domain=da tid:QS3FE8SH - Request handshake has succeeded for sequencer.",
+        "level": "debug"
+      },
+      {
+        "line" : "2019-12-24 10:24:30,545 [thread with spaces] ERROR  c.d.c.d.DomainInit:Test tid=ABCDEFG - body contains - dash",
+        "level" : "error"
+      },
+      {
+        "line" : "2020-08-06 12:33:45,219 [pool-17-thread-5] INFO  🐳 [postgres:11] - Container postgres:11 is starting: 137c1119e19c15c75b01abfa128966f3d2a972d226a878556c2e50590a1f603d",
+        "level" : "info"
+      }
+    ]
+  }
+}

@@ -3,39 +3,39 @@
 
 package com.digitalasset.canton.participant.metrics
 
-import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
-import com.daml.metrics.api.dropwizard.DropwizardGauge
-import com.daml.metrics.api.{MetricDoc, MetricHandle as ApiMetricHandle, MetricName, MetricsContext}
+import com.daml.metrics.api.noop.NoOpGauge
+import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
+import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.TaskSchedulerMetrics
-import com.digitalasset.canton.metrics.MetricHandle.NodeMetrics
+import com.digitalasset.canton.metrics.MetricHandle.{CantonDropwizardMetricsFactory, MetricsFactory}
 import com.digitalasset.canton.metrics.*
-import io.opentelemetry.api.metrics
 
 import scala.collection.concurrent.TrieMap
 
 class ParticipantMetrics(
     name: String,
-    override val prefix: MetricName,
-    override val registry: MetricRegistry,
-    meter: metrics.Meter,
-    factory: ApiMetricHandle.Factory,
-) extends NodeMetrics {
+    val prefix: MetricName,
+    val dropwizardFactory: CantonDropwizardMetricsFactory,
+    val openTelemetryFactory: OpenTelemetryFactory,
+) {
 
   private implicit val mc: MetricsContext = MetricsContext("participant_name" -> name)
 
-  object dbStorage extends DbStorageMetrics(prefix, registry)
+  object dbStorage extends DbStorageMetrics(prefix, dropwizardFactory)
 
-  val ledgerApiServer: LedgerApiServerMetrics = new LedgerApiServerMetrics(registry, meter)
+  val ledgerApiServer: LedgerApiServerMetrics =
+    new LedgerApiServerMetrics(dropwizardFactory, openTelemetryFactory)
+
   private val clients = TrieMap[DomainAlias, SyncDomainMetrics]()
 
-  object pruning extends PruningMetrics(prefix, registry)
+  object pruning extends PruningMetrics(prefix, dropwizardFactory)
 
   def domainMetrics(alias: DomainAlias): SyncDomainMetrics = {
-    clients.getOrElseUpdate(alias, new SyncDomainMetrics(prefix :+ alias.unwrap, registry))
+    clients.getOrElseUpdate(alias, new SyncDomainMetrics(prefix :+ alias.unwrap, dropwizardFactory))
   }
 
   @MetricDoc.Tag(
@@ -45,7 +45,7 @@ class ParticipantMetrics(
         |The indexer will subsequently store the update in a form that allows for querying the ledger efficiently.""",
     qualification = Debug,
   )
-  val updatesPublished: Meter = meter(prefix :+ "updates-published")
+  val updatesPublished: Meter = dropwizardFactory.meter(prefix :+ "updates-published")
 
   @MetricDoc.Tag(
     summary = "Number of requests being validated.",
@@ -55,7 +55,7 @@ class ParticipantMetrics(
     qualification = Debug,
   )
   val dirtyRequests: Gauge[Int] =
-    factory.gauge(prefix :+ "dirty_requests", 0, "Number of requests being validated.")
+    dropwizardFactory.gauge(prefix :+ "dirty_requests", 0, "Number of requests being validated.")
 
   @MetricDoc.Tag(
     summary = "Configured maximum number of requests currently being validated.",
@@ -68,10 +68,10 @@ class ParticipantMetrics(
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   val maxDirtyRequestGaugeForDocs: Gauge[Int] =
-    DropwizardGauge(prefix :+ "max_dirty_requests", null)
+    NoOpGauge(prefix :+ "max_dirty_requests", 0)
 
   def registerMaxDirtyRequest(value: () => Option[Int]): Unit =
-    factory.gaugeWithSupplier(
+    dropwizardFactory.gaugeWithSupplier(
       prefix :+ "max_dirty_requests",
       () => value().getOrElse(-1),
       """
@@ -81,10 +81,9 @@ class ParticipantMetrics(
 
 }
 
-class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricRegistry)
-    extends MetricHandle.Factory {
+class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
 
-  object sequencerClient extends SequencerClientMetrics(prefix, registry)
+  object sequencerClient extends SequencerClientMetrics(prefix, factory)
 
   object conflictDetection extends TaskSchedulerMetrics {
 
@@ -99,7 +98,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
       qualification = Debug,
     )
     val sequencerCounterQueue: Counter =
-      counter(prefix :+ "sequencer-counter-queue")
+      factory.counter(prefix :+ "sequencer-counter-queue")
 
     @MetricDoc.Tag(
       summary = "Size of conflict detection task queue",
@@ -109,11 +108,11 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
                       |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
       qualification = Debug,
     )
-    val taskQueue: RefGauge[Int] = refGauge(prefix :+ "task-queue", 0)
+    val taskQueue: RefGauge[Int] = factory.refGauge(prefix :+ "task-queue", 0)
 
   }
 
-  object transactionProcessing extends TransactionProcessingMetrics(prefix, registry)
+  object transactionProcessing extends TransactionProcessingMetrics(prefix, factory)
 
   @MetricDoc.Tag(
     summary = "Size of conflict detection task queue",
@@ -123,7 +122,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
                     |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
     qualification = Debug,
   )
-  val numDirtyRequests: Counter = counter(prefix :+ "dirty-requests")
+  val numDirtyRequests: Counter = factory.counter(prefix :+ "dirty-requests")
 
   object recordOrderPublisher extends TaskSchedulerMetrics {
 
@@ -136,7 +135,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
       qualification = Debug,
     )
     val sequencerCounterQueue: Counter =
-      counter(prefix :+ "sequencer-counter-queue")
+      factory.counter(prefix :+ "sequencer-counter-queue")
 
     @MetricDoc.Tag(
       summary = "Size of record order publisher task queue",
@@ -144,7 +143,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
                       |exposes the number of tasks that are waiting in the task queue for the right time to pass.""",
       qualification = Debug,
     )
-    val taskQueue: RefGauge[Int] = refGauge(prefix :+ "task-queue", 0)
+    val taskQueue: RefGauge[Int] = factory.refGauge(prefix :+ "task-queue", 0)
   }
 
 }

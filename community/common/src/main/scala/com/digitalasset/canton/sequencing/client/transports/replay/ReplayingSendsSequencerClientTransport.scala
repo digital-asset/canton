@@ -203,7 +203,7 @@ class ReplayingSendsSequencerClientTransport(
       withResource(new PrintStream(os)) { ps =>
         withResource(
           ConsoleReporter
-            .forRegistry(metrics.registry)
+            .forRegistry(metrics.metricsFactory.registry)
             .filter(MetricFilter.startsWith(metrics.submissions.prefix.toString()))
             .outputTo(ps)
             .build()

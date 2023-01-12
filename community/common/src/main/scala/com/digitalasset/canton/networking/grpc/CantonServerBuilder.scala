@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle
+import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.tracing.TracingConfig
 import io.grpc.*
 import io.grpc.netty.{GrpcSslContexts, NettyServerBuilder}
@@ -139,7 +140,8 @@ object CantonServerBuilder {
     */
   def forConfig(
       config: ServerConfig,
-      nodeMetrics: MetricHandle.Factory,
+      metricsPrefix: MetricName,
+      metricsFactory: MetricsFactory,
       executor: Executor,
       loggerFactory: NamedLoggerFactory,
       apiLoggingConfig: ApiLoggingConfig,
@@ -164,7 +166,8 @@ object CantonServerBuilder {
       config.instantiateServerInterceptors(
         tracing,
         apiLoggingConfig,
-        nodeMetrics,
+        metricsPrefix,
+        metricsFactory,
         loggerFactory,
         grpcMetrics,
       ),

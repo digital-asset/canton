@@ -7,7 +7,6 @@ import com.codahale.metrics
 import com.codahale.metrics.{Metric, MetricFilter}
 import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
 import com.daml.metrics.api.{MetricName, MetricsContext}
-import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
 import com.daml.metrics.{ExecutorServiceMetrics, JvmMetricSet, OpenTelemetryMeterOwner}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.buildinfo.BuildInfo
@@ -17,6 +16,7 @@ import com.digitalasset.canton.domain.metrics.{
   MediatorNodeMetrics,
   SequencerMetrics,
 }
+import com.digitalasset.canton.metrics.MetricHandle.CantonDropwizardMetricsFactory
 import com.digitalasset.canton.metrics.MetricsConfig.MetricsFilterConfig
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -110,7 +110,8 @@ case class MetricsFactory(
       "canton_version" -> BuildInfo.version,
     )
   }
-  private val envMetrics = new EnvMetrics(registry)
+  val metricsFactory = new CantonDropwizardMetricsFactory(registry)
+  private val envMetrics = new EnvMetrics(metricsFactory)
   private val participants = TrieMap[String, ParticipantMetrics]()
   private val domains = TrieMap[String, DomainMetrics]()
   private val sequencers = TrieMap[String, SequencerMetrics]()
@@ -146,8 +147,7 @@ case class MetricsFactory(
         new ParticipantMetrics(
           name,
           MetricsFactory.prefix,
-          newRegistry(metricName),
-          meter,
+          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
           openTelemetryFactory,
         )
       },
@@ -162,8 +162,7 @@ case class MetricsFactory(
         val metricName = deduplicateName(name, "domain", domains)
         new DomainMetrics(
           MetricsFactory.prefix,
-          newRegistry(metricName),
-          grpcMetricsForComponent("domain"),
+          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
         )
       },
     )
@@ -175,8 +174,7 @@ case class MetricsFactory(
         val metricName = deduplicateName(name, "sequencer", sequencers)
         new SequencerMetrics(
           MetricsFactory.prefix,
-          newRegistry(metricName),
-          grpcMetricsForComponent("sequencer"),
+          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
         )
       },
     )
@@ -188,15 +186,11 @@ case class MetricsFactory(
         val metricName = deduplicateName(name, "mediator", mediators)
         new MediatorNodeMetrics(
           MetricsFactory.prefix,
-          newRegistry(metricName),
-          grpcMetricsForComponent("mediator"),
+          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
         )
       },
     )
   }
-
-  def grpcMetricsForComponent(component: String): GrpcServerMetrics =
-    new DamlGrpcServerMetrics(openTelemetryFactory, component)
 
   /** de-duplicate name if there is someone using the same name for another type of node (not sure that will ever happen)
     */

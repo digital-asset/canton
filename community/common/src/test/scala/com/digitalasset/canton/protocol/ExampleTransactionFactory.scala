@@ -1455,7 +1455,6 @@ class ExampleTransactionFactory(
             contractInstance = exercise131UsedInstance.unwrap,
             metadata = exercise131UsedInstance.metadata,
             ledgerTime = ledgerTime,
-            salt = None, // TODO(#10960): Populate when testing input contracts authentication
             agreementText = exercise131Agreement,
           )
         ),
@@ -1475,7 +1474,6 @@ class ExampleTransactionFactory(
             exercise1UsedInstance.unwrap,
             exercise1UsedInstance.metadata,
             ledgerTime,
-            None, // TODO(#10960): Populate when testing input contracts authentication
             agreementText = exercise1Agreement,
           )
         ),
@@ -1982,7 +1980,6 @@ class ExampleTransactionFactory(
           exercise10UsedInstance.unwrap,
           exercise10UsedInstance.metadata,
           ledgerTime,
-          None, // TODO(#10960): Populate when testing input contracts authentication
           agreementText = exercise10Agreement,
         )
       ),
@@ -2012,7 +2009,6 @@ class ExampleTransactionFactory(
             exercise12UsedInstance.unwrap,
             exercise12UsedInstance.metadata,
             ledgerTime,
-            None, // TODO(#10960): Populate when testing input contracts authentication
             agreementText = exercise12Agreement,
           )
         ),

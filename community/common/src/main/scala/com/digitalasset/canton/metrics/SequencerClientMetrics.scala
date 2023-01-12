@@ -3,17 +3,15 @@
 
 package com.digitalasset.canton.metrics
 
-import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Timer}
-import com.daml.metrics.api.{MetricDoc, MetricName}
+import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
+import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 
 import scala.concurrent.duration.*
 
-class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistry)
-    extends MetricHandle.Factory {
-
-  override val prefix: MetricName = basePrefix :+ "sequencer-client"
+class SequencerClientMetrics(basePrefix: MetricName, val metricsFactory: MetricsFactory) {
+  val prefix: MetricName = basePrefix :+ "sequencer-client"
 
   @MetricDoc.Tag(
     summary = "Timer monitoring time and rate of sequentially handling the event application logic",
@@ -21,7 +19,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         |the rate and time it takes the application (participant or domain) to handle the events.""",
     qualification = Debug,
   )
-  val applicationHandle: Timer = timer(prefix :+ "application-handle")
+  val applicationHandle: Timer = metricsFactory.timer(prefix :+ "application-handle")
 
   @MetricDoc.Tag(
     summary = "Timer monitoring time and rate of entire event handling",
@@ -30,7 +28,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         |the full time (which should just be marginally more than the application handle.""",
     qualification = Debug,
   )
-  val processingTime: Timer = timer(prefix :+ "event-handle")
+  val processingTime: Timer = metricsFactory.timer(prefix :+ "event-handle")
 
   @MetricDoc.Tag(
     summary = "The load on the event subscription",
@@ -39,7 +37,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
     qualification = Debug,
   )
   val load: TimedLoadGauge =
-    loadGauge(prefix :+ "load", 1.second, processingTime)
+    metricsFactory.loadGauge(prefix :+ "load", 1.second, processingTime)
 
   @MetricDoc.Tag(
     summary = "The delay on the event processing",
@@ -56,7 +54,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         |too slow to keep up with the messaging load.""",
     qualification = Debug,
   )
-  val delay: Gauge[Long] = gauge(prefix :+ "delay", 0L)
+  val delay: Gauge[Long] = metricsFactory.gauge(prefix :+ "delay", 0L)(MetricsContext.Empty)
 
   object submissions {
     val prefix: MetricName = SequencerClientMetrics.this.prefix :+ "submissions"
@@ -68,7 +66,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
           |Decremented when the event or an error is sequenced, or when the max-sequencing-time has elapsed.""",
       qualification = Debug,
     )
-    val inFlight: Counter = counter(prefix :+ "in-flight")
+    val inFlight: Counter = metricsFactory.counter(prefix :+ "in-flight")
 
     @MetricDoc.Tag(
       summary = "Rate and timings of send requests to the sequencer",
@@ -78,7 +76,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
           |""",
       qualification = Debug,
     )
-    val sends: Timer = timer(prefix :+ "sends")
+    val sends: Timer = metricsFactory.timer(prefix :+ "sends")
 
     @MetricDoc.Tag(
       summary = "Rate and timings of sequencing requests",
@@ -89,7 +87,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
           |""",
       qualification = Debug,
     )
-    val sequencingTime: Timer = timer(prefix :+ "sequencing")
+    val sequencingTime: Timer = metricsFactory.timer(prefix :+ "sequencing")
 
     @MetricDoc.Tag(
       summary = "Count of send requests which receive an overloaded response",
@@ -97,7 +95,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         "Counter that is incremented if a send request receives an overloaded response from the sequencer.",
       qualification = Debug,
     )
-    val overloaded: Counter = counter(prefix :+ "overloaded")
+    val overloaded: Counter = metricsFactory.counter(prefix :+ "overloaded")
 
     @MetricDoc.Tag(
       summary = "Count of send requests that did not cause an event to be sequenced",
@@ -108,6 +106,6 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
                       |max-sequencing-time may just be too small for the sequencer to be able to sequence the request.""",
       qualification = Debug,
     )
-    val dropped: Counter = counter(prefix :+ "dropped")
+    val dropped: Counter = metricsFactory.counter(prefix :+ "dropped")
   }
 }

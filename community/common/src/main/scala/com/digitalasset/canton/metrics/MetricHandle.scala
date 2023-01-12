@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.metrics
 
+import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.{
   Debug,
   Errors,
@@ -11,9 +12,10 @@ import com.daml.metrics.api.MetricDoc.MetricQualification.{
   Traffic,
 }
 import com.daml.metrics.api.MetricDoc.{FanInstanceTag, FanTag, GroupTag, MetricQualification, Tag}
-import com.daml.metrics.api.MetricHandle.Timer
-import com.daml.metrics.api.dropwizard.DropwizardFactory
-import com.daml.metrics.api.{MetricHandle as DamlMetricHandle, MetricName}
+import com.daml.metrics.api.MetricHandle.{Counter, Factory, Gauge, Histogram, Meter, Timer}
+import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
+import com.daml.metrics.api.noop.{NoOpCounter, NoOpGauge, NoOpHistogram, NoOpMeter, NoOpTimer}
+import com.daml.metrics.api.{MetricHandle as DamlMetricHandle, MetricName, MetricsContext}
 
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
@@ -21,25 +23,90 @@ import scala.reflect.runtime.universe as ru
 
 object MetricHandle {
 
-  trait Factory extends DropwizardFactory {
+  trait MetricsFactory extends Factory {
 
-    def prefix: MetricName
+    def registry: MetricRegistry
 
     def loadGauge(
+        name: MetricName,
+        interval: FiniteDuration,
+        timer: Timer,
+    ): TimedLoadGauge
+
+    def refGauge[T](name: MetricName, empty: T): RefGauge[T]
+  }
+
+  class CantonDropwizardMetricsFactory(registry: MetricRegistry)
+      extends DropwizardMetricsFactory(registry)
+      with MetricsFactory {
+
+    override def loadGauge(
         name: MetricName,
         interval: FiniteDuration,
         timer: Timer,
     ): TimedLoadGauge =
       reRegisterGauge[Double, TimedLoadGauge](name, new TimedLoadGauge(name, interval, timer))
 
-    def refGauge[T](name: MetricName, empty: T): RefGauge[T] =
+    override def refGauge[T](name: MetricName, empty: T): RefGauge[T] =
       reRegisterGauge[T, RefGauge[T]](name, new RefGauge[T](name, empty))
 
   }
 
-  trait NodeMetrics extends Factory {
-    def dbStorage: DbStorageMetrics
+  object NoOpMetricsFactory extends MetricsFactory {
+
+    override val registry = new MetricRegistry
+
+    override def timer(
+        name: MetricName,
+        description: String,
+    )(implicit
+        context: MetricsContext
+    ): Timer = NoOpTimer(name)
+
+    override def gauge[T](
+        name: MetricName,
+        initial: T,
+        description: String,
+    )(implicit
+        context: MetricsContext
+    ): Gauge[T] = NoOpGauge(name, initial)
+
+    override def gaugeWithSupplier[T](
+        name: MetricName,
+        gaugeSupplier: () => T,
+        description: String,
+    )(implicit context: MetricsContext): Unit = ()
+
+    override def meter(
+        name: MetricName,
+        description: String,
+    )(implicit
+        context: MetricsContext
+    ): Meter = NoOpMeter(name)
+
+    override def counter(
+        name: MetricName,
+        description: String,
+    )(implicit
+        context: MetricsContext
+    ): Counter = NoOpCounter(name)
+
+    override def histogram(
+        name: MetricName,
+        description: String,
+    )(implicit
+        context: MetricsContext
+    ): Histogram = NoOpHistogram(name)
+
+    override def loadGauge(
+        name: MetricName,
+        interval: FiniteDuration,
+        timer: Timer,
+    ): TimedLoadGauge = new TimedLoadGauge(name, interval, timer)
+
+    override def refGauge[T](name: MetricName, empty: T): RefGauge[T] = new RefGauge[T](name, empty)
   }
+
 }
 
 object MetricDoc {

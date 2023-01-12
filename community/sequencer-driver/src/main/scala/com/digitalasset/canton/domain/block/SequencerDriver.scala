@@ -158,6 +158,10 @@ trait SequencerDriver extends AutoCloseable {
 
 }
 
+object SequencerDriver {
+  val DefaultInitialBlockHeight = -1L
+}
+
 /** A block that a [[SequencerDriver]] delivers to the sequencer node.
   *
   * @param blockHeight The height of the block. Block heights must be consecutive.
