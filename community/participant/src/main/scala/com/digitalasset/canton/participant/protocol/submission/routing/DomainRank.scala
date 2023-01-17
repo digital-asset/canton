@@ -120,5 +120,5 @@ private[routing] final case class DomainRank(
 private[routing] object DomainRank {
   // The highest priority domain should be picked first, so negate the priority
   implicit val domainRanking: Ordering[DomainRank] =
-    Ordering.by(x => (x.transfers.size, -x.priority, x.domainId))
+    Ordering.by(x => (-x.priority, x.transfers.size, x.domainId))
 }

@@ -7,17 +7,16 @@ import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
-import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, ViewHash, v0}
+import com.digitalasset.canton.protocol.{RequestId, ViewHash}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -32,7 +31,8 @@ private[mediator] object ResponseAggregation {
       distanceToThreshold: Int,
       rejections: List[(Set[LfPartyId], LocalReject)],
   ) extends PrettyPrinting {
-    lazy val totalAvailableWeight: Int = pendingConfirmingParties.foldLeft(0)(_ + _.weight)
+
+    lazy val totalAvailableWeight: Int = pendingConfirmingParties.map(_.weight).sum
 
     override def pretty: Pretty[ViewState] = {
       prettyOfClass(
@@ -43,77 +43,38 @@ private[mediator] object ResponseAggregation {
     }
   }
 
-  private def initialState(
-      request: MediatorRequest,
+  /** Creates a non-finalized response aggregation from a request.
+    */
+  def fromRequest(
       requestId: RequestId,
+      request: MediatorRequest,
       protocolVersion: ProtocolVersion,
-  )(implicit loggingContext: ErrorLoggingContext): Either[Verdict, Map[ViewHash, ViewState]] = {
-    val minimumThreshold = request.confirmationPolicy.minimumThreshold
-    request.informeesAndThresholdByView.toList
-      .traverse { case (viewHash, (informees, threshold)) =>
-        val confirmingParties = informees.collect { case c: ConfirmingParty => c }
-        Either.cond(
-          threshold >= minimumThreshold,
-          viewHash -> ViewState(confirmingParties, threshold.unwrap, Nil),
-          MediatorError.MalformedMessage
-            .Reject(
-              s"Received a mediator request with id $requestId having threshold $threshold for transaction view $viewHash, which is below the confirmation policy's minimum threshold of $minimumThreshold. Rejecting request...",
-              v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
-              protocolVersion,
-            )
-            .reported(),
-        )
-      }
-      .map(_.toMap)
-  }
+  )(loggerFactory: NamedLoggerFactory)(implicit
+      requestTraceContext: TraceContext
+  ): ResponseAggregation = {
+    val initialState = request.informeesAndThresholdByView.map {
+      case (viewHash, (informees, threshold)) =>
+        val confirmingParties = informees.collect { case cp: ConfirmingParty => cp }
+        viewHash -> ViewState(confirmingParties, threshold.unwrap, rejections = Nil)
+    }
 
-  def apply(requestId: RequestId, request: MediatorRequest, protocolVersion: ProtocolVersion)(
-      loggerFactory: NamedLoggerFactory
-  )(implicit traceContext: TraceContext): ResponseAggregation = {
-    implicit val loggingContext: ErrorLoggingContext =
-      ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
-    val version = requestId.unwrap
-    val initial = for {
-      pending <- initialState(request, requestId, protocolVersion)
-      _ <- Either.cond(
-        pending.values.exists(_.distanceToThreshold > 0),
-        (),
-        Approve(protocolVersion),
-      )
-      existsQuorum = pending.values.forall(state =>
-        state.totalAvailableWeight >= state.distanceToThreshold
-      )
-      _ <- Either.cond(
-        existsQuorum,
-        (), {
-          val failed = pending.filterNot { case (_, v) =>
-            v.totalAvailableWeight >= v.distanceToThreshold
-          }.keys
-          MediatorError.MalformedMessage
-            .Reject(
-              s"Rejected transaction has views with not enough confirming parties: $failed",
-              v0.MediatorRejection.Code.NotEnoughConfirmingParties,
-              protocolVersion,
-            )
-            .reported()
-        },
-      )
-    } yield pending
-    ResponseAggregation(requestId, request, version, initial)(
+    ResponseAggregation(requestId, request, requestId.unwrap, Right(initialState))(
       protocolVersion = protocolVersion,
-      requestTraceContext = traceContext,
+      requestTraceContext = requestTraceContext,
     )(loggerFactory)
   }
 
-  def apply(
+  /** Creates a finalized response aggregation from a verdict.
+    */
+  def fromVerdict(
       requestId: RequestId,
       request: MediatorRequest,
-      version: CantonTimestamp,
       verdict: Verdict,
       protocolVersion: ProtocolVersion,
-      requestTraceContext: TraceContext,
-  )(loggerFactory: NamedLoggerFactory): ResponseAggregation =
-    ResponseAggregation(requestId, request, version, Left(verdict))(
+  )(
+      loggerFactory: NamedLoggerFactory
+  )(implicit requestTraceContext: TraceContext): ResponseAggregation =
+    ResponseAggregation(requestId, request, requestId.unwrap, Left(verdict))(
       protocolVersion,
       requestTraceContext,
     )(loggerFactory)
@@ -130,7 +91,7 @@ private[mediator] object ResponseAggregation {
   *                            validated anywhere. Intentionally supplied in a separate parameter list to avoid being
   *                            included in equality checks.
   */
-private[mediator] final case class ResponseAggregation private (
+private[mediator] final case class ResponseAggregation(
     requestId: RequestId,
     request: MediatorRequest,
     version: CantonTimestamp,

@@ -210,11 +210,7 @@ private[mediator] class DbFinalizedResponseStore(
           .map {
             _.headOption.map {
               case (reqId, mediatorRequest, version, verdict, requestTraceContext) =>
-                ResponseAggregation(
-                  reqId,
-                  mediatorRequest,
-                  version,
-                  verdict,
+                ResponseAggregation(reqId, mediatorRequest, version, Left(verdict))(
                   protocolVersion,
                   requestTraceContext.unwrap,
                 )(loggerFactory)

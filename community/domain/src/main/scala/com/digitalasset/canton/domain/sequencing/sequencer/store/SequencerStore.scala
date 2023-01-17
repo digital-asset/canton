@@ -11,7 +11,7 @@ import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.domain.sequencing.sequencer.{
@@ -540,7 +540,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
 
   /** Prune as much data as safely possible from before the given timestamp.
     * Return a human readable report on what has been removed.
-    * @param requestedTimestamp the timestamp that we would like to prune from (see docs on using the pruning status and disabling members for picking this value)
+    * @param requestedTimestamp the timestamp that we would like to prune up to (see docs on using the pruning status and disabling members for picking this value)
     * @param status the pruning status that should be used for determining a safe to prune time for validation
     * @param payloadToEventMargin the maximum time margin between payloads and events.
     *                            once we have a safe to prune timestamp we simply prune all payloads at `safeTimestamp - margin`
@@ -567,7 +567,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
           .parTraverse(lookupMember)
           .map(_.flatMap(_.toList).map(_.memberId))
         adjustedTimestampO <- adjustPruningTimestampForCounterCheckpoints(
-          safeTimestamp,
+          requestedTimestamp, // already confirmed by this point by caller to be earlier than or at safeTimestamp
           disabledMemberIds,
         )
         adjustedTimestamp = adjustedTimestampO.getOrElse {
@@ -654,6 +654,14 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
   protected[store] def pruneCheckpoints(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Int]
+
+  /** Locate a timestamp relative to the earliest available event based on a skip index starting at 0.
+    * Useful to monitor the progress of pruning and for pruning in batches.
+    * @return The timestamp of the (skip+1)'th event if it exists, None otherwise.
+    */
+  def locatePruningTimestamp(skip: NonNegativeInt)(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]]
 }
 
 object SequencerStore {
@@ -663,10 +671,18 @@ object SequencerStore {
       maxInClauseSize: PositiveNumeric[Int],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      overrideCloseContext: Option[CloseContext] = None,
   )(implicit executionContext: ExecutionContext): SequencerStore =
     storage match {
       case _: MemoryStorage => new InMemorySequencerStore(loggerFactory)
       case dbStorage: DbStorage =>
-        new DbSequencerStore(dbStorage, protocolVersion, maxInClauseSize, timeouts, loggerFactory)
+        new DbSequencerStore(
+          dbStorage,
+          protocolVersion,
+          maxInClauseSize,
+          timeouts,
+          loggerFactory,
+          overrideCloseContext,
+        )
     }
 }

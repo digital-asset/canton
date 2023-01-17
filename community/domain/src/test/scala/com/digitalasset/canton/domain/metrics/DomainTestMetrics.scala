@@ -4,10 +4,12 @@
 package com.digitalasset.canton.domain.metrics
 
 import com.daml.metrics.api.MetricName
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 
 object DomainTestMetrics
     extends DomainMetrics(
       MetricName("test"),
       NoOpMetricsFactory,
+      new DamlGrpcServerMetrics(NoOpMetricsFactory, "test"),
     )

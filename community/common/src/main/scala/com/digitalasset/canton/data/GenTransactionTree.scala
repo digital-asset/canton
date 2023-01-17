@@ -8,6 +8,7 @@ import cats.syntax.foldable.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.MerkleTree.*
+import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndexFromRoot
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.{v0, *}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -80,6 +81,36 @@ case class GenTransactionTree private (
       rootViews.doBlind(blindingCommandPerNode),
     )(hashOps)
 
+  /** Specialized blinding that addresses the case of blinding a Transaction Tree to obtain a
+    * Transaction View Tree.
+    * The view is identified by its position in the tree, specified by `viewPos`, directed from the root
+    * to the leaf.
+    * To ensure the path is valid, it should be obtained beforehand with a traversal method such as
+    * [[TransactionView.allSubviewsWithPosition]]
+    *
+    * @param viewPos the position of the view from root to leaf
+    * @throws java.lang.UnsupportedOperationException if the path does not lead to a view
+    */
+  private[data] def tryBlindForTransactionViewTree(
+      viewPos: ViewPositionFromRoot
+  ): GenTransactionTree = {
+    viewPos.position match {
+      case (head: MerkleSeqIndexFromRoot) +: tail =>
+        val sm = if (viewPos.isTopLevel) submitterMetadata else submitterMetadata.blindFully
+        val rv = rootViews.tryBlindAllButLeaf(
+          head,
+          _.tryBlindForTransactionViewTree(ViewPositionFromRoot(tail)),
+        )
+        GenTransactionTree(
+          sm,
+          commonMetadata,
+          participantMetadata,
+          rv,
+        )(hashOps)
+      case _ => throw new UnsupportedOperationException(s"Invalid view position: $viewPos")
+    }
+  }
+
   lazy val transactionId: TransactionId = TransactionId.fromRootHash(rootHash)
 
   /** Yields the full informee tree corresponding to this transaction tree.
@@ -98,33 +129,36 @@ case class GenTransactionTree private (
     FullInformeeTree.tryCreate(tree, protocolVersion)
   }
 
-  /** Yields the transaction view tree corresponding to a given view.
-    * If some subtrees have already been blinded, they will remain blinded.
+  /** Finds the position of the view corresponding to the given hash.
+    * Returns `None` if no such view exists in this tree.
     */
-  def transactionViewTree(viewHash: RootHash, isTopLevelView: Boolean): TransactionViewTree = {
-    val genTransactionTree = blind({
-      case _: GenTransactionTree => RevealIfNeedBe
-      case _: SubmitterMetadata =>
-        if (isTopLevelView) RevealSubtree
-        else BlindSubtree
-      case _: CommonMetadata => RevealSubtree
-      case _: ParticipantMetadata => RevealSubtree
-      case v: TransactionView =>
-        if (v.rootHash == viewHash) RevealSubtree
-        else RevealIfNeedBe
-      case _: ViewCommonData => BlindSubtree
-      case _: ViewParticipantData => BlindSubtree
-    }).tryUnwrap
-    TransactionViewTree(genTransactionTree)
+  def viewPosition(viewHash: RootHash): Option[ViewPosition] = {
+    val pos = for {
+      (rootView, index) <- rootViews.unblindedElementsWithIndex
+      (view, viewPos) <- rootView.allSubviewsWithPosition(index)
+      if view.rootHash == viewHash
+    } yield viewPos
+
+    pos.headOption
   }
 
+  /** Yields the transaction view tree corresponding to a given view.
+    * If some subtrees have already been blinded, they will remain blinded.
+    *
+    * @throws java.lang.IllegalArgumentException if there is no transaction view in this tree with `viewHash`
+    */
+  def transactionViewTree(viewHash: RootHash): TransactionViewTree =
+    viewPosition(viewHash)
+      .map(viewPos => TransactionViewTree(tryBlindForTransactionViewTree(viewPos.reverse)))
+      .getOrElse(
+        throw new IllegalArgumentException(s"No transaction view found with hash $viewHash")
+      )
+
   lazy val allTransactionViewTrees: Seq[TransactionViewTree] = for {
-    rootView <- rootViews.unblindedElements
-    rootViewTree = transactionViewTree(rootView.rootHash, isTopLevelView = true)
-    nonRootViewTrees = for (subView <- rootView.flatten.drop(1))
-      yield rootViewTree.tree.transactionViewTree(subView.rootHash, isTopLevelView = false)
-    viewTree <- rootViewTree +: nonRootViewTrees
-  } yield viewTree
+    (rootView, index) <- rootViews.unblindedElementsWithIndex
+    (_view, viewPos) <- rootView.allSubviewsWithPosition(index)
+    genTransactionTree = tryBlindForTransactionViewTree(viewPos.reverse)
+  } yield TransactionViewTree(genTransactionTree)
 
   def allLightTransactionViewTrees(
       protocolVersion: ProtocolVersion

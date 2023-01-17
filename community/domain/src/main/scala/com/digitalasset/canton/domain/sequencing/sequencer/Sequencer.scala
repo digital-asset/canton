@@ -8,7 +8,7 @@ import akka.stream.KillSwitch
 import akka.stream.scaladsl.Source
 import cats.data.EitherT
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
@@ -18,6 +18,8 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggerFactory}
+import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
@@ -36,11 +38,12 @@ import scala.concurrent.{ExecutionContext, Future}
 sealed trait PruningError {
   def message: String
 }
+sealed trait PruningSupportError extends PruningError
 
 object PruningError {
 
   /** The sequencer implementation does not support pruning */
-  case object NotSupported extends PruningError {
+  case object NotSupported extends PruningSupportError {
     lazy val message: String = "This sequencer does not support pruning"
   }
 
@@ -56,7 +59,7 @@ object PruningError {
   * The default [[DatabaseSequencer]] implementation is backed by a database run by a single operator.
   * Other implementations support operating a Sequencer on top of third party ledgers or other infrastructure.
   */
-trait Sequencer extends FlagCloseable with HasCloseContext {
+trait Sequencer extends SequencerPruning with FlagCloseable with HasCloseContext {
   protected val loggerFactory: NamedLoggerFactory
 
   def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
@@ -98,6 +101,83 @@ trait Sequencer extends FlagCloseable with HasCloseContext {
   def read(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource]
+
+  /** Return a structure indicating the health status of the sequencer implementation.
+    * Should succeed even if the configured datastore is unavailable.
+    */
+  def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus]
+
+  /** Register a listener function that will be called every time the health status of the sequencer changes.
+    * Useful for things like signalling health changes to load balancers
+    */
+  def onHealthChange(f: (SequencerHealthStatus, TraceContext) => Unit)(implicit
+      traceContext: TraceContext
+  ): Unit
+
+  /** Return a snapshot state that other newly onboarded sequencers can use as an initial state
+    * from which to support serving events. This state depends on the provided timestamp
+    * and will contain registered members, counters per member, latest timestamp (which will be greater than
+    * or equal to the provided timestamp) as well as a sequencer implementation specific piece of information
+    * such that all together form the point after which the new sequencer can safely operate.
+    * The provided timestamp is typically the timestamp of the requesting sequencer's private key,
+    * which is the point in time where it can effectively sign events.
+    */
+  def snapshot(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, SequencerSnapshot]
+
+  /** First check is the member is registered and if not call `registerMember` */
+  def ensureRegistered(member: Member)(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, SequencerWriteError[RegisterMemberError], Unit] =
+    for {
+      isRegistered <- EitherT.right[SequencerWriteError[RegisterMemberError]](isRegistered(member))
+      _ <- EitherTUtil.ifThenET(!isRegistered)(registerMember(member))
+    } yield ()
+
+  /** Disable the provided member. Should prevent them from reading or writing in the future (although they can still be addressed).
+    * Their unread data can also be pruned.
+    * Effectively disables all instances of this member.
+    */
+  def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit]
+
+  /** The first [[com.digitalasset.canton.SequencerCounter]] that this sequencer can serve for its sequencer client
+    * when the sequencer topology processor's [[com.digitalasset.canton.store.SequencedEventStore]] is empty.
+    * For a sequencer bootstrapped from a [[com.digitalasset.canton.domain.sequencing.sequencer.SequencerSnapshot]],
+    * this should be at least the [[com.digitalasset.canton.domain.sequencing.sequencer.SequencerSnapshot.heads]] for
+    * the [[com.digitalasset.canton.topology.SequencerId]].
+    * For a non-bootstrapped sequencer, this can be [[com.digitalasset.canton.GenesisSequencerCounter]].
+    * This is sound as pruning ensures that we never
+    */
+  private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter
+}
+
+/** Sequencer pruning interface.
+  */
+trait SequencerPruning {
+
+  /** Builds a pruning scheduler once storage is available
+    */
+  def pruningSchedulerBuilder: Option[Storage => PruningScheduler] = None
+  def pruningScheduler: Option[PruningScheduler] = None
+
+  /** Prune as much sequencer data as safely possible without breaking operation (except for members
+    * that have been previously flagged as disabled).
+    * Sequencers are permitted to prune to an earlier timestamp if required to for their own consistency.
+    * For example, the Database Sequencer will adjust this time to a potentially earlier point in time where
+    * counter checkpoints are available for all members (who aren't being ignored).
+    */
+  def prune(requestedTimestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, PruningError, String]
+
+  /** Locate a timestamp relative to the earliest available sequencer event based on an index starting at one.
+    * Useful to monitor the progress of pruning (when index == 1) and for pruning in batches (with index == batchSize).
+    */
+  def locatePruningTimestamp(index: PositiveInt)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]]
 
   /** Acknowledge that a member has successfully handled all events up to and including the timestamp provided.
     * Makes earlier events for this member available for pruning.
@@ -144,66 +224,6 @@ trait Sequencer extends FlagCloseable with HasCloseContext {
     * reading events.
     */
   def pruningStatus(implicit traceContext: TraceContext): Future[SequencerPruningStatus]
-
-  /** Return a structure indicating the health status of the sequencer implementation.
-    * Should succeed even if the configured datastore is unavailable.
-    */
-  def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus]
-
-  /** Register a listener function that will be called every time the health status of the sequencer changes.
-    * Useful for things like signalling health changes to load balancers
-    */
-  def onHealthChange(f: (SequencerHealthStatus, TraceContext) => Unit)(implicit
-      traceContext: TraceContext
-  ): Unit
-
-  /** Prune as much sequencer data as safely possible without breaking operation (except for members
-    * that have been previously flagged as disabled).
-    * Sequencers are permitted to prune to an earlier timestamp if required to for their own consistency.
-    * For example, the Database Sequencer will adjust this time to a potentially earlier point in time where
-    * counter checkpoints are available for all members (who aren't being ignored).
-    */
-  def prune(requestedTimestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, PruningError, String]
-
-  /** Return a snapshot state that other newly onboarded sequencers can use as an initial state
-    * from which to support serving events. This state depends on the provided timestamp
-    * and will contain registered members, counters per member, latest timestamp (which will be greater than
-    * or equal to the provided timestamp) as well as a sequencer implementation specific piece of information
-    * such that all together form the point after which the new sequencer can safely operate.
-    * The provided timestamp is typically the timestamp of the requesting sequencer's private key,
-    * which is the point in time where it can effectively sign events.
-    */
-  def snapshot(timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, SequencerSnapshot]
-
-  /** First check is the member is registered and if not call `registerMember` */
-  def ensureRegistered(member: Member)(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, SequencerWriteError[RegisterMemberError], Unit] =
-    for {
-      isRegistered <- EitherT.right[SequencerWriteError[RegisterMemberError]](isRegistered(member))
-      _ <- EitherTUtil.ifThenET(!isRegistered)(registerMember(member))
-    } yield ()
-
-  /** Disable the provided member. Should prevent them from reading or writing in the future (although they can still be addressed).
-    * Their unread data can also be pruned.
-    * Effectively disables all instances of this member.
-    */
-  def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit]
-
-  /** The first [[com.digitalasset.canton.SequencerCounter]] that this sequencer can serve for its sequencer client
-    * when the sequencer topology processor's [[com.digitalasset.canton.store.SequencedEventStore]] is empty.
-    * For a sequencer bootstrapped from a [[com.digitalasset.canton.domain.sequencing.sequencer.SequencerSnapshot]],
-    * this should be at least the [[com.digitalasset.canton.domain.sequencing.sequencer.SequencerSnapshot.heads]] for
-    * the [[com.digitalasset.canton.topology.SequencerId]].
-    * For a non-bootstrapped sequencer, this can be [[com.digitalasset.canton.GenesisSequencerCounter]].
-    * This is sound as pruning ensures that we never
-    */
-  private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter
 }
 
 object Sequencer extends HasLoggerName {

@@ -6,7 +6,11 @@ package com.digitalasset.canton.data
 import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.BlindingCommand
-import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
+import com.digitalasset.canton.data.ViewPosition.{
+  ListIndex,
+  MerklePathElement,
+  MerkleSeqIndexFromRoot,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -31,6 +35,10 @@ sealed trait TransactionSubviews extends Product with PrettyPrinting {
   val areFullyBlinded: Boolean
 
   val blindedElements: Seq[RootHash]
+
+  private[data] def tryBlindForTransactionViewTree(
+      viewPos: ViewPositionFromRoot
+  ): TransactionSubviews
 
   lazy val unblindedElements: Seq[TransactionView] = unblindedElementsWithIndex.map(_._1)
 
@@ -65,8 +73,8 @@ case class TransactionSubviewsV0 private[data] (
     throw new IllegalStateException("Attempting to serialize TransactionSubviewsV0 to proto v1")
 
   override lazy val unblindedElementsWithIndex: Seq[(TransactionView, MerklePathElement)] =
-    subviews.zip(TransactionSubviews.indicesV0(subviews.size)).collect {
-      case (v: TransactionView, index) => (v, index)
+    subviewsWithIndex.collect { case (v: TransactionView, index) =>
+      (v, index)
     }
 
   override lazy val trees: Seq[MerkleTree[?]] = subviews
@@ -82,6 +90,27 @@ case class TransactionSubviewsV0 private[data] (
   override lazy val blindedElements: Seq[RootHash] =
     subviews.flatMap(_.unwrap.left.toOption.toList)
 
+  override private[data] def tryBlindForTransactionViewTree(
+      viewPos: ViewPositionFromRoot
+  ): TransactionSubviews = {
+    viewPos match {
+      case ViewPositionFromRoot((index: ListIndex) +: tail) =>
+        if (index.index >= subviews.size)
+          throw new UnsupportedOperationException(
+            s"Invalid path: index $index does not exist (${subviews.size} subviews)"
+          )
+
+        val newSubviews = subviewsWithIndex.map {
+          case (sv, i) if i == index =>
+            sv.tryUnwrap.tryBlindForTransactionViewTree(ViewPositionFromRoot(tail))
+          case (sv, _i) => sv.blindFully
+        }
+        TransactionSubviewsV0(newSubviews)
+      case other =>
+        throw new UnsupportedOperationException(s"Invalid path: $other")
+    }
+  }
+
   override def mapUnblinded(f: TransactionView => TransactionView): TransactionSubviews =
     TransactionSubviewsV0(subviews.map {
       case v: TransactionView => f(v)
@@ -94,6 +123,9 @@ case class TransactionSubviewsV0 private[data] (
 
   override lazy val trySubviewHashes: Seq[ViewHash] =
     subviews.map(sv => ViewHash.fromRootHash(sv.rootHash))
+
+  private lazy val subviewsWithIndex: Seq[(MerkleTree[TransactionView], ListIndex)] =
+    subviews.zip(TransactionSubviews.indicesV0(subviews.size))
 }
 
 /** Implementation of [[TransactionSubviews]] where the subviews are a merkle tree
@@ -124,6 +156,21 @@ case class TransactionSubviewsV1 private[data] (
   override lazy val areFullyBlinded: Boolean = subviews.isFullyBlinded
 
   override lazy val blindedElements: Seq[RootHash] = subviews.blindedElements
+
+  override def tryBlindForTransactionViewTree(
+      viewPos: ViewPositionFromRoot
+  ): TransactionSubviews = {
+    viewPos.position match {
+      case (head: MerkleSeqIndexFromRoot) +: tail =>
+        TransactionSubviewsV1(
+          subviews.tryBlindAllButLeaf(
+            head,
+            _.tryBlindForTransactionViewTree(ViewPositionFromRoot(tail)),
+          )
+        )
+      case other => throw new UnsupportedOperationException(s"Invalid path: $other")
+    }
+  }
 
   override def mapUnblinded(f: TransactionView => TransactionView): TransactionSubviews = {
     TransactionSubviewsV1(subviews.mapM(f))

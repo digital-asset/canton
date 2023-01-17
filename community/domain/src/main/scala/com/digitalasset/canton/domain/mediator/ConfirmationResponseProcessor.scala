@@ -5,16 +5,17 @@ package com.digitalasset.canton.domain.mediator
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
+import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
-import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty, ViewType}
 import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, RootHash, v0}
@@ -23,10 +24,11 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
@@ -145,65 +147,152 @@ private[mediator] class ConfirmationResponseProcessor(
       span.setAttribute("request_id", requestId.toString)
       span.setAttribute("counter", counter.toString)
 
-      def immediatelyReject(reject: MediatorReject): Future[Unit] = {
-        reject.logWithContext(Map("requestId" -> requestId.toString))
-        sendMalformedRejection(requestId, rootHashMessages, reject, decisionTime)
-      }
+      for {
+        topologySnapshot <- crypto.ips.awaitSnapshot(requestId.unwrap)
 
-      def processNormally(): Future[Unit] = {
-        val aggregation = ResponseAggregation(requestId, request, protocolVersion)(loggerFactory)
-        logger.debug(
-          show"$requestId: registered informee message. Initial state: ${aggregation.state.showMerged}"
+        unitOrVerdictO <- validateRequest(
+          requestId,
+          request,
+          rootHashMessages,
+          topologySnapshot,
         )
-        for {
-          _ <- sendResultIfDone(aggregation, decisionTime)
-          _ = if (!aggregation.isFinalized) {
-            timeTracker.requestTick(participantResponseDeadline)
-          }
-          _ <- mediatorState.add(aggregation)
-        } yield ()
-      }
 
-      crypto.ips.awaitSnapshot(requestId.unwrap).flatMap { topologySnapshot =>
-        topologySnapshot.isMediatorActive(mediatorId).flatMap {
-          case true =>
-            checkRootHashMessages(request, rootHashMessages, topologySnapshot).value.flatMap {
-              case Left(rejectionReason) =>
-                immediatelyReject(
-                  MediatorError.InvalidMessage.Reject(
-                    s"Rejected transaction due to invalid root hash messages: $rejectionReason",
-                    v0.MediatorRejection.Code.InvalidRootHashMessage,
-                  )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
-                )
-              case Right(_) =>
-                val declaredMediator = request.mediatorId
-                if (declaredMediator == mediatorId) {
-                  processNormally()
-                } else {
-                  // The mediator request was meant to be sent to a different mediator.
-                  immediatelyReject(
-                    MediatorError.MalformedMessage.Reject(
-                      show"The declared mediator in the MediatorRequest ($declaredMediator) is not the mediator that received the request ($mediatorId).",
-                      v0.MediatorRejection.Code.WrongDeclaredMediator,
-                      protocolVersion,
-                    )
-                  )
-                }
+        // Take appropriate actions based on unitOrVerdictO
+        _ <- unitOrVerdictO match {
+          // Request is well-formed, but not yet finalized
+          case Right(()) =>
+            val aggregation = ResponseAggregation.fromRequest(
+              requestId,
+              request,
+              protocolVersion,
+            )(loggerFactory)
+
+            for {
+              _ <- mediatorState.add(aggregation)
+            } yield {
+              timeTracker.requestTick(participantResponseDeadline)
+
+              logger.debug(
+                show"$requestId: registered informee message. Initial state: ${aggregation.state.showMerged}"
+              )
             }
 
-          case false =>
-            logger.info(show"Ignoring mediator request $requestId because I'm not active.")
-            Future.unit
+          // Request is finalized, approve / reject immediately
+          case Left(Some(verdict)) =>
+            logger.debug(
+              show"$requestId: finalizing immediately with verdict $verdict..."
+            )
+
+            val aggregation = ResponseAggregation.fromVerdict(
+              requestId,
+              request,
+              verdict,
+              protocolVersion,
+            )(loggerFactory)
+
+            for {
+              _ <- verdict match {
+                case mediatorReject: MediatorReject =>
+                  sendMalformedRejection(
+                    requestId,
+                    request,
+                    rootHashMessages,
+                    mediatorReject,
+                    decisionTime,
+                  )
+
+                case _: Verdict =>
+                  verdictSender.sendResult(requestId, request, verdict, decisionTime)
+              }
+
+              _ <- mediatorState.add(aggregation)
+            } yield ()
+
+          // Discard request
+          case Left(None) =>
+            logger.debug(show"$requestId: discarding request...")
+
+            Future.successful(None)
         }
-      }
+      } yield ()
     }
   }
 
-  private def checkRootHashMessages(
+  /** Validate a mediator request
+    *
+    * Yields `Left(Some(verdict))`, if `request` can already be finalized.
+    * Yields `Left(None)`, if `request` should be discarded
+    */
+  private def validateRequest(
+      requestId: RequestId,
       request: MediatorRequest,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       topologySnapshot: TopologySnapshot,
-  ): EitherT[Future, String, Unit] = {
+  )(implicit traceContext: TraceContext): Future[Either[Option[Verdict], Unit]] = (for {
+
+    // Bail out, if this mediator is passive
+    isActive <- EitherT.right(topologySnapshot.isMediatorActive(mediatorId))
+    _ <- EitherTUtil.condUnitET[Future][Option[Verdict]](
+      isActive, {
+        logger.info(show"Ignoring mediator request $requestId because I'm not active.")
+        None
+      },
+    )
+
+    // Validate activeness of informee participants
+    _ <- topologySnapshot
+      .allHaveActiveParticipants(request.allInformees)
+      .leftMap { informeesNoParticipant =>
+        val reject = MediatorError.InvalidMessage.Reject.create(
+          show"Received a mediator request with id $requestId with some informees not being hosted by an active participant: $informeesNoParticipant. Rejecting request...",
+          v0.MediatorRejection.Code.InformeesNotHostedOnActiveParticipant,
+          protocolVersion,
+        )
+        reject.log()
+        Some(reject)
+      }
+
+    // Validate root hash messages
+    _ <- checkRootHashMessages(requestId, request, rootHashMessages, topologySnapshot)
+      .leftMap[Option[Verdict]](Some(_))
+
+    // Validate declared mediator id
+    _ <- EitherTUtil.condUnitET[Future][Option[Verdict]](
+      request.mediatorId == mediatorId,
+      Some(
+        MediatorError.MalformedMessage
+          .Reject(
+            show"Received a mediator request with id $requestId with an incorrect mediator id ${request.mediatorId}. Rejecting request...",
+            v0.MediatorRejection.Code.WrongDeclaredMediator,
+            protocolVersion,
+          )
+          .reported()
+      ),
+    )
+
+    // Validate minimum threshold
+    _ <- EitherT
+      .fromEither[Future](validateMinimumThreshold(requestId, request, protocolVersion))
+      .leftMap[Option[Verdict]](Some(_))
+
+    // Reject, if the authorized confirming parties cannot attain the threshold
+    _ <-
+      validateAuthorizedConfirmingParties(
+        requestId,
+        request,
+        topologySnapshot,
+        protocolVersion,
+      )
+        .leftMap[Option[Verdict]](Some(_))
+
+  } yield ()).value
+
+  private def checkRootHashMessages(
+      requestId: RequestId,
+      request: MediatorRequest,
+      rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+      topologySnapshot: TopologySnapshot,
+  )(implicit loggingContext: ErrorLoggingContext): EitherT[Future, MediatorReject, Unit] = {
     val (wrongRecipients, oneMemberRecipients) = rootHashMessages.flatMap { rhm =>
       rhm.recipients.trees.toList.map {
         case tree @ RecipientsTree(group, Seq()) =>
@@ -253,7 +342,7 @@ private[mediator] class ConfirmationResponseProcessor(
     def wrongViewType(expectedViewType: ViewType): Seq[ViewType] =
       rootHashMessages.map(_.protocolMessage.viewType).filterNot(_ == expectedViewType).distinct
 
-    for {
+    val unitOrRejectionReason = for {
       _ <- EitherTUtil
         .condUnitET[Future](
           wrongRecipients.isEmpty,
@@ -266,7 +355,7 @@ private[mediator] class ConfirmationResponseProcessor(
       )
       _ <- EitherTUtil.condUnitET[Future](
         distinctPayloads.sizeCompare(1) <= 0,
-        show"Different payloads in root hash messages: Sizes ${distinctPayloads.map(_.bytes.size)}",
+        show"Different payloads in root hash messages. Sizes: ${distinctPayloads.map(_.bytes.size).mkShow()}.",
       )
       _ <- request.rootHash match {
         case None =>
@@ -297,10 +386,103 @@ private[mediator] class ConfirmationResponseProcessor(
           } yield ()
       }
     } yield ()
+
+    unitOrRejectionReason.leftMap((rejectionReason: String) =>
+      MediatorError.MalformedMessage
+        .Reject(
+          s"Received a mediator request with id $requestId with invalid root hash messages. Rejecting... Reason: $rejectionReason",
+          v0.MediatorRejection.Code.InvalidRootHashMessage,
+          protocolVersion,
+        )
+        .reported()
+    )
+  }
+
+  private def validateMinimumThreshold(
+      requestId: RequestId,
+      request: MediatorRequest,
+      protocolVersion: ProtocolVersion,
+  )(implicit loggingContext: ErrorLoggingContext): Either[MediatorReject, Unit] = {
+    val minimumThreshold = request.confirmationPolicy.minimumThreshold
+
+    request.informeesAndThresholdByView.toSeq
+      .traverse_ { case (viewHash, (_, threshold)) =>
+        EitherUtil.condUnitE(
+          threshold >= minimumThreshold,
+          MediatorError.MalformedMessage
+            .Reject(
+              s"Received a mediator request with id $requestId having threshold $threshold for transaction view $viewHash, which is below the confirmation policy's minimum threshold of $minimumThreshold. Rejecting request...",
+              v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
+              protocolVersion,
+            )
+            .reported(),
+        )
+      }
+  }
+
+  private def validateAuthorizedConfirmingParties(
+      requestId: RequestId,
+      request: MediatorRequest,
+      snapshot: TopologySnapshot,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      loggingContext: ErrorLoggingContext
+  ): EitherT[Future, MediatorReject, Unit] = {
+    val requiredTrustLevel = request.confirmationPolicy.requiredTrustLevel
+
+    request.informeesAndThresholdByView.toList
+      .parTraverse_ { case (viewHash, (informees, threshold)) =>
+        // sorting parties to get deterministic error messages
+        val declaredConfirmingParties =
+          informees.collect { case p: ConfirmingParty => p }.toSeq.sortBy(_.party)
+
+        for {
+          partitionedConfirmingParties <- EitherT.right[MediatorReject](
+            declaredConfirmingParties.parTraverse { p =>
+              for {
+                canConfirm <- snapshot.isHostedByAtLeastOneParticipantF(
+                  p.party,
+                  attr =>
+                    attr.permission.canConfirm && attr.trustLevel.rank >= requiredTrustLevel.rank,
+                )
+              } yield Either.cond(canConfirm, p, p)
+            }
+          )
+
+          (unauthorized, authorized) = partitionedConfirmingParties.separate
+
+          _ <- EitherTUtil.condUnitET[Future][MediatorReject](
+            authorized.map(_.weight).sum >= threshold.value, {
+              val unauthorizedPartiesHint =
+                if (unauthorized.nonEmpty)
+                  if (requiredTrustLevel == TrustLevel.Vip)
+                    show"\nParties without VIP participant: $unauthorized"
+                  else
+                    show"\nParties without participant having permission to confirm: $unauthorized"
+                else ""
+              val authorizedPartiesHint =
+                if (authorized.nonEmpty) show"\nAuthorized parties: $authorized" else ""
+
+              MediatorError.MalformedMessage
+                .Reject(
+                  s"Received a mediator request with id $requestId with insufficient authorized confirming parties for transaction view $viewHash. " +
+                    s"Rejecting request. Threshold: $threshold." +
+                    unauthorizedPartiesHint +
+                    authorizedPartiesHint,
+                  v0.MediatorRejection.Code.NotEnoughConfirmingParties,
+                  protocolVersion,
+                )
+                .reported()
+            },
+          )
+
+        } yield ()
+      }
   }
 
   private def sendMalformedRejection(
       requestId: RequestId,
+      request: MediatorRequest,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       rejectionReason: MediatorReject,
       decisionTime: CantonTimestamp,
@@ -311,29 +493,72 @@ private[mediator] class ConfirmationResponseProcessor(
     // This can happen without a malicious submitter, e.g., if the topology has changed.
     val recipientsByViewType =
       rootHashMessages.groupBy(_.protocolMessage.viewType).mapFilter { rhms =>
-        val recipients = rhms.flatMap(_.recipients.allRecipients).toSet - mediatorId
-        NonEmpty.from(recipients.toSeq)
+        val recipients = rhms.flatMap(_.recipients.allRecipients).toSet
+        val participantRecipients = recipients.collect[Member] { case p: ParticipantId => p }
+        NonEmpty.from(participantRecipients.toSeq)
       }
     if (recipientsByViewType.nonEmpty) {
       for {
         snapshot <- crypto.awaitSnapshot(requestId.unwrap)
         envs <- recipientsByViewType.toSeq
-          .parTraverse { case (viewType, recipients) =>
-            val rejection =
-              MalformedMediatorRequestResult(
-                requestId,
-                domainId,
-                viewType,
-                rejectionReason,
-                protocolVersion,
-              )
+          .parTraverse { case (viewType, flatRecipients) =>
+            // This is currently a bit messy. We need to a TransactionResultMessage or TransferXResult whenever possible,
+            // because that allows us to easily intercept and change the verdict in tests.
+            // However, in some cases, the required information is not available, so we fall back to MalformedMediatorRequestResult.
+            // TODO(i11326): Remove unnecessary fields from the result message types, so we can get rid of MalformedMediatorRequestResult and simplify this code.
+            //  Afterwards, consider to unify this with the code in DefaultVerdictSender.
+            val rejection = viewType match {
+              case ViewType.TransactionViewType =>
+                request match {
+                  case InformeeMessage(_) =>
+                    request.createMediatorResult(
+                      requestId,
+                      rejectionReason,
+                      Set.empty,
+                    )
+                  case _: MediatorRequest =>
+                    MalformedMediatorRequestResult(
+                      requestId,
+                      domainId,
+                      viewType,
+                      rejectionReason,
+                      protocolVersion,
+                    )
+                }
+
+              case ViewType.TransferInViewType =>
+                TransferInResult.create(
+                  requestId,
+                  Set.empty,
+                  TransferInDomainId(domainId),
+                  rejectionReason,
+                  protocolVersion,
+                )
+              case ViewType.TransferOutViewType =>
+                TransferOutResult.create(
+                  requestId,
+                  Set.empty,
+                  TransferOutDomainId(domainId),
+                  rejectionReason,
+                  protocolVersion,
+                )
+              case _: ViewType =>
+                MalformedMediatorRequestResult(
+                  requestId,
+                  domainId,
+                  viewType,
+                  rejectionReason,
+                  protocolVersion,
+                )
+            }
+
+            val recipients = Recipients.groups(flatRecipients.map(r => NonEmpty(Set, r)))
+
             SignedProtocolMessage
               .tryCreate(rejection, snapshot, protocolVersion)
-              .map { signedRejection =>
-                signedRejection -> Recipients.groups(recipients.map(r => NonEmpty(Set, r)))
-              }
+              .map(_ -> recipients)
           }
-        batch = Batch.of(protocolVersion, envs: _*)
+        batch = Batch.of(protocolVersion, envs *)
         _ <- verdictSender.sendResultBatch(requestId, batch, decisionTime)
       } yield ()
     } else Future.unit

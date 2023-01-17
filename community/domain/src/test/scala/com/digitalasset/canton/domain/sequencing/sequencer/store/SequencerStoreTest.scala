@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.mockDeliverStoreEvent
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SaveLowerBoundError.BoundLowerThanExisting
@@ -635,7 +635,7 @@ trait SequencerStoreTest
           _ <- store.saveEvents(0, NonEmpty(Seq, deliverEventWithDefaults(ts2)()))
           bobId <- store.registerMember(bob, ts3)
           _ <- env.savePayloads(NonEmpty(Seq, payload1))
-          // store a deliver events at ts4, ts5 & ts6
+          // store a deliver event at ts4, ts5, and ts6
           // (hopefully resulting in the earlier two deliver events being pruned)
           _ <- store.saveEvents(
             instanceIndex,
@@ -693,6 +693,79 @@ trait SequencerStoreTest
           removedCounts.payloads shouldBe 1 // for the deliver event
           statusBefore.lowerBound shouldBe <(statusAfter.lowerBound)
           lowerBound.value shouldBe ts(5) // to prevent reads from before this point
+        }
+      }
+
+      "not prune more than requested" in {
+        val env = Env()
+        import env.*
+
+        for {
+          isStoreInitiallyEmpty <- store
+            .locatePruningTimestamp(NonNegativeInt.tryCreate(0))
+            .map(_.isEmpty)
+          aliceId <- store.registerMember(alice, ts1)
+          _ <- store.saveEvents(0, NonEmpty(Seq, deliverEventWithDefaults(ts2)()))
+          bobId <- store.registerMember(bob, ts3)
+          _ <- env.savePayloads(NonEmpty(Seq, payload1))
+          // store a deliver event at ts4, ts5, ts6, and ts7
+          // resulting in only the first deliver event being pruned honoring the pruning timestamp of earlier than ts5
+          _ <- store.saveEvents(
+            instanceIndex,
+            NonEmpty(
+              Seq,
+              Sequenced(
+                ts(4),
+                DeliverStoreEvent(
+                  aliceId,
+                  messageId1,
+                  NonEmpty(SortedSet, aliceId, bobId),
+                  payload1.id,
+                  None,
+                  traceContext,
+                ),
+              ),
+              deliverEventWithDefaults(ts(5))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
+              deliverEventWithDefaults(ts(6))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
+              deliverEventWithDefaults(ts(7))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
+            ),
+          )
+          // save an earlier counter checkpoint that should be removed
+          _ <- store
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(1), ts(4)))
+            .valueOrFail("alice counter checkpoint")
+          _ <- store
+            .saveCounterCheckpoint(bobId, checkpoint(SequencerCounter(1), ts(4)))
+            .valueOrFail("bob counter checkpoin t")
+          _ <- store
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(2), ts(6)))
+            .valueOrFail("alice counter checkpoint")
+          _ <- store
+            .saveCounterCheckpoint(bobId, checkpoint(SequencerCounter(2), ts(6)))
+            .valueOrFail("bob counter checkpoint")
+          _ <- store.acknowledge(aliceId, ts(7))
+          _ <- store.acknowledge(bobId, ts(7))
+          statusBefore <- store.status(ts(10))
+          recordCountsBefore <- store.countRecords
+          pruningTimestamp = ts(5)
+          _message <- {
+            logger.debug(s"Pruning sequencer store from $pruningTimestamp")
+            store
+              .prune(pruningTimestamp, statusBefore, NonNegativeFiniteDuration.ofSeconds(1))
+              .valueOrFail("prune")
+          }
+          recordCountsAfter <- store.countRecords
+          oldestTimestamp <- store.locatePruningTimestamp(NonNegativeInt.tryCreate(0))
+        } yield {
+          isStoreInitiallyEmpty shouldBe true
+          // as pruning is "exclusive", should see ts4, the checkpoint time before ts5, and not
+          // ts6, the timestamp just before safePruningTimestamp (ts7)
+          oldestTimestamp shouldBe Some(ts(4))
+          statusBefore.safePruningTimestamp shouldBe ts(7)
+          val removedCounts = recordCountsBefore - recordCountsAfter
+          removedCounts.counterCheckpoints shouldBe 0 // no earlier checkpoints
+          removedCounts.events shouldBe 1 // the only deliver event earlier than ts5
+          removedCounts.payloads shouldBe 1 // for the deliver event
         }
       }
 

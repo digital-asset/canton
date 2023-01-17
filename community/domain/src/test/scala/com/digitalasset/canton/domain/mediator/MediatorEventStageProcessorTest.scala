@@ -321,7 +321,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     }
 
   private def responseAggregation(requestId: RequestId): ResponseAggregation =
-    ResponseAggregation(
+    ResponseAggregation.fromRequest(
       requestId,
       InformeeMessage(fullInformeeTree)(testedProtocolVersion),
       testedProtocolVersion,

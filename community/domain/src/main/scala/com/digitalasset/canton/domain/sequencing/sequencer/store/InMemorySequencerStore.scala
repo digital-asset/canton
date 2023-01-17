@@ -12,6 +12,7 @@ import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore.CheckpointDataAtCounter
@@ -333,6 +334,13 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
     }
 
     removedCheckpointsCounter.get()
+  }
+
+  override def locatePruningTimestamp(skip: NonNegativeInt)(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]] = Future.successful {
+    import scala.jdk.OptionConverters.*
+    events.keySet().stream().skip(skip.value.toLong).findFirst().toScala
   }
 
   override protected[store] def adjustPruningTimestampForCounterCheckpoints(

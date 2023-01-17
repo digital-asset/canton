@@ -41,8 +41,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
         case ((expectedTransactionViewTree, (expectedView, _)), index) =>
           s"blind the transaction tree to the $index-th transaction view tree" in {
             transactionTree.transactionViewTree(
-              expectedTransactionViewTree.viewHash.toRootHash,
-              expectedTransactionViewTree.isTopLevel,
+              expectedTransactionViewTree.viewHash.toRootHash
             ) shouldEqual expectedTransactionViewTree
           }
 

@@ -23,6 +23,15 @@ case class ViewPosition(position: List[MerklePathElement]) extends AnyVal {
 
   def encodeDeterministically: ByteString =
     DeterministicEncoding.encodeSeqWith(position)(_.encodeDeterministically)
+
+  /** Reverse the position, as well as all contained MerkleSeqIndex path elements */
+  def reverse: ViewPositionFromRoot = ViewPositionFromRoot(position.reverse.map(_.reverse))
+}
+
+/** Same as [[ViewPosition]], with the position directed from the root to the leaf */
+case class ViewPositionFromRoot(position: List[MerklePathElement]) extends AnyVal {
+  def isTopLevel: Boolean = position.size == 1
+  def isEmpty: Boolean = position.isEmpty
 }
 
 object ViewPosition {
@@ -38,6 +47,7 @@ object ViewPosition {
   /** A single element on a path through a Merkle tree. */
   sealed trait MerklePathElement extends Product with Serializable with PrettyPrinting {
     def encodeDeterministically: ByteString
+    def reverse: MerklePathElement
   }
 
   /** For [[MerkleTreeInnerNode]]s which branch to a list of subviews,
@@ -50,6 +60,8 @@ object ViewPosition {
         .concat(DeterministicEncoding.encodeInt(index))
 
     override def pretty: Pretty[ListIndex] = prettyOfString(_.index.toString)
+
+    override lazy val reverse: ListIndex = this
   }
 
   /** A leaf position in a [[MerkleSeq]], encodes as a path of directions from the leaf to the root.
@@ -63,6 +75,21 @@ object ViewPosition {
 
     override def pretty: Pretty[MerkleSeqIndex] =
       prettyOfString(_ => index.reverse.map(_.show).mkString(""))
+
+    override lazy val reverse: MerkleSeqIndexFromRoot = MerkleSeqIndexFromRoot(index.reverse)
+  }
+
+  /** Same as [[MerkleSeqIndex]], with the position directed from the root to the leaf */
+  case class MerkleSeqIndexFromRoot(index: List[Direction]) extends MerklePathElement {
+    override def encodeDeterministically: ByteString =
+      throw new UnsupportedOperationException(
+        "MerkleSeqIndexFromRoot is for internal use only and should not be encoded"
+      )
+
+    override def pretty: Pretty[MerkleSeqIndexFromRoot] =
+      prettyOfString(_ => index.map(_.show).mkString(""))
+
+    override lazy val reverse: MerkleSeqIndex = MerkleSeqIndex(index.reverse)
   }
 
   object MerklePathElement {

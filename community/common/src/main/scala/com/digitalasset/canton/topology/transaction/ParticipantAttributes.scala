@@ -82,6 +82,12 @@ object ParticipantPermission {
     else snd
   }
 
+  def higherOf(fst: ParticipantPermission, snd: ParticipantPermission): ParticipantPermission = {
+    if (fst.level < snd.level)
+      fst
+    else snd
+  }
+
 }
 
 /** The trust level of the participant. Can be either Ordinary or Vip
@@ -94,6 +100,8 @@ sealed trait TrustLevel extends Product with Serializable {
 object TrustLevel {
 
   def lowerOf(fst: TrustLevel, snd: TrustLevel): TrustLevel = if (fst.rank < snd.rank) fst else snd
+
+  def higherOf(fst: TrustLevel, snd: TrustLevel): TrustLevel = if (fst.rank > snd.rank) fst else snd
 
   case object Ordinary extends TrustLevel {
     override def toProtoEnum: v0.TrustLevel = v0.TrustLevel.Ordinary

@@ -341,7 +341,7 @@ object ExampleTransactionFactory {
       topology = Map(
         submitter -> Map(submitterParticipant -> ParticipantAttributes(Submission, TrustLevel.Vip)),
         signatory -> Map(
-          signatoryParticipant -> ParticipantAttributes(Confirmation, TrustLevel.Vip)
+          signatoryParticipant -> ParticipantAttributes(Confirmation, TrustLevel.Ordinary)
         ),
         observer -> Map(
           signatoryParticipant -> ParticipantAttributes(Observation, TrustLevel.Ordinary)

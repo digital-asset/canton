@@ -15,7 +15,6 @@ import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import io.functionmeta.functionFullName
@@ -77,13 +76,11 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
   }
   val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
   val currentVersion =
-    ResponseAggregation(
+    ResponseAggregation.fromVerdict(
       requestId,
       informeeMessage,
-      requestId.unwrap,
       MediatorError.Timeout.Reject.create(testedProtocolVersion),
       testedProtocolVersion,
-      TraceContext.empty,
     )(loggerFactory)
 
   private[mediator] def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {
