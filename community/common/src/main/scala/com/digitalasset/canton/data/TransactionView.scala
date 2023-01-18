@@ -8,6 +8,7 @@ import cats.syntax.functor.*
 import com.daml.lf.transaction.ContractStateMachine.{ActiveLedgerState, KeyMapping}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.TransactionView.InvalidView
+import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.{v0, v1, *}
@@ -82,6 +83,22 @@ case class TransactionView private (
       representativeProtocolVersion,
     )(hashOps)
 
+  private[data] def tryBlindForTransactionViewTree(
+      viewPos: ViewPositionFromRoot
+  ): TransactionView = {
+    val isMainView = viewPos.isEmpty
+
+    if (isMainView) this
+    else {
+      TransactionView.tryCreate(
+        viewCommonData.blindFully,
+        viewParticipantData.blindFully,
+        subviews.tryBlindForTransactionViewTree(viewPos),
+        representativeProtocolVersion,
+      )(hashOps)
+    }
+  }
+
   val viewHash: ViewHash = ViewHash.fromRootHash(rootHash)
 
   /** Traverses all unblinded subviews `v1, v2, v3, ...` in pre-order and yields
@@ -97,6 +114,22 @@ case class TransactionView private (
     */
   def flatten: Seq[TransactionView] =
     foldLeft(Seq.newBuilder[TransactionView])((acc, v) => acc += v).result()
+
+  /** Yields all (direct and indirect) subviews of this view in pre-order, along with the subview position
+    * under the root view position `rootPos`. The first element is this view.
+    */
+  def allSubviewsWithPosition(rootPos: MerklePathElement): Seq[(TransactionView, ViewPosition)] = {
+    def helper(
+        view: TransactionView,
+        viewPos: ViewPosition,
+    ): Seq[(TransactionView, ViewPosition)] = {
+      (view, viewPos) +: view.subviews.unblindedElementsWithIndex.flatMap {
+        case (view, viewIndex) => helper(view, viewIndex +: viewPos)
+      }
+    }
+
+    helper(this, rootPos +: ViewPosition.root)
+  }
 
   override def pretty: Pretty[TransactionView] = prettyOfClass(
     param("root hash", _.rootHash),

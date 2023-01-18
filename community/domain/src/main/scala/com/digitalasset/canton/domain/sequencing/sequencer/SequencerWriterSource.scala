@@ -26,6 +26,7 @@ import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -238,7 +239,7 @@ object SequencerWriterSource {
           )
         }
       }
-      .via(UpdateWatermarkFlow(store))
+      .via(UpdateWatermarkFlow(store, logger))
       .via(NotifyEventSignallerFlow(eventSignaller))
   }
 }
@@ -518,22 +519,37 @@ object WritePayloadsFlow {
 }
 
 object UpdateWatermarkFlow {
-  def apply(store: SequencerWriterStore)(implicit
+  def apply(store: SequencerWriterStore, logger: TracedLogger)(implicit
       executionContext: ExecutionContext
-  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
+  ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] = {
     Flow[Traced[BatchWritten]]
       .mapAsync(1)(_.withTraceContext { implicit traceContext => written =>
         for {
-          _ <- store.saveWatermark(written.latestTimestamp).value.map {
-            case Left(SaveWatermarkError.WatermarkFlaggedOffline) =>
-              // intentionally throwing exception that will bubble up through the akka stream and handled by the
-              // recovery process in SequencerWriter
-              throw new SequencerOfflineException(store.instanceIndex)
-            case _ => ()
-          }
+          _ <- store
+            .saveWatermark(written.latestTimestamp)
+            .value
+            .map {
+              case Left(SaveWatermarkError.WatermarkFlaggedOffline) =>
+                // intentionally throwing exception that will bubble up through the akka stream and handled by the
+                // recovery process in SequencerWriter
+                throw new SequencerOfflineException(store.instanceIndex)
+              case _ => ()
+            }
+            // This is a workaround to avoid failing during shutdown that can be removed once saveWatermark returns
+            // a FutureUnlessShutdown
+            .recover {
+              case exception if DbExceptionRetryable.retryOKForever(exception, logger) =>
+                // The exception itself is already being logged above by retryOKForever. Only logging here additional
+                // context
+                logger.info(
+                  "Saving watermark failed with a retryable error. This can happen during shutdown." +
+                    " The error will be ignored to allow the shutdown to proceed."
+                )
+            }
         } yield Traced(written)
       })
       .named("updateWatermark")
+  }
 }
 
 object NotifyEventSignallerFlow {

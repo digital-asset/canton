@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.{v0, v1}
 import com.digitalasset.canton.domain.sequencing.admin.client.HttpSequencerAdminClient
@@ -19,6 +20,7 @@ import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, In
 import com.digitalasset.canton.domain.sequencing.sequencer.{LedgerIdentity, SequencerSnapshot}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.http.HttpClient
+import com.digitalasset.canton.pruning.admin.v0.LocatePruningTimestamp
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, Member}
@@ -204,6 +206,30 @@ object EnterpriseSequencerAdminCommands {
     //  command will potentially take a long time
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
 
+  }
+
+  final case class LocatePruningTimestampCommand(index: PositiveInt)
+      extends BaseSequencerAdministrationCommand[
+        LocatePruningTimestamp.Request,
+        LocatePruningTimestamp.Response,
+        Option[CantonTimestamp],
+      ] {
+    override def createRequest(): Either[String, LocatePruningTimestamp.Request] = Right(
+      LocatePruningTimestamp.Request(index.value)
+    )
+
+    override def submitRequest(
+        service: v0.EnterpriseSequencerAdministrationServiceGrpc.EnterpriseSequencerAdministrationServiceStub,
+        request: LocatePruningTimestamp.Request,
+    ): Future[LocatePruningTimestamp.Response] =
+      service.locatePruningTimestamp(request)
+
+    override def handleResponse(
+        response: LocatePruningTimestamp.Response
+    ): Either[String, Option[CantonTimestamp]] =
+      response.timestamp.fold(Right(None): Either[String, Option[CantonTimestamp]])(
+        CantonTimestamp.fromProtoPrimitive(_).bimap(_.message, Some(_))
+      )
   }
 
   final case class DisableMember(member: Member)

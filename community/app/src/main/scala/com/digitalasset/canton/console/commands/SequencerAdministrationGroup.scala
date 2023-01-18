@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.console.commands
 
+import com.digitalasset.canton.admin.api.client.commands.EnterpriseSequencerAdminCommands.LocatePruningTimestampCommand
 import com.digitalasset.canton.admin.api.client.commands.{
   EnterpriseSequencerAdminCommands,
+  PruningSchedulerCommands,
   SequencerAdminCommands,
 }
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleEnvironment,
@@ -16,6 +19,8 @@ import com.digitalasset.canton.console.{
   Helpful,
 }
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministrationServiceGrpc
+import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministrationServiceGrpc.EnterpriseSequencerAdministrationServiceStub
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   LedgerIdentity,
   SequencerClients,
@@ -38,7 +43,22 @@ class SequencerAdministrationGroup(
     with NamedLogging {
 
   @Help.Summary("Pruning of the sequencer")
-  object pruning extends Helpful {
+  object pruning
+      extends PruningSchedulerAdministration(
+        runner,
+        consoleEnvironment,
+        new PruningSchedulerCommands[EnterpriseSequencerAdministrationServiceStub](
+          EnterpriseSequencerAdministrationServiceGrpc.stub,
+          _.setSchedule(_),
+          _.clearSchedule(_),
+          _.setCron(_),
+          _.setMaxDuration(_),
+          _.setRetention(_),
+          _.getSchedule(_),
+        ),
+        loggerFactory,
+      )
+      with Helpful {
     @Help.Summary("Status of the sequencer and its connected clients")
     @Help.Description(
       """Provides a detailed breakdown of information required for pruning:
@@ -196,6 +216,23 @@ class SequencerAdministrationGroup(
         sb.toString()
       }
     }
+
+    @Help.Summary("Obtain a timestamp at or near the beginning of sequencer state")
+    @Help.Description(
+      """This command provides insight into the current state of sequencer pruning when called with
+        |the default value of `index` 1.
+        |When pruning the sequencer manually via `prune_at` and with the intent to prune in batches, specify
+        |a value such as 1000 to obtain a pruning timestamp that corresponds to the "end" of the batch."""
+    )
+    def locate_pruning_timestamp(
+        index: PositiveInt = PositiveInt.tryCreate(1)
+    ): Option[CantonTimestamp] =
+      check(FeatureFlag.Preview) {
+        consoleEnvironment.run {
+          runner.adminCommand(LocatePruningTimestampCommand(index))
+        }
+      }
+
   }
 
   /** Disable the provided member at the sequencer preventing them from reading and writing, and allowing their

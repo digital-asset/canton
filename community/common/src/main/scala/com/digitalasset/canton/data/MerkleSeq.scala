@@ -10,7 +10,11 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleSeq.MerkleSeqElement
 import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
-import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndex}
+import com.digitalasset.canton.data.ViewPosition.{
+  MerklePathElement,
+  MerkleSeqIndex,
+  MerkleSeqIndexFromRoot,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -87,6 +91,31 @@ case class MerkleSeq[+M <: VersionedMerkleTree[_]](
         }
       case None => this
     }
+
+  /** Blind everything in this MerkleSeq, except the leaf identified by the given path.
+    * To ensure the path is valid, it should be obtained beforehand with a traversal
+    * method such as [[unblindedElementsWithIndex]] and reversed with [[ViewPosition.reverse]].
+    *
+    * @param path the path from root to leaf
+    * @param actionOnLeaf an action to transform the leaf once it is found
+    * @throws java.lang.UnsupportedOperationException if the path does not lead to an unblinded leaf
+    */
+  def tryBlindAllButLeaf[A <: VersionedMerkleTree[A]](
+      path: MerkleSeqIndexFromRoot,
+      actionOnLeaf: M => A,
+      // Ideally, we would have `actionOnLeaf: M => M`, as there is no need to change the type of the
+      // leaf when blinding. Unfortunately, this becomes harder in practice: since M is covariant,
+      // the type checker does not know the actual type at runtime and could still mishandle it.
+  ): MerkleSeq[A] = {
+    rootOrEmpty match {
+      case Some(root) =>
+        MerkleSeq(
+          Some(root.tryUnwrap.tryBlindAllButLeaf(path, actionOnLeaf)),
+          representativeProtocolVersion,
+        )(hashOps)
+      case None => throw new UnsupportedOperationException("Empty MerkleSeq")
+    }
+  }
 
   def toProtoV0: v0.MerkleSeq =
     v0.MerkleSeq(rootOrEmpty = rootOrEmpty.map(MerkleTree.toBlindableNodeV0))
@@ -169,6 +198,11 @@ object MerkleSeq
         optimizedBlindingPolicy: PartialFunction[RootHash, BlindingCommand]
     ): MerkleSeqElement[M]
 
+    def tryBlindAllButLeaf[A <: VersionedMerkleTree[A]](
+        path: MerkleSeqIndexFromRoot,
+        actionOnLeaf: M => A,
+    ): MerkleSeqElement[A]
+
     def mapM[A <: VersionedMerkleTree[A]](f: M => A): MerkleSeqElement[A]
 
     def toProtoV0: v0.MerkleSeqElement
@@ -217,6 +251,32 @@ object MerkleSeq
       )(
         hashOps
       )
+
+    override def tryBlindAllButLeaf[A <: VersionedMerkleTree[A]](
+        path: MerkleSeqIndexFromRoot,
+        actionOnLeaf: M => A,
+    ): MerkleSeqElement[A] = {
+      path.index match {
+        case Direction.Left :: tailIndex =>
+          Branch[A](
+            first.tryUnwrap.tryBlindAllButLeaf(MerkleSeqIndexFromRoot(tailIndex), actionOnLeaf),
+            BlindedNode[MerkleSeqElement[A]](second.rootHash),
+            representativeProtocolVersion,
+          )(hashOps)
+
+        case Direction.Right :: tailIndex =>
+          Branch[A](
+            BlindedNode[MerkleSeqElement[A]](first.rootHash),
+            second.tryUnwrap.tryBlindAllButLeaf(MerkleSeqIndexFromRoot(tailIndex), actionOnLeaf),
+            representativeProtocolVersion,
+          )(hashOps)
+
+        case Nil =>
+          throw new UnsupportedOperationException(
+            "The path is invalid: path exhausted but leaf not reached"
+          )
+      }
+    }
 
     override private[MerkleSeq] def foreachUnblindedElement(
         path: Path
@@ -297,6 +357,23 @@ object MerkleSeq
         optimizedBlindingPolicy: PartialFunction[RootHash, MerkleTree.BlindingCommand]
     ): Singleton[M] =
       Singleton[M](data.doBlind(optimizedBlindingPolicy), representativeProtocolVersion)(hashOps)
+
+    override def tryBlindAllButLeaf[A <: VersionedMerkleTree[A]](
+        path: MerkleSeqIndexFromRoot,
+        actionOnLeaf: M => A,
+    ): MerkleSeqElement[A] = {
+      path.index match {
+        case List() =>
+          Singleton(
+            actionOnLeaf(data.tryUnwrap),
+            representativeProtocolVersion,
+          )(hashOps)
+        case other =>
+          throw new UnsupportedOperationException(
+            s"The path is invalid: reached a leaf but the path contains more steps ($other)"
+          )
+      }
+    }
 
     override private[MerkleSeq] def foreachUnblindedElement(path: Path)(
         body: (M, Path) => Unit

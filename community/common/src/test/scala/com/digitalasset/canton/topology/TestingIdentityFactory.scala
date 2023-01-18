@@ -261,7 +261,23 @@ class TestingIdentityFactory(
 
     val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
 
-    val permissions: Map[ParticipantId, ParticipantAttributes] = topology.topology.flatMap(_._2)
+    // Compute participant permissions and trust levels to be the highest granted to an individual party
+    val permissions: Map[ParticipantId, ParticipantAttributes] =
+      topology.topology.foldLeft(Map.empty[ParticipantId, ParticipantAttributes]) {
+        case (acc, (_, participants)) =>
+          participants.foldLeft(acc) { case (acc, (participant, attributes1)) =>
+            val ParticipantAttributes(permission1, trustLevel1) = attributes1
+            val newAttributes = acc.get(participant) match {
+              case Some(ParticipantAttributes(permission2, trustLevel2)) =>
+                ParticipantAttributes(
+                  permission = ParticipantPermission.higherOf(permission1, permission2),
+                  trustLevel = TrustLevel.higherOf(trustLevel1, trustLevel2),
+                )
+              case None => attributes1
+            }
+            acc.updated(participant, newAttributes)
+          }
+      }
 
     val participantTxs = participantsTxs(permissions, packages)
 

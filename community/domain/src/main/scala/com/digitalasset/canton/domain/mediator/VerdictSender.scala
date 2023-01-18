@@ -10,15 +10,14 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.MediatorMessageId.VerdictMessageId
-import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   MediatorRequest,
   SignedProtocolMessage,
   Verdict,
 }
-import com.digitalasset.canton.protocol.{RequestId, v0}
 import com.digitalasset.canton.sequencing.client.{
   SendCallback,
   SendResult,
@@ -36,7 +35,6 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -138,61 +136,22 @@ private[mediator] class DefaultVerdictSender(
       .void
   }
 
-  private def informeesGroupedByParticipant(requestId: RequestId, informees: Set[LfPartyId])(
-      implicit traceContext: TraceContext
-  ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] = {
-
-    def participantInformeeMapping(
-        topologySnapshot: TopologySnapshot
-    ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] = {
-      val start = Map.empty[ParticipantId, Set[LfPartyId]]
-      val prefetchF =
-        informees.toList.parTraverse(partyId =>
-          topologySnapshot.activeParticipantsOf(partyId).map(res => (partyId, res))
-        )
-      prefetchF.map { fetched =>
-        fetched.foldLeft((start, Set.empty[LfPartyId]))({
-          case (
-                (participantsToInformees, informeesNoParticipant),
-                (informee, activeParticipants),
-              ) =>
-            val activeParticipantsOfInformee = activeParticipants.keySet
-            if (activeParticipantsOfInformee.isEmpty)
-              (participantsToInformees, informeesNoParticipant + informee)
-            else {
-              val updatedMap = activeParticipantsOfInformee.foldLeft(participantsToInformees)({
-                case (map, participant) =>
-                  map + (participant -> (map.getOrElse(participant, Set.empty) + informee))
-              })
-              (updatedMap, informeesNoParticipant)
-            }
-        })
-      }
-    }
-
-    crypto.ips.awaitSnapshot(requestId.unwrap).flatMap(participantInformeeMapping)
-  }
-
-  private[this] def createResults(requestId: RequestId, request: MediatorRequest, verdict: Verdict)(
-      implicit traceContext: TraceContext
+  private[this] def createResults(
+      requestId: RequestId,
+      request: MediatorRequest,
+      verdict: Verdict,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[Future, SyncCryptoError, Batch[DefaultOpenEnvelope]] =
     for {
-      informeesMapAndAnyInformeeNoActiveParticipant <- EitherT.right(
-        informeesGroupedByParticipant(requestId, request.allInformees)
-      )
-      (informeesMap, informeesNoParticipant) = informeesMapAndAnyInformeeNoActiveParticipant
       snapshot <- EitherT.right(crypto.awaitSnapshot(requestId.unwrap))
-      verdictWithInformeeCheck = {
-        if (informeesNoParticipant.nonEmpty) {
-          MediatorError.InvalidMessage.Reject(
-            show"Rejected transaction due to informees not being hosted on an active participant: $informeesNoParticipant",
-            v0.MediatorRejection.Code.InformeesNotHostedOnActiveParticipant,
-          )(verdict.representativeProtocolVersion)
-        } else verdict
-      }
+      informeesMap <- EitherT.right(
+        informeesByParticipant(request.allInformees.toList, snapshot.ipsSnapshot)
+      )
+
       envelopes <- informeesMap.toList
         .parTraverse { case (participantId, informees) =>
-          val result = request.createMediatorResult(requestId, verdictWithInformeeCheck, informees)
+          val result = request.createMediatorResult(requestId, verdict, informees)
           SignedProtocolMessage
             .create(result, snapshot, protocolVersion)
             .map(signedResult =>
@@ -200,4 +159,18 @@ private[mediator] class DefaultVerdictSender(
             )
         }
     } yield Batch(envelopes, protocolVersion)
+
+  private def informeesByParticipant(
+      informees: List[LfPartyId],
+      topologySnapshot: TopologySnapshot,
+  ): Future[Map[ParticipantId, Set[LfPartyId]]] =
+    for {
+      participantsByParty <- topologySnapshot.activeParticipantsOfParties(informees)
+    } yield participantsByParty.foldLeft(Map.empty[ParticipantId, Set[LfPartyId]]) {
+      case (acc, (party, participants)) =>
+        participants.foldLeft(acc) { case (acc, participant) =>
+          val parties = acc.getOrElse(participant, Set.empty) + party
+          acc.updated(participant, parties)
+        }
+    }
 }

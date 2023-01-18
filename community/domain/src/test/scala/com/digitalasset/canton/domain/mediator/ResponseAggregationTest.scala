@@ -133,7 +133,9 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
       val sut =
-        ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
+        ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
+          loggerFactory
+        )
 
       it("should have initially all pending confirming parties listed") {
         sut.state shouldBe Right(
@@ -142,59 +144,6 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             view2.viewHash -> ViewState(Set(bob), 2, Nil),
           )
         )
-      }
-
-      it("should check the policy's minimum threshold") {
-        val viewcommonDataThresholdTooLow =
-          ViewCommonData.create(hashOps)(
-            Set(alice),
-            NonNegativeInt.zero,
-            salt(54172),
-            testedProtocolVersion,
-          )
-        val viewThresholdTooLow =
-          TransactionView.tryCreate(hashOps)(
-            viewcommonDataThresholdTooLow,
-            b(100),
-            emptySubviews,
-            testedProtocolVersion,
-          )
-        val fullInformeeTreeThresholdTooLow = FullInformeeTree.tryCreate(
-          GenTransactionTree.tryCreate(hashOps)(
-            b(0),
-            commonMetadataSignatory,
-            b(2),
-            MerkleSeq.fromSeq(hashOps)(viewThresholdTooLow :: Nil, testedProtocolVersion),
-          ),
-          testedProtocolVersion,
-        )
-
-        val informeeMessage =
-          InformeeMessage(fullInformeeTreeThresholdTooLow)(testedProtocolVersion)
-
-        val alarmMsg =
-          show"Received a mediator request with id $requestId having threshold 0 for transaction view ${viewThresholdTooLow.viewHash}, which is below the confirmation policy's minimum threshold of 1. Rejecting request..."
-
-        val alarm = MediatorError.MalformedMessage.Reject(
-          alarmMsg,
-          v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
-          testedProtocolVersion,
-        )
-
-        val sut = loggerFactory.assertLogs(
-          ResponseAggregation(
-            requestId,
-            informeeMessage,
-            testedProtocolVersion,
-          )(loggerFactory),
-          _.shouldBeCantonError(
-            MediatorError.MalformedMessage,
-            _ shouldBe alarmMsg,
-            checkTestedProtocolVersion,
-          ),
-        )
-
-        sut.state shouldBe Left(alarm)
       }
 
       it("should reject responses with the wrong root hash") {
@@ -241,10 +190,13 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId,
               informeeMessage,
               changeTs1,
-              ParticipantReject(
-                NonEmpty(List, Set(alice.party) -> testReject()),
-                testedProtocolVersion,
+              Left(
+                ParticipantReject(
+                  NonEmpty(List, Set(alice.party) -> testReject()),
+                  testedProtocolVersion,
+                )
               ),
+            )(
               testedProtocolVersion,
               TraceContext.empty,
             )(loggerFactory)
@@ -287,7 +239,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 requestId,
                 informeeMessage,
                 changeTs2,
-                rejection,
+                Left(rejection),
+              )(
                 testedProtocolVersion,
                 TraceContext.empty,
               )(loggerFactory)
@@ -369,7 +322,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId,
               informeeMessage,
               changeTs,
-              Verdict.Approve(testedProtocolVersion),
+              Left(Verdict.Approve(testedProtocolVersion)),
+            )(
               testedProtocolVersion,
               TraceContext.empty,
             )(loggerFactory)
@@ -463,7 +417,9 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .thenReturn(Future.successful(false))
 
       val sut =
-        ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
+        ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
+          loggerFactory
+        )
       lazy val changeTs = requestId.unwrap.plusSeconds(1)
       def testReject(reason: String) =
         LocalReject.MalformedRejects.Payloads.Reject(reason)(testedProtocolVersion)
@@ -573,7 +529,9 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .thenReturn(Future.successful(true))
 
       val sut =
-        ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
+        ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
+          loggerFactory
+        )
       val initialState =
         Map(
           view1.viewHash -> ViewState(Set(alice, bob), 3, Nil),

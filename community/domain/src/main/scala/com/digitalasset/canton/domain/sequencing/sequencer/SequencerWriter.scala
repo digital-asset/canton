@@ -10,7 +10,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
@@ -19,6 +19,7 @@ import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,
   FlagCloseableAsync,
   FutureUnlessShutdown,
+  HasCloseContext,
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -123,16 +124,33 @@ object SequencerWriterStoreFactory {
   */
 class SequencerWriter(
     writerStoreFactory: SequencerWriterStoreFactory,
-    createWriterFlow: (SequencerWriterStore, TraceContext) => RunningSequencerWriterFlow,
+    createWriterFlow: (
+        SequencerWriterStore,
+        TraceContext,
+    ) => RunningSequencerWriterFlow,
     storage: Storage,
-    generalStore: SequencerStore,
     clock: Clock,
     expectedCommitMode: Option[CommitMode],
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
+    protocolVersion: ProtocolVersion,
+    maxSqlInListSize: PositiveNumeric[Int],
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync {
+    with FlagCloseableAsync
+    with HasCloseContext {
+
+  val generalStore: SequencerStore =
+    SequencerStore(
+      storage,
+      protocolVersion,
+      maxSqlInListSize,
+      timeouts,
+      loggerFactory,
+      // Overriding the store's close context with the writers, so that when the writer gets closed, the store
+      // stops retrying forever
+      overrideCloseContext = Some(this.closeContext),
+    )
 
   private case class RunningWriter(flow: RunningSequencerWriterFlow, store: SequencerWriterStore) {
 
@@ -363,7 +381,6 @@ object SequencerWriter {
       keepAliveInterval: Option[NonNegativeFiniteDuration],
       processingTimeout: ProcessingTimeout,
       storage: Storage,
-      generalStore: SequencerStore,
       clock: Clock,
       cryptoApi: DomainSyncCryptoClient,
       eventSignaller: EventSignaller,
@@ -396,11 +413,12 @@ object SequencerWriter {
       writerStorageFactory,
       createWriterFlow(_)(_),
       storage,
-      generalStore,
       clock,
       writerConfig.commitModeValidation,
       processingTimeout,
       loggerFactory,
+      protocolVersion,
+      writerConfig.maxSqlInListSize,
     )
   }
 

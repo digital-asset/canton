@@ -8,6 +8,7 @@ import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import org.scalatest.compatible.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -15,7 +16,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 import java.util.UUID
 import scala.concurrent.Future
 
-trait MultiTenantedSequencerStoreTest {
+trait MultiTenantedSequencerStoreTest extends FlagCloseable with HasCloseContext {
   this: AsyncWordSpec with BaseTest =>
 
   def multiTenantedSequencerStore(mk: () => SequencerStore): Unit = {

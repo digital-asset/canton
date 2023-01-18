@@ -9,7 +9,7 @@ import cats.syntax.functor.*
 import cats.syntax.option.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.*
@@ -87,7 +87,6 @@ object DatabaseSequencer {
       storage,
       None,
       None,
-      None,
       clock,
       domainId,
       topologyClientMember,
@@ -108,7 +107,6 @@ class DatabaseSequencer(
     override protected val timeouts: ProcessingTimeout,
     storage: Storage,
     exclusiveStorage: Option[Storage],
-    pruningSchedulerBuilder: Option[(Storage, Sequencer) => PruningScheduler],
     health: Option[SequencerHealthConfig],
     clock: Clock,
     domainId: DomainId,
@@ -125,14 +123,6 @@ class DatabaseSequencer(
       SignatureVerifier(cryptoApi),
     )
     with FlagCloseable {
-  private val store: SequencerStore =
-    SequencerStore(
-      storage,
-      protocolVersion,
-      config.writer.maxSqlInListSize,
-      timeouts,
-      loggerFactory,
-    )
 
   private val writer = SequencerWriter(
     config.writer,
@@ -141,7 +131,6 @@ class DatabaseSequencer(
     keepAliveInterval,
     timeouts,
     storage,
-    store,
     clock,
     cryptoApi,
     eventSignaller,
@@ -149,8 +138,14 @@ class DatabaseSequencer(
     loggerFactory,
   )
 
-  private val pruningScheduler =
-    pruningSchedulerBuilder.map(_(exclusiveStorage.getOrElse(storage), this))
+  override val pruningScheduler: Option[PruningScheduler] =
+    pruningSchedulerBuilder.map(
+      _(
+        exclusiveStorage.getOrElse(
+          storage // no exclusive storage in non-ha setups
+        )
+      )
+    )
 
   withNewTraceContext { implicit traceContext =>
     timeouts.unbounded.await(s"Waiting for sequencer writer to fully start")(
@@ -167,6 +162,8 @@ class DatabaseSequencer(
       )
     )
   }
+
+  private val store = writer.generalStore
 
   // periodically run the call to mark lagging sequencers as offline
   private def periodicallyMarkLaggingSequencersOffline(
@@ -310,6 +307,13 @@ class DatabaseSequencer(
       status <- EitherT.right[PruningError](this.pruningStatus)
       result <- store.prune(requestedTimestamp, status, config.writer.payloadToEventMargin)
     } yield result
+
+  override def locatePruningTimestamp(index: PositiveInt)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]] =
+    EitherT.right[PruningSupportError](
+      store.locatePruningTimestamp(NonNegativeInt.tryCreate(index.value - 1))
+    )
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

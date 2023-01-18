@@ -70,7 +70,9 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
     }
     val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
     val currentVersion =
-      ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
+      ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
+        loggerFactory
+      )
 
     def mediatorState: MediatorState = {
       val sut =

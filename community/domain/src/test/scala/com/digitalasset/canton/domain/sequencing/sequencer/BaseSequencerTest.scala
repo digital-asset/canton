@@ -8,6 +8,7 @@ import akka.stream.scaladsl.{Keep, Source}
 import akka.stream.{KillSwitches, Materializer}
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
@@ -17,6 +18,8 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
 }
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.time.SimClock
@@ -120,6 +123,11 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     override def prune(requestedTimestamp: CantonTimestamp)(implicit
         traceContext: TraceContext
     ): EitherT[Future, PruningError, String] = ???
+    override def locatePruningTimestamp(index: PositiveInt)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]] = ???
+    override def pruningSchedulerBuilder: Option[Storage => PruningScheduler] = ???
+    override def pruningScheduler: Option[PruningScheduler] = ???
     override def snapshot(timestamp: CantonTimestamp)(implicit
         traceContext: TraceContext
     ): EitherT[Future, String, SequencerSnapshot] =

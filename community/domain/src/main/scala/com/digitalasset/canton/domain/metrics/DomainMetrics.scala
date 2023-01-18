@@ -7,7 +7,7 @@ import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
-import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
+import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.metrics.{DbStorageMetrics, SequencerClientMetrics}
@@ -15,9 +15,9 @@ import com.digitalasset.canton.metrics.{DbStorageMetrics, SequencerClientMetrics
 class SequencerMetrics(
     parent: MetricName,
     val factory: MetricsFactory,
+    val grpcMetrics: GrpcServerMetrics,
 ) {
   val prefix: MetricName = MetricName(parent :+ "sequencer")
-  val grpcMetrics = new DamlGrpcServerMetrics(factory, "sequencer")
 
   object sequencerClient extends SequencerClientMetrics(prefix, factory)
 
@@ -91,13 +91,12 @@ class EnvMetrics(factory: MetricsFactory) {
 class DomainMetrics(
     val prefix: MetricName,
     val metricsFactory: MetricsFactory,
+    val grpcMetrics: GrpcServerMetrics,
 ) {
 
-  val grpcMetrics: GrpcServerMetrics =
-    new DamlGrpcServerMetrics(metricsFactory = metricsFactory, component = "domain")
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
-  object sequencer extends SequencerMetrics(prefix, metricsFactory)
+  object sequencer extends SequencerMetrics(prefix, metricsFactory, grpcMetrics)
 
   object mediator extends MediatorMetrics(prefix, metricsFactory)
 
@@ -107,10 +106,9 @@ class DomainMetrics(
 class MediatorNodeMetrics(
     val prefix: MetricName,
     val metricsFactory: MetricsFactory,
+    val grpcMetrics: GrpcServerMetrics,
 ) {
 
-  val grpcMetrics: GrpcServerMetrics =
-    new DamlGrpcServerMetrics(metricsFactory = metricsFactory, component = "mediator")
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
   object mediator extends MediatorMetrics(prefix, metricsFactory)

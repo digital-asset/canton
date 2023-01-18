@@ -7,6 +7,7 @@ import com.codahale.metrics
 import com.codahale.metrics.{Metric, MetricFilter}
 import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
 import com.daml.metrics.api.{MetricName, MetricsContext}
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.daml.metrics.{ExecutorServiceMetrics, JvmMetricSet, OpenTelemetryMeterOwner}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.buildinfo.BuildInfo
@@ -163,6 +164,7 @@ case class MetricsFactory(
         new DomainMetrics(
           MetricsFactory.prefix,
           new CantonDropwizardMetricsFactory(newRegistry(metricName)),
+          new DamlGrpcServerMetrics(openTelemetryFactory, "domain"),
         )
       },
     )
@@ -175,6 +177,7 @@ case class MetricsFactory(
         new SequencerMetrics(
           MetricsFactory.prefix,
           new CantonDropwizardMetricsFactory(newRegistry(metricName)),
+          new DamlGrpcServerMetrics(openTelemetryFactory, "sequencer"),
         )
       },
     )
@@ -187,6 +190,7 @@ case class MetricsFactory(
         new MediatorNodeMetrics(
           MetricsFactory.prefix,
           new CantonDropwizardMetricsFactory(newRegistry(metricName)),
+          new DamlGrpcServerMetrics(openTelemetryFactory, "mediator"),
         )
       },
     )

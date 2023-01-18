@@ -152,15 +152,16 @@ object ConfirmationPolicy {
 
     val actionNodes = transaction.nodes.values.collect { case an: LfActionNode => an }
 
-    val vipCheckParties = actionNodes.map { node =>
+    val vipCheckPartiesPerNode = actionNodes.map { node =>
       LfTransactionUtil.informees(node) & LfTransactionUtil.stateKnownTo(node)
     }
-    val signatoriesCheckParties = actionNodes.map { node =>
+    val signatoriesCheckPartiesPerNode = actionNodes.map { node =>
       LfTransactionUtil.signatoriesOrMaintainers(node) | LfTransactionUtil.actingParties(node)
     }
-    val allParties = vipCheckParties.flatten ++ signatoriesCheckParties.flatten
+    val allParties =
+      (vipCheckPartiesPerNode.flatten ++ signatoriesCheckPartiesPerNode.flatten).toSet
     // TODO(i4930) - potentially batch this lookup
-    val activeParticipantsF =
+    val eligibleParticipantsF =
       allParties.toList
         .parTraverse(partyId =>
           topologySnapshot.activeParticipantsOf(partyId).map { res =>
@@ -169,12 +170,10 @@ object ConfirmationPolicy {
         )
         .map(_.toMap)
 
-    activeParticipantsF.map { partyData =>
-      val hasVipForEachNode = vipCheckParties.forall { nodeParties =>
-        nodeParties.exists(partyData.get(_).forall(_._1))
-      }
-      val hasConfirmersForEachNode = signatoriesCheckParties.forall { nodeParties =>
-        nodeParties.exists(partyData.get(_).forall(_._2))
+    eligibleParticipantsF.map { eligibleParticipants =>
+      val hasVipForEachNode = vipCheckPartiesPerNode.forall { _.exists(eligibleParticipants(_)._1) }
+      val hasConfirmersForEachNode = signatoriesCheckPartiesPerNode.forall {
+        _.exists(eligibleParticipants(_)._2)
       }
       List(hasVipForEachNode -> Vip, hasConfirmersForEachNode -> Signatory)
         .filter(_._1)
