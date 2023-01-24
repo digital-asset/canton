@@ -93,7 +93,7 @@ object SequencerRuntimeFactory {
         system: ActorSystem,
     ): SequencerRuntime =
       new SequencerRuntime(
-        SequencerFactory.database(sequencerConfig, loggerFactory),
+        SequencerFactory.database(sequencerConfig, metrics, loggerFactory),
         staticDomainParameters,
         localParameters,
         domainConfig.publicApi,

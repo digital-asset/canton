@@ -10,7 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.participant.protocol.{TransactionProcessor, v0}
+import com.digitalasset.canton.participant.protocol.{ProcessingSteps, TransactionProcessor, v0}
 import com.digitalasset.canton.participant.store.{
   SerializableCompletionInfo,
   SerializableRejectionReasonTemplate,
@@ -101,7 +101,12 @@ final case class TransactionSubmissionTrackingData(
   )(implicit loggingContext: NamedLoggingContext): LedgerSyncEvent = {
 
     val reasonTemplate = rejectionCause.asFinalReason(recordTime)
-    CommandRejected(recordTime.toLf, completionInfo, reasonTemplate)
+    CommandRejected(
+      recordTime.toLf,
+      completionInfo,
+      reasonTemplate,
+      ProcessingSteps.RequestType.Transaction,
+    )
   }
 
   override def updateOnNotSequenced(timestamp: CantonTimestamp, reason: DeliverErrorReason)(implicit

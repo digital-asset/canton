@@ -25,7 +25,6 @@ import com.digitalasset.canton.time.{
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 
-import scala.Ordering.Implicits.*
 import scala.annotation.nowarn
 
 object DomainParameters {

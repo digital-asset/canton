@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTime
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ViewType.TransferInViewType
-import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree}
+import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree, TransferSubmitterMetadata}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting, PackageService}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
@@ -93,6 +93,16 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
   private val participant = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("bothdomains::participant")
   )
+  private def submitterInfo(submitter: LfPartyId): TransferSubmitterMetadata = {
+    TransferSubmitterMetadata(
+      submitter,
+      LedgerApplicationId.assertFromString("tests"),
+      participant.toLf,
+      None,
+    )
+  }
+
+  private val workflowId: Option[LfWorkflowId] = None
 
   private val identityFactory = TestingTopology()
     .withDomains(sourceDomain)
@@ -175,7 +185,12 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     val transferDataF =
       TransferStoreTest.mkTransferDataForDomain(transferId, sourceMediator, party1, targetDomain)
     val submissionParam =
-      SubmissionParam(party1, transferId, SourceProtocolVersion(testedProtocolVersion))
+      SubmissionParam(
+        submitterInfo(party1),
+        transferId,
+        workflowId,
+        SourceProtocolVersion(testedProtocolVersion),
+      )
     val transferOutResult =
       TransferInProcessingStepsTest.transferOutResult(
         sourceDomain,
@@ -203,9 +218,10 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     "fail when a receiving party has no participant on the domain" in {
       val transferOutRequest = TransferOutRequest(
-        party1,
+        submitterInfo(party1),
         Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
         Set.empty,
+        workflowId,
         coidAbs1,
         transferId.sourceDomain,
         SourceProtocolVersion(testedProtocolVersion),
@@ -278,7 +294,12 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     "fail when submitting party is not a stakeholder" in {
       val submissionParam2 =
-        SubmissionParam(party2, transferId, SourceProtocolVersion(testedProtocolVersion))
+        SubmissionParam(
+          submitterInfo(party2),
+          transferId,
+          workflowId,
+          SourceProtocolVersion(testedProtocolVersion),
+        )
 
       for {
         transferData <- transferDataF
@@ -331,7 +352,12 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "fail when submitting party not hosted on the participant" in {
 
       val submissionParam2 =
-        SubmissionParam(party2, transferId, SourceProtocolVersion(testedProtocolVersion))
+        SubmissionParam(
+          submitterInfo(party2),
+          transferId,
+          workflowId,
+          SourceProtocolVersion(testedProtocolVersion),
+        )
 
       for {
         transferData2 <- TransferStoreTest.mkTransferDataForDomain(
@@ -646,9 +672,10 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
     val transferOutRequest = TransferOutRequest(
-      party1,
+      submitterInfo(party1),
       Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
       Set.empty,
+      workflowId,
       contractId,
       transferId.sourceDomain,
       SourceProtocolVersion(testedProtocolVersion),
@@ -752,7 +779,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         SequencerCounter(1),
         rootHash,
         contract,
-        submitter,
+        submitterInfo(submitter),
+        workflowId,
         transactionId1,
         transferringParticipant = false,
         transferId,
@@ -845,7 +873,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     TransferInProcessingSteps.makeFullTransferInTree(
       pureCrypto,
       seed,
-      submitter,
+      submitterInfo(submitter),
+      workflowId,
       stakeholders,
       contract,
       creatingTransactionId,

@@ -13,7 +13,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.error.{CantonError, HasDegradationState}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -660,6 +660,7 @@ class SyncDomain(
               domainId,
               transferCoordination,
               data.contract.metadata.stakeholders,
+              data.transferOutRequest.submitterMetadata,
               participantId,
               data.transferOutRequest.targetTimeProof.timestamp,
             )
@@ -735,8 +736,9 @@ class SyncDomain(
         .onShutdown(Left(SubmissionDuringShutdown.Rejection()))
     }
 
-  def submitTransferOut(
-      submittingParty: LfPartyId,
+  override def submitTransferOut(
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       contractId: LfContractId,
       targetDomain: DomainId,
       targetProtocolVersion: TargetProtocolVersion,
@@ -747,18 +749,27 @@ class SyncDomain(
       TransferProcessorError,
       Future[TransferOutProcessingSteps.SubmissionResult],
     ](functionFullName, DomainNotReady(domainId, "The domain is shutting down.")) {
+      logger.debug(s"Submitting transfer-out of `$contractId` from `$domainId` to `$targetDomain`")
+
       if (!ready)
         DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard
       transferOutProcessor
         .submit(
           TransferOutProcessingSteps
-            .SubmissionParam(submittingParty, contractId, targetDomain, targetProtocolVersion)
+            .SubmissionParam(
+              submitterMetadata,
+              workflowId,
+              contractId,
+              targetDomain,
+              targetProtocolVersion,
+            )
         )
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
     }
 
-  def submitTransferIn(
-      submittingParty: LfPartyId,
+  override def submitTransferIn(
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       transferId: TransferId,
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit
@@ -770,13 +781,20 @@ class SyncDomain(
       functionFullName,
       DomainNotReady(domainId, "The domain is shutting down."),
     ) {
+      logger.debug(s"Submitting transfer-in of `$transferId` from `$domainId`")
 
       if (!ready)
         DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard
+
       transferInProcessor
         .submit(
           TransferInProcessingSteps
-            .SubmissionParam(submittingParty, transferId, sourceProtocolVersion)
+            .SubmissionParam(
+              submitterMetadata,
+              transferId,
+              workflowId,
+              sourceProtocolVersion,
+            )
         )
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
     }

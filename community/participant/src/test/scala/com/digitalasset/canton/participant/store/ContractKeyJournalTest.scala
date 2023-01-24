@@ -239,5 +239,5 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
 
 object ContractKeyJournalTest {
   def globalKey(keyIndex: Long): LfGlobalKey =
-    LfGlobalKey(LfTransactionBuilder.defaultTemplateId, ValueInt64(keyIndex))
+    LfGlobalKey.assertBuild(LfTransactionBuilder.defaultTemplateId, ValueInt64(keyIndex))
 }

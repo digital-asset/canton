@@ -123,7 +123,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     override def prune(requestedTimestamp: CantonTimestamp)(implicit
         traceContext: TraceContext
     ): EitherT[Future, PruningError, String] = ???
-    override def locatePruningTimestamp(index: PositiveInt)(implicit
+    override def locateAndReportPruningTimestamp(index: PositiveInt)(implicit
         traceContext: TraceContext
     ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]] = ???
     override def pruningSchedulerBuilder: Option[Storage => PruningScheduler] = ???

@@ -136,7 +136,7 @@ object SerializableContract
     val unversionedDisclosedContract = disclosedContract.unversioned
     val contractMetadata = unversionedDisclosedContract.metadata
     val ledgerTime = CantonTimestamp(contractMetadata.createdAt)
-    val driverContractMetadataBytes = contractMetadata.driverMetadata.toArray
+    val driverContractMetadataBytes = contractMetadata.driverMetadata.toByteArray
 
     for {
       disclosedContractIdVersion <- CantonContractIdVersion

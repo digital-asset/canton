@@ -327,7 +327,7 @@ class ParticipantNodeBootstrap(
 
   override def initialize(id: NodeId): EitherT[Future, String, Unit] = startInstanceUnlessClosing {
 
-    val participantId = ParticipantId(id.identity)
+    val participantId: ParticipantId = ParticipantId(id.identity)
     topologyManager.setParticipantId(participantId)
     val ledgerApiParticipantId = participantId.toLf
 
@@ -635,7 +635,7 @@ class ParticipantNodeBootstrap(
       adminServerRegistry
         .addServiceU(
           TransferServiceGrpc.bindService(
-            new GrpcTransferService(sync.transferService),
+            new GrpcTransferService(sync.transferService, participantId),
             executionContext,
           )
         )

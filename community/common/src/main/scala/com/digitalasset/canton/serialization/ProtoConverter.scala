@@ -5,6 +5,7 @@ package com.digitalasset.canton.serialization
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.daml.lf.data.Ref
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError.{
@@ -14,7 +15,15 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   TimestampConversionError,
 }
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.{LedgerTransactionId, LfPartyId, ProtoDeserializationError}
+import com.digitalasset.canton.{
+  LedgerApplicationId,
+  LedgerParticipantId,
+  LedgerSubmissionId,
+  LedgerTransactionId,
+  LfPartyId,
+  LfWorkflowId,
+  ProtoDeserializationError,
+}
 import com.google.protobuf.timestamp.Timestamp
 import com.google.protobuf.{ByteString, CodedInputStream, InvalidProtocolBufferException}
 
@@ -94,13 +103,38 @@ object ProtoConverter {
     } yield parsed
 
   def parseLfPartyId(party: String): ParsingResult[LfPartyId] =
-    LfPartyId.fromString(party).leftMap(StringConversionError)
+    parseString(party)(LfPartyId.fromString)
+
+  def parseLfParticipantId(party: String): ParsingResult[LedgerParticipantId] =
+    parseString(party)(LedgerParticipantId.fromString)
+
+  def parseLFApplicationId(applicationId: String): ParsingResult[LedgerApplicationId] =
+    parseString(applicationId)(LedgerApplicationId.fromString)
+
+  def parseLFSubmissionIdO(submissionId: String): ParsingResult[Option[LedgerSubmissionId]] =
+    Option
+      .when(submissionId.nonEmpty)(parseLFSubmissionId(submissionId))
+      .sequence
+
+  def parseLFSubmissionId(submissionId: String): ParsingResult[LedgerSubmissionId] =
+    parseString(submissionId)(LedgerSubmissionId.fromString)
+
+  def parseLFWorkflowIdO(workflowId: String): ParsingResult[Option[LfWorkflowId]] =
+    Option
+      .when(workflowId.nonEmpty)(parseString(workflowId)(LfWorkflowId.fromString))
+      .sequence
 
   def parseLedgerTransactionId(id: String): ParsingResult[LedgerTransactionId] =
-    LedgerTransactionId.fromString(id).leftMap(StringConversionError)
+    parseString(id)(LedgerTransactionId.fromString)
 
   def parseLfContractId(id: String): ParsingResult[LfContractId] =
-    LfContractId.fromString(id).leftMap(StringConversionError)
+    parseString(id)(LfContractId.fromString)
+
+  def parseCommandId(id: String): ParsingResult[Ref.CommandId] =
+    parseString(id)(Ref.CommandId.fromString)
+
+  private def parseString[T](from: String)(to: String => Either[String, T]): ParsingResult[T] =
+    to(from).leftMap(StringConversionError)
   object InstantConverter extends ProtoConverter[Instant, Timestamp, ProtoDeserializationError] {
     override def toProtoPrimitive(value: Instant): Timestamp =
       Timestamp(value.getEpochSecond, value.getNano)

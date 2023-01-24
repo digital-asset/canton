@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.LfWorkflowId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.transfer.TransferCoordination.DomainData
@@ -82,7 +82,8 @@ class TransferCoordination(
     */
   def transferIn(
       id: DomainId,
-      partyId: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       transferId: TransferId,
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit
@@ -93,7 +94,12 @@ class TransferCoordination(
         inSubmissionById(id).toRight(UnknownDomain(id, "When transfering in"))
       )
       submissionResult <- inSubmission
-        .submitTransferIn(partyId, transferId, sourceProtocolVersion)
+        .submitTransferIn(
+          submitterMetadata,
+          workflowId,
+          transferId,
+          sourceProtocolVersion,
+        )
         .semiflatMap(identity)
     } yield submissionResult
   }
@@ -272,7 +278,8 @@ trait TransferSubmissionHandle {
   def timeTracker: DomainTimeTracker
 
   def submitTransferOut(
-      submittingParty: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       contractId: LfContractId,
       targetDomain: DomainId,
       targetProtocolVersion: TargetProtocolVersion,
@@ -281,7 +288,8 @@ trait TransferSubmissionHandle {
   ): EitherT[Future, TransferProcessorError, Future[TransferOutProcessingSteps.SubmissionResult]]
 
   def submitTransferIn(
-      submittingParty: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       transferId: TransferId,
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit

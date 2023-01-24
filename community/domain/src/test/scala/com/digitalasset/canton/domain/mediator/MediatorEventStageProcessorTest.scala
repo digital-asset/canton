@@ -19,7 +19,7 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
@@ -61,6 +61,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     val state = new MediatorState(
       new InMemoryFinalizedResponseStore(loggerFactory),
       new InMemoryMediatorDeduplicationStore(loggerFactory),
+      mock[Clock],
       mediatorMetrics,
       timeouts,
       loggerFactory,

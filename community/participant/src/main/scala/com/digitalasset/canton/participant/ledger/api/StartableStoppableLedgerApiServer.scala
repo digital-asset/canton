@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.ledger.api
 
 import akka.actor.ActorSystem
 import com.daml.api.util.TimeProvider
+import com.daml.ledger.api.auth.CachedJwtVerifierLoader
 import com.daml.ledger.api.domain
 import com.daml.ledger.api.health.HealthChecks
 import com.daml.ledger.api.v1.experimental_features.{
@@ -19,7 +20,11 @@ import com.daml.logging.LoggingContext
 import com.daml.platform.LedgerApiServer
 import com.daml.platform.apiserver.ratelimiting.{RateLimitingInterceptor, ThreadpoolCheck}
 import com.daml.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
-import com.daml.platform.configuration.{IndexServiceConfig as LedgerIndexServiceConfig, ServerRole}
+import com.daml.platform.configuration.{
+  AcsStreamsConfig as LedgerAcsStreamsConfig,
+  IndexServiceConfig as LedgerIndexServiceConfig,
+  ServerRole,
+}
 import com.daml.platform.index.IndexServiceOwner
 import com.daml.platform.indexer.{
   IndexerConfig as DamlIndexerConfig,
@@ -157,16 +162,21 @@ class StartableStoppableLedgerApiServer(
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
+
+    val acsConfig = config.serverConfig.activeContractsService
+
+    val acsStreamsConfig = LedgerAcsStreamsConfig(
+      maxIdsPerIdPage = acsConfig.acsIdPageSize,
+      maxPagesPerIdPagesBuffer = acsConfig.acsIdPageBufferSize,
+      maxWorkingMemoryInBytesForIdPages = LedgerAcsStreamsConfig.DefaultAcsIdPageWorkingMemoryBytes,
+      maxPayloadsPerPayloadsPage = config.serverConfig.eventsPageSize,
+      maxParallelIdCreateQueries = acsConfig.acsIdFetchingParallelism,
+      maxParallelPayloadCreateQueries = acsConfig.acsContractFetchingParallelism,
+    )
+
     val indexServiceConfig = LedgerIndexServiceConfig(
-      eventsPageSize = config.serverConfig.eventsPageSize,
+      acsStreams = acsStreamsConfig,
       eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
-      acsIdPageSize = config.serverConfig.activeContractsService.acsIdPageSize,
-      acsIdPageBufferSize = config.serverConfig.activeContractsService.acsIdPageBufferSize,
-      acsIdFetchingParallelism =
-        config.serverConfig.activeContractsService.acsIdFetchingParallelism,
-      acsContractFetchingParallelism =
-        config.serverConfig.activeContractsService.acsContractFetchingParallelism,
-      acsGlobalParallelism = config.serverConfig.activeContractsService.acsGlobalParallelism,
       maxContractStateCacheSize = config.serverConfig.maxContractStateCacheSize,
       maxContractKeyStateCacheSize = config.serverConfig.maxContractKeyStateCacheSize,
       maxTransactionsInMemoryFanOutBufferSize =
@@ -192,6 +202,17 @@ class StartableStoppableLedgerApiServer(
         )
       ),
     )
+
+    val authService = new CantonAdminTokenAuthService(
+      config.adminToken,
+      parent = config.serverConfig.authServices.map(
+        _.create(
+          config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway
+        )
+      ),
+    )
+
+    val jwtVerifierLoader = new CachedJwtVerifierLoader(metrics = config.metrics)
 
     for {
       (inMemoryState, inMemoryStateUpdaterFlow) <-
@@ -263,14 +284,8 @@ class StartableStoppableLedgerApiServer(
         servicesExecutionContext = executionContext,
         checkOverloaded = config.syncService.checkOverloaded,
         ledgerFeatures = getLedgerFeatures,
-        authService = new CantonAdminTokenAuthService(
-          config.adminToken,
-          parent = config.serverConfig.authServices.map(
-            _.create(
-              config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway
-            )
-          ),
-        ),
+        authService = authService,
+        jwtVerifierLoader = jwtVerifierLoader,
         jwtTimestampLeeway =
           config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
         meteringReportKey = config.meteringReportKey,

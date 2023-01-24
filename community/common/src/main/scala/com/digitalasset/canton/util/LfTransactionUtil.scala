@@ -56,7 +56,10 @@ object LfTransactionUtil {
       keyWithMaintainers: LfKeyWithMaintainers,
   ): Either[LfContractId, LfGlobalKeyWithMaintainers] =
     checkNoContractIdInKey(keyWithMaintainers.key).map(value =>
-      LfGlobalKeyWithMaintainers(LfGlobalKey(templateId, value), keyWithMaintainers.maintainers)
+      LfGlobalKeyWithMaintainers(
+        LfGlobalKey.assertBuild(templateId, value),
+        keyWithMaintainers.maintainers,
+      )
     )
 
   /** Convert `keyWithMaintainers` to a versioned [[com.digitalasset.canton.protocol.package.LfGlobalKeyWithMaintainers]], throwing an
@@ -71,7 +74,7 @@ object LfTransactionUtil {
     LfVersioned(
       version,
       LfGlobalKeyWithMaintainers(
-        LfGlobalKey(templateId, assertNoContractIdInKey(keyWithMaintainers.key)),
+        LfGlobalKey.assertBuild(templateId, assertNoContractIdInKey(keyWithMaintainers.key)),
         keyWithMaintainers.maintainers,
       ),
     )

@@ -276,7 +276,9 @@ object MetricDoc {
               } else {
                 rf.get match {
                   // if it is a metric handle, try to grab the annotation and the name
-                  case x: DamlMetricHandle =>
+                  case x: DamlMetricHandle
+                      // TODO(#11468): Remove special casing of the following metric with the next daml upgrade 2.6.0 snapshot 20230124
+                      if x.name != "daml.lapi.streams.active" =>
                     val tag = extractTag(rf.symbol.annotations, tagParser)
                     if (tag.isEmpty) {
                       // if there is no Tag check if there exists a MetricDoc.FanInstanceTag

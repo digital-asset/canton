@@ -55,7 +55,7 @@ import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, LfWorkflowId, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
@@ -76,6 +76,7 @@ private[transfer] class TransferInProcessingSteps(
       SubmissionResult,
       TransferInViewType,
       TransferInResult,
+      PendingTransferIn,
     ]
     with NamedLogging {
 
@@ -84,13 +85,11 @@ private[transfer] class TransferInProcessingSteps(
   override def requestKind: String = "TransferIn"
 
   override def submissionDescription(param: SubmissionParam): String =
-    s"Submitter ${param.submitterLf}, transferId ${param.transferId}"
+    s"Submitter ${param.submitterMetadata.submitter}, transferId ${param.transferId}"
 
   override type SubmissionResultArgs = PendingTransferSubmission
 
   override type PendingDataAndResponseArgs = TransferInProcessingSteps.PendingDataAndResponseArgs
-
-  override type RejectionArgs = Unit
 
   override type RequestType = ProcessingSteps.RequestType.TransferIn
   override val requestType = ProcessingSteps.RequestType.TransferIn
@@ -111,9 +110,15 @@ private[transfer] class TransferInProcessingSteps(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Submission] = {
 
-    val SubmissionParam(submitterLf, transferId, sourceProtocolVersion) = param
+    val SubmissionParam(
+      submitterMetadata,
+      transferId,
+      workflowId,
+      sourceProtocolVersion,
+    ) = param
     val ipsSnapshot = recentSnapshot.ipsSnapshot
     val pureCrypto = recentSnapshot.pureCrypto
+    val submitter = submitterMetadata.submitter
 
     def activeParticipantsOfParty(
         party: LfPartyId
@@ -142,27 +147,27 @@ private[transfer] class TransferInProcessingSteps(
 
       stakeholders = transferData.transferOutRequest.stakeholders
       _ <- condUnitET[Future](
-        stakeholders.contains(submitterLf),
-        SubmittingPartyMustBeStakeholder(Some(transferId), submitterLf, stakeholders),
+        stakeholders.contains(submitter),
+        SubmittingPartyMustBeStakeholder(Some(transferId), submitter, stakeholders),
       )
 
       submitterRelationship <- EitherT(
         ipsSnapshot
-          .hostedOn(submitterLf, participantId)
-          .map(_.toRight(PartyNotHosted(transferId, submitterLf, participantId)))
+          .hostedOn(submitter, participantId)
+          .map(_.toRight(PartyNotHosted(transferId, submitter, participantId)))
       )
 
       _ <- condUnitET[Future](
         submitterRelationship.permission == ParticipantPermission.Submission,
-        NoSubmissionPermission(Some(transferId), submitterLf, participantId),
+        NoSubmissionPermission(Some(transferId), submitter, participantId),
       )
-
       transferInUuid = seedGenerator.generateUuid()
       seed = seedGenerator.generateSaltSeed()
       fullTree = makeFullTransferInTree(
         pureCrypto,
         seed,
-        submitterLf,
+        submitterMetadata,
+        workflowId,
         stakeholders,
         transferData.contract,
         transferData.creatingTransactionId,
@@ -457,7 +462,8 @@ private[transfer] class TransferInProcessingSteps(
         sc,
         txInRequest.tree.rootHash,
         txInRequest.contract,
-        txInRequest.submitter,
+        txInRequest.submitterMetadata,
+        txInRequest.workflowId,
         txInRequest.creatingTransactionId,
         transferringParticipant,
         transferId,
@@ -514,7 +520,15 @@ private[transfer] class TransferInProcessingSteps(
 
       (responses, causalityMessage) = responsesAndCausalityMessages
     } yield {
-      StorePendingDataAndSendResponseAndCreateTimeout(entry, responses, causalityMessage, ())
+      StorePendingDataAndSendResponseAndCreateTimeout(
+        entry,
+        responses,
+        causalityMessage,
+        RejectionArgs(
+          entry,
+          LocalReject.TimeRejects.LocalTimeout.Reject()(targetProtocolVersion.v),
+        ),
+      )
     }
   }
 
@@ -681,7 +695,8 @@ private[transfer] class TransferInProcessingSteps(
       requestSequencerCounter,
       rootHash,
       contract,
-      submitter,
+      submitterMetadata,
+      workflowId,
       creatingTransactionId,
       transferringParticipant,
       transferId,
@@ -709,10 +724,11 @@ private[transfer] class TransferInProcessingSteps(
             contract,
             creatingTransactionId,
             requestId.unwrap,
-            submitter,
+            submitterMetadata,
             transferId,
             rootHash,
             createTransactionAccepted = !transferringParticipant,
+            workflowId,
           )
           timestampEvent = Some(
             TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
@@ -742,12 +758,11 @@ private[transfer] class TransferInProcessingSteps(
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
       recordTime: CantonTimestamp,
-      submitter: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
       transferOutId: TransferId,
       rootHash: RootHash,
       createTransactionAccepted: Boolean,
-  )(implicit
-      traceContext: TraceContext
+      workflowId: Option[LfWorkflowId],
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
     val targetDomain = domainId
     val contractInst = contract.contractInstance.unversioned
@@ -771,13 +786,6 @@ private[transfer] class TransferInProcessingSteps(
       .getOrElse(Bytes.Empty)
 
     for {
-      targetIps <- transferCoordination.cryptoSnapshot(targetDomain, recordTime)
-      // TODO(i11196): this is a poor-man's solution to figuring out whether we need to produce a completion event.
-      // Fix it by adding the participant that submitted the transfer-in to the TransferInViewTree
-      isParticipantHostingSubmitter <- EitherT.right(
-        targetIps.ipsSnapshot.hostedOn(submitter, participantId).map(_.nonEmpty)
-      )
-
       updateId <- EitherT.fromEither[Future](
         rootHash.asLedgerTransactionId.leftMap[TransferProcessorError](
           FieldConversionError("Transaction id (root hash)", _)
@@ -791,22 +799,20 @@ private[transfer] class TransferInProcessingSteps(
       )
 
       completionInfo =
-        Option.when(isParticipantHostingSubmitter)(
+        Option.when(participantId.toLf == submitterMetadata.submittingParticipant)(
           CompletionInfo(
-            actAs = List(submitter),
-            applicationId = Ref.ApplicationId.assertFromString(
-              "application-id"
-            ), // TODO(i11196): add this information
+            actAs = List(submitterMetadata.submitter),
+            applicationId = submitterMetadata.applicationId,
             commandId = Ref.CommandId.assertFromString("command-id"),
             optDeduplicationPeriod = None,
-            submissionId = None, // TODO(i11196): add this information
+            submissionId = submitterMetadata.submissionId,
             statistics = None,
           )
         )
     } yield LedgerSyncEvent.TransferredIn(
       updateId = updateId,
       optCompletionInfo = completionInfo,
-      submitter = submitter,
+      submitter = submitterMetadata.submitter,
       recordTime = recordTime.toLf,
       ledgerCreateTime = contract.ledgerCreateTime.toLf,
       createNode = createNode,
@@ -815,6 +821,7 @@ private[transfer] class TransferInProcessingSteps(
       transferOutId = transferOutId,
       targetDomain = targetDomain,
       createTransactionAccepted = createTransactionAccepted,
+      workflowId = workflowId,
     )
   }
 }
@@ -822,10 +829,13 @@ private[transfer] class TransferInProcessingSteps(
 object TransferInProcessingSteps {
 
   case class SubmissionParam(
-      submitterLf: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
       transferId: TransferId,
+      workflowId: Option[LfWorkflowId],
       sourceProtocolVersion: SourceProtocolVersion,
-  )
+  ) {
+    val submitterLf: LfPartyId = submitterMetadata.submitter
+  }
 
   case class SubmissionResult(transferInCompletionF: Future[com.google.rpc.status.Status])
 
@@ -835,7 +845,8 @@ object TransferInProcessingSteps {
       override val requestSequencerCounter: SequencerCounter,
       rootHash: RootHash,
       contract: SerializableContract,
-      submitter: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       creatingTransactionId: TransactionId,
       transferringParticipant: Boolean,
       transferId: TransferId,
@@ -850,7 +861,8 @@ object TransferInProcessingSteps {
   private[transfer] def makeFullTransferInTree(
       pureCrypto: CryptoPureApi,
       seed: SaltSeed,
-      submitter: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
@@ -873,7 +885,8 @@ object TransferInProcessingSteps {
     )
     val view = TransferInView.create(pureCrypto)(
       viewSalt,
-      submitter,
+      submitterMetadata,
+      workflowId,
       contract,
       creatingTransactionId,
       transferOutResult,

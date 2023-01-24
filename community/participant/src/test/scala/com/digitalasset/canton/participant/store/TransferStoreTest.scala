@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.{TransferData, TransferOutRequest}
@@ -25,7 +25,16 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.{Checked, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter, SequencerCounter}
+import com.digitalasset.canton.{
+  BaseTest,
+  LedgerApplicationId,
+  LedgerParticipantId,
+  LedgerSubmissionId,
+  LfPartyId,
+  LfWorkflowId,
+  RequestCounter,
+  SequencerCounter,
+}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -595,6 +604,8 @@ object TransferStoreTest {
   val privateCrypto = cryptoFactory.crypto.privateCrypto
   val pureCryptoApi: CryptoPureApi = cryptoFactory.pureCrypto
 
+  private val submissionId: Option[LedgerSubmissionId] = None
+  private val workflowId: Option[LfWorkflowId] = None
   def sign(str: String): Signature = {
     val hash =
       pureCryptoApi.build(HashPurpose.TransferResultSignature).addWithoutLengthPrefix(str).finish()
@@ -607,8 +618,31 @@ object TransferStoreTest {
   }
 
   private val protocolVersion = BaseTest.testedProtocolVersion
+
   val seedGenerator = new SeedGenerator(pureCryptoApi)
 
+  private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
+    val submittingParticipant: LedgerParticipantId =
+      if (protocolVersion >= ProtocolVersion.v5)
+        LedgerParticipantId.assertFromString("participant1")
+      else
+        LedgerParticipantId.assertFromString(
+          "no-participant-id"
+        ) // default value in TransferOutView/TransferInView
+    val applicationId: LedgerApplicationId =
+      if (protocolVersion >= ProtocolVersion.v5)
+        LedgerApplicationId.assertFromString("application-tests")
+      else
+        LedgerApplicationId.assertFromString(
+          "no-application-id"
+        ) // default value in TransferOutView/TransferInView
+    TransferSubmitterMetadata(
+      submitter,
+      applicationId,
+      submittingParticipant,
+      None,
+    )
+  }
   def mkTransferDataForDomain(
       transferId: TransferId,
       sourceMediator: MediatorId,
@@ -626,9 +660,10 @@ object TransferStoreTest {
         TargetProtocolVersion(protocolVersion)
 
     val transferOutRequest = TransferOutRequest(
-      submittingParty,
+      submitterMetadata(submittingParty),
       Set(submittingParty),
       Set.empty,
+      workflowId,
       coidAbs1,
       transferId.sourceDomain,
       SourceProtocolVersion(protocolVersion),

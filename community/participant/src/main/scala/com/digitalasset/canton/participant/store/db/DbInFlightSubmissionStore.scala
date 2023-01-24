@@ -16,12 +16,12 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.protocol.submission.*
+import com.digitalasset.canton.participant.store.InFlightSubmissionStore
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightByMessageId,
   InFlightBySequencingInfo,
   InFlightReference,
 }
-import com.digitalasset.canton.participant.store.{InFlightSubmissionStore, SerializableSubmissionId}
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
 import com.digitalasset.canton.resource.{DbStorage, DbStore}

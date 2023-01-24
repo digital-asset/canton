@@ -69,7 +69,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.{DiscardOps, DomainAlias}
+import com.digitalasset.canton.{DiscardOps, DomainAlias, LedgerParticipantId}
 
 import java.time.Instant
 import scala.concurrent.TimeoutException
@@ -1455,18 +1455,32 @@ trait ParticipantAdministration extends FeatureFlagFilter {
        The command returns the ID of the transfer when the transfer-out has completed successfully.
        The contract is in transit until the transfer-in has completed on the target domain.
        The submitting party must be a stakeholder of the contract and the participant must have submission rights
-       for the submitting party on the source domain. It must also be connected to the target domain."""
+       for the submitting party on the source domain. It must also be connected to the target domain.
+       An application-id can be specified to uniquely identify the application that have issued the transfer,
+       otherwise the default value will be used. An optional submission id can be set by the committer to the value
+       of their choice that allows an application to correlate completions to its submissions."""
     )
     def out(
         submittingParty: PartyId,
         contractId: LfContractId,
         sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
+        applicationId: LedgerParticipantId = LedgerParticipantId.assertFromString("AdminConsole"),
+        submissionId: String = "",
+        workflowId: String = "",
     ): TransferId =
       check(FeatureFlag.Preview)(consoleEnvironment.run {
         adminCommand(
           ParticipantAdminCommands.Transfer
-            .TransferOut(submittingParty, contractId, sourceDomain, targetDomain)
+            .TransferOut(
+              submittingParty,
+              contractId,
+              sourceDomain,
+              targetDomain,
+              applicationId = applicationId,
+              submissionId = submissionId,
+              workflowId = workflowId,
+            )
         )
       })
 
@@ -1475,12 +1489,29 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       The command returns when the transfer-in has completed successfully.
       If the transferExclusivityTimeout in the target domain's parameters is set to a positive value,
       all participants of all stakeholders connected to both origin and target domain will attempt to transfer-in
-      the contract automatically after the exclusivity timeout has elapsed.""")
-    def in(submittingParty: PartyId, transferId: TransferId, targetDomain: DomainAlias): Unit =
+      the contract automatically after the exclusivity timeout has elapsed.
+      An application-id can be specified to uniquely identifies the application that have issued the transfer,
+      otherwise the default value will be used. An optional submission id can be set by the committer to the value
+      of their choice that allows an application to correlate completions to its submissions.""")
+    def in(
+        submittingParty: PartyId,
+        transferId: TransferId,
+        targetDomain: DomainAlias,
+        applicationId: LedgerParticipantId = LedgerParticipantId.assertFromString("AdminConsole"),
+        submissionId: String = "",
+        workflowId: String = "",
+    ): Unit =
       check(FeatureFlag.Preview)(consoleEnvironment.run {
         adminCommand(
           ParticipantAdminCommands.Transfer
-            .TransferIn(submittingParty, transferId.toProtoV0, targetDomain)
+            .TransferIn(
+              submittingParty,
+              transferId.toProtoV0,
+              targetDomain,
+              applicationId,
+              submissionId,
+              workflowId,
+            )
         )
       })
 

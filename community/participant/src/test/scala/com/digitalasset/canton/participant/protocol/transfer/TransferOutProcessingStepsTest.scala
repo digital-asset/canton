@@ -12,7 +12,11 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTime
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
-import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  FullTransferOutTree,
+  TransferSubmitterMetadata,
+}
 import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting, PackageService}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
@@ -59,8 +63,10 @@ import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetPr
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutorService,
+  LedgerApplicationId,
   LedgerTransactionId,
   LfPartyId,
+  LfWorkflowId,
   RequestCounter,
   SequencerCounter,
 }
@@ -78,19 +84,36 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
   private implicit val ec: ExecutionContext = executorService
 
-  val sourceDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("source::domain"))
-  val sourceMediator = MediatorId(UniqueIdentifier.tryFromProtoPrimitive("source::mediator"))
-  val targetDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("target::domain"))
+  private val sourceDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("source::domain"))
+  private val sourceMediator = MediatorId(
+    UniqueIdentifier.tryFromProtoPrimitive("source::mediator")
+  )
+  private val targetDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("target::domain"))
 
-  val submitter: LfPartyId = PartyId(
+  private val submitter: LfPartyId = PartyId(
     UniqueIdentifier.tryFromProtoPrimitive("submitter::party")
   ).toLf
-  val party1: LfPartyId = PartyId(UniqueIdentifier.tryFromProtoPrimitive("party1::party")).toLf
-  val party2: LfPartyId = PartyId(UniqueIdentifier.tryFromProtoPrimitive("party2::party")).toLf
+  private val party1: LfPartyId = PartyId(
+    UniqueIdentifier.tryFromProtoPrimitive("party1::party")
+  ).toLf
+  private val party2: LfPartyId = PartyId(
+    UniqueIdentifier.tryFromProtoPrimitive("party2::party")
+  ).toLf
 
-  val submittingParticipant = ParticipantId(
+  private val submittingParticipant = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("submitting::participant")
   )
+
+  private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
+    TransferSubmitterMetadata(
+      submitter,
+      LedgerApplicationId.assertFromString("tests"),
+      submittingParticipant.toLf,
+      None,
+    )
+  }
+
+  private val workflowId: Option[LfWorkflowId] = None
 
   val adminSubmitter: LfPartyId = submittingParticipant.adminParty.toLf
 
@@ -245,8 +268,9 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           submittingParticipant,
           timeEvent,
           contractId,
-          submitter,
+          submitterMetadata(submitter),
           stakeholders,
+          workflowId,
           sourceDomain,
           SourceProtocolVersion(testedProtocolVersion),
           sourceMediator,
@@ -381,9 +405,10 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         result == Right(
           (
             TransferOutRequest(
-              submitter = submitter,
+              submitterMetadata = submitterMetadata(submitter),
               stakeholders = stakeholders,
               adminParties = Set(adminSubmitter, admin3, admin4),
+              workflowId = workflowId,
               contractId = contractId,
               sourceDomain = sourceDomain,
               sourceProtocolVersion = SourceProtocolVersion(testedProtocolVersion),
@@ -405,9 +430,10 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         result == Right(
           (
             TransferOutRequest(
-              submitter = submitter,
+              submitterMetadata = submitterMetadata(submitter),
               stakeholders = stakeholders,
               adminParties = Set(adminSubmitter, admin1),
+              workflowId = workflowId,
               contractId = contractId,
               sourceDomain = sourceDomain,
               sourceProtocolVersion = SourceProtocolVersion(testedProtocolVersion),
@@ -439,7 +465,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       val transactionId = ExampleTransactionFactory.transactionId(1)
       val submissionParam =
         TransferOutProcessingSteps.SubmissionParam(
-          party1,
+          submitterMetadata = submitterMetadata(party1),
+          workflowId = workflowId,
           contractId,
           targetDomain,
           TargetProtocolVersion(testedProtocolVersion),
@@ -471,7 +498,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
       val transactionId = ExampleTransactionFactory.transactionId(1)
       val submissionParam = TransferOutProcessingSteps.SubmissionParam(
-        party1,
+        submitterMetadata = submitterMetadata(party1),
+        workflowId = workflowId,
         contractId,
         sourceDomain,
         TargetProtocolVersion(testedProtocolVersion),
@@ -500,9 +528,10 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
   "receive request" should {
     val contractId = ExampleTransactionFactory.suffixedId(10, 0)
     val outRequest = TransferOutRequest(
-      party1,
+      submitterMetadata = submitterMetadata(party1),
       Set(party1),
       Set(party1),
+      workflowId = workflowId,
       contractId,
       sourceDomain,
       SourceProtocolVersion(testedProtocolVersion),
@@ -580,9 +609,10 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
       val transactionId = ExampleTransactionFactory.transactionId(1)
       val outRequest = TransferOutRequest(
-        party1,
+        submitterMetadata = submitterMetadata(party1),
         Set(party1),
         Set(submittingParticipant.adminParty.toLf),
+        workflowId = workflowId,
         contractId,
         sourceDomain,
         SourceProtocolVersion(testedProtocolVersion),
@@ -671,7 +701,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           rootHash,
           WithContractHash(contractId, contractHash),
           transferringParticipant = false,
-          submitter,
+          submitterMetadata = submitterMetadata(submitter),
+          workflowId = workflowId,
           transferId,
           targetDomain,
           Set(party1),
@@ -690,9 +721,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               pureCrypto,
             )
         )("get commit set and contract to be stored and event")
-      } yield {
-        succeed
-      }
+      } yield succeed
     }
   }
 

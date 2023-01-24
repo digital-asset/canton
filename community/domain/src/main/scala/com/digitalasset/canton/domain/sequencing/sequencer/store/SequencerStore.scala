@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
+import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommitMode,
   PruningError,
@@ -539,19 +540,21 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
   ): EitherT[Future, MemberDisabledError.type, Unit]
 
   /** Prune as much data as safely possible from before the given timestamp.
-    * Return a human readable report on what has been removed.
     * @param requestedTimestamp the timestamp that we would like to prune up to (see docs on using the pruning status and disabling members for picking this value)
     * @param status the pruning status that should be used for determining a safe to prune time for validation
     * @param payloadToEventMargin the maximum time margin between payloads and events.
     *                            once we have a safe to prune timestamp we simply prune all payloads at `safeTimestamp - margin`
     *                            to ensure no payloads are removed where events will remain.
     *                            typically sourced from [[SequencerWriterConfig.payloadToEventMargin]].
+    * @return the timestamp up to which the database sequencer has been pruned (lower than requestedTimestamp) and a human readable report on what has been removed.
     */
   def prune(
       requestedTimestamp: CantonTimestamp,
       status: SequencerPruningStatus,
       payloadToEventMargin: NonNegativeFiniteDuration,
-  )(implicit traceContext: TraceContext): EitherT[Future, PruningError, String] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, PruningError, SequencerPruningResult] = {
     val disabledClients = status.disabledClients
 
     logger.debug(show"Pruning Sequencer: disabled-members: ${disabledClients.members}")
@@ -617,7 +620,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
       )
       _ <- EitherT.right(updateLowerBound(adjustedTimestamp))
       description <- EitherT.right(performPruning(adjustedTimestamp))
-    } yield description
+    } yield SequencerPruningResult(adjustedTimestamp, description)
   }
 
   /** This takes the timestamp that is considered safe to prune from and walks it back to ensure that we have
@@ -685,4 +688,9 @@ object SequencerStore {
           overrideCloseContext,
         )
     }
+
+  case class SequencerPruningResult(
+      actuallyPrunedToUp: CantonTimestamp, // timestamp actually pruned up to, often lower than requested timestamp
+      report: String, // human readable report also used for logging
+  )
 }

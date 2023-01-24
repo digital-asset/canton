@@ -14,6 +14,7 @@ import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{
@@ -22,6 +23,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   NamedLoggingContext,
 }
+import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
   PendingEventPublish,
   PendingPublish,
@@ -57,6 +59,7 @@ import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.chaining.scalaUtilChainingOps
 
 class InMemoryMultiDomainEventLog(
     lookupEvent: NamedLoggingContext => (
@@ -373,6 +376,24 @@ class InMemoryMultiDomainEventLog(
       entriesRef.get().referencesByOffset.drop(deltaFromBeginning.toInt).headOption.map {
         case (offset, _) => offset
       }
+    )
+
+  override def locateAndReportPruningTimestamp(skip: NonNegativeInt)(implicit
+      traceContext: TraceContext
+  ): OptionT[Future, CantonTimestamp] =
+    OptionT.fromOption(
+      entriesRef
+        .get()
+        .referencesByOffset
+        .drop(skip.value)
+        .headOption
+        .map { case (_offset, (_eventLogId, _localOffset, publicationTime)) =>
+          publicationTime
+        }
+        .tap(ts =>
+          if (skip.value == 0)
+            MetricsHelper.updateAgeInHoursGauge(clock, metrics.pruning.prune.maxEventAge, ts)
+        )
     )
 
   override def lookupOffset(globalOffset: GlobalOffset)(implicit

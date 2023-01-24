@@ -12,11 +12,14 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.*
+import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.protocol.{
@@ -58,6 +61,7 @@ object DatabaseSequencer {
       topologyClientMember: Member,
       protocolVersion: ProtocolVersion,
       cryptoApi: DomainSyncCryptoClient,
+      metrics: SequencerMetrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
@@ -92,6 +96,7 @@ object DatabaseSequencer {
       topologyClientMember,
       protocolVersion,
       cryptoApi,
+      metrics,
       loggerFactory,
     )
   }
@@ -113,6 +118,7 @@ class DatabaseSequencer(
     topologyClientMember: Member,
     protocolVersion: ProtocolVersion,
     cryptoApi: DomainSyncCryptoClient,
+    metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(
@@ -305,15 +311,29 @@ class DatabaseSequencer(
   )(implicit traceContext: TraceContext): EitherT[Future, PruningError, String] =
     for {
       status <- EitherT.right[PruningError](this.pruningStatus)
-      result <- store.prune(requestedTimestamp, status, config.writer.payloadToEventMargin)
-    } yield result
+      // Update the max-event-age metric after pruning. Use the actually pruned timestamp as
+      // the database sequencer tends to prune fewer events than asked for e.g. not wanting to
+      // prune sequencer-counter checkpoints partially.
+      report <- store.prune(requestedTimestamp, status, config.writer.payloadToEventMargin).map {
+        case SequencerPruningResult(tsActuallyPrunedUpTo, report) =>
+          MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, tsActuallyPrunedUpTo.some)
+          report
+      }
+    } yield report
 
-  override def locatePruningTimestamp(index: PositiveInt)(implicit
+  override def locateAndReportPruningTimestamp(index: PositiveInt)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]] =
-    EitherT.right[PruningSupportError](
-      store.locatePruningTimestamp(NonNegativeInt.tryCreate(index.value - 1))
+  ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]] = for {
+    ts <- EitherT.right[PruningSupportError](
+      store
+        .locatePruningTimestamp(NonNegativeInt.tryCreate(index.value - 1))
     )
+    // If we just determined the timestamp of the oldest event, take the opportunity
+    // to update the max-event-age metric with the age based on the clock current time
+    // or zero in case there are no events.
+    _ = if (index.value == 1)
+      MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, ts)
+  } yield ts
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

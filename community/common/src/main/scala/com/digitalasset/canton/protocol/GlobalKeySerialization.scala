@@ -58,6 +58,6 @@ object GlobalKeySerialization {
           ProtoDeserializationError
             .ValueDeserializationError("GlobalKey.key", s"Key contains contract Id $cid")
         )
-    } yield LfVersioned(key.version, LfGlobalKey(templateId, key.unversioned))
+    } yield LfVersioned(key.version, LfGlobalKey.assertBuild(templateId, key.unversioned))
 
 }
