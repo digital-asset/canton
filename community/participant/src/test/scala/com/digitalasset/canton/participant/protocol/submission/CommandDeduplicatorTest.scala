@@ -7,6 +7,7 @@ import cats.syntax.option.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.{
   AlreadyExists,
   DeduplicationPeriodTooEarly,
@@ -66,6 +67,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     CantonTimestamp.Epoch.toLf,
     event1.optCompletionInfo.value,
     new FinalReason(RpcStatus(code = Code.ABORTED_VALUE, message = "event1 rejection")),
+    ProcessingSteps.RequestType.Transaction,
   )
 
   lazy val event3 = CommandRejected(
@@ -73,6 +75,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     DefaultDamlValues
       .completionInfo(List.empty, commandId = DefaultDamlValues.commandId(3), submissionId = None),
     FinalReason(RpcStatus(code = Code.NOT_FOUND_VALUE, message = "event3 message")),
+    ProcessingSteps.RequestType.Transaction,
   )
   lazy val changeId3 = event3.completionInfo.changeId
   lazy val changeId3Hash = ChangeIdHash(changeId3)

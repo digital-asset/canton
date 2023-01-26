@@ -83,7 +83,7 @@ class DomainRouter(
         TraceContext,
         Map[LfContractId, SerializableContract],
     ) => EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]],
-    contractsTransferer: ContractsTransferer,
+    contractsTransferer: ContractsTransfer,
     snapshotProvider: DomainId => Either[TransactionRoutingError, TopologySnapshot],
     serializableContractAuthenticator: SerializableContractAuthenticator,
     autoTransferTransaction: Boolean,
@@ -174,7 +174,10 @@ class DomainRouter(
             ): TransactionRoutingError
           )
         }
-      _ <- contractsTransferer.transfer(domainRankTarget)
+      _ <- contractsTransferer.transfer(
+        domainRankTarget,
+        submitterInfo,
+      )
       _ = logger.info(s"submitting the transaction to the ${domainRankTarget.domainId}")
       transactionSubmittedF <- submit(domainRankTarget.domainId)(
         submitterInfo,
@@ -289,7 +292,12 @@ object DomainRouter {
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, traceContext: TraceContext): DomainRouter = {
 
-    val transfer = new ContractsTransferer(connectedDomainsMap, loggerFactory)
+    val transfer =
+      new ContractsTransfer(
+        connectedDomainsMap,
+        submittingParticipant = participantId,
+        loggerFactory,
+      )
 
     val domainIdResolver = recoveredDomainOfAlias(connectedDomainsMap, domainAliasManager) _
     val stateProviderWithProtocolVersion = domainStateProvider(connectedDomainsMap) _

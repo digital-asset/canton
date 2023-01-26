@@ -23,7 +23,7 @@ import slick.jdbc.{GetResult, SetParameter}
 
 import java.util.UUID
 
-case class TimestampedEvent(
+final case class TimestampedEvent(
     event: LedgerSyncEvent,
     localOffset: LocalOffset,
     requestSequencerCounter: Option[SequencerCounter],

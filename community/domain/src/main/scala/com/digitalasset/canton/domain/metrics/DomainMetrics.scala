@@ -7,10 +7,11 @@ import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
-import com.daml.metrics.grpc.GrpcServerMetrics
+import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
 import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
+import com.digitalasset.canton.metrics.MetricHandle.{MetricsFactory, NoOpMetricsFactory}
 import com.digitalasset.canton.metrics.{DbStorageMetrics, SequencerClientMetrics}
+import com.google.common.annotations.VisibleForTesting
 
 class SequencerMetrics(
     parent: MetricName,
@@ -57,7 +58,28 @@ class SequencerMetrics(
   )
   val timeRequests: Meter = factory.meter(prefix :+ "time-requests")
 
+  @MetricDoc.Tag(
+    summary = "Age of oldest unpruned sequencer event.",
+    description =
+      """This gauge exposes the age of the oldest, unpruned sequencer event in hours as a way to quantify the
+        |pruning backlog.""",
+    qualification = Debug,
+  )
+  val maxEventAge: Gauge[Long] =
+    factory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
+
   object dbStorage extends DbStorageMetrics(prefix, factory)
+}
+
+object SequencerMetrics {
+
+  @VisibleForTesting
+  def noop(testName: String) = new SequencerMetrics(
+    MetricName(testName),
+    NoOpMetricsFactory,
+    new DamlGrpcServerMetrics(NoOpMetricsFactory, "sequencer"),
+  )
+
 }
 
 class EnvMetrics(factory: MetricsFactory) {
@@ -137,6 +159,15 @@ class MediatorMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
   )
   val requests: Meter = metricsFactory.meter(prefix :+ "requests")
 
+  @MetricDoc.Tag(
+    summary = "Age of oldest unpruned mediator response.",
+    description =
+      """This gauge exposes the age of the oldest, unpruned mediator response in hours as a way to quantify the
+        |pruning backlog.""",
+    qualification = Debug,
+  )
+  val maxResponseAge: Gauge[Long] =
+    metricsFactory.gauge[Long](MetricName(prefix :+ "max-response-age"), 0L)(MetricsContext.Empty)
 }
 
 class IdentityManagerMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {

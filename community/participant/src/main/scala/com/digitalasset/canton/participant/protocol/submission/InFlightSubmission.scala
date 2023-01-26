@@ -10,7 +10,6 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightByMessageId,
   InFlightBySequencingInfo,
 }
-import com.digitalasset.canton.participant.store.SerializableSubmissionId
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbSerializationException
@@ -100,7 +99,6 @@ case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo](
   ): InFlightBySequencingInfo =
     InFlightBySequencingInfo(submissionDomain, ev(sequencingInfo))
 }
-
 object InFlightSubmission {
   implicit def getResultInFlightSubmission[SequencingInfo <: SubmissionSequencingInfo: GetResult](
       implicit getResultTraceContext: GetResult[SerializableTraceContext]

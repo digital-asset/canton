@@ -26,7 +26,7 @@ import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.Versioned
 import com.daml.logging.LoggingContext
 import com.daml.nonempty.NonEmpty
-import com.daml.telemetry.TelemetryContext
+import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout

@@ -135,6 +135,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       new MediatorState(
         finalizedResponseStore,
         deduplicationStore,
+        clock,
         metrics,
         nodeParameters.processingTimeouts,
         loggerFactory,

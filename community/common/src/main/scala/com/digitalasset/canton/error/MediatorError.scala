@@ -66,8 +66,8 @@ object MediatorError extends MediatorErrorGroup {
     object Reject {
       def create(
           cause: String,
-          v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
           protocolVersion: ProtocolVersion,
+          v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
       ): Reject =
         Reject(cause, v0CodeP)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
     }

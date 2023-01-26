@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.{Factory, Timer}
-import com.daml.metrics.api.{MetricDoc, MetricName}
+import com.daml.metrics.api.MetricHandle.{Factory, Gauge, Timer}
+import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 
 class PruningMetrics(val prefix: MetricName, metricsFactory: Factory) {
 
@@ -33,6 +33,16 @@ class PruningMetrics(val prefix: MetricName, metricsFactory: Factory) {
       qualification = Debug,
     )
     val overall: Timer = metricsFactory.timer(prefix)
+
+    @MetricDoc.Tag(
+      summary = "Age of oldest unpruned event.",
+      description =
+        """This gauge exposes the age of the oldest, unpruned event in hours as a way to quantify the
+          |pruning backlog.""",
+      qualification = Debug,
+    )
+    val maxEventAge: Gauge[Long] =
+      metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
 
   }
 }

@@ -6,11 +6,13 @@ package com.digitalasset.canton.participant.protocol.transfer
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.daml.ledger.participant.state.v2.CompletionInfo
+import com.daml.lf.data.Ref
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SaltError}
-import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata, ViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
@@ -24,7 +26,7 @@ import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMess
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
 import com.digitalasset.canton.participant.store.TransferStore.TransferStoreError
-import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
@@ -51,6 +53,7 @@ trait TransferProcessingSteps[
     SubmissionResult,
     RequestViewType <: ViewType,
     Result <: SignedProtocolMessageContent,
+    PendingTransferType <: PendingTransfer,
 ] extends ProcessingSteps[
       SubmissionParam,
       SubmissionResult,
@@ -77,6 +80,11 @@ trait TransferProcessingSteps[
   override type RequestError = TransferProcessorError
 
   override type ResultError = TransferProcessorError
+
+  override type RejectionArgs = TransferProcessingSteps.RejectionArgs[PendingTransferType]
+
+  override type RequestType <: ProcessingSteps.RequestType.Transfer
+  override val requestType: RequestType
 
   override def embedNoMediatorError(error: NoMediatorError): TransferProcessorError =
     GenericStepsError(error)
@@ -179,6 +187,7 @@ trait TransferProcessingSteps[
     }
   }
 
+  // TODO(#11388): Generate rejection information (see: MultipleMediatorsBaseTest and InactiveMediatorError)
   override def eventAndSubmissionIdForInactiveMediator(
       ts: CantonTimestamp,
       rc: RequestCounter,
@@ -189,8 +198,35 @@ trait TransferProcessingSteps[
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
       traceContext: TraceContext
-  ): Either[TransferProcessorError, Option[TimestampedEvent]] =
-    Right(None)
+  ): Either[TransferProcessorError, Option[TimestampedEvent]] = {
+
+    val RejectionArgs(pendingTransfer, rejectionReason) = rejectionArgs
+
+    val completionInfoO = Some(
+      CompletionInfo(
+        actAs = List(pendingTransfer.submitterMetadata.submitter),
+        applicationId = pendingTransfer.submitterMetadata.applicationId,
+        commandId = Ref.CommandId.assertFromString("command-id"),
+        optDeduplicationPeriod = None,
+        submissionId = pendingTransfer.submitterMetadata.submissionId,
+        statistics = None,
+      )
+    )
+
+    rejectionReason.logWithContext(Map("requestId" -> pendingTransfer.requestId.toString))
+    val rejection = LedgerSyncEvent.CommandRejected.FinalReason(rejectionReason.rpcStatus())
+
+    val tse = completionInfoO.map(info =>
+      TimestampedEvent(
+        LedgerSyncEvent
+          .CommandRejected(pendingTransfer.requestId.unwrap.toLf, info, rejection, requestType),
+        pendingTransfer.requestCounter.asLocalOffset,
+        Some(pendingTransfer.requestSequencerCounter),
+      )
+    )
+
+    Right(tse)
+  }
 
   case class TransferSubmission(
       override val batch: Batch[DefaultOpenEnvelope],
@@ -231,7 +267,11 @@ object TransferProcessingSteps {
     def requestCounter: RequestCounter
 
     def requestSequencerCounter: SequencerCounter
+
+    def submitterMetadata: TransferSubmitterMetadata
   }
+
+  case class RejectionArgs[T <: PendingTransfer](pendingTransfer: T, error: LocalReject)
 
   trait TransferProcessorError
       extends WrapsProcessorError

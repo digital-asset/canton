@@ -16,6 +16,7 @@ import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.InformeeMessage
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -79,6 +80,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
           new InMemoryMediatorDeduplicationStore(loggerFactory),
+          mock[Clock],
           DomainTestMetrics.mediator,
           timeouts,
           loggerFactory,

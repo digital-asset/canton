@@ -4,7 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.lf.command.{EngineEnrichedContractMetadata, ProcessedDisclosedContract}
-import com.daml.lf.data.ImmArray
+import com.daml.lf.data.Bytes
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurposeTest, TestSalt}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -30,7 +30,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
         stakeholders = Set(alice, bob),
         maybeKeyWithMaintainers = Some(
           ExampleTransactionFactory.globalKeyWithMaintainers(
-            LfGlobalKey(templateId, Value.ValueUnit),
+            LfGlobalKey.assertBuild(templateId, Value.ValueUnit),
             Set(alice),
           )
         ),
@@ -55,7 +55,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
     val createdAt = LfTimestamp.Epoch
     val contractSalt = TestSalt.generateSalt(0)
     val driverMetadata =
-      ImmArray.from(DriverContractMetadata(contractSalt).toByteArray(testedProtocolVersion))
+      Bytes.fromByteArray(DriverContractMetadata(contractSalt).toByteArray(testedProtocolVersion))
 
     val contractIdDiscriminator = ExampleTransactionFactory.lfHash(0)
     val contractIdSuffix =
@@ -135,7 +135,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
           .fromDisclosedContract(
             versionedDisclosedContract
               .focus(_.unversioned.metadata.driverMetadata)
-              .replace(ImmArray.empty)
+              .replace(Bytes.Empty)
           )
           .left
           .value shouldBe "Missing driver contract metadata in provided disclosed contract"

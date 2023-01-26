@@ -32,7 +32,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.{DomainAlias, LedgerTransactionId}
+import com.digitalasset.canton.{DomainAlias, LedgerParticipantId, LedgerTransactionId}
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.ManagedChannel
@@ -676,6 +676,9 @@ object ParticipantAdminCommands {
         contractId: LfContractId,
         sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
+        applicationId: LedgerParticipantId,
+        submissionId: String,
+        workflowId: String,
     ) extends Base[AdminTransferOutRequest, AdminTransferOutResponse, TransferId] {
       override def createRequest(): Either[String, AdminTransferOutRequest] =
         Right(
@@ -684,6 +687,9 @@ object ParticipantAdminCommands {
             originDomain = sourceDomain.toProtoPrimitive,
             targetDomain = targetDomain.toProtoPrimitive,
             contractId = contractId.coid,
+            applicationId = applicationId,
+            submissionId = submissionId,
+            workflowId = workflowId,
           )
         )
 
@@ -705,6 +711,9 @@ object ParticipantAdminCommands {
         submittingParty: PartyId,
         transferId: v0proto.TransferId,
         targetDomain: DomainAlias,
+        applicationId: LedgerParticipantId,
+        submissionId: String,
+        workflowId: String,
     ) extends Base[AdminTransferInRequest, AdminTransferInResponse, Unit] {
 
       override def createRequest(): Either[String, AdminTransferInRequest] =
@@ -713,6 +722,9 @@ object ParticipantAdminCommands {
             submittingPartyId = submittingParty.toLf,
             transferId = Some(transferId),
             targetDomain = targetDomain.toProtoPrimitive,
+            applicationId = applicationId,
+            submissionId = submissionId,
+            workflowId = workflowId,
           )
         )
 

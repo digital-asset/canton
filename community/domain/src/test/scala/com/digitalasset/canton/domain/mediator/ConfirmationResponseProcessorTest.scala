@@ -27,7 +27,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration}
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
@@ -112,6 +112,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
           new InMemoryMediatorDeduplicationStore(loggerFactory),
+          mock[Clock],
           DomainTestMetrics.mediator,
           timeouts,
           loggerFactory,
@@ -426,7 +427,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             response,
           ), {
             _.shouldBeCantonError(
-              MediatorError.MalformedMessage,
+              MediatorError.InvalidMessage,
               _ shouldBe show"Received a mediator response at ${ts.immediateSuccessor} by $participant with an unknown request id $requestId. Discarding response...",
               checkTestedProtocolVersion,
             )

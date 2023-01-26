@@ -994,7 +994,12 @@ class TransactionProcessingSteps(
       )
 
       TimestampedEvent(
-        LedgerSyncEvent.CommandRejected(ts.toLf, completionInfo, rejection),
+        LedgerSyncEvent.CommandRejected(
+          ts.toLf,
+          completionInfo,
+          rejection,
+          requestType,
+        ),
         rc.asLocalOffset,
         Some(sc),
       )
@@ -1050,7 +1055,7 @@ class TransactionProcessingSteps(
 
     val tse = submitterParticipantSubmitterInfo.map(info =>
       TimestampedEvent(
-        LedgerSyncEvent.CommandRejected(requestTime.toLf, info, rejection),
+        LedgerSyncEvent.CommandRejected(requestTime.toLf, info, rejection, requestType),
         requestCounter.asLocalOffset,
         Some(requestSequencerCounter),
       )

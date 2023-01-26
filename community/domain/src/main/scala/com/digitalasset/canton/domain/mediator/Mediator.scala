@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.mediator
 import cats.data.{EitherT, NonEmptySeq}
 import cats.instances.future.*
 import cats.syntax.bifunctor.*
+import cats.syntax.option.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -20,6 +21,7 @@ import com.digitalasset.canton.lifecycle.{
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.sequencing.*
@@ -204,6 +206,10 @@ private[mediator] class Mediator(
       _ <- EitherT.right(state.prune(pruneAt))
       _ = logger.debug(show"Pruning sequenced event up to [$pruneAt]")
       _ <- EitherT.right(sequencedEventStore.prune(pruneAt).merge)
+
+      // After pruning successfully, update the "max-event-age" metric.
+      _ = MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxResponseAge, pruneAt.some)
+
     } yield ()
   }
 

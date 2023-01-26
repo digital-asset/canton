@@ -9,8 +9,9 @@ import com.daml.platform.apiserver.SeedService.Seeding
 import com.daml.platform.apiserver.configuration.RateLimitingConfig
 import com.daml.platform.apiserver.ApiServerConfig as DamlApiServerConfig
 import com.daml.platform.configuration.{
+  AcsStreamsConfig as LedgerAcsStreamsConfig,
   CommandConfiguration,
-  IndexServiceConfig as DamlIndexServiceConfig,
+  IndexServiceConfig as LedgerIndexServiceConfig,
 }
 import com.daml.platform.indexer.ha.HaConfig
 import com.daml.platform.indexer.{
@@ -238,7 +239,7 @@ case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultConfigurationLoadTimeout,
     eventsPageSize: Int = LedgerApiServerConfig.DefaultEventsPageSize,
     eventsProcessingParallelism: Int = LedgerApiServerConfig.DefaultEventsProcessingParallelism,
-    bufferedStreamsPageSize: Int = DamlIndexServiceConfig.DefaultBufferedStreamsPageSize,
+    bufferedStreamsPageSize: Int = LedgerIndexServiceConfig.DefaultBufferedStreamsPageSize,
     activeContractsService: ActiveContractsServiceConfig = ActiveContractsServiceConfig(),
     commandService: CommandServiceConfig = CommandServiceConfig(),
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
@@ -283,22 +284,22 @@ case class LedgerApiServerConfig(
 object LedgerApiServerConfig {
 
   // Defaults inspired by default settings in kvutils
-  val DefaultEventsPageSize: Int = 1000
-  val DefaultEventsProcessingParallelism: Int = 8
-  val DefaultConfigurationLoadTimeout: NonNegativeFiniteDuration =
+  private val DefaultEventsPageSize: Int = 1000
+  private val DefaultEventsProcessingParallelism: Int = 8
+  private val DefaultConfigurationLoadTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(10L)
-  val DefaultManagementServiceTimeout: NonNegativeFiniteDuration =
+  private val DefaultManagementServiceTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(2L)
-  val DefaultMaxContractStateCacheSize: Long = 100000L
-  val DefaultMaxContractKeyStateCacheSize: Long = 100000L
-  val DefaultDatabaseConnectionTimeout: NonNegativeFiniteDuration =
+  private val DefaultMaxContractStateCacheSize: Long = 100000L
+  private val DefaultMaxContractKeyStateCacheSize: Long = 100000L
+  private val DefaultDatabaseConnectionTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(30)
-  val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 10000
-  val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
+  private val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 10000
+  private val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(5)
-  val DefaultInMemoryStateUpdaterParallelism: Int = 2
-  val DefaultPreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
-    NonNegativeFiniteDuration(DamlIndexServiceConfig.PreparePackageMetadataTimeOutWarning.toJava)
+  private val DefaultInMemoryStateUpdaterParallelism: Int = 2
+  private val DefaultPreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration(LedgerIndexServiceConfig.PreparePackageMetadataTimeOutWarning.toJava)
   val DefaultRateLimit: RateLimitingConfig =
     RateLimitingConfig.Default.copy(
       maxApiServicesQueueSize = 20000,
@@ -306,7 +307,7 @@ object LedgerApiServerConfig {
       maxUsedHeapSpacePercentage = 100,
       minFreeHeapSpaceBytes = 0,
     )
-  val DefaultCompletionsPageSize = 1000
+  private val DefaultCompletionsPageSize = 1000
 
   def DefaultInMemoryFanOutThreadPoolSize(implicit loggingContext: ErrorLoggingContext): Int = {
     val numberOfThreads =
@@ -320,7 +321,7 @@ object LedgerApiServerConfig {
     */
   private def _completenessCheck(
       apiServerConfig: DamlApiServerConfig,
-      indexServiceConfig: DamlIndexServiceConfig,
+      indexServiceConfig: LedgerIndexServiceConfig,
   ): Unit = {
 
     val DamlApiServerConfig(
@@ -341,16 +342,9 @@ object LedgerApiServerConfig {
       _identityProviderManagement,
     ) = apiServerConfig
 
-    val DamlIndexServiceConfig(
-      _eventsPageSize, // configured via participant.eventsPageSize,
+    val LedgerIndexServiceConfig(
       _eventsProcessingParallelism,
       _bufferedStreamsPageSize,
-      acsIdPageSize,
-      _acsIdPageBufferSize,
-      _acsIdPageWorkingMemoryBytes,
-      acsIdFetchingParallelism,
-      acsContractFetchingParallelism,
-      acsGlobalParallelism,
       _maxContractStateCacheSize,
       _maxContractKeyStateCacheSize,
       _maxTransactionsInMemoryFanOutBufferSize,
@@ -359,11 +353,21 @@ object LedgerApiServerConfig {
       inMemoryFanOutThreadPoolSize,
       preparePackageMetadataTimeOutWarning,
       completionsPageSize,
+      acsStreams,
       _transactionsFlatStreamReaderConfig,
       _transactionsTreeStreamReaderConfig,
       _globalMaxEventIdQueries,
       _globalMaxEventPayloadQueries,
     ) = indexServiceConfig
+
+    val LedgerAcsStreamsConfig(
+      maxIdsPerIdPage,
+      maxPagesPerIdPagesBuffer,
+      _maxWorkingMemoryInBytesForIdPages,
+      _maxPayloadsPerPayloadsPage, // configured via participant.eventsPageSize,
+      maxParallelIdCreateQueries,
+      maxParallelPayloadCreateQueries, // Must be a power of 2
+    ) = acsStreams
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
       import ServerAuthRequirementConfig.*
@@ -407,10 +411,10 @@ object LedgerApiServerConfig {
       internalPort = Some(Port.tryCreate(port.value)),
       tls = tlsConfig,
       activeContractsService = ActiveContractsServiceConfig(
-        acsIdPageSize,
-        acsIdFetchingParallelism,
-        acsContractFetchingParallelism,
-        acsGlobalParallelism,
+        acsIdPageSize = maxIdsPerIdPage,
+        acsIdPageBufferSize = maxPagesPerIdPagesBuffer,
+        acsIdFetchingParallelism = maxParallelIdCreateQueries,
+        acsContractFetchingParallelism = maxParallelPayloadCreateQueries,
       ),
       managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout.toJava),
       apiStreamShutdownTimeout =
@@ -459,12 +463,11 @@ object LedgerApiServerConfig {
   * Note _completenessCheck performed in LedgerApiServerConfig above
   */
 case class ActiveContractsServiceConfig(
-    acsIdPageSize: Int = DamlIndexServiceConfig.DefaultAcsIdPageSize,
-    acsIdPageBufferSize: Int = DamlIndexServiceConfig.DefaultAcsIdPageBufferSize,
-    acsIdFetchingParallelism: Int = DamlIndexServiceConfig.DefaultAcsIdFetchingParallelism,
+    acsIdPageSize: Int = LedgerAcsStreamsConfig.DefaultAcsIdPageSize,
+    acsIdPageBufferSize: Int = LedgerAcsStreamsConfig.DefaultAcsIdPageBufferSize,
+    acsIdFetchingParallelism: Int = LedgerAcsStreamsConfig.DefaultAcsIdFetchingParallelism,
     acsContractFetchingParallelism: Int =
-      DamlIndexServiceConfig.DefaultAcsContractFetchingParallelism,
-    acsGlobalParallelism: Int = DamlIndexServiceConfig.DefaultAcsGlobalParallelism,
+      LedgerAcsStreamsConfig.DefaultAcsContractFetchingParallelism,
 )
 
 /** Ledger api command service specific configurations

@@ -9,7 +9,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.*
-import com.daml.telemetry.TelemetryContext
+import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

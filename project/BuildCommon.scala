@@ -18,7 +18,7 @@ import scalafix.sbt.ScalafixPlugin
 import scoverage.ScoverageKeys._
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport._
-
+import better.files.{File => BetterFile, _}
 import scala.language.postfixOps
 
 object BuildCommon {
@@ -169,10 +169,10 @@ object BuildCommon {
     output
   }
 
-  def formatCoverageExcludes(excludes: String): String =
+  private def formatCoverageExcludes(excludes: String): String =
     excludes.stripMargin.trim.split(System.lineSeparator).mkString(";")
 
-  def packDamlSources(damlSource: File, target: String): Seq[(File, String)] = {
+  private def packDamlSources(damlSource: File, target: String): Seq[(File, String)] = {
     // take all files except hidden and items under the `.daml` build directory
     // support nested folder structures in case that is ever used in our samples
     ((damlSource ** "*") --- (damlSource * ".daml" ** "*"))
@@ -185,10 +185,22 @@ object BuildCommon {
       }
   }
 
-  def packDars(darOutput: File, target: String): Seq[(File, String)] = {
+  private def packDars(darOutput: File, target: String): Seq[(File, String)] = {
     (darOutput * "*.dar").get
       .map { f =>
         (f, s"$target${Path.sep}${f.getName}")
+      }
+  }
+
+  private def packProtobufFiles(BaseFile: BetterFile, target: String): Seq[(File, String)] = {
+    val path = BaseFile / "src" / "main" / "protobuf"
+    val pathJ = path.toJava
+    (pathJ ** "*").get
+      .filter { f =>
+        f.isFile && !f.isHidden
+      }
+      .map { f =>
+        (f, Seq("protobuf", target, IO.relativize(pathJ, f).get).mkString(s"${Path.sep}"))
       }
   }
 
@@ -294,10 +306,25 @@ object BuildCommon {
         else
           Seq()
       }
+      //  here, we copy the protobuf files of community manually
+      val communityCommonProto: Seq[(File, String)] = packProtobufFiles(
+        "community" / "common",
+        "community",
+      )
+      val communityParticipantProto: Seq[(File, String)] = packProtobufFiles(
+        "community" / "participant",
+        "participant",
+      )
+      val communityDomainProto: Seq[(File, String)] = packProtobufFiles(
+        "community" / "domain",
+        "domain",
+      )
+      val protoFiles = communityCommonProto ++ communityParticipantProto ++ communityDomainProto
+
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
-        releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ additionalBundleSources.value
+        releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ additionalBundleSources.value ++ protoFiles
       val args = bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
       val assembleJar = assembly.value
@@ -1109,7 +1136,7 @@ object BuildCommon {
         Compile / unmanagedSourceDirectories ++=
           Seq(
             "observability/metrics/src/main/scala",
-            "observability/telemetry/src/main/scala",
+            "observability/tracing/src/main/scala",
             "libs-scala/concurrent/src/main/scala",
             "libs-scala/executors/src/main/scala",
             "libs-scala/resources/src/main/2.13",
@@ -1219,7 +1246,7 @@ object BuildCommon {
           auth0_java,
           auth0_jwks,
           scala_logging,
-          slick_hikaricp,
+          hikaricp,
           guava,
           dropwizard_metrics_core,
           grpc_netty,

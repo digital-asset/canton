@@ -40,7 +40,6 @@ import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordering.Implicits.infixOrderingOps
 
 abstract class TopologyManager[E <: CantonError](
     val clock: Clock,

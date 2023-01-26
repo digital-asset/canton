@@ -677,7 +677,7 @@ trait SequencerStoreTest
           statusBefore <- store.status(ts(10))
           recordCountsBefore <- store.countRecords
           pruningTimestamp = statusBefore.safePruningTimestamp
-          _message <- {
+          _tsAndReport <- {
             logger.debug(s"Pruning sequencer store from $pruningTimestamp")
             store
               .prune(pruningTimestamp, statusBefore, NonNegativeFiniteDuration.ofSeconds(1))
@@ -748,7 +748,7 @@ trait SequencerStoreTest
           statusBefore <- store.status(ts(10))
           recordCountsBefore <- store.countRecords
           pruningTimestamp = ts(5)
-          _message <- {
+          _tsAndReport <- {
             logger.debug(s"Pruning sequencer store from $pruningTimestamp")
             store
               .prune(pruningTimestamp, statusBefore, NonNegativeFiniteDuration.ofSeconds(1))

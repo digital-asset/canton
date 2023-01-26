@@ -134,6 +134,12 @@ message Parties {
     repeated string parties = 1;
 }
 
+enum CommandKind {
+    Transaction = 0;
+    TransferOut = 1;
+    TransferIn = 2;
+}
+
 message CommandRejected {
     CompletionInfo completion_info = 1;
     google.protobuf.Timestamp record_time = 2;
@@ -142,6 +148,7 @@ message CommandRejected {
     message GrpcRejectionReasonTemplate {
         bytes status = 1;
     }
+    CommandKind command_kind = 4;
 }
 
 message TransferredOut {
@@ -154,6 +161,7 @@ message TransferredOut {
     string source_domain = 7;
     string target_domain = 8;
     google.protobuf.Timestamp transfer_in_exclusivity = 9;
+    string workflow_id = 10; // optional
 }
 
 message TransferredIn {
@@ -168,4 +176,5 @@ message TransferredIn {
     com.digitalasset.canton.protocol.v0.TransferId transfer_out_id = 9;
     string target_domain = 10;
     bool create_transaction_accepted = 11;
+    string workflow_id = 12; // optional
 }

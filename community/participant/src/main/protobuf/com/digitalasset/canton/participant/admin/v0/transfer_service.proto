@@ -25,6 +25,9 @@ message AdminTransferOutRequest {
     string contract_id = 2;
     string origin_domain = 3;
     string target_domain = 4;
+    string application_id = 5;
+    string submission_id = 6; // optional
+    string workflow_id = 7; // optional
 }
 
 message AdminTransferOutResponse {
@@ -35,6 +38,9 @@ message AdminTransferInRequest {
     string submitting_party_id = 1;
     string target_domain = 2;
     com.digitalasset.canton.protocol.v0.TransferId transfer_id = 3;
+    string application_id = 4;
+    string submission_id = 5; // optional
+    string workflow_id = 6; // optional
 }
 
 message AdminTransferInResponse {

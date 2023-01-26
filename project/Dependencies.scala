@@ -1,6 +1,6 @@
-import sbt.{io => _, _}
 import cats.syntax.either._
 import cats.syntax.functorFilter._
+import sbt.{io => _, _}
 
 object Dependencies {
   val daml_libraries_version = metabuild.BuildInfo.daml_libraries_version
@@ -192,7 +192,7 @@ object Dependencies {
 
   lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.13"
 
-  lazy val web3j = "org.web3j" % "core" % "4.8.9"
+  lazy val web3j = "org.web3j" % "core" % "4.9.6"
 
   // From digitalasset.jfrog.io
   lazy val vmbc_protos =
@@ -286,5 +286,6 @@ object Dependencies {
     damlDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
   // it should be kept up-to-date with the scaffeine version to avoid incompatibilities
   lazy val caffeine = damlDependency("com.github.ben-manes.caffeine", "caffeine")
+  lazy val hikaricp = damlDependency("com.zaxxer", "HikariCP")
 
 }

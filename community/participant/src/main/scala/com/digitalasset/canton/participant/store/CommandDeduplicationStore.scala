@@ -12,7 +12,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.GlobalOffset
-import com.digitalasset.canton.participant.protocol.submission.ChangeIdHash
+import com.digitalasset.canton.participant.protocol.submission.{
+  ChangeIdHash,
+  SerializableSubmissionId,
+}
 import com.digitalasset.canton.participant.store.CommandDeduplicationStore.OffsetAndPublicationTime
 import com.digitalasset.canton.participant.store.db.DbCommandDeduplicationStore
 import com.digitalasset.canton.participant.store.memory.InMemoryCommandDeduplicationStore

@@ -10,6 +10,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.*
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
@@ -515,19 +516,28 @@ object ProcessingSteps {
   }
 
   object RequestType {
-    case object Transaction extends RequestType {
+    // Since RequestType is not sealed (extended in tests), we introduce this sealed one
+    sealed trait Values extends RequestType with PrettyPrinting
+
+    case object Transaction extends Values {
       override type PendingRequestData = PendingTransaction
+      override def pretty: Pretty[Transaction] = prettyOfObject[Transaction]
     }
     type Transaction = Transaction.type
 
-    case object TransferOut extends RequestType {
+    sealed trait Transfer extends Values
+
+    case object TransferOut extends Transfer {
       override type PendingRequestData = PendingTransferOut
+      override def pretty: Pretty[TransferOut] = prettyOfObject[TransferOut]
     }
 
     type TransferOut = TransferOut.type
 
-    case object TransferIn extends RequestType {
+    case object TransferIn extends Transfer {
       override type PendingRequestData = PendingTransferIn
+      override def pretty: Pretty[TransferIn] = prettyOfObject[TransferIn]
+
     }
     type TransferIn = TransferIn.type
   }

@@ -98,6 +98,11 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
           """
     }
 
+    // TODO(#11292): Remove additional logging after root cause of flaky PruneObserver hang figured out
+    logger.debug(
+      s"About to set phase of $pruning_status_table to \"${phase.kind}\" and timestamp to $timestamp"
+    )
+
     for {
       rowCount <- EitherT.right(storage.update(query, "pruning status upsert"))
       _ <-
@@ -110,7 +115,12 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
             case _ =>
           }
         } else EitherT.pure[Future, E](())
-    } yield ()
+    } yield {
+      // TODO(#11292): Remove additional logging after root cause of flaky PruneObserver hang figured out
+      logger.debug(
+        s"Finished setting phase of $pruning_status_table to \"${phase.kind}\" and timestamp to $timestamp"
+      )
+    }
   }
 }
 

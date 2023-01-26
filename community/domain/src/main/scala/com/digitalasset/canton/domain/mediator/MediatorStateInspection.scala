@@ -14,8 +14,8 @@ private[mediator] class MediatorStateInspection(state: MediatorState) {
   def finalizedResponseCount()(implicit traceContext: TraceContext): Future[Long] =
     state.finalizedResponseStore.count()
 
-  def locatePruningTimestamp(skip: NonNegativeInt)(implicit
+  def locateAndReportPruningTimestamp(skip: NonNegativeInt)(implicit
       traceContext: TraceContext
   ): Future[Option[CantonTimestamp]] =
-    state.finalizedResponseStore.locatePruningTimestamp(skip.value)
+    state.locateAndReportPruningTimestamp(skip)
 }

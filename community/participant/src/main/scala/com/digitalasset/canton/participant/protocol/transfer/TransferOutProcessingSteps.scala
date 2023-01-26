@@ -15,7 +15,12 @@ import com.daml.lf.data.Ref
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
-import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree, ViewType}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  FullTransferOutTree,
+  TransferSubmitterMetadata,
+  ViewType,
+}
 import com.digitalasset.canton.error.{BaseCantonError, MediatorError}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{
@@ -70,7 +75,7 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, LfWorkflowId, RequestCounter, SequencerCounter, checked}
 import org.slf4j.event.Level
 
 import scala.collection.mutable
@@ -90,6 +95,7 @@ class TransferOutProcessingSteps(
       SubmissionResult,
       TransferOutViewType,
       TransferOutResult,
+      PendingTransferOut,
     ]
     with NamedLogging {
 
@@ -98,8 +104,6 @@ class TransferOutProcessingSteps(
   override type SubmissionResultArgs = PendingTransferSubmission
 
   override type PendingDataAndResponseArgs = TransferOutProcessingSteps.PendingDataAndResponseArgs
-
-  override type RejectionArgs = Unit
 
   override type RequestType = ProcessingSteps.RequestType.TransferOut
   override val requestType = ProcessingSteps.RequestType.TransferOut
@@ -124,7 +128,13 @@ class TransferOutProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Submission] = {
-    val SubmissionParam(submittingParty, contractId, targetDomain, targetProtocolVersion) = param
+    val SubmissionParam(
+      submitterMetadata,
+      submittingParticipant,
+      contractId,
+      targetDomain,
+      targetProtocolVersion,
+    ) = param
     val pureCrypto = sourceRecentSnapshot.pureCrypto
 
     def withDetails(message: String) = s"Transfer-out $contractId to $targetDomain: $message"
@@ -159,8 +169,9 @@ class TransferOutProcessingSteps(
           participantId,
           timeProof,
           contractId,
-          submittingParty,
+          submitterMetadata,
           stakeholders,
+          submittingParticipant,
           domainId,
           sourceDomainProtocolVersion,
           mediatorId,
@@ -364,7 +375,8 @@ class TransferOutProcessingSteps(
         fullTree.tree.rootHash,
         WithContractHash.fromContract(storedContract.contract, fullTree.contractId),
         transferringParticipant,
-        fullTree.submitter,
+        fullTree.submitterMetadata,
+        fullTree.workflowId,
         transferId,
         fullTree.targetDomain,
         fullTree.stakeholders,
@@ -407,7 +419,10 @@ class TransferOutProcessingSteps(
       entry,
       responseOpt.map(_ -> Recipients.cc(mediatorId)).toList,
       List.empty,
-      (),
+      RejectionArgs(
+        entry,
+        LocalReject.TimeRejects.LocalTimeout.Reject()(sourceDomainProtocolVersion.v),
+      ),
     )
   }
 
@@ -493,7 +508,8 @@ class TransferOutProcessingSteps(
       rootHash,
       WithContractHash(contractId, contractHash),
       transferringParticipant,
-      submitter,
+      submitterMetadata,
+      workflowId,
       transferId,
       targetDomain,
       stakeholders,
@@ -536,11 +552,12 @@ class TransferOutProcessingSteps(
             requestId.unwrap,
             contractId,
             stakeholders,
-            submitter,
+            submitterMetadata,
             transferId,
             targetDomain,
             rootHash,
             transferInExclusivity,
+            workflowId,
           )
         } yield CommitAndStoreContractsAndPublishEvent(
           commitSetFO,
@@ -576,48 +593,40 @@ class TransferOutProcessingSteps(
       recordTime: CantonTimestamp,
       contractId: LfContractId,
       contractStakeholders: Set[LfPartyId],
-      submitter: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
       transferId: TransferId,
       targetDomain: DomainId,
       rootHash: RootHash,
       transferInExclusivity: Option[CantonTimestamp],
-  )(implicit
-      traceContext: TraceContext
+      workflowId: Option[LfWorkflowId],
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredOut] = {
     for {
       updateId <- EitherT
         .fromEither[Future](rootHash.asLedgerTransactionId)
         .leftMap[TransferProcessorError](FieldConversionError("Transaction Id", _))
 
-      // TODO(#11196): fix when we create completion info
-      sourceIps <- transferCoordination.cryptoSnapshot(transferId.sourceDomain, recordTime)
-      // TODO(#11196): this is a poor-man's solution to figuring out whether we need to produce a completion event.
-      // Fix it by adding the participant that submitted the transfer-out to the TransferOutViewTree
-      isParticipantHostingSubmitter <- EitherT.right(
-        sourceIps.ipsSnapshot.hostedOn(submitter, participantId).map(_.nonEmpty)
-      )
       completionInfo =
-        Option.when(isParticipantHostingSubmitter)(
+        Option.when(participantId.toLf == submitterMetadata.submittingParticipant)(
           CompletionInfo(
-            actAs = List(submitter),
-            applicationId =
-              Ref.ApplicationId.assertFromString("application-id"), // TODO(#11196): fix this
+            actAs = List(submitterMetadata.submitter),
+            applicationId = submitterMetadata.applicationId,
             commandId = Ref.CommandId.assertFromString("command-id"),
             optDeduplicationPeriod = None,
-            submissionId = None, // TODO(#11196): fix this
+            submissionId = submitterMetadata.submissionId,
             statistics = None,
           )
         )
     } yield LedgerSyncEvent.TransferredOut(
       updateId = updateId,
       optCompletionInfo = completionInfo,
-      submitter = submitter,
+      submitter = submitterMetadata.submitter,
       recordTime = recordTime.toLf,
       contractId = contractId,
       contractStakeholders = contractStakeholders,
       sourceDomainId = transferId.sourceDomain,
       targetDomainId = targetDomain,
       transferInExclusivity = transferInExclusivity.map(_.toLf),
+      workflowId = workflowId,
     )
   }
 
@@ -633,6 +642,7 @@ class TransferOutProcessingSteps(
       targetDomain,
       transferCoordination,
       pendingRequestData.stakeholders,
+      pendingRequestData.submitterMetadata,
       participantId,
       t0,
     )
@@ -800,11 +810,14 @@ object TransferOutProcessingSteps {
   import com.digitalasset.canton.util.ShowUtil.*
 
   case class SubmissionParam(
-      submittingParty: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       contractId: LfContractId,
       targetDomain: DomainId,
       targetProtocolVersion: TargetProtocolVersion,
-  )
+  ) {
+    val submittingParty: LfPartyId = submitterMetadata.submitter
+  }
 
   case class SubmissionResult(
       transferId: TransferId,
@@ -818,7 +831,8 @@ object TransferOutProcessingSteps {
       rootHash: RootHash,
       contractIdAndHash: WithContractHash[LfContractId],
       transferringParticipant: Boolean,
-      submitter: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       transferId: TransferId,
       targetDomain: DomainId,
       stakeholders: Set[LfPartyId],
@@ -834,8 +848,9 @@ object TransferOutProcessingSteps {
       participantId: ParticipantId,
       timeProof: TimeProof,
       contractId: LfContractId,
-      submitter: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
       stakeholders: Set[LfPartyId],
+      workflowId: Option[LfWorkflowId],
       sourceDomain: DomainId,
       sourceProtocolVersion: SourceProtocolVersion,
       sourceMediator: MediatorId,
@@ -852,7 +867,7 @@ object TransferOutProcessingSteps {
     for {
       adminPartiesAndRecipients <- transferOutRequestData(
         participantId,
-        submitter,
+        submitterMetadata.submitter,
         stakeholders,
         sourceIps,
         targetIps,
@@ -861,9 +876,10 @@ object TransferOutProcessingSteps {
       (transferOutAdminParties, recipients) = adminPartiesAndRecipients
     } yield {
       val transferOutRequest = TransferOutRequest(
-        submitter,
+        submitterMetadata,
         stakeholders,
         transferOutAdminParties,
+        workflowId,
         contractId,
         sourceDomain,
         sourceProtocolVersion,
@@ -1112,6 +1128,7 @@ object TransferOutProcessingSteps {
       targetDomain: DomainId,
       transferCoordination: TransferCoordination,
       stks: Set[LfPartyId],
+      transferOutSubmitterMetadata: TransferSubmitterMetadata,
       participantId: ParticipantId,
       t0: CantonTimestamp,
   )(implicit
@@ -1154,7 +1171,20 @@ object TransferOutProcessingSteps {
             )
         ).map(SourceProtocolVersion(_))
         submissionResult <- transferCoordination
-          .transferIn(targetDomain, inParty, id, sourceProtocolVersion)(TraceContext.empty)
+          .transferIn(
+            targetDomain,
+            TransferSubmitterMetadata(
+              inParty,
+              transferOutSubmitterMetadata.applicationId,
+              participantId.toLf,
+              None,
+            ),
+            workflowId = None,
+            id,
+            sourceProtocolVersion,
+          )(
+            TraceContext.empty
+          )
         TransferInProcessingSteps.SubmissionResult(completionF) = submissionResult
         status <- EitherT.liftF(completionF)
       } yield status

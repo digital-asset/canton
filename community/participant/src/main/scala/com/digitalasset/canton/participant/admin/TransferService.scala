@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.participant.protocol.transfer.{
   TransferData,
   TransferSubmissionHandle,
@@ -15,7 +15,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{DomainAlias, LfPartyId}
+import com.digitalasset.canton.{DomainAlias, LfPartyId, LfWorkflowId}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -27,10 +27,11 @@ class TransferService(
 )(implicit ec: ExecutionContext) {
 
   private[admin] def transferOut(
-      submittingParty: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
       contractId: LfContractId,
       sourceDomain: DomainAlias,
       targetDomain: DomainAlias,
+      workflowId: Option[LfWorkflowId],
   )(implicit traceContext: TraceContext): EitherT[Future, String, TransferId] =
     for {
       submissionHandle <- EitherT.fromEither[Future](submissionHandleFor(sourceDomain))
@@ -41,7 +42,13 @@ class TransferService(
       )
 
       transferId <- submissionHandle
-        .submitTransferOut(submittingParty, contractId, targetDomainId, targetProtocolVersion)
+        .submitTransferOut(
+          submitterMetadata,
+          workflowId,
+          contractId,
+          targetDomainId,
+          targetProtocolVersion,
+        )
         .semiflatMap(Predef.identity)
         .biflatMap(
           error => EitherT.leftT[Future, TransferId](error.toString),
@@ -66,8 +73,13 @@ class TransferService(
     )
   )
 
-  def transferIn(submittingParty: LfPartyId, targetDomain: DomainAlias, transferId: TransferId)(
-      implicit traceContext: TraceContext
+  def transferIn(
+      submitterMetadata: TransferSubmitterMetadata,
+      targetDomain: DomainAlias,
+      transferId: TransferId,
+      workflowId: Option[LfWorkflowId],
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
     for {
       submisisonHandle <- EitherT.fromEither[Future](submissionHandleFor(targetDomain))
@@ -75,7 +87,12 @@ class TransferService(
         SourceProtocolVersion(_)
       )
       result <- submisisonHandle
-        .submitTransferIn(submittingParty, transferId, sourceProtocolVersion)
+        .submitTransferIn(
+          submitterMetadata,
+          workflowId,
+          transferId,
+          sourceProtocolVersion,
+        )
         .semiflatMap(Predef.identity)
         .leftMap(_.toString)
       _ <- EitherT(

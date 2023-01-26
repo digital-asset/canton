@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.DurationConverters.*
 
-sealed trait RefinedDuration {
+sealed trait RefinedDuration extends Ordered[RefinedDuration] {
   def duration: Duration
   def unwrap: Duration = duration
 
@@ -37,7 +37,7 @@ sealed trait RefinedDuration {
 
   def toScala: FiniteDuration = duration.toScala
 
-  def getMicros: Long = duration.getSeconds * 1000000L + duration.getNano / 1000L
+  override def compare(that: RefinedDuration): Int = this.duration.compareTo(that.duration)
 }
 
 trait RefinedDurationCompanion[RD <: RefinedDuration] {

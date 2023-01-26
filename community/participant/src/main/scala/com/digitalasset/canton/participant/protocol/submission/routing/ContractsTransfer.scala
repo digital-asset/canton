@@ -5,13 +5,15 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.digitalasset.canton.LfPartyId
+import com.daml.ledger.participant.state.v2.SubmitterInfo
+import com.digitalasset.canton.LfWorkflowId
+import com.digitalasset.canton.data.TransferSubmitterMetadata
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.submission.routing.Transfers.TransferArgs
+import com.digitalasset.canton.participant.protocol.submission.routing.ContractsTransfer.TransferArgs
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
 import com.digitalasset.canton.participant.sync.{SyncDomain, TransactionRoutingError}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -19,13 +21,15 @@ import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetPr
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
-private[routing] class ContractsTransferer(
+private[routing] class ContractsTransfer(
     connectedDomains: TrieMap[DomainId, SyncDomain],
+    submittingParticipant: ParticipantId,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
   def transfer(
-      domainRankTarget: DomainRank
+      domainRankTarget: DomainRank,
+      submitterInfo: SubmitterInfo,
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
     if (domainRankTarget.transfers.nonEmpty) {
       logger.info(
@@ -36,7 +40,13 @@ private[routing] class ContractsTransferer(
           TransferArgs(
             sourceDomainId,
             domainRankTarget.domainId,
-            lfParty,
+            TransferSubmitterMetadata(
+              lfParty,
+              submitterInfo.applicationId,
+              submittingParticipant.toLf,
+              submitterInfo.submissionId,
+            ),
+            workflowId = None,
             cid,
             traceContext,
           )
@@ -47,8 +57,17 @@ private[routing] class ContractsTransferer(
     }
   }
 
-  private def perform(args: TransferArgs): EitherT[Future, TransactionRoutingError, Unit] = {
-    val TransferArgs(sourceDomain, targetDomain, submittingParty, contractId, _traceContext) = args
+  private def perform(
+      args: TransferArgs
+  ): EitherT[Future, TransactionRoutingError, Unit] = {
+    val TransferArgs(
+      sourceDomain,
+      targetDomain,
+      submitterMetadata,
+      workflowId,
+      contractId,
+      _traceContext,
+    ) = args
     implicit val traceContext = _traceContext
 
     val transfer = for {
@@ -65,7 +84,8 @@ private[routing] class ContractsTransferer(
 
       outResult <- sourceSyncDomain
         .submitTransferOut(
-          submittingParty,
+          submitterMetadata,
+          workflowId,
           contractId,
           targetDomain,
           TargetProtocolVersion(targetSyncDomain.staticDomainParameters.protocolVersion),
@@ -84,7 +104,8 @@ private[routing] class ContractsTransferer(
 
       inResult <- targetSyncDomain
         .submitTransferIn(
-          submittingParty,
+          submitterMetadata,
+          workflowId,
           outResult.transferId,
           SourceProtocolVersion(sourceSyncDomain.staticDomainParameters.protocolVersion),
         )
@@ -105,11 +126,12 @@ private[routing] class ContractsTransferer(
   }
 }
 
-private[routing] object Transfers {
+private[routing] object ContractsTransfer {
   case class TransferArgs(
       sourceDomain: DomainId,
       targetDomain: DomainId,
-      submitter: LfPartyId,
+      submitterMetadata: TransferSubmitterMetadata,
+      workflowId: Option[LfWorkflowId],
       contract: LfContractId,
       traceContext: TraceContext,
   )

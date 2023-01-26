@@ -274,7 +274,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       val fut = f.sync
         .allocateParty(Some(lfInputPartyId), Some("displayName"), submissionId)(
           com.daml.logging.LoggingContext.ForTesting,
-          com.daml.telemetry.NoOpTelemetryContext,
+          com.daml.tracing.NoOpTelemetryContext,
         )
         .asScala
 

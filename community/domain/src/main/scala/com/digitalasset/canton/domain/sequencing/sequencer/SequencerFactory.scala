@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.stream.Materializer
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
+import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -33,6 +34,7 @@ trait SequencerFactory {
 object SequencerFactory {
   def database(
       config: DatabaseSequencerConfig,
+      metrics: SequencerMetrics,
       loggerFactory: NamedLoggerFactory,
   ): SequencerFactory =
     new SequencerFactory {
@@ -60,6 +62,7 @@ object SequencerFactory {
           topologyClientMember,
           sequencerProtocolVersion,
           domainSyncCryptoApi,
+          metrics,
           loggerFactory,
         )
 
