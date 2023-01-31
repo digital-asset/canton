@@ -1574,23 +1574,28 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       """While a resource limit is attained or exceeded, the participant will reject any additional submission with GRPC status ABORTED.
         |Most importantly, a submission will be rejected **before** it consumes a significant amount of resources.
         |
-        |There are two kinds of limits: `max_dirty_requests` and `max_rate`.
+        |There are three kinds of limits: `maxDirtyRequests`,  `maxRate` and `maxBurstFactor`.
         |The number of dirty requests of a participant P covers (1) requests initiated by P as well as 
         |(2) requests initiated by participants other than P that need to be validated by P.
         |Compared to the maximum rate, the maximum number of dirty requests reflects the load on the participant more accurately.
         |However, the maximum number of dirty requests alone does not protect the system from "bursts":
-        |If an application submits a huge number of commands at once, the maximum number of dirty requests will likely be exceeded.
+        |If an application submits a huge number of commands at once, the maximum number of dirty requests will likely 
+        |be exceeded, as the system is registering dirty requests only during validation and not already during 
+        |submission.
         |
         |The maximum rate is a hard limit on the rate of commands submitted to this participant through the ledger API.
         |As the rate of commands is checked and updated immediately after receiving a new command submission,
-        |an application cannot exceed the maximum rate, even when it sends a "burst" of commands.
+        |an application cannot exceed the maximum rate.
         |
-        |For the sake of illustration, let's assume the configured rate limit is ``100 commands/s``.
+        |The `maxBurstFactor` parameter (positive, default 0.5) allows to configure how permissive the rate limitation should be 
+        |with respect to bursts. The rate limiting will be enforced strictly after having observed `max_burst` * `max_rate` commands.
+        |
+        |For the sake of illustration, let's assume the configured rate limit is ``100 commands/s`` with a burst ratio of 0.5.
         |If an application submits 100 commands within a single second, waiting exactly 10 milliseconds between consecutive commands,
-        |then the participant will accept all commands.
-        |If an application submits 100 commands within one millisecond, then the actual rate is ``100000 commands/s``.
-        |Consequently, the participant may reject all but the first command;
-        |however, due to limited clock precision the participant will actually accept about 10 commands. 
+        |then the participant will accept all commands.        
+        |With a `maxBurstFactor` of 0.5, the participant will accept the first 50 commands and reject the remaining 50.
+        |If the application then waits another 500 ms, it may submit another burst of 50 commands. If it waits 250 ms,
+        |it may submit only a burst of 25 commands.
         |
         |Resource limits can only be changed, if the server runs Canton enterprise.
         |In the community edition, the server uses fixed limits that cannot be changed."""
@@ -1602,6 +1607,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def resource_limits(): ResourceLimits = consoleEnvironment.run {
       adminCommand(GetResourceLimits())
     }
+
   }
 }
 

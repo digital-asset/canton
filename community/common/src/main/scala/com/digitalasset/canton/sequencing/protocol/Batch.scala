@@ -5,10 +5,12 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.Applicative
 import cats.implicits.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.messages.ProtocolMessage
+import com.digitalasset.canton.protocol.messages.{EnvelopeContent, ProtocolMessage}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -188,5 +190,21 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
   def closeEnvelopes[T <: ProtocolMessage](batch: Batch[OpenEnvelope[T]]): Batch[ClosedEnvelope] = {
     val closedEnvs = batch.envelopes.map(env => env.closeEnvelope)
     Batch(closedEnvs)(batch.representativeProtocolVersion)
+  }
+
+  def openEnvelopes(batch: Batch[ClosedEnvelope])(
+      protocolVersion: ProtocolVersion,
+      hashOps: HashOps,
+  ): (Batch[OpenEnvelope[ProtocolMessage]], Seq[ProtoDeserializationError]) = {
+    val (openingErrors, openEnvelopes) = batch.envelopes
+      .map(
+        _.openEnvelope(
+          EnvelopeContent.messageFromByteString(protocolVersion, hashOps),
+          protocolVersion,
+        )
+      )
+      .separate
+
+    (Batch(openEnvelopes)(batch.representativeProtocolVersion), openingErrors)
   }
 }

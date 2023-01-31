@@ -196,7 +196,9 @@ class MemberAuthenticationService(
           if (_) Right(()) else Left(ParticipantDisabled(participant))
         })
       // consider all types of members always active
-      case _ => EitherT.pure[Future, AuthenticationError](())
+      case _ =>
+        // TODO(#4933) check that mediator state is active
+        EitherT.pure[Future, AuthenticationError](())
     }
 
   private def storeAcceptedAgreement(

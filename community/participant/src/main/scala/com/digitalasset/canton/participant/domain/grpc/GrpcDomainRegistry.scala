@@ -104,10 +104,9 @@ class GrpcDomainRegistry(
   }
 
   def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
-    (config: DomainConnectionConfig) => implicit traceContext: TraceContext =>
+    (config: DomainConnectionConfig) =>
       SequencerConnectClient(
         config,
-        cryptoApiProvider.crypto,
         participantNodeParameters.processingTimeouts,
         participantNodeParameters.tracing.propagation,
         loggerFactory,
@@ -124,7 +123,7 @@ class GrpcDomainRegistry(
     val sequencerConnection = config.sequencerConnection
 
     val runE = for {
-      sequencerConnectClient <- sequencerConnectClientBuilder(config)(traceContext)
+      sequencerConnectClient <- sequencerConnectClientBuilder(config)
         .leftMap(err =>
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message)
         )

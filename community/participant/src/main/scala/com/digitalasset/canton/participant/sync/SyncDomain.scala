@@ -781,7 +781,7 @@ class SyncDomain(
       functionFullName,
       DomainNotReady(domainId, "The domain is shutting down."),
     ) {
-      logger.debug(s"Submitting transfer-in of `$transferId` from `$domainId`")
+      logger.debug(s"Submitting transfer-in of `$transferId` to `$domainId`")
 
       if (!ready)
         DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard

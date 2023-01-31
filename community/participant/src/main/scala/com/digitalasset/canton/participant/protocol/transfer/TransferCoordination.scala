@@ -77,11 +77,11 @@ class TransferCoordination(
       .toRight(UnknownDomain(domain, "When waiting for timestamp"))
   }
 
-  /** Submits a transfer in. Used by the [[TransferOutProcessingSteps]] to automatically trigger the submission of a
-    * transfer in after the exclusivity timeout.
+  /** Submits a transfer-in. Used by the [[TransferOutProcessingSteps]] to automatically trigger the submission of a
+    * transfer-in after the exclusivity timeout.
     */
-  def transferIn(
-      id: DomainId,
+  private[transfer] def transferIn(
+      domainId: DomainId,
       submitterMetadata: TransferSubmitterMetadata,
       workflowId: Option[LfWorkflowId],
       transferId: TransferId,
@@ -89,9 +89,11 @@ class TransferCoordination(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult] = {
+    logger.debug(s"Triggering automatic transfer-in of transfer `$transferId`")
+
     for {
       inSubmission <- EitherT.fromEither[Future](
-        inSubmissionById(id).toRight(UnknownDomain(id, "When transfering in"))
+        inSubmissionById(domainId).toRight(UnknownDomain(domainId, "When transferring in"))
       )
       submissionResult <- inSubmission
         .submitTransferIn(

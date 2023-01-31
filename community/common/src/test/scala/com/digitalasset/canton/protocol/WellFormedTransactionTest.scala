@@ -296,7 +296,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             actingParties = Set(signatory),
             key = Some(
               LfKeyWithMaintainers(
-                LfTransactionUtil.assertNoContractIdInKey(contractInst.unversioned.arg),
+                LfTransactionUtil.checkNoContractIdInKey(contractInst.unversioned.arg).value,
                 Set.empty,
               )
             ),

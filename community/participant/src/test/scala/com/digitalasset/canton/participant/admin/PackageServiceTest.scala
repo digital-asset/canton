@@ -8,7 +8,6 @@ import cats.data.EitherT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.error.definitions.PackageServiceError
-import com.daml.lf.CantonOnly
 import com.daml.lf.archive.DarParser
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -19,6 +18,7 @@ import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonEx
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
+import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.BinaryFileUtil
@@ -58,7 +58,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
 
   private class Env {
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
-    val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false)
+    val engine = DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false)
     val sut =
       new PackageService(
         engine,

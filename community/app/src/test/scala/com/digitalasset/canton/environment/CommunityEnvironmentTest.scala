@@ -78,7 +78,7 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
 
     val environment = new CommunityEnvironment(
       config,
-      TestingConfigInternal(),
+      TestingConfigInternal(initializeGlobalOpenTelemetry = false),
       loggerFactory,
     ) {
       override def createParticipant(

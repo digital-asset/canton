@@ -14,7 +14,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.now
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
 import com.digitalasset.canton.error.*
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
@@ -628,10 +628,11 @@ abstract class TopologyManager[E <: CantonError](
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
     Seq(
+      SyncCloseable("topology-manager-store", store.close()),
       sequentialQueue.asCloseable(
         "topology-manager-sequential-queue",
         timeouts.shutdownProcessing.unwrap,
-      )
+      ),
     )
   }
 

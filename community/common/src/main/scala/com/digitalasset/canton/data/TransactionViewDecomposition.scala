@@ -205,6 +205,7 @@ object TransactionViewDecomposition {
           val remainingChildrenRbContext = rollbackChildrenRbContext.exitRollback
           peelAwayTopLevelRollbackNodes(rollbackChildren, rollbackChildrenRbContext) ++
             peelAwayTopLevelRollbackNodes(remainingChildren, remainingChildrenRbContext)
+        case (_nodeId, _: LfNodeAuthority) +: _remainingChildren => sys.error("LfNodeAuthority")
       }
 
     val rootNodes =

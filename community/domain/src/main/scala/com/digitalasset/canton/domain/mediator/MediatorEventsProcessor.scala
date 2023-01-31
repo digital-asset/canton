@@ -16,12 +16,11 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.sequencing.handlers.StripSignature
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   AsyncResult,
   HandlerResult,
-  OrdinaryProtocolEvent,
+  TracedProtocolEvent,
   UnsignedProtocolEventHandler,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -100,15 +99,15 @@ private[mediator] class MediatorEventsProcessor(
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
 
-  def handle(events: Seq[OrdinaryProtocolEvent])(implicit
+  def handle(events: Seq[TracedProtocolEvent])(implicit
       traceContext: TraceContext
   ): HandlerResult =
     NonEmpty.from(events).fold(HandlerResult.done)(handle)
 
   private def handle(
-      events: NonEmpty[Seq[OrdinaryProtocolEvent]]
+      events: NonEmpty[Seq[TracedProtocolEvent]]
   )(implicit traceContext: TraceContext): HandlerResult = {
-    val identityF = StripSignature(identityClientEventHandler)(Traced(events))
+    val identityF = identityClientEventHandler(Traced(events))
 
     val envelopesByEvent = envelopesGroupedByEvent(events)
 
@@ -221,11 +220,11 @@ private[mediator] class MediatorEventsProcessor(
   }
 
   private def envelopesGroupedByEvent(
-      events: NonEmpty[Seq[OrdinaryProtocolEvent]]
-  ): NonEmpty[Seq[(OrdinaryProtocolEvent, Seq[OpenEnvelope[ProtocolMessage]])]] =
+      events: NonEmpty[Seq[TracedProtocolEvent]]
+  ): NonEmpty[Seq[(TracedProtocolEvent, Seq[OpenEnvelope[ProtocolMessage]])]] =
     events.map { event =>
       implicit val traceContext: TraceContext = event.traceContext
-      event.signedEvent.content match {
+      event.value match {
         case deliver: Deliver[DefaultOpenEnvelope] =>
           val domainEnvelopes = ProtocolMessage.filterDomainsEnvelopes(
             deliver.batch,
@@ -242,7 +241,7 @@ private[mediator] class MediatorEventsProcessor(
     }
 
   private def determineStages(
-      envelopesByEvent: Seq[(OrdinaryProtocolEvent, Seq[OpenEnvelope[ProtocolMessage]])]
+      envelopesByEvent: Seq[(TracedProtocolEvent, Seq[OpenEnvelope[ProtocolMessage]])]
   ): Future[(Boolean, List[MediatorEventStage])] = {
     NonEmpty
       .from(envelopesByEvent)
@@ -250,28 +249,29 @@ private[mediator] class MediatorEventsProcessor(
         // work out requests that will timeout during this range of events
         // (keep in mind that they may receive a result during this time, in which case the timeout will be ignored)
         val (lastEvent, _) = envelopesByEventNE.last1
-        val unfinalized = state.pendingRequestIdsBefore(lastEvent.timestamp)
+        val unfinalized = state.pendingRequestIdsBefore(lastEvent.value.timestamp)
 
         val stagesF =
           envelopesByEventNE.foldLeft(Future.successful(EventProcessingStages(unfinalized))) {
-            case (stages, (event, envelopes)) =>
-              implicit val traceContext: TraceContext = event.traceContext
-              for {
-                stages <- extractMediatorEventsStage(
-                  event.counter,
-                  event.timestamp,
-                  envelopes,
-                ).toList
-                  .foldLeft(
-                    stages
-                  ) { case (acc, stage) => acc.map(_.addStage(stage)) }
+            case (stages, (tracedEvent, envelopes)) =>
+              tracedEvent.withTraceContext { implicit traceContext => event =>
+                for {
+                  stages <- extractMediatorEventsStage(
+                    event.counter,
+                    event.timestamp,
+                    envelopes,
+                  ).toList
+                    .foldLeft(
+                      stages
+                    ) { case (acc, stage) => acc.map(_.addStage(stage)) }
 
-                stagesWithTimeouts <- stages.addTimeouts(event.counter, event.timestamp)
-              } yield stagesWithTimeouts.withIdentityUpdate(
-                envelopes
-                  .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
-                  .nonEmpty
-              )
+                  stagesWithTimeouts <- stages.addTimeouts(event.counter, event.timestamp)
+                } yield stagesWithTimeouts.withIdentityUpdate(
+                  envelopes
+                    .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
+                    .nonEmpty
+                )
+              }
           }
         stagesF.map(_.complete)
       }

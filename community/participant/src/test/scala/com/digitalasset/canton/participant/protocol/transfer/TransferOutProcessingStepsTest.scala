@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
 import cats.implicits.*
-import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
@@ -153,7 +152,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       loggerFactory,
     )(executorService)
 
-  val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false)
+  val engine = DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false)
   val mockPackageService =
     new PackageService(
       engine,

@@ -9,3 +9,5 @@ CREATE TABLE pruning_schedules(
   max_duration bigint not null, -- positive number of seconds
   retention bigint not null -- positive number of seconds
 );
+
+ALTER TABLE participant_settings ADD max_burst_factor double precision not null default 0.5;

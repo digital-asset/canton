@@ -3,70 +3,63 @@
 
 package com.digitalasset.canton.util
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeNumeric, PositiveDouble}
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration.*
 
 /** Utility class that allows clients to keep track of a rate limit.
+  *
+  * The decay rate limiter keeps track of the current rate, allowing temporary
+  * bursts. This allows temporary bursts at the risk of overloading the system too quickly.
+  *
   * Clients need to tell an instance whenever they intend to start a new task.
   * The instance will inform the client whether the task can be executed while still meeting the rate limit.
   *
   * Guarantees:
   * <ul>
-  * <li>Maximum burst size: if `checkAndUpdateRate` is called `n` times in parallel, at most `max(2, maxTasksPerSecond / 5)` calls may return `true`.
-  *     The upper bound mainly comes from the assumption that `System.nanoTime` has a resolution of `100.millis`.</li>
+  * <li>Maximum burst size: if `checkAndUpdateRate` is called `n` times in parallel, at most `max 1, maxTasksPerSecond * maxBurstFactor` calls may return `true`.</li>
   * <li>Average rate: if `checkAndUpdateRate` is called at a rate of at least `maxTasksPerSecond` during `n` seconds,
-  *     then the number of calls that return `true` divided by `n` is roughly `maxTasksPerSecond` when `n` goes towards infinity.
-  *     See the unit tests to get a better understanding of the term "roughly".
+  *     then the number of calls that return `true` divided by `n` is roughly `maxTasksPerSecond` .*
   * </ul>
   *
   * @param maxTasksPerSecond the maximum number of tasks per second
+  * @param maxBurstFactor ratio of max tasks per second when the throtteling should start to kick in
   */
-class RateLimiter(val maxTasksPerSecond: NonNegativeInt) {
+class RateLimiter(
+    val maxTasksPerSecond: NonNegativeNumeric[Double],
+    maxBurstFactor: PositiveDouble,
+    nanoTime: => Long = System.nanoTime(),
+) {
 
-  private val maxTasksPerSecondLong: Long = maxTasksPerSecond.unwrap.toLong
+  private val currentState_ = new AtomicReference[State](State(approvedLastTask = false, 0, 0.0))
+  val maxBurst: Double = maxBurstFactor.value * maxTasksPerSecond.value
 
-  // Cycles are at least 100 millis, because otherwise they may be below the resolution of `System.nanoTime`.
-  // In that case, we would enforce a much lower rate than requested.
-  val (cycleDuration, maxTasksPerCycle): (FiniteDuration, Long) =
-    if (maxTasksPerSecondLong == 0) (1.day, 0)
-    else if (maxTasksPerSecondLong >= 10) (100.millis, maxTasksPerSecondLong / 10)
-    else (1.second / maxTasksPerSecondLong, 1)
-
-  // Upper bound on a burst: Worst case scenario:
-  // - A new instance is created. This starts a new cycle.
-  // - maxTasksPerCycle tasks land just before the end of the cycle.
-  // - Another maxTasksPerCycle tasks land at the beginning of the next cycle.
-  // - Total: 2 * maxTasksPerCycle <= 2 * max(1, maxTasksPerSecond / 10) <= max(2, maxTasksPerSecond / 5)
-  //
-  // Note that the upper bound is mainly driven by the lower bound of 100ms on the cycleDuration.
-
-  // Remark: we could lower the upper bound on bursts from `max(maxTasksPerSecond / 5, max 2)` to `max(maxTasksPerSecond / 10, max 1)`
-  // by storing all tasks in a queue. We don't do that because the improvement seems not to justify the overhead of having a queue.
-
-  /** First component is the number of tasks in the current cycle.
-    * Second component is the end point of the current cycle.
-    */
-  private val state: AtomicReference[(Long, Deadline)] = new AtomicReference(
-    (0, cycleDuration.fromNow)
-  )
+  private case class State(
+      approvedLastTask: Boolean,
+      lastUpdateNanos: Long,
+      approvedTasks: Double,
+  ) {
+    def update(now: Long): State = {
+      // determine the time elapsed since we submitted last time
+      val deltaNanos = now - lastUpdateNanos
+      // determine the fractional number of commands that we were allowed to submit in that period
+      val adjust = maxTasksPerSecond.value * deltaNanos.toDouble / 1e9
+      // remove that number from the "approvedTasks"
+      val newApprovedTasks = Math.max(0, approvedTasks - adjust)
+      // if the newApprovedTasks is below the maxBurst value, approve the request and increment the approvedTasks
+      // this allows bursts of up to "maxBurst" and thereafter enforces a strictly continuous rate limit
+      if (newApprovedTasks < maxBurst) {
+        State(approvedLastTask = true, now, newApprovedTasks + 1)
+      } else State(approvedLastTask = false, now, newApprovedTasks)
+    }
+  }
 
   /** Call this before starting a new task.
     * @return whether the tasks can be executed while still meeting the rate limit
     */
   final def checkAndUpdateRate(): Boolean = {
-    val now = Deadline.now
-
-    val (oldCount, oldNextCycle) = state.getAndUpdate { case st @ (count, nextCycle) =>
-      if (count < maxTasksPerCycle)
-        (count + 1, nextCycle)
-      else if (nextCycle <= now)
-        (1, cycleDuration.fromNow)
-      else
-        st
-    }
-
-    oldCount < maxTasksPerCycle || oldNextCycle <= now
+    val now = nanoTime
+    currentState_.updateAndGet(_.update(now)).approvedLastTask
   }
+
 }

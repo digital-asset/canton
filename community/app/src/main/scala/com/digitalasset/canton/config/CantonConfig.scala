@@ -3,6 +3,11 @@
 
 package com.digitalasset.canton.config
 
+////////////////////////////////////////////////////////
+// DO NOT USE INTELLIJ OPTIMIZE-IMPORT AS IT WILL REMOVE
+// SOME OF THE IMPLICIT IMPORTS NECESSARY TO COMPILE
+////////////////////////////////////////////////////////
+
 import cats.Order
 import cats.data.Validated
 import cats.syntax.either.*
@@ -354,6 +359,7 @@ trait CantonConfig {
       DomainNodeParameters(
         general = CantonNodeParameterConverter.general(this, domainConfig),
         protocol = CantonNodeParameterConverter.protocol(domainConfig.init.domainParameters),
+        maxBurstFactor = domainConfig.parameters.maxBurstFactor,
       )
   }
 
@@ -528,6 +534,8 @@ object CantonConfig {
     import CantonConfigUtil.*
     import ParticipantInitConfig.DeprecatedImplicits.*
     import com.digitalasset.canton.config.CheckConfig.IsActive.DeprecatedImplicits.*
+    import com.digitalasset.canton.participant.config.ActiveContractsServiceConfig.DeprecatedImplicits.*
+    import com.digitalasset.canton.participant.config.LedgerApiServerConfig.DeprecatedImplicits.*
 
     lazy implicit val lengthLimitedStringReader: ConfigReader[LengthLimitedString] = {
       ConfigReader.fromString[LengthLimitedString] { str =>
@@ -548,6 +556,17 @@ object CantonConfig {
           .catchOnly[NumberFormatException](Duration.apply(str))
           .leftMap(error => err(error.getMessage))
           .flatMap(duration => NonNegativeDuration.fromDuration(duration).leftMap(err))
+      }
+
+    implicit val positiveDurationSecondsReader: ConfigReader[PositiveDurationSeconds] =
+      ConfigReader.fromString[PositiveDurationSeconds] { str =>
+        def err(message: String) =
+          CannotConvert(str, PositiveDurationSeconds.getClass.getName, message)
+
+        Either
+          .catchOnly[NumberFormatException](Duration.apply(str))
+          .leftMap(error => err(error.getMessage))
+          .flatMap(duration => PositiveDurationSeconds.fromDuration(duration).leftMap(err))
       }
 
     implicit val maxRequestSizeReader: ConfigReader[MaxRequestSize] =
@@ -731,8 +750,6 @@ object CantonConfig {
       deriveReader[CommunityCryptoConfig]
     lazy implicit val apiTypeGrpcConfigReader: ConfigReader[ApiType.Grpc.type] =
       deriveReader[ApiType.Grpc.type]
-    lazy implicit val apiTypeHttpConfigReader: ConfigReader[ApiType.Http.type] =
-      deriveReader[ApiType.Http.type]
     lazy implicit val apiTypeConfigReader: ConfigReader[ApiType] = deriveReader[ApiType]
     lazy implicit val clientConfigReader: ConfigReader[ClientConfig] = deriveReader[ClientConfig]
     lazy implicit val remoteDomainConfigReader: ConfigReader[RemoteDomainConfig] =
@@ -797,10 +814,14 @@ object CantonConfig {
     lazy implicit val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
       deriveReader[RateLimitingConfig]
     lazy implicit val ledgerApiServerConfigReader: ConfigReader[LedgerApiServerConfig] =
-      deriveReader[LedgerApiServerConfig]
+      deriveReader[LedgerApiServerConfig].applyDeprecations
     lazy implicit val activeContractsServiceConfigReader
         : ConfigReader[ActiveContractsServiceConfig] =
-      deriveReader[ActiveContractsServiceConfig]
+      deriveReader[ActiveContractsServiceConfig].applyDeprecations
+    lazy implicit val flatTransactionStreamsConfigReader
+        : ConfigReader[FlatTransactionStreamsConfig] = deriveReader[FlatTransactionStreamsConfig]
+    lazy implicit val treeTransactionStreamsConfigReader
+        : ConfigReader[TreeTransactionStreamsConfig] = deriveReader[TreeTransactionStreamsConfig]
     lazy implicit val commandServiceConfigReader: ConfigReader[CommandServiceConfig] =
       deriveReader[CommandServiceConfig]
     lazy implicit val userManagementServiceConfigReader: ConfigReader[UserManagementServiceConfig] =
@@ -820,9 +841,6 @@ object CantonConfig {
     lazy implicit val sequencerConnectionConfigCertificateConfigReader
         : ConfigReader[SequencerConnectionConfig.CertificateConfig] =
       deriveReader[SequencerConnectionConfig.CertificateConfig]
-    lazy implicit val sequencerConnectionConfigHttpReader
-        : ConfigReader[SequencerConnectionConfig.Http] =
-      deriveReader[SequencerConnectionConfig.Http]
     lazy implicit val sequencerConnectionConfigGrpcReader
         : ConfigReader[SequencerConnectionConfig.Grpc] =
       deriveReader[SequencerConnectionConfig.Grpc]
@@ -851,6 +869,8 @@ object CantonConfig {
       deriveReader[CommunitySequencerConfig]
     lazy implicit val domainParametersConfigReader: ConfigReader[DomainParametersConfig] =
       deriveReader[DomainParametersConfig]
+    lazy implicit val domainNodeParametersConfigReader: ConfigReader[DomainNodeParametersConfig] =
+      deriveReader[DomainNodeParametersConfig]
     lazy implicit val deadlockDetectionConfigReader: ConfigReader[DeadlockDetectionConfig] =
       deriveReader[DeadlockDetectionConfig]
     lazy implicit val checkConfigAlwaysHealthyReader: ConfigReader[CheckConfig.AlwaysHealthy.type] =
@@ -972,6 +992,8 @@ object CantonConfig {
           case y => y.toString
         }
       }
+    implicit val positiveDurationSecondsWriter: ConfigWriter[PositiveDurationSeconds] =
+      ConfigWriter.toString(_.underlying.toString)
 
     implicit val lengthLimitedStringWriter: ConfigWriter[LengthLimitedString] =
       ConfigWriter.toString(_.unwrap)
@@ -1121,8 +1143,6 @@ object CantonConfig {
       deriveWriter[TlsBaseServerConfig]
     lazy implicit val apiTypeGrpcConfigWriter: ConfigWriter[ApiType.Grpc.type] =
       deriveWriter[ApiType.Grpc.type]
-    lazy implicit val apiTypeHttpConfigWriter: ConfigWriter[ApiType.Http.type] =
-      deriveWriter[ApiType.Http.type]
     lazy implicit val apiTypeConfigWriter: ConfigWriter[ApiType] = deriveWriter[ApiType]
     lazy implicit val communityPublicServerConfigWriter: ConfigWriter[CommunityPublicServerConfig] =
       deriveWriter[CommunityPublicServerConfig]
@@ -1164,8 +1184,11 @@ object CantonConfig {
     lazy implicit val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] =
       deriveWriter[LedgerApiServerConfig]
     lazy implicit val activeContractsServiceConfigWriter
-        : ConfigWriter[ActiveContractsServiceConfig] =
-      deriveWriter[ActiveContractsServiceConfig]
+        : ConfigWriter[ActiveContractsServiceConfig] = deriveWriter[ActiveContractsServiceConfig]
+    lazy implicit val flatTransactionStreamsConfigWriter
+        : ConfigWriter[FlatTransactionStreamsConfig] = deriveWriter[FlatTransactionStreamsConfig]
+    lazy implicit val treeTransactionStreamsConfigWriter
+        : ConfigWriter[TreeTransactionStreamsConfig] = deriveWriter[TreeTransactionStreamsConfig]
     lazy implicit val commandServiceConfigWriter: ConfigWriter[CommandServiceConfig] =
       deriveWriter[CommandServiceConfig]
     lazy implicit val userManagementServiceConfigWriter: ConfigWriter[UserManagementServiceConfig] =
@@ -1185,9 +1208,6 @@ object CantonConfig {
     lazy implicit val sequencerConnectionConfigCertificateConfigWriter
         : ConfigWriter[SequencerConnectionConfig.CertificateConfig] =
       deriveWriter[SequencerConnectionConfig.CertificateConfig]
-    lazy implicit val sequencerConnectionConfigHttpWriter
-        : ConfigWriter[SequencerConnectionConfig.Http] =
-      deriveWriter[SequencerConnectionConfig.Http]
     lazy implicit val sequencerConnectionConfigGrpcWriter
         : ConfigWriter[SequencerConnectionConfig.Grpc] =
       deriveWriter[SequencerConnectionConfig.Grpc]
@@ -1214,6 +1234,8 @@ object CantonConfig {
       deriveWriter[CommunitySequencerConfig]
     lazy implicit val domainParametersConfigWriter: ConfigWriter[DomainParametersConfig] =
       deriveWriter[DomainParametersConfig]
+    lazy implicit val domainNodeParametersConfigWriter: ConfigWriter[DomainNodeParametersConfig] =
+      deriveWriter[DomainNodeParametersConfig]
     lazy implicit val deadlockDetectionConfigWriter: ConfigWriter[DeadlockDetectionConfig] =
       deriveWriter[DeadlockDetectionConfig]
     lazy implicit val checkConfigAlwaysHealthyWriter: ConfigWriter[CheckConfig.AlwaysHealthy.type] =

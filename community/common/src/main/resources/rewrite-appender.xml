@@ -272,6 +272,7 @@
             <contains>Docker image pull has not made progress in</contains>
             <testing>true</testing>
         </rewrite>
+
         <!-- config validations don't support log suppression in tests as they use the root logger -->
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.config.CommunityConfigValidations$</logger>
@@ -291,6 +292,47 @@
             <contains>UNIMPLEMENTED</contains>
             <maxLevel>INFO</maxLevel>
         </rewrite>
+
+        <!-- grpc "Half-closed without a request" grpc shutdown flake - might be when client hangs up before server response? https://github.com/grpc/grpc-java/issues/4890
+             reported by daml-repo ErrorInterceptor/ErrorListener added with daml 2.0.0-snapshot.20211220
+             Can probably be removed once https://github.com/digital-asset/daml/issues/13413 is fixed. -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.daml.platform.apiserver.error.ErrorInterceptor</logger>
+            <contains>LEDGER_API_INTERNAL_ERROR</contains>
+            <exceptionMessage>Half-closed without a request</exceptionMessage>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+        <!-- shutdown issues in ledger-api server TODO(#11534) -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.daml.platform.apiserver.error.ErrorInterceptor</logger>
+            <contains>LEDGER_API_INTERNAL_ERROR</contains>
+            <exceptionMessage>INTERNAL: Task com.codahale.metrics</exceptionMessage>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+        <!-- This may sometimes lead to subsequent errors (e.g. api server fails to startup), but quite often it can simply be ignored. Matches both lines here:
+               Trying to gather entropy from the underlying operating system to initialized the contract ID seeding, but the entropy pool seems empty.
+               In CI environments environment consider using the "testing-weak" mode, that may produce insecure contract IDs but does not block on startup. -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.daml.platform.apiserver.SeedService$</logger>
+            <contains>contract ID</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+        <!-- Suppress execution context monitor warnings during tests -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.canton.concurrent.ExecutionContextMonitor</logger>
+            <contains></contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+
+
     </appender>
 
     <!-- using an async appender to move rendering and filtering of log messages to background thread -->
@@ -300,6 +342,7 @@
         <queueSize>1024</queueSize>
         <maxFlushTime>0</maxFlushTime>
     </appender>
+
     <!-- add a shutdown hook for the async appender -->
     <shutdownHook class="ch.qos.logback.core.hook.DelayingShutdownHook" />
 

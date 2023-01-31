@@ -120,11 +120,6 @@ object StaticDomainParameters
 
   override protected def name: String = "static domain parameters"
 
-  /*
-   Set of default values used for configuration and tests
-   Values should be synced with the CCF ones:
-    enterprise/domain/src/main/cpp/canton/domain/canton_domain_parameters.hpp
-   */
   val defaultMaxRatePerParticipant: NonNegativeInt =
     NonNegativeInt.tryCreate(1000000) // yeah, sure.
   val defaultMaxRequestSize: MaxRequestSize = MaxRequestSize(
@@ -538,11 +533,6 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
 
   override protected def name: String = "dynamic domain parameters"
 
-  /*
-   Set of default values used for configuration and tests
-   Values should be synced with the CCF ones:
-    enterprise/domain/src/main/cpp/canton/domain/canton_domain_parameters.hpp
-   */
   private val defaultParticipantResponseTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(30)
   private val defaultMediatorReactionTimeout: NonNegativeFiniteDuration =

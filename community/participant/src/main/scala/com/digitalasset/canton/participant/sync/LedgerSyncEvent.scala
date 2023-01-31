@@ -11,7 +11,6 @@ import com.daml.ledger.participant.state.v2.{
   TransactionMeta,
   Update,
 }
-import com.daml.lf.CantonOnly
 import com.daml.lf.data.{Bytes, ImmArray}
 import com.daml.lf.transaction.{BlindingInfo, CommittedTransaction}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -23,6 +22,7 @@ import com.digitalasset.canton.protocol.{
   LfHash,
   LfNodeCreate,
   LfNodeId,
+  LfVersionedTransaction,
   TransferId,
 }
 import com.digitalasset.canton.topology.DomainId
@@ -362,7 +362,6 @@ object LedgerSyncEvent {
       param("submitter", _.submitter),
       param("recordTime", _.recordTime),
       param("transferOutId", _.transferOutId),
-      param("transferOutId", _.transferOutId),
       param("target", _.targetDomain),
       paramWithoutValue("createNode"),
       paramWithoutValue("contractMetadata"),
@@ -389,7 +388,7 @@ object LedgerSyncEvent {
       Option.when(createTransactionAccepted) {
         val nodeId = LfNodeId(0)
         val committedTransaction = LfCommittedTransaction(
-          CantonOnly.lfVersionedTransaction(
+          LfVersionedTransaction(
             version = createNode.version,
             nodes = HashMap((nodeId, createNode)),
             roots = ImmArray(nodeId),

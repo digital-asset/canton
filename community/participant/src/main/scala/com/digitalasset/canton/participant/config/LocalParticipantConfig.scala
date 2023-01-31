@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.config
 
+import cats.syntax.option.*
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
@@ -12,6 +13,8 @@ import com.daml.platform.configuration.{
   AcsStreamsConfig as LedgerAcsStreamsConfig,
   CommandConfiguration,
   IndexServiceConfig as LedgerIndexServiceConfig,
+  TransactionFlatStreamsConfig as LedgerTransactionFlatStreamsConfig,
+  TransactionTreeStreamsConfig as LedgerTransactionTreeStreamsConfig,
 }
 import com.daml.platform.indexer.ha.HaConfig
 import com.daml.platform.indexer.{
@@ -22,7 +25,6 @@ import com.daml.platform.indexer.{
 import com.daml.platform.localstore.UserManagementConfig
 import com.daml.platform.store.DbSupport.DataSourceProperties as DamlDataSourceProperties
 import com.daml.platform.store.backend.postgresql.PostgresDataSourceConfig as DamlPostgresDataSourceConfig
-import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
@@ -43,6 +45,7 @@ import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapp
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
+import com.digitalasset.canton.{DiscardOps, config}
 import io.netty.handler.ssl.{ClientAuth, SslContext}
 import io.scalaland.chimney.dsl.*
 import monocle.macros.syntax.lens.*
@@ -203,9 +206,10 @@ case class RemoteParticipantConfig(
   * @param maxContractCacheWeight    ledger api server contract cache maximum weight (caffeine cache size)
   * @param tls                       tls configuration setting from ledger api server.
   * @param configurationLoadTimeout  ledger api server startup delay if no timemodel has been sent by canton via ReadService
-  * @param eventsPageSize            database / akka page size for batching of ledger api server index ledger events queries.
   * @param eventsProcessingParallelism parallelism for loading and decoding ledger events
   * @param activeContractsService    configurations pertaining to the ledger api server's "active contracts service"
+  * @param transactionFlatStreams    configurations pertaining to the ledger api server's streams of transaction trees
+  * @param transactionTreeStreams    configurations pertaining to the ledger api server's streams of flat transactions
   * @param commandService            configurations pertaining to the ledger api server's "command service"
   * @param managementServiceTimeout  ledger api server management service maximum duration. Duration has to be finite
   *                                  as the ledger api server uses java.time.duration that does not support infinite scala durations.
@@ -237,10 +241,13 @@ case class LedgerApiServerConfig(
     tls: Option[TlsServerConfig] = None,
     configurationLoadTimeout: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultConfigurationLoadTimeout,
-    eventsPageSize: Int = LedgerApiServerConfig.DefaultEventsPageSize,
     eventsProcessingParallelism: Int = LedgerApiServerConfig.DefaultEventsProcessingParallelism,
     bufferedStreamsPageSize: Int = LedgerIndexServiceConfig.DefaultBufferedStreamsPageSize,
     activeContractsService: ActiveContractsServiceConfig = ActiveContractsServiceConfig(),
+    transactionTreeStreams: TreeTransactionStreamsConfig = TreeTransactionStreamsConfig(),
+    transactionFlatStreams: FlatTransactionStreamsConfig = FlatTransactionStreamsConfig(),
+    globalMaxEventIdQueries: Int = LedgerIndexServiceConfig().globalMaxEventIdQueries,
+    globalMaxEventPayloadQueries: Int = LedgerIndexServiceConfig().globalMaxEventPayloadQueries,
     commandService: CommandServiceConfig = CommandServiceConfig(),
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
     managementServiceTimeout: NonNegativeFiniteDuration =
@@ -315,6 +322,26 @@ object LedgerApiServerConfig {
     numberOfThreads / 4 + 1
   }
 
+  trait LedgerApiServerConfigDeprecationsImplicits {
+    implicit def deprecatedLedgerApiServerConfig[X <: LedgerApiServerConfig]
+        : DeprecatedFieldsFor[X] = new DeprecatedFieldsFor[LedgerApiServerConfig] {
+      override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+        DeprecatedConfigUtils.MovedConfigPath(
+          "active-contracts-service.acs-global-parallelism",
+          "global-max-event-payload-queries",
+        ),
+        DeprecatedConfigUtils.MovedConfigPath(
+          "events-page-size",
+          "active-contracts-service.max-payloads-per-payloads-page",
+          "transaction-flat-streams.max-payloads-per-payloads-page",
+          "transaction-tree-streams.max-payloads-per-payloads-page",
+        ),
+      )
+    }
+  }
+
+  object DeprecatedImplicits extends LedgerApiServerConfigDeprecationsImplicits
+
   /** the following case class match will help us detect any additional configuration options added
     * when we upgrade the Daml code. if the below match fails because there are more config options,
     * add them to our "LedgerApiServerConfig".
@@ -354,8 +381,8 @@ object LedgerApiServerConfig {
       preparePackageMetadataTimeOutWarning,
       completionsPageSize,
       acsStreams,
-      _transactionsFlatStreamReaderConfig,
-      _transactionsTreeStreamReaderConfig,
+      transactionFlatStreams,
+      transactionTreeStreams,
       _globalMaxEventIdQueries,
       _globalMaxEventPayloadQueries,
     ) = indexServiceConfig
@@ -364,10 +391,41 @@ object LedgerApiServerConfig {
       maxIdsPerIdPage,
       maxPagesPerIdPagesBuffer,
       _maxWorkingMemoryInBytesForIdPages,
-      _maxPayloadsPerPayloadsPage, // configured via participant.eventsPageSize,
+      _maxPayloadsPerPayloadsPage,
       maxParallelIdCreateQueries,
-      maxParallelPayloadCreateQueries, // Must be a power of 2
+      maxParallelPayloadCreateQueries,
     ) = acsStreams
+
+    {
+      val LedgerTransactionTreeStreamsConfig(
+        _maxIdsPerIdPage,
+        _maxPagesPerIdPagesBuffer,
+        _maxWorkingMemoryInBytesForIdPages,
+        _maxPayloadsPerPayloadsPage,
+        _maxParallelIdCreateQueries,
+        _maxParallelIdConsumingQueries,
+        _maxParallelIdNonConsumingQueries,
+        _maxParallelPayloadCreateQueries,
+        _maxParallelPayloadConsumingQueries,
+        _maxParallelPayloadNonConsumingQueries,
+        _maxParallelPayloadQueries,
+        _transactionsProcessingParallelism,
+      ) = transactionTreeStreams
+    }
+    {
+      val LedgerTransactionFlatStreamsConfig(
+        _maxIdsPerIdPage,
+        _maxPagesPerIdPagesBuffer,
+        _maxWorkingMemoryInBytesForIdPages,
+        _maxPayloadsPerPayloadsPage,
+        _maxParallelIdCreateQueries,
+        _maxParallelIdConsumingQueries,
+        _maxParallelPayloadCreateQueries,
+        _maxParallelPayloadConsumingQueries,
+        _maxParallelPayloadQueries,
+        _transactionsProcessingParallelism,
+      ) = transactionFlatStreams
+    }
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
       import ServerAuthRequirementConfig.*
@@ -411,10 +469,10 @@ object LedgerApiServerConfig {
       internalPort = Some(Port.tryCreate(port.value)),
       tls = tlsConfig,
       activeContractsService = ActiveContractsServiceConfig(
-        acsIdPageSize = maxIdsPerIdPage,
-        acsIdPageBufferSize = maxPagesPerIdPagesBuffer,
-        acsIdFetchingParallelism = maxParallelIdCreateQueries,
-        acsContractFetchingParallelism = maxParallelPayloadCreateQueries,
+        maxIdsPerIdPage = maxIdsPerIdPage,
+        maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
+        maxParallelIdCreateQueries = maxParallelIdCreateQueries,
+        maxPayloadsPerPayloadsPage = maxParallelPayloadCreateQueries,
       ),
       managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout.toJava),
       apiStreamShutdownTimeout =
@@ -455,19 +513,121 @@ object LedgerApiServerConfig {
 
 /** Ledger api active contracts service specific configurations
   *
-  * @param acsIdPageSize                  number of contract ids fetched from the index for every round trip when serving ACS calls
-  * @param acsIdPageBufferSize            buffer size used for indexer fetching
-  * @param acsIdFetchingParallelism       number of contract id pages fetched in parallel when serving ACS calls
-  * @param acsContractFetchingParallelism number of event pages fetched in parallel when serving ACS calls
-  * @param acsGlobalParallelism           maximum number of concurrent ACS queries to the index database
+  * @param maxWorkingMemoryInBytesForIdPages Memory for storing id pages across all id pages buffers. Per single stream.
+  * @param maxIdsPerIdPage                   Number of event ids to retrieve in a single query (a page of event ids).
+  * @param maxPagesPerIdPagesBuffer          Number of id pages to store in a buffer. There is a buffer for each decomposed filtering constraint.
+  * @param maxParallelIdCreateQueries        Number of parallel queries that fetch ids of create events. Per single stream.
+  * @param maxPayloadsPerPayloadsPage        Number of parallel queries that fetch payloads of create events. Per single stream.
+  * @param maxParallelPayloadCreateQueries   Number of event payloads to retrieve in a single query (a page of event payloads).
+  *
   * Note _completenessCheck performed in LedgerApiServerConfig above
   */
 case class ActiveContractsServiceConfig(
-    acsIdPageSize: Int = LedgerAcsStreamsConfig.DefaultAcsIdPageSize,
-    acsIdPageBufferSize: Int = LedgerAcsStreamsConfig.DefaultAcsIdPageBufferSize,
-    acsIdFetchingParallelism: Int = LedgerAcsStreamsConfig.DefaultAcsIdFetchingParallelism,
-    acsContractFetchingParallelism: Int =
-      LedgerAcsStreamsConfig.DefaultAcsContractFetchingParallelism,
+    maxWorkingMemoryInBytesForIdPages: Int =
+      LedgerAcsStreamsConfig.default.maxWorkingMemoryInBytesForIdPages,
+    maxIdsPerIdPage: Int = LedgerAcsStreamsConfig.default.maxIdsPerIdPage,
+    maxPagesPerIdPagesBuffer: Int = LedgerAcsStreamsConfig.default.maxPagesPerIdPagesBuffer,
+    maxParallelIdCreateQueries: Int = LedgerAcsStreamsConfig.default.maxParallelIdCreateQueries,
+    maxPayloadsPerPayloadsPage: Int = LedgerAcsStreamsConfig.default.maxPayloadsPerPayloadsPage,
+    maxParallelPayloadCreateQueries: Int =
+      LedgerAcsStreamsConfig.default.maxParallelPayloadCreateQueries,
+)
+
+object ActiveContractsServiceConfig {
+  trait ActiveContractsServiceDeprecationsImplicits {
+    implicit def deprecatedActiveContractsServiceConfig[X <: ActiveContractsServiceConfig]
+        : DeprecatedFieldsFor[X] = new DeprecatedFieldsFor[ActiveContractsServiceConfig] {
+      override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+        DeprecatedConfigUtils.MovedConfigPath("acs-id-page-size", "max-ids-per-id-page"),
+        DeprecatedConfigUtils
+          .MovedConfigPath("acs-id-page-buffer-size", "max-pages-per-id-pages-buffer"),
+        DeprecatedConfigUtils
+          .MovedConfigPath("acs-id-fetching-parallelism", "max-parallel-id-create-queries"),
+        DeprecatedConfigUtils.MovedConfigPath(
+          "acs-contract-fetching-parallelism",
+          "max-parallel-payload-create-queries",
+        ),
+      )
+    }
+  }
+
+  object DeprecatedImplicits extends ActiveContractsServiceDeprecationsImplicits
+}
+
+/** Ledger API flat transaction streams configuration.
+  *
+  * @param maxIdsPerIdPage                    Number of event ids to retrieve in a single query (a page of event ids).
+  * @param maxPagesPerIdPagesBuffer           Number of id pages to store in a buffer. There is a buffer for each decomposed filtering constraint.
+  * @param maxWorkingMemoryInBytesForIdPages  Memory for storing id pages across all id pages buffers. Per single stream.
+  * @param maxPayloadsPerPayloadsPage         Number of event payloads to retrieve in a single query (a page of event payloads).
+  * @param maxParallelIdCreateQueries         Number of parallel queries that fetch ids of create events. Per single stream.
+  * @param maxParallelIdConsumingQueries      Number of parallel queries that fetch ids of consuming events. Per single stream.
+  * @param maxParallelPayloadCreateQueries    Number of parallel queries that fetch payloads of create events. Per single stream.
+  * @param maxParallelPayloadConsumingQueries Number of parallel queries that fetch payloads of consuming events. Per single stream.
+  * @param maxParallelPayloadQueries          Upper bound on the number of parallel queries that fetch payloads. Per single stream.
+  * @param transactionsProcessingParallelism  Number of transactions to process in parallel. Per single stream.
+  */
+case class FlatTransactionStreamsConfig(
+    maxIdsPerIdPage: Int = LedgerTransactionFlatStreamsConfig.default.maxIdsPerIdPage,
+    maxPagesPerIdPagesBuffer: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxPagesPerIdPagesBuffer,
+    maxWorkingMemoryInBytesForIdPages: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxWorkingMemoryInBytesForIdPages,
+    maxPayloadsPerPayloadsPage: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxPayloadsPerPayloadsPage,
+    maxParallelIdCreateQueries: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxParallelIdCreateQueries,
+    maxParallelIdConsumingQueries: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxParallelIdConsumingQueries,
+    maxParallelPayloadCreateQueries: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxParallelPayloadCreateQueries,
+    maxParallelPayloadConsumingQueries: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxParallelPayloadConsumingQueries,
+    maxParallelPayloadQueries: Int =
+      LedgerTransactionFlatStreamsConfig.default.maxParallelPayloadQueries,
+    transactionsProcessingParallelism: Int =
+      LedgerTransactionFlatStreamsConfig.default.transactionsProcessingParallelism,
+)
+
+/** Ledger API transaction tree streams configuration.
+  *
+  * @param maxIdsPerIdPage                        Number of event ids to retrieve in a single query (a page of event ids).
+  * @param maxPagesPerIdPagesBuffer               Number of id pages to store in a buffer. There is a buffer for each decomposed filtering constraint.
+  * @param maxWorkingMemoryInBytesForIdPages      Memory for storing id pages across all id pages buffers. Per single stream.
+  * @param maxPayloadsPerPayloadsPage             Number of event payloads to retrieve in a single query (a page of event payloads).
+  * @param maxParallelIdCreateQueries             Number of parallel queries that fetch ids of create events. Per single stream.
+  * @param maxParallelIdConsumingQueries          Number of parallel queries that fetch ids of consuming events. Per single stream.
+  * @param maxParallelIdNonConsumingQueries       Number of parallel queries that fetch payloads of non-consuming events. Per single stream.
+  * @param maxParallelPayloadCreateQueries        Number of parallel queries that fetch payloads of create events. Per single stream.
+  * @param maxParallelPayloadConsumingQueries     Number of parallel queries that fetch payloads of consuming events. Per single stream.
+  * @param maxParallelPayloadNonConsumingQueries  Number of parallel queries that fetch ids of non-consuming events. Per single stream.
+  * @param maxParallelPayloadQueries              Upper bound on the number of parallel queries that fetch payloads. Per single stream.
+  * @param transactionsProcessingParallelism      Number of transactions to process in parallel. Per single stream.
+  */
+case class TreeTransactionStreamsConfig(
+    maxIdsPerIdPage: Int = LedgerTransactionTreeStreamsConfig.default.maxIdsPerIdPage,
+    maxPagesPerIdPagesBuffer: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxPagesPerIdPagesBuffer,
+    maxWorkingMemoryInBytesForIdPages: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxWorkingMemoryInBytesForIdPages,
+    maxPayloadsPerPayloadsPage: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxPayloadsPerPayloadsPage,
+    maxParallelIdCreateQueries: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxParallelIdCreateQueries,
+    maxParallelIdConsumingQueries: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxParallelIdConsumingQueries,
+    maxParallelIdNonConsumingQueries: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxParallelIdNonConsumingQueries,
+    maxParallelPayloadCreateQueries: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxParallelPayloadCreateQueries,
+    maxParallelPayloadConsumingQueries: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxParallelPayloadConsumingQueries,
+    maxParallelPayloadNonConsumingQueries: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxParallelPayloadNonConsumingQueries,
+    maxParallelPayloadQueries: Int =
+      LedgerTransactionTreeStreamsConfig.default.maxParallelPayloadQueries,
+    transactionsProcessingParallelism: Int =
+      LedgerTransactionTreeStreamsConfig.default.transactionsProcessingParallelism,
 )
 
 /** Ledger api command service specific configurations
@@ -782,6 +942,8 @@ case class ParticipantNodeParameterConfig(
   *
   * @param maxItemsInSqlClause    maximum number of items to place in sql "in clauses"
   * @param maxPruningBatchSize    maximum number of events to prune from a participant at a time, used to break up batches internally
+  * @param pruningMetricUpdateInterval  How frequently to update the `max-event-age` pruning progress metric in the background.
+  *                                     A setting of None disables background metric updating.
   * @param acsPruningInterval        How often to prune the ACS journal in the background. A very high interval will let the journal grow larger and
   *                                  eventually slow queries down. A very low interval may cause a high load on the journal table and the DB.
   *                                  The default is 60 seconds.
@@ -792,6 +954,8 @@ case class ParticipantNodeParameterConfig(
 case class ParticipantStoreConfig(
     maxItemsInSqlClause: PositiveNumeric[Int] = PositiveNumeric.tryCreate(100),
     maxPruningBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(1000),
+    pruningMetricUpdateInterval: Option[config.PositiveDurationSeconds] =
+      config.PositiveDurationSeconds.ofHours(1L).some,
     acsPruningInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(60),
     dbBatchAggregationConfig: BatchAggregatorConfig = BatchAggregatorConfig.Batching(),
 )

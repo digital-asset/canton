@@ -37,7 +37,7 @@ object DomainConnectionInfo {
       } yield (domainId, staticDomainParameters))
 
     for {
-      sequencerConnectClient <- sequencerConnectClientBuilder(config)(traceContext)
+      sequencerConnectClient <- sequencerConnectClientBuilder(config)
       domainInfo <- getDomainInfo(config.domain, sequencerConnectClient).thereafter(_ =>
         sequencerConnectClient.close()
       )

@@ -31,6 +31,7 @@ import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.resource.StorageFactory
 import com.digitalasset.canton.store.IndexedStringStore
+import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{
@@ -115,6 +116,7 @@ abstract class CantonNodeBootstrapBase[
     val loggerFactory: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
     grpcMetrics: GrpcServerMetrics,
+    configuredOpenTelemetry: ConfiguredOpenTelemetry,
 )(
     implicit val executionContext: ExecutionContextIdlenessExecutorService,
     implicit val scheduler: ScheduledExecutorService,
@@ -127,7 +129,7 @@ abstract class CantonNodeBootstrapBase[
   protected val adminApiConfig = config.adminApi
   protected val initConfig = config.init
   protected val tracerProvider =
-    TracerProvider.Factory(parameterConfig.tracing.tracer, name.unwrap)
+    TracerProvider.Factory(configuredOpenTelemetry, name.unwrap)
   implicit val tracer: Tracer = tracerProvider.tracer
 
   private val isRunningVar = new AtomicBoolean(true)
@@ -440,7 +442,6 @@ abstract class CantonNodeBootstrapBase[
           Lifecycle.toCloseableOption(initializationWatcherRef.get()),
           adminServerRegistry,
           adminServer,
-          tracerProvider,
         ) ++ getNode.toList ++ stores ++ List(crypto, storage, clock)
         Lifecycle.close(instances: _*)(logger)
         logger.debug(s"Successfully completed shutdown of $name")

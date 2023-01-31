@@ -41,16 +41,21 @@ trait SequencerDriverFactory {
 
   /** Creates a new ledger driver instance
     *
-    * @param config The driver-specific configuration
+    * @param config The driver-specific configuration.
+    * @param nonStandardConfig Whether to be lax in enforcing certain configuration constraints such
+    *                          as required external component versions.
     * @param timeProvider Time provider to obtain time readings from.
     *                     If [[usesTimeProvider]] returns true, must be used instead of system time
-    *                     so that we can modify time in tests
+    *                     so that we can modify time in tests.
     * @param firstBlockHeight Initial block from which the driver will start serving the block subscription.
+    * @param domainTopologyManagerId The Canton identifier of the Topology Manager for the domain being
+    *                                supported.
     * @param loggerFactory A logger factory through which all logging should be done.
     *                      Useful in tests as we can capture log entries and check them.
     */
   def create(
       config: ConfigType,
+      nonStandardConfig: Boolean,
       timeProvider: TimeProvider,
       firstBlockHeight: Option[Long],
       domainTopologyManagerId: String,

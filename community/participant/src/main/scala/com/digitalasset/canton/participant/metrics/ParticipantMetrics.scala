@@ -4,9 +4,8 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
-import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.DomainAlias
@@ -20,7 +19,7 @@ class ParticipantMetrics(
     name: String,
     val prefix: MetricName,
     val dropwizardFactory: CantonDropwizardMetricsFactory,
-    val openTelemetryFactory: OpenTelemetryFactory,
+    val labeledMetricsFactory: LabeledMetricsFactory,
 ) {
 
   private implicit val mc: MetricsContext = MetricsContext("participant_name" -> name)
@@ -28,7 +27,7 @@ class ParticipantMetrics(
   object dbStorage extends DbStorageMetrics(prefix, dropwizardFactory)
 
   val ledgerApiServer: LedgerApiServerMetrics =
-    new LedgerApiServerMetrics(dropwizardFactory, openTelemetryFactory)
+    new LedgerApiServerMetrics(dropwizardFactory, labeledMetricsFactory, dropwizardFactory.registry)
 
   private val clients = TrieMap[DomainAlias, SyncDomainMetrics]()
 

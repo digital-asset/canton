@@ -29,7 +29,6 @@ import com.digitalasset.canton.topology.processing.{
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
-import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -94,9 +93,7 @@ class DomainTopologyManagerRequestServiceTest
           )
         }
       }
-      override def addParticipant(participantId: ParticipantId, x509: Option[X509Cert])(implicit
-          traceContext: TraceContext
-      ): EitherT[Future, DomainTopologyManagerError, Unit] = EitherT.rightT(())
+
       override def issueParticipantStateForDomain(participantId: ParticipantId)(implicit
           traceContext: TraceContext
       ): EitherT[Future, DomainTopologyManagerError, Unit] = blocking {

@@ -23,10 +23,9 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.ContractData
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
-import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
+import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
-import com.digitalasset.canton.external.{BackgroundRunnerHandler, BackgroundRunnerHelpers}
 import com.digitalasset.canton.logging.{LastErrorsAppender, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.{RepairService, SyncStateInspection}
 import com.digitalasset.canton.participant.config.{AuthServiceConfig, BaseParticipantConfig}
@@ -34,7 +33,7 @@ import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.util.{BinaryFileUtil, ErrorUtil}
+import com.digitalasset.canton.util.BinaryFileUtil
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import io.circe.Encoder
@@ -43,7 +42,6 @@ import io.circe.syntax.*
 
 import java.io.{File as JFile}
 import java.time.Instant
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.nowarn
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -373,114 +371,6 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
   }
 
-  // intentionally not publicly documented
-  // TODO(#8353): Identify non-daml-sdk way to run the daml-json service, perhaps renaming `sdk` to something else.
-  //  Alternatively even though the daml-sdk may not be available in all environments (such as integration tests)
-  //  keep this around and count on users installing the daml-sdk on top of canton.
-  object sdk extends Helpful {
-
-    private val backgroundRunner =
-      new BackgroundRunnerHandler[String](ProcessingTimeout(), loggerFactory)
-    private val jsonApiPort = new AtomicInteger(7575)
-    private val registeredClose = new AtomicBoolean(false)
-
-    private def ensureWeClose()(implicit env: ConsoleEnvironment): Unit = {
-      // ensure we close when this env goes down
-      if (!registeredClose.getAndSet(true)) {
-        env.environment.addUserCloseable(() => {
-          backgroundRunner.close()
-        })
-      }
-    }
-
-    object http_json {
-      def launch_for(ref: ParticipantReference, port: Option[Int] = None)(implicit
-          env: ConsoleEnvironment
-      ): Port = {
-        val config = ref.config.clientLedgerApi
-        ErrorUtil.requireArgument(
-          config.tls.isEmpty,
-          "Implementing starting json-apis with TLS connection support is left to the reader as an exercise",
-        )
-        val name = s"json-api-${ref.name}"
-        val httpPort = port.getOrElse(jsonApiPort.getAndIncrement())
-        val cmd =
-          Seq(
-            "daml",
-            "json-api",
-            "--ledger-host",
-            s"${config.address}",
-            "--ledger-port",
-            s"${config.port.unwrap}",
-            "--http-port",
-            s"${httpPort}",
-            "--allow-insecure-tokens",
-          )
-        logger.info(s"Starting ${name} as external process with $cmd")
-        if (!backgroundRunner.exists(name)) {
-          logger.warn(
-            "Starting `daml json-api` which must have been installed separately from canton."
-          )
-          backgroundRunner.tryAdd(name, cmd, name, manualStart = false)
-          ensureWeClose()
-        }
-        BackgroundRunnerHelpers.waitUntilUp(Port.tryCreate(httpPort), 30)
-        Port.tryCreate(httpPort)
-      }
-    }
-
-    object jwt {
-
-      def generate_unsafe_token_for_participant(
-          participant: LocalParticipantReference,
-          admin: Boolean,
-          applicationId: String,
-      ): Map[PartyId, String] = {
-        val secret = participant.config.ledgerApi.authServices
-          .collectFirst { case AuthServiceConfig.UnsafeJwtHmac256(secret) =>
-            secret.unwrap
-          }
-          .getOrElse("notasecret")
-
-        participant.parties
-          .hosted()
-          .map(_.party)
-          .map(x =>
-            (
-              x,
-              generate_unsafe_jwt256_token(
-                secret = secret,
-                admin = admin,
-                readAs = List(x.toLf),
-                actAs = List(x.toLf),
-                ledgerId = Some(participant.id.uid.id.unwrap),
-                applicationId = Some(applicationId),
-              ),
-            )
-          )
-          .toMap
-
-      }
-
-      def generate_unsafe_jwt256_token(
-          secret: String,
-          admin: Boolean,
-          readAs: List[String],
-          actAs: List[String],
-          ledgerId: Option[String],
-          applicationId: Option[String],
-      ): String = JwtTokenUtilities.buildUnsafeToken(
-        secret = secret,
-        admin = admin,
-        readAs = readAs,
-        actAs = actAs,
-        ledgerId = ledgerId,
-        applicationId = applicationId,
-      )
-
-    }
-  }
-
   @Help.Summary("Canton development and testing utilities", FeatureFlag.Testing)
   @Help.Group("Ledger Api Testing")
   object ledger_api_utils extends Helpful {
@@ -584,6 +474,54 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       )
     }
 
+    // intentionally not publicly documented
+    object jwt {
+      def generate_unsafe_token_for_participant(
+          participant: LocalParticipantReference,
+          admin: Boolean,
+          applicationId: String,
+      ): Map[PartyId, String] = {
+        val secret = participant.config.ledgerApi.authServices
+          .collectFirst { case AuthServiceConfig.UnsafeJwtHmac256(secret) =>
+            secret.unwrap
+          }
+          .getOrElse("notasecret")
+
+        participant.parties
+          .hosted()
+          .map(_.party)
+          .map(x =>
+            (
+              x,
+              generate_unsafe_jwt256_token(
+                secret = secret,
+                admin = admin,
+                readAs = List(x.toLf),
+                actAs = List(x.toLf),
+                ledgerId = Some(participant.id.uid.id.unwrap),
+                applicationId = Some(applicationId),
+              ),
+            )
+          )
+          .toMap
+      }
+
+      def generate_unsafe_jwt256_token(
+          secret: String,
+          admin: Boolean,
+          readAs: List[String],
+          actAs: List[String],
+          ledgerId: Option[String],
+          applicationId: Option[String],
+      ): String = JwtTokenUtilities.buildUnsafeToken(
+        secret = secret,
+        admin = admin,
+        readAs = readAs,
+        actAs = actAs,
+        ledgerId = ledgerId,
+        applicationId = applicationId,
+      )
+    }
   }
 
   @Help.Summary("Logging related commands")

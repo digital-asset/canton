@@ -8,13 +8,15 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
+import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
 import com.digitalasset.canton.domain.sequencing.service.SubscriptionPool.PoolClosed
@@ -137,7 +139,10 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         FutureSupervisor.Noop,
         loggerFactory,
       )
-
+    private val params = new SequencerParameters {
+      override def maxBurstFactor: PositiveDouble = PositiveDouble.tryCreate(1e-6)
+      override def processingTimeouts: ProcessingTimeout = timeouts
+    }
     val service =
       new GrpcSequencerService(
         sequencer,
@@ -150,7 +155,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         subscriptionPool,
         sequencerSubscriptionFactory,
         domainParamLookup,
-        timeouts,
+        params,
       )
   }
 

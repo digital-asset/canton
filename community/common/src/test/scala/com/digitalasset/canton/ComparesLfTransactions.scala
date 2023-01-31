@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.{
   LfContractId,
   LfLeafOnlyActionNode,
   LfNode,
+  LfNodeAuthority,
   LfNodeCreate,
   LfNodeExercises,
   LfNodeFetch,
@@ -49,6 +50,7 @@ trait ComparesLfTransactions {
         case rn: LfNodeRollback =>
           TxTree(rn.copy(children = ImmArray.empty), rn.children.toSeq.map(go): _*)
         case leafNode: LfLeafOnlyActionNode => TxTree(leafNode)
+        case _: LfNodeAuthority => sys.error("LfNodeAuthority")
       }
       tx.roots.toSeq.map(go)
     }

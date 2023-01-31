@@ -78,7 +78,7 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
       envDef.environmentFactory.create(
         finalConfig,
         loggerFactory,
-        envDef.testingConfig,
+        envDef.testingConfig.copy(initializeGlobalOpenTelemetry = false),
       )
 
     try {

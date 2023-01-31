@@ -191,6 +191,11 @@ object RequireTypes {
     lazy val MaxValue: PositiveInt = PositiveInt.tryCreate(Int.MaxValue)
   }
 
+  type PositiveDouble = PositiveNumeric[Double]
+  object PositiveDouble {
+    def create(n: Double): Either[InvariantViolation, PositiveDouble] = PositiveNumeric.create(n)
+    def tryCreate(n: Double): PositiveDouble = PositiveNumeric.tryCreate(n)
+  }
   object PositiveNumeric {
     def tryCreate[T](t: T)(implicit num: Numeric[T]): PositiveNumeric[T] =
       create(t).valueOr(err => throw new IllegalArgumentException(err.message))
@@ -222,6 +227,17 @@ object RequireTypes {
           )
       }
     }
+
+    implicit def readPositiveDouble: GetResult[PositiveDouble] = GetResult { r =>
+      PositiveNumeric.tryCreate(r.nextDouble())
+    }
+
+    implicit def writePositiveNumeric[T](implicit
+        f: SetParameter[T]
+    ): SetParameter[PositiveNumeric[T]] =
+      (s, pp) => {
+        pp >> s.unwrap
+      }
 
     final case class NonPositiveValue[T](t: T) extends FailureReason {
       override def description: String =

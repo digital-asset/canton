@@ -126,35 +126,3 @@ message Handshake {
     }
 }
 
-// Client configuration for how members should connect to the sequencer of a domain.
-message SequencerConnection {
-    oneof type {
-        Http http = 1;
-        Grpc grpc = 2;
-    }
-
-    message Http {
-        // Primary read and write address
-        string host = 1;
-        uint32 port = 2;
-        // Server certificate of the HTTP sequencer
-        google.protobuf.BytesValue certificate = 3;
-        // Read host & port allow optionally specifying a separate endpoint for performing read operations against a replica.
-        // Usually they have the same values as the primary address.
-        string readHost = 4;
-        uint32 readPort = 5;
-    }
-
-    message Grpc {
-        // connection information to sequencer (http[s]://<host>:<port>")
-        repeated string connections = 1;
-        // Should the connection use TLS?
-        bool transportSecurity = 2;
-        google.protobuf.BytesValue customTrustCertificates = 3;
-    }
-}
-
-enum ApiType {
-    Grpc = 0;
-    Http = 1;
-}

@@ -5,7 +5,12 @@ package com.digitalasset.canton.domain.config
 
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
-import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.{
+  ExistingFile,
+  NonNegativeInt,
+  Port,
+  PositiveDouble,
+}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.domain.sequencing.sequencer.CommunitySequencerConfig
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
@@ -134,7 +139,19 @@ trait DomainConfig extends DomainBaseConfig {
     adminApi = adminApi.clientConfig,
     publicApi = sequencerConnectionConfig,
   )
+
+  /** General node parameters */
+  def parameters: DomainNodeParametersConfig
+
 }
+
+/** Various domain node parameters
+  *
+  * @param maxBurstFactor how forgiving should the participant rate limiting be with respect to bursts
+  */
+case class DomainNodeParametersConfig(
+    maxBurstFactor: PositiveDouble = PositiveDouble.tryCreate(0.5)
+)
 
 final case class CommunityDomainConfig(
     override val init: DomainInitConfig = DomainInitConfig(),
@@ -149,6 +166,7 @@ final case class CommunityDomainConfig(
     override val timeTracker: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
     override val sequencerClient: SequencerClientConfig = SequencerClientConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
+    override val parameters: DomainNodeParametersConfig = DomainNodeParametersConfig(),
 ) extends DomainConfig
     with CommunityLocalNodeConfig
     with ConfigDefaults[DefaultPorts, CommunityDomainConfig] {

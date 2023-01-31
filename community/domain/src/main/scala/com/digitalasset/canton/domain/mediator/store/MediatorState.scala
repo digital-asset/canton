@@ -180,16 +180,20 @@ private[mediator] class MediatorState(
 
   /** Locate the timestamp of the finalized response at or, if skip > 0, near the beginning of the sequence of finalized responses.
     *
-    * If skip == 0, returns the timestamp of the oldest, unpruned finalized response in which case we also
-    * take this opportunity to update the ledger-begin-age metric based on the current clock time or zero if
-    * the store is empty (e.g. fully pruned).
+    * If skip == 0, returns the timestamp of the oldest, unpruned finalized response.
     */
-  def locateAndReportPruningTimestamp(skip: NonNegativeInt)(implicit
+  def locatePruningTimestamp(skip: NonNegativeInt)(implicit
       traceContext: TraceContext
   ): Future[Option[CantonTimestamp]] = for {
     ts <- finalizedResponseStore.locatePruningTimestamp(skip.value)
-    _ = if (skip.value == 0) MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxResponseAge, ts)
+    _ = if (skip.value == 0) MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, ts)
   } yield ts
+
+  /** Report the max-event-age metric based on the oldest response timestamp and the current clock time or
+    * zero if no oldest timestamp exists (e.g. mediator fully pruned).
+    */
+  def reportMaxResponseAgeMetric(oldestResponseTimestamp: Option[CantonTimestamp]): Unit =
+    MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, oldestResponseTimestamp)
 
   override def onClosed(): Unit = Lifecycle.close(finalizedResponseStore)(logger)
 }

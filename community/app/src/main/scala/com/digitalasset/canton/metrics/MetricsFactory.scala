@@ -5,10 +5,10 @@ package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
 import com.codahale.metrics.{Metric, MetricFilter}
-import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
+import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.metrics.grpc.DamlGrpcServerMetrics
-import com.daml.metrics.{ExecutorServiceMetrics, JvmMetricSet, OpenTelemetryMeterOwner}
+import com.daml.metrics.{ExecutorServiceMetrics, JvmMetricSet}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.domain.metrics.{
@@ -22,15 +22,13 @@ import com.digitalasset.canton.metrics.MetricsConfig.MetricsFilterConfig
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.typesafe.scalalogging.LazyLogging
+import io.opentelemetry.api.OpenTelemetry
 import io.opentelemetry.api.metrics.Meter
-import io.opentelemetry.exporter.prometheus.PrometheusCollector
-import io.opentelemetry.sdk.metrics.SdkMeterProviderBuilder
 import io.prometheus.client.dropwizard.DropwizardExports
 
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
-import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 
 case class MetricsConfig(
@@ -105,12 +103,14 @@ case class MetricsFactory(
     meter: Meter,
 ) extends AutoCloseable {
 
-  private val openTelemetryFactory = new OpenTelemetryFactory(meter) {
-    override val globalMetricsContext: MetricsContext = MetricsContext(
+  private val openTelemetryFactory = new OpenTelemetryMetricsFactory(
+    meter,
+    globalMetricsContext = MetricsContext(
       "daml_version" -> BuildInfo.damlLibrariesVersion,
       "canton_version" -> BuildInfo.version,
-    )
-  }
+    ),
+  )
+
   val metricsFactory = new CantonDropwizardMetricsFactory(registry)
   private val envMetrics = new EnvMetrics(metricsFactory)
   private val participants = TrieMap[String, ParticipantMetrics]()
@@ -241,24 +241,20 @@ object MetricsFactory extends LazyLogging {
 
   val prefix: MetricName = MetricName("canton")
 
-  def forConfig(config: MetricsConfig): MetricsFactory = {
+  def forConfig(config: MetricsConfig, openTelemetry: OpenTelemetry): MetricsFactory = {
     val registry = new metrics.MetricRegistry()
-    val meterProviderBuilder = OpenTelemetryMeterOwner.buildProviderWithViews
-    val reporter = registerReporter(config, registry, meterProviderBuilder)
-    val meterProvider = meterProviderBuilder.build()
+    val reporter = registerReporter(config, registry)
     new MetricsFactory(
       reporter,
       registry,
       config.reportJvmMetrics,
-      meterProvider.meterBuilder("daml").build(),
+      openTelemetry.meterBuilder("canton").build(),
     )
   }
 
-  @nowarn("msg=deprecated")
   private def registerReporter(
       config: MetricsConfig,
       registry: metrics.MetricRegistry,
-      meterProviderBuilder: SdkMeterProviderBuilder,
   ): Seq[metrics.Reporter] = {
     config.reporters.map {
 
@@ -292,9 +288,9 @@ object MetricsFactory extends LazyLogging {
         reporter.start(interval.unwrap.toMillis, TimeUnit.MILLISECONDS)
         reporter
 
+      // OpenTelemetry registers the prometheus collector during initialization
       case Prometheus(hostname, port) =>
         logger.debug(s"Exposing metrics for Prometheus on port $hostname:$port")
-        meterProviderBuilder.registerMetricReader(PrometheusCollector.create())
         new DropwizardExports(registry).register[DropwizardExports]()
         val reporter = new Reporters.Prometheus(hostname, port)
         reporter

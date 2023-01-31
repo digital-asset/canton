@@ -166,8 +166,8 @@ class MediatorMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
         |pruning backlog.""",
     qualification = Debug,
   )
-  val maxResponseAge: Gauge[Long] =
-    metricsFactory.gauge[Long](MetricName(prefix :+ "max-response-age"), 0L)(MetricsContext.Empty)
+  val maxEventAge: Gauge[Long] =
+    metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
 }
 
 class IdentityManagerMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
+import com.daml.ledger.api.auth.AuthService.AUTHORIZATION_KEY
 import com.daml.ledger.api.auth.{AuthService, ClaimSet}
 import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.util.HexString

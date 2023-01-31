@@ -1401,9 +1401,9 @@ object RepairService {
           .validateRecord(createArguments)
           .leftMap(e => s"Failed to validate arguments: ${e}")
 
-        argsVersionedValue = CantonOnly.asVersionedValue(
+        argsVersionedValue = LfVersioned(
+          protocol.DummyTransactionVersion, // Version is ignored by daml engine upon RepairService.addContract
           argsValue,
-          CantonOnly.DummyTransactionVersion, // Version is ignored by daml engine upon RepairService.addContract
         )
 
         lfContractInst = LfContractInst(template = template, arg = argsVersionedValue)

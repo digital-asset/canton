@@ -61,12 +61,7 @@ import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
-  Confirmation,
-  Disabled,
-  Observation,
-  Submission,
-}
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
@@ -78,7 +73,6 @@ import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetPr
 import com.digitalasset.canton.{LfPartyId, LfWorkflowId, RequestCounter, SequencerCounter, checked}
 import org.slf4j.event.Level
 
-import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
 class TransferOutProcessingSteps(
@@ -935,16 +929,8 @@ object TransferOutProcessingSteps {
       ec: ExecutionContext,
   ): EitherT[Future, TransferProcessorError, (Set[LfPartyId], Set[ParticipantId])] = {
 
-    val stakeholdersWithParticipantPermissionsF = stakeholders.toList
-      .parTraverse { stakeholder =>
-        val sourceF = partyParticipants(sourceIps, stakeholder)
-        val targetF = partyParticipants(targetIps, stakeholder)
-        for {
-          source <- sourceF
-          target <- targetF
-        } yield (stakeholder, (source, target))
-      }
-      .map(_.toMap)
+    val stakeholdersWithParticipantPermissionsF =
+      PartyParticipantPermissions(stakeholders, sourceIps, targetIps)
 
     for {
       stakeholdersWithParticipantPermissions <- EitherT.right(
@@ -974,7 +960,7 @@ object TransferOutProcessingSteps {
       )
     } yield {
       val participants =
-        stakeholdersWithParticipantPermissions.values
+        stakeholdersWithParticipantPermissions.permissions.values
           .map(_._1.all)
           .foldLeft[Set[ParticipantId]](Set.empty[ParticipantId])(_ ++ _)
       (transferOutAdminParties, participants)
@@ -1042,15 +1028,15 @@ object TransferOutProcessingSteps {
     * </ul>
     */
   private def transferOutParticipants(
-      participantsByParty: Map[LfPartyId, (PartyParticipants, PartyParticipants)]
+      participantsByParty: PartyParticipantPermissions
   ): Either[TransferProcessorError, Set[ParticipantId]] = {
 
-    participantsByParty.toList
+    participantsByParty.permissions.toList
       .traverse { case (party, (source, target)) =>
         val submissionPermissionCheck = Validated.condNec(
           source.submitters.isEmpty || source.submitters.exists(target.submitters.contains),
           (),
-          show"For party $party, no participant with submission permission on source domain has submission permission on target domain.",
+          show"For party $party, no participant with submission permission on source domain (at ${participantsByParty.sourceTs}) has submission permission on target domain (at ${participantsByParty.targetTs}).",
         )
 
         val transferOutParticipants = source.confirmers.intersect(target.confirmers)
@@ -1058,7 +1044,7 @@ object TransferOutProcessingSteps {
           Validated.condNec(
             transferOutParticipants.nonEmpty,
             transferOutParticipants,
-            show"No participant of the party $party has confirmation permission on both domains.",
+            show"No participant of the party $party has confirmation permission on both domains at respective timestamps ${participantsByParty.sourceTs} and ${participantsByParty.targetTs}.",
           )
 
         Applicative[ValidatedNec[String, *]]
@@ -1066,61 +1052,6 @@ object TransferOutProcessingSteps {
       }
       .bimap(errors => PermissionErrors(s"${stringOfNec(errors)}"), MonoidK[Set].algebra.combineAll)
       .toEither
-  }
-
-  private case class PartyParticipants(
-      submission: Set[ParticipantId],
-      confirmation: Set[ParticipantId],
-      other: Set[ParticipantId],
-  ) {
-    require(
-      !submission.exists(confirmation.contains),
-      "submission and confirmation permissions must be disjoint.",
-    )
-    require(
-      !submission.exists(other.contains),
-      "submission and other permissions must be disjoint.",
-    )
-    require(
-      !confirmation.exists(other.contains),
-      "confirmation and other permissions must be disjoint.",
-    )
-
-    def submitters: Set[ParticipantId] = submission
-
-    def confirmers: Set[ParticipantId] = submission ++ confirmation
-
-    def all: Set[ParticipantId] = submission ++ confirmation ++ other
-  }
-
-  private def partyParticipants(ips: TopologySnapshot, party: LfPartyId)(implicit
-      ec: ExecutionContext
-  ): Future[PartyParticipants] = {
-
-    val submission = mutable.Set.newBuilder[ParticipantId]
-    val confirmation = mutable.Set.newBuilder[ParticipantId]
-    val other = mutable.Set.newBuilder[ParticipantId]
-
-    ips.activeParticipantsOf(party).map { partyParticipants =>
-      partyParticipants.foreach {
-        case (participantId, ParticipantAttributes(permission, _trustLevel)) =>
-          permission match {
-            case Submission => submission += participantId
-            case Confirmation => confirmation += participantId
-            case Observation => other += participantId
-            case Disabled =>
-              throw new IllegalStateException(
-                s"activeParticipantsOf($party) returned a disabled participant $participantId"
-              )
-          }
-      }
-      PartyParticipants(
-        submission.result().toSet,
-        confirmation.result().toSet,
-        other.result().toSet,
-      )
-    }
-
   }
 
   def autoTransferIn(
@@ -1207,8 +1138,8 @@ object TransferOutProcessingSteps {
 
       result.transform {
         case Left(StopRetry(Left(error))) => Left(error)
-        case Left(StopRetry(Right(verdict))) => Right(())
-        case Right(verdict) => Right(())
+        case Left(StopRetry(Right(_verdict))) => Right(())
+        case Right(_verdict) => Right(())
       }
     }
 
@@ -1239,7 +1170,7 @@ object TransferOutProcessingSteps {
               })
               _unit <- EitherTUtil.leftSubflatMap(performAutoInRepeatedly) {
                 // Filter out submission errors occurring because the transfer is already completed
-                case NoTransferData(id, TransferCompleted(transferId, timeOfCompletion)) =>
+                case NoTransferData(_id, TransferCompleted(_transferId, _timeOfCompletion)) =>
                   Right(())
                 // Filter out the case that the participant has disconnected from the target domain in the meantime.
                 case UnknownDomain(domain, _reason) if domain == targetDomain =>

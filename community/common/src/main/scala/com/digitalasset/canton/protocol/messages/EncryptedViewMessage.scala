@@ -233,6 +233,22 @@ final case class EncryptedViewMessageV1[+VT <: ViewType](
 ) extends EncryptedViewMessage[VT]
     with ProtocolMessageV1 {
 
+  def copy[A <: ViewType](
+      submitterParticipantSignature: Option[Signature] = this.submitterParticipantSignature,
+      viewHash: ViewHash = this.viewHash,
+      randomness: Seq[AsymmetricEncrypted[SecureRandomness]] = this.randomness,
+      encryptedView: EncryptedView[A] = this.encryptedView,
+      domainId: DomainId = this.domainId,
+      viewEncryptionScheme: SymmetricKeyScheme = this.viewEncryptionScheme,
+  ): EncryptedViewMessageV1[A] = EncryptedViewMessageV1(
+    submitterParticipantSignature,
+    viewHash,
+    randomness,
+    encryptedView,
+    domainId,
+    viewEncryptionScheme,
+  )(informeeParticipants)
+
   protected[messages] def participants: Option[Set[ParticipantId]] =
     informeeParticipants
 
@@ -255,7 +271,7 @@ final case class EncryptedViewMessageV1[+VT <: ViewType](
   override protected def updateView[VT2 <: ViewType](
       newView: EncryptedView[VT2]
   ): EncryptedViewMessage[VT2] =
-    copy(encryptedView = newView)(informeeParticipants)
+    copy(encryptedView = newView)
 
   override def toByteString: ByteString = toProtoV1.toByteString
 }

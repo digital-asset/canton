@@ -7,7 +7,7 @@ package com.digitalasset.canton.participant.admin.v0;
 
 import "google/protobuf/duration.proto";
 import "com/digitalasset/canton/time/admin/v0/time_tracker_config.proto";
-import "com/digitalasset/canton/protocol/v0/sequencing.proto";
+import "com/digitalasset/canton/domain/api/v0/sequencer_connection.proto";
 
 /**
  * Domain connectivity service for adding and connecting to domains
@@ -42,7 +42,7 @@ message DomainConnectionConfig {
     // participant local identifier of the target domain
     string domain_alias = 1;
     // connection information to sequencer
-    com.digitalasset.canton.protocol.v0.SequencerConnection sequencerConnection = 2;
+    com.digitalasset.canton.domain.api.v0.SequencerConnection sequencerConnection = 2;
     // if false, then domain needs to be manually connected to (default false)
     bool manual_connect = 3;
     // optional domainId (if TLS isn't to be trusted)

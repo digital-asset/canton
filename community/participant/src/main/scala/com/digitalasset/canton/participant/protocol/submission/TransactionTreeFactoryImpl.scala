@@ -9,7 +9,6 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.SubmitterInfo
-import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.*
@@ -238,8 +237,11 @@ abstract class TransactionTreeFactoryImpl(
         tuple
       }
 
-      val suffixedTx =
-        CantonOnly.setTransactionNodes(subaction.unwrap, suffixedNodes ++ rollbackNodes)
+      val suffixedTx = LfVersionedTransaction(
+        subaction.unwrap.version,
+        suffixedNodes ++ rollbackNodes,
+        subaction.unwrap.roots,
+      )
       view -> checked(WellFormedTransaction.normalizeAndAssert(suffixedTx, metadata, WithSuffixes))
     }
   }

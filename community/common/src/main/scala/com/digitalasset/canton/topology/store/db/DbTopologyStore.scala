@@ -15,7 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.{
 }
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{Lifecycle, RunOnShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.DynamicDomainParameters
@@ -53,8 +53,20 @@ class DbTopologyStoreFactory(
   override def forId[StoreId <: TopologyStoreId](storeId: StoreId): TopologyStore[StoreId] =
     storeCache
       .getOrElseUpdate(
-        storeId,
-        new DbTopologyStore(storage, storeId, maxItemsInSqlQuery, timeouts, loggerFactory),
+        storeId, {
+          import TraceContext.Implicits.Empty.emptyTraceContext
+          val newStore =
+            new DbTopologyStore(storage, storeId, maxItemsInSqlQuery, timeouts, loggerFactory)
+          // When a store gets closed, we should remove it from the cache to avoid keeping serving closed stores
+          newStore.runOnShutdown(
+            new RunOnShutdown {
+              override def name: String = "clear-closed-topology-store-from-cache"
+              override def done: Boolean = !storeCache.contains(storeId)
+              override def run(): Unit = storeCache.remove(storeId).discard
+            }
+          )
+          newStore
+        },
       )
       .asInstanceOf[TopologyStore[StoreId]]
 

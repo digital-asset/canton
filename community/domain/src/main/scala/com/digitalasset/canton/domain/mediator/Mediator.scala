@@ -4,9 +4,12 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.{EitherT, NonEmptySeq}
+import cats.implicits.toFoldableOps
 import cats.instances.future.*
 import cats.syntax.bifunctor.*
+import cats.syntax.functorFilter.*
 import cats.syntax.option.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -14,6 +17,7 @@ import com.digitalasset.canton.domain.mediator.Mediator.PruningError
 import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
 import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   Lifecycle,
@@ -22,12 +26,22 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsHelper
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
+import com.digitalasset.canton.protocol.messages.{
+  ProtocolMessage,
+  RootHashMessage,
+  SerializedRootHashMessagePayload,
+  Verdict,
+}
+import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters, RequestId}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.sequencing.handlers.{DiscardIgnoredEvents, EnvelopeOpener}
-import com.digitalasset.canton.sequencing.protocol.Envelope
+import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
+import com.digitalasset.canton.sequencing.protocol.{
+  ClosedEnvelope,
+  Envelope,
+  OpenEnvelope,
+  SequencedEvent,
+}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
@@ -36,6 +50,8 @@ import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.parallelFuture
+import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -122,9 +138,7 @@ private[mediator] class Mediator(
 
     _ <- sequencerClient.subscribeTracking(
       sequencerCounterTrackerStore,
-      DiscardIgnoredEvents(loggerFactory)(
-        EnvelopeOpener[OrdinaryEnvelopeBox](protocolVersion, syncCrypto.crypto.pureCrypto)(handler)
-      ),
+      DiscardIgnoredEvents(loggerFactory)(handler),
       timeTracker,
       onCleanHandler = onCleanSequencerCounterHandler,
     )
@@ -208,17 +222,17 @@ private[mediator] class Mediator(
       _ <- EitherT.right(sequencedEventStore.prune(pruneAt).merge)
 
       // After pruning successfully, update the "max-event-age" metric.
-      _ = MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxResponseAge, pruneAt.some)
+      _ = MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, pruneAt.some)
 
     } yield ()
   }
 
   private def handler: ApplicationHandler[Lambda[
     `+X <: Envelope[_]` => Traced[Seq[OrdinarySequencedEvent[X]]]
-  ], DefaultOpenEnvelope] =
+  ], ClosedEnvelope] =
     new ApplicationHandler[Lambda[
       `+X <: Envelope[_]` => Traced[Seq[OrdinarySequencedEvent[X]]]
-    ], DefaultOpenEnvelope] {
+    ], ClosedEnvelope] {
       override def name: String = s"mediator-${mediatorId}"
 
       override def subscriptionStartsAt(
@@ -227,13 +241,77 @@ private[mediator] class Mediator(
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
         topologyTransactionProcessor.subscriptionStartsAt(start, domainTimeTracker)
 
-      override def apply(tracedEvents: Traced[Seq[OrdinaryProtocolEvent]]): HandlerResult = {
+      private def sendMalformedRejection(
+          rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+          timestamp: CantonTimestamp,
+          verdict: Verdict.MediatorReject,
+      ): Future[Unit] = {
+        val requestId = RequestId(timestamp)
+
+        for {
+          snapshot <- syncCrypto.awaitSnapshot(timestamp)
+          topoSnapshot = snapshot.ipsSnapshot
+          domainParameters <- topoSnapshot.findDynamicDomainParametersOrDefault(
+            protocolVersion
+          )
+          decisionTime = domainParameters.decisionTimeFor(timestamp)
+          _ <- processor.sendMalformedRejection(
+            requestId,
+            None,
+            rootHashMessages,
+            verdict,
+            decisionTime,
+          )
+        } yield ()
+      }
+
+      override def apply(
+          tracedEvents: Traced[Seq[BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]]]
+      ): HandlerResult = {
         tracedEvents.withTraceContext { implicit traceContext => events =>
+          val tracedOpenEventsWithRejectionsF = events.map { closedSignedEvent =>
+            val closedEvent = closedSignedEvent.signedEvent.content
+
+            val (openEvent, openingErrors) = SequencedEvent.openEnvelopes(closedEvent)(
+              protocolVersion,
+              syncCrypto.crypto.pureCrypto,
+            )
+
+            val rejectionsF = openingErrors.parTraverse_(error => {
+              val cause =
+                s"Received an envelope at ${closedEvent.timestamp} that cannot be opened. Discarding envelope... Reason: ${error}"
+              val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
+              alarm.report()
+
+              val rootHashMessages = openEvent.envelopes.mapFilter(
+                ProtocolMessage.select[RootHashMessage[SerializedRootHashMessagePayload]]
+              )
+
+              if (rootHashMessages.nonEmpty) {
+                // In this case, we assume it is a Mediator Request message
+                sendMalformedRejection(
+                  rootHashMessages,
+                  closedEvent.timestamp,
+                  alarm,
+                )
+              } else Future.unit
+            })
+
+            (Traced(openEvent)(closedSignedEvent.traceContext), rejectionsF)
+          }
+
+          val (tracedOpenEvents, rejectionsF) = tracedOpenEventsWithRejectionsF.unzip
+
           // update the delay logger using the latest event we've been handed
           events.lastOption.foreach(e => delayLogger.checkForDelay(e))
 
-          logger.trace(s"Processing ${events.size} events for the mediator")
-          eventsProcessor.handle(events)
+          logger.debug(s"Processing ${tracedOpenEvents.size} events for the mediator")
+
+          val result = FutureUtil.logOnFailureUnlessShutdown(
+            eventsProcessor.handle(tracedOpenEvents),
+            "Failed to handle Mediator events",
+          )
+          FutureUnlessShutdown.outcomeF(rejectionsF.sequence_).flatMap { case () => result }
         }
       }
     }

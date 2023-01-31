@@ -6,7 +6,12 @@ package com.digitalasset.canton.console
 import ammonite.util.Bind
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.data.CantonStatus
-import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{
+  InstanceName,
+  NonNegativeInt,
+  PositiveDouble,
+  PositiveInt,
+}
 import com.digitalasset.canton.config.{
   ConsoleCommandTimeout,
   NonNegativeDuration,
@@ -34,8 +39,8 @@ import io.opentelemetry.api.trace.Tracer
 
 import java.time.{Duration as JDuration, Instant}
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration.{Duration as SDuration}
-import scala.reflect.runtime.{universe as ru}
+import scala.concurrent.duration.Duration as SDuration
+import scala.reflect.runtime.universe as ru
 import scala.util.control.NonFatal
 
 case class NodeReferences[A, R <: A, L <: A](local: Seq[L], remote: Seq[R]) {
@@ -70,7 +75,7 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
   protected def consoleEnvironmentBindings: ConsoleEnvironmentBinding
 
   private val tracerProvider =
-    TracerProvider.Factory(environment.config.monitoring.tracing.tracer, "console")
+    TracerProvider.Factory(environment.configuredOpenTelemetry, "console")
   private[console] val tracer: Tracer = tracerProvider.tracer
 
   /** Definition of the startup order of local instances.
@@ -458,7 +463,7 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
   protected def selfAlias(): Bind[_] = Bind(ConsoleEnvironmentBinding.BindingName, this)
 
   override def onClosed(): Unit = {
-    Lifecycle.close(grpcAdminCommandRunner, environment, tracerProvider)(logger)
+    Lifecycle.close(grpcAdminCommandRunner, environment)(logger)
   }
 
   def startAll(): Unit = {
@@ -540,6 +545,11 @@ object ConsoleEnvironment {
       * @throws java.lang.IllegalArgumentException if `n` is not positive
       */
     implicit def toPositiveInt(n: Int): PositiveInt = PositiveInt.tryCreate(n)
+
+    /** Implicitly map a Double to a `PositiveDouble`
+      * @throws java.lang.IllegalArgumentException if `n` is not positive
+      */
+    implicit def toPositiveDouble(n: Double): PositiveDouble = PositiveDouble.tryCreate(n)
 
     /** Implicitly convert a duration to a [[com.digitalasset.canton.config.NonNegativeDuration]]
       * @throws java.lang.IllegalArgumentException if `duration` is negative

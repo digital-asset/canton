@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import com.digitalasset.canton.SequencerCounter
@@ -321,19 +322,20 @@ class DatabaseSequencer(
       }
     } yield report
 
-  override def locateAndReportPruningTimestamp(index: PositiveInt)(implicit
+  override def locatePruningTimestamp(index: PositiveInt)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]] = for {
-    ts <- EitherT.right[PruningSupportError](
+  ): EitherT[Future, PruningSupportError, Option[CantonTimestamp]] =
+    EitherT.right[PruningSupportError](
       store
         .locatePruningTimestamp(NonNegativeInt.tryCreate(index.value - 1))
     )
-    // If we just determined the timestamp of the oldest event, take the opportunity
-    // to update the max-event-age metric with the age based on the clock current time
-    // or zero in case there are no events.
-    _ = if (index.value == 1)
-      MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, ts)
-  } yield ts
+
+  override def reportMaxEventAgeMetric(
+      oldestEventTimestamp: Option[CantonTimestamp]
+  ): Either[PruningSupportError, Unit] =
+    Either.right(
+      MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, oldestEventTimestamp)
+    )
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

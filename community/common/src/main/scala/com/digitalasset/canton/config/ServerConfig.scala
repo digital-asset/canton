@@ -4,13 +4,14 @@
 package com.digitalasset.canton.config
 
 import com.daml.ledger.api.tls.TlsVersion
-import com.daml.metrics.api.MetricHandle.Factory
+import com.daml.metrics.api.MetricHandle.MetricsFactory
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
 import com.digitalasset.canton.config.SequencerConnectionConfig.CertificateFile
+import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.{
@@ -18,7 +19,6 @@ import com.digitalasset.canton.networking.grpc.{
   CantonServerBuilder,
   CantonServerInterceptors,
 }
-import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TracingConfig
@@ -82,7 +82,7 @@ trait ServerConfig extends Product with Serializable {
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
       metricsPrefix: MetricName,
-      metrics: Factory,
+      metrics: MetricsFactory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ): CantonServerInterceptors
@@ -94,7 +94,7 @@ trait CommunityServerConfig extends ServerConfig {
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
       metricsPrefix: MetricName,
-      metrics: Factory,
+      metrics: MetricsFactory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ) = new CantonCommunityServerInterceptors(
@@ -180,27 +180,22 @@ case class KeepAliveClientConfig(
 )
 
 sealed trait ApiType extends PrettyPrinting {
-  def toProtoEnum: v0.ApiType
+  def toProtoEnum: v0.SequencerApiType
 }
 
 object ApiType {
   case object Grpc extends ApiType {
-    def toProtoEnum: v0.ApiType = v0.ApiType.Grpc
+    def toProtoEnum: v0.SequencerApiType = v0.SequencerApiType.Grpc
     override def pretty: Pretty[Grpc.type] = prettyOfObject[Grpc.type]
-  }
-  case object Http extends ApiType {
-    def toProtoEnum: v0.ApiType = v0.ApiType.Http
-    override def pretty: Pretty[Http.type] = prettyOfObject[Http.type]
   }
 
   def fromProtoEnum(
       field: String,
-      apiTypeP: v0.ApiType,
+      apiTypeP: v0.SequencerApiType,
   ): ParsingResult[ApiType] =
     apiTypeP match {
-      case v0.ApiType.Grpc => Right(Grpc)
-      case v0.ApiType.Http => Right(Http)
-      case v0.ApiType.Unrecognized(value) =>
+      case v0.SequencerApiType.Grpc => Right(Grpc)
+      case v0.SequencerApiType.Unrecognized(value) =>
         Left(ProtoDeserializationError.UnrecognizedEnum(field, value))
     }
 }

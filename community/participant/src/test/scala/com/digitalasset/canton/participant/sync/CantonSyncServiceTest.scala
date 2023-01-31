@@ -8,7 +8,6 @@ import cats.Id
 import cats.data.EitherT
 import cats.implicits.*
 import com.daml.ledger.participant.state.v2.ChangeId
-import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.CommittedTransaction
 import com.daml.lf.transaction.test.TransactionBuilder
@@ -56,6 +55,7 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyDispatcher,
   ParticipantTopologyManager,
 }
+import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
@@ -220,7 +220,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       syncCrypto,
       pruningProcessor,
       ledgerId,
-      CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false),
+      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false),
       syncDomainStateFactory,
       new SimClock(loggerFactory = loggerFactory),
       new ResourceManagementService.CommunityResourceManagementService(

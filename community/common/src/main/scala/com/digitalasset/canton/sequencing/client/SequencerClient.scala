@@ -42,7 +42,6 @@ import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenMana
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
 import com.digitalasset.canton.sequencing.client.grpc.GrpcSequencerChannelBuilder
-import com.digitalasset.canton.sequencing.client.http.HttpSequencerClient
 import com.digitalasset.canton.sequencing.client.transports.*
 import com.digitalasset.canton.sequencing.client.transports.replay.{
   ReplayingEventsSequencerClientTransport,
@@ -1251,7 +1250,6 @@ object SequencerClient {
       ): EitherT[Future, String, SequencerClientTransport] = {
         def mkRealTransport: EitherT[Future, String, SequencerClientTransport] =
           connection match {
-            case http: HttpSequencerConnection => httpTransport(http)
             case grpc: GrpcSequencerConnection => grpcTransport(grpc, member).toEitherT
           }
 
@@ -1296,25 +1294,6 @@ object SequencerClient {
           )
         } yield transport
       }
-
-      private def httpTransport(connection: HttpSequencerConnection)(implicit
-          executionContext: ExecutionContext,
-          traceContext: TraceContext,
-      ): EitherT[Future, String, SequencerClientTransport] =
-        HttpSequencerClient(
-          crypto,
-          connection,
-          processingTimeout,
-          traceContextPropagation,
-          loggerFactory,
-        ).map(client =>
-          new HttpSequencerClientTransport(
-            client,
-            domainParameters.protocolVersion,
-            processingTimeout,
-            loggerFactory,
-          )
-        )
 
       private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
           executionContext: ExecutionContextExecutor

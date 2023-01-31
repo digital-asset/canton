@@ -4,7 +4,7 @@
 package com.digitalasset.canton.console
 
 import com.digitalasset.canton.*
-import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, HttpAdminCommand}
+import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
@@ -171,8 +171,7 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
       NodeNotStarted.ErrorCanton(this)
 
   override protected[console] def adminCommand[Result](
-      grpcCommand: GrpcAdminCommand[_, _, Result],
-      httpCommand: HttpAdminCommand[_, _, Result],
+      grpcCommand: GrpcAdminCommand[_, _, Result]
   ): ConsoleCommandResult[Result] =
     runCommandIfRunning(
       consoleEnvironment.grpcAdminCommandRunner
@@ -192,8 +191,7 @@ trait GrpcRemoteInstanceReference extends RemoteInstanceReference {
   def config: NodeConfig
 
   override protected[console] def adminCommand[Result](
-      grpcCommand: GrpcAdminCommand[_, _, Result],
-      httpCommand: HttpAdminCommand[_, _, Result],
+      grpcCommand: GrpcAdminCommand[_, _, Result]
   ): ConsoleCommandResult[Result] =
     consoleEnvironment.grpcAdminCommandRunner.runCommand(
       name,

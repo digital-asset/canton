@@ -26,7 +26,6 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -53,15 +52,6 @@ trait DomainIdentityStateObserver {
 }
 
 object DomainTopologyManager {
-  type AddMemberHook =
-    (AuthenticatedMember, Option[X509Cert]) => EitherT[Future, DomainTopologyManagerError, Unit]
-
-  val addMemberNoOp =
-    (_: AuthenticatedMember, _: Option[X509Cert]) =>
-      EitherT[Future, DomainTopologyManagerError, Unit](Future.successful(Right(())))
-
-  val legalIdentityHookNoOp: X509Certificate => EitherT[Future, String, Unit] =
-    (_: X509Certificate) => EitherT[Future, String, Unit](Future.successful(Right(())))
 
   def transactionsAreSufficientToInitializeADomain(
       id: DomainId,
@@ -164,7 +154,6 @@ class DomainTopologyManager(
     val id: DomainTopologyManagerId,
     clock: Clock,
     override val store: TopologyStore[TopologyStoreId.AuthorizedStore],
-    addParticipantHook: DomainTopologyManager.AddMemberHook,
     override val crypto: Crypto,
     override protected val timeouts: ProcessingTimeout,
     val protocolVersion: ProtocolVersion,
@@ -220,13 +209,6 @@ class DomainTopologyManager(
       traceContext: TraceContext
   ): Future[Map[KeyOwner, Seq[PublicKey]]] =
     store.findInitialState(id)
-
-  override def addParticipant(
-      participantId: ParticipantId,
-      x509: Option[X509Cert],
-  )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {
-    addParticipantHook(participantId, x509)
-  }
 
   private def checkTransactionIsNotForAlienDomainEntities(
       transaction: SignedTopologyTransaction[TopologyChangeOp]

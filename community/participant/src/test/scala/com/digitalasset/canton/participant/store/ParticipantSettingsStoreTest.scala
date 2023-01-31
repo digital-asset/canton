@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.option.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -23,13 +23,17 @@ trait ParticipantSettingsStoreTest
 
   lazy val resourceLimits0: ResourceLimits = ResourceLimits.default
   lazy val resourceLimits1: ResourceLimits =
-    ResourceLimits(Some(NonNegativeInt.tryCreate(42)), None)
+    ResourceLimits(Some(NonNegativeInt.tryCreate(42)), None, PositiveNumeric.tryCreate(0.1))
   lazy val resourceLimits2: ResourceLimits =
-    ResourceLimits(Some(NonNegativeInt.tryCreate(84)), None)
+    ResourceLimits(Some(NonNegativeInt.tryCreate(84)), None, PositiveNumeric.tryCreate(0.2))
   lazy val resourceLimits3: ResourceLimits =
-    ResourceLimits(Some(NonNegativeInt.tryCreate(42)), Some(NonNegativeInt.tryCreate(22)))
+    ResourceLimits(
+      Some(NonNegativeInt.tryCreate(42)),
+      Some(NonNegativeInt.tryCreate(22)),
+      PositiveNumeric.tryCreate(0.3),
+    )
   lazy val resourceLimits4: ResourceLimits =
-    ResourceLimits(None, Some(NonNegativeInt.tryCreate(22)))
+    ResourceLimits(None, Some(NonNegativeInt.tryCreate(22)), PositiveNumeric.tryCreate(0.4))
 
   lazy val maxDedupDuration = NonNegativeFiniteDuration.ofMicros(123456789L)
 
