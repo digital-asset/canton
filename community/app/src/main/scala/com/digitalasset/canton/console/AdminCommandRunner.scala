@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.console
 
-import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, HttpAdminCommand}
+import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{CantonConfig, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.ConsoleTimeout
@@ -17,22 +17,13 @@ import scala.annotation.tailrec
   */
 trait AdminCommandRunner {
 
-  /** Run an admin command and return its result.
-    * Depending on the admin client config details, it will either run the GRPC or the HTTP admin command.
-    */
-  protected[console] def adminCommand[Result](
-      grpcCommand: GrpcAdminCommand[_, _, Result],
-      httpCommand: HttpAdminCommand[_, _, Result],
-  ): ConsoleCommandResult[Result]
-
   /** Run a GRPC admin command and return its result.
     * Most of the commands are only defined for the GRPC interface, so we default to showing an error message
     * if the command is called for a node configured with an HTTP interface.
     */
   protected[console] def adminCommand[Result](
-      command: GrpcAdminCommand[_, _, Result]
-  ): ConsoleCommandResult[Result] =
-    adminCommand(command, new HttpAdminCommand.NotSupported[Result](command.fullName))
+      grpcCommand: GrpcAdminCommand[_, _, Result]
+  ): ConsoleCommandResult[Result]
 
   protected[console] def tracedLogger: TracedLogger
 

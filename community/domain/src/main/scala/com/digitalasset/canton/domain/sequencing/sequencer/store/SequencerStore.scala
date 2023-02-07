@@ -10,8 +10,9 @@ import cats.syntax.parallel.*
 import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric, String256M}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult

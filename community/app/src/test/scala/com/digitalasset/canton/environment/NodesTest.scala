@@ -6,7 +6,7 @@ package com.digitalasset.canton.environment
 import cats.data.EitherT
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.lifecycle.ShutdownFailedException
@@ -37,6 +37,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override val nodeTypeName: String = "test-node"
     override def clientAdminApi = adminApi.clientConfig
     override def withDefaults(ports: DefaultPorts): TestNodeConfig = this
+    override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig()
   }
   object TestNodeParameters extends CantonNodeParameters {
     override def delayLoggingThreshold: NonNegativeFiniteDuration = ???

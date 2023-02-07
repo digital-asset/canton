@@ -6,8 +6,10 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.Applicative
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.*
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.messages.ProtocolMessage
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.{EnvelopeBox, RawSignedContentEnvelopeBox}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -63,6 +65,8 @@ sealed trait SequencedEvent[+Env <: Envelope[_]]
   protected def traverse[F[_], Env2 <: Envelope[_]](f: Env => F[Env2])(implicit
       F: Applicative[F]
   ): F[SequencedEvent[Env2]]
+
+  def envelopes: Seq[Env]
 }
 
 object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedEvent[Envelope[_]]] {
@@ -185,6 +189,17 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
       )(f: Env1 => G[Env2])(implicit G: Applicative[G]): G[RawSignedContentEnvelopeBox[Env2]] =
         signedEvent.traverse(_.traverse(f))
     }
+
+  def openEnvelopes(
+      event: SequencedEvent[ClosedEnvelope]
+  )(protocolVersion: ProtocolVersion, hashOps: HashOps): (
+      SequencedEvent[OpenEnvelope[ProtocolMessage]],
+      Seq[ProtoDeserializationError],
+  ) = event match {
+    case deliver: Deliver[ClosedEnvelope] =>
+      Deliver.openEnvelopes(deliver)(protocolVersion, hashOps)
+    case deliver: DeliverError => (deliver, Seq.empty)
+  }
 }
 
 sealed abstract case class DeliverError private[sequencing] (
@@ -219,6 +234,7 @@ sealed abstract case class DeliverError private[sequencing] (
     param("reason", _.reason),
   )
 
+  def envelopes: Seq[Nothing] = Seq.empty
 }
 
 object DeliverError {
@@ -281,7 +297,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     )
 
   @VisibleForTesting
-  private[canton] def copy[Env2 >: Env <: Envelope[_]](
+  private[canton] def copy[Env2 <: Envelope[_]](
       counter: SequencerCounter = this.counter,
       timestamp: CantonTimestamp = this.timestamp,
       domainId: DomainId = this.domainId,
@@ -301,6 +317,8 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       param("domain id", _.domainId),
       unnamedParam(_.batch),
     )
+
+  def envelopes: Seq[Env] = batch.envelopes
 }
 
 object Deliver {
@@ -324,4 +342,17 @@ object Deliver {
       case deliver @ Deliver(_, _, _, _, _) => Some(deliver)
       case _: DeliverError => None
     }
+
+  def openEnvelopes(
+      deliver: Deliver[ClosedEnvelope]
+  )(protocolVersion: ProtocolVersion, hashOps: HashOps): (
+      Deliver[OpenEnvelope[ProtocolMessage]],
+      Seq[ProtoDeserializationError],
+  ) = {
+    val (openBatch, openingErrors) =
+      Batch.openEnvelopes(deliver.batch)(protocolVersion, hashOps)
+    val openDeliver = deliver.copy(batch = openBatch)
+
+    (openDeliver, openingErrors)
+  }
 }

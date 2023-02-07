@@ -9,7 +9,7 @@ import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
-import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.DomainParametersConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
@@ -65,6 +65,7 @@ object CommunityConfigValidations
     List(
       backwardsCompatibleLoggingConfig,
       developmentProtocolSafetyCheckDomains,
+      developmentProtocolSafetyCheckParticipants,
       warnIfUnsafeMinProtocolVersion,
       warnIfUnsafeProtocolVersionEmbeddedDomain,
     )
@@ -182,9 +183,39 @@ object CommunityConfigValidations
   private def developmentProtocolSafetyCheckDomains(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
-    developmentProtocolSafetyCheck(config.domains.toSeq.map { case (k, v) =>
-      (k, v.init.domainParameters)
-    })
+    developmentProtocolSafetyCheck(
+      config.parameters.nonStandardConfig,
+      config.domains.toSeq.map { case (k, v) =>
+        (k, v.init.domainParameters)
+      },
+    )
+  }
+
+  private def developmentProtocolSafetyCheckParticipants(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    def toNe(
+        name: String,
+        nonStandardConfig: Boolean,
+        devVersionSupport: Boolean,
+    ): Validated[NonEmpty[Seq[String]], Unit] = {
+      Validated.cond(
+        nonStandardConfig || !devVersionSupport,
+        (),
+        NonEmpty(
+          Seq,
+          s"Enabling dev-version-support for participant ${name} requires you to explicitly set canton.parameters.non-standard-config = yes",
+        ),
+      )
+    }
+
+    config.participants.toList.traverse_ { case (name, participantConfig) =>
+      toNe(
+        name.unwrap,
+        config.parameters.nonStandardConfig,
+        participantConfig.parameters.devVersionSupport,
+      )
+    }
   }
 
   private def warnIfUnsafeMinProtocolVersion(
@@ -214,19 +245,20 @@ object CommunityConfigValidations
   }
 
   private[config] def developmentProtocolSafetyCheck(
-      namesAndConfig: Seq[(InstanceName, DomainParametersConfig)]
+      allowUnstableProtocolVersion: Boolean,
+      namesAndConfig: Seq[(InstanceName, DomainParametersConfig)],
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     def toNe(
         name: String,
         protocolVersion: ProtocolVersion,
-        flag: Boolean,
+        allowUnstableProtocolVersion: Boolean,
     ): Validated[NonEmpty[Seq[String]], Unit] = {
       Validated.cond(
-        protocolVersion.isStable || flag,
+        protocolVersion.isStable || allowUnstableProtocolVersion,
         (),
         NonEmpty(
           Seq,
-          s"Protocol ${protocolVersion} for node ${name} requires you to explicitly set ...parameters.will-corrupt-your-system-dev-version-support = yes",
+          s"Using non-stable protocol ${protocolVersion} for node ${name} requires you to explicitly set canton.parameters.non-standard-config = yes",
         ),
       )
     }
@@ -235,7 +267,7 @@ object CommunityConfigValidations
       toNe(
         name.unwrap,
         parameters.protocolVersion.version,
-        parameters.willCorruptYourSystemDevVersionSupport,
+        allowUnstableProtocolVersion,
       )
     }
 

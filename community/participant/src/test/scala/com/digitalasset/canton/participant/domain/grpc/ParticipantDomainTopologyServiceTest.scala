@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.domain.grpc
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.participant.domain.ParticipantDomainTopologyService

@@ -6,7 +6,6 @@ package com.digitalasset.canton.protocol
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
-import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.daml.lf.transaction.Versioned
@@ -66,7 +65,7 @@ object ExampleTransactionFactory {
   val templateId = LfTransactionBuilder.defaultTemplateId
   val someOptUsedPackages = Some(Set(packageId))
   val defaultGlobalKey = LfTransactionBuilder.defaultGlobalKey
-  val transactionVersion = CantonOnly.DummyTransactionVersion
+  val transactionVersion = protocol.DummyTransactionVersion
 
   private def valueCapturing(coid: List[LfContractId]): Value = {
     val captives = coid.map(c => (None, ValueContractId(c)))
@@ -74,7 +73,7 @@ object ExampleTransactionFactory {
   }
 
   private def versionedValueCapturing(coid: List[LfContractId]): Value.VersionedValue =
-    CantonOnly.asVersionedValue(valueCapturing(coid), transactionVersion)
+    LfVersioned(transactionVersion, valueCapturing(coid))
 
   def contractInstance(
       capturedIds: Seq[LfContractId] = Seq.empty,
@@ -89,7 +88,7 @@ object ExampleTransactionFactory {
     deepValue(Value.MAXIMUM_NESTING + 10)
   }
   val veryDeepVersionedValue: VersionedValue =
-    CantonOnly.asVersionedValue(veryDeepValue, transactionVersion)
+    LfVersioned(transactionVersion, veryDeepValue)
 
   val veryDeepContractInstance: LfContractInst =
     LfContractInst(templateId, veryDeepVersionedValue)
@@ -224,13 +223,13 @@ object ExampleTransactionFactory {
       (nodeId(index + startIndex), node)
     }: _*)
 
-    val version = CantonOnly.maxTransactionVersion(
+    val version = protocol.maxTransactionVersion(
       NonEmpty
         .from(nodesMap.values.toSeq.mapFilter(_.optVersion))
         .getOrElse(NonEmpty(Seq, transactionVersion))
     )
 
-    CantonOnly.lfVersionedTransaction(version, nodesMap, roots)
+    LfVersionedTransaction(version, nodesMap, roots)
   }
 
   def inventSeeds(tx: LfVersionedTransaction): Map[LfNodeId, LfHash] =
@@ -626,7 +625,7 @@ class ExampleTransactionFactory(
       submitterMetadata,
       commonMetadata,
       participantMetadata,
-      MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
+      MerkleSeq.fromSeq(cryptoOps, protocolVersion)(rootViews),
     )
 
   def blindedForInformeeTree(
@@ -654,7 +653,7 @@ class ExampleTransactionFactory(
         blinded(submitterMetadata),
         commonMetadata,
         blinded(participantMetadata),
-        MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
+        MerkleSeq.fromSeq(cryptoOps, protocolVersion)(rootViews),
       ),
       protocolVersion,
     )
@@ -665,7 +664,7 @@ class ExampleTransactionFactory(
         submitterMetadata,
         commonMetadata,
         participantMetadata,
-        MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
+        MerkleSeq.fromSeq(cryptoOps, protocolVersion)(rootViews),
       )
     )
 
@@ -691,7 +690,7 @@ class ExampleTransactionFactory(
         blinded(submitterMetadata),
         commonMetadata,
         participantMetadata,
-        MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
+        MerkleSeq.fromSeq(cryptoOps, protocolVersion)(rootViews),
       )
     )
 
@@ -728,7 +727,7 @@ class ExampleTransactionFactory(
     override def rootTransactionViewTrees: Seq[TransactionViewTree] = Seq.empty
 
     override def versionedSuffixedTransaction: LfVersionedTransaction =
-      CantonOnly.lfVersionedTransaction(
+      LfVersionedTransaction(
         version = transactionVersion,
         roots = ImmArray.empty,
         nodes = HashMap.empty,

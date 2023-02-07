@@ -7,7 +7,7 @@ import cats.kernel.Order
 import cats.syntax.either.*
 import com.daml.ledger.client.binding.Primitive.Party as ClientParty
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
-import com.digitalasset.canton.config.RequireTypes.{String255, String3, String300}
+import com.digitalasset.canton.config.CantonRequireTypes.{String255, String3, String300}
 import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult

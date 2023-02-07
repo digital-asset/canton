@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.ledger.api
 
 import akka.actor.ActorSystem
 import com.daml.api.util.TimeProvider
+import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.api.auth.CachedJwtVerifierLoader
 import com.daml.ledger.api.domain
 import com.daml.ledger.api.health.HealthChecks
@@ -24,6 +25,8 @@ import com.daml.platform.configuration.{
   AcsStreamsConfig as LedgerAcsStreamsConfig,
   IndexServiceConfig as LedgerIndexServiceConfig,
   ServerRole,
+  TransactionFlatStreamsConfig as LedgerTransactionFlatStreamsConfig,
+  TransactionTreeStreamsConfig as LedgerTransactionTreeStreamsConfig,
 }
 import com.daml.platform.index.IndexServiceOwner
 import com.daml.platform.indexer.{
@@ -43,6 +46,7 @@ import com.daml.platform.services.time.TimeProviderType
 import com.daml.platform.store.DbSupport
 import com.daml.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.daml.ports.Port
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
@@ -54,6 +58,7 @@ import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue
 import io.functionmeta.functionFullName
 import io.grpc.{BindableService, ServerInterceptor}
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
+import io.scalaland.chimney.dsl.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
@@ -76,6 +81,7 @@ class StartableStoppableLedgerApiServer(
     participantDataSourceConfig: ParticipantDataSourceConfig,
     dbConfig: DbSupport.DbConfig,
     createExternalServices: () => List[BindableService] = () => Nil,
+    telemetry: Telemetry,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -162,21 +168,18 @@ class StartableStoppableLedgerApiServer(
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
-
-    val acsConfig = config.serverConfig.activeContractsService
-
-    val acsStreamsConfig = LedgerAcsStreamsConfig(
-      maxIdsPerIdPage = acsConfig.acsIdPageSize,
-      maxPagesPerIdPagesBuffer = acsConfig.acsIdPageBufferSize,
-      maxWorkingMemoryInBytesForIdPages = LedgerAcsStreamsConfig.DefaultAcsIdPageWorkingMemoryBytes,
-      maxPayloadsPerPayloadsPage = config.serverConfig.eventsPageSize,
-      maxParallelIdCreateQueries = acsConfig.acsIdFetchingParallelism,
-      maxParallelPayloadCreateQueries = acsConfig.acsContractFetchingParallelism,
-    )
+    val acsStreamsConfig =
+      config.serverConfig.activeContractsService.transformInto[LedgerAcsStreamsConfig]
+    val txFlatStreamsConfig =
+      config.serverConfig.activeContractsService.transformInto[LedgerTransactionFlatStreamsConfig]
+    val txTreeStreamsConfig =
+      config.serverConfig.activeContractsService.transformInto[LedgerTransactionTreeStreamsConfig]
 
     val indexServiceConfig = LedgerIndexServiceConfig(
       acsStreams = acsStreamsConfig,
-      eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
+      transactionFlatStreams = txFlatStreamsConfig,
+      transactionTreeStreams = txTreeStreamsConfig,
+      bufferedEventsProcessingParallelism = config.serverConfig.bufferedEventsProcessingParallelism,
       maxContractStateCacheSize = config.serverConfig.maxContractStateCacheSize,
       maxContractKeyStateCacheSize = config.serverConfig.maxContractKeyStateCacheSize,
       maxTransactionsInMemoryFanOutBufferSize =
@@ -279,7 +282,7 @@ class StartableStoppableLedgerApiServer(
         metrics = config.metrics,
         timeServiceBackend = config.testingTimeService,
         otherServices = Nil,
-        otherInterceptors = getInterceptors,
+        otherInterceptors = getInterceptors(dbSupport.dbDispatcher.executor),
         engine = config.engine,
         servicesExecutionContext = executionContext,
         checkOverloaded = config.syncService.checkOverloaded,
@@ -291,6 +294,7 @@ class StartableStoppableLedgerApiServer(
         meteringReportKey = config.meteringReportKey,
         createExternalServices = createExternalServices,
         explicitDisclosureUnsafeEnabled = config.serverConfig.explicitDisclosureUnsafe,
+        telemetry = telemetry,
       )
     } yield ()
   }
@@ -316,7 +320,9 @@ class StartableStoppableLedgerApiServer(
       maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
     )(executionContext, loggingContext)
 
-  private def getInterceptors: List[ServerInterceptor] = List(
+  private def getInterceptors(
+      indexerExecutor: QueueAwareExecutor with NamedExecutor
+  ): List[ServerInterceptor] = List(
     new ApiRequestLogger(
       config.loggerFactory,
       config.cantonParameterConfig.loggingConfig.api,
@@ -333,10 +339,14 @@ class StartableStoppableLedgerApiServer(
         additionalChecks = List(
           ThreadpoolCheck(
             name = "Environment Execution Threadpool",
-            prefix = config.envQueueName,
-            queueSize = config.envQueueSize,
             limit = rateLimit.maxApiServicesQueueSize,
-          )
+            queue = executionContext,
+          ),
+          ThreadpoolCheck(
+            name = "Index DB Threadpool",
+            limit = rateLimit.maxApiServicesIndexDbQueueSize,
+            queue = indexerExecutor,
+          ),
         ),
       )
     )

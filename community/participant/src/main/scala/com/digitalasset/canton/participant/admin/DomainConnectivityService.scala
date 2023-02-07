@@ -9,12 +9,11 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceInternalError.DomainIsMissingInternally
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownDomain
-import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, HttpSequencerConnection}
+import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherTUtil
@@ -164,7 +163,6 @@ class DomainConnectivityService(
             grpc,
             staticDomainParameters.protocolVersion,
           )
-        case _: HttpSequencerConnection => EitherT.rightT[Future, AgreementServiceError](None)
       })
       accepted <- optAgreement.fold(EitherT.rightT[Future, StatusRuntimeException](false))(ag =>
         mapErrNew(EitherT.right(agreementService.hasAcceptedAgreement(domainId, ag.id)))

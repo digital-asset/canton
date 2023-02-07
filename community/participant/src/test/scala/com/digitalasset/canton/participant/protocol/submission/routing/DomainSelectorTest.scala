@@ -61,7 +61,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       - domain: da by default
         - input contract is on da
         - participants are connected to da
-        - domainsOfSubmittersAndInformees is Set(da)
+        - admissibleDomains is Set(da)
 
     Transaction:
       - exercise by interface
@@ -104,7 +104,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
 
     "return proper response when submitters or informees are hosted on the wrong domain" in {
       val selector = selectorForExerciseByInterface(
-        domainsOfSubmittersAndInformees = NonEmpty.mk(Set, acme), // different than da
+        admissibleDomains = NonEmpty.mk(Set, acme), // different than da
         connectedDomains = Set(acme, da),
       )
 
@@ -121,7 +121,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
 
       // Multi domain, missing connection to acme: error
       val selectorMissingConnection = selectorForExerciseByInterface(
-        domainsOfSubmittersAndInformees = NonEmpty.mk(Set, acme), // different than da
+        admissibleDomains = NonEmpty.mk(Set, acme), // different than da
         connectedDomains = Set(da),
       )
 
@@ -133,7 +133,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
     "take priority into account (multi domain setting)" in {
       def pickDomain(bestDomain: DomainId): DomainId = selectorForExerciseByInterface(
         // da is not in the list to force transfer
-        domainsOfSubmittersAndInformees = NonEmpty.mk(Set, acme, repair),
+        admissibleDomains = NonEmpty.mk(Set, acme, repair),
         connectedDomains = Set(acme, da, repair),
         priorityOfDomain = d => if (d == bestDomain) 10 else 0,
       ).forMultiDomain.futureValue.domainId
@@ -248,7 +248,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         val selector = selectorForExerciseByInterface(
           prescribedDomainAlias = Some("acme"),
           connectedDomains = Set(acme, da),
-          domainsOfSubmittersAndInformees = NonEmpty.mk(Set, acme, da),
+          admissibleDomains = NonEmpty.mk(Set, acme, da),
         )
 
         // Single domain: prescribed domain should be domain of input contract
@@ -272,7 +272,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         - domain: da by default
           - input contract is on da
           - participants are connected to da
-          - domainsOfSubmittersAndInformees is Set(da)
+          - admissibleDomains is Set(da)
 
     Transaction:
       - three exercises
@@ -292,7 +292,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         selectorForThreeExercises(
           threeExercises = threeExercises,
           connectedDomains = domains,
-          domainsOfSubmittersAndInformees = domains,
+          admissibleDomains = domains,
           domainOfContracts = _ => domainOfContracts,
         ).forMultiDomain.futureValue
 
@@ -359,7 +359,7 @@ private[routing] object DomainSelectorTest {
 
     private val defaultDomain: DomainId = da
 
-    private val defaultDomainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]] =
+    private val defaultAdmissibleDomains: NonEmpty[Set[DomainId]] =
       NonEmpty.mk(Set, da)
 
     private val defaultPrescribedDomainAlias: Option[String] = None
@@ -375,8 +375,7 @@ private[routing] object DomainSelectorTest {
         domainOfContracts: Seq[LfContractId] => Map[LfContractId, DomainId] =
           defaultDomainOfContracts,
         connectedDomains: Set[DomainId] = Set(defaultDomain),
-        domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]] =
-          defaultDomainsOfSubmittersAndInformees,
+        admissibleDomains: NonEmpty[Set[DomainId]] = defaultAdmissibleDomains,
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
         prescribedDomainId: Option[DomainId] = defaultPrescribedDomainId,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
@@ -405,7 +404,7 @@ private[routing] object DomainSelectorTest {
         priorityOfDomain,
         domainOfContracts,
         connectedDomains,
-        domainsOfSubmittersAndInformees,
+        admissibleDomains,
         prescribedDomainAlias,
         prescribedDomainId,
         domainProtocolVersion,
@@ -421,8 +420,7 @@ private[routing] object DomainSelectorTest {
         domainOfContracts: Seq[LfContractId] => Map[LfContractId, DomainId] =
           defaultDomainOfContracts,
         connectedDomains: Set[DomainId] = Set(defaultDomain),
-        domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]] =
-          defaultDomainsOfSubmittersAndInformees,
+        admissibleDomains: NonEmpty[Set[DomainId]] = defaultAdmissibleDomains,
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
@@ -447,7 +445,7 @@ private[routing] object DomainSelectorTest {
         priorityOfDomain,
         domainOfContracts,
         connectedDomains,
-        domainsOfSubmittersAndInformees,
+        admissibleDomains,
         prescribedDomainAlias,
         None,
         domainProtocolVersion,
@@ -461,7 +459,7 @@ private[routing] object DomainSelectorTest {
         priorityOfDomain: DomainId => Int,
         domainOfContracts: Seq[LfContractId] => Map[LfContractId, DomainId],
         connectedDomains: Set[DomainId],
-        domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]],
+        admissibleDomains: NonEmpty[Set[DomainId]],
         prescribedDomainAlias: Option[String],
         prescribedDomainId: Option[DomainId],
         domainProtocolVersion: DomainId => ProtocolVersion,
@@ -525,7 +523,7 @@ private[routing] object DomainSelectorTest {
           new DomainSelector(
             participantId = submitterParticipantId,
             transactionData = transactionData,
-            domainsOfSubmittersAndInformees = domainsOfSubmittersAndInformees,
+            admissibleDomains = admissibleDomains,
             priorityOfDomain = priorityOfDomain,
             domainRankComputation = domainRankComputation,
             packageService = ExampleTransactionFactory.defaultPackageInfoService,

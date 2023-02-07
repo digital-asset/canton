@@ -10,7 +10,7 @@ import pureconfig.{ConfigCursor, ConfigReader, PathSegment}
 import scala.jdk.CollectionConverters.*
 
 object DeprecatedConfigUtils {
-  case class MovedConfigPath(from: String, to: String)
+  case class MovedConfigPath(from: String, to: String*)
 
   object DeprecatedFieldsFor {
     def combine[T](instances: DeprecatedFieldsFor[_ >: T]*): DeprecatedFieldsFor[T] =
@@ -33,7 +33,7 @@ object DeprecatedConfigUtils {
       * @param to string path to the new field. e.g: "path.to.new.field"
       * @return config reader with fallback values from the deprecated fields
       */
-    def moveDeprecatedField(from: String, to: String)(implicit
+    def moveDeprecatedField(from: String, to: Seq[String])(implicit
         elc: ErrorLoggingContext
     ): ConfigReader[T] = {
       val fromPathSegment =
@@ -51,15 +51,20 @@ object DeprecatedConfigUtils {
               .map { deprecated =>
                 // Log a message if it turns out there's a value defined at the deprecated path
                 elc.info(
-                  s"Config field at $from is deprecated. Please use $to instead."
+                  s"Config field at $from is deprecated. Please use the following path(s) instead: ${to
+                      .mkString(", ")}."
                 )
                 // Build a new config from scratch by
-                ConfigFactory
+                val originalConfig = ConfigFactory
                   .empty()
                   // Adding back all the values from the original config
                   .withFallback(cursorConfigValue)
-                  // Adding the deprecated value to its new location
-                  .withFallback(deprecated.atPath(to))
+
+                to
+                  .foldLeft(originalConfig)({
+                    // Adding the deprecated value to its new location(s)
+                    case (config, toPath) => config.withFallback(deprecated.atPath(toPath))
+                  })
                   // Deleting the deprecated value from the config, so that we don't get an "Unkown key" error later
                   .withoutPath(from)
                   .root()

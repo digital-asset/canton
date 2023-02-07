@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore
@@ -41,8 +41,13 @@ class DbParticipantSettingsStore(
     val maxRate = r.<<[Option[NonNegativeInt]]
     val maxDedupDuration = r.<<[Option[NonNegativeFiniteDuration]]
     val uniqueContractKeys = r.<<[Option[Boolean]]
+    val maxBurstFactor = r.<<[PositiveDouble]
     Settings(
-      ResourceLimits(maxDirtyRequests = maxDirtyRequests, maxRate = maxRate),
+      ResourceLimits(
+        maxDirtyRequests = maxDirtyRequests,
+        maxRate = maxRate,
+        maxBurstFactor = maxBurstFactor,
+      ),
       maxDedupDuration,
       uniqueContractKeys,
     )
@@ -53,7 +58,7 @@ class DbParticipantSettingsStore(
       processingTime.event {
         for {
           settingsO <- storage.query(
-            sql"select max_dirty_requests, max_rate, max_deduplication_duration, unique_contract_keys from participant_settings"
+            sql"select max_dirty_requests, max_rate, max_deduplication_duration, unique_contract_keys, max_burst_factor from participant_settings"
               .as[Settings]
               .headOption,
             functionFullName,
@@ -64,18 +69,18 @@ class DbParticipantSettingsStore(
           // For participants with v2.3.0 or earlier, this will upgrade resource limits from "no limits" to the new default
           _ <- settingsO match {
             case None if storage.isActive =>
-              val ResourceLimits(maxDirtyRequests, maxRate) = ResourceLimits.default
+              val ResourceLimits(maxDirtyRequests, maxRate, maxBurstFactor) = ResourceLimits.default
               val query = storage.profile match {
                 case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
-                  sqlu"""insert into participant_settings(client, max_dirty_requests, max_rate)
-                           values($client, $maxDirtyRequests, $maxRate)
+                  sqlu"""insert into participant_settings(client, max_dirty_requests, max_rate, max_burst_factor)
+                           values($client, $maxDirtyRequests, $maxRate, $maxBurstFactor)
                            on conflict do nothing"""
 
                 case _: DbStorage.Profile.Oracle =>
                   sqlu"""merge into participant_settings using dual on (1 = 1)
                            when not matched then
-                             insert(client, max_dirty_requests, max_rate) 
-                             values($client, $maxDirtyRequests, $maxRate)"""
+                             insert(client, max_dirty_requests, max_rate, max_burst_factor) 
+                             values($client, $maxDirtyRequests, $maxRate, $maxBurstFactor)"""
               }
               storage.update_(query, functionFullName)
 
@@ -94,19 +99,19 @@ class DbParticipantSettingsStore(
       // This also ensures that value meets the object invariant of Settings.
       cache.updateAndGet(_.map(_.copy(resourceLimits = resourceLimits)))
 
-      val ResourceLimits(maxDirtyRequests, maxRate) = resourceLimits
+      val ResourceLimits(maxDirtyRequests, maxRate, maxBurstFactor) = resourceLimits
 
       val query = storage.profile match {
         case _: DbStorage.Profile.Postgres =>
-          sqlu"""insert into participant_settings(max_dirty_requests, max_rate, client) values($maxDirtyRequests, $maxRate, $client)
-                   on conflict(client) do update set max_dirty_requests = $maxDirtyRequests, max_rate = $maxRate"""
+          sqlu"""insert into participant_settings(max_dirty_requests, max_rate, max_burst_factor, client) values($maxDirtyRequests, $maxRate, $maxBurstFactor, $client)
+                   on conflict(client) do update set max_dirty_requests = $maxDirtyRequests, max_rate = $maxRate, max_burst_factor = $maxBurstFactor"""
 
         case _: DbStorage.Profile.Oracle | _: DbStorage.Profile.H2 =>
           sqlu"""merge into participant_settings using dual on (1 = 1)
                  when matched then
-                   update set max_dirty_requests = $maxDirtyRequests, max_rate = $maxRate
+                   update set max_dirty_requests = $maxDirtyRequests, max_rate = $maxRate, max_burst_factor = $maxBurstFactor
                  when not matched then
-                   insert (max_dirty_requests, max_rate, client) values ($maxDirtyRequests, $maxRate, $client)"""
+                   insert (max_dirty_requests, max_rate, max_burst_factor, client) values ($maxDirtyRequests, $maxRate, $maxBurstFactor, $client)"""
       }
       runQueryAndRefreshCache(query, functionFullName)
     }

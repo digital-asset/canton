@@ -109,6 +109,7 @@ class TransactionProcessingSteps(
     storedContractManager: StoredContractManager,
     metrics: TransactionProcessingMetrics,
     serializableContractAuthenticator: SerializableContractAuthenticator,
+    authorizationValidator: AuthorizationValidator,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
@@ -748,6 +749,7 @@ class TransactionProcessingSteps(
       pendingDataAndResponseArgs
 
     val ipsSnapshot = snapshot.ipsSnapshot
+    val requestId = RequestId(requestTimestamp)
 
     def doParallelChecks(enrichedTransaction: EnrichedTransaction): Future[ParallelChecksResult] = {
       val ledgerTime = enrichedTransaction.ledgerTime
@@ -778,6 +780,12 @@ class TransactionProcessingSteps(
           logger,
         )
 
+        authorizationResult <- authorizationValidator.checkAuthorization(
+          requestId,
+          rootViewsWithUsedAndCreated.rootViews,
+          ipsSnapshot,
+        )
+
         conformanceResult <- modelConformanceChecker
           .check(
             rootViewsWithUsedAndCreated.rootViews,
@@ -787,7 +795,12 @@ class TransactionProcessingSteps(
             commonData,
           )
           .value
-      } yield ParallelChecksResult(consistencyResult, conformanceResult, timeValidation)
+      } yield ParallelChecksResult(
+        consistencyResult,
+        authorizationResult,
+        conformanceResult,
+        timeValidation,
+      )
     }
 
     def awaitActivenessResult: Future[ActivenessResult] = activenessResultFuture.map {
@@ -885,6 +898,7 @@ class TransactionProcessingSteps(
         submitterMetadata = enrichedTransaction.submitterMetadata,
         workflowId = enrichedTransaction.workflowId,
         contractConsistencyResult = parallelChecksResult.consistencyResult,
+        authorizationResult = parallelChecksResult.authorizationResult,
         modelConformanceResult = parallelChecksResult.conformanceResult,
         consumedInputsOfHostedParties =
           enrichedTransaction.rootViewsWithUsedAndCreated.contracts.consumedInputsOfHostedStakeholders,
@@ -902,7 +916,6 @@ class TransactionProcessingSteps(
       )
     }
 
-    val requestId = RequestId(requestTimestamp)
     val result = enrichedTransactionO match {
       case None =>
         for {
@@ -945,9 +958,7 @@ class TransactionProcessingSteps(
             Seq.empty,
             RejectionArgs(
               pendingTransaction,
-              LocalReject.TimeRejects.LocalTimeout.Reject()(
-                protocolVersion
-              ),
+              LocalReject.TimeRejects.LocalTimeout.Reject(protocolVersion),
             ),
           )
         }
@@ -1109,6 +1120,7 @@ class TransactionProcessingSteps(
       submitterMeta,
       workflowId,
       contractConsistency,
+      authorizationResult,
       modelConformanceResult,
       consumedInputsOfHostedParties,
       witnessedAndDivulged,
@@ -1261,7 +1273,7 @@ class TransactionProcessingSteps(
         case (_, Left(modelConformanceError)) =>
           rejected(
             LocalReject.MalformedRejects.ModelConformance.Reject(modelConformanceError.toString)(
-              protocolVersion
+              LocalVerdict.protocolVersionRepresentativeFor(protocolVersion)
             )
           )
 
@@ -1773,6 +1785,7 @@ object TransactionProcessingSteps {
 
   case class ParallelChecksResult(
       consistencyResult: Either[List[ReferenceToFutureContractError], Unit],
+      authorizationResult: Map[ViewHash, String],
       conformanceResult: Either[ModelConformanceChecker.Error, ModelConformanceChecker.Result],
       timeValidationResult: Either[TimeCheckFailure, Unit],
   )

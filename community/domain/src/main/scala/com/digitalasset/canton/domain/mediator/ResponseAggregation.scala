@@ -241,12 +241,6 @@ private[mediator] final case class ResponseAggregation(
     }
 
     for {
-      statesOfViews <- OptionT.fromOption[Future](state.leftMap { s =>
-        logger.debug(
-          s"Request ${requestId.unwrap} has already been finalized with verdict $s before response $responseTimestamp from $sender with $localVerdict for view $viewHashO arrives"
-        )
-      }.toOption)
-
       _ <- OptionT.fromOption[Future](rootHashO.traverse_ { rootHash =>
         if (request.rootHash.forall(_ == rootHash)) Some(())
         else {
@@ -324,6 +318,15 @@ private[mediator] final case class ResponseAggregation(
             } yield List(viewHash -> authorizedConfirmingParties)
         }
       }
+
+      // This comes last so that the validation also runs for responses to finalized requests. Benefits:
+      // - more exhaustive security alerts
+      // - avoid race conditions in security tests
+      statesOfViews <- OptionT.fromOption[Future](state.leftMap { s => // move down
+        logger.debug(
+          s"Request ${requestId.unwrap} has already been finalized with verdict $s before response $responseTimestamp from $sender with $localVerdict for view $viewHashO arrives"
+        )
+      }.toOption)
     } yield {
       val updatedState = MonadUtil.foldLeftM(statesOfViews, viewHashesAndParties)(progressView)
       copy(version = responseTimestamp, state = updatedState)

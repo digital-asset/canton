@@ -104,7 +104,7 @@ trait ProcessingSteps[
   /** The type of errors that can occur during result processing */
   type ResultError <: WrapsProcessorError
 
-  /** The type of the request (transaction, transfer out, transfer in) */
+  /** The type of the request (transaction, transfer-out, transfer-in) */
   type RequestType <: ProcessingSteps.RequestType
   val requestType: RequestType
 

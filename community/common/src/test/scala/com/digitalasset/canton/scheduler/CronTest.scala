@@ -69,9 +69,18 @@ class CronTest extends AnyWordSpec with BaseTest {
         val scheduledActual =
           cron
             .getNextValidTimeAfter(referenceTime)
-            .valueOr(err => fail(s"expect valid date but got err: ${err}"))
+            .valueOr(err => fail(s"expect valid date but got err: ${err.message}"))
         scheduledActual shouldBe nextScheduledExpected
     }
+  }
+
+  "A valid cron that ends at a certain point yields no next valid time thereafter" in {
+    // Only run in 2021 and not in subsequent years
+    val cron = Cron.tryCreate("* * * * * ? 2021")
+
+    val dateAfterCronWindow = date(1, 12, 0)
+    val never = cron.getNextValidTimeAfter(dateAfterCronWindow)
+    never shouldBe Left(Cron.NoNextValidTimeAfter(dateAfterCronWindow))
   }
 
   private def date(dayOfMonth: Int, hour: Int, minute: Int): CantonTimestamp = {

@@ -4,7 +4,8 @@
 package com.digitalasset.canton.environment
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.{InstanceName, Port}
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{CantonCommunityConfig, TestingConfigInternal}
 import com.digitalasset.canton.domain.DomainNodeBootstrap
 import com.digitalasset.canton.domain.config.{
@@ -78,7 +79,7 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
 
     val environment = new CommunityEnvironment(
       config,
-      TestingConfigInternal(),
+      TestingConfigInternal(initializeGlobalOpenTelemetry = false),
       loggerFactory,
     ) {
       override def createParticipant(

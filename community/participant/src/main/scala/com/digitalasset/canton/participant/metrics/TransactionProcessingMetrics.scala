@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.{Factory, Histogram, Timer}
+import com.daml.metrics.api.MetricHandle.{Histogram, MetricsFactory, Timer}
 import com.daml.metrics.api.{MetricDoc, MetricName}
 
-class TransactionProcessingMetrics(val prefix: MetricName, factory: Factory) {
+class TransactionProcessingMetrics(val prefix: MetricName, factory: MetricsFactory) {
 
   object protocolMessages {
     private val prefix = TransactionProcessingMetrics.this.prefix :+ "protocol-messages"

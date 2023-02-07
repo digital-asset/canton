@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.OptionT
-import com.daml.metrics.api.MetricHandle
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   Counter,
@@ -25,6 +25,7 @@ import com.digitalasset.canton.{DiscardOps, RequestCounter, RequestCounterDiscri
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.ConcurrentModificationException
+import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
@@ -88,14 +89,15 @@ class RequestJournal(
     store.query(rc)
   }
 
+  private val numDirtyRequests = new AtomicInteger(0)
+
   /** Yields the number of requests that are currently not in state clean.
     *
     * The number may be incorrect, if previous calls to `insert`, `transit`, or `terminate` have failed with an exception.
     * This can be tolerated, as the SyncDomain should be restarted after such an exception and that will
     * reset the request journal.
     */
-  def numberOfDirtyRequests: Int = numDirtyRequestsM.getCount.toInt
-  private def numDirtyRequestsM: MetricHandle.Counter = metrics.numDirtyRequests
+  def numberOfDirtyRequests: Int = numDirtyRequests.get()
 
   /** Insert a new request into the request journal.
     * The insertion will become visible immediately.
@@ -142,7 +144,7 @@ class RequestJournal(
       data = RequestData(rc, RequestState.Pending, requestTimestamp)
       _ <- store.insert(data)
 
-      _ = numDirtyRequestsM.inc()
+      _ = incrementNumDirtyRequests()
       _ = logger.debug(s"The number of dirty requests is $numberOfDirtyRequests.")
 
       // Synchronously add the new entry to the cursor queue
@@ -152,6 +154,20 @@ class RequestJournal(
       // Asynchronously drain the cursors and update the clean head
       _ = addToFlushAndLogError(s"Update Pending cursor for request $rc")(drainPending)
     } yield info.signal.future
+
+  private def incrementNumDirtyRequests(): Unit = {
+    discard {
+      numDirtyRequests.incrementAndGet()
+    }
+    metrics.numDirtyRequests.inc()
+  }
+
+  private def decrementNumDirtyRequests(): Unit = {
+    discard {
+      numDirtyRequests.decrementAndGet()
+    }
+    metrics.numDirtyRequests.dec()
+  }
 
   /** Tells the request journal that the given request is ready to transition to the given state.
     *
@@ -306,7 +322,7 @@ class RequestJournal(
       .fold(
         handleError,
         { _ =>
-          if (newState == Clean) numDirtyRequestsM.dec()
+          if (newState == Clean) decrementNumDirtyRequests()
           updateCursors()
         },
       )

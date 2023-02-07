@@ -655,7 +655,7 @@ class SyncDomain(
         eithers <- MonadUtil
           .sequentialTraverse(pendingTransfers) { data =>
             logger.debug(s"Complete ${data.transferId} after startup")
-            val eitherF = TransferOutProcessingSteps.autoTransferIn(
+            val eitherF = AutomaticTransferIn.perform(
               data.transferId,
               domainId,
               transferCoordination,
@@ -669,11 +669,11 @@ class SyncDomain(
 
       } yield {
         // Log any errors, then discard the errors and continue to complete pending transfers
-        eithers.foreach({
+        eithers.foreach {
           case Left((transferId, error)) =>
             logger.debug(s"Failed to complete pending transfer $transferId. The error was $error.")
           case Right(()) => ()
-        })
+        }
 
         pendingTransfers.lastOption.map(t => t.transferId.requestTimestamp -> t.sourceDomain)
       }
@@ -781,7 +781,7 @@ class SyncDomain(
       functionFullName,
       DomainNotReady(domainId, "The domain is shutting down."),
     ) {
-      logger.debug(s"Submitting transfer-in of `$transferId` from `$domainId`")
+      logger.debug(s"Submitting transfer-in of `$transferId` to `$domainId`")
 
       if (!ready)
         DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard

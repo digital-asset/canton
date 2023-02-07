@@ -4,8 +4,8 @@
 package com.digitalasset.canton.domain.topology.store
 
 import cats.data.OptionT
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.messages.{

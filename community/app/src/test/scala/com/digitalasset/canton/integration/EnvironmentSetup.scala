@@ -78,7 +78,7 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
       envDef.environmentFactory.create(
         finalConfig,
         loggerFactory,
-        envDef.testingConfig,
+        envDef.testingConfig.copy(initializeGlobalOpenTelemetry = false),
       )
 
     try {
@@ -114,17 +114,22 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
   protected def createEnvironment(): TCE =
     ConcurrentEnvironmentLimiter.create(getClass.getName)(manualCreateEnvironment())
 
-  protected def destroyEnvironment(environment: TCE): Unit =
-    ConcurrentEnvironmentLimiter.destroy(getClass.getName) {
-      val config = environment.actualConfig
-      plugins.foreach(_.beforeEnvironmentDestroyed(config, environment))
-      try {
-        environment.close()
-      } finally {
-        envDef.teardown(())
-        plugins.foreach(_.afterEnvironmentDestroyed(config))
-      }
+  protected def manualDestroyEnvironment(environment: TCE): Unit = {
+    val config = environment.actualConfig
+    plugins.foreach(_.beforeEnvironmentDestroyed(config, environment))
+    try {
+      environment.close()
+    } finally {
+      envDef.teardown(())
+      plugins.foreach(_.afterEnvironmentDestroyed(config))
     }
+  }
+
+  protected def destroyEnvironment(environment: TCE): Unit = {
+    ConcurrentEnvironmentLimiter.destroy(getClass.getName) {
+      manualDestroyEnvironment(environment)
+    }
+  }
 }
 
 /** Starts an environment in a beforeAll test and uses it for all tests.

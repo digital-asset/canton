@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.contravariantSemigroupal.*
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory

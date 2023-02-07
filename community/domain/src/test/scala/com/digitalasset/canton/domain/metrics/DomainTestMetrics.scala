@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.metrics
 
+import com.daml.metrics.HealthMetrics
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
@@ -12,4 +13,5 @@ object DomainTestMetrics
       MetricName("test"),
       NoOpMetricsFactory,
       new DamlGrpcServerMetrics(NoOpMetricsFactory, "test"),
+      new HealthMetrics(NoOpMetricsFactory),
     )

@@ -3,25 +3,19 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.data.EitherT
-import cats.syntax.either.*
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultBoundedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.networking.http.HttpClient
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.config.NonNegativeDuration
 import io.grpc.stub.{AbstractStub, StreamObserver}
 import io.grpc.{Context, ManagedChannel, Status, StatusException, StatusRuntimeException}
 
-import java.net.URL
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
+import scala.concurrent.{Future, Promise, blocking}
 
 trait AdminCommand[Req, Res, Result] {
 
@@ -45,59 +39,6 @@ trait AdminCommand[Req, Res, Result] {
   def fullName: String =
     // not using getClass.getSimpleName because it ignores the hierarchy of nested classes, and it also throws unexpected exceptions
     getClass.getName.split('.').last.replace("$", ".")
-}
-
-trait HttpAdminCommand[Req, Res, Result] extends AdminCommand[Req, Res, Result] {
-
-  type Svc
-
-  def createService(
-      baseUrl: URL,
-      httpClient: HttpClient,
-      timeouts: ProcessingTimeout,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext): Svc
-
-  /** Submit the created request to our service
-    */
-  def submitRequest(service: Svc, request: Req)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, Res]
-
-}
-
-object HttpAdminCommand {
-  class NotSupported[Result](name: String)
-      extends WithResult[Result](name, Left(s"Command $name is not supported by HTTP sequencer"))
-  class Stub[Result](name: String, result: Result) extends WithResult[Result](name, Right(result))
-
-  object NoopService
-  object Placeholder
-  sealed abstract class WithResult[Result](name: String, resultE: Either[String, Result])
-      extends HttpAdminCommand[Placeholder.type, Placeholder.type, Result] {
-    override type Svc = NoopService.type
-
-    override def createService(
-        baseUrl: URL,
-        httpClient: HttpClient,
-        timeouts: ProcessingTimeout,
-        loggerFactory: NamedLoggerFactory,
-    )(implicit ec: ExecutionContext): NoopService.type =
-      NoopService
-
-    override def submitRequest(service: NoopService.type, request: Placeholder.type)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, String, Placeholder.type] =
-      // doing that instead of EitherT.pure because this doesnt require an ec in scope
-      EitherT(Future.successful(Placeholder.asRight[String]))
-
-    override def createRequest(): Either[String, Placeholder.type] = Right(Placeholder)
-
-    override def handleResponse(response: Placeholder.type): Either[String, Result] =
-      resultE
-
-    override def fullName: String = name
-  }
 }
 
 /** cantonctl GRPC Command

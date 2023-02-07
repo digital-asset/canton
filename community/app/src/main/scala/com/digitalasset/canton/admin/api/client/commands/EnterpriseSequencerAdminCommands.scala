@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
@@ -11,26 +10,20 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   TimeoutType,
 }
 import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.{v0, v1}
-import com.digitalasset.canton.domain.sequencing.admin.client.HttpSequencerAdminClient
 import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
 import com.digitalasset.canton.domain.sequencing.sequencer.{LedgerIdentity, SequencerSnapshot}
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.networking.http.HttpClient
 import com.digitalasset.canton.pruning.admin.v0.LocatePruningTimestamp
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, Member}
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
 
-import java.net.URL
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 object EnterpriseSequencerAdminCommands {
   abstract class BaseSequencerInitializationCommand[Req, Rep, Res]
@@ -127,35 +120,6 @@ object EnterpriseSequencerAdminCommands {
         V1(domainId, topologySnapshot, domainParameters, snapshotO)
       else V0(domainId, topologySnapshot, domainParameters, snapshotO)
     }
-  }
-
-  case class HttpInitialize(
-      domainId: DomainId,
-      topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Add],
-      domainParameters: StaticDomainParameters,
-  ) extends HttpAdminCommand[InitRequest, InitResponse, InitResponse] {
-    override type Svc = HttpSequencerAdminClient
-
-    override def createService(
-        baseUrl: URL,
-        httpClient: HttpClient,
-        timeouts: ProcessingTimeout,
-        loggerFactory: NamedLoggerFactory,
-    )(implicit ec: ExecutionContext): HttpSequencerAdminClient =
-      new HttpSequencerAdminClient(baseUrl, httpClient, timeouts, loggerFactory)
-
-    override def submitRequest(service: HttpSequencerAdminClient, request: InitRequest)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, String, InitResponse] =
-      service.initialize(InitRequest(domainId, topologySnapshot, domainParameters.toInternal))
-
-    override def createRequest(): Either[String, InitRequest] = Right(
-      InitRequest(domainId, topologySnapshot, domainParameters.toInternal)
-    )
-
-    override def handleResponse(response: InitResponse): Either[String, InitResponse] = Right(
-      response
-    )
   }
 
   case class Snapshot(timestamp: CantonTimestamp)

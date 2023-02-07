@@ -10,8 +10,9 @@ import cats.syntax.foldable.*
 import com.daml.nonempty.catsinstances.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric, String256M}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommitMode,

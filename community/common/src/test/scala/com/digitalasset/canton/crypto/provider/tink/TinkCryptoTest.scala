@@ -26,7 +26,7 @@ class TinkCryptoTest
       CryptoFactory
         .create(
           CommunityCryptoConfig(provider = Tink),
-          new MemoryStorage,
+          new MemoryStorage(loggerFactory),
           new CommunityCryptoPrivateStoreFactory,
           testedReleaseProtocolVersion,
           timeouts,

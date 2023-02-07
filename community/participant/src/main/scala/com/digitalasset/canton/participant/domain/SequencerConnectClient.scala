@@ -7,15 +7,13 @@ import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.SequencerConnectClient.Error
 import com.digitalasset.canton.participant.domain.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.sequencing.client.http.HttpSequencerClient
+import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
-import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, HttpSequencerConnection}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 
@@ -61,7 +59,7 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 object SequencerConnectClient {
 
   type Builder =
-    DomainConnectionConfig => TraceContext => EitherT[Future, Error, SequencerConnectClient]
+    DomainConnectionConfig => EitherT[Future, Error, SequencerConnectClient]
 
   sealed trait Error {
     def message: String
@@ -75,26 +73,13 @@ object SequencerConnectClient {
     final case class Transport(message: String) extends Error
   }
 
-  def makeBuilder(
-      crypto: Crypto,
+  def apply(
+      config: DomainConnectionConfig,
       timeouts: ProcessingTimeout,
       traceContextPropagation: TracingConfig.Propagation,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContextExecutor
-  ): Builder = { config => implicit traceContext =>
-    apply(config, crypto, timeouts, traceContextPropagation, loggerFactory)
-  }
-
-  def apply(
-      config: DomainConnectionConfig,
-      crypto: Crypto,
-      timeouts: ProcessingTimeout,
-      traceContextPropagation: TracingConfig.Propagation,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      ec: ExecutionContextExecutor,
-      traceContext: TraceContext,
   ): EitherT[Future, Error, SequencerConnectClient] = {
     for {
       client <- config.sequencerConnection match {
@@ -107,17 +92,6 @@ object SequencerConnectClient {
               loggerFactory,
             )
           )
-        case connection: HttpSequencerConnection =>
-          for {
-            httpClient <- HttpSequencerClient(
-              crypto,
-              connection,
-              timeouts,
-              traceContextPropagation,
-              loggerFactory,
-            )
-              .leftMap[Error](str => Error.Transport(str))
-          } yield new HttpSequencerConnectClient(httpClient, loggerFactory)
       }
     } yield client
   }

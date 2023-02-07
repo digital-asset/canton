@@ -8,7 +8,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String255,

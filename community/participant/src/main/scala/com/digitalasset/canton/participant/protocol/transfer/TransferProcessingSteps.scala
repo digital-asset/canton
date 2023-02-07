@@ -11,7 +11,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
-import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SaltError}
+import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata, ViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
@@ -281,45 +281,80 @@ object TransferProcessingSteps {
     override def underlyingProcessorError(): Option[ProcessorError] = None
 
     override def pretty: Pretty[TransferProcessorError.this.type] = adHocPrettyInstance
+
+    def message: String
   }
 
   case class GenericStepsError(error: ProcessorError) extends TransferProcessorError {
     override def underlyingProcessorError(): Option[ProcessorError] = Some(error)
+
+    override def message: String = error.toString
   }
 
-  case class SeedGeneratorError(cause: SaltError) extends TransferProcessorError {
-    override def pretty: Pretty[SeedGeneratorError] = prettyOfParam(_.cause)
+  case class UnknownDomain(domainId: DomainId, context: String) extends TransferProcessorError {
+    override def message: String = s"Unknown domain $domainId when $context"
   }
 
-  case class UnknownDomain(domainId: DomainId, reason: String) extends TransferProcessorError
+  case class DomainNotReady(domainId: DomainId, context: String) extends TransferProcessorError {
+    override def message: String = s"Domain $domainId is not ready when $context"
 
-  case class DomainNotReady(domainId: DomainId, reason: String) extends TransferProcessorError
+  }
 
-  case class MetadataNotFound(err: engine.Error) extends TransferProcessorError
+  case class MetadataNotFound(err: engine.Error) extends TransferProcessorError {
+    override def message: String = s"Contract metadata not found: ${err.message}"
+  }
 
-  case class CreatingTransactionIdNotFound(contractId: LfContractId) extends TransferProcessorError
+  case class CreatingTransactionIdNotFound(contractId: LfContractId)
+      extends TransferProcessorError {
+    override def message: String = s"Creating transaction id not found for contract `$contractId`"
 
-  case class NoTimeProofFromDomain(domainId: DomainId) extends TransferProcessorError
+  }
 
-  case object ReceivedNoRequests extends TransferProcessorError
+  case class NoTimeProofFromDomain(domainId: DomainId) extends TransferProcessorError {
+    override def message: String = s"Cannot fetch time proof for domain `$domainId`"
+  }
+
+  case object ReceivedNoRequests extends TransferProcessorError {
+    override def message: String = "No request found for transfer"
+  }
 
   case class ReceivedMultipleRequests[T](transferIds: NonEmpty[Seq[T]])
-      extends TransferProcessorError
+      extends TransferProcessorError {
+    override def message: String =
+      s"Expecting a single transfer id and got several: ${transferIds.mkString(", ")}"
+  }
 
-  case class NoSubmissionPermission(
-      transferId: Option[TransferId],
+  case class NoSubmissionPermissionIn(
+      transferId: TransferId,
       party: LfPartyId,
       participantId: ParticipantId,
-  ) extends TransferProcessorError
+  ) extends TransferProcessorError {
 
-  case class StakeholderMismatch(
+    override def message: String =
+      s"For transfer-in `$transferId`: $party does not have submission permission on $participantId"
+  }
+
+  case class NoSubmissionPermissionOut(
+      contractId: LfContractId,
+      party: LfPartyId,
+      participantId: ParticipantId,
+  ) extends TransferProcessorError {
+    override def message: String =
+      s"For transfer-out of `$contractId`: $party does not have submission permission on $participantId"
+  }
+
+  case class StakeholdersMismatch(
       transferId: Option[TransferId],
       declaredViewStakeholders: Set[LfPartyId],
       declaredContractStakeholders: Option[Set[LfPartyId]],
       expectedStakeholders: Either[String, Set[LfPartyId]],
-  ) extends TransferProcessorError
+  ) extends TransferProcessorError {
+    override def message: String = s"For transfer `$transferId`: stakeholders mistmatch"
+  }
 
-  case class NoStakeholders private (contract: LfContractId) extends TransferProcessorError
+  case class NoStakeholders private (contractId: LfContractId) extends TransferProcessorError {
+    override def message: String = s"Contract $contractId does not have any stakeholder"
+  }
 
   object NoStakeholders {
     def logAndCreate(contract: LfContractId, logger: TracedLogger)(implicit
@@ -332,36 +367,74 @@ object TransferProcessingSteps {
     }
   }
 
-  case class SubmittingPartyMustBeStakeholder(
-      transferId: Option[TransferId],
+  case class SubmittingPartyMustBeStakeholderOut(
+      contractId: LfContractId,
       submittingParty: LfPartyId,
       stakeholders: Set[LfPartyId],
-  ) extends TransferProcessorError
+  ) extends TransferProcessorError {
+    override def message: String =
+      s"Cannot transfer-out contract `$contractId`: submitter `$submittingParty` is not a stakeholder"
+  }
 
-  case class TransferStoreFailed(error: TransferStoreError) extends TransferProcessorError
+  case class SubmittingPartyMustBeStakeholderIn(
+      transferId: TransferId,
+      submittingParty: LfPartyId,
+      stakeholders: Set[LfPartyId],
+  ) extends TransferProcessorError {
+    override def message: String =
+      s"Cannot transfer-in `$transferId`: submitter `$submittingParty` is not a stakeholder"
+  }
 
-  case class EncryptionError(error: EncryptedViewMessageCreationError)
-      extends TransferProcessorError
+  case class TransferStoreFailed(transferId: TransferId, error: TransferStoreError)
+      extends TransferProcessorError {
+    override def message: String = s"Cannot transfer `$transferId`: internal transfer store error"
+  }
 
-  case class DecryptionError[VT <: ViewType](error: EncryptedViewMessageDecryptionError[VT])
-      extends TransferProcessorError
+  case class EncryptionError(contractId: LfContractId, error: EncryptedViewMessageCreationError)
+      extends TransferProcessorError {
+    override def message: String = s"Cannot transfer contract `$contractId`: encryption error"
+  }
+
+  case class DecryptionError[VT <: ViewType](
+      transferId: TransferId,
+      error: EncryptedViewMessageDecryptionError[VT],
+  ) extends TransferProcessorError {
+    override def message: String = s"Cannot transfer `$transferId`: decryption error"
+  }
 
   case class DuplicateTransferTreeHash(
       transferId: Option[TransferId],
       submitterLf: LfPartyId,
       hash: RootHash,
-  ) extends TransferProcessorError
+  ) extends TransferProcessorError {
+    private def kind = transferId.map(id => s"in: `$id`").getOrElse("out")
 
-  case class FailedToCreateResponse(error: InvalidMediatorResponse) extends TransferProcessorError
+    override def message: String = s"Cannot transfer-$kind: duplicatehash"
+  }
 
-  case class CausalityInformationMissing(missingFor: Set[LfPartyId]) extends TransferProcessorError
+  case class FailedToCreateResponse(transferId: TransferId, error: InvalidMediatorResponse)
+      extends TransferProcessorError {
+    override def message: String = s"Cannot transfer `$transferId`: failed to create response"
+  }
+
+  case class CausalityInformationMissing(transferId: TransferId, missingFor: Set[LfPartyId])
+      extends TransferProcessorError {
+    override def message: String = s"Cannot transfer `$transferId`: causility information missing"
+  }
 
   case class IncompatibleProtocolVersions(
+      contractId: LfContractId,
       source: SourceProtocolVersion,
       target: TargetProtocolVersion,
-  ) extends TransferProcessorError
+  ) extends TransferProcessorError {
+    override def message: String =
+      s"Cannot transfer contract `$contractId`: invalid transfer from domain with protocol version $source to domain with protocol version $target"
+  }
 
-  case class FieldConversionError(field: String, error: String) extends TransferProcessorError {
+  case class FieldConversionError(transferId: TransferId, field: String, error: String)
+      extends TransferProcessorError {
+    override def message: String = s"Cannot transfer `$transferId`: invalid conversion for `$field`"
+
     override def pretty: Pretty[FieldConversionError] = prettyOfClass(
       param("field", _.field.unquoted),
       param("error", _.error.unquoted),

@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.syntax.parallel.*
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
+import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String255}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,

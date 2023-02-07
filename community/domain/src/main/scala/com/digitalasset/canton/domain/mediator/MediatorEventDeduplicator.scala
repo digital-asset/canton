@@ -17,7 +17,7 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
 }
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, RequestId, v0}
-import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
+import com.digitalasset.canton.sequencing.TracedProtocolEvent
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
@@ -44,13 +44,14 @@ private[mediator] trait MediatorEventDeduplicator {
     *   The event should be considered clean only when `storeF` is completed.
     */
   def rejectDuplicates(
-      envelopesByEvent: Seq[(OrdinaryProtocolEvent, Seq[DefaultOpenEnvelope])]
+      envelopesByEvent: Seq[(TracedProtocolEvent, Seq[DefaultOpenEnvelope])]
   )(implicit
       executionContext: ExecutionContext
-  ): Future[(Seq[(OrdinaryProtocolEvent, Seq[DefaultOpenEnvelope])], Future[Unit])] =
+  ): Future[(Seq[(TracedProtocolEvent, Seq[DefaultOpenEnvelope])], Future[Unit])] =
     MonadUtil
       .sequentialTraverse(envelopesByEvent) { case (event, envelopes) =>
-        rejectDuplicates(event.timestamp, envelopes)(event.traceContext).map {
+        implicit val traceContext: TraceContext = event.traceContext
+        rejectDuplicates(event.value.timestamp, envelopes)(traceContext).map {
           case (uniqueEnvelopes, storeF) => (event, uniqueEnvelopes) -> storeF
         }
       }

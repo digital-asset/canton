@@ -8,7 +8,7 @@ import com.daml.error.ErrorCategory.SecurityAlert
 import com.daml.error.{ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext

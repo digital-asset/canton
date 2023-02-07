@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.syntax.either.*
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.{LedgerSubmissionId, checked}

@@ -135,7 +135,7 @@ class SingleDomainCausalTrackerTest
         .foldLeft(List.empty[EventPerPartyCausalState]) { case (eventsList, update) =>
           val delta: Map[DomainId, CantonTimestamp] = update match {
             case TransactionUpdate(parties, ts, domain, rc) => Map.empty
-            // Causal dependencies should be introduced by the transfer in
+            // Causal dependencies should be introduced by the transfer-in
             case TransferInUpdate(parties, ts, domain, rc, transferId) =>
               Map(transferId.sourceDomain -> outTime)
             case _ => fail()

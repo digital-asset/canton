@@ -9,7 +9,6 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
 import com.daml.platform.apiserver.meteringreport.MeteringReportKey
@@ -19,7 +18,7 @@ import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
 }
-import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig, InitConfigBase, TestingConfigInternal}
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.{
   CommunityGrpcVaultServiceFactory,
@@ -33,6 +32,7 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
+import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -74,9 +74,11 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyDispatcher,
   ParticipantTopologyManager,
 }
+import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.scheduler.SchedulersWithPruning
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
+import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
@@ -119,14 +121,13 @@ class ParticipantNodeBootstrap(
     parentLogger: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
     meteringReportKey: MeteringReportKey,
-    envQueueName: String,
-    envQueueSize: () => Long,
     additionalGrpcServices: (
         CantonSyncService,
         ParticipantNodePersistentState,
     ) => List[BindableService] = (_, _) => Nil,
     createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithPruning] = _ =>
       Future.successful(SchedulersWithPruning.noop),
+    configuredOpenTelemetry: ConfiguredOpenTelemetry,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -150,6 +151,8 @@ class ParticipantNodeBootstrap(
       parentLogger.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
       metrics.ledgerApiServer.daml.grpc,
+      configuredOpenTelemetry,
+      metrics.ledgerApiServer.daml.health,
     ) {
 
   /** per session created admin token for in-process connections to ledger-api */
@@ -165,6 +168,12 @@ class ParticipantNodeBootstrap(
   private val replaySequencerConfig: AtomicReference[Option[ReplayConfig]] = new AtomicReference(
     None
   )
+
+  override protected lazy val nodeHealthService: HealthReporting.ServiceHealth =
+    new HealthReporting.ServiceHealth {
+      override val name: String = "participant"
+      override lazy val criticalDependencies: Set[HealthReporting.ComponentHealth] = Set(storage)
+    }
 
   private val authorizedTopologyStore = topologyStoreFactory.forId(AuthorizedStore)
   private val topologyManager =
@@ -233,8 +242,6 @@ class ParticipantNodeBootstrap(
             tracerProvider,
             metrics.ledgerApiServer,
             meteringReportKey,
-            envQueueName,
-            envQueueSize,
           ),
           // start ledger API server iff participant replica is active
           startLedgerApiServer = sync.isActive(),
@@ -525,7 +532,7 @@ class ParticipantNodeBootstrap(
               persistentState.multiDomainEventLog,
               storage,
               adminToken,
-              cantonParameterConfig.stores.maxPruningBatchSize,
+              cantonParameterConfig.stores,
             )
           )
         )
@@ -713,8 +720,7 @@ object ParticipantNodeBootstrap {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         writeHealthDumpToFile: HealthDumpFunction,
-        envQueueName: String,
-        envQueueSize: () => Long,
+        configuredOpenTelemetry: ConfiguredOpenTelemetry,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
@@ -735,8 +741,7 @@ object ParticipantNodeBootstrap {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         writeHealthDumpToFile: HealthDumpFunction,
-        envQueueName: String,
-        envQueueSize: () => Long,
+        configuredOpenTelemetry: ConfiguredOpenTelemetry,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
@@ -752,9 +757,9 @@ object ParticipantNodeBootstrap {
             participantNodeParameters,
             testingConfigInternal,
             clock,
-            CantonOnly.newDamlEngine(
+            DAMLe.newEngine(
               participantNodeParameters.uniqueContractKeys,
-              participantNodeParameters.unsafeEnableDamlLfDevVersion,
+              participantNodeParameters.devVersionSupport,
             ),
             testingTimeService,
             CantonSyncService.DefaultFactory,
@@ -779,8 +784,7 @@ object ParticipantNodeBootstrap {
             loggerFactory,
             writeHealthDumpToFile,
             meteringReportKey = CommunityKey,
-            envQueueName,
-            envQueueSize,
+            configuredOpenTelemetry = configuredOpenTelemetry,
           )
         )
         .leftMap(_.toString)

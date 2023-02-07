@@ -8,7 +8,8 @@ import cats.syntax.semigroup.*
 import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric
-import com.digitalasset.canton.crypto.{Salt, TestSalt}
+import com.digitalasset.canton.crypto.{HashPurpose, Salt, TestSalt}
+import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransactionViewTree
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
@@ -192,7 +193,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
       factory.submitterMetadata,
       factory.commonMetadata,
       factory.participantMetadata,
-      MerkleSeq.fromSeq(factory.cryptoOps)(Seq(singleCreateView), testedProtocolVersion),
+      MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(Seq(singleCreateView)),
     )
 
     "several root views have the same hash" must {
@@ -201,9 +202,8 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
           factory.submitterMetadata,
           factory.commonMetadata,
           factory.participantMetadata,
-          MerkleSeq.fromSeq(factory.cryptoOps)(
-            Seq(singleCreateView, singleCreateView),
-            testedProtocolVersion,
+          MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(
+            Seq(singleCreateView, singleCreateView)
           ),
         ) should matchPattern {
           case Left(message: String)
@@ -227,7 +227,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
           factory.submitterMetadata,
           factory.commonMetadata,
           factory.participantMetadata,
-          MerkleSeq.fromSeq(factory.cryptoOps)(Seq(parentView), testedProtocolVersion),
+          MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(Seq(parentView)),
         ) should matchPattern {
           case Left(message: String)
               if message.matches(
@@ -351,6 +351,44 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
     }
   }
 
+  // Before v3, the subview hashes do not need to be passed at construction
+  if (testedProtocolVersion >= ProtocolVersion.v4) {
+    "A light transaction view tree" when {
+      val example = factory.ViewInterleavings
+
+      forEvery(example.transactionViewTrees.zipWithIndex) { case (tvt, index) =>
+        val viewWithBlindedSubviews = tvt.view.copy(subviews = tvt.view.subviews.blindFully)
+        val genTransactionTree =
+          tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, viewWithBlindedSubviews))
+
+        val dummyViewHash = ViewHash(
+          factory.cryptoOps.build(HashPurpose.MerkleTreeInnerNode).add("hummous").finish()
+        )
+        val mangledSubviewHashes =
+          if (tvt.subviewHashes.isEmpty) Seq(dummyViewHash)
+          else tvt.subviewHashes.updated(0, dummyViewHash)
+
+        "given consistent subview hashes" must {
+          s"pass sanity tests at creation (for the $index-th transaction view tree)" in {
+            noException should be thrownBy LightTransactionViewTree
+              .tryCreate(genTransactionTree, tvt.subviewHashes, testedProtocolVersion)
+          }
+        }
+
+        "given inconsistent subview hashes" must {
+          s"reject creation (for the $index-th transaction view tree)" in {
+            an[InvalidLightTransactionViewTree] should be thrownBy LightTransactionViewTree
+              .tryCreate(genTransactionTree, mangledSubviewHashes, testedProtocolVersion)
+
+            if (tvt.subviewHashes.nonEmpty)
+              an[InvalidLightTransactionViewTree] should be thrownBy LightTransactionViewTree
+                .tryCreate(genTransactionTree, Seq.empty, testedProtocolVersion)
+          }
+        }
+      }
+    }
+  }
+
   "An informee tree" when {
 
     val example = factory.MultipleRootsAndViewNestings
@@ -394,9 +432,8 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
 
         val view1WithParticipantDataUnblinded =
           view1.copy(viewParticipantData = view1Unblinded.viewParticipantData)
-        val rootViews = MerkleSeq.fromSeq(factory.cryptoOps)(
-          Seq(view1WithParticipantDataUnblinded),
-          testedProtocolVersion,
+        val rootViews = MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(
+          Seq(view1WithParticipantDataUnblinded)
         )
 
         val treeWithViewMetadataUnblinded =
@@ -446,9 +483,8 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
 
         val viewCommonDataBlinded =
           fullInformeeTree.copy(rootViews =
-            MerkleSeq.fromSeq(factory.cryptoOps)(
-              rootViewsWithCommonDataBlinded,
-              testedProtocolVersion,
+            MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(
+              rootViewsWithCommonDataBlinded
             )
           )
 
@@ -594,7 +630,7 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
         submitterMetadata,
         commonMetadata,
         participantMetadata,
-        MerkleSeq.fromSeq(factory.cryptoOps)(Seq(rootView), protocolVersion),
+        MerkleSeq.fromSeq(factory.cryptoOps, protocolVersion)(Seq(rootView)),
       )
     }
 

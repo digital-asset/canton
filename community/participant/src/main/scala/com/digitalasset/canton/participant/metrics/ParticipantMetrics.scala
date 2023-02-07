@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
+import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
-import com.daml.metrics.api.opentelemetry.OpenTelemetryFactory
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.DomainAlias
@@ -20,7 +20,7 @@ class ParticipantMetrics(
     name: String,
     val prefix: MetricName,
     val dropwizardFactory: CantonDropwizardMetricsFactory,
-    val openTelemetryFactory: OpenTelemetryFactory,
+    val labeledMetricsFactory: LabeledMetricsFactory,
 ) {
 
   private implicit val mc: MetricsContext = MetricsContext("participant_name" -> name)
@@ -28,7 +28,7 @@ class ParticipantMetrics(
   object dbStorage extends DbStorageMetrics(prefix, dropwizardFactory)
 
   val ledgerApiServer: LedgerApiServerMetrics =
-    new LedgerApiServerMetrics(dropwizardFactory, openTelemetryFactory)
+    new LedgerApiServerMetrics(dropwizardFactory, labeledMetricsFactory, dropwizardFactory.registry)
 
   private val clients = TrieMap[DomainAlias, SyncDomainMetrics]()
 
@@ -70,7 +70,7 @@ class ParticipantMetrics(
   val maxDirtyRequestGaugeForDocs: Gauge[Int] =
     NoOpGauge(prefix :+ "max_dirty_requests", 0)
 
-  def registerMaxDirtyRequest(value: () => Option[Int]): Unit =
+  def registerMaxDirtyRequest(value: () => Option[Int]): Gauge.CloseableGauge =
     dropwizardFactory.gaugeWithSupplier(
       prefix :+ "max_dirty_requests",
       () => value().getOrElse(-1),
@@ -108,7 +108,9 @@ class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
                       |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
       qualification = Debug,
     )
-    val taskQueue: RefGauge[Int] = factory.refGauge(prefix :+ "task-queue", 0)
+    val taskQueueForDoc: Gauge[Int] = NoOpGauge(prefix :+ "task-queue", 0)
+    def taskQueue(size: () => Int): CloseableGauge =
+      factory.gauge(prefix :+ "task-queue", 0)(MetricsContext.Empty)
 
   }
 
@@ -143,7 +145,9 @@ class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
                       |exposes the number of tasks that are waiting in the task queue for the right time to pass.""",
       qualification = Debug,
     )
-    val taskQueue: RefGauge[Int] = factory.refGauge(prefix :+ "task-queue", 0)
+    val taskQueueForDoc: Gauge[Int] = NoOpGauge(prefix :+ "task-queue", 0)
+    def taskQueue(size: () => Int): CloseableGauge =
+      factory.gauge(prefix :+ "task-queue", 0)(MetricsContext.Empty)
   }
 
 }

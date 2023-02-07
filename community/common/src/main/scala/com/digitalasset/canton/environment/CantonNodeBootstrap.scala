@@ -8,11 +8,13 @@ import better.files.File
 import cats.data.{EitherT, OptionT}
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
+import com.daml.metrics.HealthMetrics
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.grpc.GrpcServerMetrics
 import com.digitalasset.canton
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{InitConfigBase, LocalNodeConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.GrpcVaultServiceFactory
@@ -21,9 +23,11 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStor
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.health.HealthReporting.ServiceHealthStatusManager
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
 import com.digitalasset.canton.health.admin.v0.StatusServiceGrpc
+import com.digitalasset.canton.health.{GrpcHealthReporter, GrpcHealthServer, HealthReporting}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
@@ -31,6 +35,7 @@ import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.resource.StorageFactory
 import com.digitalasset.canton.store.IndexedStringStore
+import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{
@@ -50,7 +55,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreFactory,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction.{TopologyTransaction, *}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.retry
@@ -62,8 +67,8 @@ import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 
-import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.{Executors, ScheduledExecutorService}
 import scala.concurrent.duration.*
 import scala.concurrent.{Future, blocking}
 
@@ -115,6 +120,8 @@ abstract class CantonNodeBootstrapBase[
     val loggerFactory: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
     grpcMetrics: GrpcServerMetrics,
+    configuredOpenTelemetry: ConfiguredOpenTelemetry,
+    healthMetrics: HealthMetrics,
 )(
     implicit val executionContext: ExecutionContextIdlenessExecutorService,
     implicit val scheduler: ScheduledExecutorService,
@@ -127,7 +134,7 @@ abstract class CantonNodeBootstrapBase[
   protected val adminApiConfig = config.adminApi
   protected val initConfig = config.init
   protected val tracerProvider =
-    TracerProvider.Factory(parameterConfig.tracing.tracer, name.unwrap)
+    TracerProvider.Factory(configuredOpenTelemetry, name.unwrap)
   implicit val tracer: Tracer = tracerProvider.tracer
 
   private val isRunningVar = new AtomicBoolean(true)
@@ -191,6 +198,37 @@ abstract class CantonNodeBootstrapBase[
         parameterConfig.processingTimeouts,
         loggerFactory,
       )
+
+  /** Health service component of the node
+    */
+  protected def nodeHealthService: HealthReporting.ServiceHealth
+
+  private val healthReporter: GrpcHealthReporter = new GrpcHealthReporter(loggerFactory)
+  private lazy val grpcNodeHealthManager =
+    ServiceHealthStatusManager(
+      "Health API",
+      new io.grpc.protobuf.services.HealthStatusManager(),
+      Set(nodeHealthService),
+    )
+
+  private val grpcHealthServer = config.monitoring.healthServer.map { healthConfig =>
+    healthReporter.registerHealthManager(grpcNodeHealthManager)
+
+    val executor = Executors.newFixedThreadPool(healthConfig.parallelism)
+
+    new GrpcHealthServer(
+      healthConfig,
+      metricsFactory,
+      executor,
+      loggerFactory,
+      parameterConfig.loggingConfig.api,
+      parameterConfig.tracing,
+      grpcMetrics,
+      timeouts,
+      grpcNodeHealthManager.manager,
+    )
+  }
+
   protected val initializationStore = InitializationStore(storage, timeouts, loggerFactory)
   protected val indexedStringStore =
     IndexedStringStore.create(
@@ -227,6 +265,15 @@ abstract class CantonNodeBootstrapBase[
     getNode
       .map(_.status.map(NodeStatus.Success(_)))
       .getOrElse(Future.successful(NodeStatus.NotInitialized(isActive)))
+  }
+
+  locally {
+    healthMetrics
+      .registerHealthGauge(
+        name.toProtoPrimitive,
+        () => getNode.map(_.status.map(_.active)).getOrElse(Future(false)),
+      )
+      .discard // we still want to report the health even if the node is closed
   }
 
   // The admin-API services
@@ -436,11 +483,10 @@ abstract class CantonNodeBootstrapBase[
           indexedStringStore,
           topologyStoreFactory,
         )
-        val instances = List(
+        val instances = grpcHealthServer.toList ++ List(
           Lifecycle.toCloseableOption(initializationWatcherRef.get()),
           adminServerRegistry,
           adminServer,
-          tracerProvider,
         ) ++ getNode.toList ++ stores ++ List(crypto, storage, clock)
         Lifecycle.close(instances: _*)(logger)
         logger.debug(s"Successfully completed shutdown of $name")

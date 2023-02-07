@@ -7,7 +7,7 @@ import cats.data.Chain
 import cats.syntax.parallel.*
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
-import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.*

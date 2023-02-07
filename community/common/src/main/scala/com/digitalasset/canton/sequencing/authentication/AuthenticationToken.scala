@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.authentication
 
 import cats.syntax.either.*
 import com.digitalasset.canton.checked
-import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
@@ -32,7 +32,7 @@ object AuthenticationToken {
 
   /** As of now, the database schemas can only handle authentication tokens up to a length of 150 bytes. Thus the length of an [[AuthenticationToken]] should never exceed that.
     * If we ever want to create an [[AuthenticationToken]] larger than that, we can increase it up to 500 bytes after which we are limited by Oracle length limits.
-    * See the documentation at [[com.digitalasset.canton.config.RequireTypes.LengthLimitedString]] for more details.
+    * See the documentation at [[com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString]] for more details.
     */
   val length: Int = 20
 

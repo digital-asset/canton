@@ -16,8 +16,9 @@ import com.digitalasset.canton.admin.api.client.data.{
   ListPartiesResult,
   PartyDetails,
 }
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.NonNegativeDuration
-import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String255}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   BaseInspection,

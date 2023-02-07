@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.InMemoryRegisterTopologyTransactionResponseStore

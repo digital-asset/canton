@@ -5,7 +5,7 @@ package com.digitalasset.canton.common.domain
 
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String255,

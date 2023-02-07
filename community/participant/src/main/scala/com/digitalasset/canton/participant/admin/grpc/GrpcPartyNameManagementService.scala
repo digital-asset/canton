@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.participant.admin.v0.{
   PartyNameManagementServiceGrpc,
   SetPartyDisplayNameRequest,

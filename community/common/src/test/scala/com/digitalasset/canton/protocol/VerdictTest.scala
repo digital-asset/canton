@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
-import com.digitalasset.canton.protocol.messages.{LocalReject, Verdict}
+import com.digitalasset.canton.protocol.messages.{LocalReject, LocalVerdict, Verdict}
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -18,6 +18,8 @@ import org.scalatest.wordspec.AnyWordSpec
 )
 class VerdictTest extends AnyWordSpec with BaseTest {
   private def party(name: String): LfPartyId = LfPartyId.assertFromString(name)
+  private lazy val representativeProtocolVersion =
+    LocalVerdict.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   "TransactionResult" can {
     "converting to and from proto" should {
@@ -32,12 +34,13 @@ class VerdictTest extends AnyWordSpec with BaseTest {
                 List,
                 (
                   Set(party("p1"), party("p2")),
-                  LocalReject.MalformedRejects.Payloads.Reject("some error")(testedProtocolVersion),
+                  LocalReject.MalformedRejects.Payloads
+                    .Reject("some error")(representativeProtocolVersion),
                 ),
                 (
                   Set(party("p3")),
                   LocalReject.ConsistencyRejections.LockedContracts
-                    .Reject(Seq())(testedProtocolVersion),
+                    .Reject(Seq())(representativeProtocolVersion),
                 ),
               ),
               testedProtocolVersion,

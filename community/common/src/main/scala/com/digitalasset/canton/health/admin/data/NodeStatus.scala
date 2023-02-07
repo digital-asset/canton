@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.health.admin.data
 
+import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.health.admin.data.NodeStatus.{multiline, portsString}
 import com.digitalasset.canton.health.admin.v0
@@ -93,7 +95,7 @@ case class SimpleStatus(
 }
 
 object SimpleStatus {
-  def fromProtoV0(proto: v0.NodeStatus.Status): ParsingResult[SimpleStatus] =
+  def fromProtoV0(proto: v0.NodeStatus.Status): ParsingResult[SimpleStatus] = {
     for {
       uid <- UniqueIdentifier.fromProtoPrimitive(proto.id, "Status.id")
       uptime <- ProtoConverter
@@ -101,7 +103,7 @@ object SimpleStatus {
         .flatMap(DurationConverter.fromProtoPrimitive)
       ports <- proto.ports.toList
         .traverse { case (s, i) =>
-          Port.create(i).map(p => (s, p))
+          Port.create(i).leftMap(InvariantViolation.toProtoDeserializationError).map(p => (s, p))
         }
         .map(_.toMap)
       topology <- ProtoConverter.parseRequired(
@@ -110,6 +112,7 @@ object SimpleStatus {
         proto.topologyQueues,
       )
     } yield SimpleStatus(uid, uptime, ports, proto.active, topology)
+  }
 }
 
 /** Health status of the sequencer component itself.

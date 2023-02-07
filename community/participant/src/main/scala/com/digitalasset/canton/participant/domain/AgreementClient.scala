@@ -7,16 +7,12 @@ import cats.data.EitherT
 import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
-import com.digitalasset.canton.sequencing.{
-  GrpcSequencerConnection,
-  HttpSequencerConnection,
-  SequencerConnection,
-}
+import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.Future
 
 /** Simple wrapper around [[AgreementService]] which calls the wrapped service if the given sequencer connection is a GRPC one,
   * otherwise it defaults to a noop, since the HTTP CCF sequencer does not yet implement an agreement service.
@@ -25,8 +21,7 @@ class AgreementClient(
     service: AgreementService,
     sequencerConnection: SequencerConnection,
     protected val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContextExecutor)
-    extends NamedLogging {
+) extends NamedLogging {
 
   def isRequiredAgreementAccepted(domainId: DomainId, protocolVersion: ProtocolVersion)(implicit
       traceContext: TraceContext
@@ -34,7 +29,6 @@ class AgreementClient(
     sequencerConnection match {
       case grpcSequencerConnection: GrpcSequencerConnection =>
         service.isRequiredAgreementAccepted(grpcSequencerConnection, domainId, protocolVersion)
-      case _: HttpSequencerConnection => EitherT.rightT[Future, AgreementServiceError](None)
     }
 
 }

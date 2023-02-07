@@ -15,7 +15,7 @@ import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.api.v1.value.Identifier
 import com.daml.ledger.client.binding.{Primitive as P}
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}

@@ -8,9 +8,12 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.{Functor, Monad}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String255}
+import com.digitalasset.canton.config.CantonRequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.Salt
+import com.digitalasset.canton.health.HealthReporting.ComponentState.UnhealthyState
+import com.digitalasset.canton.health.HealthReporting.{ComponentHealth, ComponentState}
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -70,7 +73,7 @@ import scala.language.implicitConversions
   * Using storage objects after shutdown is unsafe; thus, they should only be closed when they're ready for
   * garbage collection.
   */
-sealed trait Storage extends AutoCloseable {
+sealed trait Storage extends AutoCloseable with ComponentHealth { self: NamedLogging =>
 
   /** Indicates if the storage instance is active and ready to perform updates/writes. */
   def isActive: Boolean
@@ -140,7 +143,7 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
       closeContext: CloseContext,
   ): EitherT[UnlessShutdown, String, Storage] =
     config match {
-      case CommunityStorageConfig.Memory(_, _) => EitherT.rightT(new MemoryStorage)
+      case CommunityStorageConfig.Memory(_, _) => EitherT.rightT(new MemoryStorage(loggerFactory))
       case db: DbConfig =>
         DbStorageSingle
           .create(
@@ -157,7 +160,12 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
     }
 }
 
-class MemoryStorage extends Storage {
+class MemoryStorage(override val loggerFactory: NamedLoggerFactory)
+    extends Storage
+    with NamedLogging {
+  override val name = "memory_storage"
+  override val initialState: ComponentState = ComponentState.Ok
+
   override def close(): Unit = ()
 
   override def isActive: Boolean = true
@@ -171,6 +179,11 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
 
   val profile: DbStorage.Profile
   val dbConfig: DbConfig
+
+  override val name = "db_storage"
+
+  override lazy val initialState: ComponentState =
+    ComponentState.Failed(UnhealthyState(description = Some("database initialising")))
 
   object DbStorageConverters {
 

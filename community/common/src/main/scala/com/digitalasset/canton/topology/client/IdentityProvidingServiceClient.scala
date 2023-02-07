@@ -192,6 +192,10 @@ trait PartyTopologySnapshotClient {
       parties: Seq[LfPartyId]
   ): Future[Map[LfPartyId, Set[ParticipantId]]]
 
+  def activeParticipantsOfPartiesWithAttributes(
+      parties: Seq[LfPartyId]
+  ): Future[Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]]
+
   /** Returns the set of active participants the given party is represented by as of the snapshot timestamp
     *
     * Should never return a PartyParticipantRelationship where ParticipantPermission is DISABLED.
@@ -599,6 +603,15 @@ private[client] trait PartyTopologySnapshotLoader
     val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
     loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.map { case (k, v) =>
       (k.toLf, v.keySet)
+    })
+  }
+
+  final override def activeParticipantsOfPartiesWithAttributes(
+      parties: Seq[LfPartyId]
+  ): Future[Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]] = {
+    val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
+    loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.map { case (k, v) =>
+      (k.toLf, v)
     })
   }
 

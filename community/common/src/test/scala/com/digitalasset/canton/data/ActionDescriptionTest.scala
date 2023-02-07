@@ -17,7 +17,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
   private val suffixedId: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
   private val seed: LfHash = ExampleTransactionFactory.lfHash(5)
   private val globalKey: LfGlobalKey =
-    LfGlobalKey.assertBuild(LfTransactionBuilder.defaultTemplateId, Value.ValueInt64(10L))
+    LfGlobalKey.build(LfTransactionBuilder.defaultTemplateId, Value.ValueInt64(10L)).value
   private val choiceName: LfChoiceName = LfChoiceName.assertFromString("choice")
   private val dummyVersion: LfTransactionVersion = ExampleTransactionFactory.transactionVersion
 
@@ -125,10 +125,12 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
 
       "the key value cannot be serialized" in {
         LookupByKeyActionDescription.create(
-          LfGlobalKey.assertBuild(
-            LfTransactionBuilder.defaultTemplateId,
-            ExampleTransactionFactory.veryDeepValue,
-          ),
+          LfGlobalKey
+            .build(
+              LfTransactionBuilder.defaultTemplateId,
+              ExampleTransactionFactory.veryDeepValue,
+            )
+            .value,
           dummyVersion,
           representativePV,
         ) shouldBe Left(

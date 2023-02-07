@@ -7,7 +7,7 @@ import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import cats.syntax.traverseFilter.*
-import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.crypto.admin.v0
 import com.digitalasset.canton.crypto.{v0 as cryptoproto, *}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

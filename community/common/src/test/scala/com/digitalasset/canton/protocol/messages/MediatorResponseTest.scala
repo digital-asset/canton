@@ -5,7 +5,6 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.TestHash
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
@@ -15,22 +14,24 @@ import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
 class MediatorResponseTest extends AnyWordSpec with BaseTest with HasCryptographicEvidenceTest {
-  val cryptoApi = new SymbolicPureCrypto
-  val response1: MediatorResponse = MediatorResponse.tryCreate(
+  private lazy val localVerdictProtocolVersion =
+    LocalVerdict.protocolVersionRepresentativeFor(testedProtocolVersion)
+
+  private lazy val response1: MediatorResponse = MediatorResponse.tryCreate(
     RequestId(CantonTimestamp.now()),
     topology.ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::p1")),
     Some(ViewHash(TestHash.digest("cr1"))),
-    LocalApprove()(testedProtocolVersion),
+    LocalApprove(testedProtocolVersion),
     Some(RootHash(TestHash.digest("txid1"))),
     Set(LfPartyId.assertFromString("p1"), LfPartyId.assertFromString("p2")),
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default")),
     testedProtocolVersion,
   )
-  val response2: MediatorResponse = MediatorResponse.tryCreate(
+  private lazy val response2: MediatorResponse = MediatorResponse.tryCreate(
     RequestId(CantonTimestamp.now()),
     topology.ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::p1")),
     None,
-    LocalReject.MalformedRejects.Payloads.Reject("test message")(testedProtocolVersion),
+    LocalReject.MalformedRejects.Payloads.Reject("test message")(localVerdictProtocolVersion),
     Some(RootHash(TestHash.digest("txid3"))),
     Set.empty,
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default")),

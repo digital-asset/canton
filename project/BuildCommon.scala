@@ -44,6 +44,10 @@ object BuildCommon {
           "format",
           "; scalafmt ; Test / scalafmt ; scalafmtSbt; createLicenseHeaders",
         ) ++
+        addCommandAlias(
+          "formatAll",
+          "; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders",
+        ) ++
         // To be used by CI:
         // enable coverage and compile
         addCommandAlias("compileWithCoverage", "; clean; coverage; test:compile") ++
@@ -319,7 +323,16 @@ object BuildCommon {
         "community" / "domain",
         "domain",
       )
-      val protoFiles = communityCommonProto ++ communityParticipantProto ++ communityDomainProto
+      val researchAppProto: Seq[(File, String)] =
+        if (moduleName.value == "research-app")
+          packProtobufFiles(
+            "research" / "app",
+            "research",
+          )
+        else Nil
+
+      val protoFiles =
+        communityCommonProto ++ communityParticipantProto ++ communityDomainProto ++ researchAppProto
 
       log.info("Invoking bundle generator")
       // add license to package
@@ -1114,6 +1127,7 @@ object BuildCommon {
           opentelemetry_sdk,
           opentelemetry_sdk_autoconfigure,
           opentelemetry_prometheus,
+          opentelemetry_instrumentation_runtime_metrics,
           scalaz_core,
           akka_stream,
           log4j_core,
@@ -1131,12 +1145,14 @@ object BuildCommon {
           typelevel_paiges,
           commons_io,
           commons_codec,
+          pureconfig,
         ),
         dependencyOverrides ++= Seq(),
         Compile / unmanagedSourceDirectories ++=
           Seq(
             "observability/metrics/src/main/scala",
             "observability/tracing/src/main/scala",
+            "observability/telemetry/src/main/scala",
             "libs-scala/concurrent/src/main/scala",
             "libs-scala/executors/src/main/scala",
             "libs-scala/resources/src/main/2.13",
@@ -1213,6 +1229,8 @@ object BuildCommon {
           better_files,
           totososhi,
           lihaoyi_sourcecode,
+          logback_classic,
+          logback_core,
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
@@ -1225,6 +1243,7 @@ object BuildCommon {
             "daml-lf/data-scalacheck/src/main/scala",
             "daml-lf/transaction-test-lib/src/main/scala",
             "observability/metrics/src/test/lib/scala",
+            "ledger/test-common/src/main/scala",
           ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
         coverageEnabled := false,
         // skip header check

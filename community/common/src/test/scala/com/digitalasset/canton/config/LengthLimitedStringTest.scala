@@ -4,7 +4,7 @@
 package com.digitalasset.canton.config
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import org.scalatest.wordspec.AnyWordSpec
 
 class LengthLimitedStringTest extends AnyWordSpec with BaseTest {

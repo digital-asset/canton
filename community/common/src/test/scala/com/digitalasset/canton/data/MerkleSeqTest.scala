@@ -117,7 +117,7 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
   testCases.forEvery { (name, elements, merkleSeq, merkleSeqWithRootUnblinded) =>
     s"A MerkleSeq with $name" can {
       "be constructed" in {
-        MerkleSeq.fromSeq(hashOps)(elements, testedProtocolVersion) shouldEqual merkleSeq
+        MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(elements) shouldEqual merkleSeq
       }
 
       "be serialized" in {
@@ -161,7 +161,7 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
       }
 
       "compute the right indices" in {
-        val merkleSeq = MerkleSeq.fromSeq(hashOps)(elements, testedProtocolVersion)
+        val merkleSeq = MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(elements)
         val indices: Seq[MerklePathElement] = MerkleSeq.indicesFromSeq(elements.size)
 
         assert(indices.size == elements.size)

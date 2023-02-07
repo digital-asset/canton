@@ -7,7 +7,7 @@ import cats.Order
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
-import com.digitalasset.canton.config.RequireTypes.String68
+import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{

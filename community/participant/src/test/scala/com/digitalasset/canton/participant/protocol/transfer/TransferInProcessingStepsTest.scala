@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
 import cats.implicits.*
-import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.*
@@ -27,11 +26,11 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
-  NoSubmissionPermission,
+  NoSubmissionPermissionIn,
   ReceivedMultipleRequests,
   ReceivedNoRequests,
-  StakeholderMismatch,
-  SubmittingPartyMustBeStakeholder,
+  StakeholdersMismatch,
+  SubmittingPartyMustBeStakeholderIn,
 }
 import com.digitalasset.canton.participant.protocol.{
   GlobalCausalOrderer,
@@ -315,7 +314,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           )
         )("prepare submission did not return a left")
       } yield {
-        preparedSubmission should matchPattern { case SubmittingPartyMustBeStakeholder(_, _, _) =>
+        preparedSubmission should matchPattern { case SubmittingPartyMustBeStakeholderIn(_, _, _) =>
         }
       }
     }
@@ -344,8 +343,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           )
         )("prepare submission did not return a left")
       } yield {
-        preparedSubmission should matchPattern { case NoSubmissionPermission(_, _, _) =>
-        }
+        preparedSubmission should matchPattern { case NoSubmissionPermissionIn(_, _, _) => }
       }
     }
 
@@ -572,7 +570,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             )
         )("construction of pending data and response did not return a left")
       } yield {
-        result should matchPattern { case StakeholderMismatch(_, _, _, _) =>
+        result should matchPattern { case StakeholdersMismatch(_, _, _, _) =>
         }
       }
     }
@@ -814,7 +812,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
   ): TransferInProcessingSteps = {
 
     val pureCrypto = new SymbolicPureCrypto
-    val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false)
+    val engine = DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false)
     val mockPackageService =
       new PackageService(
         engine,

@@ -6,9 +6,9 @@ package com.digitalasset.canton.participant.domain
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
-import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.mapErr

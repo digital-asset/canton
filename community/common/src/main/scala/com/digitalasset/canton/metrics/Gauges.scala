@@ -13,7 +13,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.util.CheckedT
 import com.digitalasset.canton.util.Thereafter.syntax.*
 
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
@@ -130,15 +130,4 @@ class LoadGauge(val name: String, interval: FiniteDuration, now: => Long = Syste
     })
   }
 
-}
-
-class RefGauge[T](val name: String, empty: T) extends Gauge[T] with MetricHandle {
-
-  override def metricType: String = "Gauge"
-
-  private val ref = new AtomicReference[Option[() => T]]()
-  def setReference(inspect: Option[() => T]): Unit = {
-    ref.set(inspect)
-  }
-  override def getValue: T = ref.get().map(_()).getOrElse(empty)
 }

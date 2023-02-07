@@ -18,13 +18,13 @@ import com.daml.lf.value.Value
 import com.daml.platform.participant.util.LfEngineToApi
 import com.daml.platform.server.api.validation.FieldValidations as LedgerApiFieldValidations
 import com.digitalasset.canton.*
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
-  PositiveInt,
   String255,
 }
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashPurpose, Salt, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, HasCloseContext}
@@ -1401,9 +1401,9 @@ object RepairService {
           .validateRecord(createArguments)
           .leftMap(e => s"Failed to validate arguments: ${e}")
 
-        argsVersionedValue = CantonOnly.asVersionedValue(
+        argsVersionedValue = LfVersioned(
+          protocol.DummyTransactionVersion, // Version is ignored by daml engine upon RepairService.addContract
           argsValue,
-          CantonOnly.DummyTransactionVersion, // Version is ignored by daml engine upon RepairService.addContract
         )
 
         lfContractInst = LfContractInst(template = template, arg = argsVersionedValue)

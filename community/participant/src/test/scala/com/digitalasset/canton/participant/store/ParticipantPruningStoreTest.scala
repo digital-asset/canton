@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.String36
+import com.digitalasset.canton.config.CantonRequireTypes.String36
 import com.digitalasset.canton.participant.store.ParticipantPruningStore.ParticipantPruningStatus
 import org.scalatest.wordspec.AsyncWordSpec
 

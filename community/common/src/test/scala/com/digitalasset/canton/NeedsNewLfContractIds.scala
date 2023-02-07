@@ -13,4 +13,6 @@ trait NeedsNewLfContractIds {
 
   def newLfContractId(): LfContractId = LfContractId.V1(hasher(), hasher().bytes)
 
+  def newLfContractIdUnsuffixed(): LfContractId = LfContractId.V1(hasher())
+
 }

@@ -9,7 +9,8 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.codahale.metrics
 import com.digitalasset.canton.admin.api.client.data.{CantonStatus, CommunityCantonStatus}
-import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.{NonNegativeDuration, Password}
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.DomainId
@@ -61,6 +62,11 @@ object CantonHealthAdministrationEncoders {
   implicit val threadKeyEncoder: KeyEncoder[Thread] = (thread: Thread) => thread.getName
 
   implicit val domainIdEncoder: KeyEncoder[DomainId] = (ref: DomainId) => ref.toString
+
+  implicit val encodePort: Encoder[Port] = Encoder.encodeInt.contramap[Port](_.unwrap)
+
+  // We do not want to serialize the password to JSON, e.g., as part of a config dump.
+  implicit val encoder: Encoder[Password] = Encoder.encodeString.contramap(_ => "****")
 }
 
 object CantonHealthAdministration {

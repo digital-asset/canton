@@ -26,7 +26,7 @@ class JceCryptoTest
       CryptoFactory
         .create(
           CommunityCryptoConfig(provider = CryptoProvider.Jce),
-          new MemoryStorage,
+          new MemoryStorage(loggerFactory),
           new CommunityCryptoPrivateStoreFactory,
           testedReleaseProtocolVersion,
           timeouts,

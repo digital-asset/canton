@@ -198,9 +198,8 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
 
   /** Yields the `skip`-lowest publication timestamp (if it exists).
     * I.e., `locatePruningTimestamp(0)` yields the smallest timestamp, `locatePruningTimestamp(1)` the second smallest timestamp, and so on.
-    * When skip == 0, report the current age of the oldest event timestamp as the "oldest-event-age" metric.
     */
-  def locateAndReportPruningTimestamp(skip: NonNegativeInt)(implicit
+  def locatePruningTimestamp(skip: NonNegativeInt)(implicit
       traceContext: TraceContext
   ): OptionT[Future, CantonTimestamp]
 
@@ -270,6 +269,11 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
     * before the call to [[flush]].
     */
   def flush(): Future[Unit]
+
+  /** Report the max-event-age metric based on the oldest event timestamp and the current clock time or
+    * zero if no oldest timestamp exists (e.g. events fully pruned).
+    */
+  def reportMaxEventAgeMetric(oldestEventTimestamp: Option[CantonTimestamp]): Unit
 }
 
 object MultiDomainEventLog {

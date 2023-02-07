@@ -36,6 +36,9 @@ sealed trait TransactionSubviews extends Product with PrettyPrinting {
 
   val blindedElements: Seq[RootHash]
 
+  /** Check that the provided subview hashes are consistent with the ones from the contained subviews. */
+  def hashesConsistentWith(hashOps: HashOps)(subviewHashes: Seq[ViewHash]): Boolean
+
   private[data] def tryBlindForTransactionViewTree(
       viewPos: ViewPositionFromRoot
   ): TransactionSubviews
@@ -89,6 +92,9 @@ case class TransactionSubviewsV0 private[data] (
 
   override lazy val blindedElements: Seq[RootHash] =
     subviews.flatMap(_.unwrap.left.toOption.toList)
+
+  override def hashesConsistentWith(hashOps: HashOps)(subviewHashes: Seq[ViewHash]): Boolean =
+    subviews.map(sv => ViewHash.fromRootHash(sv.rootHash)) == subviewHashes
 
   override private[data] def tryBlindForTransactionViewTree(
       viewPos: ViewPositionFromRoot
@@ -157,6 +163,16 @@ case class TransactionSubviewsV1 private[data] (
 
   override lazy val blindedElements: Seq[RootHash] = subviews.blindedElements
 
+  override def hashesConsistentWith(hashOps: HashOps)(subviewHashes: Seq[ViewHash]): Boolean = {
+    val merkleSeqRepr = subviews.representativeProtocolVersion
+    val merkleSeqElemRepr = subviews.tryMerkleSeqElementRepresentativeProtocolVersion
+
+    val subviewsSeq = subviewHashes.map(h => BlindedNode(h.toRootHash))
+    val subviewsToCheck = MerkleSeq.fromSeq(hashOps, merkleSeqRepr, merkleSeqElemRepr)(subviewsSeq)
+
+    subviews.rootHashO == subviewsToCheck.rootHashO
+  }
+
   override def tryBlindForTransactionViewTree(
       viewPos: ViewPositionFromRoot
   ): TransactionSubviews = {
@@ -216,7 +232,7 @@ object TransactionSubviews {
       subviewsSeq: Seq[MerkleTree[TransactionView]]
   )(protocolVersion: ProtocolVersion, hashOps: HashOps): TransactionSubviews = {
     if (protocolVersion >= ProtocolVersion.v4)
-      TransactionSubviewsV1(MerkleSeq.fromSeq(hashOps)(subviewsSeq, protocolVersion))
+      TransactionSubviewsV1(MerkleSeq.fromSeq(hashOps, protocolVersion)(subviewsSeq))
     else
       TransactionSubviewsV0(subviewsSeq)
   }

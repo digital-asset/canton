@@ -88,7 +88,7 @@ object CommunityConfigTransforms {
 
   def uniquePorts: CommunityConfigTransform = {
 
-    def nextPort = UniquePortGenerator.forIntegrationTests.next
+    def nextPort = UniquePortGenerator.next
 
     val domainUpdate = updateAllDomainConfigs { case (_, config) =>
       config

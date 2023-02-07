@@ -10,7 +10,7 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.*
 import com.daml.tracing.TelemetryContext
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters

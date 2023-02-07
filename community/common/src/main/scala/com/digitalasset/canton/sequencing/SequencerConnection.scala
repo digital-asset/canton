@@ -8,13 +8,10 @@ import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.crypto.X509CertificatePem
+import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
-import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.sequencing.client.http.HttpSequencerEndpoints
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import com.digitalasset.canton.version.*
@@ -57,43 +54,6 @@ sealed trait SequencerConnection
       connection: SequencerConnection,
       additionalConnections: SequencerConnection*
   ): SequencerConnection
-}
-
-case class HttpSequencerConnection(urls: HttpSequencerEndpoints, certificate: X509CertificatePem)
-    extends SequencerConnection {
-
-  override def toProtoV0: v0.SequencerConnection =
-    v0.SequencerConnection(
-      v0.SequencerConnection.Type.Http(
-        v0.SequencerConnection.Http(
-          urls.write.getHost,
-          urls.write.getPort,
-          Some(certificate.unwrap),
-          urls.read.getHost,
-          urls.read.getPort,
-        )
-      )
-    )
-
-  override def pretty: Pretty[HttpSequencerConnection] =
-    prettyOfClass(
-      param("urls", _.urls),
-      param("certificate", _.certificate.unwrap),
-    )
-
-  override def addConnection(
-      connection: URI,
-      additionalConnections: URI*
-  ): SequencerConnection =
-    throw new IllegalArgumentException("Http sequencer does not support multiple connections")
-
-  override def addConnection(
-      connection: SequencerConnection,
-      additionalConnections: SequencerConnection*
-  ): SequencerConnection = throw new IllegalArgumentException(
-    "Http sequencer does not support multiple connections"
-  )
-
 }
 
 final case class GrpcSequencerConnection(
@@ -184,34 +144,11 @@ object SequencerConnection
   ): ParsingResult[SequencerConnection] =
     configP.`type` match {
       case v0.SequencerConnection.Type.Empty => Left(ProtoDeserializationError.FieldNotSet("type"))
-      case v0.SequencerConnection.Type.Http(http) => fromHttpProto(http)
       case v0.SequencerConnection.Type.Grpc(grpc) => fromGrpcProto(grpc)
     }
 
   // https can be safely assumed
   private def url(host: String, port: Port) = s"https://$host:$port"
-
-  private def fromHttpProto(
-      httpP: v0.SequencerConnection.Http
-  ): ParsingResult[SequencerConnection] =
-    for {
-      port <- Port.create(httpP.port)
-      readPort <- Port.create(httpP.readPort)
-      certificate <- ProtoConverter.parseRequired[X509CertificatePem, ByteString](
-        bytes =>
-          X509CertificatePem
-            .fromBytes(bytes)
-            .leftMap(err => ProtoDeserializationError.ValueConversionError("certificate", err)),
-        "certificate",
-        httpP.certificate,
-      )
-      urls <- HttpSequencerEndpoints
-        .create(
-          writeUrl = url(httpP.host, port),
-          readUrl = url(httpP.readHost, readPort),
-        )
-        .leftMap(ProtoDeserializationError.StringConversionError)
-    } yield HttpSequencerConnection(urls, certificate)
 
   private def fromGrpcProto(
       grpcP: v0.SequencerConnection.Grpc
@@ -242,12 +179,6 @@ object SequencerConnection
               case _ => Left("Cannot merge grpc and http sequencer connections")
             }
           } yield grpc.copy(endpoints = endpoints ++ allMergedEndpoints)
-        case http: HttpSequencerConnection =>
-          Either.cond(
-            connectionsNel.tail1.isEmpty,
-            http,
-            "http connection currently only supports one endpoint",
-          )
       }
     } yield conn
 }

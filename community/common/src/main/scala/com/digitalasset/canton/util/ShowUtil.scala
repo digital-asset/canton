@@ -5,7 +5,10 @@ package com.digitalasset.canton.util
 
 import cats.Show
 import cats.Show.Shown
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, LengthLimitedStringWrapper}
+import com.digitalasset.canton.config.CantonRequireTypes.{
+  LengthLimitedString,
+  LengthLimitedStringWrapper,
+}
 import com.digitalasset.canton.logging.pretty.Pretty
 
 import scala.annotation.tailrec

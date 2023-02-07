@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
-import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DefaultDeserializationError, HasCryptographicEvidence}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
@@ -24,7 +24,7 @@ object Nonce {
 
   /** As of now, the database schemas can only handle nonces up to a length of 150 bytes. Thus the length of a [[Nonce]] should never exceed that.
     * If we ever want to create a [[Nonce]] larger than that, we can increase it up to 500 bytes after which we are limited by Oracle length limits.
-    * See the documentation at [[com.digitalasset.canton.config.RequireTypes.LengthLimitedString]] for more details.
+    * See the documentation at [[com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString]] for more details.
     */
   val length: Int = 20
 

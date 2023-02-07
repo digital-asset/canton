@@ -141,6 +141,9 @@ final case class NonNegativeDuration(duration: Duration)
     case _ =>
       throw new IllegalArgumentException(s"Duration must be non-negative, but is $duration.")
   }
+
+  private[canton] def toInternal: NonNegativeFiniteDurationInternal =
+    NonNegativeFiniteDurationInternal(asJavaApproximation)
 }
 
 object NonNegativeDuration extends RefinedNonNegativeDurationCompanion[NonNegativeDuration] {

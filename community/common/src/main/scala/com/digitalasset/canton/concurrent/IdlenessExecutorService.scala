@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.concurrent
 
+import com.daml.executors.QueueAwareExecutorService
+
 import java.util.concurrent.*
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContextExecutorService
@@ -46,61 +48,25 @@ trait IdlenessExecutorService extends ExecutorService {
 
   protected[concurrent] def awaitIdlenessOnce(timeout: FiniteDuration): Boolean
 
-  /** Return the thread pool's queue size. */
-  def queueSize: Int
 }
 
-trait ExecutionContextIdlenessExecutorService
-    extends ExecutionContextExecutorService
-    with IdlenessExecutorService {
-  def name: String
-}
-
-abstract class ExecutorServiceDelegate(val executorService: ExecutorService)
-    extends ExecutionContextExecutorService {
-  override def shutdown(): Unit = executorService.shutdown()
-  override def shutdownNow(): java.util.List[Runnable] = executorService.shutdownNow()
-  override def isShutdown: Boolean = executorService.isShutdown
-  override def isTerminated: Boolean = executorService.isTerminated
-  override def awaitTermination(timeout: Long, unit: TimeUnit): Boolean =
-    executorService.awaitTermination(timeout, unit)
-  override def submit[T](task: Callable[T]): Future[T] = executorService.submit(task)
-  override def submit[T](task: Runnable, result: T): Future[T] =
-    executorService.submit(task, result)
-  override def submit(task: Runnable): Future[_] = executorService.submit(task)
-  override def invokeAll[T](
-      tasks: java.util.Collection[_ <: Callable[T]]
-  ): java.util.List[Future[T]] =
-    executorService.invokeAll(tasks)
-  override def invokeAll[T](
-      tasks: java.util.Collection[_ <: Callable[T]],
-      timeout: Long,
-      unit: TimeUnit,
-  ): java.util.List[Future[T]] = executorService.invokeAll(tasks, timeout, unit)
-  override def invokeAny[T](tasks: java.util.Collection[_ <: Callable[T]]): T =
-    executorService.invokeAny(tasks)
-  override def invokeAny[T](
-      tasks: java.util.Collection[_ <: Callable[T]],
-      timeout: Long,
-      unit: TimeUnit,
-  ): T =
-    executorService.invokeAny(tasks, timeout, unit)
-  override def execute(command: Runnable): Unit = executorService.execute(command)
-}
+abstract class ExecutionContextIdlenessExecutorService(
+    executorService: ExecutorService,
+    name: String,
+) extends QueueAwareExecutorService(executorService, name)
+    with IdlenessExecutorService
+    with ExecutionContextExecutorService
 
 class ForkJoinIdlenessExecutorService(
     pool: ForkJoinPool,
     reporter: Throwable => Unit,
-    override val name: String,
-) extends ExecutorServiceDelegate(pool)
-    with ExecutionContextIdlenessExecutorService {
+    name: String,
+) extends ExecutionContextIdlenessExecutorService(pool, name) {
   override def reportFailure(cause: Throwable): Unit = reporter(cause)
 
   override protected[concurrent] def awaitIdlenessOnce(timeout: FiniteDuration): Boolean = {
     pool.awaitQuiescence(timeout.toMillis, TimeUnit.MILLISECONDS)
   }
-
-  override def queueSize: Int = pool.getQueuedSubmissionCount
 
   override def toString: String = s"ForkJoinIdlenessExecutorService-$name: $pool"
 }
@@ -109,11 +75,9 @@ class ThreadPoolIdlenessExecutorService(
     pool: ThreadPoolExecutor,
     reporter: Throwable => Unit,
     override val name: String,
-) extends ExecutorServiceDelegate(pool)
-    with ExecutionContextIdlenessExecutorService {
-  override def reportFailure(cause: Throwable): Unit = reporter(cause)
+) extends ExecutionContextIdlenessExecutorService(pool, name) {
 
-  override def queueSize: Int = pool.getQueue.size
+  override def reportFailure(cause: Throwable): Unit = reporter(cause)
 
   override protected[concurrent] def awaitIdlenessOnce(timeout: FiniteDuration): Boolean = {
     val deadline = timeout.fromNow

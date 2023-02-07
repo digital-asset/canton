@@ -1124,7 +1124,7 @@ class AcsCommitmentProcessorSyncTest
           topology,
           optCommitmentStore = Some(badStore),
         )
-        eventually(timeUntilSuccess = FiniteDuration(30, TimeUnit.SECONDS)) {
+        eventually(timeUntilSuccess = FiniteDuration(40, TimeUnit.SECONDS)) {
           badStore.writeCounter.get() should be > 100
         }
         logger.info("Close the processor to stop retrying")

@@ -25,11 +25,7 @@ object LfTransactionBuilder {
     Ref.Identifier(defaultPackageId, QualifiedName.assertFromString("module:template"))
   val defaultInterfaceId: LfInterfaceId = defaultTemplateId
 
-  val defaultGlobalKey: LfGlobalKey =
-    LfGlobalKey.assertBuild(
-      defaultTemplateId,
-      LfTransactionUtil.assertNoContractIdInKey(Value.ValueUnit),
-    )
+  val defaultGlobalKey: LfGlobalKey = LfGlobalKey.assertBuild(defaultTemplateId, Value.ValueUnit)
 
   def allocateNodeId[M[_]](implicit monadInstance: Monad[M]): StateT[M, NodeIdState, LfNodeId] =
     for {

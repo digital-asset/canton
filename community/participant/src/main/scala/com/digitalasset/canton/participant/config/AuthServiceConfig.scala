@@ -14,7 +14,7 @@ import com.daml.jwt.{
 }
 import com.daml.ledger.api.auth.{AuthService, AuthServiceJWT, AuthServiceWildcard}
 import com.daml.platform.apiserver.{AuthServiceConfig as DamlAuthServiceConfig}
-import com.digitalasset.canton.config.RequireTypes.*
+import com.digitalasset.canton.config.CantonRequireTypes.*
 
 sealed trait AuthServiceConfig {
   def create(jwtTimestampLeeway: Option[JwtTimestampLeeway]): AuthService

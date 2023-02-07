@@ -6,8 +6,7 @@ package com.digitalasset.canton.config
 import com.digitalasset.canton.version.ProtocolVersion
 
 trait ProtocolConfig {
-  // TODO (#11206) rename and check against non standard config
-  def willCorruptYourSystemDevVersionSupport: Boolean
+  def devVersionSupport: Boolean
   def dontWarnOnDeprecatedPV: Boolean
   def initialProtocolVersion: ProtocolVersion
 }

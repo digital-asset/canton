@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.data.OptionT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.admin.PackageService

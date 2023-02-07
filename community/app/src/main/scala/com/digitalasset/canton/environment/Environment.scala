@@ -28,10 +28,12 @@ import com.digitalasset.canton.environment.Environment.*
 import com.digitalasset.canton.health.{HealthCheck, HealthServer}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.MetricsConfig.Prometheus
 import com.digitalasset.canton.metrics.MetricsFactory
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.resource.DbMigrationsFactory
+import com.digitalasset.canton.telemetry.{ConfiguredOpenTelemetry, OpenTelemetryFactory}
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
@@ -65,9 +67,21 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
   val loggerFactory: NamedLoggerFactory
 
-  // public for buildDocs task to be able to construct a fake participant and domain to document available metrics via reflection
-  val metricsFactory = MetricsFactory.forConfig(config.monitoring.metrics)
+  lazy val configuredOpenTelemetry: ConfiguredOpenTelemetry = {
+    val isPrometheusEnabled = config.monitoring.metrics.reporters.exists {
+      case _: Prometheus => true
+      case _ => false
+    }
+    OpenTelemetryFactory.initializeOpenTelemetry(
+      testingConfig.initializeGlobalOpenTelemetry,
+      isPrometheusEnabled,
+      config.monitoring.tracing.tracer,
+    )
+  }
 
+  // public for buildDocs task to be able to construct a fake participant and domain to document available metrics via reflection
+  lazy val metricsFactory: MetricsFactory =
+    MetricsFactory.forConfig(config.monitoring.metrics, configuredOpenTelemetry.openTelemetry)
   protected def participantNodeFactory
       : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType]
   protected def domainFactory: DomainNodeBootstrap.Factory[Config#DomainConfigType]
@@ -111,7 +125,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       healthDumpGenerator
         .getOrElse {
           val tracerProvider =
-            TracerProvider.Factory(config.monitoring.tracing.tracer, "admin_command_runner")
+            TracerProvider.Factory(configuredOpenTelemetry, "admin_command_runner")
           implicit val tracer: Tracer = tracerProvider.tracer
 
           val commandRunner = new GrpcAdminCommandRunner(this, config.parameters.timeouts.console)
@@ -233,7 +247,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       new HealthServer(check, config.server.address, config.server.port, timeouts, loggerFactory)
     }
 
-  private val envQueueSize = () => executionContext.queueSize.toLong
+  private val envQueueSize = () => executionContext.queueSize
   metricsFactory.forEnv.registerExecutionContextQueueSize(envQueueSize)
 
   lazy val domains =
@@ -409,8 +423,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         futureSupervisor,
         loggerFactory,
         writeHealthDumpToFile,
-        metricsFactory.forEnv.executionContextQueueSizeName,
-        envQueueSize,
+        configuredOpenTelemetry,
       )
       .valueOr(err => throw new RuntimeException(s"Failed to create participant bootstrap: $err"))
   }
@@ -431,6 +444,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         futureSupervisor,
         loggerFactory,
         writeHealthDumpToFile,
+        configuredOpenTelemetry,
       )
       .valueOr(err => throw new RuntimeException(s"Failed to create domain bootstrap: $err"))
 
@@ -459,7 +473,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
     // the allNodes list is ordered in ideal startup order, so reverse to shutdown
     val instances =
-      monitorO.toList ++ userCloseables ++ allNodes.reverse :+ metricsFactory :+ clock :+ closeHealthServer :+
+      monitorO.toList ++ userCloseables ++ allNodes.reverse :+ metricsFactory :+ configuredOpenTelemetry :+ clock :+ closeHealthServer :+
         closeHeadlessHealthAdministration :+ executionSequencerFactory :+ closeActorSystem :+ closeExecutionContext :+
         closeScheduler
     Lifecycle.close((instances.toSeq): _*)(logger)

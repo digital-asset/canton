@@ -6,13 +6,14 @@ package com.digitalasset.canton.participant.util
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.lf.CantonOnly
+import com.daml.lf.VersionRange
 import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.*
-import com.daml.lf.interpretation.{Error as LfInterpretationError}
+import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.Ast.Package
-import com.daml.lf.transaction.Versioned
+import com.daml.lf.language.LanguageVersion
+import com.daml.lf.transaction.{ContractKeyUniquenessMode, Versioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
@@ -23,10 +24,32 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
 
+import java.nio.file.Path
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object DAMLe {
+  def newEngine(
+      uniqueContractKeys: Boolean,
+      enableLfDev: Boolean,
+      profileDir: Option[Path] = None,
+  ): Engine =
+    new Engine(
+      EngineConfig(
+        allowedLanguageVersions = VersionRange(
+          LanguageVersion.v1_14,
+          if (enableLfDev) LanguageVersion.DevVersions.max else LanguageVersion.StableVersions.max,
+        ),
+        // The package store contains only validated packages, so we can skip validation upon loading
+        packageValidation = false,
+        profileDir = profileDir,
+        forbidV0ContractId = true,
+        requireSuffixedGlobalContractId = true,
+        contractKeyUniqueness =
+          if (uniqueContractKeys) ContractKeyUniquenessMode.Strict
+          else ContractKeyUniquenessMode.Off,
+      )
+    )
 
   /** Resolves packages by [[com.daml.lf.data.Ref.PackageId]].
     * The returned packages must have been validated
@@ -131,15 +154,15 @@ class DAMLe(
                 tx.nodes(singleChildNodeId) match {
                   case _: LfActionNode =>
                     Right(
-                      CantonOnly
-                        .lfVersionedTransaction(
-                          tx.version,
-                          tx.nodes - rootNid,
-                          ImmArray(singleChildNodeId),
-                        )
+                      LfVersionedTransaction(
+                        tx.version,
+                        tx.nodes - rootNid,
+                        ImmArray(singleChildNodeId),
+                      )
                     )
                   case LfNodeRollback(_) =>
                     err(s"Root-level rollback node not expected to parent another rollback node")
+                  case _: LfNodeAuthority => sys.error("LfNodeAuthority")
                 }
               case Seq() => err(s"Root-level rollback node not expected to have no child node")
               case multipleChildNodes =>

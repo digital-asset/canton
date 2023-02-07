@@ -6,8 +6,8 @@ package com.digitalasset.canton.config
 import cats.data.Validated
 import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
-import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.{
   CommunityDomainConfig,
   DomainBaseConfig,

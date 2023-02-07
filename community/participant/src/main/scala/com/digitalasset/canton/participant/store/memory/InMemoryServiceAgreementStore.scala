@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
-import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.topology.DomainId

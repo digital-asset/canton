@@ -18,10 +18,11 @@ class TestTelemetrySetup() extends AutoCloseable {
   val tracer: Tracer = tracerProvider.tracer
   def reportedSpans(): List[SpanData] = testExporter.allSpans()
 
-  override def close(): Unit = tracerProvider.close()
+  override def close(): Unit = testExporter.close()
 }
 
 object TestTelemetry {
+
   class TestExporter extends SpanExporter {
     val queue = new LinkedBlockingQueue[SpanData]
     override def `export`(spans: util.Collection[SpanData]): CompletableResultCode = {

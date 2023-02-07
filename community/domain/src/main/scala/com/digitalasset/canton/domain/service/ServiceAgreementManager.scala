@@ -7,8 +7,8 @@ import better.files.File
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0

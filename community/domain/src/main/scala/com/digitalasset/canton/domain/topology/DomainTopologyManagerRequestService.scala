@@ -29,7 +29,6 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -59,10 +58,7 @@ private[domain] object RequestProcessingStrategy {
     def addFromRequest(
         transaction: SignedTopologyTransaction[TopologyChangeOp]
     )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit]
-    def addParticipant(
-        participantId: ParticipantId,
-        x509: Option[X509Cert],
-    )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit]
+
     def issueParticipantStateForDomain(participantId: ParticipantId)(implicit
         traceContext: TraceContext
     ): EitherT[Future, DomainTopologyManagerError, Unit]
@@ -327,8 +323,6 @@ private[domain] object RequestProcessingStrategy {
           ),
         )
         res <- EitherT.right(addTransactions(reduced1.toList))
-        // Invoke the add new participant handle (for CCF)
-        _ <- hooks.addParticipant(participant, participantCert)
         // Finally, add the participant state (keys need to be pushed before the participant is active)
         rest <- EitherT.right(addTransactions(participantStates.toList))
         // Activate the participant

@@ -22,6 +22,7 @@ import com.daml.lf.transaction.Transaction.{
 }
 import com.daml.lf.value.Value
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.RequireTypes.{Port, RefinedNumeric}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.{TraceContext, W3CTraceContext}
@@ -328,6 +329,10 @@ trait PrettyInstances {
       param("consumedBy", _.consumedBy),
       param("localActiveKeys", _.localActiveKeys),
     )
+
+  implicit val prettyPort: Pretty[Port] = prettyOfString(_.unwrap.toString)
+
+  implicit val prettyRefinedNumeric: Pretty[RefinedNumeric[_]] = prettyOfString(_.unwrap.toString)
 }
 
 object PrettyInstances extends PrettyInstances

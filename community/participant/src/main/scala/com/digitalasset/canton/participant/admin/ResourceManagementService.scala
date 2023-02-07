@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin
 
 import com.daml.error.definitions.LedgerApiErrors.ParticipantBackpressure
 import com.daml.ledger.participant.state.v2.SubmissionResult
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
@@ -28,7 +29,7 @@ trait ResourceManagementService {
   private val lastWarning: AtomicReference[CantonTimestamp] =
     new AtomicReference[CantonTimestamp](CantonTimestamp.now())
 
-  metrics.registerMaxDirtyRequest(() => resourceLimits.maxDirtyRequests.map(_.unwrap))
+  metrics.registerMaxDirtyRequest(() => resourceLimits.maxDirtyRequests.map(_.unwrap)).discard
 
   def checkOverloaded(currentLoad: Int)(implicit
       loggingContext: ErrorLoggingContext

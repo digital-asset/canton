@@ -136,6 +136,23 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
 
   def writeToFile(outputFile: String): Unit =
     BinaryFileUtil.writeByteStringToFile(outputFile, toByteString)
+
+  /** Casts this instance's representative protocol version to one for the target type.
+    * This only succeeds if the versioning schemes are the same.
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def castRepresentativeProtocolVersion[V, T <: HasSupportedProtoVersions[V]](
+      target: T
+  ): Either[String, RepresentativeProtocolVersion[V]] = {
+    val sourceTable = companionObj.supportedProtoVersions.table
+    val targetTable = target.supportedProtoVersions.table
+
+    Either.cond(
+      sourceTable == targetTable,
+      representativeProtocolVersion.asInstanceOf[RepresentativeProtocolVersion[V]],
+      "Source and target versioning schemes should be the same",
+    )
+  }
 }
 
 /** This trait has the logic to store proto (de)serializers and retrieve them by protocol version.
@@ -273,6 +290,9 @@ trait HasSupportedProtoVersions[ValueClass] {
     def protocolVersionRepresentativeFor(
         protocolVersion: ProtocolVersion
     ): RepresentativeProtocolVersion[ValueClass] = converterFor(protocolVersion).fromInclusive
+
+    lazy val table: Map[ProtoVersion, RepresentativeProtocolVersion[ValueClass]] =
+      converters.forgetNE.map { case (protoVersion, codec) => (protoVersion, codec.fromInclusive) }
   }
 
   object SupportedProtoVersions {

@@ -69,7 +69,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         BlindedNode(rh(11)),
         commonMetadata,
         BlindedNode(rh(12)),
-        MerkleSeq.fromSeq(hashOps)(view :: Nil, testedProtocolVersion),
+        MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(view :: Nil),
       ),
       testedProtocolVersion,
     )

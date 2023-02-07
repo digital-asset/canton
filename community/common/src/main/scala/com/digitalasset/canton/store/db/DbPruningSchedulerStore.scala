@@ -4,8 +4,8 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String3
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.DbStorage.Profile

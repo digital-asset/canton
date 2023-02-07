@@ -13,7 +13,8 @@ import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
 }
-import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt}
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, InitConfigBase, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.{
@@ -46,6 +47,7 @@ import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.topology.*
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
+import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.admin.data.{DomainStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableServer
@@ -61,6 +63,7 @@ import com.digitalasset.canton.resource.{CommunityStorageFactory, Storage, Stora
 import com.digitalasset.canton.sequencing.client.{grpc as _, *}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
+import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.{Clock, HasUptime}
 import com.digitalasset.canton.topology.TopologyManagerError.DomainErrorGroup
 import com.digitalasset.canton.topology.*
@@ -92,8 +95,6 @@ class DomainNodeBootstrap(
     clock: Clock,
     metrics: DomainMetrics,
     parentLogger: NamedLoggerFactory = NamedLoggerFactory.root,
-    legalIdentityHook: X509Certificate => EitherT[Future, String, Unit],
-    addMemberHook: DomainTopologyManager.AddMemberHook,
     sequencerRuntimeFactory: SequencerRuntimeFactory,
     mediatorFactory: MediatorRuntimeFactory,
     storageFactory: StorageFactory,
@@ -101,6 +102,7 @@ class DomainNodeBootstrap(
     grpcVaultServiceFactory: GrpcVaultServiceFactory,
     futureSupervisor: FutureSupervisor,
     writeHealthDumpToFile: HealthDumpFunction,
+    configuredOpenTelemetry: ConfiguredOpenTelemetry,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -119,6 +121,8 @@ class DomainNodeBootstrap(
       parentLogger.append(DomainNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
       writeHealthDumpToFile,
       metrics.grpcMetrics,
+      configuredOpenTelemetry,
+      metrics.healthMetrics,
     )
     with DomainTopologyManagerIdentityInitialization[StoredDomainNodeSettings] {
 
@@ -135,6 +139,12 @@ class DomainNodeBootstrap(
     loggerFactory,
   )
 
+  override protected lazy val nodeHealthService: HealthReporting.ServiceHealth =
+    new HealthReporting.ServiceHealth {
+      override val name: String = "domain"
+      override lazy val criticalDependencies: Set[HealthReporting.ComponentHealth] = Set(storage)
+    }
+
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var topologyManager: Option[DomainTopologyManager] = None
   private val protocolVersion = config.init.domainParameters.protocolVersion.unwrap
@@ -146,7 +156,6 @@ class DomainNodeBootstrap(
       for {
         initialized <- initializeTopologyManagerIdentity(
           name,
-          legalIdentityHook,
           DynamicDomainParameters.initialValues(clock, protocolVersion),
           initConfigBase,
           staticDomainParametersFromConfig,
@@ -225,7 +234,6 @@ class DomainNodeBootstrap(
       DomainTopologyManagerId(nodeId.identity),
       clock,
       topologyStoreFactory.forId(AuthorizedStore),
-      addMemberHook,
       crypto,
       parameters.processingTimeouts,
       staticDomainParameters.protocolVersion,
@@ -559,6 +567,7 @@ object DomainNodeBootstrap {
         futureSupervisor: FutureSupervisor,
         parentLogger: NamedLoggerFactory = NamedLoggerFactory.root,
         writeHealthDumpToFile: HealthDumpFunction,
+        configuredOpenTelemetry: ConfiguredOpenTelemetry,
     )(implicit
         actorSystem: ActorSystem,
         scheduler: ScheduledExecutorService,
@@ -595,6 +604,7 @@ object DomainNodeBootstrap {
         futureSupervisor: FutureSupervisor,
         parentLogger: NamedLoggerFactory,
         writeHealthDumpToFile: HealthDumpFunction,
+        configuredOpenTelemetry: ConfiguredOpenTelemetry,
     )(implicit
         actorSystem: ActorSystem,
         scheduler: ScheduledExecutorService,
@@ -611,8 +621,6 @@ object DomainNodeBootstrap {
         clock,
         metrics,
         parentLogger,
-        DomainTopologyManager.legalIdentityHookNoOp,
-        DomainTopologyManager.addMemberNoOp,
         new SequencerRuntimeFactory.Community(config.sequencer),
         CommunityMediatorRuntimeFactory,
         new CommunityStorageFactory(config.storage),
@@ -620,6 +628,7 @@ object DomainNodeBootstrap {
         new CommunityGrpcVaultServiceFactory,
         futureSupervisor,
         writeHealthDumpToFile,
+        configuredOpenTelemetry,
       )
 
     }

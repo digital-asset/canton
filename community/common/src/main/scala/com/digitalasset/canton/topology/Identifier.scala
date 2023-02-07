@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology
 import cats.Order
 import cats.implicits.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   String185,
   String255,

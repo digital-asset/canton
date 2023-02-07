@@ -255,11 +255,31 @@ object TransactionRoutingError extends RoutingErrorGroup {
     }
 
     @Explanation(
+      """This error indicates that the transaction is referring to some submitters that are not known on any connected domain."""
+    )
+    @Resolution(
+      """Check the list of provided submitters and check if your participant is connected to the domains you are expecting it to be."""
+    )
+    object UnknownSubmitters
+        extends ErrorCode(
+          id = "UNKNOWN_SUBMITTERS",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+
+      case class Error(unknownSubmitters: Set[LfPartyId])
+          extends TransactionErrorImpl(
+            cause =
+              "The participant is not connected to any domain where the given submitters are known."
+          )
+          with TransactionRoutingError
+
+    }
+
+    @Explanation(
       """This error indicates that the transaction is referring to some informees that are not known on any connected domain."""
     )
     @Resolution(
-      """Check the list of submitted informees and check if your participant is connected to
-                               the domains you are expecting it to be."""
+      """Check the list of submitted informees and check if your participant is connected to the domains you are expecting it to be."""
     )
     object UnknownInformees
         extends ErrorCode(
@@ -274,6 +294,24 @@ object TransactionRoutingError extends RoutingErrorGroup {
           )
           with TransactionRoutingError
 
+    }
+
+    @Explanation(
+      """This error indicates that the submitters are known, but there is no connected domain on which all the submitters are hosted."""
+    )
+    @Resolution(
+      "Ensure that there is such a domain, as Canton requires a domain where all submitters are present."
+    )
+    object SubmittersNotActive
+        extends ErrorCode(
+          id = "SUBMITTERS_NOT_ACTIVE",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      case class Error(domains: Set[DomainId], informees: Set[LfPartyId])
+          extends TransactionErrorImpl(
+            cause = "There is no common domain where all submitters are active"
+          )
+          with TransactionRoutingError
     }
     @Explanation(
       """This error indicates that the informees are known, but there is no connected domain on which all the informees are hosted."""

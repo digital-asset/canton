@@ -5,8 +5,8 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.State as ProtoStateV0
 import com.digitalasset.canton.protocol.v1.RegisterTopologyTransactionResponse.Result.State as ProtoStateV1

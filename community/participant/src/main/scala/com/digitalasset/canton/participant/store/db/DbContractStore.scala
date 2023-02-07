@@ -6,7 +6,8 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String2066}
+import com.digitalasset.canton.config.CantonRequireTypes.String2066
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Salt
 import com.digitalasset.canton.data.CantonTimestamp
