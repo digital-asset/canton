@@ -15,9 +15,9 @@ import com.digitalasset.canton.crypto.{
   PublicKey,
 }
 import com.digitalasset.canton.domain.config.{DomainBaseConfig, DomainConfig}
-import com.digitalasset.canton.domain.topology.*
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
+import com.digitalasset.canton.domain.topology.{DomainTopologyManagerEventHandler, *}
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -35,11 +35,7 @@ import com.digitalasset.canton.sequencing.handlers.{
   StripSignature,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
-import com.digitalasset.canton.sequencing.{
-  HttpSequencerConnection,
-  SequencerConnection,
-  UnsignedEnvelopeBox,
-}
+import com.digitalasset.canton.sequencing.{SequencerConnection, UnsignedEnvelopeBox}
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.store.{
   IndexedStringStore,
@@ -61,6 +57,7 @@ import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
 final case class TopologyManagementComponents(
+    domainTopologyServiceHandler: DomainTopologyManagerEventHandler,
     client: DomainTopologyClientWithInit,
     sequencerClient: SequencerClient,
     processor: TopologyTransactionProcessor,
@@ -70,7 +67,8 @@ final case class TopologyManagementComponents(
 ) extends FlagCloseable
     with NamedLogging {
 
-  override def onClosed(): Unit = Lifecycle.close(client, processor, dispatcher)(logger)
+  override def onClosed(): Unit =
+    Lifecycle.close(dispatcher, domainTopologyServiceHandler, client, processor)(logger)
 
 }
 
@@ -169,26 +167,26 @@ object TopologyManagementInitialization {
         )
       }
       timeTracker = DomainTimeTracker(config.timeTracker, clock, newClient, loggerFactory)
-      eventHandler = {
-        val domainTopologyServiceHandler =
-          new DomainTopologyManagerEventHandler(
-            RegisterTopologyTransactionResponseStore(
-              storage,
-              crypto.pureCrypto,
-              protocolVersion,
-              timeouts,
-              loggerFactory,
-            ),
-            domainTopologyService,
-            (env, callback) =>
-              newClient.sendAsync(
-                Batch(List(env), protocolVersion),
-                callback = callback,
-              ),
+      domainTopologyServiceHandler =
+        new DomainTopologyManagerEventHandler(
+          RegisterTopologyTransactionResponseStore(
+            storage,
+            crypto.pureCrypto,
             protocolVersion,
             timeouts,
             loggerFactory,
-          )
+          ),
+          domainTopologyService,
+          (env, callback) =>
+            newClient.sendAsync(
+              Batch(List(env), protocolVersion),
+              callback = callback,
+            ),
+          protocolVersion,
+          timeouts,
+          loggerFactory,
+        )
+      eventHandler = {
         val topologyProcessorHandler = topologyProcessor.createHandler(id)
         DiscardIgnoredEvents(loggerFactory) {
           StripSignature {
@@ -243,9 +241,6 @@ object TopologyManagementInitialization {
           } yield ())
         } else EitherT.rightT(())
       _ <- sequencerConnection match {
-        // the CCF sequencer is special case in that it skips initial topology bootstrapping since it does not rely on that
-        // for authentication. so there is no need to wait.
-        case _: HttpSequencerConnection => EitherT.pure(())
         // GRPC-based sequencers all go through the initial topology bootstrapping so we need to wait here to make sure
         // that initial topology data has been sequenced before starting the topology dispatcher
         case _ => EitherT.right(initializationObserver.waitUntilInitialisedAndEffective.unwrap)
@@ -272,6 +267,7 @@ object TopologyManagementInitialization {
           .onShutdown(Left("Initialization aborted due to shutdown"))
       )
     } yield TopologyManagementComponents(
+      domainTopologyServiceHandler,
       topologyClient,
       newClient,
       topologyProcessor,

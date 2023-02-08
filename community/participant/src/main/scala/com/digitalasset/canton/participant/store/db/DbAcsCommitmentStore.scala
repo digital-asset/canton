@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.EitherT
 import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String68
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.Lifecycle

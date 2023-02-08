@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestData
@@ -34,15 +35,12 @@ class RepairProcessor(
   def wedgeRepairRequests(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Unit = {
     val remaining = remainingRepairRequests.get()
     val (current, rest) = remaining.span(_.requestTimestamp <= timestamp)
-    if (current.nonEmpty) {
-      val firstRc = current.headOption.getOrElse(
-        throw new RuntimeException("A non-empty list must have a head")
-      )
-      val lastRc = current.lastOption.getOrElse(
-        throw new RuntimeException("A non-empty list must have a head")
-      )
+
+    NonEmpty.from(current).foreach { currentNE =>
+      val firstRc = currentNE.head1
+      val lastRc = currentNE.last1
       logger.info(s"Skipping over repair requests with counters $firstRc to $lastRc")
-      current.foreach(skipRequest)
+      currentNE.foreach(skipRequest)
       val replaced = remainingRepairRequests.compareAndSet(remaining, rest)
       if (!replaced)
         throw new ConcurrentModificationException(

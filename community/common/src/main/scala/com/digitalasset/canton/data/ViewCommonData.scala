@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -114,7 +115,7 @@ object ViewCommonData
   private def fromProtoV0(
       hashOps: HashOps,
       viewCommonDataP: v0.ViewCommonData,
-  )(bytes: ByteString): ParsingResult[ViewCommonData] =
+  )(bytes: ByteString): ParsingResult[ViewCommonData] = {
     for {
       informees <- viewCommonDataP.informees.traverse(Informee.fromProtoV0)
 
@@ -122,10 +123,14 @@ object ViewCommonData
         .parseRequired(Salt.fromProtoV0, "salt", viewCommonDataP.salt)
         .leftMap(_.inField("salt"))
 
-      threshold <- NonNegativeInt.create(viewCommonDataP.threshold).leftMap(_.inField("threshold"))
+      threshold <- (NonNegativeInt
+        .create(viewCommonDataP.threshold)
+        .leftMap(InvariantViolation.toProtoDeserializationError))
+        .leftMap(_.inField("threshold"))
     } yield new ViewCommonData(informees.toSet, threshold, salt)(
       hashOps,
       protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
+  }
 }

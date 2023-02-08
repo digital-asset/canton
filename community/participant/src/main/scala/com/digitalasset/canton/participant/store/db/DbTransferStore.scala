@@ -104,7 +104,7 @@ class DbTransferStore(
       transfer store. In Canton 2.4.0, it was added with the default value of 2 (see in
       the migration file). Now that pv=2 is removed, this confuses the deserializer of the
       EnvelopeContent when deserializing the transfer-out result.
-      To solve that, we use at least ProtocolVersion.v3 for the derialization of the
+      To solve that, we use at least ProtocolVersion.v3 for the deserialization of the
       transfer-out result.
      */
     val fixedSourceProtocolVersion =

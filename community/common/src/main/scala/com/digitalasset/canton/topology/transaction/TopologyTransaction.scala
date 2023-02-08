@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.transaction
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.*
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String255,

@@ -378,7 +378,7 @@ class SyncStateInspection(
         tryGetProtocolVersion(state, domain),
         state.pureCryptoApi,
       )
-    closed.map(opener.open)
+    closed.map(opener.tryOpen)
   }
 
   def findMessage(domain: DomainAlias, criterion: SequencedEventStore.SearchCriterion)(implicit
@@ -394,7 +394,7 @@ class SyncStateInspection(
       tryGetProtocolVersion(state, domain),
       state.pureCryptoApi,
     )
-    closed.map(opener.open)
+    closed.map(opener.tryOpen)
   }
 
   def safeToPrune(beforeOrAt: CantonTimestamp, ledgerEnd: LedgerOffset)(implicit

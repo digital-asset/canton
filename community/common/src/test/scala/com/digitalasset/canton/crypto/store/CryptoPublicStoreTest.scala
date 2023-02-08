@@ -33,7 +33,7 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
       CryptoFactory
         .create(
           CommunityCryptoConfig(),
-          new MemoryStorage,
+          new MemoryStorage(loggerFactory),
           new CommunityCryptoPrivateStoreFactory,
           testedReleaseProtocolVersion,
           timeouts,

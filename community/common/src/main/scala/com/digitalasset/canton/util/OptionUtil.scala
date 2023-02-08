@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString
 
 import scala.annotation.nowarn
 

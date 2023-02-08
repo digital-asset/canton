@@ -8,7 +8,7 @@ import cats.data.{Chain, EitherT}
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps
+import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestValidation
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
 import com.digitalasset.canton.protocol.*
@@ -89,9 +89,10 @@ private[routing] class DomainRankComputation(
         case Nil =>
           EitherT.leftT(show"Cannot transfer contract ${contractId}: ${errAccum.mkString(",")}")
         case submitter :: rest =>
-          TransferOutProcessingSteps
-            .transferOutRequestData(
+          TransferOutRequestValidation
+            .adminPartiesWithSubmitterCheck(
               participantId,
+              contractId,
               submitter,
               contractStakeholders,
               sourceSnapshot,

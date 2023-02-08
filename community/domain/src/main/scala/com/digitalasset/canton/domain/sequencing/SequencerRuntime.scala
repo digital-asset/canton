@@ -37,7 +37,6 @@ import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -99,7 +98,7 @@ object SequencerAuthenticationConfig {
 class SequencerRuntime(
     sequencerFactory: SequencerFactory,
     staticDomainParameters: StaticDomainParameters,
-    localNodeParameters: CantonNodeParameters,
+    localNodeParameters: CantonNodeWithSequencerParameters,
     publicServerConfig: PublicServerConfig,
     timeTrackerConfig: DomainTimeTrackerConfig,
     testingConfig: TestingConfigInternal,
@@ -296,7 +295,7 @@ class SequencerRuntime(
     authenticationConfig.check,
     clock,
     sequencerDomainParamsLookup,
-    localNodeParameters.processingTimeouts,
+    localNodeParameters,
     loggerFactory,
   )
 

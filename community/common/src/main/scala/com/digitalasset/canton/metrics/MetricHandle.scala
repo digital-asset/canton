@@ -4,18 +4,12 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.api.MetricDoc.MetricQualification.{
-  Debug,
-  Errors,
-  Latency,
-  Saturation,
-  Traffic,
-}
-import com.daml.metrics.api.MetricDoc.{FanInstanceTag, FanTag, GroupTag, MetricQualification, Tag}
-import com.daml.metrics.api.MetricHandle.{Counter, Factory, Gauge, Histogram, Meter, Timer}
+import com.daml.metrics.api.MetricDoc.MetricQualification.*
+import com.daml.metrics.api.MetricDoc.*
+import com.daml.metrics.api.MetricHandle.*
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
-import com.daml.metrics.api.noop.{NoOpCounter, NoOpGauge, NoOpHistogram, NoOpMeter, NoOpTimer}
-import com.daml.metrics.api.{MetricHandle as DamlMetricHandle, MetricName, MetricsContext}
+import com.daml.metrics.api.noop.NoOpMetricsFactory as DamlNoOpMetricsFactory
+import com.daml.metrics.api.{MetricHandle as DamlMetricHandle, MetricName}
 
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
@@ -23,7 +17,7 @@ import scala.reflect.runtime.universe as ru
 
 object MetricHandle {
 
-  trait MetricsFactory extends Factory {
+  trait MetricsFactory extends DamlMetricHandle.MetricsFactory {
 
     def registry: MetricRegistry
 
@@ -33,7 +27,6 @@ object MetricHandle {
         timer: Timer,
     ): TimedLoadGauge
 
-    def refGauge[T](name: MetricName, empty: T): RefGauge[T]
   }
 
   class CantonDropwizardMetricsFactory(registry: MetricRegistry)
@@ -47,56 +40,14 @@ object MetricHandle {
     ): TimedLoadGauge =
       reRegisterGauge[Double, TimedLoadGauge](name, new TimedLoadGauge(name, interval, timer))
 
-    override def refGauge[T](name: MetricName, empty: T): RefGauge[T] =
-      reRegisterGauge[T, RefGauge[T]](name, new RefGauge[T](name, empty))
-
   }
 
-  object NoOpMetricsFactory extends MetricsFactory {
+  object NoOpMetricsFactory
+      extends DamlNoOpMetricsFactory
+      with MetricsFactory
+      with LabeledMetricsFactory {
 
     override val registry = new MetricRegistry
-
-    override def timer(
-        name: MetricName,
-        description: String,
-    )(implicit
-        context: MetricsContext
-    ): Timer = NoOpTimer(name)
-
-    override def gauge[T](
-        name: MetricName,
-        initial: T,
-        description: String,
-    )(implicit
-        context: MetricsContext
-    ): Gauge[T] = NoOpGauge(name, initial)
-
-    override def gaugeWithSupplier[T](
-        name: MetricName,
-        gaugeSupplier: () => T,
-        description: String,
-    )(implicit context: MetricsContext): Unit = ()
-
-    override def meter(
-        name: MetricName,
-        description: String,
-    )(implicit
-        context: MetricsContext
-    ): Meter = NoOpMeter(name)
-
-    override def counter(
-        name: MetricName,
-        description: String,
-    )(implicit
-        context: MetricsContext
-    ): Counter = NoOpCounter(name)
-
-    override def histogram(
-        name: MetricName,
-        description: String,
-    )(implicit
-        context: MetricsContext
-    ): Histogram = NoOpHistogram(name)
 
     override def loadGauge(
         name: MetricName,
@@ -104,7 +55,6 @@ object MetricHandle {
         timer: Timer,
     ): TimedLoadGauge = new TimedLoadGauge(name, interval, timer)
 
-    override def refGauge[T](name: MetricName, empty: T): RefGauge[T] = new RefGauge[T](name, empty)
   }
 
 }
@@ -276,9 +226,7 @@ object MetricDoc {
               } else {
                 rf.get match {
                   // if it is a metric handle, try to grab the annotation and the name
-                  case x: DamlMetricHandle
-                      // TODO(#11468): Remove special casing of the following metric with the next daml upgrade 2.6.0 snapshot 20230124
-                      if x.name != "daml.lapi.streams.active" =>
+                  case x: DamlMetricHandle =>
                     val tag = extractTag(rf.symbol.annotations, tagParser)
                     if (tag.isEmpty) {
                       // if there is no Tag check if there exists a MetricDoc.FanInstanceTag

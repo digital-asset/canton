@@ -81,8 +81,6 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
 
       domain1Parameters.uniqueContractKeys shouldBe false
       domain2parameters.uniqueContractKeys shouldBe true
-      domain1Parameters.willCorruptYourSystemDevVersionSupport shouldBe false
-      domain2parameters.willCorruptYourSystemDevVersionSupport shouldBe true
     }
 
     // In this test case, both deprecated and new fields are set with opposite values, we make sure the new fields

@@ -8,6 +8,7 @@ package com.digitalasset.canton.domain.admin.v0;
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 import "com/digitalasset/canton/topology/admin/v0/topology_ext.proto";
+import "com/digitalasset/canton/domain/api/v0/sequencer_connection.proto";
 
 service MediatorInitializationService {
 
@@ -30,7 +31,7 @@ message InitializeMediatorRequest {
   // manager is running)
   com.digitalasset.canton.protocol.v0.StaticDomainParameters domain_parameters = 4;
   // how should the member connect to the domain sequencer
-  com.digitalasset.canton.protocol.v0.SequencerConnection sequencer_connection = 5;
+  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 5;
 }
 
 message InitializeMediatorResponse {

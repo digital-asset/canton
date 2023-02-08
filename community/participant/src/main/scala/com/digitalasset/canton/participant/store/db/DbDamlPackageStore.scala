@@ -8,13 +8,10 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DarName
+import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
-import com.digitalasset.canton.config.RequireTypes.{
-  LengthLimitedString,
-  PositiveNumeric,
-  String256M,
-}
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge

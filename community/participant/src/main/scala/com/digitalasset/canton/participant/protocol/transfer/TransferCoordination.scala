@@ -44,7 +44,7 @@ class TransferCoordination(
     * This is used when a transfer-in blocks for the identity state at the transfer-out. For more general uses,
     * `awaitTimestamp` should be preferred as it triggers the progression of time on `domain` by requesting a tick.
     */
-  def awaitTransferOutTimestamp(
+  private[transfer] def awaitTransferOutTimestamp(
       domain: DomainId,
       timestamp: CantonTimestamp,
   )(implicit
@@ -62,7 +62,7 @@ class TransferCoordination(
     *
     * @param waitForEffectiveTime if set to true, we'll wait for t+epsilon, which means we'll wait until we have observed the sequencing time t
     */
-  def awaitTimestamp(
+  private[transfer] def awaitTimestamp(
       domain: DomainId,
       timestamp: CantonTimestamp,
       waitForEffectiveTime: Boolean,
@@ -77,11 +77,11 @@ class TransferCoordination(
       .toRight(UnknownDomain(domain, "When waiting for timestamp"))
   }
 
-  /** Submits a transfer in. Used by the [[TransferOutProcessingSteps]] to automatically trigger the submission of a
-    * transfer in after the exclusivity timeout.
+  /** Submits a transfer-in. Used by the [[TransferOutProcessingSteps]] to automatically trigger the submission of a
+    * transfer-in after the exclusivity timeout.
     */
-  def transferIn(
-      id: DomainId,
+  private[transfer] def transferIn(
+      domainId: DomainId,
       submitterMetadata: TransferSubmitterMetadata,
       workflowId: Option[LfWorkflowId],
       transferId: TransferId,
@@ -89,9 +89,11 @@ class TransferCoordination(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult] = {
+    logger.debug(s"Triggering automatic transfer-in of transfer `$transferId`")
+
     for {
       inSubmission <- EitherT.fromEither[Future](
-        inSubmissionById(id).toRight(UnknownDomain(id, "When transfering in"))
+        inSubmissionById(domainId).toRight(UnknownDomain(domainId, "When transferring in"))
       )
       submissionResult <- inSubmission
         .submitTransferIn(
@@ -108,7 +110,7 @@ class TransferCoordination(
     * The returned future fails with [[java.lang.IllegalArgumentException]] if the `domain` has not progressed far enough
     * such that it can compute the snapshot. Use [[awaitTimestamp]] to ensure progression to `timestamp`.
     */
-  def cryptoSnapshot(domain: DomainId, timestamp: CantonTimestamp)(implicit
+  private[transfer] def cryptoSnapshot(domain: DomainId, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, DomainSnapshotSyncCryptoApi] =
     EitherT
@@ -120,8 +122,7 @@ class TransferCoordination(
       .semiflatMap(_.snapshot(timestamp))
 
   /** Returns a recent time proof received from the given domain. */
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def recentTimeProof(
+  private def recentTimeProof(
       domain: DomainId
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, TimeProof] =
     for {
@@ -131,7 +132,7 @@ class TransferCoordination(
         .leftMap[TransferProcessorError](_ => NoTimeProofFromDomain(domain))
     } yield timeProof
 
-  def getTimeProofAndSnapshot(targetDomain: DomainId)(implicit
+  private[transfer] def getTimeProofAndSnapshot(targetDomain: DomainId)(implicit
       traceContext: TraceContext
   ): EitherT[
     FutureUnlessShutdown,
@@ -152,31 +153,34 @@ class TransferCoordination(
     } yield (timeProof, targetCrypto)
 
   /** Stores the given transfer data on the target domain. */
-  def addTransferOutRequest(
+  private[transfer] def addTransferOutRequest(
       transferData: TransferData
   )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Unit] = {
     for {
       domainData <- EitherT.fromEither[Future](lookupDomain(transferData.targetDomain))
       _ <- domainData.transferStore
         .addTransfer(transferData)
-        .leftMap[TransferProcessorError](TransferStoreFailed)
+        .leftMap[TransferProcessorError](TransferStoreFailed(transferData.transferId, _))
     } yield ()
   }
 
   /** Adds the transfer-out result to the transfer stored on the given domain. */
-  def addTransferOutResult(domain: DomainId, transferOutResult: DeliveredTransferOutResult)(implicit
+  private[transfer] def addTransferOutResult(
+      domain: DomainId,
+      transferOutResult: DeliveredTransferOutResult,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, Unit] = {
     for {
       domainData <- EitherT.fromEither[Future](lookupDomain(domain))
       _ <- domainData.transferStore
         .addTransferOutResult(transferOutResult)
-        .leftMap[TransferProcessorError](TransferStoreFailed)
+        .leftMap[TransferProcessorError](TransferStoreFailed(transferOutResult.transferId, _))
     } yield ()
   }
 
   /** Removes the given [[com.digitalasset.canton.protocol.TransferId]] from the given [[com.digitalasset.canton.topology.DomainId]]'s [[store.TransferStore]]. */
-  def deleteTransfer(targetDomain: DomainId, transferId: TransferId)(implicit
+  private[transfer] def deleteTransfer(targetDomain: DomainId, transferId: TransferId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, Unit] =
     for {

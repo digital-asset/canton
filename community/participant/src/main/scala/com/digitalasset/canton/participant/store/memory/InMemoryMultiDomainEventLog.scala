@@ -59,7 +59,6 @@ import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.chaining.scalaUtilChainingOps
 
 class InMemoryMultiDomainEventLog(
     lookupEvent: NamedLoggingContext => (
@@ -378,7 +377,7 @@ class InMemoryMultiDomainEventLog(
       }
     )
 
-  override def locateAndReportPruningTimestamp(skip: NonNegativeInt)(implicit
+  override def locatePruningTimestamp(skip: NonNegativeInt)(implicit
       traceContext: TraceContext
   ): OptionT[Future, CantonTimestamp] =
     OptionT.fromOption(
@@ -390,10 +389,6 @@ class InMemoryMultiDomainEventLog(
         .map { case (_offset, (_eventLogId, _localOffset, publicationTime)) =>
           publicationTime
         }
-        .tap(ts =>
-          if (skip.value == 0)
-            MetricsHelper.updateAgeInHoursGauge(clock, metrics.pruning.prune.maxEventAge, ts)
-        )
     )
 
   override def lookupOffset(globalOffset: GlobalOffset)(implicit
@@ -475,6 +470,13 @@ class InMemoryMultiDomainEventLog(
   }
 
   override def flush(): Future[Unit] = executionQueue.flush()
+
+  override def reportMaxEventAgeMetric(oldestEventTimestamp: Option[CantonTimestamp]): Unit =
+    MetricsHelper.updateAgeInHoursGauge(
+      clock,
+      metrics.pruning.prune.maxEventAge,
+      oldestEventTimestamp,
+    )
 }
 
 object InMemoryMultiDomainEventLog extends HasLoggerName {

@@ -20,7 +20,7 @@ trait ConsoleEnvironmentTestHelpers[CE <: ConsoleEnvironment] { this: CE =>
 
   // helpers for creating participant and domain references by name
   // unknown names will throw
-  def p(name: String): LocalParticipantReference =
+  def lp(name: String): LocalParticipantReference =
     participants.local
       .find(_.name == name)
       .getOrElse(sys.error(s"participant [$name] not configured"))
@@ -29,6 +29,10 @@ trait ConsoleEnvironmentTestHelpers[CE <: ConsoleEnvironment] { this: CE =>
     participants.remote
       .find(_.name == name)
       .getOrElse(sys.error(s"remote participant [$name] not configured"))
+
+  def p(name: String): ParticipantReference = participants.all
+    .find(_.name == name)
+    .getOrElse(sys.error(s"neither local nor remote participant [$name] not configured"))
 
   def d(name: String): CE#DomainLocalRef =
     domains.local

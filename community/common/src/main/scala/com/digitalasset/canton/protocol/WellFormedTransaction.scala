@@ -7,16 +7,15 @@ import cats.data.{NonEmptyChain, Validated}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
-import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.checked
 import com.digitalasset.canton.data.ActionDescription
 import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
 import com.digitalasset.canton.protocol.WellFormedTransaction.State
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, LfTransactionUtil, MonadUtil}
+import com.digitalasset.canton.{checked, protocol}
 
 import scala.collection.immutable.HashMap
 import scala.collection.mutable
@@ -52,7 +51,7 @@ case class WellFormedTransaction[+S <: State] private (
 )(state: S) {
   def unwrap: LfVersionedTransaction = tx
 
-  def withoutVersion: LfTransaction = CantonOnly.unwrapVersionedTransaction(tx)
+  def withoutVersion: LfTransaction = tx.transaction
 
   def seedFor(nodeId: LfNodeId): Option[LfHash] = metadata.seeds.get(nodeId)
 
@@ -74,7 +73,7 @@ case class WellFormedTransaction[+S <: State] private (
 
     if (offset == 0) this
     else {
-      val adjustedTx = CantonOnly.mapNodeId(tx, adjustNodeId)
+      val adjustedTx = tx.mapNodeId(adjustNodeId)
       val adjustedMetadata = metadata.copy(
         seeds = metadata.seeds.map { case (nodeId, seed) => adjustNodeId(nodeId) -> seed }
       )
@@ -143,7 +142,7 @@ object WellFormedTransaction {
   private def checkForest(
       tx: LfVersionedTransaction
   ): Checked[NonEmptyChain[String], String, Unit] = {
-    val noForest = CantonOnly.unwrapVersionedTransaction(tx).isWellFormed
+    val noForest = tx.transaction.isWellFormed
     val errors = noForest.toList.map(err => s"${err.reason}: ${err.nid.index}")
     Checked.fromEither(NonEmptyChain.fromSeq(errors).toLeft(()))
   }
@@ -272,9 +271,9 @@ object WellFormedTransaction {
       refIds.traverse_(addReference(nodeId, byLfValue = true))
 
     LfTransactionUtil
-      .foldExecutionOrderM(CantonOnly.unwrapVersionedTransaction(tx), ()) { (nodeId, ne, _) =>
-        val argRefs = LfTransactionUtil.referencedContractIds(ne.chosenValue)
-        addReference(nodeId)(ne.targetCoid).flatMap(_ =>
+      .foldExecutionOrderM(tx.transaction, ()) { (nodeId, nodeExercise, _) =>
+        val argRefs = LfTransactionUtil.referencedContractIds(nodeExercise.chosenValue)
+        addReference(nodeId)(nodeExercise.targetCoid).flatMap(_ =>
           addReferencesByLfValue(nodeId, argRefs.to(LazyList))
         )
       } {
@@ -368,6 +367,7 @@ object WellFormedTransaction {
               case None => Validated.Valid(())
             }
           case (_nodeId, _rn: LfNodeRollback) => Validated.Valid(())
+          case (_nodeId, _rn: LfNodeAuthority) => sys.error("LfNodeAuthority")
         }
         .toEither
     )
@@ -413,6 +413,7 @@ object WellFormedTransaction {
             Checked.continue(s"signatory or maintainer not declared as informee: ${missingInformees
                 .mkString(", ")} at node ${nodeId.index}")
         case (_nodeId, _rn: LfNodeRollback) => Checked.unit
+        case (_nodeId, _rn: LfNodeAuthority) => sys.error("LfNodeAuthority")
       }
     } yield ()
   }
@@ -438,6 +439,7 @@ object WellFormedTransaction {
       case (_, _: LfNodeFetch) => Checked.result(())
       case (_, _: LfNodeLookupByKey) => Checked.result(())
       case (_, _: LfNodeRollback) => Checked.result(())
+      case (_, _: LfNodeAuthority) => sys.error("LfNodeAuthority")
     }
 
   private def checkPartyNames(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] = {
@@ -572,7 +574,7 @@ object WellFormedTransaction {
         submissionTimes.head1,
         s"Different submission times: ${submissionTimes.mkString(", ")}",
       )
-      version = CantonOnly.maxTransactionVersion(versions)
+      version = protocol.maxTransactionVersion(versions)
       _ <- MonadUtil
         .foldLeftM[Either[String, *], (Int, List[(RollbackSibling, LfNodeId)]), WithRollbackScope[
           WellFormedTransaction[WithSuffixes]
@@ -640,7 +642,7 @@ object WellFormedTransaction {
         nid -> LfNodeRollback(children.to(ImmArray))
       }
 
-      wrappedTx = CantonOnly.lfVersionedTransaction(
+      wrappedTx = LfVersionedTransaction(
         version,
         mergedNodes.result() ++ rollbackNodes,
         mergedRoots.result().to(ImmArray),

@@ -9,10 +9,11 @@ import cats.instances.future.*
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
+import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
@@ -92,7 +93,7 @@ object GrpcSequencerService {
       authenticationCheck: AuthenticationCheck,
       clock: Clock,
       domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
-      timeouts: ProcessingTimeout,
+      parameters: SequencerParameters,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
     new GrpcSequencerService(
@@ -101,10 +102,19 @@ object GrpcSequencerService {
       loggerFactory,
       auditLogger,
       authenticationCheck,
-      new SubscriptionPool[GrpcManagedSubscription](clock, metrics, timeouts, loggerFactory),
-      new DirectSequencerSubscriptionFactory(sequencer, timeouts, loggerFactory),
+      new SubscriptionPool[GrpcManagedSubscription](
+        clock,
+        metrics,
+        parameters.processingTimeouts,
+        loggerFactory,
+      ),
+      new DirectSequencerSubscriptionFactory(
+        sequencer,
+        parameters.processingTimeouts,
+        loggerFactory,
+      ),
       domainParamsLookup,
-      timeouts,
+      parameters,
     )
 
   private sealed trait WrappedSubmissionRequest extends Product with Serializable {
@@ -150,11 +160,13 @@ class GrpcSequencerService(
     subscriptionPool: SubscriptionPool[GrpcManagedSubscription],
     directSequencerSubscriptionFactory: DirectSequencerSubscriptionFactory,
     domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
-    override protected val timeouts: ProcessingTimeout,
+    parameters: SequencerParameters,
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
     with NamedLogging
     with FlagCloseable {
+
+  override protected val timeouts: ProcessingTimeout = parameters.processingTimeouts
 
   private val rates = new TrieMap[ParticipantId, RateLimiter]()
 
@@ -579,16 +591,25 @@ class GrpcSequencerService(
       participantId: ParticipantId,
       maxRatePerParticipant: NonNegativeInt,
   ): RateLimiter = {
+    def rateAsNumeric = NonNegativeNumeric.tryCreate(maxRatePerParticipant.value.toDouble)
     rates.get(participantId) match {
       case Some(rateLimiter) =>
-        if (rateLimiter.maxTasksPerSecond == maxRatePerParticipant) rateLimiter
+        if (
+          Math.abs(
+            rateLimiter.maxTasksPerSecond.value - maxRatePerParticipant.value.toDouble
+          ) < 1.0e-6
+        )
+          rateLimiter
         else {
-          val newRateLimiter = new RateLimiter(maxRatePerParticipant)
+          val newRateLimiter = new RateLimiter(rateAsNumeric, parameters.maxBurstFactor)
           rates.update(participantId, newRateLimiter)
           newRateLimiter
         }
       case None =>
-        rates.getOrElseUpdate(participantId, new RateLimiter(maxRatePerParticipant))
+        rates.getOrElseUpdate(
+          participantId,
+          new RateLimiter(rateAsNumeric, parameters.maxBurstFactor),
+        )
     }
   }
 

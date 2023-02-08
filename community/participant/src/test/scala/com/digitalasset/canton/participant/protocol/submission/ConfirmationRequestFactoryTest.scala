@@ -199,9 +199,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           v0.focus(_.submitterParticipantSignature)
             .modify(_.map(_ => SymbolicCrypto.emptySignature))
         case v1: EncryptedViewMessageV1[_] =>
-          v1.copy(submitterParticipantSignature =
-            v1.submitterParticipantSignature.map(_ => SymbolicCrypto.emptySignature)
-          )(v1.informeeParticipants)
+          v1.focus(_.submitterParticipantSignature)
+            .modify(_.map(_ => SymbolicCrypto.emptySignature))
       }))
 
   // Expected output factory

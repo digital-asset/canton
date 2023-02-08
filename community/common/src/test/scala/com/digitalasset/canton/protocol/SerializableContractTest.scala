@@ -30,7 +30,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
         stakeholders = Set(alice, bob),
         maybeKeyWithMaintainers = Some(
           ExampleTransactionFactory.globalKeyWithMaintainers(
-            LfGlobalKey.assertBuild(templateId, Value.ValueUnit),
+            LfGlobalKey.build(templateId, Value.ValueUnit).value,
             Set(alice),
           )
         ),

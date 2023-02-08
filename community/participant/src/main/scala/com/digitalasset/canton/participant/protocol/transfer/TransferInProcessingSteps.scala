@@ -148,7 +148,7 @@ private[transfer] class TransferInProcessingSteps(
       stakeholders = transferData.transferOutRequest.stakeholders
       _ <- condUnitET[Future](
         stakeholders.contains(submitter),
-        SubmittingPartyMustBeStakeholder(Some(transferId), submitter, stakeholders),
+        SubmittingPartyMustBeStakeholderIn(transferId, submitter, stakeholders),
       )
 
       submitterRelationship <- EitherT(
@@ -159,7 +159,7 @@ private[transfer] class TransferInProcessingSteps(
 
       _ <- condUnitET[Future](
         submitterRelationship.permission == ParticipantPermission.Submission,
-        NoSubmissionPermission(Some(transferId), submitter, participantId),
+        NoSubmissionPermissionIn(transferId, submitter, participantId),
       )
       transferInUuid = seedGenerator.generateUuid()
       seed = seedGenerator.generateSaltSeed()
@@ -193,7 +193,7 @@ private[transfer] class TransferInProcessingSteps(
 
       viewMessage <- EncryptedViewMessageFactory
         .create(TransferInViewType)(fullTree, recentSnapshot, targetProtocolVersion.v)
-        .leftMap[TransferProcessorError](EncryptionError)
+        .leftMap[TransferProcessorError](EncryptionError(transferData.contract.contractId, _))
     } yield {
       val rootHashMessage =
         RootHashMessage(
@@ -365,7 +365,7 @@ private[transfer] class TransferInProcessingSteps(
                   ),
                   _,
                 ) =>
-              StakeholderMismatch(
+              StakeholdersMismatch(
                 Some(transferId),
                 declaredViewStakeholders = declaredViewStakeholders,
                 declaredContractStakeholders = Some(declaredContractStakeholders),
@@ -376,7 +376,7 @@ private[transfer] class TransferInProcessingSteps(
         recomputedStakeholders = metadata.stakeholders
         _ <- condUnitET[Future](
           declaredViewStakeholders == recomputedStakeholders && declaredViewStakeholders == declaredContractStakeholders,
-          StakeholderMismatch(
+          StakeholdersMismatch(
             Some(transferId),
             declaredViewStakeholders = declaredViewStakeholders,
             declaredContractStakeholders = Some(declaredContractStakeholders),
@@ -405,7 +405,7 @@ private[transfer] class TransferInProcessingSteps(
               logger.error(
                 s"Transferring participant is missing causality information for ${noInfoFor}."
               )
-              Left(CausalityInformationMissing(missingFor = noInfoFor.toSet))
+              Left(CausalityInformationMissing(transferId, missingFor = noInfoFor.toSet))
             }
             EitherT.fromEither[Future](either)
           }
@@ -473,18 +473,22 @@ private[transfer] class TransferInProcessingSteps(
         case None => EitherT.rightT[Future, TransferProcessorError]((Seq.empty, Seq.empty))
         case Some(validationResult) =>
           val contractResult = activenessResult.contracts
+          lazy val localVerdictProtocolVersion =
+            LocalVerdict.protocolVersionRepresentativeFor(targetProtocolVersion.v)
+
           val localVerdict =
-            if (activenessResult.isSuccessful) LocalApprove()(targetProtocolVersion.v)
+            if (activenessResult.isSuccessful)
+              LocalApprove(targetProtocolVersion.v)
             else if (contractResult.notFree.nonEmpty) {
               contractResult.notFree.toSeq match {
                 case Seq((coid, state)) =>
                   if (state == ActiveContractStore.Archived)
                     LocalReject.TransferInRejects.ContractAlreadyArchived.Reject(show"coid=$coid")(
-                      targetProtocolVersion.v
+                      localVerdictProtocolVersion
                     )
                   else
                     LocalReject.TransferInRejects.ContractAlreadyActive.Reject(show"coid=$coid")(
-                      targetProtocolVersion.v
+                      localVerdictProtocolVersion
                     )
                 case coids =>
                   throw new RuntimeException(
@@ -492,9 +496,9 @@ private[transfer] class TransferInProcessingSteps(
                   )
               }
             } else if (contractResult.alreadyLocked.nonEmpty)
-              LocalReject.TransferInRejects.ContractIsLocked.Reject("")(targetProtocolVersion.v)
+              LocalReject.TransferInRejects.ContractIsLocked.Reject("")(localVerdictProtocolVersion)
             else if (activenessResult.inactiveTransfers.nonEmpty)
-              LocalReject.TransferInRejects.AlreadyCompleted.Reject("")(targetProtocolVersion.v)
+              LocalReject.TransferInRejects.AlreadyCompleted.Reject("")(localVerdictProtocolVersion)
             else
               throw new RuntimeException(
                 withRequestId(requestId, s"Unexpected activeness result $activenessResult")
@@ -512,7 +516,7 @@ private[transfer] class TransferInProcessingSteps(
                   domainId,
                   targetProtocolVersion.v,
                 )
-                .leftMap(e => FailedToCreateResponse(e): TransferProcessorError)
+                .leftMap(e => FailedToCreateResponse(transferId, e): TransferProcessorError)
             )
             causalityMessages <- checkCausalityState(validationResult.confirmingParties)
           } yield Seq(transferResponse -> Recipients.cc(mediatorId)) -> causalityMessages
@@ -526,7 +530,7 @@ private[transfer] class TransferInProcessingSteps(
         causalityMessage,
         RejectionArgs(
           entry,
-          LocalReject.TimeRejects.LocalTimeout.Reject()(targetProtocolVersion.v),
+          LocalReject.TimeRejects.LocalTimeout.Reject(targetProtocolVersion.v),
         ),
       )
     }
@@ -552,8 +556,8 @@ private[transfer] class TransferInProcessingSteps(
     def checkSubmitterIsStakeholder: Either[TransferProcessorError, Unit] =
       condUnitE(
         transferInRequest.stakeholders.contains(transferInRequest.submitter),
-        SubmittingPartyMustBeStakeholder(
-          Some(transferId),
+        SubmittingPartyMustBeStakeholderIn(
+          transferId,
           transferInRequest.submitter,
           transferInRequest.stakeholders,
         ),
@@ -788,13 +792,13 @@ private[transfer] class TransferInProcessingSteps(
     for {
       updateId <- EitherT.fromEither[Future](
         rootHash.asLedgerTransactionId.leftMap[TransferProcessorError](
-          FieldConversionError("Transaction id (root hash)", _)
+          FieldConversionError(transferOutId, "Transaction id (root hash)", _)
         )
       )
 
       ledgerCreatingTransactionId <- EitherT.fromEither[Future](
         creatingTransactionId.asLedgerTransactionId.leftMap[TransferProcessorError](
-          FieldConversionError("Transaction id (creating transaction)", _)
+          FieldConversionError(transferOutId, "Transaction id (creating transaction)", _)
         )
       )
 
@@ -909,45 +913,64 @@ object TransferInProcessingSteps {
   private[transfer] sealed trait TransferInProcessorError extends TransferProcessorError
 
   case class NoTransferData(transferId: TransferId, lookupError: TransferStore.TransferLookupError)
-      extends TransferInProcessorError
+      extends TransferInProcessorError {
+    override def message: String =
+      s"Cannot find transfer data for transfer `$transferId`: ${lookupError.cause}"
+  }
 
   case class TransferOutIncomplete(transferId: TransferId, participant: ParticipantId)
-      extends TransferInProcessorError
+      extends TransferInProcessorError {
+    override def message: String =
+      s"Cannot transfer-in `$transferId` because transfer-out is incomplete"
+  }
 
   case class PartyNotHosted(transferId: TransferId, party: LfPartyId, participant: ParticipantId)
-      extends TransferInProcessorError
+      extends TransferInProcessorError {
+    override def message: String =
+      s"Cannot transfer-in `$transferId` because $party is not hosted on $participant"
+  }
 
   case class NoParticipantForReceivingParty(transferId: TransferId, party: LfPartyId)
-      extends TransferInProcessorError
+      extends TransferInProcessorError {
+    override def message: String = s"Cannot transfer-in `$transferId` because $party is not active"
+  }
 
   case class UnexpectedDomain(transferId: TransferId, targetDomain: DomainId, receivedOn: DomainId)
-      extends TransferInProcessorError
+      extends TransferInProcessorError {
+    override def message: String =
+      s"Cannot transfer-in `$transferId`: expecting domain `$targetDomain` but received on `$receivedOn`"
+  }
 
   case class ResultTimestampExceedsDecisionTime(
       transferId: TransferId,
       timestamp: CantonTimestamp,
       decisionTime: CantonTimestamp,
-  ) extends TransferInProcessorError
+  ) extends TransferInProcessorError {
+    override def message: String =
+      s"Cannot transfer-in `$transferId`: result time $timestamp exceeds decision time $decisionTime"
+  }
 
   case class NonInitiatorSubmitsBeforeExclusivityTimeout(
       transferId: TransferId,
       submitter: LfPartyId,
       currentTimestamp: CantonTimestamp,
       timeout: CantonTimestamp,
-  ) extends TransferInProcessorError
+  ) extends TransferInProcessorError {
+    override def message: String =
+      s"Cannot transfer-in `$transferId`: only submitter can initiate before exclusivity timeout $timeout"
+  }
 
-  case class IdentityStateNotAvailable(
-      transferId: TransferId,
-      sourceDomain: DomainId,
-      timestamp: CantonTimestamp,
-  ) extends TransferInProcessorError
-
-  case class ContractDataMismatch(transferId: TransferId) extends TransferProcessorError
+  case class ContractDataMismatch(transferId: TransferId) extends TransferProcessorError {
+    override def message: String = s"Cannot transfer-in `$transferId`: contract data mismatch"
+  }
 
   case class CreatingTransactionIdMismatch(
       transferId: TransferId,
       transferInTransactionId: TransactionId,
       localTransactionId: TransactionId,
-  ) extends TransferProcessorError
+  ) extends TransferProcessorError {
+    override def message: String =
+      s"Cannot transfer-in `$transferId`: creating transaction id mismatch"
+  }
 
 }

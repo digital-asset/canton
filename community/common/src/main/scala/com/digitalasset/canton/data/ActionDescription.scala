@@ -5,7 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.lf.CantonOnly
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.{Value, ValueCoder}
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
@@ -371,8 +371,10 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
 
   private def lfVersionFromProtoVersioned(
       versionP: String
-  ): ParsingResult[LfTransactionVersion] =
-    CantonOnly.lookupTransactionVersion(versionP).leftMap(ValueDeserializationError("version", _))
+  ): ParsingResult[LfTransactionVersion] = TransactionVersion.All
+    .find(_.protoValue == versionP)
+    .toRight(s"Unsupported transaction version ${versionP}")
+    .leftMap(ValueDeserializationError("version", _))
 
   def serializeChosenValue(
       chosenValue: Value,

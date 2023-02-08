@@ -33,7 +33,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   val salt: Salt = factory.transactionSalt
   val nodeSeed = ExampleTransactionFactory.lfHash(1)
   val globalKey: LfGlobalKey =
-    LfGlobalKey.assertBuild(LfTransactionBuilder.defaultTemplateId, Value.ValueInt64(100L))
+    LfGlobalKey.build(LfTransactionBuilder.defaultTemplateId, Value.ValueInt64(100L)).value
 
   val defaultActionDescription =
     ActionDescription.tryFromLfActionNode(

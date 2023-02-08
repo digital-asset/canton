@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
 import cats.implicits.*
-import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
@@ -26,15 +25,15 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   SeedGenerator,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.{
-  PendingTransferOut,
+import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
+import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestValidation.{
   PermissionErrors,
   TargetDomainIsSourceDomain,
 }
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
-  NoSubmissionPermission,
+  NoSubmissionPermissionOut,
   ReceivedNoRequests,
-  SubmittingPartyMustBeStakeholder,
+  SubmittingPartyMustBeStakeholderOut,
 }
 import com.digitalasset.canton.participant.protocol.{
   GlobalCausalOrderer,
@@ -153,7 +152,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       loggerFactory,
     )(executorService)
 
-  val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false)
+  val engine = DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false)
   val mockPackageService =
     new PackageService(
       engine,
@@ -287,7 +286,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     "fail if submitter is not a stakeholder" in {
       val stakeholders = Set(party1, party2)
       val result = mkTxOutRes(stakeholders, ips1, ips1)
-      result should matchPattern { case Left(SubmittingPartyMustBeStakeholder(_, _, _)) =>
+      result should matchPattern { case Left(SubmittingPartyMustBeStakeholderOut(_, _, _)) =>
       }
     }
 
@@ -296,8 +295,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         generateIps(Map(submittingParticipant -> Map(submitter -> Confirmation)))
 
       val result = mkTxOutRes(Set(submitter), ipsNoSubmissionPermission, ips1)
-      result should matchPattern { case Left(NoSubmissionPermission(_, _, _)) =>
-      }
+      result should matchPattern { case Left(NoSubmissionPermissionOut(_, _, _)) => }
     }
 
     "fail if a stakeholder cannot submit on target domain" in {

@@ -38,6 +38,7 @@ class TransactionProcessingStepsTest extends AsyncWordSpec with BaseTest {
       val behaviors = contractAuthenticatorBehaviors.toMap
       behaviors(_)
     },
+    new AuthorizationValidator(participantId),
     loggerFactory = loggerFactory,
   )
 

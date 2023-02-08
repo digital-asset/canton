@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.store.db
 
-import com.digitalasset.canton.config.RequireTypes.String3
+import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.PruningSchedulerStoreTest
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}

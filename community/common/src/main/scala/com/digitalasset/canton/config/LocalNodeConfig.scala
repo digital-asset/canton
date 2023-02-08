@@ -53,6 +53,7 @@ trait LocalNodeConfig extends NodeConfig {
   def storage: StorageConfig
   def crypto: CryptoConfig
   def sequencerClient: SequencerClientConfig
+  def monitoring: NodeMonitoringConfig
 
   /** Various cache sizes */
   def caching: CachingConfigs

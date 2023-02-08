@@ -9,8 +9,8 @@ import com.digitalasset.canton.admin.api.client.commands.{
   GrpcAdminCommand,
   ParticipantAdminCommands,
 }
-import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.config.{CantonCommunityConfig, ClientConfig}
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.{CantonCommunityConfig, ClientConfig, TestingConfigInternal}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.HeadlessConsole.{
   CompileError,
@@ -25,8 +25,11 @@ import com.digitalasset.canton.environment.{
   ParticipantNodes,
 }
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap
+import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.{BaseTest, ConfigStubs}
 import io.grpc.stub.AbstractStub
+import io.opentelemetry.sdk.OpenTelemetrySdk
+import io.opentelemetry.sdk.trace.SdkTracerProvider
 import org.mockito.ArgumentMatchers.{anyString, eq as isEq}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -73,10 +76,16 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
     val domain: DomainNodeBootstrap = mock[DomainNodeBootstrap]
 
     when(environment.config).thenReturn(config)
+    when(environment.testingConfig).thenReturn(
+      TestingConfigInternal(initializeGlobalOpenTelemetry = false)
+    )
     when(environment.participants).thenReturn(participants)
     when(environment.domains).thenReturn(domains)
     when(environment.simClock).thenReturn(None)
     when(environment.loggerFactory).thenReturn(loggerFactory)
+    when(environment.configuredOpenTelemetry).thenReturn(
+      ConfiguredOpenTelemetry(OpenTelemetrySdk.builder().build(), SdkTracerProvider.builder())
+    )
 
     when(participants.start(anyString())(anyTraceContext)).thenReturn(Right(participant))
     when(participants.stop(anyString())).thenReturn(Right(()))

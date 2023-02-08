@@ -9,7 +9,6 @@ import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.ledger.configuration.LedgerTimeModel
 import com.daml.ledger.participant.state.v2.*
-import com.daml.lf.CantonOnly.LfVersionedTransaction
 import com.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{
@@ -18,6 +17,7 @@ import com.digitalasset.canton.protocol.{
   LfHash,
   LfTransaction,
   LfTransactionVersion,
+  LfVersionedTransaction,
 }
 
 /** Default values for objects from the Daml repo for unit testing */

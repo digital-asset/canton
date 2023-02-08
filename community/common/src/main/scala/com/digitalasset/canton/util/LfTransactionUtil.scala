@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.either.*
 import cats.{Monad, Order}
 import com.daml.lf.data.*
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.Value
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.{LfPartyId, LfValue, LfVersioned}
+import com.digitalasset.canton.{LfPartyId, LfVersioned}
 
 import scala.annotation.nowarn
 
@@ -74,7 +73,7 @@ object LfTransactionUtil {
     LfVersioned(
       version,
       LfGlobalKeyWithMaintainers(
-        LfGlobalKey.assertBuild(templateId, assertNoContractIdInKey(keyWithMaintainers.key)),
+        LfGlobalKey.assertBuild(templateId, keyWithMaintainers.key),
         keyWithMaintainers.maintainers,
       ),
     )
@@ -179,6 +178,7 @@ object LfTransactionUtil {
     case _: LfNodeFetch => false
     case _: LfNodeLookupByKey => false
     case _: LfNodeRollback => false
+    case _: LfNodeAuthority => sys.error("LfNodeAuthority")
   }
 
   private[this] def suffixForDiscriminator(
@@ -259,19 +259,6 @@ object LfTransactionUtil {
     */
   def checkNoContractIdInKey(key: Value): Either[LfContractId, Value] =
     key.cids.headOption.toLeft(key)
-
-  /** @throws java.lang.IllegalArgumentException
-    *            if `key` contains a contact ID.
-    */
-  def assertNoContractIdInKey(key: Value): Value =
-    checkNoContractIdInKey(key).valueOr(cid =>
-      throw new IllegalArgumentException(s"Key contains contract Id $cid")
-    )
-
-  def checkNoContractIdInKey(
-      key: LfVersioned[LfValue]
-  ): Either[LfContractId, LfVersioned[LfValue]] =
-    checkNoContractIdInKey(key.unversioned).map(LfVersioned(key.version, _))
 
   /** Given internally consistent transactions, compute their consumed contract ids. */
   def consumedContractIds(

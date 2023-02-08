@@ -74,7 +74,6 @@ import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.collection.immutable.Set
 import scala.concurrent.{ExecutionContext, Future}
 
 class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
@@ -171,7 +170,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     val nodePersistentState = timeouts.default.await("creating node persistent state")(
       ParticipantNodePersistentState(
         syncDomainPersistentStates,
-        new MemoryStorage,
+        new MemoryStorage(loggerFactory),
         clock,
         None,
         uniqueContractKeysO = Some(false),

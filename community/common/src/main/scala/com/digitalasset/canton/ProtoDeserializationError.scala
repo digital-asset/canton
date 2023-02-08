@@ -5,6 +5,7 @@ package com.digitalasset.canton
 
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.config.RequireTypes.InvariantViolation as PureInvariantViolation
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ProtoDeserializationErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -89,6 +90,12 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
           cause = "Deserialization of protobuf message failed"
         )
         with CantonError
+  }
+
+  object InvariantViolation {
+    def toProtoDeserializationError(e: PureInvariantViolation): InvariantViolation =
+      InvariantViolation(e.message)
+    def apply(e: PureInvariantViolation): InvariantViolation = InvariantViolation(e.message)
   }
 
 }

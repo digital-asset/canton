@@ -8,7 +8,6 @@ import com.daml.lf.value.ValueCoder.{CidEncoder as LfDummyCidEncoder}
 import com.daml.lf.value.{ValueCoder, ValueOuterClass}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{LfVersioned, ProtoDeserializationError}
 
 object GlobalKeySerialization {
@@ -47,17 +46,17 @@ object GlobalKeySerialization {
       deserializedProtoKey <- ProtoConverter.protoParser(ValueOuterClass.VersionedValue.parseFrom)(
         protoKey.key
       )
-      unsafeKeyVersioned <- ValueCoder
+
+      versionedKey <- ValueCoder
         .decodeVersionedValue(ValueCoder.CidDecoder, deserializedProtoKey)
         .leftMap(err =>
           ProtoDeserializationError.ValueDeserializationError("GlobalKey.proto", err.toString)
         )
-      key <- LfTransactionUtil
-        .checkNoContractIdInKey(unsafeKeyVersioned)
-        .leftMap(cid =>
-          ProtoDeserializationError
-            .ValueDeserializationError("GlobalKey.key", s"Key contains contract Id $cid")
-        )
-    } yield LfVersioned(key.version, LfGlobalKey.assertBuild(templateId, key.unversioned))
+
+      globalKey <- LfGlobalKey
+        .build(templateId, versionedKey.unversioned)
+        .leftMap(err => ProtoDeserializationError.ValueDeserializationError("GlobalKey.key", err))
+
+    } yield LfVersioned(versionedKey.version, globalKey)
 
 }

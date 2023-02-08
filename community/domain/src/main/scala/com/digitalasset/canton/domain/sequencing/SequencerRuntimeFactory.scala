@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing
 import akka.actor.ActorSystem
 import cats.syntax.option.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveDouble
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministrationServiceGrpc
@@ -32,6 +33,13 @@ import io.opentelemetry.api.trace.Tracer
 import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.ExecutionContextExecutor
 
+trait SequencerParameters {
+  def maxBurstFactor: PositiveDouble
+  def processingTimeouts: ProcessingTimeout
+}
+
+trait CantonNodeWithSequencerParameters extends CantonNodeParameters with SequencerParameters
+
 trait SequencerRuntimeFactory {
   def create(
       domainId: DomainId,
@@ -48,7 +56,7 @@ trait SequencerRuntimeFactory {
       processingTimeout: ProcessingTimeout,
       auditLogger: TracedLogger,
       agreementManager: Option[ServiceAgreementManager],
-      localParameters: CantonNodeParameters,
+      localParameters: CantonNodeWithSequencerParameters,
       metrics: SequencerMetrics,
       indexedStringStore: IndexedStringStore,
       futureSupervisor: FutureSupervisor,
@@ -80,7 +88,7 @@ object SequencerRuntimeFactory {
         processingTimeout: ProcessingTimeout,
         auditLogger: TracedLogger,
         agreementManager: Option[ServiceAgreementManager],
-        localParameters: CantonNodeParameters,
+        localParameters: CantonNodeWithSequencerParameters,
         metrics: SequencerMetrics,
         indexedStringStore: IndexedStringStore,
         futureSupervisor: FutureSupervisor,

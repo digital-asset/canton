@@ -4,7 +4,7 @@
 package com.digitalasset.canton.store.memory;
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.String3
+import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.store.PruningSchedulerStoreTest
 import org.scalatest.wordspec.AsyncWordSpec;
 

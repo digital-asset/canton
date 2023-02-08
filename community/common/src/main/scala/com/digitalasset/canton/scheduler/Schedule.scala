@@ -5,9 +5,10 @@ package com.digitalasset.canton.scheduler
 
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
-import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.pruning.admin.v0
+import com.digitalasset.canton.scheduler.Cron.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.TryUtil
@@ -27,10 +28,6 @@ import scala.util.control.NonFatal
   *                    task as long as the current time falls within maxDuration.
   */
 class Schedule(val cron: Cron, val maxDuration: PositiveSeconds)
-
-object Schedule {
-  def apply(cron: Cron, maxDuration: PositiveSeconds) = new Schedule(cron, maxDuration)
-}
 
 final case class PruningSchedule(
     override val cron: Cron,
@@ -70,14 +67,22 @@ class Cron(val unwrap: CronExpression) {
   // ranges). "getNextValidTimeAfter" returns the next valid to to start an activity at or after the
   // specified timestamp baseline.
   // This wrapper around CronExpression also encapsulates its use of java Date.
-  def getNextValidTimeAfter(baselineTimestamp: CantonTimestamp): Either[String, CantonTimestamp] = {
+  def getNextValidTimeAfter(
+      baselineTimestamp: CantonTimestamp
+  ): Either[CronNextTimeAfterError, CantonTimestamp] = {
     for {
       jdate <- TryUtil
         .tryCatchInterrupted(baselineTimestamp.toDate)
         .toEither
-        .leftMap(_.getMessage)
-      nextJDate = unwrap.getNextValidTimeAfter(jdate)
-      nextCantonTimestamp <- CantonTimestamp.fromDate(nextJDate)
+        .leftMap(t => DateConversionError(t.getMessage))
+      // Using `Option` here to convert potential `null` into `None`.
+      // We get a `null` when the cron expression does not allow for any
+      // next valid time after the specified baseline timestamp.
+      nextJDate <- Option(unwrap.getNextValidTimeAfter(jdate))
+        .toRight(NoNextValidTimeAfter(baselineTimestamp))
+      nextCantonTimestamp <- CantonTimestamp
+        .fromDate(nextJDate)
+        .leftMap[CronNextTimeAfterError](DateConversionError)
     } yield nextCantonTimestamp
   }
 }
@@ -108,5 +113,15 @@ object Cron {
 
   def fromProtoPrimitive(cronP: String): ParsingResult[Cron] =
     create(cronP).leftMap(ValueConversionError("cron", _))
+
+  sealed trait CronNextTimeAfterError {
+    def message: String
+  }
+
+  case class NoNextValidTimeAfter(ts: CantonTimestamp) extends CronNextTimeAfterError {
+    override def message = s"No next valid time after ${ts} exists."
+  }
+
+  case class DateConversionError(message: String) extends CronNextTimeAfterError
 
 }

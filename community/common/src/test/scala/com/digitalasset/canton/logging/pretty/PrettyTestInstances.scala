@@ -3,16 +3,17 @@
 
 package com.digitalasset.canton.logging.pretty
 
-import com.daml.lf.CantonOnly.LfVersionedTransaction
 import com.digitalasset.canton.protocol.{
   LfCommittedTransaction,
   LfKeyWithMaintainers,
   LfNode,
+  LfNodeAuthority,
   LfNodeCreate,
   LfNodeExercises,
   LfNodeFetch,
   LfNodeLookupByKey,
   LfNodeRollback,
+  LfVersionedTransaction,
 }
 
 /** Pretty printing implicits for use by tests only. These enable showing readable multiline diffs when expected
@@ -38,6 +39,7 @@ trait PrettyTestInstances {
     case n: LfNodeFetch => prettyLfNodeFetch.treeOf(n)
     case n: LfNodeLookupByKey => prettyLfNodeLookupByKey.treeOf(n)
     case n: LfNodeRollback => prettyLfNodeRollback.treeOf(n)
+    case _: LfNodeAuthority => sys.error("LfNodeAuthority")
   }
 
   implicit lazy val prettyLfNodeCreate: Pretty[LfNodeCreate] = prettyOfClass(

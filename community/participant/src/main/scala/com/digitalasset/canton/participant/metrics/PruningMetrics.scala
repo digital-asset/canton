@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
-import com.daml.metrics.api.MetricHandle.{Factory, Gauge, Timer}
+import com.daml.metrics.api.MetricHandle.{Gauge, MetricsFactory, Timer}
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 
-class PruningMetrics(val prefix: MetricName, metricsFactory: Factory) {
+class PruningMetrics(val prefix: MetricName, metricsFactory: MetricsFactory) {
 
   object commitments {
     private val prefix: MetricName = MetricName(PruningMetrics.this.prefix :+ "commitments")

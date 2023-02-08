@@ -5,9 +5,9 @@ package com.digitalasset.canton.domain.initialization
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.InitConfigBase
-import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.crypto.{SigningPublicKey, X509Certificate}
+import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.environment.CantonNodeBootstrapBase
 import com.digitalasset.canton.error.CantonError
@@ -39,7 +39,6 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
 
   def initializeTopologyManagerIdentity(
       name: InstanceName,
-      legalIdentityHook: X509Certificate => EitherT[Future, String, Unit],
       initialDynamicDomainParameters: DynamicDomainParameters,
       initConfigBase: InitConfigBase,
       staticDomainParametersFromConfig: StaticDomainParameters,
@@ -92,7 +91,6 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
               uid,
               Seq(MediatorId(uid), domainTopologyManagerId),
             )
-            .flatMap(legalIdentityHook)
         } else {
           EitherT.rightT[Future, String](())
         }

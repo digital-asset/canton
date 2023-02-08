@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.pruning
 
-import com.digitalasset.canton.config.RequireTypes.String100
+import com.digitalasset.canton.config.CantonRequireTypes.String100
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.store.db.DbSerializationException

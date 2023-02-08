@@ -8,14 +8,9 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
-import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.admin.v0
-import com.digitalasset.canton.sequencing.{
-  GrpcSequencerConnection,
-  HttpSequencerConnection,
-  SequencerConnection,
-}
+import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
@@ -76,8 +71,6 @@ case class DomainConnectionConfig(
   def certificates: Option[ByteString] = sequencerConnection match {
     case grpcConnection: GrpcSequencerConnection =>
       grpcConnection.customTrustCertificates
-    case httpConnection: HttpSequencerConnection =>
-      Some(httpConnection.certificate.unwrap)
   }
 
   def withCertificates(certificates: ByteString): DomainConnectionConfig =
@@ -85,10 +78,6 @@ case class DomainConnectionConfig(
       case grpcConnection: GrpcSequencerConnection =>
         copy(sequencerConnection =
           grpcConnection.copy(customTrustCertificates = Some(certificates))
-        )
-      case httpConnection: HttpSequencerConnection =>
-        copy(sequencerConnection =
-          httpConnection.copy(certificate = X509CertificatePem.tryFromBytes(certificates))
         )
     }
 

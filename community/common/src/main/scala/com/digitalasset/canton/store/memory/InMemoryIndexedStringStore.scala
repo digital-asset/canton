@@ -4,7 +4,7 @@
 package com.digitalasset.canton.store.memory
 
 import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedStringType}
 
 import scala.collection.concurrent.TrieMap

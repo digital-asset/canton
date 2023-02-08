@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol
 
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPackageId
-import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.tracing.TraceContext
 import slick.jdbc.GetResult
 

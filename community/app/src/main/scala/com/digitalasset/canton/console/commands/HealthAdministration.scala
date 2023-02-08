@@ -5,7 +5,7 @@ package com.digitalasset.canton.console.commands
 
 import better.files.File
 import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.admin.api.client.commands.{HttpAdminCommand, StatusAdminCommands}
+import com.digitalasset.canton.admin.api.client.commands.StatusAdminCommands
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
 import com.digitalasset.canton.console.ConsoleMacros.utils
@@ -108,13 +108,11 @@ class HealthAdministration[S <: data.NodeStatus.Status](
 
   private def runningCommand =
     adminCommand(
-      StatusAdminCommands.IsRunning,
-      new HttpAdminCommand.Stub[Boolean]("running-stub", true),
+      StatusAdminCommands.IsRunning
     )
   private def initializedCommand =
     adminCommand(
-      StatusAdminCommands.IsInitialized,
-      new HttpAdminCommand.Stub[Boolean]("initialized-stub", true),
+      StatusAdminCommands.IsInitialized
     )
 
   def falseIfUnreachable(command: ConsoleCommandResult[Boolean]): Boolean =

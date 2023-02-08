@@ -7,10 +7,13 @@ package com.digitalasset.canton.config
   *
   * @param testSequencerClientFor: members that should use a
   * [[com.digitalasset.canton.sequencing.client.DelayedSequencerClient]] for testing
+  * @param initializeGlobalOpenTelemetry Determines whether the OpenTelemetry instance we build is set as the global OpenTelemetry instance. This is set to false during tests to
+  *                                      prevent failures as the global OpenTelemetry instance can be initialized just once.
   */
 case class TestingConfigInternal(
     testSequencerClientFor: Set[TestSequencerClientFor] = Set.empty,
     useCausalityTracking: Boolean = false,
+    initializeGlobalOpenTelemetry: Boolean = true,
 )
 
 /** @param environmentId ID used to disambiguate tests running in parallel

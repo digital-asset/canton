@@ -17,7 +17,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 class EnvelopeOpener[Box[+_ <: Envelope[_]]](protocolVersion: ProtocolVersion, hashOps: HashOps)(
     implicit Box: EnvelopeBox[Box]
 ) {
-  def open(closed: Box[ClosedEnvelope]): Box[DefaultOpenEnvelope] = {
+  def tryOpen(closed: Box[ClosedEnvelope]): Box[DefaultOpenEnvelope] = {
     val openedEventE = Box.traverse(closed) { closedEnvelope =>
       closedEnvelope.openEnvelope(
         EnvelopeContent.messageFromByteString(protocolVersion, hashOps),
@@ -41,7 +41,7 @@ object EnvelopeOpener {
   )(implicit Box: EnvelopeBox[Box]): ApplicationHandler[Box, ClosedEnvelope] = handler.replace {
     val opener = new EnvelopeOpener[Box](protocolVersion, hashOps)
 
-    closedEvent => handler(opener.open(closedEvent))
+    closedEvent => handler(opener.tryOpen(closedEvent))
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))

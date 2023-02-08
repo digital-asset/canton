@@ -5,7 +5,7 @@ package com.digitalasset.canton.time
 
 import cats.data.EitherT
 import cats.syntax.option.*
-import com.digitalasset.canton.config.RequireTypes.String73
+import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError

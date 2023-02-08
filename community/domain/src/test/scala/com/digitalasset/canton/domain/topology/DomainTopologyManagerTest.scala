@@ -27,7 +27,6 @@ class DomainTopologyManagerTest extends TopologyManagerTest {
           DomainTopologyManagerId(id),
           clock,
           store,
-          DomainTopologyManager.addMemberNoOp,
           crypto,
           DefaultProcessingTimeouts.testing,
           BaseTest.testedProtocolVersion,

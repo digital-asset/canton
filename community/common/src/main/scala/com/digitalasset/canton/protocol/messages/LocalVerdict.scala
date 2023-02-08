@@ -36,10 +36,7 @@ sealed trait LocalVerdict
   override protected def companionObj: HasProtocolVersionedWrapperCompanion[LocalVerdict] =
     LocalVerdict
 
-  def protocolVersion: ProtocolVersion
-
-  override def representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict] =
-    LocalVerdict.protocolVersionRepresentativeFor(protocolVersion)
+  override def representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
 }
 
 object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
@@ -64,7 +61,9 @@ object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
       localVerdictP: v0.LocalVerdict
   ): ParsingResult[LocalVerdict] = {
     import v0.LocalVerdict.{SomeLocalVerdict as Lv}
-    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0)).representative
+
+    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0))
+
     localVerdictP match {
       case v0.LocalVerdict(Lv.LocalApprove(empty.Empty(_))) =>
         Right(LocalApprove()(protocolVersion))
@@ -76,8 +75,10 @@ object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
 
   private[messages] def fromProtoV1(localVerdictP: v1.LocalVerdict): ParsingResult[LocalVerdict] = {
     import v1.LocalVerdict.{SomeLocalVerdict as Lv}
-    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1)).representative
+
+    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
     val v1.LocalVerdict(someLocalVerdictP) = localVerdictP
+
     someLocalVerdictP match {
       case Lv.LocalApprove(empty.Empty(_)) => Right(LocalApprove()(protocolVersion))
       case Lv.LocalReject(localRejectP) => LocalReject.fromProtoV1(localRejectP)
@@ -87,7 +88,9 @@ object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
   }
 }
 
-case class LocalApprove()(override val protocolVersion: ProtocolVersion) extends LocalVerdict {
+case class LocalApprove()(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
+) extends LocalVerdict {
   private[messages] def toProtoV0: v0.LocalVerdict =
     v0.LocalVerdict(v0.LocalVerdict.SomeLocalVerdict.LocalApprove(empty.Empty()))
 
@@ -95,6 +98,11 @@ case class LocalApprove()(override val protocolVersion: ProtocolVersion) extends
     v1.LocalVerdict(v1.LocalVerdict.SomeLocalVerdict.LocalApprove(empty.Empty()))
 
   override def pretty: Pretty[this.type] = prettyOfClass()
+}
+
+object LocalApprove {
+  def apply(protocolVersion: ProtocolVersion): LocalApprove =
+    LocalApprove()(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
 }
 
 /** Base type for error codes related to local reject.
@@ -217,7 +225,8 @@ object LocalReject extends LocalRejectionGroup {
   private[messages] def fromProtoV0(v: v0.LocalReject): ParsingResult[LocalReject] = {
     import ConsistencyRejections.*
     import v0.LocalReject.Code
-    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0)).representative
+    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0))
+
     v.code match {
       case Code.MissingCode => Left(FieldNotSet("LocalReject.code"))
       case Code.LockedContracts => Right(LockedContracts.Reject(v.resource)(protocolVersion))
@@ -262,7 +271,7 @@ object LocalReject extends LocalRejectionGroup {
   private[messages] def fromProtoV1(localRejectP: v1.LocalReject): ParsingResult[LocalReject] = {
     import ConsistencyRejections.*
     val v1.LocalReject(causePrefix, details, resource, errorCodeP, errorCategoryP) = localRejectP
-    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0)).representative
+    val protocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
     errorCodeP match {
       case LockedContracts.id => Right(LockedContracts.Reject(resource)(protocolVersion))
       case LockedKeys.id => Right(LockedKeys.Reject(resource)(protocolVersion))
@@ -275,6 +284,8 @@ object LocalReject extends LocalRejectionGroup {
       case TimeRejects.SubmissionTime.id =>
         Right(TimeRejects.SubmissionTime.Reject(details)(protocolVersion))
       case TimeRejects.LocalTimeout.id => Right(TimeRejects.LocalTimeout.Reject()(protocolVersion))
+      case MalformedRejects.MalformedRequest.id =>
+        Right(MalformedRejects.MalformedRequest.Reject(details)(protocolVersion))
       case MalformedRejects.Payloads.id =>
         Right(MalformedRejects.Payloads.Reject(details)(protocolVersion))
       case MalformedRejects.ModelConformance.id =>
@@ -316,7 +327,7 @@ object LocalReject extends LocalRejectionGroup {
         ) {
 
       case class Reject(override val _resources: Seq[String])(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix = s"Rejected transaction is referring to locked contracts ",
             _resourcesType = Some(CantonErrorResource.ContractId),
@@ -335,7 +346,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.LockedKeys,
         ) {
       case class Reject(override val _resources: Seq[String])(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transaction is referring to locked keys ",
             _resourcesType = Some(CantonErrorResource.ContractKey),
@@ -354,7 +365,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.InactiveContracts,
         ) {
       case class Reject(override val _resources: Seq[String])(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transaction is referring to inactive contracts ",
             _resourcesType = Some(CantonErrorResource.ContractId),
@@ -375,7 +386,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.DuplicateKey,
         ) {
       case class Reject(override val _resources: Seq[String])(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       )
       // Error message contains the term: "Inconsistent" and "DuplicateKey" to avoid failing contract key ledger api conformance tests
           extends LocalRejectImpl(
@@ -399,7 +410,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.InconsistentKey,
         ) {
       case class Reject(override val _resources: Seq[String])(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix =
               "Inconsistent rejected transaction expected unassigned key, which already exists ",
@@ -424,7 +435,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.LedgerTime,
         ) {
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix =
               "Rejected transaction as delta of the ledger time and the record time exceed the time tolerance "
@@ -445,7 +456,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.SubmissionTime,
         ) {
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix =
               "Rejected transaction as delta of the submission time and the record time exceed the time tolerance "
@@ -470,15 +481,36 @@ object LocalReject extends LocalRejectionGroup {
         ) {
       override def logLevel: Level = Level.WARN
       case class Reject()(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transaction due to a participant determined timeout "
           )
+
+      object Reject {
+        def apply(protocolVersion: ProtocolVersion): Reject =
+          Reject()(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
   }
 
   object MalformedRejects extends ErrorGroup() {
+
+    @Explanation(
+      """This rejection is made by a participant if a request is malformed."""
+    )
+    @Resolution("Please contact support.")
+    object MalformedRequest
+        extends MalformedErrorCode(
+          id = "LOCAL_VERDICT_MALFORMED_REQUEST",
+          v0.LocalReject.Code.MalformedPayloads,
+        ) {
+      case class Reject(override val _details: String)(
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
+      ) extends Malformed(
+            _causePrefix = ""
+          )
+    }
 
     @Explanation(
       """This rejection is made by a participant if a view of the transaction is malformed."""
@@ -490,7 +522,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.MalformedPayloads,
         ) {
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to malformed payload within views "
           )
@@ -506,7 +538,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.MalformedModel,
         ) {
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to a failed model conformance check: "
           )
@@ -522,7 +554,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.MalformedConfirmationPolicy,
         ) {
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to multiple confirmation policies "
           )
@@ -540,7 +572,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.BadRootHashMessage,
         ) {
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to bad root hash error messages. "
           )
@@ -556,7 +588,7 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.CreatesExistingContract,
         ) {
       case class Reject(override val _resources: Seq[String])(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends Malformed(
             _causePrefix = "Rejected transaction would create contract(s) that already exist ",
             _resourcesType = Some(CantonErrorResource.ContractId),
@@ -582,7 +614,7 @@ object LocalReject extends LocalRejectionGroup {
         ) {
 
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(_causePrefix = "Activeness check failed. ")
     }
 
@@ -600,7 +632,7 @@ object LocalReject extends LocalRejectionGroup {
         ) {
 
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transfer as transferred contract is already archived. "
           )
@@ -617,7 +649,7 @@ object LocalReject extends LocalRejectionGroup {
         ) {
 
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix =
               "Rejected transfer as the contract is already active on the target domain. "
@@ -635,7 +667,7 @@ object LocalReject extends LocalRejectionGroup {
         ) {
 
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transfer as the transferred contract is locked. "
           )
@@ -652,7 +684,7 @@ object LocalReject extends LocalRejectionGroup {
         ) {
 
       case class Reject(override val _details: String)(
-          override val protocolVersion: ProtocolVersion
+          override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transfer as the transfer has already completed "
           )
@@ -668,7 +700,7 @@ object LocalReject extends LocalRejectionGroup {
       id: String,
       category: ErrorCategory,
   )(
-      override val protocolVersion: ProtocolVersion
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
   ) extends LocalRejectImpl(
         _causePrefix = _causePrefix,
         // Append _resources to details, because we don't know _resourcesType and the _resources field is ignored if _resourcesType is None.

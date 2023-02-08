@@ -146,10 +146,8 @@ class MediatorAdministrationGroup(
   def locate_pruning_timestamp(
       index: PositiveInt = PositiveInt.tryCreate(1)
   ): Option[CantonTimestamp] =
-    check(FeatureFlag.Preview) {
-      consoleEnvironment.run {
-        runner.adminCommand(LocatePruningTimestampCommand(index))
-      }
+    consoleEnvironment.run {
+      runner.adminCommand(LocatePruningTimestampCommand(index))
     }
 
   private lazy val testing_ = new MediatorTestingGroup(runner, consoleEnvironment, loggerFactory)

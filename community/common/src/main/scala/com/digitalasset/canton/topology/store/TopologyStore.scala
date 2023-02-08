@@ -6,9 +6,13 @@ package com.digitalasset.canton.topology.store
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
+import com.digitalasset.canton.config.CantonRequireTypes.{
+  LengthLimitedString,
+  String255,
+  String256M,
+}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String256M}
 import com.digitalasset.canton.crypto.{PublicKey, SignatureCheckError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown

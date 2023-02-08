@@ -5,10 +5,10 @@ package com.digitalasset.canton.data
 
 import cats.syntax.parallel.*
 import com.daml.metrics
+import com.daml.metrics.api.MetricHandle.Gauge
 import com.daml.metrics.api.MetricName
+import com.daml.metrics.api.noop.NoOpCounter
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
-import com.digitalasset.canton.metrics.RefGauge
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
@@ -363,12 +363,12 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
 object TaskSchedulerTest {
 
   class MockTaskSchedulerMetrics extends TaskSchedulerMetrics {
-    val factory = NoOpMetricsFactory
     val prefix: MetricName = MetricName("test")
-    override val sequencerCounterQueue: metrics.api.MetricHandle.Counter = factory.counter(
+    override val sequencerCounterQueue: metrics.api.MetricHandle.Counter = NoOpCounter(
       prefix :+ "counter"
     )
-    override val taskQueue: RefGauge[Int] = factory.refGauge(prefix :+ "queue", 0)
+
+    override def taskQueue(size: () => Int): Gauge.CloseableGauge = () => ()
   }
 
   val Finalization: Int = 0

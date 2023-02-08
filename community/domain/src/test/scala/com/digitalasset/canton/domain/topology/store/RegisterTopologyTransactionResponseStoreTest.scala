@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.topology.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse

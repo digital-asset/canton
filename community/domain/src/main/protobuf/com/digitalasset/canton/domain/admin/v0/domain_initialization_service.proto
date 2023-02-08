@@ -6,7 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.domain.admin.v0;
 
 import "google/protobuf/empty.proto";
-import "com/digitalasset/canton/protocol/v0/sequencing.proto";
+import "com/digitalasset/canton/domain/api/v0/sequencer_connection.proto";
 
 // TODO(#9014) rename to DomainManagerInitializationService
 service DomainInitializationService {
@@ -18,7 +18,7 @@ service DomainInitializationService {
 
 message DomainNodeSequencerConfig {
     // connection information to sequencer
-    com.digitalasset.canton.protocol.v0.SequencerConnection sequencerConnection = 1;
+    com.digitalasset.canton.domain.api.v0.SequencerConnection sequencerConnection = 1;
 }
 
 message DomainInitRequest {

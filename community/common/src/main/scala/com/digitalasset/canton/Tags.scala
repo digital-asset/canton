@@ -4,7 +4,7 @@
 package com.digitalasset.canton
 
 import cats.syntax.either.*
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String255,

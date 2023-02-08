@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.metrics
 
+import com.daml.metrics.HealthMetrics
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
@@ -17,6 +18,7 @@ class SequencerMetrics(
     parent: MetricName,
     val factory: MetricsFactory,
     val grpcMetrics: GrpcServerMetrics,
+    val healthMetrics: HealthMetrics,
 ) {
   val prefix: MetricName = MetricName(parent :+ "sequencer")
 
@@ -78,6 +80,7 @@ object SequencerMetrics {
     MetricName(testName),
     NoOpMetricsFactory,
     new DamlGrpcServerMetrics(NoOpMetricsFactory, "sequencer"),
+    new HealthMetrics(NoOpMetricsFactory),
   )
 
 }
@@ -114,11 +117,12 @@ class DomainMetrics(
     val prefix: MetricName,
     val metricsFactory: MetricsFactory,
     val grpcMetrics: GrpcServerMetrics,
+    val healthMetrics: HealthMetrics,
 ) {
 
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
-  object sequencer extends SequencerMetrics(prefix, metricsFactory, grpcMetrics)
+  object sequencer extends SequencerMetrics(prefix, metricsFactory, grpcMetrics, healthMetrics)
 
   object mediator extends MediatorMetrics(prefix, metricsFactory)
 
@@ -129,6 +133,7 @@ class MediatorNodeMetrics(
     val prefix: MetricName,
     val metricsFactory: MetricsFactory,
     val grpcMetrics: GrpcServerMetrics,
+    val healthMetrics: HealthMetrics,
 ) {
 
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
@@ -166,8 +171,8 @@ class MediatorMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
         |pruning backlog.""",
     qualification = Debug,
   )
-  val maxResponseAge: Gauge[Long] =
-    metricsFactory.gauge[Long](MetricName(prefix :+ "max-response-age"), 0L)(MetricsContext.Empty)
+  val maxEventAge: Gauge[Long] =
+    metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
 }
 
 class IdentityManagerMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {

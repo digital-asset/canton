@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton
 
-import com.daml.lf.CantonOnly
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref
 import com.daml.lf.transaction.{
@@ -13,11 +12,13 @@ import com.daml.lf.transaction.{
   Node,
   NodeId,
   SubmittedTransaction,
+  Transaction,
   TransactionNodeStatistics,
   TransactionVersion,
   VersionedTransaction,
 }
 import com.daml.lf.value.Value
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
@@ -39,11 +40,11 @@ package object protocol {
   /** Shorthand for Daml-LF transaction wrapped in versioned transaction in turn wrapped in
     * committed or submitted transaction
     */
-  type LfTransaction = CantonOnly.LfTransaction
-  val LfTransaction: CantonOnly.LfTransaction.type = CantonOnly.LfTransaction
+  type LfTransaction = Transaction
+  val LfTransaction: Transaction.type = Transaction
 
-  type LfVersionedTransaction = CantonOnly.LfVersionedTransaction
-  val LfVersionedTransaction: VersionedTransaction.type = CantonOnly.LfVersionedTransaction
+  type LfVersionedTransaction = VersionedTransaction
+  val LfVersionedTransaction: VersionedTransaction.type = VersionedTransaction
 
   type LfCommittedTransaction = CommittedTransaction
   val LfCommittedTransaction: CommittedTransaction.type = CommittedTransaction
@@ -53,6 +54,8 @@ package object protocol {
 
   type LfTransactionVersion = TransactionVersion
   val LfTransactionVersion: TransactionVersion.type = TransactionVersion
+
+  val DummyTransactionVersion: LfTransactionVersion = TransactionVersion.maxVersion
 
   // Ledger transaction statistics based on lf transaction nodes
   type LedgerTransactionNodeStatistics = TransactionNodeStatistics
@@ -91,6 +94,10 @@ package object protocol {
   type LfNodeRollback = Node.Rollback
   val LfNodeRollback: Node.Rollback.type = Node.Rollback
 
+  /** Shorthand for authority nodes. */
+  type LfNodeAuthority = Node.Authority
+  val LfNodeAuthority: Node.Authority.type = Node.Authority
+
   /** Shorthand for leaf only action nodes. */
   type LfLeafOnlyActionNode = Node.LeafOnlyAction
 
@@ -120,4 +127,7 @@ package object protocol {
 
   type RequestProcessor[VT <: ViewType] =
     Phase37Processor[RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[VT]]]]
+
+  def maxTransactionVersion(versions: NonEmpty[Seq[LfTransactionVersion]]): LfTransactionVersion =
+    versions.reduceLeft[LfTransactionVersion](LfTransactionVersion.Ordering.max)
 }

@@ -17,7 +17,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.LfTransactionUtil
 
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, tailrec}
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Wrapper type for elements of a view decomposition
@@ -190,22 +190,49 @@ object TransactionViewDecomposition {
         .map(_.flatten)
     }
 
-    @nowarn("msg=match may not be exhaustive")
+    /* Ensure all top-level nodes are action nodes by moving rollback hierarchy into
+     * respective rollback-contexts. Action node subtrees don't change.
+     */
     def peelAwayTopLevelRollbackNodes(
         nodes: Seq[(LfNodeId, LfNode)],
         rbContext: RollbackContext,
-    ): Seq[(LfNodeId, LfActionNode, RollbackContext)] =
-      nodes match {
-        case Seq() => Seq()
-        case (nodeId, an: LfActionNode) +: remainingChildren =>
-          (nodeId, an, rbContext) +: peelAwayTopLevelRollbackNodes(remainingChildren, rbContext)
-        case (_nodeId, rn: LfNodeRollback) +: remainingChildren =>
-          val rollbackChildren = rn.children.map(idAndNode).toSeq
-          val rollbackChildrenRbContext = rbContext.enterRollback
-          val remainingChildrenRbContext = rollbackChildrenRbContext.exitRollback
-          peelAwayTopLevelRollbackNodes(rollbackChildren, rollbackChildrenRbContext) ++
-            peelAwayTopLevelRollbackNodes(remainingChildren, remainingChildrenRbContext)
-      }
+    ): Seq[(LfNodeId, LfActionNode, RollbackContext)] = {
+      type LfNodesWithRbContext = (RollbackContext, Seq[(LfNodeId, LfNode)])
+      val actionNodes = List.newBuilder[(LfNodeId, LfActionNode, RollbackContext)]
+
+      // Perform depth-first search only descending on rollback nodes, lifting up action nodes nested
+      // under one or more levels of rollback nodes. Action nodes are lifted up in-order.
+      @nowarn("msg=match may not be exhaustive")
+      @tailrec
+      def go(
+          nodesGroupedByRbContext: Seq[LfNodesWithRbContext]
+      ): Seq[(LfNodeId, LfActionNode, RollbackContext)] =
+        nodesGroupedByRbContext match {
+          case Seq() => actionNodes.result()
+          case (_rbContext, Seq()) +: remainingGroups =>
+            go(remainingGroups)
+          case (rbContext, (nodeId, an: LfActionNode) +: remainingNodes) +: remainingGroups =>
+            // append action node in depth-first left-to-right order
+            actionNodes += ((nodeId, an, rbContext))
+            go((rbContext -> remainingNodes) +: remainingGroups)
+          case (rbContext, (_nodeId, rn: LfNodeRollback) +: remainingNodes) +: remainingGroups =>
+            val rollbackChildren = rn.children.map(idAndNode).toSeq
+            val rollbackChildrenRbContext = rbContext.enterRollback
+            val remainingChildrenRbContext = rollbackChildrenRbContext.exitRollback
+            // Grouping rollback children and siblings by rollback context along with groups from "earlier calls"
+            // enables single tail-recursive call.
+            go(
+              Seq(
+                rollbackChildrenRbContext -> rollbackChildren,
+                remainingChildrenRbContext -> remainingNodes,
+              ) ++ remainingGroups
+            )
+          case (_, (_nodeId, _: LfNodeAuthority) +: _) +: _ =>
+            sys.error("LfNodeAuthority")
+        }
+
+      go(Seq(rbContext -> nodes))
+    }
 
     val rootNodes =
       peelAwayTopLevelRollbackNodes(transaction.unwrap.roots.toSeq.map(idAndNode), viewRbContext)

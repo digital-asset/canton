@@ -24,7 +24,6 @@ case class ParticipantNodeParameters(
     protocolConfig: ParticipantProtocolConfig,
     uniqueContractKeys: Boolean,
     enableCausalityTracking: Boolean,
-    unsafeEnableDamlLfDevVersion: Boolean,
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
     maxDbConnections: Int,
     excludeInfrastructureTransactions: Boolean,

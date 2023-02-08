@@ -8,6 +8,7 @@ import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveDouble
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   LoggingConfig,
@@ -21,6 +22,7 @@ import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
+import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, Lifecycle, SyncCloseable}
@@ -68,8 +70,8 @@ import org.scalatest.Outcome
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.FixtureAnyWordSpec
 
+import scala.concurrent.*
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Future, Promise}
 
 case class Env(loggerFactory: NamedLoggerFactory)(implicit
     ec: ExecutionContextExecutor,
@@ -137,6 +139,10 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
 
     override def lookupCurrentMember(): Option[Member] = None
   }
+  private val params = new SequencerParameters {
+    override def maxBurstFactor: PositiveDouble = PositiveDouble.tryCreate(0.1)
+    override def processingTimeouts: ProcessingTimeout = timeouts
+  }
   private val service =
     new GrpcSequencerService(
       sequencer,
@@ -152,7 +158,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
       ),
       sequencerSubscriptionFactory,
       domainParamsLookup,
-      timeouts,
+      params,
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,
@@ -193,7 +199,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         )
       )
   }
-  private val serverPort = UniquePortGenerator.forDomainTests.next
+  private val serverPort = UniquePortGenerator.next
   logger.debug(s"Using port ${serverPort} for integration test")
   private val server = NettyServerBuilder
     .forPort(serverPort.unwrap)

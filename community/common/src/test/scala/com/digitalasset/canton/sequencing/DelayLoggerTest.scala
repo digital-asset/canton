@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
-import com.daml.metrics.api.dropwizard.DropwizardGauge
+import com.daml.metrics.api.noop.NoOpGauge
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.LogEntry
@@ -15,7 +15,7 @@ class DelayLoggerTest extends AnyWordSpec with BaseTest {
 
   "checkForDelay" should {
     val clock = new SimClock(start = CantonTimestamp.now(), loggerFactory = loggerFactory)
-    val gauge = DropwizardGauge[Long]("test", null)
+    val gauge = NoOpGauge[Long]("test", 0L)
     val delayLogger = new DelayLogger(clock, logger, NonNegativeFiniteDuration.ofSeconds(1), gauge)
 
     def probe(delayMs: Long, assertion: Seq[LogEntry] => Assertion) = {

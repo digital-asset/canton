@@ -4,8 +4,8 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}

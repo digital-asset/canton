@@ -7,273 +7,25 @@ import cats.Order
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation as ProtoInvariantViolation
 import com.digitalasset.canton.checked
-import com.digitalasset.canton.config.RequireTypes.InstanceName.InvalidInstanceName
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.InvalidLengthString
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName.InvalidInstanceName
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.InvalidLengthString
+import com.digitalasset.canton.config.RequireTypes.InvariantViolation
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.util.ShowUtil.*
-import io.circe.{Decoder, Encoder, KeyEncoder}
-import io.scalaland.chimney.Transformer
-import pureconfig.error.{CannotConvert, FailureReason}
+import io.circe.{Encoder, KeyEncoder}
+import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 import slick.jdbc.{GetResult, SetParameter}
 
-import java.io.File
 import java.util.UUID
 
 /** Encapsulates those classes and their utility methods which enforce a given invariant via the use of require. */
-object RequireTypes {
-  final case class Port(private val n: Int) extends Ordered[Port] with PrettyPrinting with NoCopy {
-    def unwrap: Int = n
-    require(
-      n >= Port.minValidPort && n <= Port.maxValidPort,
-      s"Unable to create Port as value $n was given, but only values between ${Port.minValidPort} and ${Port.maxValidPort} (inclusive) are allowed.",
-    )
-
-    def +(n: Int): Port = Port.tryCreate(this.unwrap + n)
-    override def compare(that: Port): Int = this.unwrap compare that.unwrap
-
-    override def pretty: Pretty[Port] = prettyOfString(_ => n.toString)
-  }
-
-  object Port {
-    val (minValidPort, maxValidPort) = (0, scala.math.pow(2, 16).toInt - 1)
-    private[this] def apply(n: Int): Port =
-      throw new UnsupportedOperationException("Use create or tryCreate methods")
-
-    def create(n: Int): Either[InvariantViolation, Port] = {
-      Either.cond(
-        n >= Port.minValidPort && n <= Port.maxValidPort,
-        new Port(n),
-        InvariantViolation(
-          s"Unable to create Port as value $n was given, but only values between ${Port.minValidPort} and ${Port.maxValidPort} are allowed."
-        ),
-      )
-    }
-
-    def tryCreate(n: Int): Port = {
-      new Port(n)
-    }
-
-    implicit val encodeInstant: Encoder[Port] = Encoder.encodeInt.contramap[Port](_.unwrap)
-    implicit val decodeInstant: Decoder[Port] =
-      Decoder.decodeInt.emap(int => Port.create(int).leftMap(_.toString))
-
-    lazy implicit val portReader: ConfigReader[Port] = {
-      ConfigReader.fromString[Port] { str =>
-        def err(message: String) =
-          CannotConvert(str, Port.getClass.getName, message)
-
-        Either
-          .catchOnly[NumberFormatException](str.toInt)
-          .leftMap[FailureReason](error => err(error.getMessage))
-          .flatMap(n => create(n).leftMap(_ => InvalidPort(n)))
-      }
-    }
-
-    final case class InvalidPort(n: Int) extends FailureReason {
-      override def description: String =
-        s"Unable to create Port as value $n was given, but only values between ${Port.minValidPort} and ${Port.maxValidPort} are allowed"
-    }
-  }
-
-  sealed trait RefinedNumeric[T] extends Ordered[RefinedNumeric[T]] with PrettyPrinting {
-    protected def value: T
-    implicit def num: Numeric[T]
-
-    def unwrap: T = value
-
-    override def compare(that: RefinedNumeric[T]): Int = num.compare(value, that.value)
-    override def pretty: Pretty[RefinedNumeric[T]] = prettyOfString(_ => value.toString)
-  }
-
-  final case class NonNegativeNumeric[T] private (value: T)(implicit val num: Numeric[T])
-      extends RefinedNumeric[T] {
-    import num.*
-
-    def +(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value + other.value)
-    def *(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value * other.value)
-    def tryAdd(other: T) = NonNegativeNumeric.tryCreate(value + other)
-  }
-
-  type NonNegativeInt = NonNegativeNumeric[Int]
-
-  object NonNegativeNumeric {
-    def tryCreate[T](t: T)(implicit num: Numeric[T]): NonNegativeNumeric[T] =
-      create(t).valueOr(err => throw new IllegalArgumentException(err.message))
-
-    def create[T](
-        t: T
-    )(implicit num: Numeric[T]): Either[InvariantViolation, NonNegativeNumeric[T]] = {
-      Either.cond(
-        num.compare(t, num.zero) >= 0,
-        NonNegativeNumeric(t),
-        InvariantViolation(
-          s"Received the negative $t as argument, but we require a non-negative value here."
-        ),
-      )
-    }
-
-    implicit val readNonNegativeInt: GetResult[NonNegativeInt] = GetResult { r =>
-      NonNegativeInt.tryCreate(r.nextInt())
-    }
-
-    implicit val readNonNegativeIntOption: GetResult[Option[NonNegativeInt]] = GetResult { r =>
-      r.nextIntOption().map(NonNegativeInt.tryCreate)
-    }
-
-    implicit def writeNonNegativeNumeric[T](implicit
-        f: SetParameter[T]
-    ): SetParameter[NonNegativeNumeric[T]] =
-      (s, pp) => {
-        pp >> s.unwrap
-      }
-
-    implicit def writeNonNegativeNumericOption[T](implicit
-        f: SetParameter[Option[T]]
-    ): SetParameter[Option[NonNegativeNumeric[T]]] = (s, pp) => {
-      pp >> s.map(_.unwrap)
-    }
-
-    implicit def nonNegativeNumericReader[T](implicit
-        num: Numeric[T]
-    ): ConfigReader[NonNegativeNumeric[T]] = {
-      ConfigReader.fromString[NonNegativeNumeric[T]] { str =>
-        def err(message: String) =
-          CannotConvert(str, NonNegativeNumeric.getClass.getName, message)
-
-        num
-          .parseString(str)
-          .toRight[FailureReason](err("Cannot convert `str` to numeric"))
-          .flatMap(n => Either.cond(num.compare(n, num.zero) >= 0, tryCreate(n), NegativeValue(n)))
-      }
-    }
-
-    final case class NegativeValue[T](t: T) extends FailureReason {
-      override def description: String =
-        s"The value you gave for this configuration setting ($t) was negative, but we require a non-negative value for this configuration setting"
-    }
-  }
-
-  object NonNegativeInt {
-    lazy val zero: NonNegativeInt = NonNegativeInt.tryCreate(0)
-    lazy val one: NonNegativeInt = NonNegativeInt.tryCreate(1)
-    lazy val maxValue: NonNegativeInt = NonNegativeInt.tryCreate(Int.MaxValue)
-
-    def create(n: Int): Either[InvariantViolation, NonNegativeInt] = NonNegativeNumeric.create(n)
-    def tryCreate(n: Int): NonNegativeInt = NonNegativeNumeric.tryCreate(n)
-
-    implicit val forgetNonNegativeIntRefinement: Transformer[NonNegativeInt, Int] = _.unwrap
-  }
-
-  final case class PositiveNumeric[T] private (value: T)(implicit val num: Numeric[T])
-      extends RefinedNumeric[T] {
-    import num.*
-
-    def +(other: PositiveNumeric[T]) = PositiveNumeric.tryCreate(value + other.value)
-    def tryAdd(other: T) = PositiveNumeric.tryCreate(value + other)
-
-    def toNonNegative: NonNegativeNumeric[T] =
-      NonNegativeNumeric.tryCreate(value) // always possible to convert positive to non negative num
-  }
-
-  type PositiveInt = PositiveNumeric[Int]
-
-  object PositiveInt {
-    def create(n: Int): Either[InvariantViolation, PositiveInt] = PositiveNumeric.create(n)
-    def tryCreate(n: Int): PositiveInt = PositiveNumeric.tryCreate(n)
-
-    lazy val one: PositiveInt = PositiveInt.tryCreate(1)
-    lazy val MaxValue: PositiveInt = PositiveInt.tryCreate(Int.MaxValue)
-  }
-
-  object PositiveNumeric {
-    def tryCreate[T](t: T)(implicit num: Numeric[T]): PositiveNumeric[T] =
-      create(t).valueOr(err => throw new IllegalArgumentException(err.message))
-
-    def create[T](
-        t: T
-    )(implicit num: Numeric[T]): Either[InvariantViolation, PositiveNumeric[T]] = {
-      Either.cond(
-        num.compare(t, num.zero) > 0,
-        PositiveNumeric(t),
-        InvariantViolation(
-          s"Received the non-positive $t as argument, but we require a positive value here."
-        ),
-      )
-    }
-
-    implicit def positiveNumericReader[T](implicit
-        num: Numeric[T]
-    ): ConfigReader[PositiveNumeric[T]] = {
-      ConfigReader.fromString[PositiveNumeric[T]] { str =>
-        def err(message: String) =
-          CannotConvert(str, PositiveNumeric.getClass.getName, message)
-
-        num
-          .parseString(str)
-          .toRight[FailureReason](err("Cannot convert `str` to numeric"))
-          .flatMap(n =>
-            Either.cond(num.compare(n, num.zero) >= 0, tryCreate(n), NonPositiveValue(n))
-          )
-      }
-    }
-
-    final case class NonPositiveValue[T](t: T) extends FailureReason {
-      override def description: String =
-        s"The value you gave for this configuration setting ($t) was non-positive, but we require a positive value for this configuration setting"
-    }
-  }
-
-  final case class ExistingFile(private val file: File) extends NoCopy {
-    def unwrap: File = file
-    require(file.exists(), s"Unable to create ExistingFile as non-existing file $file was given.")
-  }
-
-  object ExistingFile {
-    private[this] def apply(file: File): ExistingFile =
-      throw new UnsupportedOperationException("Use create or tryCreate methods")
-
-    def create(file: File): Either[InvariantViolation, ExistingFile] = {
-      Either.cond(
-        file.exists,
-        new ExistingFile(file),
-        InvariantViolation(
-          s"The specified file $file does not exist/was not found. Please specify an existing file"
-        ),
-      )
-    }
-
-    def tryCreate(file: File): ExistingFile = {
-      new ExistingFile(file)
-    }
-
-    def tryCreate(path: String): ExistingFile = {
-      new ExistingFile(new File(path))
-    }
-
-    lazy implicit val existingFileReader: ConfigReader[ExistingFile] = {
-      ConfigReader.fromString[ExistingFile] { str =>
-        def err(message: String) =
-          CannotConvert(str, ExistingFile.getClass.getName, message)
-
-        Either
-          .catchOnly[NullPointerException](new File(str))
-          .leftMap[FailureReason](error => err(error.getMessage))
-          .flatMap(f => create(f).leftMap(_ => NonExistingFile(f)))
-      }
-    }
-
-    final case class NonExistingFile(file: File) extends FailureReason {
-      override def description: String =
-        s"The specified file $file does not exist/was not found. Please specify an existing file"
-    }
-  }
-
+object CantonRequireTypes {
   final case class NonEmptyString(private val str: String) extends NoCopy {
     def unwrap: String = str
     require(str.nonEmpty, s"Unable to create a NonEmptyString as the empty string $str was given.")
@@ -432,7 +184,9 @@ object RequireTypes {
         str: String,
         name: Option[String] = None,
     ): ParsingResult[LengthLimitedString] =
-      LengthLimitedString.create(str, defaultMaxLength, name).leftMap(InvariantViolation)
+      LengthLimitedString
+        .create(str, defaultMaxLength, name)
+        .leftMap(e => ProtoInvariantViolation(e))
 
     // Should be used rarely - most of the time SetParameter[String255] etc.
     // (defined through LengthLimitedStringCompanion) should be used
@@ -440,12 +194,12 @@ object RequireTypes {
     implicit val setParameterLengthLimitedString: SetParameter[LengthLimitedString] = (v, pp) =>
       pp.setString(v.unwrap)
     // Commented out so this function never accidentally throws
-//    implicit def getResultLengthLimitedString: GetResult[LengthLimitedString] =
-//      throw new UnsupportedOperationException(
-//        "Avoid attempting to read a generic LengthLimitedString from the database, as this may lead to unexpected " +
-//          "equality-comparisons (since a LengthLimitedString comparison also includes the maximum length and not only the string-content). " +
-//          "Instead refactor your code to expect a specific LengthLimitedString when reading from the database (e.g. via GetResult[String255]). " +
-//          "If you really need this functionality, then you can add this method again. ")
+    //    implicit def getResultLengthLimitedString: GetResult[LengthLimitedString] =
+    //      throw new UnsupportedOperationException(
+    //        "Avoid attempting to read a generic LengthLimitedString from the database, as this may lead to unexpected " +
+    //          "equality-comparisons (since a LengthLimitedString comparison also includes the maximum length and not only the string-content). " +
+    //          "Instead refactor your code to expect a specific LengthLimitedString when reading from the database (e.g. via GetResult[String255]). " +
+    //          "If you really need this functionality, then you can add this method again. ")
 
     implicit val orderingLengthLimitedString: Ordering[LengthLimitedString] =
       Ordering.by[LengthLimitedString, String](_.str)
@@ -674,7 +428,7 @@ object RequireTypes {
       factoryMethod(str)(name)
 
     def fromProtoPrimitive(str: String, name: String): ParsingResult[A] =
-      create(str, Some(name)).leftMap(InvariantViolation)
+      create(str, Some(name)).leftMap(e => ProtoInvariantViolation(e))
 
     implicit val lengthLimitedStringOrder: Order[A] =
       Order.by[A, String](_.str)

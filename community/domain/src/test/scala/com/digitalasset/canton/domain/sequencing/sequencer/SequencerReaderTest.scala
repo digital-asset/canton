@@ -111,7 +111,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     val testConfig =
       CommunitySequencerReaderConfig(
         readBatchSize = 10,
-        checkpointInterval = NonNegativeFiniteDuration.ofMillis(400),
+        checkpointInterval = NonNegativeFiniteDuration.ofMillis(800),
       )
     val eventSignaller = new ManualEventSignaller()
     val reader = new SequencerReader(

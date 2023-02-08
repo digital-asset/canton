@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.TransactionMeta
-import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Time}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.TransactionUpdate
@@ -60,12 +59,11 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
     val transactionId = LedgerTransactionId.assertFromString(idString)
 
     val committedTransaction = LfCommittedTransaction(
-      CantonOnly
-        .lfVersionedTransaction(
-          version = LfTransactionVersion.V10,
-          nodes = HashMap.empty,
-          roots = ImmArray.empty,
-        )
+      LfVersionedTransaction(
+        version = LfTransactionVersion.V10,
+        nodes = HashMap.empty,
+        roots = ImmArray.empty,
+      )
     )
 
     val transactionAccepted = LedgerSyncEvent.TransactionAccepted(

@@ -12,7 +12,6 @@ import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.daml.lf.command.ProcessedDisclosedContract
 import com.daml.lf.data.ImmArray
 import com.daml.lf.transaction.Versioned
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.lifecycle.FlagCloseable
@@ -41,7 +40,6 @@ import com.digitalasset.canton.participant.sync.TransactionRoutingError.Topology
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.{
   MalformedInputErrors,
   RoutingInternalError,
-  TopologyErrors,
   UnableToQueryTopologySnapshot,
 }
 import com.digitalasset.canton.participant.sync.{
@@ -52,7 +50,6 @@ import com.digitalasset.canton.participant.sync.{
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -72,7 +69,6 @@ import scala.concurrent.{ExecutionContext, Future}
   *               The inner future completes after the submission has been sequenced or if it will never be sequenced.
   */
 class DomainRouter(
-    participantId: ParticipantId,
     domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
     domainIdResolver: DomainAlias => Option[DomainId],
     submit: DomainId => (
@@ -313,8 +309,7 @@ object DomainRouter {
 
     val domainSelectorFactory = new DomainSelectorFactory(
       participantId = participantId,
-      domainsOfSubmittersAndInformees =
-        domainsOfSubmittersAndInformees(participantId, connectedDomainsMap),
+      admissibleDomains = new AdmissibleDomains(participantId, connectedDomainsMap, loggerFactory),
       priorityOfDomain = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
       domainRankComputation = domainRankComputation,
       domainStateProvider = stateProviderWithProtocolVersion,
@@ -329,7 +324,6 @@ object DomainRouter {
     )
 
     new DomainRouter(
-      participantId,
       domainOfContract(connectedDomainsMap),
       domainIdResolver,
       submit(connectedDomainsMap),
@@ -397,116 +391,6 @@ object DomainRouter {
         )
       }
 
-  private def domainsOfSubmittersAndInformees(
-      localParticipantId: ParticipantId,
-      connectedDomains: TrieMap[DomainId, SyncDomain],
-  )(transactionData: TransactionData)(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, TransactionRoutingError, NonEmpty[Set[DomainId]]] = {
-    val readyDomains = connectedDomains.collect {
-      case r @ (_, domain) if domain.readyForSubmission => r
-    }
-
-    val submitters = transactionData.submitters
-    val informees = transactionData.informees
-
-    for {
-      submitterDomainIds <- domainsOfSubmitters(localParticipantId, readyDomains, submitters)
-      informeeDomainIds <- domainsOfInformees(readyDomains, informees)
-      commonDomainIds <- EitherT.fromEither[Future](
-        NonEmpty
-          .from(submitterDomainIds.intersect(informeeDomainIds))
-          .toRight(
-            TopologyErrors.NoCommonDomain.Error(submitters, informees): TransactionRoutingError
-          )
-      )
-    } yield commonDomainIds
-  }
-
-  /** Returns the set of domains that local participant is connected to and that
-    * host all the submitters.
-    */
-  private def domainsOfSubmitters(
-      localParticipantId: ParticipantId,
-      candidateDomains: TrieMap[DomainId, SyncDomain],
-      submitters: Set[LfPartyId],
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, TransactionRoutingError, Set[DomainId]] = {
-    val snapshotsOfDomain = candidateDomains.map { case (domainId, domain) =>
-      domainId -> domain.topologyClient.currentSnapshotApproximation
-    }
-    val submittersL = submitters.toList
-
-    val domainsKnowingAllSubmittersF = snapshotsOfDomain.toList
-      .parTraverse { case (domain, snapshot) =>
-        submittersL.parTraverse(snapshot.hostedOn(_, localParticipantId)).map { res =>
-          (domain, res.forall(_.exists(_.permission == Submission)))
-        }
-      }
-      .map(_.collect {
-        case (domainId, allSubmittersAreAllowedToSubmit) if allSubmittersAreAllowedToSubmit =>
-          domainId
-      }.toSet)
-
-    EitherT(domainsKnowingAllSubmittersF.map { domainsKnowingAllSubmitters =>
-      if (domainsKnowingAllSubmitters.isEmpty) {
-        Left(submitters.toList match {
-          case one :: Nil => TopologyErrors.NoDomainOnWhichAllSubmittersCanSubmit.NotAllowed(one)
-          case some => TopologyErrors.NoDomainOnWhichAllSubmittersCanSubmit.NoSuitableDomain(some)
-        })
-      } else
-        Right(domainsKnowingAllSubmitters)
-    })
-  }
-
-  private def domainsOfInformees(
-      candidateDomains: TrieMap[DomainId, SyncDomain],
-      informees: Set[LfPartyId],
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, TransactionRoutingError, Set[DomainId]] = {
-    val informeesList = informees.toList
-
-    def partiesHostedOnDomain(snapshot: TopologySnapshot): Future[Set[LfPartyId]] =
-      informeesList
-        .parTraverseFilter { partyId =>
-          snapshot
-            .isHostedByAtLeastOneParticipantF(partyId, _.permission.isActive)
-            .map(if (_) Some(partyId) else None)
-        }
-        .map(_.toSet)
-
-    val hostedOfDomainF = candidateDomains.toList.parTraverse { case (domainId, domain) =>
-      val snapshot = domain.topologyClient.currentSnapshotApproximation
-      partiesHostedOnDomain(snapshot).map { hosted =>
-        domainId -> hosted
-      }
-    }
-    val ret = hostedOfDomainF.map { hostedOfDomain =>
-      val unknownInformees = informees.filter { informee =>
-        hostedOfDomain.forall { case (_, hosted) => !hosted.contains(informee) }
-      }
-
-      if (unknownInformees.isEmpty) {
-        val informeeDomainIds = hostedOfDomain.collect {
-          case (domainId, hosted) if informees.forall(hosted.contains) => domainId
-        }.toSet
-        if (informeeDomainIds.isEmpty) {
-          Left(TopologyErrors.InformeesNotActive.Error(candidateDomains.keys.toSet, informees))
-        } else {
-          Right(informeeDomainIds)
-        }
-      } else {
-        Left(TopologyErrors.UnknownInformees.Error(unknownInformees))
-      }
-    }
-    EitherT(ret)
-  }
-
   private def priorityOfDomain(
       domainConnectionConfigStore: DomainConnectionConfigStore,
       domainAliasManager: DomainAliasManager,
@@ -522,7 +406,7 @@ object DomainRouter {
     maybePriority.getOrElse(Integer.MIN_VALUE)
   }
 
-  /** We intentially do not store the `keyResolver` in [[com.digitalasset.canton.protocol.WellFormedTransaction]]
+  /** We intentionally do not store the `keyResolver` in [[com.digitalasset.canton.protocol.WellFormedTransaction]]
     * because we do not (yet) need to deal with merging the mappings
     * in [[com.digitalasset.canton.protocol.WellFormedTransaction.merge]].
     */

@@ -5,14 +5,7 @@ package com.digitalasset.canton.console.commands
 
 import com.digitalasset.canton.admin.api.client.commands.PruningSchedulerCommands
 import com.digitalasset.canton.config.PositiveDurationSeconds
-import com.digitalasset.canton.console.{
-  AdminCommandRunner,
-  ConsoleEnvironment,
-  FeatureFlag,
-  FeatureFlagFilter,
-  Help,
-  Helpful,
-}
+import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.pruning.PruningSchedule
 import io.grpc.stub.AbstractStub
@@ -21,15 +14,13 @@ import io.grpc.stub.AbstractStub
   */
 class PruningSchedulerAdministration[T <: AbstractStub[T]](
     runner: AdminCommandRunner,
-    val consoleEnvironment: ConsoleEnvironment,
+    protected val consoleEnvironment: ConsoleEnvironment,
     commands: PruningSchedulerCommands[T],
-    val loggerFactory: NamedLoggerFactory,
-) extends FeatureFlagFilter
-    with Helpful {
+    protected val loggerFactory: NamedLoggerFactory,
+) extends Helpful {
 
   @Help.Summary(
-    "Activate automatic participant pruning according to the specified schedule.",
-    FeatureFlag.Preview,
+    "Activate automatic pruning according to the specified schedule."
   )
   @Help.Description(
     """The schedule is specified in cron format and "max_duration" and "retention" durations. The cron string indicates
@@ -43,23 +34,19 @@ class PruningSchedulerAdministration[T <: AbstractStub[T]](
       maxDuration: PositiveDurationSeconds,
       retention: PositiveDurationSeconds,
   ): Unit =
-    check(FeatureFlag.Preview)(
-      consoleEnvironment.run(
-        runner.adminCommand(
-          commands.SetScheduleCommand(cron = cron, maxDuration = maxDuration, retention = retention)
-        )
+    consoleEnvironment.run(
+      runner.adminCommand(
+        commands.SetScheduleCommand(cron = cron, maxDuration = maxDuration, retention = retention)
       )
     )
 
-  @Help.Summary("Deactivate automatic participant pruning.", FeatureFlag.Preview)
+  @Help.Summary("Deactivate automatic pruning.")
   def clear_schedule(): Unit =
-    check(FeatureFlag.Preview)(
-      consoleEnvironment.run(
-        runner.adminCommand(commands.ClearScheduleCommand())
-      )
+    consoleEnvironment.run(
+      runner.adminCommand(commands.ClearScheduleCommand())
     )
 
-  @Help.Summary("Modify the cron used by automatic pruning.", FeatureFlag.Preview)
+  @Help.Summary("Modify the cron used by automatic pruning.")
   @Help.Description(
     """The schedule is specified in cron format and refers to pruning start times in the GMT time zone.
       |This call returns an error if no schedule has been configured via `set_schedule` or if automatic
@@ -69,13 +56,11 @@ class PruningSchedulerAdministration[T <: AbstractStub[T]](
     """
   )
   def set_cron(cron: String): Unit =
-    check(FeatureFlag.Preview)(
-      consoleEnvironment.run(
-        runner.adminCommand(commands.SetCronCommand(cron))
-      )
+    consoleEnvironment.run(
+      runner.adminCommand(commands.SetCronCommand(cron))
     )
 
-  @Help.Summary("Modify the maximum duration used by automatic pruning.", FeatureFlag.Preview)
+  @Help.Summary("Modify the maximum duration used by automatic pruning.")
   @Help.Description(
     """The `maxDuration` is specified as a positive duration and has at most per-second granularity.
       |This call returns an error if no schedule has been configured via `set_schedule` or if automatic
@@ -85,15 +70,13 @@ class PruningSchedulerAdministration[T <: AbstractStub[T]](
     """
   )
   def set_max_duration(maxDuration: PositiveDurationSeconds): Unit =
-    check(FeatureFlag.Preview)(
-      consoleEnvironment.run(
-        runner.adminCommand(
-          commands.SetMaxDurationCommand(maxDuration)
-        )
+    consoleEnvironment.run(
+      runner.adminCommand(
+        commands.SetMaxDurationCommand(maxDuration)
       )
     )
 
-  @Help.Summary("Update the pruning retention used by automatic pruning.", FeatureFlag.Preview)
+  @Help.Summary("Update the pruning retention used by automatic pruning.")
   @Help.Description(
     """The `retention` is specified as a positive duration and has at most per-second granularity.
       |This call returns an error if no schedule has been configured via `set_schedule` or if automatic
@@ -103,15 +86,13 @@ class PruningSchedulerAdministration[T <: AbstractStub[T]](
     """
   )
   def set_retention(retention: PositiveDurationSeconds): Unit =
-    check(FeatureFlag.Preview)(
-      consoleEnvironment.run(
-        runner.adminCommand(
-          commands.SetRetentionCommand(retention)
-        )
+    consoleEnvironment.run(
+      runner.adminCommand(
+        commands.SetRetentionCommand(retention)
       )
     )
 
-  @Help.Summary("Inspect the automatic pruning schedule.", FeatureFlag.Preview)
+  @Help.Summary("Inspect the automatic pruning schedule.")
   @Help.Description(
     """The schedule consists of a "cron" expression and "max_duration" and "retention" durations. The cron string
       |indicates the points in time at which pruning should begin in the GMT time zone, and the maximum duration
@@ -121,10 +102,8 @@ class PruningSchedulerAdministration[T <: AbstractStub[T]](
     """
   )
   def get_schedule(): Option[PruningSchedule] =
-    check(FeatureFlag.Preview)(
-      consoleEnvironment.run(
-        runner.adminCommand(commands.GetScheduleCommand())
-      )
+    consoleEnvironment.run(
+      runner.adminCommand(commands.GetScheduleCommand())
     )
 
 }

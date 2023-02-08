@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{

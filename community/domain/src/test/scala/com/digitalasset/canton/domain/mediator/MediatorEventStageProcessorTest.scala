@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.{
@@ -18,7 +17,6 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -116,13 +114,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
 
     def handle(events: RawProtocolEvent*): FutureUnlessShutdown[Unit] =
       processor
-        .handle(
-          events.map(e =>
-            OrdinarySequencedEvent(SignedContent(e, SymbolicCrypto.emptySignature, None))(
-              traceContext
-            )
-          )
-        )
+        .handle(events.map(e => Traced(e)(traceContext)))
         .flatMap(_.unwrap)
 
     def receivedEventsFor(requestId: RequestId): Seq[MediatorEvent] =
@@ -183,7 +175,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     sequentialTraverse_(badBatches) { case (batch, expectedMessages) =>
       loggerFactory.assertLogs(
         env.processor.handle(
-          toTracedSignedEvents(
+          Seq(
             Deliver.create(
               SequencerCounter(1),
               CantonTimestamp.Epoch,
@@ -192,7 +184,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
               batch,
               testedProtocolVersion,
             )
-          )
+          ).map(e => Traced(e)(traceContext))
         ),
         expectedMessages map { error => logEntry: LogEntry =>
           logEntry.errorMessage should include(error)
@@ -311,15 +303,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       }
     }
   }
-
-  private def toTracedSignedEvents(
-      delivers: Deliver[DefaultOpenEnvelope]*
-  ): Seq[OrdinaryProtocolEvent] =
-    delivers.map { deliver =>
-      OrdinarySequencedEvent(SignedContent(deliver, SymbolicCrypto.emptySignature, None))(
-        traceContext
-      )
-    }
 
   private def responseAggregation(requestId: RequestId): ResponseAggregation =
     ResponseAggregation.fromRequest(

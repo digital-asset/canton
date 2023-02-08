@@ -29,8 +29,8 @@ import com.daml.nonempty.NonEmpty
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
@@ -1659,7 +1659,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
     "This error is logged when a sync domain has a non-active status."
   )
   @Resolution(
-    """If you attempt to connect to a domain that has either been migrated off or has a pending migration, 
+    """If you attempt to connect to a domain that has either been migrated off or has a pending migration,
        |this error will be emitted. Please complete the migration before attempting to connect to it."""
   )
   object SyncServiceDomainIsNotActive
@@ -1788,7 +1788,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
       with CombinedError[SyncServiceError]
 
   @Explanation(
-    """The participant is not connected to a domain and can therefore not allocate a party 
+    """The participant is not connected to a domain and can therefore not allocate a party
     because the party notification is configured as ``party-notification.type = via-domain``."""
   )
   @Resolution(

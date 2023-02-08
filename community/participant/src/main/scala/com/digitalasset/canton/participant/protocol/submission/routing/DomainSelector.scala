@@ -34,11 +34,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 private[routing] class DomainSelectorFactory(
     participantId: ParticipantId,
-    domainsOfSubmittersAndInformees: TransactionData => EitherT[
-      Future,
-      TransactionRoutingError,
-      NonEmpty[Set[DomainId]],
-    ],
+    admissibleDomains: AdmissibleDomains,
     priorityOfDomain: DomainId => Int,
     domainRankComputation: DomainRankComputation,
     packageService: PackageService,
@@ -50,13 +46,18 @@ private[routing] class DomainSelectorFactory(
 )(implicit ec: ExecutionContext) {
   def create(
       transactionData: TransactionData
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[Future, TransactionRoutingError, DomainSelector] = {
     for {
-      domainsOfSubmittersAndInformees <- domainsOfSubmittersAndInformees(transactionData)
+      admissibleDomains <- admissibleDomains.forParties(
+        submitters = transactionData.submitters,
+        informees = transactionData.informees,
+      )
     } yield new DomainSelector(
       participantId,
       transactionData,
-      domainsOfSubmittersAndInformees,
+      admissibleDomains,
       priorityOfDomain,
       domainRankComputation,
       packageService,
@@ -67,10 +68,10 @@ private[routing] class DomainSelectorFactory(
 }
 
 /** Selects the best domain for routing.
-  * @param domainsOfSubmittersAndInformees Domains that host both submitters and informees of the transaction:
-  *                                          - submitters have to be hosted on the local participant
-  *                                          - informees have to be hosted on some participant
-  *                                        It is assumed that the participant is connected to all domains in `connectedDomains`
+  * @param admissibleDomains Domains that host both submitters and informees of the transaction:
+  *                          - submitters have to be hosted on the local participant
+  *                          - informees have to be hosted on some participant
+  *                          It is assumed that the participant is connected to all domains in `connectedDomains`
   * @param priorityOfDomain Priority of each domain (lowest number indicates highest priority)
   * @param domainRankComputation Utility class to compute `DomainRank`
   * @param domainStateProvider Provides state information about a domain.
@@ -80,7 +81,7 @@ private[routing] class DomainSelectorFactory(
 private[routing] class DomainSelector(
     participantId: ParticipantId,
     val transactionData: TransactionData,
-    domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]],
+    admissibleDomains: NonEmpty[Set[DomainId]],
     priorityOfDomain: DomainId => Int,
     domainRankComputation: DomainRankComputation,
     packageService: PackageInfoService,
@@ -117,7 +118,7 @@ private[routing] class DomainSelector(
 
       case None =>
         for {
-          admissibleDomains <- filterDomains(domainsOfSubmittersAndInformees)
+          admissibleDomains <- filterDomains(admissibleDomains)
           domainRank <- pickDomainIdAndComputeTransfers(contracts, admissibleDomains)
         } yield domainRank
     }
@@ -159,7 +160,7 @@ private[routing] class DomainSelector(
 
             case None =>
               // Pick the best valid domain in domainsOfSubmittersAndInformees
-              filterDomains(domainsOfSubmittersAndInformees)
+              filterDomains(admissibleDomains)
                 .map(_.minBy1(id => DomainRank(Map.empty, priorityOfDomain(id), id)))
           }
       }
@@ -169,15 +170,16 @@ private[routing] class DomainSelector(
   /** Filter domains using the [[com.digitalasset.canton.participant.protocol.submission.DomainUsabilityCheckerFull]]
     */
   private def filterDomains(
-      domains: NonEmpty[Set[DomainId]]
+      admissibleDomains: NonEmpty[Set[DomainId]]
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionRoutingError, NonEmpty[Set[DomainId]]] = {
 
-    val (unableToFetchStateDomains, domainStates) = domains.forgetNE.toList.map { domainId =>
-      domainStateProvider(domainId).map { case (snapshot, protocolVersion) =>
-        (domainId, protocolVersion, snapshot, packageService)
-      }
+    val (unableToFetchStateDomains, domainStates) = admissibleDomains.forgetNE.toList.map {
+      domainId =>
+        domainStateProvider(domainId).map { case (snapshot, protocolVersion) =>
+          (domainId, protocolVersion, snapshot, packageService)
+        }
     }.separate
 
     val domainsFilter = DomainsFilter(
@@ -256,11 +258,11 @@ private[routing] class DomainSelector(
 
       // Informees and submitters should reside on the selected domain
       _ <- EitherTUtil.condUnitET[Future](
-        domainsOfSubmittersAndInformees.contains(domainId),
+        admissibleDomains.contains(domainId),
         TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
           .NotAllInformeeAreOnDomain(
             domainId,
-            domainsOfSubmittersAndInformees,
+            admissibleDomains,
           ),
       )
 

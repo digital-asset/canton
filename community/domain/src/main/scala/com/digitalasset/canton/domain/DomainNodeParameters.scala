@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.domain
 
+import com.digitalasset.canton.config.RequireTypes.PositiveDouble
+import com.digitalasset.canton.domain.sequencing.CantonNodeWithSequencerParameters
 import com.digitalasset.canton.environment.{
   CantonNodeParameters,
   HasGeneralCantonNodeParameters,
@@ -19,6 +21,8 @@ import com.digitalasset.canton.environment.{
 case class DomainNodeParameters(
     general: CantonNodeParameters.General,
     protocol: CantonNodeParameters.Protocol,
+    maxBurstFactor: PositiveDouble,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters
+    with CantonNodeWithSequencerParameters

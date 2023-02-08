@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.checked
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String73,

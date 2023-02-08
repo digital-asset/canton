@@ -79,12 +79,18 @@ trait TransferStore extends TransferLookup {
 object TransferStore {
   sealed trait TransferStoreError extends Product with Serializable
 
-  sealed trait TransferLookupError extends TransferStoreError
+  sealed trait TransferLookupError extends TransferStoreError {
+    def cause: String
+  }
 
-  case class UnknownTransferId(transferId: TransferId) extends TransferLookupError
+  case class UnknownTransferId(transferId: TransferId) extends TransferLookupError {
+    override def cause: String = "unknown transfer id"
+  }
 
   case class TransferCompleted(transferId: TransferId, timeOfCompletion: TimeOfChange)
-      extends TransferLookupError
+      extends TransferLookupError {
+    override def cause: String = "transfer already completed"
+  }
 
   case class TransferDataAlreadyExists(old: TransferData, `new`: TransferData)
       extends TransferStoreError

@@ -5,6 +5,8 @@ package com.digitalasset.canton.resource
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, QueryCostMonitoringConfig}
+import com.digitalasset.canton.health.HealthReporting.ComponentState
+import com.digitalasset.canton.health.HealthReporting.ComponentState.UnhealthyState
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
@@ -35,6 +37,10 @@ class DbStorageSingle private (
     with NamedLogging {
 
   private val isActiveRef = new AtomicReference[Boolean](true)
+
+  override lazy val initialState: ComponentState =
+    if (isActiveRef.get()) ComponentState.Ok
+    else ComponentState.Failed(UnhealthyState(Some("instance is passive")))
 
   private val periodicConnectionCheck = new PeriodicAction(
     clock,
@@ -74,12 +80,14 @@ class DbStorageSingle private (
       val connection =
         // this will timeout and throw a SQLException if can't establish a connection
         db.source.createConnection()
-      ResourceUtil.withResource(connection)(
+      val valid = ResourceUtil.withResource(connection)(
         _.isValid(dbConfig.parameters.connectionTimeout.duration.toSeconds.toInt)
       )
+      if (valid) resolveUnhealthy
+      valid
     } catch {
       case e: SQLException =>
-        DatabaseConnectionLost(e.getMessage, e).discard
+        failureOccurred(DatabaseConnectionLost(e.getMessage, e))
         false
     })).map(isActiveRef.set)
   }
@@ -138,7 +146,15 @@ object DbStorageSingle {
         retryConfig = retryConfig,
       )(loggerFactory)
       profile = DbStorage.profile(config)
-      storage = new DbStorageSingle(profile, config, db, clock, metrics, timeouts, loggerFactory)
+      storage = new DbStorageSingle(
+        profile,
+        config,
+        db,
+        clock,
+        metrics,
+        timeouts,
+        loggerFactory,
+      )
     } yield storage
 
 }

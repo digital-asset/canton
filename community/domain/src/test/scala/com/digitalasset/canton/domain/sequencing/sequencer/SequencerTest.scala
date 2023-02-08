@@ -83,7 +83,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       DatabaseSequencer.single(
         CommunitySequencerConfig.Database(),
         DefaultProcessingTimeouts.testing,
-        new MemoryStorage(),
+        new MemoryStorage(loggerFactory),
         clock,
         domainId,
         topologyClientMember,

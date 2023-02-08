@@ -142,7 +142,6 @@ final case class ViewParticipantData private (
     }
     val keyInconsistencies = resolvedKeys.filter(inconsistentAssignedKey)
     if (keyInconsistencies.nonEmpty) {
-      println(show"View participant data: ${resolvedKeys}\n\n${coreInputs}")
       throw InvalidViewParticipantData(show"Inconsistencies for resolved keys: $keyInconsistencies")
     }
   }

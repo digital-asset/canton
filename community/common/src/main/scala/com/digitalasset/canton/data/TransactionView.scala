@@ -48,6 +48,10 @@ case class TransactionView private (
       }
   }
 
+  def subviewHashesConsistentWith(subviewHashes: Seq[ViewHash]): Boolean = {
+    subviews.hashesConsistentWith(hashOps)(subviewHashes)
+  }
+
   override def subtrees: Seq[MerkleTree[_]] =
     Seq[MerkleTree[_]](viewCommonData, viewParticipantData) ++ subviews.trees
 

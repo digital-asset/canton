@@ -24,14 +24,14 @@ object Dependencies {
   lazy val slf4j_version = "1.7.29"
   lazy val log4j_version = "2.17.0"
   lazy val ammonite_version = "2.5.5"
-  lazy val pprint_version = "0.7.1"
+  lazy val pprint_version = "0.8.1"
   // if you update the slick version, please also update our forked code in common/slick.util.*
   lazy val slick_version = "3.3.3"
   lazy val bouncy_castle_version = "1.70"
 
   lazy val pureconfig_version = "0.14.0"
 
-  lazy val circe_version = "0.13.0"
+  lazy val circe_version = "0.14.2"
 
   lazy val scalatest_version = "3.2.9"
 
@@ -83,7 +83,7 @@ object Dependencies {
   lazy val grpc_services = "io.grpc" % "grpc-services" % grpc_version
   lazy val grpc_api = "io.grpc" % "grpc-api" % grpc_version
 
-  lazy val scopt = "com.github.scopt" %% "scopt" % "4.0.0"
+  lazy val scopt = "com.github.scopt" %% "scopt" % "4.1.0"
 
   lazy val akka_stream = "com.typesafe.akka" %% "akka-stream" % akka_version
   lazy val akka_stream_testkit = "com.typesafe.akka" %% "akka-stream-testkit" % akka_version
@@ -91,7 +91,7 @@ object Dependencies {
   lazy val akka_http = "com.typesafe.akka" %% "akka-http" % akka_http_version
   lazy val akka_http_testkit = "com.typesafe.akka" %% "akka-http-testkit" % akka_http_version
 
-  lazy val scala_logging = "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2"
+  lazy val scala_logging = "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
   lazy val scalacheck = "org.scalacheck" %% "scalacheck" % "1.15.4"
   lazy val scalatest = "org.scalatest" %% "scalatest" % scalatest_version
   lazy val scalatestScalacheck =
@@ -164,8 +164,10 @@ object Dependencies {
 
   lazy val opentelemetry_instrumentation_grpc =
     "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % s"$opentelemetry_version-alpha"
+  lazy val opentelemetry_instrumentation_runtime_metrics =
+    "io.opentelemetry.instrumentation" % "opentelemetry-runtime-metrics" % s"$opentelemetry_version-alpha"
 
-  lazy val better_files = "com.github.pathikrit" %% "better-files" % "3.8.0"
+  lazy val better_files = "com.github.pathikrit" %% "better-files" % "3.9.1"
 
   // TODO(#10852) one database library, not two
   lazy val slick = "com.typesafe.slick" %% "slick" % slick_version
@@ -188,7 +190,7 @@ object Dependencies {
     "org.openjfx" % s"javafx-$x" % "17-ea+8"
   }
 
-  lazy val toxiproxy_java = "eu.rekawek.toxiproxy" % "toxiproxy-java" % "2.1.4"
+  lazy val toxiproxy_java = "eu.rekawek.toxiproxy" % "toxiproxy-java" % "2.1.7"
 
   lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.13"
 
@@ -211,6 +213,9 @@ object Dependencies {
     "digitalasset/canton-sequencer-core-reference"
   lazy val vmbc_sequencer_core_reference_docker_image_label: String =
     "sdk-version_2.5.0-snapshot.20221028.10865.0.1b726fe8_vmbc-driver-commit_96853d036"
+
+  lazy val dummy_sequencer_driver_bare_uberjar_name: String =
+    "dummy-driver-isolated-bare-impl.jar"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

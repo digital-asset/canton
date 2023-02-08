@@ -4,7 +4,7 @@
 package com.digitalasset.canton.config
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.{
+import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String255,

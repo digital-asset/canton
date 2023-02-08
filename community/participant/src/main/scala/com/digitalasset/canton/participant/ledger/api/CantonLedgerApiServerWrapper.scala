@@ -14,6 +14,7 @@ import com.daml.platform.apiserver.*
 import com.daml.platform.apiserver.meteringreport.MeteringReportKey
 import com.daml.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
 import com.daml.platform.store.DbSupport
+import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, StorageConfig}
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
@@ -69,7 +70,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     * @param loggerFactory         canton logger factory
     * @param tracerProvider        tracer provider for open telemetry grpc injection
     * @param metrics               upstream metrics module
-    * @param envQueueSize          method to read the environment execution context queue size
     */
   case class Config(
       serverConfig: LedgerApiServerConfig,
@@ -87,8 +87,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       tracerProvider: TracerProvider,
       metrics: Metrics,
       meteringReportKey: MeteringReportKey,
-      envQueueName: String,
-      envQueueSize: () => Long,
   ) extends NamedLogging {
     override def logger: TracedLogger = super.logger
 
@@ -144,6 +142,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
               participantDataSourceConfig = participantDataSourceConfig,
               dbConfig = dbConfig,
               createExternalServices = createExternalServices,
+              telemetry = new DefaultOpenTelemetry(config.tracerProvider.openTelemetry),
             )
           }
 

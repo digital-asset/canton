@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology.store.memory
 
 import cats.syntax.functorFilter.*
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.PublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

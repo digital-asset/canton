@@ -4,12 +4,12 @@
 package com.digitalasset.canton.data
 
 import com.daml.metrics.api.MetricHandle.Counter
+import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
 import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, SyncCloseable}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.RefGauge
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
@@ -99,7 +99,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   private[this] val lock: Object = new Object
 
   // init metrics
-  metrics.taskQueue.setReference(Some(() => taskQueue.size))
+  private val queueSizeGauge: CloseableGauge = metrics.taskQueue(() => taskQueue.size)
 
   /** Used to inspect the state of the sequencerCounterQueue, for testing purposes. */
   @VisibleForTesting
@@ -247,7 +247,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   override def closeAsync() = {
     import TraceContext.Implicits.Empty.*
     Seq(
-      SyncCloseable("unregister-metrics", metrics.taskQueue.setReference(None)),
+      SyncCloseable("unregister-metrics", queueSizeGauge.close()),
       queue.asCloseable("TaskScheduler.flush", timeouts.shutdownShort.unwrap),
     )
   }
@@ -323,7 +323,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
 
 trait TaskSchedulerMetrics {
   def sequencerCounterQueue: Counter
-  def taskQueue: RefGauge[Int]
+  def taskQueue(size: () => Int): CloseableGauge
 }
 
 object TaskScheduler {

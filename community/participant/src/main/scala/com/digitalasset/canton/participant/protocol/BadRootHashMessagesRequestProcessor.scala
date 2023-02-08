@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
-import com.digitalasset.canton.protocol.messages.{LocalReject, MediatorResponse}
+import com.digitalasset.canton.protocol.messages.{LocalReject, LocalVerdict, MediatorResponse}
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.Recipients
@@ -82,7 +82,9 @@ class BadRootHashMessagesRequestProcessor(
             sender = participantId,
             viewHash = None,
             localVerdict = LocalReject.MalformedRejects.BadRootHashMessages
-              .Reject(rejectionReason)(protocolVersion),
+              .Reject(rejectionReason)(
+                LocalVerdict.protocolVersionRepresentativeFor(protocolVersion)
+              ),
             rootHash = Some(rootHash),
             confirmingParties = Set.empty,
             domainId = domainId,

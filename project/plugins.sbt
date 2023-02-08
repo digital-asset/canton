@@ -32,7 +32,7 @@ addSbtPlugin("com.eed3si9n" %% "sbt-buildinfo" % "0.9.0")
 libraryDependencies += "com.esotericsoftware.yamlbeans" % "yamlbeans" % "1.13"
 
 // Assembly plugin to build fat-jars
-addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.15.0")
+addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "1.2.0")
 
 // Need better files for building the config file when doing the 'did we break Protobuf compatibility?' check
 libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.8.0"
@@ -46,9 +46,9 @@ addSbtPlugin("com.github.cb372" % "sbt-explicit-dependencies" % "0.2.16")
 libraryDependencies += "org.typelevel" %% "cats-core" % "2.6.1"
 
 libraryDependencies ++= Seq(
-  "io.circe" %% "circe-core" % "0.13.0",
-  "io.circe" %% "circe-generic" % "0.13.0",
-  "io.circe" %% "circe-parser" % "0.13.0",
+  "io.circe" %% "circe-core" % "0.14.2",
+  "io.circe" %% "circe-generic" % "0.14.2",
+  "io.circe" %% "circe-parser" % "0.14.2",
 )
 
 // JMH for benchmarking purposes

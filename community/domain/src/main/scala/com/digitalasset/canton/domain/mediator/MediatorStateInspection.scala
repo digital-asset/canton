@@ -14,8 +14,11 @@ private[mediator] class MediatorStateInspection(state: MediatorState) {
   def finalizedResponseCount()(implicit traceContext: TraceContext): Future[Long] =
     state.finalizedResponseStore.count()
 
-  def locateAndReportPruningTimestamp(skip: NonNegativeInt)(implicit
+  def locatePruningTimestamp(skip: NonNegativeInt)(implicit
       traceContext: TraceContext
   ): Future[Option[CantonTimestamp]] =
-    state.locateAndReportPruningTimestamp(skip)
+    state.locatePruningTimestamp(skip)
+
+  def reportMaxResponseAgeMetric(oldestResponseTimestamp: Option[CantonTimestamp]): Unit =
+    state.reportMaxResponseAgeMetric(oldestResponseTimestamp)
 }
