@@ -500,7 +500,11 @@ class StoreBasedTopologySnapshot(
           // filter out in-active
           .filter(_._2.permission.isActive)
       }
-      allAggregated.fmap(v => capped(v))
+      val partyToParticipantAttributes = allAggregated.fmap(v => capped(v))
+      // for each party we should return a result
+      parties.map { party =>
+        party -> partyToParticipantAttributes.getOrElse(party, Map.empty)
+      }.toMap
     }
   }
 

@@ -7,7 +7,6 @@ import com.daml.lf.data.ImmArray
 import com.daml.lf.value.Value
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{State, WithSuffixes, WithoutSuffixes}
-import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.prop.{TableFor3, TableFor4}
 import org.scalatest.wordspec.AnyWordSpec
@@ -25,7 +24,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
       cid: LfContractId,
       contractInstance: LfContractInst = ExampleTransactionFactory.contractInstance(),
       signatories: Set[LfPartyId] = Set(signatory),
-      key: Option[LfKeyWithMaintainers] = None,
+      key: Option[LfGlobalKeyWithMaintainers] = None,
       agreementText: String = "",
   ): LfNodeCreate =
     ExampleTransactionFactory.createNode(
@@ -241,7 +240,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             choiceObservers = Set.empty,
             children = ImmArray.empty,
             exerciseResult = None,
-            key = None,
+            keyOpt = None,
             byKey = false,
             version = ExampleTransactionFactory.transactionVersion,
           ),
@@ -264,39 +263,25 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         """Unable to parse party: Invalid unique identifier `bubu` .*""",
       ),
       (
-        "Contract ID in contract key",
-        factory.versionedTransactionWithSeeds(
-          Seq(0),
-          createNode(
-            unsuffixedId(0),
-            signatories = Set(signatory),
-            key = Some(
-              LfKeyWithMaintainers(
-                Value.ValueContractId(unsuffixedId(0)),
-                Set(signatory),
-              )
-            ),
-          ),
-        ),
-        WithoutSuffixes,
-        s"found the contract ID ContractId\\(000000000000000000000000000000000000000000000000000000000000000000\\) in the key of node 0",
-      ),
-      (
         "Empty maintainers",
         factory.versionedTransactionWithSeeds(
           Seq(0, 1),
           createNode(
             unsuffixedId(1),
             signatories = Set(signatory),
-            key = Some(LfKeyWithMaintainers(contractInst.unversioned.arg, Set.empty)),
+            key = Some(
+              LfGlobalKeyWithMaintainers
+                .assertBuild(templateId, contractInst.unversioned.arg, Set.empty)
+            ),
           ),
           ExampleTransactionFactory.exerciseNode(
             lfAbs,
             signatories = Set(signatory),
             actingParties = Set(signatory),
             key = Some(
-              LfKeyWithMaintainers(
-                LfTransactionUtil.checkNoContractIdInKey(contractInst.unversioned.arg).value,
+              LfGlobalKeyWithMaintainers.assertBuild(
+                templateId,
+                contractInst.unversioned.arg,
                 Set.empty,
               )
             ),

@@ -157,7 +157,9 @@ trait TransferProcessingSteps[
   ): EitherT[Future, TransferProcessorError, DecryptedViews] = {
     val result = for {
       decryptedEitherList <- batch.toNEF.parTraverse(decryptTree(snapshot)(_).value)
-    } yield DecryptedViews(decryptedEitherList)
+    } yield DecryptedViews(
+      decryptedEitherList.map(_.map(decryptedView => (decryptedView, None)))
+    )
     EitherT.right(result)
   }
 

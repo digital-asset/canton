@@ -402,13 +402,7 @@ object DamlPlugin extends AutoPlugin {
           val curlWithBasicOptions = "curl" :: "-sSL" :: "--fail" :: Nil
           val credentials = url match {
             case artifactory if artifactory.startsWith("https://digitalasset.jfrog.io/") =>
-              // CircleCI specifies ARTIFACTORY_ env variables
-              val artifactoryUser = Option(System.getenv("ARTIFACTORY_USER")).getOrElse("")
-              val artifactoryPassword = Option(System.getenv("ARTIFACTORY_PASSWORD")).getOrElse("")
-              if (artifactoryUser.nonEmpty && artifactoryPassword.nonEmpty)
-                "-u" :: s"${artifactoryUser}:${artifactoryPassword}" :: Nil
-              else
-                "--netrc" :: Nil // on dev machines look up artifactory credentials in ~/.netrc per https://everything.curl.dev/usingcurl/netrc
+              "--netrc" :: Nil // on dev machines look up artifactory credentials in ~/.netrc per https://everything.curl.dev/usingcurl/netrc
             case _maven => Nil // maven does not require credentials
           }
           val fileAndUrl =

@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.TransactionViewTree
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
@@ -17,9 +18,9 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
 
-/** @param rootViews The root views of the projected transaction */
+/** @param rootViewsWithSignatures The root views of the projected transaction with their respective signatures */
 case class UsedAndCreated(
-    rootViews: NonEmpty[Seq[TransactionViewTree]],
+    rootViewsWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
     contracts: UsedAndCreatedContracts,
     keys: InputAndUpdatedKeys,
     hostedInformeeStakeholders: Set[LfPartyId],

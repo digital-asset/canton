@@ -62,10 +62,10 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlar
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.protocol.messages.{EncryptedViewMessage, *}
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
-import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.{WithRecipients, *}
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
@@ -109,6 +109,7 @@ class TransactionProcessingSteps(
     storedContractManager: StoredContractManager,
     metrics: TransactionProcessingMetrics,
     serializableContractAuthenticator: SerializableContractAuthenticator,
+    authenticationValidator: AuthenticationValidator,
     authorizationValidator: AuthorizationValidator,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -605,7 +606,7 @@ class TransactionProcessingSteps(
       def decryptViewWithRandomness(
           viewMessage: TransactionViewMessage,
           randomness: SecureRandomness,
-      ): EitherT[Future, DecryptionError, DecryptedView] =
+      ): EitherT[Future, DecryptionError, (DecryptedView, Option[Signature])] =
         for {
           ltvt <- decryptTree(viewMessage, Some(randomness))
           _ <- EitherT.fromEither[Future](
@@ -615,11 +616,11 @@ class TransactionProcessingSteps(
                 deriveRandomnessForSubviews(viewMessage, randomness)
               )
           )
-        } yield ltvt
+        } yield (ltvt, viewMessage.submitterParticipantSignature)
 
       def decryptView(
           transactionViewEnvelope: OpenEnvelope[TransactionViewMessage]
-      ): Future[Either[DecryptionError, WithRecipients[DecryptedView]]] = {
+      ): Future[Either[DecryptionError, (WithRecipients[DecryptedView], Option[Signature])]] = {
         extractRandomnessFromView(transactionViewEnvelope)
         for {
           randomness <- randomnessMap(transactionViewEnvelope.protocolMessage.viewHash).future
@@ -627,7 +628,9 @@ class TransactionProcessingSteps(
             transactionViewEnvelope.protocolMessage,
             randomness,
           ).value
-        } yield lightViewTreeE.map(WithRecipients(_, transactionViewEnvelope.recipients))
+        } yield lightViewTreeE.map { case (view, signature) =>
+          (WithRecipients(view, transactionViewEnvelope.recipients), signature)
+        }
       }
 
       val result = for {
@@ -649,14 +652,16 @@ class TransactionProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      decryptedViewsWithSignatures: NonEmpty[
+        Seq[(WithRecipients[DecryptedView], Option[Signature])]
+      ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CheckActivenessAndWritePendingContracts] = {
 
-    val lightViewTrees = decryptedViews.map(_.unwrap)
+    val lightViewTrees = decryptedViewsWithSignatures.map { case (view, _) => view.unwrap }
 
     // The transaction ID is the root hash and all `decryptedViews` have the same root hash
     // so we can take any.
@@ -680,6 +685,20 @@ class TransactionProcessingSteps(
           )
         )
       )
+      .map { viewTree =>
+        (
+          viewTree,
+          decryptedViewsWithSignatures.find { case (view, _) =>
+            view.unwrap.viewHash == viewTree.viewHash
+          } match {
+            case Some((_, signature)) => signature
+            case None =>
+              throw new RuntimeException(
+                s"View tree ${viewTree.viewHash} must be present in the list of decrypted views."
+              )
+          },
+        )
+      }
 
     // TODO(M40): check that all non-root lightweight trees can be decrypted with the expected (derived) randomness
     //   Also, check that all the view's informees received the derived randomness
@@ -757,6 +776,17 @@ class TransactionProcessingSteps(
         _ <- pendingCursor
 
         rootViewsWithUsedAndCreated = enrichedTransaction.rootViewsWithUsedAndCreated
+        rootViews = rootViewsWithUsedAndCreated.rootViewsWithSignatures.map { case (views, _) =>
+          views
+        }
+
+        authenticationResult <-
+          authenticationValidator.verifyViewSignatures(
+            requestId,
+            rootViewsWithUsedAndCreated.rootViewsWithSignatures,
+            snapshot,
+          )
+
         consistencyResult = ContractConsistencyChecker
           .assertInputContractsInPast(
             rootViewsWithUsedAndCreated.contracts.used.toList,
@@ -767,8 +797,7 @@ class TransactionProcessingSteps(
 
         // `tryCommonData` should never throw here because all views have the same root hash
         // which already commits to the ParticipantMetadata and CommonMetadata
-        commonData = checked(tryCommonData(rootViewsWithUsedAndCreated.rootViews))
-
+        commonData = checked(tryCommonData(rootViews))
         amSubmitter = enrichedTransaction.submitterMetadata.exists(
           _.submitterParticipant == participantId
         )
@@ -782,13 +811,13 @@ class TransactionProcessingSteps(
 
         authorizationResult <- authorizationValidator.checkAuthorization(
           requestId,
-          rootViewsWithUsedAndCreated.rootViews,
+          rootViews,
           ipsSnapshot,
         )
 
         conformanceResult <- modelConformanceChecker
           .check(
-            rootViewsWithUsedAndCreated.rootViews,
+            rootViews,
             rootViewsWithUsedAndCreated.keys.keyResolverFor(_),
             pendingDataAndResponseArgs.rc,
             ipsSnapshot,
@@ -796,6 +825,7 @@ class TransactionProcessingSteps(
           )
           .value
       } yield ParallelChecksResult(
+        authenticationResult,
         consistencyResult,
         authorizationResult,
         conformanceResult,
@@ -825,7 +855,9 @@ class TransactionProcessingSteps(
     ): TransactionValidationResult = {
       val viewResults = SortedMap.newBuilder[ViewHash, ViewValidationResult]
 
-      enrichedTransaction.rootViewsWithUsedAndCreated.rootViews.forgetNE
+      enrichedTransaction.rootViewsWithUsedAndCreated.rootViewsWithSignatures
+        .map { case (view, _) => view }
+        .forgetNE
         .flatMap(_.flatten)
         .foreach { view =>
           val viewParticipantData = view.viewParticipantData
@@ -898,6 +930,7 @@ class TransactionProcessingSteps(
         submitterMetadata = enrichedTransaction.submitterMetadata,
         workflowId = enrichedTransaction.workflowId,
         contractConsistencyResult = parallelChecksResult.consistencyResult,
+        authenticationResult = parallelChecksResult.authenticationResult,
         authorizationResult = parallelChecksResult.authorizationResult,
         modelConformanceResult = parallelChecksResult.conformanceResult,
         consumedInputsOfHostedParties =
@@ -1120,6 +1153,7 @@ class TransactionProcessingSteps(
       submitterMeta,
       workflowId,
       contractConsistency,
+      authenticationResult,
       authorizationResult,
       modelConformanceResult,
       consumedInputsOfHostedParties,
@@ -1307,9 +1341,10 @@ class TransactionProcessingSteps(
   ): Unit = ()
 
   private[this] def extractUsedAndCreated(
-      rootViewTrees: NonEmpty[Seq[TransactionViewTree]],
+      rootViewTreesWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
       topologySnapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext): Future[UsedAndCreated] = {
+    val rootViewTrees = rootViewTreesWithSignatures.map { case (view, _) => view }
     val hostsPartyPrefetchF = prefetchHostsParties(rootViewTrees, topologySnapshot)
     hostsPartyPrefetchF.map { partyPrefetch =>
       val (usedAndCreatedContracts, hostedInformeeStakeholders) =
@@ -1321,7 +1356,7 @@ class TransactionProcessingSteps(
           extractInputAndUpdatedKeysV2(rootViewTrees, partyPrefetch)
 
       UsedAndCreated(
-        rootViews = rootViewTrees,
+        rootViewsWithSignatures = rootViewTreesWithSignatures,
         contracts = usedAndCreatedContracts,
         keys = inputAndReassignedKeys,
         hostedInformeeStakeholders = hostedInformeeStakeholders,
@@ -1777,13 +1812,19 @@ object TransactionProcessingSteps {
       submitterMetadata: Option[SubmitterMetadata],
   ) {
 
-    def transactionId: TransactionId =
-      rootViewsWithUsedAndCreated.rootViews.head1.transactionId
-    def ledgerTime: CantonTimestamp =
-      rootViewsWithUsedAndCreated.rootViews.head1.ledgerTime
+    def transactionId: TransactionId = {
+      val (tvt, _) = rootViewsWithUsedAndCreated.rootViewsWithSignatures.head1
+      tvt.transactionId
+    }
+
+    def ledgerTime: CantonTimestamp = {
+      val (tvt, _) = rootViewsWithUsedAndCreated.rootViewsWithSignatures.head1
+      tvt.ledgerTime
+    }
   }
 
   case class ParallelChecksResult(
+      authenticationResult: Map[ViewHash, String],
       consistencyResult: Either[List[ReferenceToFutureContractError], Unit],
       authorizationResult: Map[ViewHash, String],
       conformanceResult: Either[ModelConformanceChecker.Error, ModelConformanceChecker.Result],

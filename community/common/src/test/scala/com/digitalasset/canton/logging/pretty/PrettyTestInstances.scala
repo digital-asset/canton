@@ -5,7 +5,7 @@ package com.digitalasset.canton.logging.pretty
 
 import com.digitalasset.canton.protocol.{
   LfCommittedTransaction,
-  LfKeyWithMaintainers,
+  LfGlobalKeyWithMaintainers,
   LfNode,
   LfNodeAuthority,
   LfNodeCreate,
@@ -48,7 +48,7 @@ trait PrettyTestInstances {
     param("stakeholders", _.stakeholders),
     param("templateId", _.templateId),
     param("version", _.version),
-    paramIfDefined("key", _.key),
+    paramIfDefined("key", _.keyOpt),
     param("arguments", _.arg),
   )
 
@@ -66,7 +66,7 @@ trait PrettyTestInstances {
     param("templateId", _.templateId),
     param("version", _.version),
     paramIfTrue("byKey", _.byKey),
-    paramIfDefined("key", _.key),
+    paramIfDefined("key", _.keyOpt),
   )
 
   implicit lazy val prettyLfNodeFetch: Pretty[LfNodeFetch] = prettyOfClass(
@@ -77,7 +77,7 @@ trait PrettyTestInstances {
     param("templateId", _.templateId),
     param("version", _.version),
     paramIfTrue("byKey", _.byKey),
-    paramIfDefined("key", _.key),
+    paramIfDefined("key", _.keyOpt),
   )
 
   implicit lazy val prettyLfNodeLookupByKey: Pretty[LfNodeLookupByKey] = prettyOfClass(
@@ -91,10 +91,11 @@ trait PrettyTestInstances {
     paramIfNonEmpty("children", _.children.toList)
   )
 
-  implicit lazy val prettyLfKeyWithMaintainers: Pretty[LfKeyWithMaintainers] = prettyOfClass(
-    param("key", _.key),
-    param("maintainers", _.maintainers),
-  )
+  implicit lazy val prettyLfGlobalKeyWithMaintainers: Pretty[LfGlobalKeyWithMaintainers] =
+    prettyOfClass(
+      param("key", _.value),
+      param("maintainers", _.maintainers),
+    )
 
 }
 

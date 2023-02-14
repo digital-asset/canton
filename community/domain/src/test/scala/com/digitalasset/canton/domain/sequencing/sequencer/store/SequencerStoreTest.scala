@@ -737,7 +737,7 @@ trait SequencerStoreTest
             .valueOrFail("alice counter checkpoint")
           _ <- store
             .saveCounterCheckpoint(bobId, checkpoint(SequencerCounter(1), ts(4)))
-            .valueOrFail("bob counter checkpoin t")
+            .valueOrFail("bob counter checkpoint")
           _ <- store
             .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(2), ts(6)))
             .valueOrFail("alice counter checkpoint")
@@ -759,14 +759,14 @@ trait SequencerStoreTest
           oldestTimestamp <- store.locatePruningTimestamp(NonNegativeInt.tryCreate(0))
         } yield {
           isStoreInitiallyEmpty shouldBe true
-          // as pruning is "exclusive", should see ts4, the checkpoint time before ts5, and not
+          // as pruning is "exclusive", should see the requested pruning time of ts5, and not
           // ts6, the timestamp just before safePruningTimestamp (ts7)
-          oldestTimestamp shouldBe Some(ts(4))
+          oldestTimestamp shouldBe Some(ts(5))
           statusBefore.safePruningTimestamp shouldBe ts(7)
           val removedCounts = recordCountsBefore - recordCountsAfter
-          removedCounts.counterCheckpoints shouldBe 0 // no earlier checkpoints
-          removedCounts.events shouldBe 1 // the only deliver event earlier than ts5
-          removedCounts.payloads shouldBe 1 // for the deliver event
+          removedCounts.counterCheckpoints shouldBe 2 // Alice's and Bob's checkpoints from ts4
+          removedCounts.events shouldBe 2 // the two deliver event earlier than ts5 from ts2 and ts4
+          removedCounts.payloads shouldBe 1 // for payload1 from ts1
         }
       }
 

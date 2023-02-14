@@ -18,6 +18,9 @@ import com.digitalasset.canton.version.ReleaseVersion
 import com.typesafe.config.{Config, ConfigFactory}
 import org.slf4j.LoggerFactory
 
+import java.util.concurrent.atomic.AtomicReference
+import scala.util.control.NonFatal
+
 /** The Canton main application.
   *
   * Starts a set of domains and participant nodes.
@@ -81,6 +84,29 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
   // Now that at least one line has been logged, deregister the killingStatusManager so that
   // Canton does not die on a warning status.
   logbackStatusManager.remove(killingStatusListener)
+
+  val environmentRef: AtomicReference[Option[E]] = new AtomicReference(None)
+  sys.runtime.addShutdownHook(new Thread(() => {
+    try {
+      logger.info("Shutting down...")
+      environmentRef.get().foreach(_.close())
+      logger.info("Shutdown complete.")
+    } catch {
+      case NonFatal(exception) =>
+        logger.error("Failed to shut down successfully.", exception)
+    } finally {
+      LoggerFactory.getILoggerFactory match {
+        case logbackLoggerContext: LoggerContext =>
+          logger.info("Shutting down logger. Bye bye.")
+          logbackLoggerContext.stop()
+        case _ =>
+          logger.warn(
+            "Logback is not bound via slf4j. Cannot shut down logger, this could result in lost log-messages."
+          )
+      }
+    }
+  }))
+  logger.info("Registered shutdown-hook.")
 
   val cantonConfig: E#Config = {
     val mergedUserConfigsE = NonEmpty.from(cliOptions.configFiles) match {
@@ -154,6 +180,7 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
   }
 
   val environment = environmentFactory.create(cantonConfig, loggerFactory)
+  environmentRef.set(Some(environment)) // registering for graceful shutdown
   environment.startAndReconnect(cliOptions.autoConnectLocal) match {
     case Right(()) =>
     case Left(_) => sys.exit(1)

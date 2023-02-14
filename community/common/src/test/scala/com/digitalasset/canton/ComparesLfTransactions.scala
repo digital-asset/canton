@@ -82,15 +82,17 @@ trait ComparesLfTransactions {
     def add(coid: LfContractId): Unit = if (!contractIds.contains(coid)) contractIds += coid
 
     tx.foldInExecutionOrder(())(
-      (_, _, en) => (add(en.targetCoid), LfTransaction.ChildrenRecursion.DoRecurse),
-      (_, _, _) => ((), LfTransaction.ChildrenRecursion.DoRecurse),
-      {
+      exerciseBegin = (_, _, en) => (add(en.targetCoid), LfTransaction.ChildrenRecursion.DoRecurse),
+      rollbackBegin = (_, _, _) => ((), LfTransaction.ChildrenRecursion.DoRecurse),
+      authorityBegin = (_, _, _) => sys.error("LfNodeAuthority"),
+      leaf = {
         case (_, _, cn: LfNodeCreate) => add(cn.coid)
         case (_, _, fn: LfNodeFetch) => add(fn.coid)
         case (_, _, ln: LfNodeLookupByKey) => ln.result.foreach(add)
       },
-      (_, _, _) => (),
-      (_, _, _) => (),
+      exerciseEnd = (_, _, _) => (),
+      rollbackEnd = (_, _, _) => (),
+      authorityEnd = (_, _, _) => sys.error("LfNodeAuthority"),
     )
 
     contractIds.result()

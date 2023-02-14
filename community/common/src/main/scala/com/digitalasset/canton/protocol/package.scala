@@ -108,10 +108,6 @@ package object protocol {
   type LfHash = Hash
   val LfHash: Hash.type = Hash
 
-  /** Shorthand for contract keys ("local" within an lf transaction node). */
-  type LfKeyWithMaintainers = Node.KeyWithMaintainers
-  val LfKeyWithMaintainers: Node.KeyWithMaintainers.type = Node.KeyWithMaintainers
-
   /** Shorthand for global contract keys (with template_id). */
   type LfGlobalKey = GlobalKey
   val LfGlobalKey: GlobalKey.type = GlobalKey

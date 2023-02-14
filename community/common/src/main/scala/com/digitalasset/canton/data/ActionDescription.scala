@@ -33,8 +33,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{LfTransactionUtil, NoCopy}
+import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
@@ -191,20 +190,13 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
           protocolVersionRepresentativeFor(protocolVersion)
         )
 
-      case LfNodeLookupByKey(templateId, key, _result, version) =>
+      case LfNodeLookupByKey(_, keyWithMaintainers, _result, version) =>
         for {
           _ <- Either.cond(
             seedO.isEmpty,
             (),
             InvalidActionDescription("No seed should be given for a LookupByKey node"),
           )
-          keyWithMaintainers <- LfTransactionUtil
-            .globalKeyWithMaintainers(templateId, key)
-            .leftMap(coid =>
-              InvalidActionDescription(
-                show"Contract ID $coid found in contract key for template $templateId"
-              )
-            )
           actionDescription <- LookupByKeyActionDescription.create(
             keyWithMaintainers.globalKey,
             version,

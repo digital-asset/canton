@@ -5,6 +5,7 @@ package com.digitalasset.canton.concurrent
 
 import com.daml.executors.QueueAwareExecutorService
 
+import java.util
 import java.util.concurrent.*
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContextExecutorService
@@ -61,6 +62,7 @@ class ForkJoinIdlenessExecutorService(
     pool: ForkJoinPool,
     reporter: Throwable => Unit,
     name: String,
+    cleanUp: AutoCloseable,
 ) extends ExecutionContextIdlenessExecutorService(pool, name) {
   override def reportFailure(cause: Throwable): Unit = reporter(cause)
 
@@ -69,6 +71,18 @@ class ForkJoinIdlenessExecutorService(
   }
 
   override def toString: String = s"ForkJoinIdlenessExecutorService-$name: $pool"
+
+  override def shutdown(): Unit = {
+    super.shutdown()
+    cleanUp.close()
+  }
+
+  override def shutdownNow(): util.List[Runnable] = {
+    val result = super.shutdownNow()
+    cleanUp.close()
+    result
+  }
+
 }
 
 class ThreadPoolIdlenessExecutorService(

@@ -10,7 +10,6 @@ import cats.syntax.traverse.*
 import com.daml.lf.transaction.ContractStateMachine.KeyInactive
 import com.daml.lf.transaction.Transaction.{KeyActive, KeyCreate, KeyInput, NegativeKeyLookup}
 import com.daml.lf.transaction.{ContractKeyUniquenessMode, ContractStateMachine}
-import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -25,7 +24,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MapsUtil, MonadUtil}
+import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
 
@@ -197,11 +196,6 @@ class TransactionTreeFactoryImplV3(
     ): EitherT[Future, TransactionTreeConversionError, B] =
       EitherT.fromEither(either.leftWiden[TransactionTreeConversionError])
 
-    def globalKey(lfNode: LfActionNode, key: Value) = {
-      // The key comes from a `WellformedTransaction` and thus cannot contain a contract ID
-      checked(LfGlobalKey.assertBuild(LfTransactionUtil.nodeTemplate(lfNode), key))
-    }
-
     for {
       // Compute salts
       viewCommonDataSalt <- fromEither(state.nextSalt())
@@ -242,10 +236,8 @@ class TransactionTreeFactoryImplV3(
               suffixedNode
           }
 
-          LfTransactionUtil.keyWithMaintainers(suffixedNode).foreach {
-            case LfKeyWithMaintainers(key, maintainers) =>
-              val gkey = globalKey(suffixedNode, key)
-              state.keyVersionAndMaintainers += (gkey -> (suffixedNode.version -> maintainers))
+          suffixedNode.keyOpt.foreach { case LfGlobalKeyWithMaintainers(gkey, maintainers) =>
+            state.keyVersionAndMaintainers += (gkey -> (suffixedNode.version -> maintainers))
           }
 
           state.signalRollbackScope(rbScope)
@@ -255,7 +247,7 @@ class TransactionTreeFactoryImplV3(
               resolutionForModeOff <- suffixedNode match {
                 case lookupByKey: LfNodeLookupByKey
                     if state.csmState.mode == ContractKeyUniquenessMode.Off =>
-                  val gkey = globalKey(suffixedNode, lookupByKey.key.key)
+                  val gkey = lookupByKey.key.globalKey
                   state.currentResolver.get(gkey).toRight(MissingContractKeyLookupError(gkey))
                 case _ => Right(KeyInactive) // dummy value, as resolution is not used
               }

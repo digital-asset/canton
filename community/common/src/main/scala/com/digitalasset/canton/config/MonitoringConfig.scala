@@ -43,7 +43,7 @@ final case class GrpcHealthServerConfig(
     )
 }
 
-/** Monitoring configuraiton for a canton node.
-  * @param healthServer Optional gRPC Health server configuration
+/** Monitoring configuration for a canton node.
+  * @param grpcHealthServer Optional gRPC Health server configuration
   */
-final case class NodeMonitoringConfig(healthServer: Option[GrpcHealthServerConfig] = None)
+final case class NodeMonitoringConfig(grpcHealthServer: Option[GrpcHealthServerConfig] = None)

@@ -153,7 +153,7 @@ object LedgerConnection {
       .intercept(
         GrpcTracing.builder(tracerProvider.openTelemetry).build().newClientInterceptor()
       )
-    LedgerClient.fromBuilder(builder, clientConfig)
+    LedgerClient(builder.build(), clientConfig)
   }
 
   def apply(

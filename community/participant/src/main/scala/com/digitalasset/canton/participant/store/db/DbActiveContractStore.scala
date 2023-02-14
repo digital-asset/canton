@@ -110,8 +110,6 @@ class DbActiveContractStore(
       )
     )
 
-  case class DbAcsError(reason: String) extends AcsError
-
   override protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("active-contract-store")
 

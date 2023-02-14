@@ -155,7 +155,9 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
       batchTraceContext: TraceContext
   ): Iterable[DbAction.ReadOnly[Iterable[CheckData]]]
 
-  /** Compare the item against the data that was found in the store and produce a result */
+  /** Compare the item against the data that was found in the store and produce a result.
+    * It is called for each item that the update command returned an update counter not equal to 1.
+    */
   protected def analyzeFoundData(item: A, foundData: Option[CheckData])(implicit
       traceContext: TraceContext
   ): Try[B]

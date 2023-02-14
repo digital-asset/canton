@@ -10,6 +10,7 @@ import ch.qos.logback.core.spi.AppenderAttachable
 import ch.qos.logback.core.{Appender, AppenderBase}
 import com.digitalasset.canton.DiscardOps
 import org.slf4j.Marker
+import org.slf4j.event.KeyValuePair
 
 import java.util
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -91,6 +92,14 @@ class RewritingAppender()
     )
     override def getTimeStamp: Long = event.getTimeStamp
     override def prepareForDeferredProcessing(): Unit = event.prepareForDeferredProcessing()
+
+    override def getKeyValuePairs: util.List[KeyValuePair] = event.getKeyValuePairs
+
+    override def getMarkerList: util.List[Marker] = event.getMarkerList
+
+    override def getNanoseconds: Int = event.getNanoseconds
+
+    override def getSequenceNumber: Long = event.getSequenceNumber
   }
 
   def setTesting(isTesting: Boolean): Unit = {

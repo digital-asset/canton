@@ -3,10 +3,9 @@
 
 package com.digitalasset.canton.version
 
-import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.util.VersionUtil
 
 import scala.annotation.tailrec
 import scala.util.Try
@@ -85,35 +84,6 @@ sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
   }
 }
 
-sealed trait CompanionTrait {
-  protected def createInternal(
-      rawVersion: String,
-      baseName: String,
-  ): Either[String, (Int, Int, Int, Option[String])] = {
-    // `?:` removes the capturing group, so we get a cleaner pattern-match statement
-    val regex = raw"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,4})(?:-(.*))?".r
-
-    rawVersion match {
-      case regex(rawMajor, rawMinor, rawPatch, suffix) =>
-        val parsedDigits = List(rawMajor, rawMinor, rawPatch).traverse(raw =>
-          raw.toIntOption.toRight(s"Couldn't parse number `$raw`")
-        )
-        parsedDigits.flatMap {
-          case List(major, minor, patch) =>
-            // `suffix` is `null` if no suffix is given
-            Right((major, minor, patch, Option(suffix)))
-          case _ => Left(s"Unexpected error while parsing version `$rawVersion`")
-        }
-
-      case _ =>
-        Left(
-          s"Unable to convert string `$rawVersion` to a valid ${baseName}. A ${baseName} is similar to a semantic version. For example, '1.2.3' or '1.2.3-SNAPSHOT' are valid ${baseName}s."
-        )
-    }
-  }
-
-}
-
 /** This class represent a release version.
   * Please refer to the [[https://docs.daml.com/canton/usermanual/versioning.html versioning documentation]]
   * in the user manual for details.
@@ -127,10 +97,10 @@ final case class ReleaseVersion(
   def majorMinor: (Int, Int) = (major, minor)
 }
 
-object ReleaseVersion extends CompanionTrait {
+object ReleaseVersion {
 
   def create(rawVersion: String): Either[String, ReleaseVersion] =
-    createInternal(rawVersion, ReleaseVersion.getClass.getSimpleName).map {
+    VersionUtil.create(rawVersion, ReleaseVersion.getClass.getSimpleName).map {
       case (major, minor, patch, optSuffix) =>
         new ReleaseVersion(major, minor, patch, optSuffix)
     }
@@ -138,47 +108,4 @@ object ReleaseVersion extends CompanionTrait {
 
   /** The release this process belongs to. */
   val current: ReleaseVersion = ReleaseVersion.tryCreate(BuildInfo.version)
-}
-
-/** This class represents a revision of the Sequencer.sol contract. */
-final case class EthereumContractVersion(
-    major: Int,
-    minor: Int,
-    patch: Int,
-    optSuffix: Option[String] = None,
-) extends CantonVersion
-
-object EthereumContractVersion extends CompanionTrait {
-
-  def create(rawVersion: String): Either[String, EthereumContractVersion] =
-    createInternal(rawVersion, EthereumContractVersion.getClass.getSimpleName).map {
-      case (major, minor, patch, optSuffix) =>
-        new EthereumContractVersion(major, minor, patch, optSuffix)
-    }
-  def tryCreate(rawVersion: String): EthereumContractVersion =
-    create(rawVersion).fold(sys.error, identity)
-
-  /** Which revisions of the Sequencer.sol contract are supported and can be deployed by a certain release? */
-  def tryReleaseVersionToEthereumContractVersions(
-      v: ReleaseVersion,
-      includeDeletedProtocolVersions: Boolean = false,
-  ): NonEmpty[List[EthereumContractVersion]] = {
-    assert(ReleaseVersionToProtocolVersions.get(v, includeDeletedProtocolVersions).isDefined)
-
-    if (v < ReleaseVersions.v2_3_0)
-      NonEmpty(List, v1_0_0)
-    else
-      NonEmpty(List, v1_0_0, v1_0_1)
-  }
-
-  lazy val v1_0_0: EthereumContractVersion = EthereumContractVersion(1, 0, 0)
-  lazy val v1_0_1: EthereumContractVersion = EthereumContractVersion(1, 0, 1)
-
-  lazy val allKnownVersions = List(v1_0_0, v1_0_1)
-
-  lazy val latest: EthereumContractVersion = tryReleaseVersionToEthereumContractVersions(
-    ReleaseVersion.current
-  ).max1
-  lazy val versionInTests: EthereumContractVersion = latest
-
 }

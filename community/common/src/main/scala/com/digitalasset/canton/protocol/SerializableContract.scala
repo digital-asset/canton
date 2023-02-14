@@ -5,8 +5,7 @@ package com.digitalasset.canton.protocol
 
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
-import com.daml.lf.command.ProcessedDisclosedContract
-import com.daml.lf.transaction.Versioned
+import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.crypto
@@ -131,21 +130,20 @@ object SerializableContract
       .map(SerializableContract(contractId, _, metadata, ledgerTime, contractSalt))
 
   def fromDisclosedContract(
-      disclosedContract: Versioned[ProcessedDisclosedContract]
+      disclosedContract: ProcessedDisclosedContract
   ): Either[String, SerializableContract] = {
-    val unversionedDisclosedContract = disclosedContract.unversioned
-    val contractMetadata = unversionedDisclosedContract.metadata
-    val ledgerTime = CantonTimestamp(contractMetadata.createdAt)
-    val driverContractMetadataBytes = contractMetadata.driverMetadata.toByteArray
+    val create = disclosedContract.create
+    val ledgerTime = CantonTimestamp(disclosedContract.createdAt)
+    val driverContractMetadataBytes = disclosedContract.driverMetadata.toByteArray
 
     for {
       disclosedContractIdVersion <- CantonContractIdVersion
-        .ensureCantonContractId(unversionedDisclosedContract.contractId)
+        .ensureCantonContractId(disclosedContract.contractId)
         .leftMap(err => s"Invalid disclosed contract id: ${err.toString}")
       _ <- disclosedContractIdVersion match {
         case NonAuthenticatedContractIdVersion =>
           Left(
-            s"Disclosed contract with non-authenticated contract id: ${unversionedDisclosedContract.contractId.toString}"
+            s"Disclosed contract with non-authenticated contract id: ${disclosedContract.contractId.toString}"
           )
         case AuthenticatedContractIdVersion => Right(())
       }
@@ -160,24 +158,19 @@ object SerializableContract
             .leftMap(err => s"Failed parsing disclosed contract driver contract metadata: $err")
             .map(m => Some(m.salt))
       }
-      contractInstance =
-        LfContractInst(
-          version = disclosedContract.version,
-          template = unversionedDisclosedContract.templateId,
-          arg = unversionedDisclosedContract.argument,
-        )
+      contractInstance = create.versionedCoinst
       cantonContractMetadata <- ContractMetadata.create(
-        signatories = contractMetadata.signatories,
-        stakeholders = contractMetadata.stakeholders,
-        maybeKeyWithMaintainers = contractMetadata.maybeKeyWithMaintainers,
+        signatories = create.signatories,
+        stakeholders = create.stakeholders,
+        maybeKeyWithMaintainers = create.versionedKeyOpt,
       )
       contract <- SerializableContract(
-        contractId = unversionedDisclosedContract.contractId,
+        contractId = disclosedContract.contractId,
         contractInstance = contractInstance,
         metadata = cantonContractMetadata,
         ledgerTime = ledgerTime,
         contractSalt = salt,
-        agreementText = AgreementText(disclosedContract.unversioned.metadata.agreementText),
+        agreementText = AgreementText(create.agreementText),
       ).leftMap(err => s"Failed creating serializable contract from disclosed contract: $err")
     } yield contract
   }

@@ -62,7 +62,12 @@ class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest {
 
       override def activeParticipantsOfPartiesWithAttributes(
           parties: Seq[LfPartyId]
-      ): Future[Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]] = ???
+      ): Future[Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]] =
+        Future.successful(
+          parties.map { party =>
+            party -> topology.getOrElse(party, Map.empty)
+          }.toMap
+        )
     }
 
     "allHaveActiveParticipants should yield correct results" in {

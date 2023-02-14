@@ -11,7 +11,5 @@ object EnterpriseSequencerErrorGroups {
 
   abstract class EthereumErrorGroup extends ErrorGroup
 
-  abstract class VmbcErrorGroup extends ErrorGroup
-
   abstract class FabricErrorGroup extends ErrorGroup
 }

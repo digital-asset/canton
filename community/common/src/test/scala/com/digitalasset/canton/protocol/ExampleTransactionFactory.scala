@@ -104,7 +104,7 @@ object ExampleTransactionFactory {
       actingParties: Set[LfPartyId] = Set.empty,
       signatories: Set[LfPartyId] = Set.empty,
       observers: Set[LfPartyId] = Set.empty,
-      key: Option[LfKeyWithMaintainers] = None,
+      key: Option[LfGlobalKeyWithMaintainers] = None,
       byKey: Boolean = false,
       version: LfTransactionVersion = transactionVersion,
   ): LfNodeFetch =
@@ -114,7 +114,7 @@ object ExampleTransactionFactory {
       actingParties = actingParties,
       signatories = signatories,
       stakeholders = signatories ++ observers,
-      key = key,
+      keyOpt = key,
       byKey = byKey,
       version = version,
     )
@@ -124,7 +124,7 @@ object ExampleTransactionFactory {
       contractInstance: LfContractInst = this.contractInstance(),
       signatories: Set[LfPartyId] = Set.empty,
       observers: Set[LfPartyId] = Set.empty,
-      key: Option[LfKeyWithMaintainers] = None,
+      key: Option[LfGlobalKeyWithMaintainers] = None,
       agreementText: String = "",
   ): LfNodeCreate = {
     val unversionedContractInst = contractInstance.unversioned
@@ -150,7 +150,7 @@ object ExampleTransactionFactory {
       choiceObservers: Set[LfPartyId] = Set.empty,
       actingParties: Set[LfPartyId] = Set.empty,
       exerciseResult: Option[Value] = Some(Value.ValueNone),
-      key: Option[LfKeyWithMaintainers] = None,
+      key: Option[LfGlobalKeyWithMaintainers] = None,
       byKey: Boolean = false,
   ): LfNodeExercises =
     LfNodeExercises(
@@ -166,7 +166,7 @@ object ExampleTransactionFactory {
       choiceObservers = choiceObservers,
       children = children.to(ImmArray),
       exerciseResult = exerciseResult,
-      key = key,
+      keyOpt = key,
       byKey = byKey,
       version = transactionVersion,
     )
@@ -198,7 +198,7 @@ object ExampleTransactionFactory {
   ): LfNodeLookupByKey =
     LfNodeLookupByKey(
       key.templateId,
-      LfTransactionUtil.fromGlobalKeyWithMaintainers(LfGlobalKeyWithMaintainers(key, maintainers)),
+      LfGlobalKeyWithMaintainers(key, maintainers),
       resolution,
       transactionVersion,
     )
@@ -273,9 +273,7 @@ object ExampleTransactionFactory {
       ContractMetadata.tryCreate(
         node.signatories,
         node.stakeholders,
-        node.key.map(
-          LfTransactionUtil.tryGlobalKeyWithMaintainers(node.templateId, _, node.version)
-        ),
+        node.versionedKey,
       ),
     )
 
@@ -793,10 +791,9 @@ class ExampleTransactionFactory(
     def metadata: TransactionMetadata =
       mkMetadata(nodeSeed.fold(Map.empty[LfNodeId, LfHash])(seed => Map(nodeId -> seed)))
 
-    override def keyResolver: LfKeyResolver = LfTransactionUtil.keyWithMaintainers(node) match {
+    override def keyResolver: LfKeyResolver = node.gkeyOpt match {
       case None => Map.empty
-      case Some(kWithM) =>
-        val gkey = LfGlobalKey.assertBuild(node.templateId, kWithM.key)
+      case Some(gkey) =>
         val resolution = LfTransactionUtil.usedContractIdWithMetadata(node).map(_.unwrap)
         Map(gkey -> resolution)
     }
@@ -866,7 +863,7 @@ class ExampleTransactionFactory(
       unsuffixedCapturedContractIds: Seq[LfContractId] = Seq.empty,
       signatories: Set[LfPartyId] = Set(submitter),
       observers: Set[LfPartyId] = Set(observer),
-      key: Option[LfKeyWithMaintainers] = None,
+      key: Option[LfGlobalKeyWithMaintainers] = None,
   ) extends SingleNode(Some(seed)) {
 
     require(

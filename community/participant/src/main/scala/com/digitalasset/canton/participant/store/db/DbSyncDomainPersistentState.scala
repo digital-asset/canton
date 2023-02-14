@@ -57,7 +57,8 @@ class DbSyncDomainPersistentState(
       parameters.maxItemsInSqlClause,
       numDbConnections,
       caching.contractStore,
-      parameters.dbBatchAggregationConfig,
+      dbQueryBatcherConfig = parameters.dbBatchAggregationConfig,
+      insertBatchAggregatorConfig = parameters.dbBatchAggregationConfig,
       processingTimeouts,
       loggerFactory,
     )

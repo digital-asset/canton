@@ -239,12 +239,12 @@ class DbDamlPackageStore(
         nonEmptyPackages: NonEmpty[Seq[PackageId]]
     ) = {
       val queryActions = DbStorage
-        .toInClauses(
+        .toInClauses_(
           field = "package_id",
           values = nonEmptyPackages,
           maxContractIdSqlInListSize,
         )
-        .map({ case (_value, inStatement) =>
+        .map { inStatement =>
           (sql"""
                   select package_id
                   from dar_packages result
@@ -259,7 +259,7 @@ class DbDamlPackageStore(
                   )
                   #${storage.limit(1)}
                   """).as[LfPackageId]
-        })
+        }
 
       val resultF = for {
         packages <- storage.sequentialQueryAndCombine(queryActions, functionFullName)

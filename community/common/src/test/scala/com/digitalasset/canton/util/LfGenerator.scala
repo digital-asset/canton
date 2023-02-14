@@ -53,7 +53,7 @@ object LfGenerator {
   def createGen[N >: LfNodeCreate]: StateT[Gen, NodeIdState, LfAction] =
     for {
       node <- StateT.liftF(lfGen.malformedCreateNodeGen)
-      fixedNode = node.copy(templateId = truncateIdentifier(node.coinst.template), key = None)
+      fixedNode = node.copy(templateId = truncateIdentifier(node.coinst.template), keyOpt = None)
       action <- createFromLf[Gen](fixedNode)
     } yield action
 
@@ -61,7 +61,7 @@ object LfGenerator {
     for {
       node <- StateT.liftF(Gen.resize(10, lfGen.fetchNodeGen))
       templateId = truncateIdentifier(node.templateId)
-      fixedNode = node.copy(templateId = templateId, key = None)
+      fixedNode = node.copy(templateId = templateId, keyOpt = None)
       action <- fetchFromLf[Gen](fixedNode)
     } yield action
 
@@ -70,7 +70,7 @@ object LfGenerator {
       children <- generateMultiple(maxBranching)
       node <- StateT.liftF(Gen.resize(10, lfGen.danglingRefExerciseNodeGen))
       templateId = truncateIdentifier(node.templateId)
-      fixedNode = node.copy(children = ImmArray.empty, templateId = templateId, key = None)
+      fixedNode = node.copy(children = ImmArray.empty, templateId = templateId, keyOpt = None)
       action <- exerciseFromLf[Gen](fixedNode, children)
     } yield action
 

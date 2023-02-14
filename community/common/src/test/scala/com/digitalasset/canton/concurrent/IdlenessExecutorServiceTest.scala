@@ -119,6 +119,7 @@ class ForkJoinIdlenessExecutorServiceTest
         new ForkJoinPool(),
         throwable => logger.error(s"Error: $throwable"),
         loggerFactory.threadName + "-fork-join-pool",
+        () => (),
       )
     }
   }

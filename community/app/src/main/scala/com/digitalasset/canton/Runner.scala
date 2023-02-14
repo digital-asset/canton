@@ -48,15 +48,7 @@ class ServerRunner[E <: Environment](
             sys.exit(3)
         }
 
-      bootstrapScript.fold(start())(script => startWithBootstrap(script))
-
-      // The ServerRunner is typically terminated through an external signal (SIGTERM, SIGINT, ...)
-      // We do not register a shutdown hook to close the environment, as this is tricky to coordinate with other shutdown hooks (akka, h2, ...).
-      // In practice, closing the environment from a shutdown hook leads to an exception storm.
-      //
-      // Closing the environment is only "nice to have", as the OS will release resources and
-      // crash recovery will deal with critical writes lost due to the shutdown.
-
+      bootstrapScript.fold(start())(startWithBootstrap)
     } catch {
       case ex: Throwable =>
         logger.error(s"Unexpected error while running server: ${ex.getMessage}")
@@ -77,9 +69,6 @@ class ConsoleInteractiveRunner[E <: Environment](
         InteractiveConsole(consoleEnvironment, noTty, bootstrapScript, logger)
       } catch {
         case NonFatal(_) => false
-      } finally {
-        // ensure anything that's been left running is cleanly shutdown
-        environment.close()
       }
     sys.exit(if (success) 0 else 1)
   }
@@ -94,16 +83,12 @@ class ConsoleScriptRunner[E <: Environment](
 
   override def run(environment: E): Unit = {
     val exitCode =
-      try {
-        ConsoleScriptRunner.run(environment, scriptPath, logger) match {
-          case Right(_unit) =>
-            Ok
-          case Left(err) =>
-            logger.error(s"Script execution failed: $err")(TraceContext.empty)
-            Error
-        }
-      } finally {
-        environment.close()
+      ConsoleScriptRunner.run(environment, scriptPath, logger) match {
+        case Right(_unit) =>
+          Ok
+        case Left(err) =>
+          logger.error(s"Script execution failed: $err")(TraceContext.empty)
+          Error
       }
 
     sys.exit(exitCode)

@@ -228,7 +228,7 @@ class RepairService(
                 agreementText = "",
                 signatories = contractWithMetadata.signatories,
                 stakeholders = contractWithMetadata.stakeholders,
-                key = contractWithMetadata.keyWithMaintainers,
+                keyOpt = contractWithMetadata.keyWithMaintainers,
                 version = contractWithMetadata.instance.version,
               )
             }
@@ -293,7 +293,7 @@ class RepairService(
                 exerciseResult = Some(Value.ValueNone),
                 // Not setting the contract key as the indexer deletes contract keys along with contracts.
                 // If the contract keys were needed, we'd have to reinterpret the contract to look up the key.
-                key = None,
+                keyOpt = None,
                 byKey = false,
                 version = contract.rawContractInstance.contractInstance.version,
               )
@@ -495,16 +495,18 @@ class RepairService(
         inputContract: SerializableContract,
         computed: ContractWithMetadata,
     ): EitherT[Future, String, SerializableContract] =
-      EitherT.fromEither[Future](for {
-        metadata <- computed.metadataWithGlobalKey.leftMap(err =>
-          log(s"Failed to convert contract key ${err.message}")
+      EitherT.fromEither[Future](
+        for {
+          rawContractInstance <- SerializableRawContractInstance
+            .create(computed.instance, computed.agreementText)
+            .leftMap(err =>
+              log(s"Failed to serialize contract ${inputContract.contractId}: ${err.errorMessage}")
+            )
+        } yield inputContract.copy(
+          metadata = computed.metadataWithGlobalKey,
+          rawContractInstance = rawContractInstance,
         )
-        rawContractInstance <- SerializableRawContractInstance
-          .create(computed.instance, computed.agreementText)
-          .leftMap(err =>
-            log(s"Failed to serialize contract ${inputContract.contractId}: ${err.errorMessage}")
-          )
-      } yield inputContract.copy(metadata = metadata, rawContractInstance = rawContractInstance))
+      )
 
     val contract = contractToAdd.contract
     val witnesses = contractToAdd.witnesses.map(_.toLf)

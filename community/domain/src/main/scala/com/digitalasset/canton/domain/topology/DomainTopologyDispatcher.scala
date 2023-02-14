@@ -26,6 +26,7 @@ import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessag
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
@@ -97,6 +98,7 @@ private[domain] class DomainTopologyDispatcher(
     futureSupervisor: FutureSupervisor,
     sender: DomainTopologySender,
     protected val loggerFactory: NamedLoggerFactory,
+    topologyManagerSequencerCounterTrackerStore: SequencerCounterTrackerStore,
 )(implicit val ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
@@ -515,7 +517,12 @@ private[domain] class DomainTopologyDispatcher(
   }
 
   override protected def onClosed(): Unit =
-    Lifecycle.close(sender)(logger)
+    Lifecycle.close(
+      topologyManagerSequencerCounterTrackerStore,
+      targetStore,
+      authorizedStore,
+      sender,
+    )(logger)
 
 }
 
@@ -535,6 +542,7 @@ private[domain] object DomainTopologyDispatcher {
       parameters: CantonNodeParameters,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
+      topologyManagerSequencerCounterTrackerStore: SequencerCounterTrackerStore,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -550,6 +558,7 @@ private[domain] object DomainTopologyDispatcher {
       retryInterval = 10.seconds,
       parameters.processingTimeouts,
       loggerFactory,
+      futureSupervisor,
     )
 
     val dispatcher = new DomainTopologyDispatcher(
@@ -566,6 +575,7 @@ private[domain] object DomainTopologyDispatcher {
       futureSupervisor,
       sender,
       loggerFactory,
+      topologyManagerSequencerCounterTrackerStore,
     )
 
     domainTopologyManager.addObserver(dispatcher)
@@ -616,6 +626,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
       retryInterval: FiniteDuration,
       val timeouts: ProcessingTimeout,
       val loggerFactory: NamedLoggerFactory,
+      futureSupervisor: FutureSupervisor,
   )(implicit executionContext: ExecutionContext)
       extends NamedLogging
       with HasDegradationState[DomainTopologySender.TopologyDispatchingDegradation]

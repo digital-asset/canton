@@ -7,7 +7,6 @@ buildInfoKeys := Seq[BuildInfoKey](
   "daml_language_versions" -> metabuild.DamlVersions.daml_language_versions,
   "use_custom_daml_version" -> metabuild.DamlVersions.useCustomDamlVersion,
   "daml_compiler_version" -> metabuild.DamlVersions.version,
-  "vmbc_driver_libraries_version" -> metabuild.DamlVersions.vmbc_driver_libraries_version,
 )
 buildInfoPackage := "metabuild"
 

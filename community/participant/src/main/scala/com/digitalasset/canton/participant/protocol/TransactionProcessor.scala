@@ -87,6 +87,7 @@ class TransactionProcessor(
         ephemeral.storedContractManager,
         metrics,
         new SerializableContractAuthenticatorImpl(new UnicumGenerator(crypto.pureCrypto)),
+        new AuthenticationValidator(),
         new AuthorizationValidator(participantId),
         loggerFactory,
       ),

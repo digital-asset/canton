@@ -12,7 +12,7 @@ import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
 import com.daml.lf.data.Ref
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
+import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -266,12 +266,15 @@ class TransferOutProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      correctRootHashes: NonEmpty[Seq[WithRecipients[FullTransferOutTree]]],
+      decryptedViewsWithSignatures: NonEmpty[
+        Seq[(WithRecipients[FullTransferOutTree], Option[Signature])]
+      ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       sourceSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
+    val correctRootHashes = decryptedViewsWithSignatures.map { case (rootHashes, _) => rootHashes }
     // TODO(M40): Send a rejection if malformedPayloads is non-empty
     for {
       txOutRequestAndRecipients <- EitherT.cond[Future](

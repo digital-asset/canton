@@ -407,6 +407,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
           party1.toLf -> Set(participant1),
           party2.toLf -> Set(participant2),
           party3.toLf -> Set(participant3),
+          party4.toLf -> Set(),
         )
       }
     }

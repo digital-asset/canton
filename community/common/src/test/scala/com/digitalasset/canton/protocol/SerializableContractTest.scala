@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.protocol
 
-import com.daml.lf.command.{EngineEnrichedContractMetadata, ProcessedDisclosedContract}
 import com.daml.lf.data.Bytes
+import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurposeTest, TestSalt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, LfPartyId, LfTimestamp, LfValue, LfVersioned}
-import monocle.macros.syntax.lens.*
+import com.digitalasset.canton.{BaseTest, LfPartyId, LfTimestamp, LfValue}
 import org.scalatest.wordspec.AnyWordSpec
 
 class SerializableContractTest extends AnyWordSpec with BaseTest {
@@ -74,22 +73,19 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
       templateId = templateId,
       contractId = authenticatedContractId,
       argument = LfValue.ValueNil,
-      metadata = EngineEnrichedContractMetadata(
-        createdAt = createdAt,
-        driverMetadata = driverMetadata,
-        signatories = Set(alice),
-        stakeholders = Set(alice),
-        maybeKeyWithMaintainers = None,
-        agreementText = agreementText,
-      ),
+      createdAt = createdAt,
+      driverMetadata = driverMetadata,
+      signatories = Set(alice),
+      stakeholders = Set(alice),
+      keyOpt = None,
+      agreementText = agreementText,
+      version = transactionVersion,
     )
-
-    val versionedDisclosedContract = LfVersioned(transactionVersion, disclosedContract)
 
     "provided a valid disclosed contract" should {
       "succeed" in {
         val actual = SerializableContract
-          .fromDisclosedContract(versionedDisclosedContract)
+          .fromDisclosedContract(disclosedContract)
           .value
 
         actual shouldBe SerializableContract(
@@ -111,7 +107,9 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
       "fail" in {
         SerializableContract
           .fromDisclosedContract(
-            versionedDisclosedContract.map(_.copy(contractId = invalidFormatContractId))
+            disclosedContract.copy(create =
+              disclosedContract.create.copy(coid = invalidFormatContractId)
+            )
           )
           .left
           .value shouldBe s"Invalid disclosed contract id: malformed contract id '${invalidFormatContractId.toString}'. Suffix 00 does not start with one of the supported prefixes: Bytes(ca01) or Bytes(ca00)"
@@ -122,7 +120,9 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
       "fail" in {
         SerializableContract
           .fromDisclosedContract(
-            versionedDisclosedContract.map(_.copy(contractId = nonAuthenticatedContractId))
+            disclosedContract.copy(create =
+              disclosedContract.create.copy(coid = nonAuthenticatedContractId)
+            )
           )
           .left
           .value shouldBe s"Disclosed contract with non-authenticated contract id: ${nonAuthenticatedContractId.toString}"
@@ -132,11 +132,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
     "provided a disclosed contract with missing driver contract metadata" should {
       "fail" in {
         SerializableContract
-          .fromDisclosedContract(
-            versionedDisclosedContract
-              .focus(_.unversioned.metadata.driverMetadata)
-              .replace(Bytes.Empty)
-          )
+          .fromDisclosedContract(disclosedContract.copy(driverMetadata = Bytes.Empty))
           .left
           .value shouldBe "Missing driver contract metadata in provided disclosed contract"
       }

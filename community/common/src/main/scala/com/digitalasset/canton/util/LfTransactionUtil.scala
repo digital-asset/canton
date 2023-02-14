@@ -7,8 +7,8 @@ import cats.{Monad, Order}
 import com.daml.lf.data.*
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.Value
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.{LfPartyId, LfVersioned}
 
 import scala.annotation.nowarn
 
@@ -47,42 +47,6 @@ object LfTransactionUtil {
     case _: LfNodeLookupByKey => None
   }
 
-  /** Check that `keyWithMaintainers` has a key that doesn't contain a contract ID (so can be used as a contact key).
-    * If so, convert `keyWithMaintainers` to a [[com.digitalasset.canton.protocol.package.LfGlobalKeyWithMaintainers]].
-    */
-  def globalKeyWithMaintainers(
-      templateId: LfTemplateId,
-      keyWithMaintainers: LfKeyWithMaintainers,
-  ): Either[LfContractId, LfGlobalKeyWithMaintainers] =
-    checkNoContractIdInKey(keyWithMaintainers.key).map(value =>
-      LfGlobalKeyWithMaintainers(
-        LfGlobalKey.assertBuild(templateId, value),
-        keyWithMaintainers.maintainers,
-      )
-    )
-
-  /** Convert `keyWithMaintainers` to a versioned [[com.digitalasset.canton.protocol.package.LfGlobalKeyWithMaintainers]], throwing an
-    * [[java.lang.IllegalArgumentException]] if `keyWithMaintainers` has a key
-    * that contains a contract ID.
-    */
-  def tryGlobalKeyWithMaintainers(
-      templateId: LfTemplateId,
-      keyWithMaintainers: LfKeyWithMaintainers,
-      version: LfTransactionVersion,
-  ): LfVersioned[LfGlobalKeyWithMaintainers] =
-    LfVersioned(
-      version,
-      LfGlobalKeyWithMaintainers(
-        LfGlobalKey.assertBuild(templateId, keyWithMaintainers.key),
-        keyWithMaintainers.maintainers,
-      ),
-    )
-
-  def fromGlobalKeyWithMaintainers(
-      global: LfGlobalKeyWithMaintainers
-  ): LfKeyWithMaintainers =
-    LfKeyWithMaintainers(global.globalKey.key, global.maintainers)
-
   /** Get the IDs and metadata of contracts used within a single
     * [[com.digitalasset.canton.protocol.package.LfActionNode]]
     */
@@ -98,7 +62,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nf.signatories,
               nf.stakeholders,
-              nf.key.map(tryGlobalKeyWithMaintainers(nf.templateId, _, nf.version)),
+              nf.versionedKeyOpt,
             ),
           )
         )
@@ -110,7 +74,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nx.signatories,
               nx.stakeholders,
-              nx.key.map(tryGlobalKeyWithMaintainers(nx.templateId, _, nx.version)),
+              nx.versionedKeyOpt,
             ),
           )
         )
@@ -122,7 +86,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nl.keyMaintainers,
               nl.keyMaintainers,
-              Some(tryGlobalKeyWithMaintainers(nl.templateId, nl.key, nl.version)),
+              nl.versionedKeyOpt,
             ),
           )
         )
@@ -161,7 +125,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nc.signatories,
               nc.stakeholders,
-              nc.key.map(tryGlobalKeyWithMaintainers(nc.coinst.template, _, nc.version)),
+              nc.versionedKeyOpt,
             ),
           )
         )
@@ -246,13 +210,6 @@ object LfTransactionUtil {
     }
   }
 
-  def keyWithMaintainers(node: LfActionNode): Option[LfKeyWithMaintainers] = node match {
-    case c: LfNodeCreate => c.key
-    case f: LfNodeFetch => f.key
-    case e: LfNodeExercises => e.key
-    case l: LfNodeLookupByKey => Some(l.key)
-  }
-
   /** Check that the `com.daml.lf.value.Value` key does not contain a contract ID.
     * If the key does contain a contract ID then it will be returned in a Left.
     * Valid contract keys cannot contain contract IDs.
@@ -278,7 +235,7 @@ object LfTransactionUtil {
   }
 
   def stateKnownTo(node: LfActionNode): Set[LfPartyId] = node match {
-    case n: LfNodeCreate => n.key.fold(n.stakeholders)(_.maintainers)
+    case n: LfNodeCreate => n.keyOpt.fold(n.stakeholders)(_.maintainers)
     case n: LfNodeFetch => n.stakeholders
     case n: LfNodeExercises => n.stakeholders
     case n: LfNodeLookupByKey =>
