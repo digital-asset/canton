@@ -571,7 +571,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
           .parTraverse(lookupMember)
           .map(_.flatMap(_.toList).map(_.memberId))
         adjustedTimestampO <- adjustPruningTimestampForCounterCheckpoints(
-          requestedTimestamp, // already confirmed by this point by caller to be earlier than or at safeTimestamp
+          safeTimestamp, // use the safeTimestamp to decide what timestamps need to be kept due to checkpoints
           disabledMemberIds,
         )
         adjustedTimestamp = adjustedTimestampO.getOrElse {
@@ -582,7 +582,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
           logger.error(s"Preventing pruning as it would remove all data from the Sequencer")
           sys.error("Preventing pruning as it would remove all data from the Sequencer")
         }
-      } yield adjustedTimestamp
+      } yield adjustedTimestamp min requestedTimestamp // only adjust timestamp to be earlier, i.e. prune less not more
 
     // Setting the lower bound to this new timestamp prevents any future readers from reading before this point.
     // As we've already ensured all known enabled readers have read beyond this point this should be harmless.
@@ -617,7 +617,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
       )
       adjustedTimestamp <- EitherT.right(adjustTimestamp())
       _ = logger.debug(
-        s"From safe timestamp [$safeTimestamp] we have picked pruning events at [$adjustedTimestamp] to support recorded counter checkpoints"
+        s"From safe timestamp [$safeTimestamp] and requested timestamp [$requestedTimestamp] we have picked pruning events at [$adjustedTimestamp] to support recorded counter checkpoints"
       )
       _ <- EitherT.right(updateLowerBound(adjustedTimestamp))
       description <- EitherT.right(performPruning(adjustedTimestamp))

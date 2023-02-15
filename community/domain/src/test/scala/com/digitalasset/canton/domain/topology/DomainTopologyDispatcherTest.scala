@@ -38,6 +38,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   OpenEnvelope,
   SendAsyncError,
 }
+import com.digitalasset.canton.store.memory.InMemorySequencerCounterTrackerStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{
@@ -201,6 +202,7 @@ class DomainTopologyDispatcherTest
       FutureSupervisor.Noop,
       sender,
       loggerFactory,
+      new InMemorySequencerCounterTrackerStore(loggerFactory),
     )
     val dispatcher = mkDispatcher
 
@@ -559,6 +561,7 @@ class DomainTopologySenderTest
       retryInterval = 100.millis,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
+      FutureSupervisor.Noop,
     ) {
       override def send(
           batch: Batch[OpenEnvelope[DomainTopologyTransactionMessage]],

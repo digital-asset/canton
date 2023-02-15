@@ -22,6 +22,7 @@ case class TransactionValidationResult(
     submitterMetadata: Option[SubmitterMetadata],
     workflowId: Option[WorkflowId],
     contractConsistencyResult: Either[List[ReferenceToFutureContractError], Unit],
+    authenticationResult: Map[ViewHash, String],
     authorizationResult: Map[ViewHash, String],
     modelConformanceResult: Either[ModelConformanceChecker.Error, ModelConformanceChecker.Result],
     consumedInputsOfHostedParties: Map[LfContractId, WithContractHash[Set[LfPartyId]]],

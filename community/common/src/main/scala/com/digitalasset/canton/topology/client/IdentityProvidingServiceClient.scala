@@ -510,8 +510,7 @@ private[client] trait PartyTopologySnapshotBaseClient {
       parties: Set[LfPartyId],
       check: (ParticipantPermission => Boolean) = _.isActive,
   ): EitherT[Future, Set[LfPartyId], Unit] = {
-    val fetchedF =
-      parties.toList.parTraverse(party => activeParticipantsOf(party).map(x => (party, x)))
+    val fetchedF = activeParticipantsOfPartiesWithAttributes(parties.toSeq)
     EitherT(
       fetchedF
         .map { fetched =>

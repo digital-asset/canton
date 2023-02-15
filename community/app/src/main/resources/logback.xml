@@ -8,85 +8,115 @@
     <resetJUL>true</resetJUL>
   </contextListener>
 
-  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-    <!-- whoever figures out how to define the encoder once and doesn't use copy pasta such as I did here wins a price! -->
-    <if condition='isDefined("LOG_FORMAT_JSON")'>
-      <then><encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/></then>
-      <else>
-        <encoder>
-          <!-- show nice colors and omit date on log output if we are running interactively -->
-          <if condition='isDefined("INTERACTIVE_STDOUT")'>
-            <then>
-              <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
-              <pattern>%highlight(%-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;)</pattern>
-            </then>
-            <else><pattern>%date [%thread] %-5level %logger{35} &entityCorrelationIdTrailingSpaceReplace;</pattern></else>
-          </if>
-        </encoder>
-      </else>
-    </if>
-    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>${LOG_LEVEL_STDOUT:-WARN}</level>
-    </filter>
-    <if condition='isDefined("INTERACTIVE_STDOUT")'>
-      <then>
-        <filter class="com.digitalasset.canton.logging.ThrottleFilterEvaluator" />
-      </then>
-    </if>
-  </appender>
-
-  <if condition='isDefined("LOG_FILE_FLAT")'>
+  <!-- whoever figures out how to define the encoder once and doesn't use copy pasta such as I did here wins a price! -->
+  <if condition='isDefined("LOG_FORMAT_JSON")'>
     <then>
-    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-      <file>${LOG_FILE_NAME:-log/canton.log}</file>
-      <append>${LOG_FILE_APPEND:-true}</append>
-      <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
-      <immediateFlush>${LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
-      <if condition='isDefined("LOG_FORMAT_JSON")'>
-        <then><encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/></then>
+      <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+          <level>${LOG_LEVEL_STDOUT:-WARN}</level>
+        </filter>
+      </appender>
+    </then>
+    <else>
+      <if condition='isDefined("INTERACTIVE_STDOUT")'>
+        <then>
+          <!-- show nice colors and omit date on log output if we are running interactively -->
+          <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
+          <variable name="pattern" value="%highlight(%-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;)"/>
+          <variable name="filter_class" value="com.digitalasset.canton.logging.ThrottleFilterEvaluator"/>
+        </then>
         <else>
-          <encoder>
-            <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
-            <pattern>%date [%thread] %-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;</pattern>
-          </encoder>
+          <variable name="pattern" value="%date [%thread] %-5level %logger{35} &entityCorrelationIdTrailingSpaceReplace;"/>
+          <!-- dummy filter which will have no effect (since its level is not set), to reduce code replication -->
+          <variable name="filter_class" value="ch.qos.logback.classic.filter.ThresholdFilter"/>
         </else>
       </if>
-      <if condition='isDefined("LOG_LAST_ERRORS")'>
+      <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+          <pattern>${pattern}</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+          <level>${LOG_LEVEL_STDOUT:-WARN}</level>
+        </filter>
+        <filter class="${filter_class}" />
+      </appender>
+    </else>
+  </if>
+
+  <if condition='isDefined("LOG_FILE_FLAT")'>
+    <if condition='isDefined("LOG_LAST_ERRORS")'>
+      <then><variable name="log_last_errors_filter" value="com.digitalasset.canton.logging.CantonFilterEvaluator"/></then>
+      <!-- dummy filter which will have no effect, to reduce code replication -->
+      <else><variable name="log_last_errors_filter" value="ch.qos.logback.classic.filter.ThresholdFilter"/></else>
+    </if>
+    <then>
+      <if condition='isDefined("LOG_FORMAT_JSON")'>
         <then>
-          <filter class="com.digitalasset.canton.logging.CantonFilterEvaluator" />
+          <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+            <file>${LOG_FILE_NAME:-log/canton.log}</file>
+            <append>${LOG_FILE_APPEND:-true}</append>
+            <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+            <immediateFlush>${LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+            <encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/>
+            <filter class="${log_last_errors_filter}" />
+          </appender>
         </then>
+        <else>
+          <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+            <file>${LOG_FILE_NAME:-log/canton.log}</file>
+            <append>${LOG_FILE_APPEND:-true}</append>
+            <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+            <immediateFlush>${LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+            <encoder>
+              <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
+              <pattern>%date [%thread] %-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;</pattern>
+            </encoder>
+            <filter class="${log_last_errors_filter}" />
+          </appender>
+        </else>
       </if>
-    </appender>
     </then>
     <else>
       <if condition='isDefined("LOG_FILE_ROLLING")'>
         <then>
-          <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-            <file>${LOG_FILE_NAME:-log/canton.log}</file>
-            <append>true</append>
-            <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
-            <immediateFlush>${LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
-            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-              <!-- hourly rollover and compress (gz), change pattern if you want different roll-overs -->
-              <fileNamePattern>${LOG_FILE_NAME:-log/canton.log}.%d{${LOG_FILE_ROLLING_PATTERN:-yyyy-MM-dd}}.gz</fileNamePattern>
-              <!-- keep max 12 archived log files -->
-              <maxHistory>${LOG_FILE_HISTORY:-12}</maxHistory>
-            </rollingPolicy>
-            <if condition='isDefined("LOG_FORMAT_JSON")'>
-              <then><encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/></then>
-              <else>
+          <if condition='isDefined("LOG_FORMAT_JSON")'>
+            <then>
+              <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${LOG_FILE_NAME:-log/canton.log}</file>
+                <append>true</append>
+                <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+                <immediateFlush>${LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                  <!-- hourly rollover and compress (gz), change pattern if you want different roll-overs -->
+                  <fileNamePattern>${LOG_FILE_NAME:-log/canton.log}.%d{${LOG_FILE_ROLLING_PATTERN:-yyyy-MM-dd}}.gz</fileNamePattern>
+                  <!-- keep max 12 archived log files -->
+                  <maxHistory>${LOG_FILE_HISTORY:-12}</maxHistory>
+                </rollingPolicy>
+                <encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/>
+                <filter class="${log_last_errors_filter}" />
+              </appender>
+            </then>
+            <else>
+              <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${LOG_FILE_NAME:-log/canton.log}</file>
+                <append>true</append>
+                <!-- Allow for disabling flush on each log-line (faster, but may miss logs when crashing) -->
+                <immediateFlush>${LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                  <!-- hourly rollover and compress (gz), change pattern if you want different roll-overs -->
+                  <fileNamePattern>${LOG_FILE_NAME:-log/canton.log}.%d{${LOG_FILE_ROLLING_PATTERN:-yyyy-MM-dd}}.gz</fileNamePattern>
+                  <!-- keep max 12 archived log files -->
+                  <maxHistory>${LOG_FILE_HISTORY:-12}</maxHistory>
+                </rollingPolicy>
                 <encoder>
                   <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
                   <pattern>%date [%thread] %-5level %logger{35} &entityCorrelationIdTrailingSpaceReplace;</pattern>
                 </encoder>
-              </else>
-            </if>
-            <if condition='isDefined("LOG_LAST_ERRORS")'>
-              <then>
-                <filter class="com.digitalasset.canton.logging.CantonFilterEvaluator" />
-              </then>
-            </if>
-          </appender>
+                <filter class="${log_last_errors_filter}" />
+              </appender>
+            </else>
+          </if>
         </then>
         <else>
           <appender name="FILE" class="ch.qos.logback.core.helpers.NOPAppender"/>
@@ -97,6 +127,11 @@
 
   <!-- include the rewrite appender to rewrite certain log levels of certain messages -->
   <include resource="rewrite-appender.xml"/>
+  <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
+    <then>
+      <include resource="rewrite-async-appender.xml"/>
+    </then>
+  </if>
 
   <!-- If log last errors is true, we set the DA loggers to debug log level but filter out at log level canton on the main log files -->
   <if condition='isDefined("LOG_LAST_ERRORS")'>
@@ -121,40 +156,46 @@
         </encoder>
       </appender>
 
+      <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
+        <then>
+            <variable name="REWRITE_LOG_LEVEL_MODE" value="REWRITE_LOG_LEVEL"/>
+        </then>
+        <else>
+            <variable name="REWRITE_LOG_LEVEL_MODE" value="REWRITE_LOG_LEVEL_SYNC"/>
+        </else>
+      </if>
+
       <!-- Buffer errors for the last_errors command before passing them on to the rewrite appender -->
       <appender name="LAST_ERRORS" class="com.digitalasset.canton.logging.LastErrorsAppender">
-        <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
-          <then>
-            <appender-ref ref="REWRITE_LOG_LEVEL" />
-          </then>
-          <else>
-            <!-- default choice, chosen if LOG_IMMEDIATE_FLUSH is undefined -->
-            <appender-ref ref="REWRITE_LOG_LEVEL_SYNC" />
-          </else>
-        </if>
+        <appender-ref ref="${REWRITE_LOG_LEVEL_MODE}" />
         <lastErrorsFileAppenderName>FILE_LAST_ERRORS</lastErrorsFileAppenderName>
         <appender-ref ref="FILE_LAST_ERRORS"/>
       </appender>
     </then>
   </if>
 
-  <root level="${LOG_LEVEL_ROOT:-INFO}">
-    <if condition='isDefined("LOG_LAST_ERRORS")'>
-      <then>
+  <root level="${LOG_LEVEL_ROOT:-INFO}"></root>
+  <if condition='isDefined("LOG_LAST_ERRORS")'>
+    <then>
+      <root>
         <appender-ref ref="LAST_ERRORS" />
-      </then>
-      <else>
-        <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
-          <then>
+      </root>
+    </then>
+    <else>
+      <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
+        <then>
+          <root>
             <appender-ref ref="REWRITE_LOG_LEVEL" />
-          </then>
-          <else>
+          </root>
+        </then>
+        <else>
+          <root>
             <!-- default choice, chosen if LOG_IMMEDIATE_FLUSH is undefined -->
             <appender-ref ref="REWRITE_LOG_LEVEL_SYNC" />
-          </else>
-        </if>
-      </else>
-    </if>
-  </root>
+          </root>
+        </else>
+      </if>
+    </else>
+  </if>
 
 </configuration>

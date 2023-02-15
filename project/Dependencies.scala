@@ -7,7 +7,6 @@ object Dependencies {
   val daml_language_versions = metabuild.BuildInfo.daml_language_versions
   val daml_compiler_version = metabuild.BuildInfo.daml_compiler_version
   val use_custom_daml_version = metabuild.BuildInfo.use_custom_daml_version
-  val vmbc_driver_libraries_version = metabuild.BuildInfo.vmbc_driver_libraries_version
 
   lazy val osClassifier: String =
     if (sys.props("os.name").contains("Mac")) "osx" else sys.props("os.name").toLowerCase
@@ -20,8 +19,8 @@ object Dependencies {
   lazy val akka_version = "2.6.18"
   lazy val akka_http_version = "10.2.8"
   lazy val grpc_version = "1.44.0"
-  lazy val logback_version = "1.2.8"
-  lazy val slf4j_version = "1.7.29"
+  lazy val logback_version = "1.4.5"
+  lazy val slf4j_version = "2.0.6"
   lazy val log4j_version = "2.17.0"
   lazy val ammonite_version = "2.5.5"
   lazy val pprint_version = "0.8.1"
@@ -195,24 +194,6 @@ object Dependencies {
   lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.13"
 
   lazy val web3j = "org.web3j" % "core" % "4.9.6"
-
-  // From digitalasset.jfrog.io
-  lazy val vmbc_protos =
-    "com.digitalasset.daml.driver.vmbc" % "vmbc-grpc" % vmbc_driver_libraries_version
-
-  // From digitalasset.jfrog.io
-  lazy val pkv_interceptors =
-    "com.digitalasset.daml.driver.vmbc" % "pkv-grpc-interceptors" % vmbc_driver_libraries_version
-
-  // From digitalasset.jfrog.io
-  lazy val vmbc_sequencer_protos =
-    "com.digitalasset.canton.driver.vmbc" % "canton-sequencer-grpc" % vmbc_driver_libraries_version
-
-  // From digitalasset.jfrog.io
-  lazy val vmbc_sequencer_core_reference_docker_image_name: String =
-    "digitalasset/canton-sequencer-core-reference"
-  lazy val vmbc_sequencer_core_reference_docker_image_label: String =
-    "sdk-version_2.5.0-snapshot.20221028.10865.0.1b726fe8_vmbc-driver-commit_96853d036"
 
   lazy val dummy_sequencer_driver_bare_uberjar_name: String =
     "dummy-driver-isolated-bare-impl.jar"

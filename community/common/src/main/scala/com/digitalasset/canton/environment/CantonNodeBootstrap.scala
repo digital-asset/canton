@@ -203,15 +203,19 @@ abstract class CantonNodeBootstrapBase[
     */
   protected def nodeHealthService: HealthReporting.ServiceHealth
 
+  // Service that will always return `SERVING`. Useful to be targeted by k8s liveness probes.
+  private val livenessService = new HealthReporting.ServiceHealth {
+    override val name: String = "liveness"
+  }
   private val healthReporter: GrpcHealthReporter = new GrpcHealthReporter(loggerFactory)
   private lazy val grpcNodeHealthManager =
     ServiceHealthStatusManager(
       "Health API",
       new io.grpc.protobuf.services.HealthStatusManager(),
-      Set(nodeHealthService),
+      Set(nodeHealthService, livenessService),
     )
 
-  private val grpcHealthServer = config.monitoring.healthServer.map { healthConfig =>
+  private val grpcHealthServer = config.monitoring.grpcHealthServer.map { healthConfig =>
     healthReporter.registerHealthManager(grpcNodeHealthManager)
 
     val executor = Executors.newFixedThreadPool(healthConfig.parallelism)

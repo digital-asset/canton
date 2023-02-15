@@ -948,7 +948,11 @@ case class ParticipantNodeParameterConfig(
 /** Parameters for the participant node's stores
   *
   * @param maxItemsInSqlClause    maximum number of items to place in sql "in clauses"
-  * @param maxPruningBatchSize    maximum number of events to prune from a participant at a time, used to break up batches internally
+  * @param maxPruningBatchSize    maximum number of events to prune from a participant at a time, used to break up canton participant-internal batches
+  * @param ledgerApiPruningBatchSize  Number of events to prune from the ledger api server index-database at a time during automatic background pruning.
+  *                                   Canton-internal store pruning happens at the smaller batch size of "maxPruningBatchSize" to minimize memory usage
+  *                                   whereas ledger-api-server index-db pruning needs sufficiently large batches to amortize the database overhead of
+  *                                   "skipping over" active contracts.
   * @param pruningMetricUpdateInterval  How frequently to update the `max-event-age` pruning progress metric in the background.
   *                                     A setting of None disables background metric updating.
   * @param acsPruningInterval        How often to prune the ACS journal in the background. A very high interval will let the journal grow larger and
@@ -961,6 +965,7 @@ case class ParticipantNodeParameterConfig(
 case class ParticipantStoreConfig(
     maxItemsInSqlClause: PositiveNumeric[Int] = PositiveNumeric.tryCreate(100),
     maxPruningBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(1000),
+    ledgerApiPruningBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(50000),
     pruningMetricUpdateInterval: Option[config.PositiveDurationSeconds] =
       config.PositiveDurationSeconds.ofHours(1L).some,
     acsPruningInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(60),

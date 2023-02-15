@@ -10,7 +10,11 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
+import com.digitalasset.canton.crypto.{
+  DomainSnapshotSyncCryptoApi,
+  DomainSyncCryptoClient,
+  Signature,
+}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -435,16 +439,16 @@ abstract class ProtocolProcessor[
 
     def checkRootHash(
         decryptedViews: steps.DecryptedViews
-    ): (Seq[MalformedPayload], Seq[WithRecipients[steps.DecryptedView]]) = {
+    ): (Seq[MalformedPayload], Seq[(WithRecipients[steps.DecryptedView], Option[Signature])]) = {
 
       val correctRootHash = rootHashMessage.rootHash
       val (correctRootHashes, wrongRootHashes) =
-        decryptedViews.views.partition(_.unwrap.rootHash == correctRootHash)
+        decryptedViews.views.partition { case (view, _) => view.unwrap.rootHash == correctRootHash }
       val malformedPayloads: Seq[MalformedPayload] =
         decryptedViews.decryptionErrors.map(ProtocolProcessor.ViewMessageDecryptionError(_)) ++
-          wrongRootHashes.map(viewTree =>
+          wrongRootHashes.map { case (viewTree, _) =>
             ProtocolProcessor.WrongRootHash(viewTree.unwrap, correctRootHash)
-          )
+          }
 
       (malformedPayloads, correctRootHashes)
     }
@@ -624,8 +628,9 @@ abstract class ProtocolProcessor[
                   trackAndSendResponses(snapshot, contractsAndContinue)
               }
 
-            case Some(goodViews) =>
+            case Some(goodViewsWithSignatures) =>
               // All views with the same correct root hash declare the same mediator, so it's enough to look at the head
+              val goodViews = goodViewsWithSignatures.map { case (views, _) => views }
               val declaredMediator = goodViews.head1.unwrap.mediatorId
               if (declaredMediator == mediatorId) {
                 // Check whether the declared mediator is still an active mediator.
@@ -636,7 +641,7 @@ abstract class ProtocolProcessor[
                         ts,
                         rc,
                         sc,
-                        goodViews,
+                        goodViewsWithSignatures,
                         malformedPayloads,
                         snapshot,
                       )

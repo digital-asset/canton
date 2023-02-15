@@ -194,9 +194,7 @@ object WellFormedTransaction {
   private def checkByKeyNodes(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] = {
     val byKeyNodesWithoutKey =
       tx.nodes.collect {
-        case (nodeId, node: LfActionNode)
-            if node.byKey && LfTransactionUtil.keyWithMaintainers(node).isEmpty =>
-          nodeId
+        case (nodeId, node: LfActionNode) if node.byKey && node.keyOpt.isEmpty => nodeId
       }.toList
     Checked.fromEitherNonabort(())(
       Either.cond(
@@ -351,12 +349,9 @@ object WellFormedTransaction {
         .to(LazyList)
         .traverse_ {
           case (nodeId, node: LfActionNode) =>
-            LfTransactionUtil.keyWithMaintainers(node) match {
+            node.keyOpt match {
               case Some(k) =>
-                val noCid = LfTransactionUtil
-                  .checkNoContractIdInKey(k.key)
-                  .leftMap(cid => s"found the contract ID $cid in the key of node ${nodeId.index}")
-                  .toValidatedNec
+                val noCid = Validated.Valid(k.value)
                 val nonemptyMaintainers =
                   Validated.condNec(
                     k.maintainers.nonEmpty,

@@ -8,7 +8,7 @@ import cats.syntax.bifunctor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
-import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOps}
+import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOps, Signature}
 import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -168,14 +168,21 @@ class TestProcessingSteps(
             WithRecipients(treeFor(envelope.protocolMessage.viewHash, hash), envelope.recipients),
         )
     }
-    EitherT.rightT(DecryptedViews(decryptedViewTrees.toList))
+    EitherT.rightT(
+      DecryptedViews(
+        decryptedViewTrees.toList
+          .map(_.map((_, None)))
+      )
+    )
   }
 
   override def computeActivenessSetAndPendingContracts(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[TestViewTree]]],
+      decryptedViewsWithSignatures: NonEmpty[
+        Seq[(WithRecipients[TestViewTree], Option[Signature])]
+      ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit

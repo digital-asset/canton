@@ -20,10 +20,9 @@ import com.daml.ledger.api.health.HealthStatus
 import com.daml.ledger.configuration.*
 import com.daml.ledger.participant.state
 import com.daml.ledger.participant.state.v2.*
-import com.daml.lf.command.ProcessedDisclosedContract
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.engine.Engine
-import com.daml.lf.transaction.Versioned
+import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.daml.logging.LoggingContext
 import com.daml.nonempty.NonEmpty
 import com.daml.tracing.TelemetryContext
@@ -359,7 +358,7 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       _estimatedInterpretationCost: Long,
       keyResolver: LfKeyResolver,
-      disclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
+      disclosedContracts: ImmArray[ProcessedDisclosedContract],
   )(implicit
       _loggingContext: LoggingContext, // not used - contains same properties as canton named logger
       telemetryContext: TelemetryContext,
@@ -458,7 +457,7 @@ class CantonSyncService(
       transactionMeta: TransactionMeta,
       transaction: LfSubmittedTransaction,
       keyResolver: LfKeyResolver,
-      explicitlyDisclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
+      explicitlyDisclosedContracts: ImmArray[ProcessedDisclosedContract],
   )(implicit traceContext: TraceContext): Future[SubmissionResult] = {
 
     val ack = SubmissionResult.Acknowledged

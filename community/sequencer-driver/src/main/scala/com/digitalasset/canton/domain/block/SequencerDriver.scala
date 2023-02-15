@@ -81,7 +81,7 @@ trait SequencerDriverFactory {
   *
   * The write operations sequence and distribute different kinds of requests.
   * They can all be implemented by the same mechanism of sequencing a bytestring,
-  * but are kept separately for legacy reasons: The Fabric, Ethereum and Vmbc drivers have separate
+  * but are kept separately for legacy reasons: The Fabric and Ethereum drivers have separate
   * entry points or messages for the different request kinds.
   *
   * Sequenced requests are delivered in a stream of [[RawLedgerBlock]]s ordered by their block height.

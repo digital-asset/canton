@@ -1,16 +1,18 @@
 import DamlPlugin.autoImport._
 import Dependencies._
+import better.files.{File => BetterFile, _}
 import com.typesafe.sbt.SbtLicenseReport.autoImportImpl._
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
 import org.scalafmt.sbt.ScalafmtPlugin
 import sbt.Keys._
-import sbt.internal.util.ManagedLogger
 import sbt._
+import sbt.internal.BuildDependencies
+import sbt.internal.librarymanagement.ProjectResolver
+import sbt.internal.util.ManagedLogger
 import sbt.nio.Keys._
 import sbtassembly.AssemblyKeys._
 import sbtassembly.AssemblyPlugin.autoImport.assembly
-import sbtassembly.MergeStrategy
-import sbtassembly.PathList
+import sbtassembly.{MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport._
 import sbtprotoc.ProtocPlugin.autoImport.PB
@@ -18,7 +20,8 @@ import scalafix.sbt.ScalafixPlugin
 import scoverage.ScoverageKeys._
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport._
-import better.files.{File => BetterFile, _}
+
+import java.nio.file.Files
 import scala.language.postfixOps
 
 object BuildCommon {
@@ -176,7 +179,7 @@ object BuildCommon {
   private def formatCoverageExcludes(excludes: String): String =
     excludes.stripMargin.trim.split(System.lineSeparator).mkString(";")
 
-  private def packDamlSources(damlSource: File, target: String): Seq[(File, String)] = {
+  private def packDamlSources(damlSource: File, target: String): Seq[(File, String)] =
     // take all files except hidden and items under the `.daml` build directory
     // support nested folder structures in case that is ever used in our samples
     ((damlSource ** "*") --- (damlSource * ".daml" ** "*"))
@@ -187,14 +190,12 @@ object BuildCommon {
       .map { f =>
         (f, s"$target${Path.sep}${IO.relativize(damlSource, f).get}")
       }
-  }
 
-  private def packDars(darOutput: File, target: String): Seq[(File, String)] = {
+  private def packDars(darOutput: File, target: String): Seq[(File, String)] =
     (darOutput * "*.dar").get
       .map { f =>
         (f, s"$target${Path.sep}${f.getName}")
       }
-  }
 
   private def packProtobufFiles(BaseFile: BetterFile, target: String): Seq[(File, String)] = {
     val path = BaseFile / "src" / "main" / "protobuf"
@@ -232,6 +233,7 @@ object BuildCommon {
     taskKey[Seq[(File, String)]]("Bundle these additional sources")
 
   lazy val bundle = taskKey[Unit]("create a release bundle")
+
   lazy val bundleTask: Def.Initialize[Task[String]] = Def
     .task {
       import CommunityProjects.`community-common`
@@ -349,36 +351,34 @@ object BuildCommon {
     }
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
-    {
-      case PathList("buf.yaml") => MergeStrategy.discard
-      case PathList("META-INF", "io.netty.versions.properties") => MergeStrategy.first
-      case "reflect.properties" => MergeStrategy.first
-      case PathList("org", "checkerframework", _ @_*) => MergeStrategy.first
-      case PathList("google", "protobuf", _*) => MergeStrategy.first
-      case PathList("org", "apache", "logging", _*) => MergeStrategy.first
-      case PathList("ch", "qos", "logback", _*) => MergeStrategy.first
-      case PathList("com", "daml", "ledger", "api", "v1", "package.proto") => MergeStrategy.first
-      case PathList(
-            "META-INF",
-            "org",
-            "apache",
-            "logging",
-            "log4j",
-            "core",
-            "config",
-            "plugins",
-            "Log4j2Plugins.dat",
-          ) =>
-        MergeStrategy.first
-      // TODO(#10617) remove when no longer needed
-      case (PathList("akka", "stream", "scaladsl", broadcasthub, _*))
-          if broadcasthub.startsWith("BroadcastHub") =>
-        MergeStrategy.first
-      case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
-      case path if path.contains("module-info.class") => MergeStrategy.discard
-      case PathList("org", "jline", _ @_*) => MergeStrategy.first
-      case x => oldStrategy(x)
-    }
+    case PathList("buf.yaml") => MergeStrategy.discard
+    case PathList("META-INF", "io.netty.versions.properties") => MergeStrategy.first
+    case "reflect.properties" => MergeStrategy.first
+    case PathList("org", "checkerframework", _ @_*) => MergeStrategy.first
+    case PathList("google", "protobuf", _*) => MergeStrategy.first
+    case PathList("org", "apache", "logging", _*) => MergeStrategy.first
+    case PathList("ch", "qos", "logback", _*) => MergeStrategy.first
+    case PathList("com", "daml", "ledger", "api", "v1", "package.proto") => MergeStrategy.first
+    case PathList(
+          "META-INF",
+          "org",
+          "apache",
+          "logging",
+          "log4j",
+          "core",
+          "config",
+          "plugins",
+          "Log4j2Plugins.dat",
+        ) =>
+      MergeStrategy.first
+    // TODO(#10617) remove when no longer needed
+    case (PathList("akka", "stream", "scaladsl", broadcasthub, _*))
+        if broadcasthub.startsWith("BroadcastHub") =>
+      MergeStrategy.first
+    case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
+    case path if path.contains("module-info.class") => MergeStrategy.discard
+    case PathList("org", "jline", _ @_*) => MergeStrategy.first
+    case x => oldStrategy(x)
   }
 
   // applies to all sub-projects
@@ -440,12 +440,12 @@ object BuildCommon {
     "canton-json.lnav.json",
   )
 
-  /** By default, sbt-header (github.com/sbt/sbt-header) will not check the /protobuf directories, so we manually need to add them here.
-    *  Fix is similar to https://github.com/sbt/sbt-header#sbt-boilerplate
+  /** By default, sbt-header (github.com/sbt/sbt-header) will not check the /protobuf directories,
+    * so we manually need to add them here. Fix is similar to
+    * https://github.com/sbt/sbt-header#sbt-boilerplate
     */
-  def addProtobufFilesToHeaderCheck(conf: Configuration) = {
+  def addProtobufFilesToHeaderCheck(conf: Configuration) =
     conf / headerSources ++= (conf / PB.protoSources).value.flatMap(pdir => (pdir ** "*.proto").get)
-  }
 
   def addFilesToHeaderCheck(filePattern: String, relativeDir: String, conf: Configuration) =
     conf / headerSources ++= (((conf / sourceDirectory).value / relativeDir) ** filePattern).get
@@ -459,7 +459,8 @@ object BuildCommon {
       `community-common`,
       `community-domain`,
       `community-participant`,
-      `sequencer-driver`,
+      `sequencer-driver-api`,
+      `sequencer-driver-lib`,
       blake2b,
       functionmeta,
       `slick-fork`,
@@ -672,7 +673,6 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("vmbc" -> Dependencies.daml_libraries_version),
           BuildInfoKey("protocolVersions" -> List("3", "4")),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -805,14 +805,9 @@ object BuildCommon {
       )
 
     // Project for specifying the sequencer driver API
-    lazy val `sequencer-driver` = project
+    lazy val `sequencer-driver-api` = project
       .in(file("community/sequencer-driver"))
-      .dependsOn(
-        `akka-fork`,
-        `util-external`,
-        DamlProjects.`daml-copy-common`,
-        DamlProjects.`daml-copy-testing` % "test->test",
-      )
+      .dependsOn(`util-external`)
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
@@ -833,6 +828,73 @@ object BuildCommon {
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         JvmRulesPlugin.damlRepoHeaderSettings,
+        sequencerDriverAssemblySettings,
+      )
+
+    val sequencerDriverAssemblySettings = Seq(
+      // Conforming to the Maven dependency naming convention.
+      assembly / assemblyJarName := s"sequencer-driver-lib_$scala_version_short-${version.value}.jar",
+      // Do not assembly dependencies other than local projects.
+      assemblyPackageDependency / assembleArtifact := false,
+      assemblyPackageScala / assembleArtifact := false,
+    )
+
+    /** The project below is a ~proxy project made for the purpose of the Drivers team.
+      * It is intented to be a temporary solution once canton repo gets reorganized. This project
+      * contains sequencer driver API, it's dependencies and utilities - all required by existing drivers.
+      * Now, in order to split repositories we have to publish minimal dependency set to artifactory
+      * (see here: https://github.com/sbt/sbt-assembly#q-despite-the-concerned-friends-i-still-want-publish-%C3%BCber-jars-what-advice-do-you-have).
+      * However, the problem arises from the fact that sequencer-driver is using util-external which
+      * is using daml-copy-common, akka-fork etc. This chain of internal dependencies is causing the
+      * need to publish more and more jars to the artifactory which we do not want to do (at least
+      * now, since there's no 'publish' infrastructure ready yet). Ad hoc solution, which we've
+      * found, is to create (and publish) a 'fat jar' (which is not so fat - 15MB...) with all the
+      * internal deps placed inside of it. Otherwise, we would have to republish e.g. bunch of Daml classes
+      * already present elsewhere in the Artifactory (daml-copy-common module).
+      * Unfortunatelly, we also need to manually create a pom file for such a jar.
+      * That means we have to traverse all the internal dependencies of `sequencer-driver-api`
+      * and obtain their 'libraryDependencies' which should land in the final pom
+      * file. Sbt doesn't allow to do that - it throws the exception when evaluating macros
+      * (https://github.com/sbt/sbt/issues/6792).
+      * The final solution is using `projectDependencies` task to setup all the transitive
+      * external dependencies (libraryDependencies is a settingKey which has to be evaluated
+      * during load phase, therefore cannot be used here). However, `projectDescriptors` (used here)
+      * still contains internal deps which we're filtering out here (by organization (e.g.
+      * com.digitalasset.canton) and version (e.g. 2.6.0-SNAPSHOT)).
+      */
+    lazy val `sequencer-driver-lib`: Project = project
+      .settings(
+        sharedCantonSettings,
+        projectDependencies := {
+          val thisOrg = (`sequencer-driver-api` / organization).value
+          val thisVer = (`sequencer-driver-api` / version).value
+          for {
+            moduleDescriptor <- (`sequencer-driver-api` / projectDescriptors).value.values.toList
+            dependency <- moduleDescriptor.getDependencies.toList
+            revisionId = dependency.getDependencyRevisionId
+            org = revisionId.getOrganisation if org != thisOrg
+            name = revisionId.getName
+            version = revisionId.getRevision() if version != thisVer
+          } yield ModuleID(org, name, version)
+        },
+        Compile / packageBin := Def.task {
+          val src = (`sequencer-driver-api` / assembly).value.toPath
+          val dest = (Compile / packageBin / artifactPath).value.toPath
+          Files.deleteIfExists(dest)
+          Files.copy(src, dest).toFile()
+        }.value,
+        Compile / packageSrc := Def.task {
+          val src = (`sequencer-driver-api` / Compile / packageSrc).value.toPath
+          val dest = (Compile / packageSrc / artifactPath).value.toPath
+          Files.deleteIfExists(dest)
+          Files.copy(src, dest).toFile()
+        }.value,
+        Compile / packageDoc := Def.task {
+          val src = (`sequencer-driver-api` / Compile / packageDoc).value.toPath
+          val dest = (Compile / packageDoc / artifactPath).value.toPath
+          Files.deleteIfExists(dest)
+          Files.copy(src, dest).toFile()
+        }.value,
       )
 
     lazy val blake2b = project
@@ -950,7 +1012,10 @@ object BuildCommon {
       )
 
   }
+
   object DamlProjects {
+
+    lazy val damlFolder = Def.setting((ThisBuild / baseDirectory).value / "daml")
 
     lazy val allProjects = Set(
       `daml-copy-macro`,
@@ -983,7 +1048,7 @@ object BuildCommon {
         Compile / unmanagedSourceDirectories ++=
           Seq( // TODO(#10852) same purpose as function meta
             "libs-scala/nameof/src/main/scala"
-          ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+          ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
         headerSources / excludeFilter := HiddenFileFilter || "*",
@@ -1006,7 +1071,7 @@ object BuildCommon {
         Compile / PB.protoSources ++= Seq(
           "daml-lf/archive/src/main/protobuf",
           "daml-lf/transaction/src/main/protobuf",
-        ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+        ).map(f => damlFolder.value / f),
         Compile / PB.targets := Seq(
           PB.gens.java -> (Compile / sourceManaged).value
         ),
@@ -1084,7 +1149,7 @@ object BuildCommon {
           "ledger-api/grpc-definitions",
           "ledger/participant-integration-api/src/main/protobuf",
           "ledger/ledger-configuration/protobuf",
-        ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+        ).map(f => damlFolder.value / f),
         Compile / PB.targets := Seq(
           // build java codegen too
           PB.gens.java -> (Compile / sourceManaged).value,
@@ -1198,7 +1263,7 @@ object BuildCommon {
             "daml-lf/engine/src/main/scala",
             "daml-lf/interpreter/src/main/scala",
             "daml-lf/validation/src/main/scala",
-          ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+          ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
         headerSources / excludeFilter := HiddenFileFilter || "*",
@@ -1244,7 +1309,7 @@ object BuildCommon {
             "daml-lf/transaction-test-lib/src/main/scala",
             "observability/metrics/src/test/lib/scala",
             "ledger/test-common/src/main/scala",
-          ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+          ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
         headerSources / excludeFilter := HiddenFileFilter || "*",
@@ -1280,7 +1345,7 @@ object BuildCommon {
           reflections,
         ),
         Compile / unmanagedResourceDirectories ++= Seq(
-          (baseDirectory.value / "../../../daml/ledger/participant-integration-api/src/main/resources").file
+          damlFolder.value / "ledger/participant-integration-api/src/main/resources"
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
@@ -1297,7 +1362,7 @@ object BuildCommon {
             "ledger/participant-state-metrics/src/main/scala",
             "ledger/participant-integration-api/src/main/scala",
             "ledger/error/generator/lib/src/main/scala",
-          ).map(f => (baseDirectory.value / s"../../../daml/$f").file),
+          ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
         headerSources / excludeFilter := HiddenFileFilter || "*",

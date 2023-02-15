@@ -476,6 +476,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       monitorO.toList ++ userCloseables ++ allNodes.reverse :+ metricsFactory :+ configuredOpenTelemetry :+ clock :+ closeHealthServer :+
         closeHeadlessHealthAdministration :+ executionSequencerFactory :+ closeActorSystem :+ closeExecutionContext :+
         closeScheduler
+    logger.info("Closing environment...")
     Lifecycle.close((instances.toSeq): _*)(logger)
   })
 }

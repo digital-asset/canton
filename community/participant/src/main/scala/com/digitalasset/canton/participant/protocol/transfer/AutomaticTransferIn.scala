@@ -10,7 +10,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.error.{BaseCantonError, MediatorError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.NoTransferData
+import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.NoTransferData
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestValidation.AutomaticTransferInError
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.store.TransferStore.TransferCompleted

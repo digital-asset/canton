@@ -12,9 +12,6 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
 import com.daml.lf.data.{Bytes, Ref}
-import com.daml.lf.engine.Error as LfError
-import com.daml.lf.interpretation.Error as LfInterpretationError
-import com.daml.lf.transaction.Node.KeyWithMaintainers
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
@@ -33,6 +30,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SeedGenerator,
 }
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
+import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{
   ProcessingSteps,
@@ -51,12 +49,10 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
-import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, LfWorkflowId, RequestCounter, SequencerCounter, checked}
-import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -97,6 +93,16 @@ private[transfer] class TransferInProcessingSteps(
   override def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions = {
     state.pendingTransferInSubmissions
   }
+
+  private val transferInValidation = new TransferInValidation(
+    domainId,
+    participantId,
+    engine,
+    transferCoordination,
+    causalityTracking,
+    targetProtocolVersion,
+    loggerFactory,
+  )
 
   override def submissionIdOfPendingRequest(pendingData: PendingTransferIn): RootHash =
     pendingData.rootHash
@@ -264,14 +270,18 @@ private[transfer] class TransferInProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[FullTransferInTree]]],
+      decryptedViewsWithSignatures: NonEmpty[
+        Seq[(WithRecipients[FullTransferInTree], Option[Signature])]
+      ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
+    val correctRootHashes = decryptedViewsWithSignatures.map { case (rootHashes, _) =>
+      rootHashes.unwrap
+    }
     // TODO(M40): Send a rejection if malformedPayloads is non-empty
-    val correctRootHashes = decryptedViews.map(_.unwrap)
     for {
       txInRequest <- EitherT.cond[Future](
         correctRootHashes.toList.sizeCompare(1) == 0,
@@ -346,93 +356,8 @@ private[transfer] class TransferInProcessingSteps(
 
     val transferId = txInRequest.transferOutResultEvent.transferId
 
-    def checkStakeholders(
-        transferInRequest: FullTransferInTree
-    ): EitherT[Future, TransferProcessorError, Unit] = {
-      val declaredContractStakeholders = transferInRequest.contract.metadata.stakeholders
-      val declaredViewStakeholders = transferInRequest.stakeholders
-
-      for {
-        metadata <- engine
-          .contractMetadata(
-            transferInRequest.contract.contractInstance,
-            declaredContractStakeholders,
-          )
-          .leftMap {
-            case LfError.Interpretation(
-                  e @ LfError.Interpretation.DamlException(
-                    LfInterpretationError.FailedAuthorization(_, _)
-                  ),
-                  _,
-                ) =>
-              StakeholdersMismatch(
-                Some(transferId),
-                declaredViewStakeholders = declaredViewStakeholders,
-                declaredContractStakeholders = Some(declaredContractStakeholders),
-                expectedStakeholders = Left(e.message),
-              )
-            case error => MetadataNotFound(error)
-          }
-        recomputedStakeholders = metadata.stakeholders
-        _ <- condUnitET[Future](
-          declaredViewStakeholders == recomputedStakeholders && declaredViewStakeholders == declaredContractStakeholders,
-          StakeholdersMismatch(
-            Some(transferId),
-            declaredViewStakeholders = declaredViewStakeholders,
-            declaredContractStakeholders = Some(declaredContractStakeholders),
-            expectedStakeholders = Right(recomputedStakeholders),
-          ),
-        ).leftWiden[TransferProcessorError]
-      } yield ()
-    }
-
-    // The transferring participant must send on the causal state at the time of the transfer-out.
-    // This state is sent to all participants hosting a party that the transferring participant confirms for.
-    def checkCausalityState(
-        confirmFor: Set[LfPartyId]
-    ): EitherT[Future, TransferProcessorError, List[(CausalityMessage, Recipients)]] = {
-      if (transferringParticipant && causalityTracking) {
-        val clocksF = causalityLookup.awaitAndFetchTransferOut(transferId, confirmFor)
-        for {
-          clocks <- EitherT.liftF(clocksF)
-          confirmForClocks <- {
-            val (noInfoFor, clocksList) =
-              confirmFor.toList.map(p => clocks.get(p).toRight(left = p)).separate
-
-            val either = if (noInfoFor.isEmpty) {
-              Right(clocksList)
-            } else {
-              logger.error(
-                s"Transferring participant is missing causality information for ${noInfoFor}."
-              )
-              Left(CausalityInformationMissing(transferId, missingFor = noInfoFor.toSet))
-            }
-            EitherT.fromEither[Future](either)
-          }
-
-          recipients <- EitherT.liftF {
-            confirmForClocks.parTraverse { clock =>
-              val hostedBy =
-                targetCrypto.ipsSnapshot.activeParticipantsOf(clock.partyId).map(_.keySet)
-              hostedBy.map(ptps => (clock, ptps))
-            }
-          }
-
-          causalityMessages = {
-            recipients.flatMap { case (clock, hostedBy) =>
-              val msg = CausalityMessage(domainId, targetProtocolVersion.v, transferId, clock)
-              logger.debug(
-                s"Sending causality message for $transferId with clock $clock to $hostedBy"
-              )
-              Recipients.ofSet(hostedBy).map(msg -> _).toList
-            }
-          }
-        } yield causalityMessages
-      } else EitherT.rightT[Future, TransferProcessorError](List.empty)
-    }
-
     for {
-      _ <- checkStakeholders(txInRequest)
+      _ <- transferInValidation.checkStakeholders(txInRequest)
 
       hostedStks <- EitherT.liftF[Future, TransferProcessorError, List[LfPartyId]](
         hostedStakeholders(
@@ -444,7 +369,7 @@ private[transfer] class TransferInProcessingSteps(
       transferDataO <- EitherT.right[TransferProcessorError](
         transferLookup.lookup(transferId).toOption.value
       )
-      validationResultO <- validateTransferInRequest(
+      validationResultO <- transferInValidation.validateTransferInRequest(
         ts,
         txInRequest,
         transferDataO,
@@ -518,7 +443,12 @@ private[transfer] class TransferInProcessingSteps(
                 )
                 .leftMap(e => FailedToCreateResponse(transferId, e): TransferProcessorError)
             )
-            causalityMessages <- checkCausalityState(validationResult.confirmingParties)
+            causalityMessages <- transferInValidation.checkCausalityState(causalityLookup)(
+              targetCrypto,
+              validationResult.confirmingParties,
+              transferringParticipant,
+              transferId,
+            )
           } yield Seq(transferResponse -> Recipients.cc(mediatorId)) -> causalityMessages
       }
 
@@ -538,149 +468,6 @@ private[transfer] class TransferInProcessingSteps(
 
   private[this] def withRequestId(requestId: RequestId, message: String) =
     s"Transfer-in $requestId: $message"
-
-  @VisibleForTesting
-  private[transfer] def validateTransferInRequest(
-      tsIn: CantonTimestamp,
-      transferInRequest: FullTransferInTree,
-      transferDataO: Option[TransferData],
-      targetCrypto: DomainSnapshotSyncCryptoApi,
-      transferringParticipant: Boolean,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, Option[TransferInValidationResult]] = {
-    val txOutResultEvent = transferInRequest.transferOutResultEvent.result
-
-    val transferId = transferInRequest.transferOutResultEvent.transferId
-
-    def checkSubmitterIsStakeholder: Either[TransferProcessorError, Unit] =
-      condUnitE(
-        transferInRequest.stakeholders.contains(transferInRequest.submitter),
-        SubmittingPartyMustBeStakeholderIn(
-          transferId,
-          transferInRequest.submitter,
-          transferInRequest.stakeholders,
-        ),
-      )
-
-    val targetIps = targetCrypto.ipsSnapshot
-
-    transferDataO match {
-      case Some(transferData) =>
-        val sourceDomain = transferData.transferOutRequest.sourceDomain
-        val transferOutTimestamp = transferData.transferOutTimestamp
-        for {
-          _ready <- {
-            logger.info(
-              s"Waiting for topology state at ${transferOutTimestamp} on transfer-out domain $sourceDomain ..."
-            )
-            EitherT(
-              transferCoordination
-                .awaitTransferOutTimestamp(sourceDomain, transferOutTimestamp)
-                .sequence
-            )
-          }
-
-          sourceCrypto <- transferCoordination.cryptoSnapshot(sourceDomain, transferOutTimestamp)
-          // TODO(M40): Check the signatures of the mediator and the sequencer
-
-          _ <- condUnitET[Future](
-            txOutResultEvent.content.timestamp <= transferData.transferOutDecisionTime,
-            ResultTimestampExceedsDecisionTime(
-              transferId,
-              timestamp = txOutResultEvent.content.timestamp,
-              decisionTime = transferData.transferOutDecisionTime,
-            ),
-          )
-
-          // TODO(M40): Validate the shipped transfer-out result w.r.t. stakeholders
-          // TODO(M40): Validate that the transfer-out result received matches the transfer-out result in transferData
-
-          _ <- condUnitET[Future](
-            transferInRequest.contract == transferData.contract,
-            ContractDataMismatch(transferId),
-          )
-          _ <- EitherT.fromEither[Future](checkSubmitterIsStakeholder)
-          transferOutSubmitter = transferData.transferOutRequest.submitter
-          exclusivityBaseline = transferData.transferOutRequest.targetTimeProof.timestamp
-
-          // TODO(M40): Check that transferData.transferOutRequest.targetTimeProof.timestamp is in the past
-          cryptoSnapshot <- transferCoordination
-            .cryptoSnapshot(
-              transferData.targetDomain,
-              transferData.transferOutRequest.targetTimeProof.timestamp,
-            )
-
-          /*
-            We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
-            because it makes no sense to progress if we don't manage to fetch domain parameters.
-            Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
-            that we don't have here.
-           */
-          domainParameters <- EitherT(
-            cryptoSnapshot.ipsSnapshot
-              .findDynamicDomainParameters()
-              .map(
-                _.toRight(
-                  DomainNotReady(transferData.targetDomain, "Unable to fetch domain parameters")
-                )
-              )
-          )
-
-          exclusivityLimit = domainParameters.transferExclusivityLimitFor(exclusivityBaseline)
-
-          _ <- condUnitET[Future](
-            tsIn >= exclusivityLimit
-              || transferOutSubmitter == transferInRequest.submitter,
-            NonInitiatorSubmitsBeforeExclusivityTimeout(
-              transferId,
-              transferInRequest.submitter,
-              currentTimestamp = tsIn,
-              timeout = exclusivityLimit,
-            ),
-          )
-          _ <- condUnitET[Future](
-            transferData.creatingTransactionId == transferInRequest.creatingTransactionId,
-            CreatingTransactionIdMismatch(
-              transferId,
-              transferInRequest.creatingTransactionId,
-              transferData.creatingTransactionId,
-            ),
-          )
-          sourceIps = sourceCrypto.ipsSnapshot
-          confirmingParties <- EitherT.right(
-            transferInRequest.stakeholders.toList.parTraverseFilter { stakeholder =>
-              for {
-                source <- sourceIps.canConfirm(participantId, stakeholder)
-                target <- targetIps.canConfirm(participantId, stakeholder)
-              } yield if (source && target) Some(stakeholder) else None
-            }
-          )
-
-        } yield Some(TransferInValidationResult(confirmingParties.toSet))
-      case None =>
-        for {
-          _ <- EitherT.fromEither[Future](checkSubmitterIsStakeholder)
-          res <-
-            if (transferringParticipant) {
-              val targetIps = targetCrypto.ipsSnapshot
-              val confirmingPartiesF = transferInRequest.stakeholders.toList
-                .parTraverseFilter { stakeholder =>
-                  targetIps
-                    .canConfirm(participantId, stakeholder)
-                    .map(if (_) Some(stakeholder) else None)
-                }
-                .map(_.toSet)
-              EitherT(confirmingPartiesF.map { confirmingParties =>
-                Right(Some(TransferInValidationResult(confirmingParties))): Either[
-                  TransferProcessorError,
-                  Option[TransferInValidationResult],
-                ]
-              })
-            } else EitherT.rightT[Future, TransferProcessorError](None)
-        } yield res
-    }
-  }
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
       message: SignedContent[Deliver[DefaultOpenEnvelope]],
@@ -778,9 +565,7 @@ private[transfer] class TransferInProcessingSteps(
         contract.rawContractInstance.agreementText.v,
         contract.metadata.signatories,
         contract.metadata.stakeholders,
-        key = contract.metadata.maybeKeyWithMaintainers.map(keyWithMaintainers =>
-          KeyWithMaintainers(keyWithMaintainers.globalKey.key, keyWithMaintainers.maintainers)
-        ),
+        keyOpt = contract.metadata.maybeKeyWithMaintainers,
         contract.contractInstance.version,
       )
     val driverContractMetadata = contract.contractSalt
@@ -860,8 +645,6 @@ object TransferInProcessingSteps {
     override def pendingContracts: Set[LfContractId] = Set(contract.contractId)
   }
 
-  case class TransferInValidationResult(confirmingParties: Set[LfPartyId])
-
   private[transfer] def makeFullTransferInTree(
       pureCrypto: CryptoPureApi,
       seed: SaltSeed,
@@ -909,68 +692,4 @@ object TransferInProcessingSteps {
       targetCrypto: DomainSnapshotSyncCryptoApi,
       transferringParticipant: Boolean,
   )
-
-  private[transfer] sealed trait TransferInProcessorError extends TransferProcessorError
-
-  case class NoTransferData(transferId: TransferId, lookupError: TransferStore.TransferLookupError)
-      extends TransferInProcessorError {
-    override def message: String =
-      s"Cannot find transfer data for transfer `$transferId`: ${lookupError.cause}"
-  }
-
-  case class TransferOutIncomplete(transferId: TransferId, participant: ParticipantId)
-      extends TransferInProcessorError {
-    override def message: String =
-      s"Cannot transfer-in `$transferId` because transfer-out is incomplete"
-  }
-
-  case class PartyNotHosted(transferId: TransferId, party: LfPartyId, participant: ParticipantId)
-      extends TransferInProcessorError {
-    override def message: String =
-      s"Cannot transfer-in `$transferId` because $party is not hosted on $participant"
-  }
-
-  case class NoParticipantForReceivingParty(transferId: TransferId, party: LfPartyId)
-      extends TransferInProcessorError {
-    override def message: String = s"Cannot transfer-in `$transferId` because $party is not active"
-  }
-
-  case class UnexpectedDomain(transferId: TransferId, targetDomain: DomainId, receivedOn: DomainId)
-      extends TransferInProcessorError {
-    override def message: String =
-      s"Cannot transfer-in `$transferId`: expecting domain `$targetDomain` but received on `$receivedOn`"
-  }
-
-  case class ResultTimestampExceedsDecisionTime(
-      transferId: TransferId,
-      timestamp: CantonTimestamp,
-      decisionTime: CantonTimestamp,
-  ) extends TransferInProcessorError {
-    override def message: String =
-      s"Cannot transfer-in `$transferId`: result time $timestamp exceeds decision time $decisionTime"
-  }
-
-  case class NonInitiatorSubmitsBeforeExclusivityTimeout(
-      transferId: TransferId,
-      submitter: LfPartyId,
-      currentTimestamp: CantonTimestamp,
-      timeout: CantonTimestamp,
-  ) extends TransferInProcessorError {
-    override def message: String =
-      s"Cannot transfer-in `$transferId`: only submitter can initiate before exclusivity timeout $timeout"
-  }
-
-  case class ContractDataMismatch(transferId: TransferId) extends TransferProcessorError {
-    override def message: String = s"Cannot transfer-in `$transferId`: contract data mismatch"
-  }
-
-  case class CreatingTransactionIdMismatch(
-      transferId: TransferId,
-      transferInTransactionId: TransactionId,
-      localTransactionId: TransactionId,
-  ) extends TransferProcessorError {
-    override def message: String =
-      s"Cannot transfer-in `$transferId`: creating transaction id mismatch"
-  }
-
 }

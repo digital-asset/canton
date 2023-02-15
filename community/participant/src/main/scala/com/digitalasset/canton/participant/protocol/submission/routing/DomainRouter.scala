@@ -9,9 +9,8 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
-import com.daml.lf.command.ProcessedDisclosedContract
 import com.daml.lf.data.ImmArray
-import com.daml.lf.transaction.Versioned
+import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.lifecycle.FlagCloseable
@@ -97,7 +96,7 @@ class DomainRouter(
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
       transaction: LfSubmittedTransaction,
-      explicitlyDisclosedContracts: ImmArray[Versioned[ProcessedDisclosedContract]],
+      explicitlyDisclosedContracts: ImmArray[ProcessedDisclosedContract],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]] = {

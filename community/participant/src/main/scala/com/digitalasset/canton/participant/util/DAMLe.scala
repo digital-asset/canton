@@ -4,8 +4,6 @@
 package com.digitalasset.canton.participant.util
 
 import cats.data.EitherT
-import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.daml.lf.VersionRange
 import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.PackageId
@@ -21,7 +19,6 @@ import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe.{ContractWithMetadata, PackageResolver}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
 
 import java.nio.file.Path
@@ -62,33 +59,15 @@ object DAMLe {
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],
       templateId: LfTemplateId,
-      keyWithMaintainers: Option[LfKeyWithMaintainers],
+      keyWithMaintainers: Option[LfGlobalKeyWithMaintainers],
       agreementText: AgreementText,
   ) {
-    def metadataWithGlobalKey: Either[Error, ContractMetadata] = {
-      keyWithMaintainers
-        .traverse(
-          // contract keys are not allowed to contain contract id:
-          kwm =>
-            LfTransactionUtil
-              .globalKeyWithMaintainers(templateId, kwm)
-              .leftMap(_ =>
-                Error.Interpretation(
-                  Error.Interpretation
-                    .DamlException(LfInterpretationError.ContractIdInContractKey(kwm.key)),
-                  detailMessage =
-                    None, // no detail to add to interpretation error generated outside of lf
-                )
-              )
-        )
-        .map(safeKeyWithMaintainers =>
-          ContractMetadata.tryCreate(
-            signatories,
-            stakeholders,
-            safeKeyWithMaintainers.map(LfVersioned(instance.version, _)),
-          )
-        )
-    }
+    def metadataWithGlobalKey: ContractMetadata =
+      ContractMetadata.tryCreate(
+        signatories,
+        stakeholders,
+        keyWithMaintainers.map(LfVersioned(instance.version, _)),
+      )
   }
 
   val zeroSeed: LfHash = LfHash.assertFromByteArray(new Array[Byte](LfHash.underlyingHashLength))
@@ -245,8 +224,7 @@ class DAMLe(
   ): EitherT[Future, Error, ContractMetadata] =
     for {
       contractAndMetadata <- contractWithMetadata(contractInstance, supersetOfSignatories)
-      metadata <- EitherT.fromEither[Future](contractAndMetadata.metadataWithGlobalKey)
-    } yield metadata
+    } yield contractAndMetadata.metadataWithGlobalKey
 
   private[this] def handleResult[A](contracts: ContractAndKeyLookup, result: Result[A])(implicit
       traceContext: TraceContext

@@ -7,7 +7,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
+import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -301,19 +301,20 @@ trait ProcessingSteps[
 
   /** Phase 3:
     *
-    * @param views The successfully decrypted views
+    * @param views The successfully decrypted views and their signatures. Signatures are only present for
+    *              top-level views (where the submitter metadata is not blinded)
     * @param decryptionErrors The decryption errors while trying to decrypt the views
     */
   case class DecryptedViews(
-      views: Seq[WithRecipients[DecryptedView]],
+      views: Seq[(WithRecipients[DecryptedView], Option[Signature])],
       decryptionErrors: Seq[EncryptedViewMessageDecryptionError[RequestViewType]],
   )
 
   object DecryptedViews {
     def apply(
-        all: Seq[Either[EncryptedViewMessageDecryptionError[RequestViewType], WithRecipients[
-          DecryptedView
-        ]]]
+        all: Seq[Either[EncryptedViewMessageDecryptionError[
+          RequestViewType
+        ], (WithRecipients[DecryptedView], Option[Signature])]]
     ): DecryptedViews = {
       val (errors, views) = all.separate
       DecryptedViews(views, errors)
@@ -325,7 +326,8 @@ trait ProcessingSteps[
     * @param ts         The timestamp of the request
     * @param rc         The [[com.digitalasset.canton.RequestCounter]] of the request
     * @param sc         The [[com.digitalasset.canton.SequencerCounter]] of the request
-    * @param decryptedViews The decrypted views from step 1 with the right root hash
+    * @param decryptedViewsWithSignatures The decrypted views from step 1 with the right root hash
+    *                                     and their respective signatures
     * @param malformedPayloads The decryption errors and decrypted views with a wrong root hash
     * @param snapshot Snapshot of the topology state at the request timestamp
     * @return The activeness set and the pending contracts to add to the
@@ -336,7 +338,9 @@ trait ProcessingSteps[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      decryptedViewsWithSignatures: NonEmpty[
+        Seq[(WithRecipients[DecryptedView], Option[Signature])]
+      ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit

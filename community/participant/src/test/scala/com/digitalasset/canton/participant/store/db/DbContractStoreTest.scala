@@ -66,6 +66,7 @@ object DbContractStoreTest {
       maxDbConnections = 10,
       cacheConfig = CachingConfigs.testing.contractStore,
       dbQueryBatcherConfig = BatchAggregatorConfig.defaultsForTesting,
+      insertBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
       timeouts = DefaultProcessingTimeouts.testing,
       loggerFactory = loggerFactory,
     )

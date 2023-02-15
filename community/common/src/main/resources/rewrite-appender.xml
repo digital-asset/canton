@@ -335,15 +335,4 @@
 
     </appender>
 
-    <!-- using an async appender to move rendering and filtering of log messages to background thread -->
-    <appender name="REWRITE_LOG_LEVEL" class="ch.qos.logback.classic.AsyncAppender">
-        <appender-ref ref="REWRITE_LOG_LEVEL_SYNC" />
-        <discardingThreshold>0</discardingThreshold>
-        <queueSize>1024</queueSize>
-        <maxFlushTime>0</maxFlushTime>
-    </appender>
-
-    <!-- add a shutdown hook for the async appender -->
-    <shutdownHook class="ch.qos.logback.core.hook.DelayingShutdownHook" />
-
 </included>

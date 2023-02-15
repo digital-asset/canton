@@ -213,62 +213,65 @@ class ConfirmationResponseFactory(
 
             // Rejections due to a failed model conformance check
             val modelConformanceRejections =
-              transactionValidationResult.modelConformanceResult match {
-                case Left(cause) =>
-                  val verdict = logged(
-                    LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)(
+              transactionValidationResult.modelConformanceResult.swap.toOption.map(cause =>
+                logged(
+                  LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)(
+                    verdictProtocolVersion
+                  )
+                )
+              )
+
+            // Rejections due to a failed authentication check
+            val authenticationRejections =
+              transactionValidationResult.authenticationResult
+                .get(viewHash)
+                .map(err =>
+                  logged(
+                    LocalReject.MalformedRejects.MalformedRequest.Reject(err.toString)(
                       verdictProtocolVersion
                     )
                   )
-                  Seq(verdict)
-                case Right(_) => Seq.empty
-              }
+                )
 
             // Rejections due to a failed authorization check
             val authorizationRejections =
-              transactionValidationResult.authorizationResult.get(viewHash) match {
-                case Some(cause) =>
-                  val verdict = logged(
+              transactionValidationResult.authorizationResult
+                .get(viewHash)
+                .map(cause =>
+                  logged(
                     LocalReject.MalformedRejects.MalformedRequest.Reject(cause)(
                       verdictProtocolVersion
                     )
                   )
-                  Seq(verdict)
-                case None => Seq.empty
-              }
+                )
 
             // Rejections due to a failed time validation
-            val timeValidationRejections = transactionValidationResult.timeValidationResult match {
-              case Left(err) =>
-                // Note, this is logged in the TimeValidator
-                val rejection = err match {
-                  case TimeValidator.LedgerTimeRecordTimeDeltaTooLargeError(
-                        ledgerTime,
-                        recordTime,
-                        maxDelta,
-                      ) =>
-                    LocalReject.TimeRejects.LedgerTime.Reject(
-                      s"ledgerTime=$ledgerTime, recordTime=$recordTime, maxDelta=$maxDelta"
-                    )(verdictProtocolVersion)
-                  case TimeValidator.SubmissionTimeRecordTimeDeltaTooLargeError(
-                        submissionTime,
-                        recordTime,
-                        maxDelta,
-                      ) =>
-                    LocalReject.TimeRejects.SubmissionTime.Reject(
-                      s"submissionTime=$submissionTime, recordTime=$recordTime, maxDelta=$maxDelta"
-                    )(verdictProtocolVersion)
-                }
-                Seq(rejection)
-
-              case Right(()) => Seq.empty
-            }
+            val timeValidationRejections =
+              transactionValidationResult.timeValidationResult.swap.toOption.map {
+                case TimeValidator.LedgerTimeRecordTimeDeltaTooLargeError(
+                      ledgerTime,
+                      recordTime,
+                      maxDelta,
+                    ) =>
+                  LocalReject.TimeRejects.LedgerTime.Reject(
+                    s"ledgerTime=$ledgerTime, recordTime=$recordTime, maxDelta=$maxDelta"
+                  )(verdictProtocolVersion)
+                case TimeValidator.SubmissionTimeRecordTimeDeltaTooLargeError(
+                      submissionTime,
+                      recordTime,
+                      maxDelta,
+                    ) =>
+                  LocalReject.TimeRejects.SubmissionTime.Reject(
+                    s"submissionTime=$submissionTime, recordTime=$recordTime, maxDelta=$maxDelta"
+                  )(verdictProtocolVersion)
+              }
 
             // Approve if the consistency check succeeded, reject otherwise.
             val consistencyVerdicts = verdictsForView(viewValidationResult, hostedConfirmingParties)
 
             val localVerdicts: Seq[LocalVerdict] =
-              consistencyVerdicts.toList ++ timeValidationRejections ++ authorizationRejections ++ modelConformanceRejections
+              consistencyVerdicts.toList ++ timeValidationRejections ++
+                authenticationRejections ++ authorizationRejections ++ modelConformanceRejections
 
             val localVerdictAndPartiesO = localVerdicts
               .collectFirst[(LocalVerdict, Set[LfPartyId])] {

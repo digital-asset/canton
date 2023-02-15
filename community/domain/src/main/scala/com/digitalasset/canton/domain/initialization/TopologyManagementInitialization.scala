@@ -68,7 +68,7 @@ final case class TopologyManagementComponents(
     with NamedLogging {
 
   override def onClosed(): Unit =
-    Lifecycle.close(dispatcher, domainTopologyServiceHandler, client, processor)(logger)
+    Lifecycle.close(domainTopologyServiceHandler, dispatcher, client, processor)(logger)
 
 }
 
@@ -262,6 +262,7 @@ object TopologyManagementInitialization {
             parameters,
             futureSupervisor,
             dispatcherLoggerFactory,
+            topologyManagerSequencerCounterTrackerStore,
           )
           .map(Right(_))
           .onShutdown(Left("Initialization aborted due to shutdown"))

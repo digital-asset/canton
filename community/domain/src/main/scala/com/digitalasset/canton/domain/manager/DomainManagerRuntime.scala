@@ -24,7 +24,7 @@ trait DomainManagerRuntime extends FlagCloseable {
   )
 
   override protected def onClosed(): Unit = Lifecycle.close(
-    topologyManagementComponents,
     domainTopologyManager,
+    topologyManagementComponents,
   )(logger)
 }

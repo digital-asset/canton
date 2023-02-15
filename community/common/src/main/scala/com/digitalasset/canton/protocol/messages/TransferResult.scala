@@ -24,7 +24,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
-/** Mediator result for a transfer-out request
+/** Mediator result for a transfer request
   *
   * @param requestId timestamp of the corresponding [[TransferOutRequest]] on the source domain
   */
@@ -45,10 +45,6 @@ case class TransferResult[+Domain <: TransferDomainId] private (
   override def domainId: DomainId = domain.unwrap
 
   override def viewType: ViewType = domain.toViewType
-
-  @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
-  def isTransferIn: Boolean =
-    domain.isInstanceOf[TransferInDomainId]
 
   override protected[messages] def toProtoSomeSignedProtocolMessage
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransferResult =

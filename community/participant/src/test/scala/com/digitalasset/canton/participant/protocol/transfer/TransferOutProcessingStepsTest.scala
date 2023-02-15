@@ -3,11 +3,9 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import cats.data.EitherT
 import cats.implicits.*
-import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
@@ -16,7 +14,6 @@ import com.digitalasset.canton.data.{
   FullTransferOutTree,
   TransferSubmitterMetadata,
 }
-import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting, PackageService}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.mkActivenessSet
@@ -42,8 +39,6 @@ import com.digitalasset.canton.participant.protocol.{
 }
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{MultiDomainEventLog, SyncDomainEphemeralState}
-import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
-import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -114,19 +109,19 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
   private val workflowId: Option[LfWorkflowId] = None
 
-  val adminSubmitter: LfPartyId = submittingParticipant.adminParty.toLf
+  private val adminSubmitter: LfPartyId = submittingParticipant.adminParty.toLf
 
-  val pureCrypto = TestingIdentityFactory.pureCrypto()
+  private val pureCrypto = TestingIdentityFactory.pureCrypto()
 
-  val multiDomainEventLog = mock[MultiDomainEventLog]
-  val persistentState =
+  private val multiDomainEventLog = mock[MultiDomainEventLog]
+  private val persistentState =
     new InMemorySyncDomainPersistentState(
       IndexedDomain.tryCreate(sourceDomain, 1),
       pureCrypto,
       enableAdditionalConsistencyChecks = true,
       loggerFactory,
     )
-  val globalTracker = new GlobalCausalOrderer(
+  private val globalTracker = new GlobalCausalOrderer(
     submittingParticipant,
     _ => true,
     DefaultProcessingTimeouts.testing,
@@ -134,7 +129,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     loggerFactory,
   )
 
-  def mkState: SyncDomainEphemeralState =
+  private def mkState: SyncDomainEphemeralState =
     new SyncDomainEphemeralState(
       persistentState,
       multiDomainEventLog,
@@ -152,34 +147,12 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       loggerFactory,
     )(executorService)
 
-  val engine = DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false)
-  val mockPackageService =
-    new PackageService(
-      engine,
-      new InMemoryDamlPackageStore(loggerFactory),
-      mock[ParticipantEventPublisher],
-      pureCrypto,
-      _ => EitherT.rightT(()),
-      new PackageInspectionOpsForTesting(submittingParticipant, loggerFactory),
-      ProcessingTimeout(),
-      loggerFactory,
+  private val damle =
+    DAMLeTestInstance(submittingParticipant, signatories = Set(party1), stakeholders = Set(party1))(
+      loggerFactory
     )
-  private val packageResolver = DAMLe.packageResolver(mockPackageService)
 
-  val damle: DAMLe = new DAMLe(
-    packageResolver,
-    engine,
-    loggerFactory,
-  ) {
-    override def contractMetadata(
-        contractInstance: LfContractInst,
-        supersetOfSignatories: Set[LfPartyId],
-    )(implicit traceContext: TraceContext) = {
-      EitherT.pure[Future, Error](ContractMetadata.tryCreate(Set(party1), Set(party1), None))
-    }
-  }
-
-  def generateIps(
+  private def generateIps(
       topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]]
   ): TopologySnapshot =
     TestingTopology()

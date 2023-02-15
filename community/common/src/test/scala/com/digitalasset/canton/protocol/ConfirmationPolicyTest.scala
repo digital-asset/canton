@@ -8,8 +8,9 @@ import com.digitalasset.canton.protocol.ConfirmationPolicy.{Signatory, Vip}
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   signatoryParticipant,
   submitterParticipant,
+  templateId,
 }
-import com.digitalasset.canton.protocol.LfKeyWithMaintainers
+import com.digitalasset.canton.protocol.LfGlobalKeyWithMaintainers
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
@@ -96,7 +97,13 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
         seed = gen.deriveNodeSeed(0),
         signatories = Set(ExampleTransactionFactory.signatory),
         observers = Set(ExampleTransactionFactory.submitter, ExampleTransactionFactory.observer),
-        key = Some(LfKeyWithMaintainers(Value.ValueUnit, Set(ExampleTransactionFactory.signatory))),
+        key = Some(
+          LfGlobalKeyWithMaintainers.assertBuild(
+            templateId,
+            Value.ValueUnit,
+            Set(ExampleTransactionFactory.signatory),
+          )
+        ),
       )
       .versionedUnsuffixedTransaction
 
