@@ -8,6 +8,7 @@ import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.LfWorkflowId
 import com.digitalasset.canton.data.TransferSubmitterMetadata
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.routing.ContractsTransfer.TransferArgs
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
@@ -90,8 +91,10 @@ private[routing] class ContractsTransfer(
           targetDomain,
           TargetProtocolVersion(targetSyncDomain.staticDomainParameters.protocolVersion),
         )
+        .mapK(FutureUnlessShutdown.outcomeK)
+        .semiflatMap(Predef.identity)
         .leftMap(_.toString)
-        .semiflatMap(identity)
+        .onShutdown(Left("Application is shutting down"))
       outStatus <- EitherT.right[String](outResult.transferOutCompletionF)
       _outApprove <- EitherT.cond[Future](
         outStatus.code == com.google.rpc.Code.OK_VALUE,
@@ -110,7 +113,9 @@ private[routing] class ContractsTransfer(
           SourceProtocolVersion(sourceSyncDomain.staticDomainParameters.protocolVersion),
         )
         .leftMap[String](err => s"Transfer in failed with error ${err}")
-        .semiflatMap(identity)
+        .flatMap { s =>
+          EitherT(s.map(Right(_)).onShutdown(Left("Application is shutting down")))
+        }
 
       inStatus <- EitherT.right[String](inResult.transferInCompletionF)
       _inApprove <- EitherT.cond[Future](

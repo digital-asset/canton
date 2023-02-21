@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.transfer.{
   TransferData,
   TransferSubmissionHandle,
@@ -49,9 +50,12 @@ class TransferService(
           targetDomainId,
           targetProtocolVersion,
         )
+        .mapK(FutureUnlessShutdown.outcomeK)
         .semiflatMap(Predef.identity)
+        .leftMap(_.toString)
+        .onShutdown(Left("Application is shutting down"))
         .biflatMap(
-          error => EitherT.leftT[Future, TransferId](error.toString),
+          error => EitherT.leftT[Future, TransferId](error),
           result =>
             EitherT(
               result.transferOutCompletionF.map(status =>
@@ -93,8 +97,10 @@ class TransferService(
           transferId,
           sourceProtocolVersion,
         )
+        .mapK(FutureUnlessShutdown.outcomeK)
         .semiflatMap(Predef.identity)
         .leftMap(_.toString)
+        .onShutdown(Left("Application is shutting down"))
       _ <- EitherT(
         result.transferInCompletionF.map(status =>
           Either.cond(

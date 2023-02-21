@@ -7,8 +7,9 @@ import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
-import com.digitalasset.canton.error.{CantonError, HasDegradationState}
+import com.digitalasset.canton.health.HealthReporting.{ComponentHealth, ComponentState}
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -64,7 +65,9 @@ class ResilientSequencerSubscription[HandlerError](
     extends SequencerSubscription[HandlerError]
     with NamedLogging
     with FlagCloseableAsync
-    with HasDegradationState[LostSequencerSubscription.Warn] {
+    with ComponentHealth {
+  override val name: String = SequencerClient.healthName
+  override val initialState: ComponentState = ComponentState.Ok
   private val nextSubscriptionRef =
     new AtomicReference[Future[Option[SequencerSubscription[HandlerError]]]](
       Future.successful(None)
@@ -99,7 +102,7 @@ class ResilientSequencerSubscription[HandlerError](
         // register resolution
         FutureUtil.doNotAwait(
           hasReceivedEvent.awaitEvent.map { _ =>
-            resolveDegradationIfExists(_ => "Successfully read one message from the sequencer")
+            resolveUnhealthy
           },
           "has received event failed",
         )
@@ -164,11 +167,11 @@ class ResilientSequencerSubscription[HandlerError](
     val logMessage = s"Waiting ${LoggerUtil.roundDurationForHumans(newDelay)} before reconnecting"
     if (newDelay < retryDelayRule.warnDelayDuration) {
       logger.debug(logMessage)
-    } else if (isDegraded) {
+    } else if (isFailed && getState != ComponentState.NotInitialized) {
       logger.info(logMessage)
     } else {
       TraceContext.withNewTraceContext { tx =>
-        this.degradationOccurred(
+        this.failureOccurred(
           LostSequencerSubscription.Warn(domainId.toString)(this.errorLoggingContext(tx))
         )
       }

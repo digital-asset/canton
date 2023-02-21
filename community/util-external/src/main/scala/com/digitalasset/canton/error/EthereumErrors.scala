@@ -42,8 +42,8 @@ object EthereumErrors extends EthereumErrorGroup {
 
     @Explanation(
       """This error is logged when during setup the sequencer detects that it isn't
-        |connected to a free-gas network. This usually leads to transactions silently being dropped by Ethereum nodes. 
-        |You should only use a non-free-gas network, if you have configured an Ethereum wallet for the sequencer to use 
+        |connected to a free-gas network. This usually leads to transactions silently being dropped by Ethereum nodes.
+        |You should only use a non-free-gas network, if you have configured an Ethereum wallet for the sequencer to use
         |and have given it gas.
         |"""
     )
@@ -61,13 +61,13 @@ object EthereumErrors extends EthereumErrorGroup {
         |the head of the blockchain of the connected Ethereum network. The Ethereum sequencer won't observe new transactions
         |in the blockchain until it has caught up to the head. This may take a long time depending on the blockchain length
         |and number of Canton transaction in the blocks. Empirically, we have observed that the Canton sequencer
-        | processes roughly 500 empty blocks/second. This may vary strongly for non-empty blocks.  
-        | The sequencer logs once it has caught up to within `blocksBehindBlockchainHead` blocks behind the blockchain head. 
+        | processes roughly 500 empty blocks/second. This may vary strongly for non-empty blocks.
+        | The sequencer logs once it has caught up to within `blocksBehindBlockchainHead` blocks behind the blockchain head.
         |"""
     )
     @Resolution(
-      """Wait until the sequencer has caught up to the head 
-        | of the blockchain. Alternatively, consider changing the configuration of `block-to-read-from` of the Ethereum 
+      """Wait until the sequencer has caught up to the head
+        | of the blockchain. Alternatively, consider changing the configuration of `block-to-read-from` of the Ethereum
         | sequencer when initializing it against an Ethereum network that already mined a lot of blocks. """
     )
     object ManyBlocksBehindHead
@@ -83,13 +83,13 @@ object EthereumErrors extends EthereumErrorGroup {
     }
 
     @Explanation(
-      """This warning is logged on startup if the sequencer is configured to only start reading from a block 
+      """This warning is logged on startup if the sequencer is configured to only start reading from a block
         |that wasn't mined yet by the blockchain (e.g. sequencer is supposed to start reading from block 500, but
-        |the latest block is only 100). This is likely due to a misconfiguration. 
+        |the latest block is only 100). This is likely due to a misconfiguration.
         |"""
     )
     @Resolution(
-      """This issue frequently occurs when the blockchain is reset but the sequencer database configuration is 
+      """This issue frequently occurs when the blockchain is reset but the sequencer database configuration is
         |  not updated or the sequencer database (which persists the last block that was read by the sequencer) is not reset.
         |  Validate these settings and ensure that the sequencer is still reading from the same blockchain. """
     )
@@ -103,20 +103,20 @@ object EthereumErrors extends EthereumErrorGroup {
 
     // TODO(i11028): consider setting the TPM ID during contract creation in constructor so these errors are redundant
     @Explanation(
-      """The sequencer smart contract has detected that a value that is immutable after being set for the first time 
-        | (either the signing tolerance or the topology manager ID) was attempted to be changed. 
-        |   Most frequently this error occurs during testing when a Canton Ethereum sequencer process without persistence 
-        | is restarted while pointing to the same smart sequencer contract. An Ethereum sequencer attempts to set the 
+      """The sequencer smart contract has detected that a value that is immutable after being set for the first time
+        | (either the signing tolerance or the topology manager ID) was attempted to be changed.
+        |   Most frequently this error occurs during testing when a Canton Ethereum sequencer process without persistence
+        | is restarted while pointing to the same smart sequencer contract. An Ethereum sequencer attempts to set the
         | topology manager ID during initialization, however, without persistence the topology manager ID is randomly
-        | regenerated on the restart which leads to the sequencer attempting to change the topology manager ID in the 
-        | sequencer smart contract.  
+        | regenerated on the restart which leads to the sequencer attempting to change the topology manager ID in the
+        | sequencer smart contract.
         |"""
     )
     @Resolution(
       """Deploy a new instance of the sequencer contract (Console command `ethereum.deploy_sequencer_contract`) and configure
-        | the Ethereum sequencer to use that instance. If the errors occur because an Ethereum sequencer process is 
+        | the Ethereum sequencer to use that instance. If the errors occur because an Ethereum sequencer process is
         | restarted without persistence, deploy a fresh instance of the sequencer contract and configure persistence
-        | for restarts. 
+        | for restarts.
         |"""
     )
     object AttemptToChangeImmutableValue
@@ -139,7 +139,7 @@ object EthereumErrors extends EthereumErrorGroup {
     @Resolution("""This frequently error occurs when updating the Canton system without updating the sequencer
       |contract deployed on the blockchain. Validate that the sequencer contract corresponding to the current Canton release
       | is deployed in the latest blockchain blocks on the configured address (see also `ethereum.deploy_sequencer_contract`).
-      | Another common reason for this error is that the wrong contract address was configured.  
+      | Another common reason for this error is that the wrong contract address was configured.
       |""")
     object WrongEVMBytecode
         extends ErrorCode("WRONG_EVM_BYTECODE", InvalidGivenCurrentSystemStateOther) {
@@ -156,13 +156,13 @@ object EthereumErrors extends EthereumErrorGroup {
     }
 
     @Explanation("""
-        |As one of the first steps when initializing a Besu sequencer, Canton attempts to query the version (attribute) 
-        |of the Sequencer.sol contract. 
+        |As one of the first steps when initializing a Besu sequencer, Canton attempts to query the version (attribute)
+        |of the Sequencer.sol contract.
         |""")
-    @Resolution("""Usually, the root cause of this is a deployment or configuration problem. 
+    @Resolution("""Usually, the root cause of this is a deployment or configuration problem.
         | Ensure that a Sequencer.sol contract is deployed on the configured address on the latest block when attempting
         |  to initialize the Canton Besu sequencer node. If this error persists, a malicious user may
-        |  be attempting to interfere with the Ethereum network. 
+        |  be attempting to interfere with the Ethereum network.
         |""")
     object UnableToQueryVersion
         extends ErrorCode("ETHEREUM_CANT_QUERY_VERSION", InvalidGivenCurrentSystemStateOther) {
@@ -177,8 +177,8 @@ object EthereumErrors extends EthereumErrorGroup {
     }
 
     @Explanation(
-      """This error is logged when the sequencer detects that (according to the configuration) 
-        |the corresponding Sequencer.sol contract should have authorization enabled but doesn't (and vice versa). 
+      """This error is logged when the sequencer detects that (according to the configuration)
+        |the corresponding Sequencer.sol contract should have authorization enabled but doesn't (and vice versa).
         |"""
     )
     @Resolution(
@@ -197,14 +197,14 @@ object EthereumErrors extends EthereumErrorGroup {
     }
 
     @Explanation(
-      """This error is logged during setup when the sequencer detects that authorization is enabled on 
-        |the Sequencer.sol contract, but the Ethereum account used by the sequencer node is not authorized to interact with the contract. 
+      """This error is logged during setup when the sequencer detects that authorization is enabled on
+        |the Sequencer.sol contract, but the Ethereum account used by the sequencer node is not authorized to interact with the contract.
         |"""
     )
     @Resolution(
       """Authorize this sequencer node from another already-authorized sequencer node (see console
-        |command `authorize_ledger_identity`). 
-        | 
+        |command `authorize_ledger_identity`).
+        |
         |"""
     )
     object Unauthorized
@@ -220,15 +220,15 @@ object EthereumErrors extends EthereumErrorGroup {
   object TransactionErrors extends ErrorGroup {
     @Explanation("""
         |This error is logged when the Sequencer Ethereum application receives an error when attempting to submit a
-        | transaction to the transaction pool of the Ethereum client. Common causes for this are network errors, 
-        | or when the Ethereum account of the Sequencer Ethereum application is used by another application. 
+        | transaction to the transaction pool of the Ethereum client. Common causes for this are network errors,
+        | or when the Ethereum account of the Sequencer Ethereum application is used by another application.
         | Less commonly, this error might also indirectly be caused if the transaction pool of the Ethereum client is
         | full or flushed.
         |""")
-    @Resolution("""Generally, Canton should recover automatically from this error. 
-        | If you continue to see this error, investigate possible root causes such as poor network connections, 
+    @Resolution("""Generally, Canton should recover automatically from this error.
+        | If you continue to see this error, investigate possible root causes such as poor network connections,
         | if the Ethereum wallet of the Ethereum Sequencer application is being reused by another application, and the
-        | health of the Ethereum client.  
+        | health of the Ethereum client.
         |""")
     object SubmissionFailed
         extends ErrorCode(
@@ -245,13 +245,13 @@ object EthereumErrors extends EthereumErrorGroup {
 
     @Explanation("""
                    |This error happens when the Sequencer Ethereum application reads a transaction from the blockchain
-                   | which is malformed (e.g, invalid member, arguments aren't parseable or too large). 
+                   | which is malformed (e.g, invalid member, arguments aren't parseable or too large).
                    |This could happen if a malicious or faulty Ethereum Sequencer node is placing faulty data on the
                    | blockchain.
                    |""")
     @Resolution("""Generally, Canton should recover automatically from this error.
                   | The faulty transactions are simply skipped by all non-malicious/non-faulty sequencers in a deterministic way,
-                  | so the integrity of the event stream across sequencer nodes should be maintained. 
+                  | so the integrity of the event stream across sequencer nodes should be maintained.
                   | If you continue to see this error, investigate whether some of the sequencer nodes in the network are misbehaving.
                   |""")
     object InvalidTransaction extends AlarmErrorCode("ETHEREUM_TRANSACTION_INVALID") {
@@ -265,19 +265,19 @@ object EthereumErrors extends EthereumErrorGroup {
           )
     }
 
-    @Explanation("""This error occurs when the Ethereum sequencer attempts to fetch the transaction receipt for a 
-        |previously submitted transaction but receives an exception. Usually, this is caused by network errors, 
-        |the Ethereum client node being overloaded or the Ethereum sequencer reaching its `transactionReceiptPollingAttempts` 
-        |for a given transaction.  
-        |The fetching of transaction receipts of submitted transactions is separate from the Ethereum sequencer's  
-        |read-stream used to ingest new transactions. Thus, in this sense, this error is purely informative and can be  
-        |caused by transient issues (such as a transient network outage). Note, that the Canton nonce manager 
-        |refreshes his cache whenever this error occurs which may unblock stuck transactions with a too-high nonce. 
+    @Explanation("""This error occurs when the Ethereum sequencer attempts to fetch the transaction receipt for a
+        |previously submitted transaction but receives an exception. Usually, this is caused by network errors,
+        |the Ethereum client node being overloaded or the Ethereum sequencer reaching its `transactionReceiptPollingAttempts`
+        |for a given transaction.
+        |The fetching of transaction receipts of submitted transactions is separate from the Ethereum sequencer's
+        |read-stream used to ingest new transactions. Thus, in this sense, this error is purely informative and can be
+        |caused by transient issues (such as a transient network outage). Note, that the Canton nonce manager
+        |refreshes his cache whenever this error occurs which may unblock stuck transactions with a too-high nonce.
         |""")
-    @Resolution("""Usually, this error should resolve by itself. If you frequently see this error, ensure that 
-        |the Ethereum account of the Ethereum sequencer is used by no one else and that the Ethereum client doesn't  
-        |drop submitted transactions through being overloaded or reaching a full txpool. If this errors keeps occurring, 
-        |please contact support. 
+    @Resolution("""Usually, this error should resolve by itself. If you frequently see this error, ensure that
+        |the Ethereum account of the Ethereum sequencer is used by no one else and that the Ethereum client doesn't
+        |drop submitted transactions through being overloaded or reaching a full txpool. If this errors keeps occurring,
+        |please contact support.
         |""")
     object ReceiptFetchingFailed
         extends ErrorCode(

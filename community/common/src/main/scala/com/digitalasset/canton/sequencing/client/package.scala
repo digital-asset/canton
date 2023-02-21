@@ -4,6 +4,7 @@
 package com.digitalasset.canton.sequencing
 
 import cats.data.EitherT
+import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.sequencing.protocol.MessageId
 
 import scala.concurrent.Future
@@ -24,5 +25,5 @@ package object client {
     * or the process exits.
     * @see [[SequencerClient.sendAsync]]
     */
-  type SendCallback = SendResult => Unit
+  type SendCallback = UnlessShutdown[SendResult] => Unit
 }

@@ -24,6 +24,7 @@ import com.digitalasset.canton.environment.{
   DomainNodes,
   ParticipantNodes,
 }
+import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.{BaseTest, ConfigStubs}
@@ -84,7 +85,11 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
     when(environment.simClock).thenReturn(None)
     when(environment.loggerFactory).thenReturn(loggerFactory)
     when(environment.configuredOpenTelemetry).thenReturn(
-      ConfiguredOpenTelemetry(OpenTelemetrySdk.builder().build(), SdkTracerProvider.builder())
+      ConfiguredOpenTelemetry(
+        OpenTelemetrySdk.builder().build(),
+        SdkTracerProvider.builder(),
+        NoOpOnDemandMetricsReader$,
+      )
     )
 
     when(participants.start(anyString())(anyTraceContext)).thenReturn(Right(participant))

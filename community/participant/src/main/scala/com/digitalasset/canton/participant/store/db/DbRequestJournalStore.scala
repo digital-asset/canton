@@ -126,9 +126,9 @@ class DbRequestJournalStore(
               """merge /*+ INDEX (journal_requests pk_journal_requests) */
                 |into journal_requests
                 |using (select ? domain_id, ? request_counter from dual) input
-                |on (journal_requests.request_counter = input.request_counter and 
+                |on (journal_requests.request_counter = input.request_counter and
                 |    journal_requests.domain_id = input.domain_id)
-                |when not matched then 
+                |when not matched then
                 |  insert (domain_id, request_counter, request_state_index, request_timestamp, commit_time, repair_context)
                 |  values (input.domain_id, input.request_counter, ?, ?, ?, ?)""".stripMargin
             DbStorage.bulkOperation(query, items.map(_.value).toList, storage.profile)(setData)
@@ -355,7 +355,7 @@ class DbRequestJournalStore(
   )(implicit traceContext: TraceContext): Future[Seq[RequestData]] = {
     val statement =
       sql"""
-        select request_counter, request_state_index, request_timestamp, commit_time, repair_context 
+        select request_counter, request_state_index, request_timestamp, commit_time, repair_context
         from journal_requests where domain_id = $domainId and request_counter >= $fromInclusive and repair_context is not null
         order by request_counter
         """.as[RequestData]

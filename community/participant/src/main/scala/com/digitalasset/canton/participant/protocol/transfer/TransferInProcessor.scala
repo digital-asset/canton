@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.ViewType.TransferInViewType
@@ -36,6 +37,7 @@ class TransferInProcessor(
     override protected val timeouts: ProcessingTimeout,
     targetProtocolVersion: TargetProtocolVersion,
     loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
       TransferInProcessingSteps.SubmissionParam,
@@ -59,4 +61,5 @@ class TransferInProcessor(
       domainCrypto,
       sequencerClient,
       loggerFactory,
+      futureSupervisor,
     )

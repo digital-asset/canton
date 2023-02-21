@@ -20,6 +20,7 @@ import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
+  HasCloseContext,
   Lifecycle,
   StartAndCloseable,
   SyncCloseable,
@@ -81,6 +82,7 @@ private[mediator] class Mediator(
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with StartAndCloseable[Unit]
+    with HasCloseContext
     with NoTracing {
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
@@ -107,6 +109,7 @@ private[mediator] class Mediator(
     state,
     protocolVersion,
     loggerFactory,
+    timeouts,
   )
 
   private val deduplicator = MediatorEventDeduplicator.create(
@@ -324,8 +327,8 @@ private[mediator] class Mediator(
           topologyTransactionProcessor,
           syncCrypto.ips,
           timeTracker,
+          processor,
           sequencerClient,
-          syncCrypto.ips,
           topologyClient,
           sequencerCounterTrackerStore,
           state,

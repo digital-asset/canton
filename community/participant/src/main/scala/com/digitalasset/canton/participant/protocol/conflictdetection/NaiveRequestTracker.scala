@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.{EitherT, NonEmptyChain}
 import cats.syntax.either.*
+import com.digitalasset.canton.concurrent.{FutureSupervisor, SupervisedPromise}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler, TaskSchedulerMetrics}
 import com.digitalasset.canton.lifecycle.{
@@ -14,7 +15,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
@@ -46,6 +47,7 @@ private[participant] class NaiveRequestTracker(
     taskSchedulerMetrics: TaskSchedulerMetrics,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext)
     extends RequestTracker
     with NamedLogging
@@ -104,7 +106,7 @@ private[participant] class NaiveRequestTracker(
       ),
     )
 
-    val data = RequestData.mk(sc, requestTimestamp, decisionTime, activenessSet)
+    val data = RequestData.mk(sc, requestTimestamp, decisionTime, activenessSet, futureSupervisor)
 
     requests.putIfAbsent(rc, data) match {
       case None =>
@@ -541,6 +543,10 @@ private[conflictdetection] object NaiveRequestTracker {
         requestTimestamp: CantonTimestamp,
         decisionTime: CantonTimestamp,
         activenessSet: ActivenessSet,
+        futureSupervisor: FutureSupervisor,
+    )(implicit
+        elc: ErrorLoggingContext,
+        ec: ExecutionContext,
     ): RequestData =
       new RequestData(
         sequencerCounter = sc,
@@ -548,10 +554,11 @@ private[conflictdetection] object NaiveRequestTracker {
         decisionTime = decisionTime,
         activenessSet = activenessSet,
       )(
-        activenessResult = Promise[ActivenessResult](),
+        activenessResult =
+          SupervisedPromise[ActivenessResult]("activeness-result", futureSupervisor),
         timeoutResult = Promise[TimeoutResult](),
         finalizationDataCell = new SingleUseCell[FinalizationData],
-        commitSetPromise = Promise[CommitSet](),
+        commitSetPromise = SupervisedPromise[CommitSet]("commit-set", futureSupervisor),
       )
   }
 

@@ -47,6 +47,8 @@ object DamlPlugin extends AutoPlugin {
       settingKey[Option[String]]("Allows hardcoding daml project version")
 
     val damlGenerateCode = taskKey[Seq[File]]("Generate scala code from Daml")
+    // From https://github.com/DACH-NY/the-real-canton-coin/pull/357:
+    val damlDependencies = taskKey[Seq[File]]("Paths to DARs that this project depends on")
     val damlBuild = taskKey[Seq[File]]("Build a Daml Archive from Daml source")
     val damlStudio = taskKey[Unit]("Open Daml studio for all projects in scope")
     val damlCheckProjectVersions =
@@ -64,6 +66,7 @@ object DamlPlugin extends AutoPlugin {
       damlSourceDirectory := sourceDirectory.value / "daml",
       damlCompileDirectory := target.value / "daml",
       damlDarOutput := resourceManaged.value,
+      damlDependencies := Seq(),
       damlScalaCodegenOutput := sourceManaged.value / "daml-codegen-scala",
       damlJavaCodegenOutput := sourceManaged.value / "daml-codegen-java",
       damlBuildOrder := Seq(),
@@ -77,6 +80,8 @@ object DamlPlugin extends AutoPlugin {
         val javaOutputDirectory = damlJavaCodegenOutput.value
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
+
+        IO.delete(scalaOutputDirectory)
 
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
           settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
@@ -97,6 +102,7 @@ object DamlPlugin extends AutoPlugin {
         cache(settings.map(_._2).toSet).toSeq
       },
       damlBuild := {
+        val dependencies = damlDependencies.value
         val outputDirectory = damlDarOutput.value
         val buildDirectory = damlCompileDirectory.value
         val sourceDirectory = damlSourceDirectory.value
@@ -144,7 +150,7 @@ object DamlPlugin extends AutoPlugin {
             }.toSet
           }
 
-        cache(allDamlFiles.get.toSet).toSeq
+        cache(allDamlFiles.get.toSet ++ dependencies).toSeq
       },
       // Declare dependency so that Daml packages in test scope may depend on packages in compile scope.
       (Test / damlBuild) := (Test / damlBuild).dependsOn(Compile / damlBuild).value,

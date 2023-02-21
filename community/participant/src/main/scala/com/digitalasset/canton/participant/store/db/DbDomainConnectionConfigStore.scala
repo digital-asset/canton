@@ -107,12 +107,12 @@ class DbDomainConnectionConfigStore private[store] (
 
     val insertAction: DbAction.WriteOnly[Int] = storage.profile match {
       case _: DbStorage.Profile.Oracle =>
-        sqlu"""insert 
+        sqlu"""insert
                /*+ IGNORE_ROW_ON_DUPKEY_INDEX ( PARTICIPANT_DOMAIN_CONNECTION_CONFIGS ( domain_alias ) ) */
                into participant_domain_connection_configs(domain_alias, config, status)
                values ($domainAlias, $config, $status)"""
       case _ =>
-        sqlu"""insert 
+        sqlu"""insert
                into participant_domain_connection_configs(domain_alias, config, status)
                values ($domainAlias, $config, $status)
                on conflict do nothing"""

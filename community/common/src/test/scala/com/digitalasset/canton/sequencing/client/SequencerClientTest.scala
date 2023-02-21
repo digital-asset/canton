@@ -19,7 +19,12 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Hash, HashPurpose, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
+import com.digitalasset.canton.logging.{
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+  TracedLogger,
+}
 import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetrics}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
@@ -187,21 +192,24 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     "doesn't give prior event to the application handler" in {
       val validated = new AtomicBoolean()
       val processed = new AtomicBoolean()
-
+      val testLogger = logger
       for {
         env @ Env(_client, transport, _, _, _) <- Env.create(
           eventValidator = new SequencedEventValidator {
             override def validate(
                 event: OrdinarySerializedEvent
-            ): EitherT[Future, SequencedEventValidationError, Unit] = {
+            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
               validated.set(true)
               Env.eventAlwaysValid.validate(event)
             }
 
             override def validateOnReconnect(
                 reconnectEvent: OrdinarySerializedEvent
-            ): EitherT[Future, SequencedEventValidationError, Unit] =
+            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
               validate(reconnectEvent)
+
+            override protected val timeouts: ProcessingTimeout = ProcessingTimeout()
+            override protected val logger: TracedLogger = testLogger
           },
           storedEvents = Seq(deliver),
         )
@@ -804,6 +812,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     val eventAlwaysValid: SequencedEventValidator = SequencedEventValidator.noValidation(
       DefaultTestIdentities.domainId,
       DefaultTestIdentities.sequencer,
+      timeouts,
       warn = false,
     )
 
@@ -830,8 +839,10 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       val transport = new MockTransport
       val sendTrackerStore = new InMemorySendTrackerStore()
       val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
-      val sendTracker = new SendTracker(Map.empty, sendTrackerStore, metrics, loggerFactory)
-      val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+      val sendTracker =
+        new SendTracker(Map.empty, sendTrackerStore, metrics, loggerFactory, timeouts)
+      val sequencerCounterTrackerStore =
+        new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
       val timeTracker =
         new DomainTimeTracker(
           DomainTimeTrackerConfig(),

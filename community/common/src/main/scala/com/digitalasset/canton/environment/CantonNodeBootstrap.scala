@@ -23,7 +23,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStor
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.health.HealthReporting.ServiceHealthStatusManager
+import com.digitalasset.canton.health.HealthReporting.{ServiceHealth, ServiceHealthStatusManager}
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
 import com.digitalasset.canton.health.admin.v0.StatusServiceGrpc
@@ -204,9 +204,7 @@ abstract class CantonNodeBootstrapBase[
   protected def nodeHealthService: HealthReporting.ServiceHealth
 
   // Service that will always return `SERVING`. Useful to be targeted by k8s liveness probes.
-  private val livenessService = new HealthReporting.ServiceHealth {
-    override val name: String = "liveness"
-  }
+  private val livenessService = ServiceHealth("liveness")
   private val healthReporter: GrpcHealthReporter = new GrpcHealthReporter(loggerFactory)
   private lazy val grpcNodeHealthManager =
     ServiceHealthStatusManager(
@@ -214,24 +212,6 @@ abstract class CantonNodeBootstrapBase[
       new io.grpc.protobuf.services.HealthStatusManager(),
       Set(nodeHealthService, livenessService),
     )
-
-  private val grpcHealthServer = config.monitoring.grpcHealthServer.map { healthConfig =>
-    healthReporter.registerHealthManager(grpcNodeHealthManager)
-
-    val executor = Executors.newFixedThreadPool(healthConfig.parallelism)
-
-    new GrpcHealthServer(
-      healthConfig,
-      metricsFactory,
-      executor,
-      loggerFactory,
-      parameterConfig.loggingConfig.api,
-      parameterConfig.tracing,
-      grpcMetrics,
-      timeouts,
-      grpcNodeHealthManager.manager,
-    )
-  }
 
   protected val initializationStore = InitializationStore(storage, timeouts, loggerFactory)
   protected val indexedStringStore =
@@ -391,6 +371,24 @@ abstract class CantonNodeBootstrapBase[
     } else {
       EitherT.leftT[Future, Unit]("Node identity has already been initialized")
     }
+  }
+
+  private val grpcHealthServer = config.monitoring.grpcHealthServer.map { healthConfig =>
+    healthReporter.registerHealthManager(grpcNodeHealthManager)
+
+    val executor = Executors.newFixedThreadPool(healthConfig.parallelism)
+
+    new GrpcHealthServer(
+      healthConfig,
+      metricsFactory,
+      executor,
+      loggerFactory,
+      parameterConfig.loggingConfig.api,
+      parameterConfig.tracing,
+      grpcMetrics,
+      timeouts,
+      grpcNodeHealthManager.manager,
+    )
   }
 
   /** Attempt to start the node.

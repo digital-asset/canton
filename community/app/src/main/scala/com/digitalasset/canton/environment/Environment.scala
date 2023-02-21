@@ -81,7 +81,11 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
   // public for buildDocs task to be able to construct a fake participant and domain to document available metrics via reflection
   lazy val metricsFactory: MetricsFactory =
-    MetricsFactory.forConfig(config.monitoring.metrics, configuredOpenTelemetry.openTelemetry)
+    MetricsFactory.forConfig(
+      config.monitoring.metrics,
+      configuredOpenTelemetry.openTelemetry,
+      testingConfig.metricsFactoryType,
+    )
   protected def participantNodeFactory
       : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType]
   protected def domainFactory: DomainNodeBootstrap.Factory[Config#DomainConfigType]

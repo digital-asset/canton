@@ -180,7 +180,7 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
   val profile: DbStorage.Profile
   val dbConfig: DbConfig
 
-  override val name = "db_storage"
+  override val name: String = DbStorage.healthName
 
   override lazy val initialState: ComponentState =
     ComponentState.Failed(UnhealthyState(description = Some("database initialising")))
@@ -370,6 +370,7 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
 }
 
 object DbStorage {
+  val healthName: String = "db-storage"
 
   case class PassiveInstanceException(reason: String)
       extends RuntimeException(s"DbStorage instance is not active: $reason")

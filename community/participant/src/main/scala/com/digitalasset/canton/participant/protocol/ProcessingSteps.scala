@@ -343,6 +343,7 @@ trait ProcessingSteps[
       ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
+      mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RequestError, CheckActivenessAndWritePendingContracts]
@@ -555,13 +556,14 @@ object ProcessingSteps {
     def requestCounter: RequestCounter
     def requestSequencerCounter: SequencerCounter
     def pendingContracts: Set[LfContractId]
+    def mediatorId: MediatorId
   }
 
   object PendingRequestData {
     def unapply(
         arg: PendingRequestData
-    ): Some[(RequestCounter, SequencerCounter, Set[LfContractId])] = {
-      Some((arg.requestCounter, arg.requestSequencerCounter, arg.pendingContracts))
+    ): Some[(RequestCounter, SequencerCounter, Set[LfContractId], MediatorId)] = {
+      Some((arg.requestCounter, arg.requestSequencerCounter, arg.pendingContracts, arg.mediatorId))
     }
   }
 }

@@ -50,11 +50,10 @@ class RepairProcessor(
   }
 
   private def skipRequest(requestData: RequestData): Unit = {
-    val RequestData(rc, _state, _requestTimestamp, _commitTime, repairContext) = requestData
+    val RequestData(rc, _, _, _, repairContext) = requestData
     implicit val repairTraceContext =
       W3CTraceContext.toTraceContext(repairContext.map(_.unwrap), None)
     requestCounterAllocator.skipRequestCounter(rc)
-    phase37Synchronizer.skipRequestCounter(rc)
   }
 }
 

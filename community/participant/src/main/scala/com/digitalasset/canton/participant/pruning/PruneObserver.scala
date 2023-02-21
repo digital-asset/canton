@@ -64,7 +64,7 @@ private[participant] class PruneObserver(
       FutureUnlessShutdown.unit
     } else if (!lastPruningF.isCompleted) {
       logger.warn(
-        s"""Background ACS pruning initiated at $lastPruneTs took longer than the configured ACS pruning interval $acsPruningInterval. 
+        s"""Background ACS pruning initiated at $lastPruneTs took longer than the configured ACS pruning interval $acsPruningInterval.
            |Pruning at $now is skipped. Consider to increase the setting participants.<participant>.parameters.stores.acs-pruning-interval.
           """.stripMargin
       )

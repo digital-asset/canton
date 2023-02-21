@@ -195,6 +195,12 @@ class ParticipantPartiesAdministrationGroup(
         }
       } yield domainIds.toSet
     }
+    def retryE(condition: => Boolean, message: => String): Either[String, Unit] = {
+      AdminCommandRunner
+        .retryUntilTrue(consoleEnvironment.commandTimeouts.ledgerCommand)(condition)
+        .toEither
+        .leftMap(_ => message)
+    }
     def waitForParty(
         partyId: PartyId,
         domainIds: Set[DomainId],
@@ -202,15 +208,15 @@ class ParticipantPartiesAdministrationGroup(
         queriedParticipant: ParticipantId = participantId,
     ): Either[String, Unit] = {
       if (domainIds.nonEmpty) {
-        AdminCommandRunner
-          .retryUntilTrue(consoleEnvironment.commandTimeouts.ledgerCommand) {
-            domainIds subsetOf registered
-          }
-          .toEither
-          .leftMap(_ =>
-            show"Party ${partyId} did not appear for $queriedParticipant on domain ${domainIds.diff(registered)}"
-          )
+        retryE(
+          domainIds subsetOf registered,
+          show"Party ${partyId} did not appear for $queriedParticipant on domain ${domainIds.diff(registered)}",
+        )
       } else Right(())
+    }
+    val syncLedgerApi = waitForDomain match {
+      case DomainChoice.All => true
+      case DomainChoice.Only(aliases) => aliases.nonEmpty
     }
     consoleEnvironment.run {
       ConsoleCommandResult.fromEither {
@@ -247,6 +253,14 @@ class ParticipantPartiesAdministrationGroup(
                 .toEither
           }
           _ <- waitForParty(partyId, domainIds, primaryRegistered(partyId))
+          _ <-
+            // sync with ledger-api server if this node is connected to at least one domain
+            if (syncLedgerApi && primaryConnected.exists(_.nonEmpty))
+              retryE(
+                runner.ledger_api.parties.list().map(_.party).contains(partyId.toLf),
+                show"The party ${partyId} never appeared on the ledger API server",
+              )
+            else Right(())
           _ <- additionalSync.traverse_ { case (p, domains) =>
             waitForParty(
               partyId,
@@ -263,6 +277,7 @@ class ParticipantPartiesAdministrationGroup(
         } yield partyId
       }
     }
+
   }
 
   private def runPartyCommand(

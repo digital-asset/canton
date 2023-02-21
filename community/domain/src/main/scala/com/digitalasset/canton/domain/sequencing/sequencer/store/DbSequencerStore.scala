@@ -70,7 +70,9 @@ class DbSequencerStore(
   import storage.converters.*
 
   implicit val closeContext: CloseContext =
-    overrideCloseContext.getOrElse(CloseContext(this))
+    overrideCloseContext
+      .map(CloseContext.combine(_, CloseContext(this), timeouts, logger)(TraceContext.empty))
+      .getOrElse(CloseContext(this))
 
   private implicit val setRecipientsArrayOParameter
       : SetParameter[Option[NonEmpty[SortedSet[SequencerMemberId]]]] = (v, pp) => {
@@ -538,12 +540,12 @@ class DbSequencerStore(
                                     |  values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     |  on conflict do nothing""".stripMargin
       case _: Oracle =>
-        """merge /*+ INDEX ( sequencer_events ( ts ) ) */  
+        """merge /*+ INDEX ( sequencer_events ( ts ) ) */
           |into sequencer_events
           |using (select ? ts from dual) input
           |on (sequencer_events.ts = input.ts)
           |when not matched then
-          |  insert (ts, node_index, event_type, message_id, sender, recipients, payload_id, signing_timestamp, 
+          |  insert (ts, node_index, event_type, message_id, sender, recipients, payload_id, signing_timestamp,
           |          error_message, trace_context)
           |  values (input.ts, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
     }
@@ -588,7 +590,7 @@ class DbSequencerStore(
         case _: Postgres =>
           sqlu"""insert into sequencer_watermarks (node_index, watermark_ts, sequencer_online)
                values ($instanceIndex, $ts, true)
-               on conflict (node_index) do 
+               on conflict (node_index) do
                  update set watermark_ts = $ts where sequencer_watermarks.sequencer_online = true
                """
         case _: H2 =>
@@ -641,8 +643,8 @@ class DbSequencerStore(
       .querySingle(
         {
           val query =
-            sql"""select watermark_ts, sequencer_online 
-                    from sequencer_watermarks 
+            sql"""select watermark_ts, sequencer_online
+                    from sequencer_watermarks
                     where node_index = $instanceIndex"""
           def watermark(row: (CantonTimestamp, Boolean)) = Watermark(row._1, row._2)
 
@@ -689,7 +691,7 @@ class DbSequencerStore(
             case _: Postgres =>
               sqlu"""insert into sequencer_watermarks (node_index, watermark_ts, sequencer_online)
                values ($instanceIndex, $watermark, true)
-               on conflict (node_index) do 
+               on conflict (node_index) do
                  update set watermark_ts = $watermark, sequencer_online = true
                """
             case _: H2 | _: Oracle =>
@@ -738,8 +740,8 @@ class DbSequencerStore(
         memberContainsAfter: String,
         safeWatermark: CantonTimestamp,
     ) = sql"""
-        select events.ts, events.node_index, events.event_type, events.message_id, events.sender, 
-          events.recipients, payloads.id, payloads.content, events.signing_timestamp, 
+        select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
+          events.recipients, payloads.id, payloads.content, events.signing_timestamp,
           events.error_message, events.trace_context
         from sequencer_events events
         left join sequencer_payloads payloads
@@ -795,7 +797,7 @@ class DbSequencerStore(
             ((events.recipients is null) or $memberId IN (SELECT * FROM TABLE(events.recipients)))
             and (
               -- inclusive timestamp bound that defaults to MinValue if unset
-              events.ts >= $inclusiveFromTimestamp 
+              events.ts >= $inclusiveFromTimestamp
                 -- only consider events within the safe watermark
                 and events.ts <= $safeWatermark
                 -- if the sequencer that produced the event is offline, only consider up until its offline watermark
@@ -862,7 +864,7 @@ class DbSequencerStore(
               sqlu"""merge into sequencer_counter_checkpoints using dual
                     on member = $memberId and counter = $counter
                     when not matched then
-                      insert (member, counter, ts, latest_topology_client_ts) 
+                      insert (member, counter, ts, latest_topology_client_ts)
                       values ($memberId, $counter, $ts, $latestTopologyClientTimestamp)
                   """
             case _: Oracle =>
@@ -908,7 +910,7 @@ class DbSequencerStore(
     storage
       .query(
         sql"""
-           select counter, ts, latest_topology_client_ts 
+           select counter, ts, latest_topology_client_ts
            from sequencer_counter_checkpoints
            where member = $memberId
              and counter < $counter
@@ -931,7 +933,7 @@ class DbSequencerStore(
                """
         case _: H2 =>
           sqlu"""merge into sequencer_acknowledgements using dual
-                  on member = $member 
+                  on member = $member
                   when matched and $timestamp > ts then
                     update set ts = $timestamp
                   when not matched then

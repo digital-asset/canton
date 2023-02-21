@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.telemetry
 
+import com.digitalasset.canton.metrics.OnDemandMetricsReader
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder
 
@@ -13,6 +14,7 @@ import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder
 case class ConfiguredOpenTelemetry(
     openTelemetry: OpenTelemetrySdk,
     tracerProviderBuilder: SdkTracerProviderBuilder,
+    onDemandMetricsReader: OnDemandMetricsReader,
 ) extends AutoCloseable {
   override def close(): Unit = {
     openTelemetry.getSdkMeterProvider.close()

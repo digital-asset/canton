@@ -17,10 +17,14 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.FutureInstances.*
 import io.circe.{Encoder, KeyEncoder}
+import io.prometheus.client.Collector.MetricFamilySamples
+import io.prometheus.client.exporter.common.TextFormat
 
+import java.io.StringWriter
 import java.time.Instant
 import scala.concurrent.duration.TimeUnit
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
+import scala.jdk.CollectionConverters.IteratorHasAsJava
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -55,6 +59,13 @@ object CantonHealthAdministrationEncoders {
   implicit val timerEncoder: Encoder[metrics.Timer] =
     Encoder.forProduct4("count", "one-min-rate", "five-min-rate", "hist") { timer =>
       (timer.getCount, timer.getFiveMinuteRate, timer.getOneMinuteRate, timer.getSnapshot)
+    }
+
+  implicit val prometheusMetricDataEncoder: Encoder[Seq[MetricFamilySamples]] =
+    Encoder.encodeString.contramap[Seq[MetricFamilySamples]] { metrics =>
+      val writer = new StringWriter()
+      TextFormat.write004(writer, metrics.iterator.asJavaEnumeration)
+      writer.toString
     }
 
   implicit val traceElemEncoder: Encoder[StackTraceElement] =

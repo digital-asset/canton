@@ -39,6 +39,12 @@ final case class ConcurrentHMap[R[_, _]] private (
   def putIfAbsent[K, V](k: K, v: V)(implicit ev: R[K, V]): Option[V] =
     underlying.putIfAbsent(k, v).asInstanceOf[Option[V]]
 
+  def put_[K, V](k: K, v: V)(implicit ev: R[K, V]): Unit =
+    underlying.put(k, v).discard
+
+  def replace_[K, V](k: K, v: V)(implicit ev: R[K, V]): Unit =
+    underlying.replace(k, v).discard
+
   def remove[K, V](k: K)(implicit ev: R[K, V]): Option[V] =
     underlying.remove(k).asInstanceOf[Option[V]]
 

@@ -4,6 +4,8 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
+import io.opentelemetry.exporter.prometheus.OtelPrometheusAdapter
+import io.prometheus.client.Collector.MetricFamilySamples
 
 import scala.jdk.CollectionConverters.*
 
@@ -13,17 +15,20 @@ case class MetricsSnapshot(
     gauges: Map[String, metrics.Gauge[_]],
     histograms: Map[String, metrics.Histogram],
     meters: Map[String, metrics.Meter],
+    prometheusMetrics: Seq[MetricFamilySamples],
 )
 
 object MetricsSnapshot {
 
-  def apply(registry: metrics.MetricRegistry): MetricsSnapshot = {
+  def apply(registry: metrics.MetricRegistry, reader: OnDemandMetricsReader): MetricsSnapshot = {
+    val metrics = reader.read()
     MetricsSnapshot(
       timers = registry.getTimers.asScala.toMap,
       counters = registry.getCounters.asScala.toMap,
       gauges = registry.getGauges.asScala.toMap,
       histograms = registry.getHistograms.asScala.toMap,
       meters = registry.getMeters.asScala.toMap,
+      prometheusMetrics = OtelPrometheusAdapter.openTelemetryMetricsToPrometheus(metrics),
     )
   }
 }

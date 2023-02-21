@@ -7,14 +7,20 @@ import cats.Functor
 import cats.data.EitherT
 import cats.syntax.option.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.crypto.{HashOps, Signature, SyncCryptoApi, SyncCryptoError}
+import com.digitalasset.canton.crypto.{
+  HashOps,
+  Signature,
+  SignatureCheckError,
+  SyncCryptoApi,
+  SyncCryptoError,
+}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
@@ -37,6 +43,14 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtocolVersionedWrapper[SignedProtocolMessage[SignedProtocolMessageContent]] {
+
+  def verifySignature(
+      snapshot: SyncCryptoApi,
+      member: Member,
+  ): EitherT[Future, SignatureCheckError, Unit] = {
+    val hash = snapshot.pureCrypto.digest(message.hashPurpose, message.getCryptographicEvidence)
+    snapshot.verifySignature(hash, member, signature)
+  }
 
   def copy[MM <: SignedProtocolMessageContent](
       message: MM = this.message,

@@ -18,7 +18,7 @@ import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.ledger.client.binding.{Contract, Primitive as P, TemplateCompanion}
 import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
-import com.daml.metrics.api.{MetricName, MetricsContext}
+import com.daml.metrics.api.{MetricHandle, MetricName, MetricsContext}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
@@ -54,7 +54,6 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserver}
 import com.digitalasset.canton.participant.ledger.api.client.DecodeUtil
 import com.digitalasset.canton.protocol.LfContractId
@@ -260,9 +259,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
 
           val observer: StreamObserver[TransactionTree] = new StreamObserver[TransactionTree] {
 
-            def prefix: MetricName = MetricName(name)
-
-            val metricsFactory: MetricsFactory =
+            val metricsFactory: MetricHandle.MetricsFactory =
               consoleEnvironment.environment.metricsFactory.metricsFactory
 
             val metric: Meter = metricsFactory.meter(metricName)

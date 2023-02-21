@@ -535,6 +535,7 @@ object CantonConfig {
     import com.digitalasset.canton.config.CheckConfig.IsActive.DeprecatedImplicits.*
     import com.digitalasset.canton.participant.config.ActiveContractsServiceConfig.DeprecatedImplicits.*
     import com.digitalasset.canton.participant.config.LedgerApiServerConfig.DeprecatedImplicits.*
+    import com.digitalasset.canton.metrics.MetricsReporterConfig.DeprecatedImplicits.*
 
     lazy implicit val lengthLimitedStringReader: ConfigReader[LengthLimitedString] = {
       ConfigReader.fromString[LengthLimitedString] { str =>
@@ -907,7 +908,7 @@ object CantonConfig {
     lazy implicit val metricsConfigJMXReader: ConfigReader[MetricsConfig.JMX] =
       deriveReader[MetricsConfig.JMX]
     lazy implicit val metricsReporterConfigReader: ConfigReader[MetricsReporterConfig] =
-      deriveReader[MetricsReporterConfig]
+      deriveReader[MetricsReporterConfig].applyDeprecations
     lazy implicit val metricsConfigReader: ConfigReader[MetricsConfig] = deriveReader[MetricsConfig]
     lazy implicit val queryCostMonitoringConfigReader: ConfigReader[QueryCostMonitoringConfig] =
       deriveReader[QueryCostMonitoringConfig]

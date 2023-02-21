@@ -426,7 +426,7 @@ object LocalReject extends LocalRejectionGroup {
         This can happen in an overloaded system due to high latencies or for transactions with long interpretation times."""
     )
     @Resolution(
-      "For long-running transactions, specify a ledger time with the command submission. For short-running transactions, simply retry."
+      "For long-running transactions, specify a ledger time with the command submission or adjust the dynamic domain parameter ledgerTimeRecordTimeTolerance (and possibly the participant and mediator reaction timeout). For short-running transactions, simply retry."
     )
     object LedgerTime
         extends LocalRejectErrorCode(

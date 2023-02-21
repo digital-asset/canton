@@ -11,7 +11,7 @@ import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.TaskSchedulerMetrics
-import com.digitalasset.canton.metrics.MetricHandle.{CantonDropwizardMetricsFactory, MetricsFactory}
+import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
 import com.digitalasset.canton.metrics.*
 
 import scala.collection.concurrent.TrieMap
@@ -19,23 +19,23 @@ import scala.collection.concurrent.TrieMap
 class ParticipantMetrics(
     name: String,
     val prefix: MetricName,
-    val dropwizardFactory: CantonDropwizardMetricsFactory,
+    val metricsFactory: MetricsFactory,
     val labeledMetricsFactory: LabeledMetricsFactory,
 ) {
 
   private implicit val mc: MetricsContext = MetricsContext("participant_name" -> name)
 
-  object dbStorage extends DbStorageMetrics(prefix, dropwizardFactory)
+  object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
   val ledgerApiServer: LedgerApiServerMetrics =
-    new LedgerApiServerMetrics(dropwizardFactory, labeledMetricsFactory, dropwizardFactory.registry)
+    new LedgerApiServerMetrics(metricsFactory, labeledMetricsFactory, metricsFactory.registry)
 
   private val clients = TrieMap[DomainAlias, SyncDomainMetrics]()
 
-  object pruning extends PruningMetrics(prefix, dropwizardFactory)
+  object pruning extends PruningMetrics(prefix, metricsFactory)
 
   def domainMetrics(alias: DomainAlias): SyncDomainMetrics = {
-    clients.getOrElseUpdate(alias, new SyncDomainMetrics(prefix :+ alias.unwrap, dropwizardFactory))
+    clients.getOrElseUpdate(alias, new SyncDomainMetrics(prefix :+ alias.unwrap, metricsFactory))
   }
 
   @MetricDoc.Tag(
@@ -45,7 +45,7 @@ class ParticipantMetrics(
         |The indexer will subsequently store the update in a form that allows for querying the ledger efficiently.""",
     qualification = Debug,
   )
-  val updatesPublished: Meter = dropwizardFactory.meter(prefix :+ "updates-published")
+  val updatesPublished: Meter = metricsFactory.meter(prefix :+ "updates-published")
 
   @MetricDoc.Tag(
     summary = "Number of requests being validated.",
@@ -55,7 +55,7 @@ class ParticipantMetrics(
     qualification = Debug,
   )
   val dirtyRequests: Gauge[Int] =
-    dropwizardFactory.gauge(prefix :+ "dirty_requests", 0, "Number of requests being validated.")
+    metricsFactory.gauge(prefix :+ "dirty_requests", 0, "Number of requests being validated.")
 
   @MetricDoc.Tag(
     summary = "Configured maximum number of requests currently being validated.",
@@ -71,7 +71,7 @@ class ParticipantMetrics(
     NoOpGauge(prefix :+ "max_dirty_requests", 0)
 
   def registerMaxDirtyRequest(value: () => Option[Int]): Gauge.CloseableGauge =
-    dropwizardFactory.gaugeWithSupplier(
+    metricsFactory.gaugeWithSupplier(
       prefix :+ "max_dirty_requests",
       () => value().getOrElse(-1),
       """

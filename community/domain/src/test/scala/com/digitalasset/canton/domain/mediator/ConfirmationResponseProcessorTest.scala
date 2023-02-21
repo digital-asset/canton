@@ -34,7 +34,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.eq as eqMatch
 import org.scalatest.Assertion
@@ -45,7 +45,11 @@ import scala.concurrent.Future
 import scala.language.reflectiveCalls
 
 @nowarn("msg=match may not be exhaustive")
-class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
+class ConfirmationResponseProcessorTest
+    extends AsyncWordSpec
+    with BaseTest
+    with HasTestCloseContext { self =>
+
   private lazy val domainId: DomainId = DomainId(
     UniqueIdentifier.tryFromProtoPrimitive("domain::test")
   )
@@ -116,7 +120,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val mediatorState =
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
-          new InMemoryMediatorDeduplicationStore(loggerFactory),
+          new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
           mock[Clock],
           DomainTestMetrics.mediator,
           timeouts,
@@ -131,6 +135,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         mediatorState,
         testedProtocolVersion,
         loggerFactory,
+        timeouts,
       )
     }
 

@@ -246,6 +246,10 @@ class TestingIdentityFactory(
           FutureUnlessShutdown.pure(trySnapshot(timestamp))
         override def close(): Unit = ()
         override def topologyKnownUntilTimestamp: CantonTimestamp = approximateTimestamp
+
+        override def snapshotUS(timestamp: CantonTimestamp)(implicit
+            traceContext: TraceContext
+        ): FutureUnlessShutdown[TopologySnapshot] = awaitSnapshotUS(timestamp)
       })
     )
     ips

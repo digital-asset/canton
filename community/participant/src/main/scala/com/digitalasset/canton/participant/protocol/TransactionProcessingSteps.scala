@@ -19,6 +19,7 @@ import com.daml.lf.transaction.ContractStateMachine.{KeyInactive, KeyMapping}
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.digitalasset.canton.concurrent.{FutureSupervisor, SupervisedPromise}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
@@ -112,6 +113,7 @@ class TransactionProcessingSteps(
     authenticationValidator: AuthenticationValidator,
     authorizationValidator: AuthorizationValidator,
     protected val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       SubmissionParam,
@@ -540,7 +542,10 @@ class TransactionProcessingSteps(
       //  crashing the SyncDomain
       val randomnessMap =
         batch.foldLeft(Map.empty[ViewHash, Promise[SecureRandomness]]) { case (m, evt) =>
-          m + (evt.protocolMessage.viewHash -> Promise[SecureRandomness]())
+          m + (evt.protocolMessage.viewHash -> SupervisedPromise[SecureRandomness](
+            "secure-randomness",
+            futureSupervisor,
+          ))
         }
 
       def extractRandomnessFromView(
@@ -657,6 +662,7 @@ class TransactionProcessingSteps(
       ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
+      mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CheckActivenessAndWritePendingContracts] = {
@@ -984,7 +990,7 @@ class TransactionProcessingSteps(
             s"Cannot handle confirmation request with malformed payloads: $malformedPayloads",
           )
           val pendingTransaction =
-            createPendingTransaction(requestId, transactionValidationResult, rc, sc)
+            createPendingTransaction(requestId, transactionValidationResult, rc, sc, mediatorId)
           StorePendingDataAndSendResponseAndCreateTimeout(
             pendingTransaction,
             responses.map(_ -> mediatorRecipient),
@@ -1071,6 +1077,7 @@ class TransactionProcessingSteps(
       requestCounter,
       requestSequencerCounter,
       transactionValidationResult,
+      _,
     ) =
       pendingTransaction
     val submitterMeta = transactionValidationResult.submitterMetadata
@@ -1146,6 +1153,7 @@ class TransactionProcessingSteps(
       transactionValidationResult: TransactionValidationResult,
       rc: RequestCounter,
       sc: SequencerCounter,
+      mediatorId: MediatorId,
   )(implicit traceContext: TraceContext): PendingTransaction = {
     val TransactionValidationResult(
       transactionId,
@@ -1181,6 +1189,7 @@ class TransactionProcessingSteps(
       rc,
       sc,
       transactionValidationResult,
+      mediatorId,
     )
   }
 

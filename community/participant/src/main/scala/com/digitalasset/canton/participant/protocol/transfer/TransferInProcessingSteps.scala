@@ -4,12 +4,10 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
 import com.daml.lf.data.{Bytes, Ref}
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -275,6 +273,7 @@ private[transfer] class TransferInProcessingSteps(
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
+      mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
@@ -393,6 +392,7 @@ private[transfer] class TransferInProcessingSteps(
         transferringParticipant,
         transferId,
         hostedStks.toSet,
+        mediatorId,
       )
       responsesAndCausalityMessages <- validationResultO match {
         case None => EitherT.rightT[Future, TransferProcessorError]((Seq.empty, Seq.empty))
@@ -492,6 +492,7 @@ private[transfer] class TransferInProcessingSteps(
       transferringParticipant,
       transferId,
       hostedStakeholders,
+      _,
     ) = pendingRequestData
 
     import scala.util.Either.MergeableEither
@@ -640,6 +641,7 @@ object TransferInProcessingSteps {
       transferringParticipant: Boolean,
       transferId: TransferId,
       hostedStakeholders: Set[LfPartyId],
+      mediatorId: MediatorId,
   ) extends PendingTransfer
       with PendingRequestData {
     override def pendingContracts: Set[LfContractId] = Set(contract.contractId)

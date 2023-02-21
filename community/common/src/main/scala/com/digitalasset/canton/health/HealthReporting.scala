@@ -3,16 +3,17 @@
 
 package com.digitalasset.canton.health
 
+import com.digitalasset.canton.*
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.HealthReporting.ComponentState.{
   Degraded,
   Failed,
-  Ok,
   UnhealthyState,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.SingleUseCell
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.protobuf.services.HealthStatusManager
 
@@ -25,6 +26,9 @@ object HealthReporting extends PrettyInstances {
     */
   sealed trait ComponentState
   object ComponentState {
+
+    val NotInitialized: ComponentState =
+      ComponentState.Failed(ComponentState.UnhealthyState(Some("Not Initialized")))
 
     object Unhealthy {
       def unapply(state: ComponentState): Option[UnhealthyState] = state match {
@@ -96,6 +100,11 @@ object HealthReporting extends PrettyInstances {
     param("state", _.getState),
   )
 
+  implicit val prettyHealthElement: Pretty[HealthElement] = prettyOfClass {
+    case health: ServiceHealth => Some(prettyServiceHealth.treeOf(health))
+    case health: ComponentHealth => Some(prettyComponentHealth.treeOf(health))
+  }
+
   /** Combines a health status manager (exposed as a gRPC health service), with the set of health services it needs to report on.
     */
   case class ServiceHealthStatusManager(
@@ -118,58 +127,58 @@ object HealthReporting extends PrettyInstances {
     * - ServiceHealth: Aggregates ComponentHealth under critical and soft dependencies
     * Services are queryable through their name in the gRPC Health Check service/
     */
-  sealed trait HealthElement[S] {
+  sealed trait HealthElement {
+    type State
     protected val listeners = new AtomicReference[List[HealthListener]](Nil)
-    type HealthListener = (this.type, S) => Unit
+    type HealthListener = (this.type, State, TraceContext) => Unit
+
+    /** Returns true when the component is not in a failed state (for components, degraded is still not failed)
+      */
+    def isNotFailed: Boolean
 
     def registerOnHealthChange(listener: HealthListener): Unit = {
       listeners.getAndUpdate(listener :: _)
-      listener(this, getState)
+      listener(this, getState, TraceContext.empty)
     }
 
     /** Name of the health element. Used for logging.
       */
     def name: String
 
-    def getState: S
+    /** Current state
+      */
+    def getState: State
   }
 
-  trait ServiceHealth extends HealthElement[ServingStatus] { self =>
+  case class ServiceHealth(
+      name: String,
+      criticalDependencies: Seq[HealthElement] = Seq.empty,
+      softDependencies: Seq[HealthElement] = Seq.empty,
+  ) extends HealthElement { self =>
+    override type State = ServingStatus
 
-    /** Critical dependencies directly affecting the ServingStatus of the service.
-      * If any of the dependency reports a failed status, this service will report as `NOT_SERVING`.
-      */
-    def criticalDependencies: Set[ComponentHealth] = Set.empty
-
-    /** Components related to the service but that won't affect its serving status even when failed.
-      *
-      * @return
-      */
-    def softDependencies: Set[ComponentHealth] = Set.empty
-
-    criticalDependencies.foreach(
-      _.registerOnHealthChange((_: ComponentHealth, _: ComponentState) => {
-        listeners.get().foreach(_(self, getState))
-      })
+    criticalDependencies.foreach(c =>
+      c.registerOnHealthChange((_: c.type, _: c.type#State, tc: TraceContext) =>
+        listeners.get().foreach(_(self, getState, tc))
+      )
     )
 
-    // Compute the serving status for a service
-    override def getState: ServingStatus = {
-      def allComponentsOkOrDegraded: Boolean = criticalDependencies
-        .map(component =>
-          component.getState match {
-            case ComponentState.Ok | _: ComponentState.Degraded => true
-            case _ => false
-          }
-        )
-        .forall(_ == true)
+    override def registerOnHealthChange(listener: HealthListener): Unit = {
+      super.registerOnHealthChange(listener)
+    }
 
-      if (allComponentsOkOrDegraded) ServingStatus.SERVING
+    override def getState: ServingStatus = {
+      if (criticalDependencies.forall(_.isNotFailed)) ServingStatus.SERVING
       else ServingStatus.NOT_SERVING
     }
+
+    override def isNotFailed: Boolean = getState == ServingStatus.SERVING
+
+    def dependencies: Seq[HealthElement] = criticalDependencies ++ softDependencies
   }
 
-  trait ComponentHealth extends HealthElement[ComponentState] { self: NamedLogging =>
+  trait ComponentHealth extends HealthElement { self: NamedLogging =>
+    override type State = ComponentState
 
     /** Initial state of the component
       */
@@ -177,21 +186,24 @@ object HealthReporting extends PrettyInstances {
 
     private lazy val stateRef = new AtomicReference[ComponentState](initialState)
 
-    def reportHealthState(state: ComponentState)(implicit tc: TraceContext): Unit = {
+    def reportHealthState_(state: ComponentState)(implicit tc: TraceContext): Unit = {
+      reportHealthState(state).discard
+    }
+
+    def reportHealthState(
+        state: ComponentState
+    )(implicit tc: TraceContext): Boolean = {
       val old = stateRef.getAndSet(state)
-      if (old != state) logStateChange(old)
-      listeners.get().foreach(_(this, state))
+      val changed = old != state
+      if (changed) {
+        logStateChange(old)
+        listeners.get().foreach(_(this, state, tc))
+      }
+      changed
     }
 
     override def getState: ComponentState = stateRef.get()
-
-    /** Whether the component is in a degraded state. Note: degraded here means exactly _degraded_, to know if the component
-      * is just unhealthy (i.e degraded or failed), use isUnhealthy.
-      */
-    def isDegraded: Boolean = getState match {
-      case _: Degraded => true
-      case _ => false
-    }
+    override def isNotFailed: Boolean = !isFailed
 
     /** Whether the component is in a failed state. Note: failed here means exactly _failed_, to know if the component
       * is just unhealthy (i.e degraded or failed), use isUnhealthy.
@@ -201,32 +213,15 @@ object HealthReporting extends PrettyInstances {
       case _ => false
     }
 
-    /** Whether the component is in a degraded or failed state.
-      */
-    def isUnhealthy: Boolean = isDegraded || isFailed
-
-    /** Whether the component has last reported being ok (and at least once)
-      */
-    def isOk: Boolean = getState match {
-      case Ok => true
-      case _ => false
-    }
-
-    /** If the component is unhealthy, return the unhealthy state with information about the issue.
-      */
-    def getUnhealthyState: Option[UnhealthyState] =
-      getState match {
-        case ComponentState.Unhealthy(unhealthy) =>
-          Some(unhealthy)
-        case _ =>
-          None
-      }
-
     /** Set the health state to Ok and if the previous state was unhealthy, log a message to inform about the resolution
       * of the ongoing issue.
       */
-    def resolveUnhealthy(implicit traceContext: TraceContext): Unit = {
+    def resolveUnhealthy(implicit traceContext: TraceContext): Boolean = {
       reportHealthState(ComponentState.Ok)
+    }
+
+    def resolveUnhealthy_(implicit traceContext: TraceContext): Unit = {
+      resolveUnhealthy.discard
     }
 
     private def logStateChange(
@@ -244,7 +239,7 @@ object HealthReporting extends PrettyInstances {
     def degradationOccurred(error: CantonError)(implicit
         tc: TraceContext
     ): Unit = {
-      reportHealthState(
+      reportHealthState_(
         ComponentState.Degraded(
           UnhealthyState(None, Some(error))
         )
@@ -256,7 +251,7 @@ object HealthReporting extends PrettyInstances {
     def failureOccurred(error: CantonError)(implicit
         tc: TraceContext
     ): Unit = {
-      reportHealthState(
+      reportHealthState_(
         ComponentState.Failed(
           UnhealthyState(None, Some(error))
         )
@@ -269,7 +264,7 @@ object HealthReporting extends PrettyInstances {
     def degradationOccurred(error: String)(implicit
         tc: TraceContext
     ): Unit = {
-      reportHealthState(
+      reportHealthState_(
         ComponentState.Degraded(
           UnhealthyState(Some(error))
         )
@@ -281,11 +276,46 @@ object HealthReporting extends PrettyInstances {
     def failureOccurred(error: String)(implicit
         tc: TraceContext
     ): Unit = {
-      reportHealthState(
+      reportHealthState_(
         ComponentState.Failed(
           UnhealthyState(Some(error))
         )
       )
     }
+  }
+
+  /** Deferred Health component, use when the health component is not instantiated at bootstrap time
+    * @param uninitializedName name used to identify this component while it has not been initialized yet
+    * @param prefix optional string to prepend to the name of the delegate component
+    */
+  case class DeferredHealthComponent(
+      override val loggerFactory: NamedLoggerFactory,
+      uninitializedName: String,
+  ) extends ComponentHealth
+      with NamedLogging { self =>
+    override protected val initialState: ComponentState = ComponentState.NotInitialized
+    private val delegate = new SingleUseCell[ComponentHealth]
+
+    override def name: String =
+      delegate.get
+        .map(_.name)
+        .getOrElse(uninitializedName)
+
+    override def getState: State = delegate.get
+      .map(_.getState)
+      .getOrElse(initialState)
+
+    def set(element: ComponentHealth): Unit = {
+      if (delegate.putIfAbsent(element).isEmpty) {
+        element.registerOnHealthChange(
+          (_: element.type, state: element.State, tc: TraceContext) => {
+            listeners.get().foreach(_(self, state, tc))
+          }
+        )
+      } else {
+        logger.debug(s"The deferred health component $name was already set")(TraceContext.empty)
+      }
+    }
+    override def isNotFailed: Boolean = delegate.get.exists(_.isNotFailed)
   }
 }

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.memory
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
@@ -21,6 +22,7 @@ class InMemorySyncDomainPersistentState(
     override val pureCryptoApi: CryptoPureApi,
     override val enableAdditionalConsistencyChecks: Boolean,
     val loggerFactory: NamedLoggerFactory,
+    timeouts: ProcessingTimeout,
 )(implicit ec: ExecutionContext)
     extends SyncDomainPersistentState {
 
@@ -33,7 +35,8 @@ class InMemorySyncDomainPersistentState(
   val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
   val acsCommitmentStore = new InMemoryAcsCommitmentStore(loggerFactory)
   val parameterStore = new InMemoryDomainParameterStore()
-  val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+  val sequencerCounterTrackerStore =
+    new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
   val sendTrackerStore = new InMemorySendTrackerStore()
   val causalDependencyStore =
     new InMemorySingleDomainCausalDependencyStore(domainId.item, loggerFactory)

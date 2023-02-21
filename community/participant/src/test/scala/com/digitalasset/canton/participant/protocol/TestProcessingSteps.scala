@@ -185,6 +185,7 @@ class TestProcessingSteps(
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
+      mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TestProcessingError, CheckActivenessAndWritePendingContracts] = {
@@ -213,7 +214,7 @@ class TestProcessingSteps(
   ): EitherT[Future, TestProcessingError, StorePendingDataAndSendResponseAndCreateTimeout] = {
     val res = StorePendingDataAndSendResponseAndCreateTimeout(
       pendingRequestData.getOrElse(
-        TestPendingRequestData(RequestCounter(0), SequencerCounter(0), Set.empty)
+        TestPendingRequestData(RequestCounter(0), SequencerCounter(0), Set.empty, mediatorId)
       ),
       Seq.empty,
       List.empty,
@@ -295,6 +296,7 @@ object TestProcessingSteps {
       requestCounter: RequestCounter,
       requestSequencerCounter: SequencerCounter,
       pendingContracts: Set[LfContractId],
+      mediatorId: MediatorId,
   ) extends PendingRequestData
 
   case object TestPendingRequestDataType extends RequestType {

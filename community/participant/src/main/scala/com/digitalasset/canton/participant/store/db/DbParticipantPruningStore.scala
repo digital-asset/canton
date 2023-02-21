@@ -40,7 +40,7 @@ class DbParticipantPruningStore(
         case _: Postgres =>
           sqlu"""insert into pruning_operation as po (name, started_up_to_inclusive, completed_up_to_inclusive)
                  values ($name, $upToInclusive, null)
-                 on conflict (name) do 
+                 on conflict (name) do
                    update set started_up_to_inclusive = $upToInclusive
                    where po.started_up_to_inclusive is null or po.started_up_to_inclusive < $upToInclusive"""
         case _: H2 =>
@@ -68,7 +68,7 @@ class DbParticipantPruningStore(
   )(implicit traceContext: TraceContext): Future[Unit] =
     processingTime.event {
       storage.update_(
-        sqlu"""update pruning_operation set completed_up_to_inclusive = $upToInclusive 
+        sqlu"""update pruning_operation set completed_up_to_inclusive = $upToInclusive
                        where name = $name and (completed_up_to_inclusive is null or completed_up_to_inclusive < $upToInclusive)""",
         functionFullName,
       )

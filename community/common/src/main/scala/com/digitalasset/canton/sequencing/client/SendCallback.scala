@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.sequencing.client
 
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
 
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.Promise
 
 /** Utilities for a SendCallback passed to the send method of the [[SequencerClient]] */
 object SendCallback {
@@ -27,11 +28,16 @@ object SendCallback {
     * and cause a deadlock.
     */
   class CallbackFuture extends SendCallback {
-    private val promise = Promise[SendResult]()
+    import com.digitalasset.canton.DiscardOps
 
-    val future: Future[SendResult] = promise.future
+    private val promise = Promise[UnlessShutdown[SendResult]]()
 
-    override def apply(result: SendResult): Unit = promise.success(result)
+    val future: FutureUnlessShutdown[SendResult] = {
+      FutureUnlessShutdown(promise.future)
+    }
+
+    override def apply(result: UnlessShutdown[SendResult]): Unit =
+      promise.trySuccess(result).discard
   }
 
   def future: CallbackFuture = new CallbackFuture

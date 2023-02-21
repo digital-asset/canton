@@ -388,8 +388,8 @@ object DbInFlightSubmissionStore {
                submission_domain, message_id,
                sequencing_timeout, sequencer_counter, sequencing_time, tracking_data,
                trace_context)
-             values (?, ?, 
-                     ?, ?, 
+             values (?, ?,
+                     ?, ?,
                      ?, NULL, NULL, ?,
                      ?)
              on conflict do nothing"""

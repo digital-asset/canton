@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
@@ -41,6 +42,7 @@ class TransactionProcessingStepsTest extends AsyncWordSpec with BaseTest {
     new AuthenticationValidator(),
     new AuthorizationValidator(participantId),
     loggerFactory = loggerFactory,
+    FutureSupervisor.Noop,
   )
 
   "authenticateInputContracts" when {

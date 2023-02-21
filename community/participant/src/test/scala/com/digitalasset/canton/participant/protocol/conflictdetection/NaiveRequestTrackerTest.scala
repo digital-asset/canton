@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.memory.{InMemoryTransferStore, TransferCache}
@@ -52,6 +53,7 @@ class NaiveRequestTrackerTest
       ParticipantTestMetrics.domain.conflictDetection,
       timeouts,
       loggerFactory,
+      FutureSupervisor.Noop,
     )
   }
 

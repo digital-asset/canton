@@ -5,7 +5,7 @@ package com.digitalasset.canton.store.db
 
 import com.digitalasset.canton.SequencerCounterDiscriminator
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
@@ -19,7 +19,6 @@ class DbSequencerCounterTrackerStore(
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends SequencerCounterTrackerStore
-    with FlagCloseable
     with NamedLogging {
   override protected[store] val cursorStore =
     new DbCursorPreheadStore[SequencerCounterDiscriminator](

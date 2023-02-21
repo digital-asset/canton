@@ -10,6 +10,7 @@ import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricName
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.MetricHandle.CantonDropwizardMetricsFactory
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -42,7 +43,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
       initRc: RequestCounter,
       store: RequestJournalStore = new InMemoryRequestJournalStore(loggerFactory),
   ): RequestJournal = {
-    new RequestJournal(store, mkSyncDomainMetrics, loggerFactory, initRc)
+    new RequestJournal(store, mkSyncDomainMetrics, loggerFactory, initRc, FutureSupervisor.Noop)
   }
 
   private def mkSyncDomainMetrics = {
@@ -354,7 +355,13 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
     "cursor futures are consistent with the persisted cursors" in {
       val rjs = new InMemoryRequestJournalStore(loggerFactory)
       val hooked = new PreHookRequestJournalStore(rjs, loggerFactory)
-      val rj = new RequestJournal(hooked, mkSyncDomainMetrics, loggerFactory, initRc)
+      val rj = new RequestJournal(
+        hooked,
+        mkSyncDomainMetrics,
+        loggerFactory,
+        initRc,
+        FutureSupervisor.Noop,
+      )
 
       def cleanCounterHook3(clean4: Future[Unit]): CleanCounterHook = { prehead =>
         val CursorPrehead(rc, _requestTimestamp) = prehead
@@ -448,7 +455,13 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
     "preheads do not move backwards" in {
       val rjs = new InMemoryRequestJournalStore(loggerFactory)
       val hooked = new PreHookRequestJournalStore(rjs, loggerFactory)
-      val rj = new RequestJournal(hooked, mkSyncDomainMetrics, loggerFactory, initRc)
+      val rj = new RequestJournal(
+        hooked,
+        mkSyncDomainMetrics,
+        loggerFactory,
+        initRc,
+        FutureSupervisor.Noop,
+      )
       val ts1 = CantonTimestamp.ofEpochSecond(1)
 
       // No test for the Pending prehead because we don't have a hook into that.

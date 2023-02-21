@@ -5,6 +5,7 @@ package com.digitalasset.canton.store
 
 import com.digitalasset.canton.SequencerCounterDiscriminator
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
@@ -23,7 +24,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * completely and successfully.
   * The prehead of the cursor is advanced only so far that all sequencer counters up to the prehead are clean.
   */
-trait SequencerCounterTrackerStore extends AutoCloseable {
+trait SequencerCounterTrackerStore extends FlagCloseable {
   protected[store] val cursorStore: CursorPreheadStore[SequencerCounterDiscriminator]
 
   /** Gets the prehead clean sequencer counter. All sequencer counters below are assumed to be clean. */
@@ -56,7 +57,7 @@ object SequencerCounterTrackerStore {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): SequencerCounterTrackerStore = storage match {
-    case _: MemoryStorage => new InMemorySequencerCounterTrackerStore(loggerFactory)
+    case _: MemoryStorage => new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
     case dbStorage: DbStorage =>
       new DbSequencerCounterTrackerStore(client, dbStorage, timeouts, loggerFactory)
   }

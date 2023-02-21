@@ -7,8 +7,15 @@ import cats.data.EitherT
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  SyncCloseable,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.SendTrackerUpdateError
@@ -22,7 +29,7 @@ import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SavePendingSendError, SendTrackerStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
-import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
 
 import java.time.Instant
 import scala.collection.concurrent.TrieMap
@@ -44,8 +51,10 @@ class SendTracker(
     store: SendTrackerStore,
     metrics: SequencerClientMetrics,
     protected val loggerFactory: NamedLoggerFactory,
+    override val timeouts: ProcessingTimeout,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
+    with FlagCloseableAsync
     with AutoCloseable {
 
   /** Details of sends in flight
@@ -143,7 +152,9 @@ class SendTracker(
     logger.debug(s"Sequencer send [$messageId] has timed out at $timestamp")
     for {
       _ <- handler(messageId)
-      _ <- EitherT.right(removePendingSend(messageId, SendResult.Timeout(timestamp).some))
+      _ <- EitherT.right(
+        removePendingSend(messageId, UnlessShutdown.Outcome(SendResult.Timeout(timestamp)).some)
+      )
     } yield ()
   }
 
@@ -158,7 +169,7 @@ class SendTracker(
   )(implicit traceContext: TraceContext): Future[Unit] =
     extractSendResult(event)
       .fold(Future.unit) { case (messageId, sendResult) =>
-        removePendingSend(messageId, sendResult.some)
+        removePendingSend(messageId, UnlessShutdown.Outcome(sendResult).some)
       }
 
   private def updateSequencedMetrics(pendingSend: PendingSend, result: SendResult): Unit = {
@@ -185,14 +196,14 @@ class SendTracker(
   /** Removes the pending send.
     * If a send result is supplied the callback will be called with it.
     */
-  private def removePendingSend(messageId: MessageId, resultO: Option[SendResult])(implicit
-      traceContext: TraceContext
+  private def removePendingSend(messageId: MessageId, resultO: Option[UnlessShutdown[SendResult]])(
+      implicit traceContext: TraceContext
   ): Future[Unit] = {
     val pendingO = pendingSends.remove(messageId)
 
     OptionUtil
       .zipWith(pendingO, resultO) { (pending, result) =>
-        updateSequencedMetrics(pending, result)
+        result.foreach(updateSequencedMetrics(pending, _))
         pending.callback(result)
       }
       .discard
@@ -217,5 +228,17 @@ class SendTracker(
     }
   }
 
-  override def close(): Unit = Lifecycle.close(store)(logger)
+  override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
+    import TraceContext.Implicits.Empty.emptyTraceContext
+    Seq(
+      AsyncCloseable(
+        "complete-pending-sends",
+        MonadUtil.sequentialTraverse_(pendingSends.keys)(
+          removePendingSend(_, Some(UnlessShutdown.AbortedDueToShutdown))
+        ),
+        timeouts.shutdownProcessing.duration,
+      ),
+      SyncCloseable("send-tracker-store", store.close()),
+    )
+  }
 }

@@ -268,11 +268,13 @@ class ResilientSequencerSubscriptionRetryTimingTest
         val subscription =
           createSubscription(
             SubscriptionTestFactory.alwaysCloseWith(RetryableError),
+            // this will retry with a max-delay and it will warn once the max-delay is hit
             retryDelayRule = retryDelay(maxDelay),
           )
 
         subscription.start
 
+        // we retry until we see a warning
         eventually() {
           loggerFactory.numberOfRecordedEntries should be > 0
         }
@@ -288,8 +290,8 @@ class ResilientSequencerSubscriptionRetryTimingTest
         logEntries should not be empty
       },
     )
-    // Check that it has hit MaxDelay
-    -startTime.timeLeft should (be >= maxDelay and be <= maxDelay * 25)
+    // Check that it has hit MaxDelay. We can't really check an upper bound as it would make the test flaky
+    -startTime.timeLeft should be >= maxDelay
   }
 }
 

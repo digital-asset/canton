@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.OptionT
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.concurrent.{FutureSupervisor, SupervisedPromise}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   Counter,
@@ -69,6 +70,7 @@ class RequestJournal(
     metrics: SyncDomainMetrics,
     override protected val loggerFactory: NamedLoggerFactory,
     initRc: RequestCounter,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends RequestJournalReader
     with NamedLogging
@@ -300,7 +302,8 @@ class RequestJournal(
       logger.debug(withRc(rc, s"Transited to state $newState"))
       if (newState.hasCursor) {
         // Synchronously add the new entry to the cursor queue, if there is a cursor queue
-        val info = CursorInfo(requestTimestamp, Promise[Unit]())
+        val info =
+          CursorInfo(requestTimestamp, SupervisedPromise[Unit]("cursor-info", futureSupervisor))
         newState.visitCursor {
           case Pending => Some(pendingCursor.insert(rc, info))
           case Clean => Some(cleanCursor.insert(rc, info))
@@ -348,7 +351,7 @@ class RequestJournal(
 
   private def withRc(rc: RequestCounter, msg: String): String = s"Request $rc: $msg"
 
-  private def drainPending: Future[Unit] = Future {
+  private def drainPending(implicit traceContext: TraceContext): Future[Unit] = Future {
     val newPrehead = drain(pendingCursor)
     newPrehead.foreach { case (_prehead, completionPromise) => completionPromise.success(()) }
   }
@@ -374,9 +377,8 @@ class RequestJournal(
     */
   private def drain(
       pq: PeanoQueue[RequestCounter, CursorInfo]
-  ): Option[(RequestCounterCursorPrehead, Promise[Unit])] = {
-
-    val completionPromise = Promise[Unit]()
+  )(implicit traceContext: TraceContext): Option[(RequestCounterCursorPrehead, Promise[Unit])] = {
+    val completionPromise = SupervisedPromise[Unit]("drain", futureSupervisor)
 
     @tailrec def drain(
         currentPrehead: Option[RequestCounterCursorPrehead]

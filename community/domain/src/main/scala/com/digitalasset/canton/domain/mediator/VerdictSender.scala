@@ -10,6 +10,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.MediatorMessageId.VerdictMessageId
+import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
@@ -98,9 +99,9 @@ private[mediator] class DefaultVerdictSender(
       decisionTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val callback: SendCallback = {
-      case SendResult.Success(_) =>
+      case UnlessShutdown.Outcome(SendResult.Success(_)) =>
         logger.debug(s"Sent result for request ${requestId.unwrap}")
-      case SendResult.Error(error) =>
+      case UnlessShutdown.Outcome(SendResult.Error(error)) =>
         val reason = error.reason
         reason match {
           case _: DeliverErrorReason.BatchRefused =>
@@ -112,8 +113,10 @@ private[mediator] class DefaultVerdictSender(
               s"Failed to send result message for $requestId: $reason"
             )
         }
-      case _: SendResult.Timeout =>
+      case UnlessShutdown.Outcome(_: SendResult.Timeout) =>
         logger.warn("Sequencing result message timed out.")
+      case UnlessShutdown.AbortedDueToShutdown =>
+        logger.debug("Sequencing result processing was aborted due to shutdown")
     }
 
     // the result of send request will be logged within the returned future however any error is effectively

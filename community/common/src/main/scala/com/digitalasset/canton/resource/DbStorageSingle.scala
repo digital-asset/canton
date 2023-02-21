@@ -83,7 +83,7 @@ class DbStorageSingle private (
       val valid = ResourceUtil.withResource(connection)(
         _.isValid(dbConfig.parameters.connectionTimeout.duration.toSeconds.toInt)
       )
-      if (valid) resolveUnhealthy
+      if (valid) resolveUnhealthy_
       valid
     } catch {
       case e: SQLException =>

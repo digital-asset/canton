@@ -8,6 +8,7 @@ import com.daml.error.definitions.LedgerApiErrors
 import com.daml.error.{ContextualizedErrorLogger, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.ledger.participant.state.v2.{ChangeId, SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -44,7 +45,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import org.slf4j.event.Level
 
 import java.time.Duration
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 class TransactionProcessor(
     participantId: ParticipantId,
@@ -59,6 +60,7 @@ class TransactionProcessor(
     metrics: TransactionProcessingMetrics,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit val ec: ExecutionContext)
     extends ProtocolProcessor[
       TransactionProcessingSteps.SubmissionParam,
@@ -90,12 +92,14 @@ class TransactionProcessor(
         new AuthenticationValidator(),
         new AuthorizationValidator(participantId),
         loggerFactory,
+        futureSupervisor,
       ),
       inFlightSubmissionTracker,
       ephemeral,
       crypto,
       sequencerClient,
       loggerFactory,
+      futureSupervisor,
     ) {
 
   def submit(
@@ -106,9 +110,13 @@ class TransactionProcessor(
       disclosedContracts: Map[LfContractId, SerializableContract],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TransactionProcessor.TransactionSubmissionError, Future[
-    TransactionSubmitted
-  ]] =
+  ): EitherT[
+    FutureUnlessShutdown,
+    TransactionProcessor.TransactionSubmissionError,
+    FutureUnlessShutdown[
+      TransactionSubmitted
+    ],
+  ] =
     this.submit(
       TransactionProcessingSteps.SubmissionParam(
         submitterInfo,

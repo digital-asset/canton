@@ -42,7 +42,7 @@ class DbDomainParameterStore(
       // be different even though the parameters are the same
       val query = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
-          sqlu"""insert 
+          sqlu"""insert
                  /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( static_domain_parameters ( domain_id ) ) */
                  into static_domain_parameters(domain_id, params)
                values ($domainId, $newParameters)"""

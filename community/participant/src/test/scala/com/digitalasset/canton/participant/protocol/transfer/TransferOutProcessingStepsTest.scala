@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.implicits.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
@@ -120,6 +121,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       pureCrypto,
       enableAdditionalConsistencyChecks = true,
       loggerFactory,
+      timeouts,
     )
   private val globalTracker = new GlobalCausalOrderer(
     submittingParticipant,
@@ -145,7 +147,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       DefaultProcessingTimeouts.testing,
       useCausalityTracking = true,
       loggerFactory,
-    )(executorService)
+      FutureSupervisor.Noop,
+    )
 
   private val damle =
     DAMLeTestInstance(submittingParticipant, signatories = Set(party1), stakeholders = Set(party1))(
@@ -549,6 +552,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
             NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
+            MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
           )
         )("compute activeness set failed")
       } yield {
@@ -680,6 +684,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           Set(party1),
           timeEvent,
           Some(transferInExclusivity),
+          MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
         )
         _ <- valueOrFail(
           outProcessingSteps

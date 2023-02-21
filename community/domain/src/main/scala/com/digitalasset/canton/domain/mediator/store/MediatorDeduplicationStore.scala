@@ -8,6 +8,7 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore.DeduplicationData
+import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -26,7 +27,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
-private[mediator] trait MediatorDeduplicationStore extends NamedLogging {
+private[mediator] trait MediatorDeduplicationStore extends NamedLogging with FlagCloseable {
 
   /** Stores deduplication data for a given uuid.
     */
@@ -168,7 +169,7 @@ private[mediator] object MediatorDeduplicationStore {
       batchAggregatorConfig: BatchAggregatorConfig =
         BatchAggregatorConfig(), // TODO(i9798): make this configurable
   )(implicit executionContext: ExecutionContext): MediatorDeduplicationStore = storage match {
-    case _: MemoryStorage => new InMemoryMediatorDeduplicationStore(loggerFactory)
+    case _: MemoryStorage => new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts)
     case dbStorage: DbStorage =>
       new DbMediatorDeduplicationStore(
         mediatorId,
@@ -210,7 +211,8 @@ private[mediator] object MediatorDeduplicationStore {
 }
 
 private[mediator] class InMemoryMediatorDeduplicationStore(
-    override protected val loggerFactory: NamedLoggerFactory
+    override protected val loggerFactory: NamedLoggerFactory,
+    override val timeouts: ProcessingTimeout,
 ) extends MediatorDeduplicationStore
     with NamedLogging {
 

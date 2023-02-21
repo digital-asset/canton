@@ -77,7 +77,10 @@ trait HealthDumpGenerator[Status <: CantonStatus] {
     val cantonVersion = ReleaseVersion.current.fullVersion
     val env = EnvironmentInfo(sys.props("os.name"), javaVersion)
 
-    val metricsSnapshot = MetricsSnapshot(environment.metricsFactory.registry)
+    val metricsSnapshot = MetricsSnapshot(
+      environment.metricsFactory.registry,
+      environment.configuredOpenTelemetry.onDemandMetricsReader,
+    )
     val config = environment.config.dumpString
 
     val traces = {
