@@ -309,7 +309,7 @@ class DbDamlPackageStore(
       case _: DbStorage.Profile.Oracle =>
         sqlu"""insert
                 /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( dars ( hash_hex ) ) */
-                into dars (hash_hex, hash, data, name) 
+                into dars (hash_hex, hash, data, name)
                 values (${dar.hash.toLengthLimitedHexString}, ${dar.hash}, ${dar.data}, ${dar.name})
               """
     }

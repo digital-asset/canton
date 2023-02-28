@@ -242,11 +242,18 @@ class SequencerRuntime(
           sequencerDomainParamsLookup,
           localNodeParameters.processingTimeouts,
           // Since the sequencer runtime trusts itself, there is no point in validating the events.
-          SequencedEventValidatorFactory.noValidation(domainId, sequencerId, warn = false),
+          SequencedEventValidatorFactory
+            .noValidation(domainId, sequencerId, warn = false, timeouts),
           clock,
           RequestSigner(syncCrypto),
           sequencedEventStore,
-          new SendTracker(Map(), SendTrackerStore(storage), metrics.sequencerClient, loggerFactory),
+          new SendTracker(
+            Map(),
+            SendTrackerStore(storage),
+            metrics.sequencerClient,
+            loggerFactory,
+            timeouts,
+          ),
           metrics.sequencerClient,
           None,
           replayEnabled = false,

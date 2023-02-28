@@ -650,7 +650,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(acsCommitmentStore.noOutstandingCommitments(any[CantonTimestamp])(any[TraceContext]))
         .thenReturn(Future.successful(None))
-      val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+      val sequencerCounterTrackerStore =
+        new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
 
       for {
@@ -684,7 +685,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         .thenAnswer { (ts: CantonTimestamp, _: TraceContext) =>
           Future.successful(Some(ts.min(CantonTimestamp.Epoch)))
         }
-      val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+      val sequencerCounterTrackerStore =
+        new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
 
       for {
@@ -729,7 +731,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         constantSortedReconciliationIntervalsProvider(reconciliationInterval)
 
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-      val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+      val sequencerCounterTrackerStore =
+        new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
       val ts0 = CantonTimestamp.Epoch
       val ts1 = CantonTimestamp.ofEpochMilli(requestTsDelta.toMillis)
@@ -799,7 +802,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       val requestTsDelta = 20.seconds
 
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-      val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+      val sequencerCounterTrackerStore =
+        new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(acsCommitmentStore.noOutstandingCommitments(any[CantonTimestamp])(any[TraceContext]))
         .thenAnswer { (ts: CantonTimestamp, _: TraceContext) =>
@@ -853,7 +857,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         constantSortedReconciliationIntervalsProvider(reconciliationInterval)
 
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-      val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+      val sequencerCounterTrackerStore =
+        new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(acsCommitmentStore.noOutstandingCommitments(any[CantonTimestamp])(any[TraceContext]))
         .thenAnswer { (ts: CantonTimestamp, _: TraceContext) =>
@@ -900,7 +905,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       val submissionId = LedgerSubmissionId.assertFromString("submission-id").some
 
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-      val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
+      val sequencerCounterTrackerStore =
+        new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(acsCommitmentStore.noOutstandingCommitments(any[CantonTimestamp])(any[TraceContext]))
         .thenAnswer { (ts: CantonTimestamp, _: TraceContext) =>

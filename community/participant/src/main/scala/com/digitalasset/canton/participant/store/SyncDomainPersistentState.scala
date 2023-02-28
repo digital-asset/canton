@@ -62,6 +62,7 @@ object SyncDomainPersistentState {
           pureCryptoApi,
           enableAdditionalConsistencyChecks,
           domainLoggerFactory,
+          processingTimeouts,
         )
       case db: DbStorage =>
         new DbSyncDomainPersistentState(

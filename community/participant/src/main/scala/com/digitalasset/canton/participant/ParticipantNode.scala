@@ -33,6 +33,7 @@ import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
 import com.digitalasset.canton.health.HealthReporting
+import com.digitalasset.canton.health.HealthReporting.{DeferredHealthComponent, ServiceHealth}
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -65,6 +66,7 @@ import com.digitalasset.canton.participant.store.memory.{
 import com.digitalasset.canton.participant.sync.{
   CantonSyncService,
   ParticipantEventPublisher,
+  SyncDomain,
   SyncDomainPersistentStateManager,
   SyncServiceError,
 }
@@ -77,7 +79,7 @@ import com.digitalasset.canton.participant.topology.{
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.scheduler.SchedulersWithPruning
-import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
+import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
@@ -143,7 +145,7 @@ class ParticipantNodeBootstrap(
       cantonParameterConfig,
       clock,
       metrics.prefix,
-      metrics.dropwizardFactory,
+      metrics.metricsFactory,
       metrics.dbStorage,
       storageFactory,
       cryptoPrivateStoreFactory,
@@ -169,11 +171,28 @@ class ParticipantNodeBootstrap(
     None
   )
 
+  lazy val syncDomainHealth: DeferredHealthComponent = DeferredHealthComponent(
+    loggerFactory,
+    SyncDomain.healthName,
+  )
+  lazy val syncDomainEphemeralHealth: DeferredHealthComponent = DeferredHealthComponent(
+    loggerFactory,
+    SyncDomainEphemeralState.healthName,
+  )
+  lazy val syncDomainSequencerClientHealth: DeferredHealthComponent = DeferredHealthComponent(
+    loggerFactory,
+    SequencerClient.healthName,
+  )
+
   override protected lazy val nodeHealthService: HealthReporting.ServiceHealth =
-    new HealthReporting.ServiceHealth {
-      override val name: String = "participant"
-      override lazy val criticalDependencies: Set[HealthReporting.ComponentHealth] = Set(storage)
-    }
+    HealthReporting.ServiceHealth(
+      "participant",
+      criticalDependencies = Seq(storage),
+      // The sync service won't be reporting Ok until the node is initialized, but that shouldn't prevent traffic from
+      // reaching the node
+      softDependencies =
+        Seq(syncDomainHealth, syncDomainEphemeralHealth, syncDomainSequencerClientHealth),
+    )
 
   private val authorizedTopologyStore = topologyStoreFactory.forId(AuthorizedStore)
   private val topologyManager =
@@ -484,6 +503,7 @@ class ParticipantNodeBootstrap(
         testingConfig,
         cantonParameterConfig.enableCausalityTracking,
         loggerFactory,
+        futureSupervisor,
       )
 
       // upstream party information update generator
@@ -567,6 +587,10 @@ class ParticipantNodeBootstrap(
         futureSupervisor,
         loggerFactory,
       )
+
+      _ = syncDomainHealth.set(sync.syncDomainHealth)
+      _ = syncDomainEphemeralHealth.set(sync.ephemeralHealth)
+      _ = syncDomainSequencerClientHealth.set(sync.sequencerClientHealth)
 
       // provide the idm a handle to synchronize package vettings
       _ = {
@@ -697,6 +721,7 @@ class ParticipantNodeBootstrap(
         replaySequencerConfig,
         schedulers,
         loggerFactory,
+        nodeHealthService,
       )
 
     }
@@ -835,6 +860,7 @@ class ParticipantNode(
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
+    val serviceHealth: ServiceHealth,
 ) extends CantonNode
     with NamedLogging
     with HasUptime

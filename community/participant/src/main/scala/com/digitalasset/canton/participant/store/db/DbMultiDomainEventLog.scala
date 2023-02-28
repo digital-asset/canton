@@ -331,7 +331,7 @@ class DbMultiDomainEventLog private[db] (
     processingTime.event {
       val insertStatement = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
-          """merge /*+ INDEX ( linearized_event_log ( local_offset, log_id ) ) */ 
+          """merge /*+ INDEX ( linearized_event_log ( local_offset, log_id ) ) */
             |into linearized_event_log lel
             |using (select ? log_id, ? local_offset from dual) input
             |on (lel.local_offset = input.local_offset and lel.log_id = input.log_id)
@@ -466,7 +466,7 @@ class DbMultiDomainEventLog private[db] (
                 storage.query(
                   sql"""select /*+ INDEX (linearized_event_log pk_linearized_event_log, event_log pk_event_log) */ global_offset, content, trace_context
                     from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
-                    where global_offset > $batchFromExcl and global_offset <= $batchToIncl and 
+                    where global_offset > $batchFromExcl and global_offset <= $batchToIncl and
                     (el.log_id = $domainIdIndex or (el.log_id = $participantEventLogId and el.event_id like $rejectionEventIdPattern))
                     order by global_offset asc"""
                     .as[(GlobalOffset, Traced[LedgerSyncEvent])],
@@ -519,7 +519,7 @@ class DbMultiDomainEventLog private[db] (
               el.local_offset, request_sequencer_counter, el.event_id, content, trace_context, causality_update,
               publication_time
             from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
-            where 
+            where
             """ ++ inClause).as[(GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
       }
       storage.sequentialQueryAndCombine(queries, functionFullName).map { events =>
@@ -666,7 +666,7 @@ class DbMultiDomainEventLog private[db] (
           select global_offset, log_id, local_offset
           from linearized_event_log
           where publication_time >= $fromInclusive
-          order by publication_time asc, global_offset asc 
+          order by publication_time asc, global_offset asc
           #${storage.limit(1)}
           """.as[(GlobalOffset, Int, LocalOffset)].headOption
       storage.querySingle(query, functionFullName).flatMap { case (offset, logIndex, localOffset) =>

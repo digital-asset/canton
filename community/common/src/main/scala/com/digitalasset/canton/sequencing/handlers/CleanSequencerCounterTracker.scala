@@ -10,7 +10,6 @@ import com.digitalasset.canton.data.{
   PeanoQueue,
   SynchronizedPeanoTreeQueue,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.sequencing.{HandlerResult, PossiblyIgnoredApplicationHandler}
@@ -68,7 +67,7 @@ class CleanSequencerCounterTracker(
           val eventBatchCounter = allocateEventBatchCounter()
           handler(tracedEvents).map { asyncF =>
             val asyncFSignalled = asyncF.andThenF { case () =>
-              FutureUnlessShutdown.outcomeF(
+              store.performUnlessClosingF("signal-clean-event-batch")(
                 signalCleanEventBatch(eventBatchCounter, lastSc, lastTs)
               )
             }

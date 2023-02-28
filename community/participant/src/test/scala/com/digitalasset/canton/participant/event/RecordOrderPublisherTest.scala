@@ -64,7 +64,7 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
       when(multiDomainEventLog.publish(any[PublicationData])).thenReturn(Future.unit)
 
       val ist = mock[InFlightSubmissionTracker]
-      when(ist.observeTimestamp(any[DomainId], any[CantonTimestamp])).thenReturn(
+      when(ist.observeTimestamp(any[DomainId], any[CantonTimestamp])(any[TraceContext])).thenReturn(
         EitherT
           .pure[Future, InFlightSubmissionTracker.UnknownDomain](()): EitherT[
           Future,

@@ -14,7 +14,7 @@ class SequencerCounterTrackerStoreTestInMemory
 
   "InMemorySequencerCounterTrackerStore" should {
     behave like sequencerCounterTrackerStore(() =>
-      new InMemorySequencerCounterTrackerStore(loggerFactory)
+      new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
     )
   }
 }

@@ -140,10 +140,7 @@ class DomainNodeBootstrap(
   )
 
   override protected lazy val nodeHealthService: HealthReporting.ServiceHealth =
-    new HealthReporting.ServiceHealth {
-      override val name: String = "domain"
-      override lazy val criticalDependencies: Set[HealthReporting.ComponentHealth] = Set(storage)
-    }
+    HealthReporting.ServiceHealth("domain", Seq(storage))
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var topologyManager: Option[DomainTopologyManager] = None

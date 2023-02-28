@@ -11,7 +11,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.ResponseAggregation
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.protocol.RequestId
@@ -62,7 +62,7 @@ private[mediator] class MediatorState(
   /** Adds an incoming ResponseAggregation */
   def add(
       responseAggregation: ResponseAggregation
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): Future[Unit] = {
     val requestId = responseAggregation.requestId
     if (!responseAggregation.isFinalized) {
       val existingValue = Option(pendingRequests.putIfAbsent(requestId, responseAggregation))
@@ -79,7 +79,8 @@ private[mediator] class MediatorState(
   }
 
   def fetch(requestId: RequestId)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): OptionT[Future, ResponseAggregation] = {
     // TODO(#10025): in an overload situation, when participants start to reply late, the fetching
     //   from the store became punitive in the semi-optimal mediator response processing
@@ -94,7 +95,8 @@ private[mediator] class MediatorState(
     * You can only use this to update non-finalized aggregations
     */
   def replace(oldValue: ResponseAggregation, newValue: ResponseAggregation)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): OptionT[Future, Unit] = {
     ErrorUtil.requireArgument(
       oldValue.requestId == newValue.requestId,
@@ -175,7 +177,8 @@ private[mediator] class MediatorState(
     * Also updates the current age of the oldest finalized response after pruning.
     */
   def prune(pruneRequestsBeforeAndIncludingTs: CantonTimestamp)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Unit] = finalizedResponseStore.prune(pruneRequestsBeforeAndIncludingTs)
 
   /** Locate the timestamp of the finalized response at or, if skip > 0, near the beginning of the sequence of finalized responses.
@@ -183,7 +186,8 @@ private[mediator] class MediatorState(
     * If skip == 0, returns the timestamp of the oldest, unpruned finalized response.
     */
   def locatePruningTimestamp(skip: NonNegativeInt)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
   ): Future[Option[CantonTimestamp]] = for {
     ts <- finalizedResponseStore.locatePruningTimestamp(skip.value)
     _ = if (skip.value == 0) MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, ts)
@@ -195,5 +199,6 @@ private[mediator] class MediatorState(
   def reportMaxResponseAgeMetric(oldestResponseTimestamp: Option[CantonTimestamp]): Unit =
     MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, oldestResponseTimestamp)
 
-  override def onClosed(): Unit = Lifecycle.close(finalizedResponseStore)(logger)
+  override def onClosed(): Unit =
+    Lifecycle.close(deduplicationStore, finalizedResponseStore)(logger)
 }

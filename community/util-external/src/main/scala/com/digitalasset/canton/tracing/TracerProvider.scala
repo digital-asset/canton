@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.tracing
 
+import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import io.opentelemetry.api.OpenTelemetry
 import io.opentelemetry.api.common.Attributes
@@ -40,6 +41,7 @@ private[tracing] class ReportingTracerProvider(
           .build(),
         SdkTracerProvider.builder
           .addSpanProcessor(SimpleSpanProcessor.create(exporter)),
+        NoOpOnDemandMetricsReader$,
       ),
       name,
       attributes,

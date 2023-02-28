@@ -123,7 +123,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
       """The WorkflowID defined in the transaction metadata is not a valid domain alias."""
     )
     @Resolution(
-      """Check that the workflow ID (if specified) corresponds to a valid domain alias. 
+      """Check that the workflow ID (if specified) corresponds to a valid domain alias.
         A typical rejection reason is a too-long domain alias. """
     )
     object InvalidDomainAlias
@@ -162,7 +162,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
       """The given party identifier is not a valid Canton party identifier."""
     )
     @Resolution(
-      """Ensure that your commands only refer to correct and valid Canton party identifiers of parties 
+      """Ensure that your commands only refer to correct and valid Canton party identifiers of parties
         |that are properly enabled on the system"""
     )
     object InvalidPartyIdentifier
@@ -204,7 +204,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
       """A provided disclosed contract could not be authenticated against the provided contract id."""
     )
     @Resolution(
-      """Ensure that disclosed contracts provided with command submission match the original contract creation 
+      """Ensure that disclosed contracts provided with command submission match the original contract creation
         |content as sourced from the Ledger API.
         |If the problem persists, contact the participant operator."""
     )
@@ -433,7 +433,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
   }
 
   @Explanation(
-    """This error indicates that the automated transfer could not succeed, as the current topology does not 
+    """This error indicates that the automated transfer could not succeed, as the current topology does not
       allow the transfer to complete, mostly due to lack of confirmation permissions of the involved parties."""
   )
   @Resolution(

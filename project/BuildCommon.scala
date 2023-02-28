@@ -595,7 +595,7 @@ object BuildCommon {
         `akka-fork`,
         `wartremover-extension` % "compile->compile;test->test",
         DamlProjects.`daml-copy-common`,
-        DamlProjects.`daml-copy-testing` % "test->test",
+        DamlProjects.`daml-copy-testing` % "test;test->test",
         `util-external` % "compile->compile;test->test",
         `util-internal` % "compile->compile;test->test",
       )
@@ -1237,7 +1237,7 @@ object BuildCommon {
             "ledger-api/rs-grpc-bridge/src/main/java",
             "ledger-api/rs-grpc-akka/src/main/scala",
             "ledger/metrics/src/main/scala",
-            "ledger/ledger-resources/src/main/scala",
+            "libs-scala/ledger-resources/src/main/scala",
             "ledger/error/src/main/scala",
             "ledger/ledger-offset/src/main/scala",
             "ledger/ledger-grpc/src/main/scala",
@@ -1308,7 +1308,7 @@ object BuildCommon {
             "daml-lf/data-scalacheck/src/main/scala",
             "daml-lf/transaction-test-lib/src/main/scala",
             "observability/metrics/src/test/lib/scala",
-            "ledger/test-common/src/main/scala",
+            "test-common/src/main/scala",
           ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check

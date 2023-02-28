@@ -512,9 +512,9 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
   @Explanation(
     """This error indicates that a dangerous owner to key mapping authorization was rejected.
       |This is the case if a command is run that could break a participant.
-      |If the command was run to assign a key for the given participant, then the command 
+      |If the command was run to assign a key for the given participant, then the command
       |was rejected because the key is not in the participants private store.
-      |If the command is run on a participant to issue transactions for another participant, 
+      |If the command is run on a participant to issue transactions for another participant,
       |then such commands must be run with force, as they are very dangerous and could easily break
       |the participant.
       |As an example, if we assign an encryption key to a participant that the participant does not

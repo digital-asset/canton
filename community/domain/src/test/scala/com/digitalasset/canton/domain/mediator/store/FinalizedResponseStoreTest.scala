@@ -10,12 +10,14 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.domain.mediator.ResponseAggregation
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import io.functionmeta.functionFullName
 import org.scalatest.BeforeAndAfterAll
@@ -25,7 +27,7 @@ import java.util.UUID
 import scala.concurrent.Future
 
 trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
-  this: AsyncWordSpec with BaseTest =>
+  self: AsyncWordSpec with BaseTest =>
 
   def ts(n: Int): CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(n.toLong)
   def requestIdTs(n: Int): RequestId = RequestId(ts(n))
@@ -84,6 +86,8 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     )(loggerFactory)
 
   private[mediator] def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {
+    implicit val closeContext: CloseContext = HasTestCloseContext.makeTestCloseContext(self.logger)
+
     "when storing responses" should {
       "get error message if trying to fetch a non existing response" in {
         val sut = mk()

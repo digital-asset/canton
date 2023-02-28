@@ -4,6 +4,7 @@
 package com.digitalasset.canton.logging
 
 import cats.data.{EitherT, OptionT}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, ExecutionContextMonitor}
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.util.ErrorUtil
@@ -237,7 +238,7 @@ class SuppressingLogger private[logging] (
     *
     * This method will automatically use asynchronous suppression if `A` is `Future[_]`.
     *
-    * @throws java.lang.IllegalArgumentException if `T` is `EitherT` or `OptionT`, because the method cannot detect
+    * @throws java.lang.IllegalArgumentException if `A` is `EitherT` or `OptionT`, because the method cannot detect
     *                                            whether asynchronous suppression is needed in this case.
     *                                            Use `EitherT.value` or `OptionT`.value to work around this.
     */
@@ -249,20 +250,69 @@ class SuppressingLogger private[logging] (
         {
           within
         },
+        { () => checkLogsAssertion(assertion) },
+        () => (),
+      )
+    }
+
+  /** Asserts that the sequence of logged warnings/errors will eventually meet a given assertion.
+    * Use this if the expected sequence of logged warnings/errors is non-deterministic and the log-message assertion might not immediately succeed when it is called (e.g. because the messages might be logged with a delay).
+    * The SupressingLogger only starts supresing and capturing logs when this method is called,
+    * If some logs that we want to capture might fire before the start or after the end of the suppression. Please use method `assertEventuallyLogsSeq` instead to provide those action in `within` parameter.
+    * On success, the method will delete all logged messages. So this method is not idempotent.
+    *
+    * On failure of the log-message assertion, it will be retried until it eventually succeeds or a timeout occurs.
+    * On timeout without success, the method will not delete any logged message
+    */
+  def assertEventuallyLogsSeq_(
+      rule: SuppressionRule
+  )(
+      assertion: Seq[LogEntry] => Assertion,
+      timeUntilSuccess: FiniteDuration = 20.seconds,
+      maxPollInterval: FiniteDuration = 5.seconds,
+  ): Unit = assertEventuallyLogsSeq(rule)((), assertion, timeUntilSuccess, maxPollInterval)
+
+  /** Asserts that the sequence of logged warnings/errors will eventually meet a given assertion.
+    * Use this if the expected sequence of logged warnings/errors is non-deterministic and the log-message assertion might not immediately succeed when it is called (e.g. because the messages might be logged with a delay).
+    *
+    * On success, the method will delete all logged messages. So this method is not idempotent.
+    *
+    * On failure of the log-message assertion, it will be retried until it eventually succeeds or a timeout occurs.
+    * On timeout without success, the method will not delete any logged message
+    *
+    * This method will automatically use asynchronous suppression if `A` is `Future[_]`.
+    *
+    * @throws java.lang.IllegalArgumentException if `T` is `EitherT` or `OptionT`, because the method cannot detect
+    * @throws java.lang.IllegalArgumentException if `A` is `EitherT` or `OptionT`, because the method cannot detect
+    *                                            whether asynchronous suppression is needed in this case.
+    *                                            Use `EitherT.value` or `OptionT`.value to work around this.
+    */
+  def assertEventuallyLogsSeq[A](
+      rule: SuppressionRule
+  )(
+      within: => A,
+      assertion: Seq[LogEntry] => Assertion,
+      timeUntilSuccess: FiniteDuration = 20.seconds,
+      maxPollInterval: FiniteDuration = 5.seconds,
+  ): A =
+    suppress(rule) {
+      runWithCleanup(
+        { within },
         { () =>
-          // check the log
-
-          val logEntries = recordedLogEntries.asScala.toSeq
-
-          assertion(logEntries)
-
-          // Remove checked log entries only if check succeeds.
-          // This is to allow for retries, if the check fails.
-          logEntries.foreach(_ => recordedLogEntries.remove())
+          BaseTest.eventually(timeUntilSuccess, maxPollInterval)(checkLogsAssertion(assertion))
         },
         () => (),
       )
     }
+
+  private def checkLogsAssertion(assertion: Seq[LogEntry] => Assertion): Unit = {
+    // check the log
+    val logEntries = recordedLogEntries.asScala.toSeq
+    assertion(logEntries)
+    // Remove checked log entries only if check succeeds.
+    // This is to allow for retries, if the check fails.
+    logEntries.foreach(_ => recordedLogEntries.remove())
+  }
 
   /** Asserts that the sequence of logged warnings/errors meets a set of expected log messages. */
   def assertLogsSeqString[A](rule: SuppressionRule, expectedLogs: Seq[String])(within: => A): A =

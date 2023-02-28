@@ -14,7 +14,7 @@ import com.digitalasset.canton.domain.topology.DomainTopologySender.{
   TopologyDispatchingDegradation,
   TopologyDispatchingInternalError,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
@@ -202,7 +202,7 @@ class DomainTopologyDispatcherTest
       FutureSupervisor.Noop,
       sender,
       loggerFactory,
-      new InMemorySequencerCounterTrackerStore(loggerFactory),
+      new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts),
     )
     val dispatcher = mkDispatcher
 
@@ -577,7 +577,7 @@ class DomainTopologySenderTest
           case one :: _ =>
             one.sendNotification.success(batch)
             one.await.foreach { _ =>
-              one.async.foreach(callback)
+              one.async.map(UnlessShutdown.Outcome(_)).foreach(callback)
             }
             FutureUnlessShutdown.pure(one.sync)
         }

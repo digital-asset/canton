@@ -19,7 +19,12 @@ class MetricDocTest extends AnyWordSpec with BaseTest {
   }
 
   class DocItem {
-    @MetricDoc.Tag("top summary", "top desc", Debug)
+    @MetricDoc.Tag(
+      "top summary",
+      "top desc",
+      Debug,
+      Map("label_key" -> "description", "label_key_2" -> "description_2"),
+    )
     val top = NoOpTimer("top")
     val utop = NoOpTimer("utop")
     object nested {
@@ -45,6 +50,11 @@ class MetricDocTest extends AnyWordSpec with BaseTest {
       val expected =
         Seq("varred", "nested.n1", "nested.n2", "top").map(nm => (nm, s"${nm} summary")).toSet
       items.map(x => (x.name, x.tag.summary)).toSet shouldBe expected
+
+      items.flatMap(_.tag.labelsWithDescription) containsSlice Seq(
+        "label_key" -> "description",
+        "label_key_2" -> "description_2",
+      )
 
     }
   }

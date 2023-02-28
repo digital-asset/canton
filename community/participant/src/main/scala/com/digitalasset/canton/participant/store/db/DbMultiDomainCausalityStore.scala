@@ -68,7 +68,7 @@ class DbMultiDomainCausalityStore private (
     val constraintsSql = {
       (sql"""select party_id, domain_id, max(domain_ts)
                  from per_party_causal_dependencies
-                 where owning_domain_id = ${transferId.sourceDomain} 
+                 where owning_domain_id = ${transferId.sourceDomain}
                  and party_id in (""" ++ partiesSql ++ sql""")
                  and constraint_ts <= ${transferId.requestTimestamp}
                  group by (party_id, domain_id)

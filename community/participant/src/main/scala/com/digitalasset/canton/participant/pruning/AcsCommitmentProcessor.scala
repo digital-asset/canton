@@ -1079,10 +1079,10 @@ object AcsCommitmentProcessor extends HasLoggerName {
     }
 
     object MismatchError extends ErrorGroup {
-      @Explanation("""This error indicates that a remote participant has sent a commitment over 
+      @Explanation("""This error indicates that a remote participant has sent a commitment over
           |an ACS for a period, while this participant does not think that there is a shared contract state.
           |This error occurs if a remote participant has manually changed contracts using repair,
-          |or due to byzantine behavior, or due to malfunction of the system. The consequence is that 
+          |or due to byzantine behavior, or due to malfunction of the system. The consequence is that
           |the ledger is forked, and some commands that should pass will not.""")
       @Resolution(
         """Please contact the other participant in order to check the cause of the mismatch. Either repair
@@ -1095,10 +1095,10 @@ object AcsCommitmentProcessor extends HasLoggerName {
             )
       }
 
-      @Explanation("""This error indicates that a remote participant has sent a commitment over 
+      @Explanation("""This error indicates that a remote participant has sent a commitment over
           |an ACS for a period which does not match the local commitment.
           |This error occurs if a remote participant has manually changed contracts using repair,
-          |or due to byzantine behavior, or due to malfunction of the system. The consequence is that the ledger is forked, 
+          |or due to byzantine behavior, or due to malfunction of the system. The consequence is that the ledger is forked,
           |and some commands that should pass will not.""")
       @Resolution(
         """Please contact the other participant in order to check the cause of the mismatch. Either repair

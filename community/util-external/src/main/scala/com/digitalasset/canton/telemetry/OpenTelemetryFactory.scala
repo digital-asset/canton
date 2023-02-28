@@ -4,6 +4,8 @@
 package com.digitalasset.canton.telemetry
 
 import com.daml.telemetry.OpenTelemetryOwner.addViewsToProvider
+import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
+import com.digitalasset.canton.metrics.OpenTelemetryOnDemandMetricsReader
 import com.digitalasset.canton.tracing.{NoopSpanExporter, TracingConfig}
 import io.opentelemetry.exporter.jaeger.JaegerGrpcSpanExporter
 import io.opentelemetry.exporter.prometheus.PrometheusCollector
@@ -29,10 +31,13 @@ object OpenTelemetryFactory {
     val autoconfigureBuilder =
       new AtomicReference[Option[SdkTracerProviderBuilder]](None)
     val configuredThroughSystemProps = sys.props.contains("otel.traces.exporter")
+    // if no metrics exporter is configured then default to none instead of the oltp default used by the library
+    sys.props.getOrElseUpdate("otel.metrics.exporter", "none"): Unit
     // if no trace exporter is configured then default to none instead of the oltp default used by the library
     sys.props.getOrElseUpdate("otel.traces.exporter", "none"): Unit
     // set default propagator, otherwise the ledger-api-client interceptor won't propagate any information
     sys.props.getOrElseUpdate("otel.propagators", "tracecontext"): Unit
+    val onDemandMetricReader = new OpenTelemetryOnDemandMetricsReader
     val configuredSdk = AutoConfiguredOpenTelemetrySdk
       .builder()
       .addSpanExporterCustomizer { (exporter, _) =>
@@ -66,7 +71,9 @@ object OpenTelemetryFactory {
          * This forces us to keep the current OpenTelemetry version (see ticket for potential paths forward).
          */
         if (metricsEnabled) {
-          meterProviderBuilder.registerMetricReader(PrometheusCollector.create())
+          meterProviderBuilder
+            .registerMetricReader(PrometheusCollector.create())
+            .registerMetricReader(onDemandMetricReader)
         } else meterProviderBuilder
       }
       .setResultAsGlobal(setGlobal)
@@ -84,6 +91,8 @@ object OpenTelemetryFactory {
     ConfiguredOpenTelemetry(
       openTelemetry = configuredSdk,
       tracerProviderBuilder = tracerProviderBuilder,
+      onDemandMetricsReader =
+        if (metricsEnabled) onDemandMetricReader else NoOpOnDemandMetricsReader$,
     )
   }
 

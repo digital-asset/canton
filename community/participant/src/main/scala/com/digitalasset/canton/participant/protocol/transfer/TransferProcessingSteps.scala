@@ -297,6 +297,11 @@ object TransferProcessingSteps {
     override def message: String = s"Unknown domain $domainId when $context"
   }
 
+  case object ApplicationShutdown extends TransferProcessorError {
+    override def pretty: Pretty[ApplicationShutdown.type] = prettyOfObject[ApplicationShutdown.type]
+    override def message: String = "Application is shutting down"
+  }
+
   case class DomainNotReady(domainId: DomainId, context: String) extends TransferProcessorError {
     override def message: String = s"Domain $domainId is not ready when $context"
 

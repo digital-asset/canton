@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.transfer.TransferCoordination.DomainData
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
+  ApplicationShutdown,
   NoTimeProofFromDomain,
   TransferProcessorError,
   TransferStoreFailed,
@@ -102,7 +103,9 @@ class TransferCoordination(
           transferId,
           sourceProtocolVersion,
         )
-        .semiflatMap(identity)
+        .mapK(FutureUnlessShutdown.outcomeK)
+        .semiflatMap(Predef.identity)
+        .onShutdown(Left(ApplicationShutdown))
     } yield submissionResult
   }
 
@@ -289,7 +292,9 @@ trait TransferSubmissionHandle {
       targetProtocolVersion: TargetProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, Future[TransferOutProcessingSteps.SubmissionResult]]
+  ): EitherT[Future, TransferProcessorError, FutureUnlessShutdown[
+    TransferOutProcessingSteps.SubmissionResult
+  ]]
 
   def submitTransferIn(
       submitterMetadata: TransferSubmitterMetadata,
@@ -298,5 +303,7 @@ trait TransferSubmissionHandle {
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, Future[TransferInProcessingSteps.SubmissionResult]]
+  ): EitherT[Future, TransferProcessorError, FutureUnlessShutdown[
+    TransferInProcessingSteps.SubmissionResult
+  ]]
 }

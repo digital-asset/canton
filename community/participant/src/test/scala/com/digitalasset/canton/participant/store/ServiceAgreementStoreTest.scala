@@ -142,7 +142,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |        responsibility is to act in accordance with this Section, and DA will
                          |        not be liable to You or any other party so long as it meets its
                          |        obligations in this Section.
-                         |        
+                         |
                          |    7.  _EXCESSIVE RESOURCE USE_. If DA determines in good faith that Your
                          |        resource usage (including, but not limited to, bandwidth, processing
                          |        cycles, storage, etc.) of the Canton Service is significantly
@@ -150,7 +150,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |        suspend Your use of the Canton Service or throttle Your access to
                          |        the Canton Service until You reduce such excessive resource
                          |        consumption.
-                         |    
+                         |
                          |    8.  _SUSPENSION OR TERMINATION OF THE SERVICE_. DA may suspend,
                          |        terminate, or restrict Your access to the Canton Service under any
                          |        of the following circumstances, and in such event DA will provide
@@ -181,7 +181,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |        for any consequences of such violation, including from the
                          |        suspension, termination of Your use of the Canton Service or from
                          |        the deletion of the Your Data.
-                         |    
+                         |
                          |    9.  _NO SLA OR TECHNICAL SUPPORT_. Alpha products, including the Canton
                          |        Service, may not always perform as specified and can be changed from
                          |        time to time without notice. With respect to this alpha program, You
@@ -191,7 +191,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |        any service credits apply to Your use of the Canton Service,
                          |        including with respect to any downtime. Support, if any, will be
                          |        governed by a separate agreement between DA and You.
-                         |    
+                         |
                          |   10.  _CHANGES TO THE SERVICE_. During the Alpha Term, DA may change or
                          |        discontinue the Canton Service at any time. DA is not obligated to
                          |        provide advance notice under this Section of any change or
@@ -464,14 +464,14 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |        provisions of this Agreement remain in full force and effect. The
                          |        Parties agree to replace the invalid or unenforceable provision with
                          |        one that matches the original intent of the Parties.
-                         |    
+                         |
                          |    4.  _THIRD-PARTY BENEFICIARIES_. For the avoidance of doubt, all rights
                          |        and benefits granted under this Agreement to You will be deemed
                          |        granted directly to You. Otherwise, no third party will be deemed to
                          |        be an intended or unintended third-party beneficiary of this
                          |        Agreement. DA is not responsible for any third-party claims against
                          |        You.
-                         |    
+                         |
                          |    5.  _FORCE MAJEURE_. With the exceptions of confidentiality,
                          |        restrictions on use, and payment obligations, a Party will be
                          |        excused from the performance of its obligations under this Agreement
@@ -491,7 +491,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |        affected Party that would be reasonably and ordinarily expected from
                          |        a skilled and experienced person or entity engaged in the same type
                          |        of undertaking under the same or similar circumstances.
-                         |    
+                         |
                          |    6.  _ENTIRE AGREEMENT, ASSIGNMENT_. This Agreement constitutes the
                          |        entire agreement of the Parties pertaining to the subject matter
                          |        hereof, and supersedes all prior agreements and understandings
@@ -499,7 +499,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |        statements to the contrary heretofore made. This Agreement may not
                          |        be assigned or transferred by You without the prior written consent
                          |        of DA.
-                         |    
+                         |
                          |    7.  _MODIFICATION; WAIVER; RIGHTS_. DA MAY AMEND OR RESTATE THIS
                          |        AGREEMENT AT ANY TIME UPON NOTICE TO YOU, WHICH NOTICE MAY BE GIVEN
                          |        ONLINE. BY CONTINUING TO ACCESS OR USE THE CANTON SERVICE, YOU AGREE

@@ -177,7 +177,7 @@ class InFlightSubmissionTracker(
   def observeTimestamp(
       domainId: DomainId,
       timestamp: CantonTimestamp,
-  ): EitherT[Future, UnknownDomain, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[Future, UnknownDomain, Unit] =
     domainStateFor(domainId).semiflatMap { domainState =>
       domainState.observedTimestampTracker.increaseWatermark(timestamp)
     }

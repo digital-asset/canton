@@ -271,6 +271,7 @@ class TransferOutProcessingSteps(
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       sourceSnapshot: DomainSnapshotSyncCryptoApi,
+      mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
@@ -371,6 +372,7 @@ class TransferOutProcessingSteps(
         hostedStks.toSet,
         fullTree.targetTimeProof,
         transferInExclusivity,
+        mediatorId,
       )
 
       sourceDomainParameters <- EitherT.right(
@@ -504,6 +506,7 @@ class TransferOutProcessingSteps(
       hostedStakeholders,
       _targetTimeProof,
       transferInExclusivity,
+      _,
     ) = pendingRequestData
 
     val pendingSubmissionData = pendingSubmissionMap.get(rootHash)
@@ -830,6 +833,7 @@ object TransferOutProcessingSteps {
       hostedStakeholders: Set[LfPartyId],
       targetTimeProof: TimeProof,
       transferInExclusivity: Option[CantonTimestamp],
+      mediatorId: MediatorId,
   ) extends PendingTransfer
       with PendingRequestData {
     override def pendingContracts: Set[LfContractId] = Set()

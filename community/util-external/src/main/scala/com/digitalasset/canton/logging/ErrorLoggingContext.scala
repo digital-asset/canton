@@ -71,6 +71,13 @@ case class ErrorLoggingContext(
   override def error(message: String): Unit = logger.error(message)(traceContext)
   override def error(message: String, throwable: Throwable): Unit =
     logger.error(message, throwable)(traceContext)
+
+  def debug(message: String): Unit = logger.debug(message)(traceContext)
+  def debug(message: String, throwable: Throwable): Unit =
+    logger.debug(message, throwable)(traceContext)
+  def trace(message: String): Unit = logger.trace(message)(traceContext)
+  def trace(message: String, throwable: Throwable): Unit =
+    logger.trace(message, throwable)(traceContext)
 }
 
 object ErrorLoggingContext {

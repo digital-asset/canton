@@ -11,6 +11,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable.forceShutdownStr
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -181,6 +182,15 @@ trait FlagCloseable extends AutoCloseable {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, E, R] = {
     EitherT(performUnlessClosingF(name)(etf.value))
+  }
+
+  def performUnlessClosingCheckedT[A, N, R](name: String, onClosing: Checked[A, N, R])(
+      etf: => CheckedT[Future, A, N, R]
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): CheckedT[Future, A, N, R] = {
+    CheckedT(performUnlessClosingF(name)(etf.value).unwrap.map(_.onShutdown(onClosing)))
   }
 
   def performUnlessClosingEitherTF[E, R](name: String, onClosing: => E)(

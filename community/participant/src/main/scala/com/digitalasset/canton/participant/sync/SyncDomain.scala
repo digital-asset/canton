@@ -14,7 +14,8 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
-import com.digitalasset.canton.error.{CantonError, HasDegradationState}
+import com.digitalasset.canton.health.HealthReporting
+import com.digitalasset.canton.health.HealthReporting.ComponentHealth
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -133,9 +134,13 @@ class SyncDomain(
     extends NamedLogging
     with StartAndCloseable[Either[SyncDomainInitializationError, Unit]]
     with TransferSubmissionHandle
-    with HasDegradationState[CantonError] {
+    with ComponentHealth {
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
+  override val name = SyncDomain.healthName
+  override val initialState: HealthReporting.ComponentState = HealthReporting.ComponentState.Failed(
+    HealthReporting.ComponentState.UnhealthyState(Some("Initial state - not connected to domain"))
+  )
 
   private[canton] val sequencerClient = domainHandle.sequencerClient
   val timeTracker: DomainTimeTracker = ephemeral.timeTracker
@@ -167,6 +172,7 @@ class SyncDomain(
     metrics.transactionProcessing,
     timeouts,
     loggerFactory,
+    futureSupervisor,
   )
 
   private val transferOutProcessor: TransferOutProcessor = new TransferOutProcessor(
@@ -182,6 +188,7 @@ class SyncDomain(
     timeouts,
     SourceProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
+    futureSupervisor,
   )
 
   private val transferInProcessor: TransferInProcessor = new TransferInProcessor(
@@ -198,6 +205,7 @@ class SyncDomain(
     timeouts,
     TargetProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
+    futureSupervisor,
   )
 
   private val sortedReconciliationIntervalsProvider = SortedReconciliationIntervalsProvider(
@@ -710,9 +718,10 @@ class SyncDomain(
   }
 
   /** A [[SyncDomain]] is ready when it has resubscribed to the sequencer client. */
-  def ready: Boolean = ephemeral.recovered
+  def ready: Boolean = ephemeral.isNotFailed
 
-  def readyForSubmission: Boolean = ready && !isDegraded && sequencerClient.subscriptionIsHealthy
+  def readyForSubmission: Boolean =
+    ready && isNotFailed && sequencerClient.healthComponent.isNotFailed
 
   /** @return The outer future completes after the submission has been registered as in-flight.
     *         The inner future completes after the submission has been sequenced or if it will never be sequenced.
@@ -725,8 +734,12 @@ class SyncDomain(
       disclosedContracts: Map[LfContractId, SerializableContract],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransactionSubmissionError, Future[TransactionSubmitted]] =
-    performUnlessClosingEitherTF[TransactionSubmissionError, TransactionSubmitted](
+  ): EitherT[Future, TransactionSubmissionError, FutureUnlessShutdown[
+    TransactionSubmitted
+  ]] =
+    performUnlessClosingEitherT[TransactionSubmissionError, FutureUnlessShutdown[
+      TransactionSubmitted
+    ]](
       functionFullName,
       SubmissionDuringShutdown.Rejection(),
     ) {
@@ -744,10 +757,12 @@ class SyncDomain(
       targetProtocolVersion: TargetProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, Future[TransferOutProcessingSteps.SubmissionResult]] =
+  ): EitherT[Future, TransferProcessorError, FutureUnlessShutdown[
+    TransferOutProcessingSteps.SubmissionResult
+  ]] =
     performUnlessClosingEitherT[
       TransferProcessorError,
-      Future[TransferOutProcessingSteps.SubmissionResult],
+      FutureUnlessShutdown[TransferOutProcessingSteps.SubmissionResult],
     ](functionFullName, DomainNotReady(domainId, "The domain is shutting down.")) {
       logger.debug(s"Submitting transfer-out of `$contractId` from `$domainId` to `$targetDomain`")
 
@@ -774,8 +789,10 @@ class SyncDomain(
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, Future[TransferInProcessingSteps.SubmissionResult]] =
-    performUnlessClosingEitherT[TransferProcessorError, Future[
+  ): EitherT[Future, TransferProcessorError, FutureUnlessShutdown[
+    TransferInProcessingSteps.SubmissionResult
+  ]] =
+    performUnlessClosingEitherT[TransferProcessorError, FutureUnlessShutdown[
       TransferInProcessingSteps.SubmissionResult
     ]](
       functionFullName,
@@ -852,6 +869,7 @@ class SyncDomain(
 }
 
 object SyncDomain {
+  val healthName: String = "sync-domain"
 
   private class EventProcessingMonitor(
       startingPoints: ProcessingStartingPoints,

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.CantonTimestamp
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -12,7 +13,11 @@ import scala.concurrent.Future
 class WatermarkTrackerTest extends AsyncWordSpec with BaseTest {
 
   def mk(): WatermarkTracker[CantonTimestamp] =
-    new WatermarkTracker[CantonTimestamp](CantonTimestamp.MinValue, loggerFactory)
+    new WatermarkTracker[CantonTimestamp](
+      CantonTimestamp.MinValue,
+      loggerFactory,
+      FutureSupervisor.Noop,
+    )
 
   "highWatermark" should {
     "return the initial watermark on an empty tracker" in {

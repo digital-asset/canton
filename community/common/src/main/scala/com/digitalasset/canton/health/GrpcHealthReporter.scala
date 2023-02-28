@@ -78,7 +78,7 @@ class GrpcHealthReporter(override val loggerFactory: NamedLoggerFactory)
       healthStatusManager: ServiceHealthStatusManager
   ): Unit = {
     healthStatusManager.services.foreach(service =>
-      service.registerOnHealthChange((service: ServiceHealth, _: ServingStatus) => {
+      service.registerOnHealthChange((service: ServiceHealth, _: ServingStatus, _) => {
         updateHealthManager(healthStatusManager, service)
       })
     )

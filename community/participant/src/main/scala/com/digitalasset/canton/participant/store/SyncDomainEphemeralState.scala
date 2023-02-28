@@ -3,8 +3,11 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.health.HealthReporting
+import com.digitalasset.canton.health.HealthReporting.ComponentHealth
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -30,8 +33,8 @@ import com.digitalasset.canton.participant.protocol.{
 import com.digitalasset.canton.participant.store.memory.TransferCache
 import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.time.DomainTimeTracker
+import com.digitalasset.canton.tracing.TraceContext
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 
@@ -50,10 +53,16 @@ class SyncDomainEphemeralState(
     timeouts: ProcessingTimeout,
     useCausalityTracking: Boolean,
     val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext)
     extends SyncDomainEphemeralStateLookup
     with AutoCloseable
-    with NamedLogging {
+    with NamedLogging
+    with ComponentHealth {
+
+  override val name: String = SyncDomainEphemeralState.healthName
+  override val initialState: HealthReporting.ComponentState =
+    HealthReporting.ComponentState.NotInitialized
 
   // Key is the root hash of the transfer tree
   val pendingTransferOutSubmissions: TrieMap[RootHash, PendingTransferSubmission] =
@@ -67,6 +76,7 @@ class SyncDomainEphemeralState(
       metrics,
       loggerFactory,
       startingPoints.processing.nextRequestCounter,
+      futureSupervisor,
     )
   val requestCounterAllocator = new RequestCounterAllocatorImpl(
     startingPoints.cleanReplay.nextRequestCounter,
@@ -96,6 +106,7 @@ class SyncDomainEphemeralState(
       metrics.conflictDetection,
       timeouts,
       loggerFactory,
+      futureSupervisor,
     )
   }
 
@@ -115,23 +126,24 @@ class SyncDomainEphemeralState(
     )
 
   val phase37Synchronizer =
-    new Phase37Synchronizer(startingPoints.cleanReplay.nextRequestCounter, loggerFactory)
+    new Phase37Synchronizer(
+      startingPoints.cleanReplay.nextRequestCounter,
+      loggerFactory,
+      futureSupervisor,
+    )
 
   val observedTimestampTracker = new WatermarkTracker[CantonTimestamp](
     startingPoints.rewoundSequencerCounterPrehead.fold(CantonTimestamp.MinValue)(_.timestamp),
     loggerFactory,
+    futureSupervisor,
   )
 
   // the time tracker, note, must be shutdown in sync domain as it is using the sequencer client to
   // request time proofs
   val timeTracker: DomainTimeTracker = createTimeTracker(loggerFactory)
 
-  private val recoveredF: AtomicBoolean = new AtomicBoolean(false)
-
-  def recovered: Boolean = recoveredF.get
-
-  def markAsRecovered(): Unit = {
-    if (!recoveredF.compareAndSet(false, true))
+  def markAsRecovered()(implicit tc: TraceContext): Unit = {
+    if (!resolveUnhealthy)
       throw new IllegalStateException("SyncDomainState has already been marked as recovered.")
   }
 
@@ -148,6 +160,10 @@ class SyncDomainEphemeralState(
     )(logger)
   }
 
+}
+
+object SyncDomainEphemeralState {
+  val healthName: String = "sync-domain-ephemeral"
 }
 
 trait SyncDomainEphemeralStateLookup {

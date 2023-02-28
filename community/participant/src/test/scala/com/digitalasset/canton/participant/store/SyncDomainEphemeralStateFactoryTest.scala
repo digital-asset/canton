@@ -79,7 +79,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     "there is no clean request" should {
       "return the default" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
 
@@ -104,7 +104,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     "there is only the clean head request" should {
       "return the clean head" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
         val rc = RequestCounter(0)
@@ -151,7 +151,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     "there are several requests" should {
       "return the right result" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
         val rc = RequestCounter(0)
@@ -242,7 +242,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
 
       "start with the request prehead when the clean sequencer counter prehead lags behind" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
         val rc = RequestCounter(0)
@@ -277,7 +277,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     "the commit times are reversed" should {
       "reprocess the clean request" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
         val rc = RequestCounter(0)
@@ -316,7 +316,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     "there are published events" should {
       "use the latest local offset as the lower bound" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
         val rc = RequestCounter(0)
@@ -376,7 +376,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     "when there is a dirty repair request" should {
       "not rewind the clean sequencer counter prehead" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
         val rc = RequestCounter.Genesis
@@ -445,7 +445,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
     "there are only repair requests" should {
       "skip over the clean repair requests" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
-        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
+        val scts = new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
         val repairTs = RepairService.RepairTimestampOnEmptyDomain

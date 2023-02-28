@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.topology.client
 
+import cats.Monad
 import cats.data.EitherT
+import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
@@ -105,6 +107,9 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
     * The method will block & wait for an update, but emit a warning if it is not available
     */
   def snapshot(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Future[T]
+  def snapshotUS(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[T]
 
   /** Waits until a snapshot is available */
   def awaitSnapshot(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Future[T]
@@ -426,12 +431,37 @@ trait DomainTopologyClientWithInit
   override def snapshot(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Future[TopologySnapshotLoader] = {
-    val syncF = this.awaitTimestamp(timestamp, waitForEffectiveTime = true) match {
-      case None => Future.unit
+    snapshotInternal(timestamp)((timestamp, waitForEffectiveTime) =>
+      this.awaitTimestamp(timestamp, waitForEffectiveTime)
+    )
+  }
+
+  /** Overloaded snapshot returning derived type */
+  override def snapshotUS(
+      timestamp: CantonTimestamp
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[TopologySnapshotLoader] = {
+    snapshotInternal[FutureUnlessShutdown](timestamp)(
+      (timestamp, waitForEffectiveTime) => this.awaitTimestampUS(timestamp, waitForEffectiveTime),
+      // Do not log a warning if we get a shutdown future
+      logWarning = f => f != FutureUnlessShutdown.abortedDueToShutdown,
+    )
+  }
+
+  private def snapshotInternal[F[_]](
+      timestamp: CantonTimestamp
+  )(
+      awaitTimestampFn: (CantonTimestamp, Boolean) => Option[F[Unit]],
+      logWarning: F[Unit] => Boolean = Function.const(true),
+  )(implicit traceContext: TraceContext, monad: Monad[F]): F[TopologySnapshotLoader] = {
+    val syncF = awaitTimestampFn(timestamp, true) match {
+      case None => monad.unit
+      // No need to log a warning if the future we get is due to a shutdown in progress
       case Some(fut) =>
-        logger.warn(
-          s"Unsynchronized access to topology snapshot at $timestamp, topology known until=$topologyKnownUntilTimestamp"
-        )
+        if (logWarning(fut)) {
+          logger.warn(
+            s"Unsynchronized access to topology snapshot at $timestamp, topology known until=$topologyKnownUntilTimestamp"
+          )
+        }
         fut
     }
     syncF.map(_ => trySnapshot(timestamp))

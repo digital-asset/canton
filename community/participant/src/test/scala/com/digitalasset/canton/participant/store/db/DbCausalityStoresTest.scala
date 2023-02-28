@@ -89,7 +89,7 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
           IdempotentInsert.insertIgnoringConflicts(
             storage,
             "linearized_event_log ( local_offset, log_id )",
-            sql""" 
+            sql"""
                             linearized_event_log (log_id, local_offset, publication_time)
                             values (${id.index}, $localOffset, ${CantonTimestamp
                 .now()})

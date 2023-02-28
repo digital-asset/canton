@@ -7,19 +7,32 @@ import com.daml.metrics.api.MetricDoc.MetricQualification.*
 import com.daml.metrics.api.MetricDoc.*
 import com.daml.metrics.api.MetricHandle as DamlMetricHandle
 
+import scala.annotation.nowarn
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe as ru
 
 object MetricDoc {
 
-  def toItem(tags: Seq[Tag], groupTags: Seq[GroupTag], x: DamlMetricHandle): Option[Item] =
+  case class GroupInfo(
+      instances: Seq[String],
+      fullNames: Seq[String],
+  )
+
+  case class Item(
+      tag: Tag,
+      name: String,
+      metricType: String,
+      groupingInfo: Option[GroupInfo] = None,
+  )
+
+  private def toItem(tags: Seq[Tag], groupTags: Seq[GroupTag], x: DamlMetricHandle): Option[Item] =
     (tags, groupTags) match {
       case (List(tag), List()) => Some(Item(tag = tag, name = x.name, metricType = x.metricType))
       case (List(tag), _) => Some(groupTagToItem(tag, groupTags, x))
       case _ => None
     }
 
-  def fromFanTag(
+  private def fromFanTag(
       tags: Seq[FanInstanceTag],
       fanTags: Seq[FanTag],
       x: DamlMetricHandle,
@@ -33,6 +46,8 @@ object MetricDoc {
               summary = fanTag.summary,
               description = fanTag.description,
               qualification = fanTag.qualification,
+              labelsWithDescription =
+                Map.empty, // fan tags are the legacy way of representing labels
             ),
             name = representative,
             metricType = x.metricType,
@@ -51,7 +66,7 @@ object MetricDoc {
   // one of the representatives then the item's name is set to be the corresponding representative.
   // The instance is set to equal the part of the metric's name replaced by the wildcard.
   // Otherwise, the item is constructed as if the GroupTag was missing.
-  def groupTagToItem(tag: Tag, groupTags: Seq[GroupTag], x: DamlMetricHandle): Item = {
+  private def groupTagToItem(tag: Tag, groupTags: Seq[GroupTag], x: DamlMetricHandle): Item = {
     val wildcard = "<.*>".r // wildcard must be inside angle brackets (<,>)
     val matchingRepresentative = groupTags
       .map(_.representative)
@@ -87,25 +102,13 @@ object MetricDoc {
     }
   }
 
-  case class GroupInfo(
-      instances: Seq[String],
-      fullNames: Seq[String],
-  )
-
-  case class Item(
-      tag: Tag,
-      name: String,
-      metricType: String,
-      groupingInfo: Option[GroupInfo] = None,
-  )
-
   // ignore scala / java packages
   private val ignorePackages = Seq("scala.", "java.")
   private def includeSymbol(symbol: ru.Symbol): Boolean =
     !ignorePackages.exists(symbol.fullName.startsWith)
 
   // Deduplicate Items that have the same name and collect the instances of those into one item
-  def group(grouped: Seq[Item]): Seq[Item] =
+  private def group(grouped: Seq[Item]): Seq[Item] =
     grouped
       .groupBy(_.name)
       .values
@@ -230,9 +233,10 @@ object MetricDoc {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def getString(tree: ru.Tree) = tree.asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
+  private def getString(tree: ru.Tree) =
+    tree.asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
 
-  def getQualification(tree: ru.Tree): MetricQualification = {
+  private def getQualification(tree: ru.Tree): MetricQualification = {
     val typeOfQualification: ru.Type = tree.tpe
     typeOfQualification match {
       case q if q =:= ru.typeOf[Latency.type] => Latency
@@ -255,19 +259,59 @@ object MetricDoc {
       Seq(1, 2).map(pos => getString(tree.children(pos))) match {
         case s :: d :: Nil =>
           val q = getQualification(tree.children(3))
-          Tag(summary = s, description = d.stripMargin, qualification = q)
+          val labels: Map[String, String] =
+            if (tree.children.size >= 4) {
+              getLabels(tree.children(4))
+            } else {
+              Map.empty
+            }
+          Tag(
+            summary = s,
+            description = d.stripMargin,
+            qualification = q,
+            labelsWithDescription = labels,
+          )
         case _ => throw new IllegalStateException("Unreachable code.")
       }
     } catch {
       case x: RuntimeException =>
         println(
           """Failed to process Tag annotation:
-            |summary and description need to be constant-string, i.e. don't apply stripmargin here ...),
-            |and MetricQualification must be an object of MetricQualification:
-            |""".stripMargin + tree.toString
+            |summary and description need to be constant-string, i.e. don't apply stripmargin here ...).
+            |MetricQualification must be an object of MetricQualification and labels must be a Map of keys to description:
+            |""".stripMargin + ru.showRaw(tree)
         )
+        println(s"Error: $x")
         throw x
     }
+  }
+
+  @SuppressWarnings(
+    Array(
+      "org.wartremover.warts.AsInstanceOf"
+    )
+  )
+  @nowarn("msg=unchecked|cannot be checked at run time")
+  private def getLabels(labelsChild: ru.Tree) = {
+    def getConstantsFromTree(tree: ru.Tree): List[String] = {
+      tree match {
+        case ru.Constant(constant: String) => constant :: Nil
+        case ru.Literal(ru.Constant(constant: String)) => constant :: Nil
+        case _ => tree.children.flatMap(getConstantsFromTree)
+      }
+    }
+
+    // The workaround is for labels declared as Map("key" -> "value", "key2" -> "value2") and so on.
+    // The Tree for the given expression becomes too complex to parse, but with a depth first traverse
+    // we can collect the constant strings in the order of appearance and re-construct the label map
+    val constants = getConstantsFromTree(labelsChild)
+    constants
+      .grouped(2)
+      .map {
+        case key :: value :: Nil => key -> value
+        case _ => throw new IllegalArgumentException(s"Cannot build labels from $constants")
+      }
+      .toMap
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))

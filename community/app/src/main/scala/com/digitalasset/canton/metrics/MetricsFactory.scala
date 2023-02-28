@@ -4,13 +4,15 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
-import com.codahale.metrics.{Metric, MetricFilter}
+import com.codahale.metrics.{Metric, MetricFilter, MetricRegistry}
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.metrics.grpc.DamlGrpcServerMetrics
-import com.daml.metrics.{ExecutorServiceMetrics, HealthMetrics as DMHealth, JvmMetricSet}
+import com.daml.metrics.{ExecutorServiceMetrics, HealthMetrics => DMHealth, JvmMetricSet}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.buildinfo.BuildInfo
+import com.digitalasset.canton.config.DeprecatedConfigUtils
+import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.domain.metrics.{
   DomainMetrics,
   EnvMetrics,
@@ -35,6 +37,21 @@ case class MetricsConfig(
     reporters: Seq[MetricsReporterConfig] = Seq.empty,
     reportJvmMetrics: Boolean = false,
 )
+
+object MetricsReporterConfig {
+  object DeprecatedImplicits {
+    implicit def deprecatedDomainBaseConfig[X <: MetricsReporterConfig]: DeprecatedFieldsFor[X] =
+      new DeprecatedFieldsFor[MetricsReporterConfig] {
+        override def deprecatePath: List[DeprecatedConfigUtils.DeprecatedConfigPath[_]] = List(
+          DeprecatedConfigUtils.DeprecatedConfigPath[String]("type", since = "2.6.0", Some("jmx")),
+          DeprecatedConfigUtils.DeprecatedConfigPath[String]("type", since = "2.6.0", Some("csv")),
+          DeprecatedConfigUtils
+            .DeprecatedConfigPath[String]("type", since = "2.6.0", Some("graphite")),
+          DeprecatedConfigUtils.DeprecatedConfigPath[String]("filters", since = "2.6.0"),
+        )
+      }
+  }
+}
 
 sealed trait MetricsReporterConfig {
   def filters: Seq[MetricsFilterConfig]
@@ -101,17 +118,12 @@ case class MetricsFactory(
     registry: metrics.MetricRegistry,
     reportJVMMetrics: Boolean,
     meter: Meter,
+    factoryType: MetricsFactoryType,
 ) extends AutoCloseable {
 
-  private val openTelemetryFactory = new OpenTelemetryMetricsFactory(
-    meter,
-    globalMetricsContext = MetricsContext(
-      "daml_version" -> BuildInfo.damlLibrariesVersion,
-      "canton_version" -> BuildInfo.version,
-    ),
-  )
+  val metricsFactory: MetricHandle.MetricsFactory =
+    createUnlabeledMetricsFactory(MetricsContext.Empty, registry)
 
-  val metricsFactory = new CantonDropwizardMetricsFactory(registry)
   private val envMetrics = new EnvMetrics(metricsFactory)
   private val participants = TrieMap[String, ParticipantMetrics]()
   private val domains = TrieMap[String, DomainMetrics]()
@@ -123,7 +135,7 @@ case class MetricsFactory(
     allNodeMetrics filterNot (_ eq toExclude)
 
   val executionServiceMetrics: ExecutorServiceMetrics = new ExecutorServiceMetrics(
-    openTelemetryFactory
+    createLabeledMetricsFactory(MetricsContext.Empty)
   )
 
   object benchmark extends MetricsGroup(MetricName(MetricsFactory.prefix :+ "benchmark"), registry)
@@ -142,17 +154,19 @@ case class MetricsFactory(
     nested
   }
 
-  private val healthMetrics = new DMHealth(openTelemetryFactory)
-
   def forParticipant(name: String): ParticipantMetrics = {
     participants.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "participant", participants)
+        val participantMetricsContext =
+          MetricsContext("participant" -> name, "component" -> "participant")
         new ParticipantMetrics(
           name,
           MetricsFactory.prefix,
-          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
-          openTelemetryFactory,
+          createUnlabeledMetricsFactory(participantMetricsContext, newRegistry(metricName)),
+          createLabeledMetricsFactory(
+            participantMetricsContext
+          ),
         )
       },
     )
@@ -164,11 +178,14 @@ case class MetricsFactory(
     domains.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "domain", domains)
+        val domainMetricsContext = MetricsContext("domain" -> name, "component" -> "domain")
+        val labeledMetricsFactory =
+          createLabeledMetricsFactory(domainMetricsContext)
         new DomainMetrics(
           MetricsFactory.prefix,
-          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
-          new DamlGrpcServerMetrics(openTelemetryFactory, "domain"),
-          healthMetrics,
+          createUnlabeledMetricsFactory(domainMetricsContext, newRegistry(metricName)),
+          new DamlGrpcServerMetrics(labeledMetricsFactory, "domain"),
+          new DMHealth(labeledMetricsFactory),
         )
       },
     )
@@ -178,11 +195,16 @@ case class MetricsFactory(
     sequencers.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "sequencer", sequencers)
+        val sequencerMetricsContext =
+          MetricsContext("sequencer" -> name, "component" -> "sequencer")
+        val labeledMetricsFactory = createLabeledMetricsFactory(
+          sequencerMetricsContext
+        )
         new SequencerMetrics(
           MetricsFactory.prefix,
-          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
-          new DamlGrpcServerMetrics(openTelemetryFactory, "sequencer"),
-          healthMetrics,
+          createUnlabeledMetricsFactory(sequencerMetricsContext, newRegistry(metricName)),
+          new DamlGrpcServerMetrics(labeledMetricsFactory, "sequencer"),
+          new DMHealth(labeledMetricsFactory),
         )
       },
     )
@@ -192,11 +214,14 @@ case class MetricsFactory(
     mediators.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "mediator", mediators)
+        val mediatorMetricsContext = MetricsContext("mediator" -> name, "component" -> "mediator")
+        val labeledMetricsFactory =
+          createLabeledMetricsFactory(mediatorMetricsContext)
         new MediatorNodeMetrics(
           MetricsFactory.prefix,
-          new CantonDropwizardMetricsFactory(newRegistry(metricName)),
-          new DamlGrpcServerMetrics(openTelemetryFactory, "mediator"),
-          healthMetrics,
+          createUnlabeledMetricsFactory(mediatorMetricsContext, newRegistry(metricName)),
+          new DamlGrpcServerMetrics(labeledMetricsFactory, "mediator"),
+          new DMHealth(labeledMetricsFactory),
         )
       },
     )
@@ -212,6 +237,31 @@ case class MetricsFactory(
     if (nodeMetricsExcept(nodesToExclude).exists(_.keySet.contains(name)))
       s"$nodeType-$name"
     else name
+
+  private def createLabeledMetricsFactory(extraContext: MetricsContext) = {
+    factoryType match {
+      case MetricsFactoryType.InMemory(provider) =>
+        provider(extraContext)
+      case MetricsFactoryType.External =>
+        new OpenTelemetryMetricsFactory(
+          meter,
+          globalMetricsContext = MetricsContext(
+            "daml_version" -> BuildInfo.damlLibrariesVersion,
+            "canton_version" -> BuildInfo.version,
+          ).merge(extraContext),
+        )
+    }
+  }
+
+  private def createUnlabeledMetricsFactory(
+      extraContext: MetricsContext,
+      registry: MetricRegistry,
+  ) = {
+    factoryType match {
+      case MetricsFactoryType.InMemory(builder) => builder(extraContext)
+      case MetricsFactoryType.External => new CantonDropwizardMetricsFactory(registry)
+    }
+  }
 
   /** returns the documented metrics by possibly creating fake participants / domains */
   def metricsDoc(): (Seq[MetricDoc.Item], Seq[MetricDoc.Item]) = {
@@ -247,7 +297,11 @@ object MetricsFactory extends LazyLogging {
 
   val prefix: MetricName = MetricName("canton")
 
-  def forConfig(config: MetricsConfig, openTelemetry: OpenTelemetry): MetricsFactory = {
+  def forConfig(
+      config: MetricsConfig,
+      openTelemetry: OpenTelemetry,
+      metricsFactoryType: MetricsFactoryType,
+  ): MetricsFactory = {
     val registry = new metrics.MetricRegistry()
     val reporter = registerReporter(config, registry)
     new MetricsFactory(
@@ -255,6 +309,7 @@ object MetricsFactory extends LazyLogging {
       registry,
       config.reportJvmMetrics,
       openTelemetry.meterBuilder("canton").build(),
+      metricsFactoryType,
     )
   }
 

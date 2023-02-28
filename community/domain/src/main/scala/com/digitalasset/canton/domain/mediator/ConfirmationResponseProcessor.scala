@@ -10,11 +10,12 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty, ViewType}
 import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages.*
@@ -48,9 +49,12 @@ private[mediator] class ConfirmationResponseProcessor(
     val mediatorState: MediatorState,
     protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
+    override val timeouts: ProcessingTimeout,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
-    with Spanning {
+    with Spanning
+    with FlagCloseable
+    with HasCloseContext {
 
   /** Handle events for a single request-id.
     * Callers should ensure all events are for the same request and ordered by sequencer time.

@@ -201,7 +201,7 @@ trait MediatorDeduplicationStoreTest extends AsyncWordSpec with BaseTest {
 
 class MediatorDeduplicationStoreTestInMemory extends MediatorDeduplicationStoreTest {
   override def mkStore(firstEventTs: CantonTimestamp): MediatorDeduplicationStore = {
-    val store = new InMemoryMediatorDeduplicationStore(loggerFactory)
+    val store = new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts)
     store.initialize(firstEventTs).futureValue
     store
   }

@@ -30,6 +30,8 @@ trait SequencerDriverFactory {
     */
   def name: String
 
+  def version: Int
+
   /** The Scala type holding the driver-specific configuration */
   type ConfigType
 
@@ -168,6 +170,9 @@ trait SequencerDriver extends AutoCloseable {
 
 object SequencerDriver {
   val DefaultInitialBlockHeight = -1L
+
+  // domain bootstrap will load this version of driver; bump for incompatible change
+  val DriverApiVersion = 1
 }
 
 /** A block that a [[SequencerDriver]] delivers to the sequencer node.

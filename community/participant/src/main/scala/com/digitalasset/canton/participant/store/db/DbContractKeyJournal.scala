@@ -71,7 +71,7 @@ class DbContractKeyJournal(
                     sql"""
               select contract_key_hash, status, ts, request_counter from
               (
-                select contract_key_hash, status, ts, request_counter, 
+                select contract_key_hash, status, ts, request_counter,
                    ROW_NUMBER() OVER (partition by domain_id, contract_key_hash order by ts desc, request_counter desc) as row_num
                  from contract_key_journal
                  where domain_id = $domainId and """ ++ inClause ++ sql"""
@@ -81,7 +81,7 @@ class DbContractKeyJournal(
                   case _ =>
                     sql"""
               with ordered_changes(contract_key_hash, status, ts, request_counter, row_num) as (
-                select contract_key_hash, status, ts, request_counter, 
+                select contract_key_hash, status, ts, request_counter,
                    ROW_NUMBER() OVER (partition by domain_id, contract_key_hash order by ts desc, request_counter desc)
                  from contract_key_journal
                  where domain_id = $domainId and """ ++ inClause ++ sql"""
@@ -223,7 +223,7 @@ class DbContractKeyJournal(
       val query = storage.profile match {
         case _: DbStorage.Profile.H2 =>
           sqlu"""
-          with ordered_changes(domain_id, contract_key_hash, status, ts, request_counter, row_num) as ( 
+          with ordered_changes(domain_id, contract_key_hash, status, ts, request_counter, row_num) as (
              select domain_id, contract_key_hash, status, ts, request_counter,
                ROW_NUMBER() OVER (partition by domain_id, contract_key_hash order by ts desc, request_counter desc)
              from contract_key_journal

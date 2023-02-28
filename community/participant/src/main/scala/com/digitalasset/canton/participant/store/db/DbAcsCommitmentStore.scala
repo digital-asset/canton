@@ -317,7 +317,7 @@ class DbAcsCommitmentStore(
                values (?, ?, ?, ?) on conflict do nothing"""
 
         case Profile.Oracle(_) =>
-          """merge /*+ INDEX ( outstanding_acs_commitments ( counter_participant, domain_id, from_exclusive, to_inclusive ) ) */  
+          """merge /*+ INDEX ( outstanding_acs_commitments ( counter_participant, domain_id, from_exclusive, to_inclusive ) ) */
             |into outstanding_acs_commitments t
             |using (select ? domain_id, ? from_exclusive, ? to_inclusive, ? counter_participant from dual) input
             |on (t.counter_participant = input.counter_participant and t.domain_id = input.domain_id and

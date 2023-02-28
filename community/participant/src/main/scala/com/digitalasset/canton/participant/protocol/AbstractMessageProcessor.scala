@@ -176,7 +176,12 @@ abstract class AbstractMessageProcessor(
           RequestState.Confirmed,
         )
       )
-      _ = ephemeral.phase37Synchronizer.markTimeout(requestCounter, RequestId(timestamp))
+
+      _ = ephemeral.phase37Synchronizer.markTimeout(
+        requestCounter,
+        RequestId(timestamp),
+        decisionTime,
+      )
       _ =
         if (!isCleanReplay(requestCounter)) {
           val timeoutF =

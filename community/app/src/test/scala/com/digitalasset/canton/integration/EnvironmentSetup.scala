@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration
 import com.digitalasset.canton.CloseableTest
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.metrics.{MetricsFactoryType, ScopedInMemoryMetricsFactory}
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
 import scala.util.control.NonFatal
@@ -74,11 +75,23 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
     }
     val finalConfig = configTransform(pluginConfig)
 
+    val scopedMetricsFactory = new ScopedInMemoryMetricsFactory
     val environmentFixture =
       envDef.environmentFactory.create(
         finalConfig,
         loggerFactory,
-        envDef.testingConfig.copy(initializeGlobalOpenTelemetry = false),
+        envDef.testingConfig.copy(
+          metricsFactoryType =
+            /* If metrics reporters were configured for the test then it's an externally observed test
+             * therefore actual metrics have to be reported.
+             * The in memory metrics are used when no reporters are configured and the metrics are
+             * observed directly in the test scenarios.
+             * */
+            if (finalConfig.monitoring.metrics.reporters.isEmpty)
+              MetricsFactoryType.InMemory(scopedMetricsFactory.forContext)
+            else MetricsFactoryType.External,
+          initializeGlobalOpenTelemetry = false,
+        ),
       )
 
     try {

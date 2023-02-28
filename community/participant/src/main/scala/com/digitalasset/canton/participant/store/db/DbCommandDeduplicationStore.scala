@@ -57,11 +57,11 @@ class DbCommandDeduplicationStore(
     processingTime.optionTEvent {
       val query =
         sql"""
-        select application_id, command_id, act_as, 
+        select application_id, command_id, act_as,
           offset_definite_answer, publication_time_definite_answer, submission_id_definite_answer, trace_context_definite_answer,
-          offset_acceptance, publication_time_acceptance, submission_id_acceptance, trace_context_acceptance 
+          offset_acceptance, publication_time_acceptance, submission_id_acceptance, trace_context_acceptance
         from command_deduplication
-        where change_id_hash = $changeIdHash 
+        where change_id_hash = $changeIdHash
         """.as[CommandDeduplicationData].headOption
       storage.querySingle(query, functionFullName)
     }
@@ -99,8 +99,8 @@ class DbCommandDeduplicationStore(
             """
         case _: DbStorage.Profile.Oracle =>
           """
-          merge into command_deduplication using 
-             (select 
+          merge into command_deduplication using
+             (select
                 ? as change_id_hash,
                 ? as application_id,
                 ? as command_id,
@@ -146,8 +146,8 @@ class DbCommandDeduplicationStore(
             """
         case _: DbStorage.Profile.H2 =>
           """
-          merge into command_deduplication using 
-             (select 
+          merge into command_deduplication using
+             (select
                 cast(? as varchar(300)) as change_id_hash,
                 cast(? as varchar(300)) as application_id,
                 cast(? as varchar(300)) as command_id,

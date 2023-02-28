@@ -115,6 +115,24 @@ object PruningServiceError extends PruningServiceErrorGroup {
         with PruningServiceError
   }
 
+  @Explanation("""Pruning has been aborted because the participant is shutting down.""")
+  @Resolution(
+    """After the participant is restarted, the participant ensures that it is in a consistent state.
+      |Therefore no intervention is necessary. After the restart, pruning can be invoked again as usual to
+      |prune the participant up to the desired offset."""
+  )
+  object ParticipantShuttingDown
+      extends ErrorCode(
+        id = "SHUTDOWN_INTERRUPTED_PRUNING",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    case class Error()(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause = "Participant has been pruned only partially due to shutdown."
+        )
+        with PruningServiceError
+  }
+
   @Explanation("""Pruning has failed because of an internal server error.""")
   @Resolution("Identify the error in the server log.")
   object InternalServerError

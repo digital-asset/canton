@@ -11,6 +11,11 @@ object Dependencies {
   lazy val osClassifier: String =
     if (sys.props("os.name").contains("Mac")) "osx" else sys.props("os.name").toLowerCase
 
+  // Used to exclude slf4j 1.x and logback 1.2.x transitive dependencies, since they're incompatible
+  // with slf4j 2.x and logback 1.4.x currently in use.
+  lazy val incompatibleLogging: Array[ExclusionRule] =
+    Array(ExclusionRule("org.slf4j"), ExclusionRule("ch.qos.logback"))
+
   lazy val scala_version = "2.13.10"
   lazy val scala_version_short = "2.13"
 
@@ -86,11 +91,13 @@ object Dependencies {
 
   lazy val akka_stream = "com.typesafe.akka" %% "akka-stream" % akka_version
   lazy val akka_stream_testkit = "com.typesafe.akka" %% "akka-stream-testkit" % akka_version
-  lazy val akka_slf4j = "com.typesafe.akka" %% "akka-slf4j" % akka_version
+  lazy val akka_slf4j =
+    "com.typesafe.akka" %% "akka-slf4j" % akka_version excludeAll (incompatibleLogging: _*)
   lazy val akka_http = "com.typesafe.akka" %% "akka-http" % akka_http_version
   lazy val akka_http_testkit = "com.typesafe.akka" %% "akka-http-testkit" % akka_http_version
 
-  lazy val scala_logging = "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
+  lazy val scala_logging =
+    "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5" excludeAll (incompatibleLogging: _*)
   lazy val scalacheck = "org.scalacheck" %% "scalacheck" % "1.15.4"
   lazy val scalatest = "org.scalatest" %% "scalatest" % scalatest_version
   lazy val scalatestScalacheck =
@@ -104,11 +111,7 @@ object Dependencies {
 
   lazy val slf4j_api = "org.slf4j" % "slf4j-api" % slf4j_version
   lazy val jul_to_slf4j = "org.slf4j" % "jul-to-slf4j" % slf4j_version
-  lazy val logback_classic =
-    "ch.qos.logback" % "logback-classic" % logback_version excludeAll ExclusionRule(
-      organization = "org.slf4j",
-      name = "slf4j-api",
-    )
+  lazy val logback_classic = "ch.qos.logback" % "logback-classic" % logback_version
 
   lazy val logback_core = "ch.qos.logback" % "logback-core" % logback_version
 
@@ -169,7 +172,8 @@ object Dependencies {
   lazy val better_files = "com.github.pathikrit" %% "better-files" % "3.9.1"
 
   // TODO(#10852) one database library, not two
-  lazy val slick = "com.typesafe.slick" %% "slick" % slick_version
+  lazy val slick =
+    "com.typesafe.slick" %% "slick" % slick_version excludeAll (incompatibleLogging: _*)
   lazy val slick_hikaricp = "com.typesafe.slick" %% "slick-hikaricp" % slick_version
 
   lazy val testcontainers_version = "1.15.1"

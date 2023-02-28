@@ -18,6 +18,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -25,7 +26,7 @@ import java.util.UUID
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
-class MediatorStateTest extends AsyncWordSpec with BaseTest {
+class MediatorStateTest extends AsyncWordSpec with BaseTest with HasTestCloseContext { self =>
 
   "MediatorState" when {
     val requestId = RequestId(CantonTimestamp.Epoch)
@@ -79,7 +80,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
       val sut =
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
-          new InMemoryMediatorDeduplicationStore(loggerFactory),
+          new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
           mock[Clock],
           DomainTestMetrics.mediator,
           timeouts,

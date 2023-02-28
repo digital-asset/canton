@@ -35,6 +35,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
 import com.digitalasset.canton.error.*
+import com.digitalasset.canton.health.HealthReporting.DeferredHealthComponent
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -74,6 +75,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.Schedulers
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
@@ -146,6 +148,13 @@ class CantonSyncService(
     with NamedLogging {
 
   import ShowUtil.*
+
+  val syncDomainHealth: DeferredHealthComponent =
+    DeferredHealthComponent(loggerFactory, SyncDomain.healthName)
+  val ephemeralHealth: DeferredHealthComponent =
+    DeferredHealthComponent(loggerFactory, SyncDomainEphemeralState.healthName)
+  val sequencerClientHealth: DeferredHealthComponent =
+    DeferredHealthComponent(loggerFactory, SequencerClient.healthName)
 
   val maxDeduplicationDuration: NonNegativeFiniteDuration =
     participantNodePersistentState.settingsStore.settings.maxDeduplicationDuration
@@ -446,6 +455,9 @@ class CantonSyncService(
             "none",
           )
         )
+      case Left(LedgerPruningCancelledDueToShutdown) =>
+        logger.info(s"Pruning interrupted due to shutdown")
+        Left(PruningServiceError.ParticipantShuttingDown.Error())
       case Left(err) =>
         logger.warn(s"Internal error while pruning: $err")
         Left(PruningServiceError.InternalServerError.Error(err.message))
@@ -498,8 +510,12 @@ class CantonSyncService(
           // and asynchronously send it to the sequencer.
           logger.debug(s"Command ${submitterInfo.commandId} is now in flight.")
           sequencedF.onComplete {
-            case Success(_) =>
+            case Success(UnlessShutdown.Outcome(_)) =>
               logger.debug(s"Successfully submitted transaction ${submitterInfo.commandId}.")
+            case Success(UnlessShutdown.AbortedDueToShutdown) =>
+              logger.debug(
+                s"Transaction submission aborted due to shutdown ${submitterInfo.commandId}."
+              )
             case Failure(ex) =>
               logger.error(s"Command submission for ${submitterInfo.commandId} failed", ex)
           }
@@ -1083,7 +1099,7 @@ class CantonSyncService(
       )
 
     def handleCloseDegradation(syncDomain: SyncDomain)(err: CantonError) = {
-      syncDomain.degradationOccurred(err)
+      syncDomain.failureOccurred(err)
       disconnectDomain(domainAlias)
     }
 
@@ -1169,7 +1185,10 @@ class CantonSyncService(
         // update list of connected domains
         _ = connectedDomainsMap += (domainId -> syncDomain)
 
-        _ = syncDomain.resolveDegradationIfExists(_ => s"reconnected to domain $domainAlias")
+        _ = syncDomainHealth.set(syncDomain)
+        _ = ephemeralHealth.set(syncDomain.ephemeral)
+        _ = sequencerClientHealth.set(syncDomain.sequencerClient.healthComponent)
+        _ = syncDomain.resolveUnhealthy
 
         // Start sequencer client subscription only after sync domain has been added to connectedDomainsMap, e.g. to
         // prevent sending PartyAddedToParticipantEvents before the domain is available for command submission. (#2279)

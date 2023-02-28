@@ -718,19 +718,21 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
       }
 
       lazy val callback: SendCallback = {
-        case _: SendResult.Success =>
+        case UnlessShutdown.Outcome(_: SendResult.Success) =>
           val msg = s"Successfully registered $message with the sequencer."
           if (isDegraded)
             resolveDegradationIfExists(_ => msg)
           else
             logger.debug(msg)
           finalizeCurrentJob(UnlessShutdown.Outcome(Right(())))
-        case SendResult.Error(error) =>
+        case UnlessShutdown.Outcome(SendResult.Error(error)) =>
           TopologyDispatchingInternalError.SendResultError(error).discard
           stopDispatching("Stopping due to an internal send result error")
-        case _: SendResult.Timeout =>
+        case UnlessShutdown.Outcome(_: SendResult.Timeout) =>
           degradationOccurred(TopologyDispatchingDegradation.SendTrackerTimeout())
           dispatch()
+        case UnlessShutdown.AbortedDueToShutdown =>
+          abortDueToShutdown()
       }
 
       def dispatch(): Unit = {

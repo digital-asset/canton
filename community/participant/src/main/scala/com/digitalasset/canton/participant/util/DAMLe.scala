@@ -22,6 +22,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
 
 import java.nio.file.Path
+import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
@@ -228,7 +229,14 @@ class DAMLe(
 
   private[this] def handleResult[A](contracts: ContractAndKeyLookup, result: Result[A])(implicit
       traceContext: TraceContext
-  ): Future[Either[Error, A]] =
+  ): Future[Either[Error, A]] = {
+    @tailrec
+    def iterateOverInterrupts(continue: () => Result[A]): Result[A] =
+      continue() match {
+        case ResultInterruption(continue) => iterateOverInterrupts(continue)
+        case otherResult => otherResult
+      }
+
     result match {
       case ResultNeedPackage(packageId, resume) =>
         resolvePackage(packageId)(traceContext).transformWith {
@@ -257,5 +265,9 @@ class DAMLe(
           .value
           .flatMap(optInst => handleResult(contracts, resume(optInst)))
       case ResultError(err) => Future.successful(Left(err))
+      case ResultInterruption(continue) =>
+        handleResult(contracts, iterateOverInterrupts(continue))
     }
+  }
+
 }

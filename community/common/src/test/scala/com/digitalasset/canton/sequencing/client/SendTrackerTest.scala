@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.SendTrackerUpdateError.TimeoutHandlerError
@@ -82,7 +83,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
 
   def mkSendTracker(): Env = {
     val store = new InMemorySendTrackerStore()
-    val tracker = new SendTracker(Map.empty, store, metrics, loggerFactory)
+    val tracker = new SendTracker(Map.empty, store, metrics, loggerFactory, timeouts)
 
     Env(tracker, store)
   }
@@ -222,12 +223,12 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
 
     "track callback" should {
       class CaptureSendResultHandler {
-        private val calledWithP = Promise[SendResult]()
+        private val calledWithP = Promise[UnlessShutdown[SendResult]]()
         val handler: SendCallback = result => {
           calledWithP.success(result)
         }
 
-        val result: Future[SendResult] = calledWithP.future
+        val result: FutureUnlessShutdown[SendResult] = FutureUnlessShutdown(calledWithP.future)
       }
 
       "callback with successful send" in {
@@ -243,7 +244,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           _ <- valueOrFail(
             tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
           )("update with msgId1")
-          calledWith <- sendResultHandler.result
+          calledWith <- sendResultHandler.result.failOnShutdown
         } yield calledWith should matchPattern { case SendResult.Success(_) =>
         }
       }
@@ -261,7 +262,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           _ <- valueOrFail(
             tracker.update(timeoutHandler.handler)(deliverError(msgId1, CantonTimestamp.MinValue))
           )("update with msgId1")
-          calledWith <- sendResultHandler.result
+          calledWith <- sendResultHandler.result.failOnShutdown
         } yield calledWith should matchPattern { case SendResult.Error(_) =>
         }
       }
@@ -283,7 +284,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           )(
             "update with deliver event"
           )
-          calledWith <- sendResultHandler.result
+          calledWith <- sendResultHandler.result.failOnShutdown
         } yield calledWith should matchPattern { case SendResult.Timeout(deliverEventTime) =>
         }
       }

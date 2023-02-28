@@ -258,7 +258,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
     processingTime.optionTEvent {
       storage
         .querySingle(
-          sql"""select /*+ INDEX (event_log pk_event_log) */ 
+          sql"""select /*+ INDEX (event_log pk_event_log) */
        local_offset, request_sequencer_counter, event_id, content, trace_context, causality_update
               from event_log
               where log_id = $log_id and local_offset = $offset"""
@@ -292,7 +292,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       storage
         .querySingle(
           sql"""select local_offset, request_sequencer_counter, event_id, content, trace_context, causality_update
-              from event_log 
+              from event_log
               where log_id = $log_id and event_id = $eventId"""
             .as[TimestampedEventAndCausalChange]
             .headOption,

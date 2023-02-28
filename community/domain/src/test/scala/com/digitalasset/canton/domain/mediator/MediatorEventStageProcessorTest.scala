@@ -21,6 +21,7 @@ import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -28,7 +29,8 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.collection.mutable
 import scala.concurrent.Future
 
-class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
+class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with HasTestCloseContext {
+  self =>
   private lazy val domainId = DefaultTestIdentities.domainId
   private lazy val mediatorId = DefaultTestIdentities.mediator
   private lazy val mediatorMetrics = DomainTestMetrics.mediator
@@ -58,7 +60,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
 
     val state = new MediatorState(
       new InMemoryFinalizedResponseStore(loggerFactory),
-      new InMemoryMediatorDeduplicationStore(loggerFactory),
+      new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
       mock[Clock],
       mediatorMetrics,
       timeouts,

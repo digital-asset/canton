@@ -158,40 +158,10 @@ trait BaseTest
   )(implicit ec: ExecutionContext, pos: source.Position): Future[Assertion] =
     optionTAssertion.getOrElse(fail(s"Unexpected None value"))
 
-  /** Keeps evaluating `testCode` until it succeeds or a timeout occurs.
-    * @throws org.scalatest.exceptions.TestFailedException if `testCode` keeps throwing such an exception even after `timeout`
-    * @throws java.lang.Throwable if `testCode` throws any other throwable
-    * @throws java.lang.IllegalArgumentException if `timeUntilSuccess` is negative
-    */
-  @SuppressWarnings(
-    Array(
-      "org.wartremover.warts.Var",
-      "org.wartremover.warts.While",
-      "org.wartremover.warts.Return",
-    )
-  )
   def eventually[T](
       timeUntilSuccess: FiniteDuration = 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
-  )(testCode: => T): T = {
-    require(
-      timeUntilSuccess >= Duration.Zero,
-      s"The timeout must not be negative, but is $timeUntilSuccess",
-    )
-    val deadline = timeUntilSuccess.fromNow
-    var sleepMs = 1L
-    while (deadline.hasTimeLeft()) {
-      try {
-        return testCode
-      } catch {
-        case _: TestFailedException =>
-          val timeLeft = deadline.timeLeft.toMillis max 0
-          Threading.sleep(sleepMs min timeLeft)
-          sleepMs = (sleepMs * 2) min maxPollInterval.toMillis
-      }
-    }
-    testCode // try one last time and throw exception, if assertion keeps failing
-  }
+  )(testCode: => T): T = BaseTest.eventually(timeUntilSuccess, maxPollInterval)(testCode)
 
   /** Keeps evaluating `testCode` until it fails or a timeout occurs.
     * @return the result the last evaluation of `testCode`
@@ -323,6 +293,8 @@ trait BaseTest
   implicit class FutureUnlessShutdownSyntax[A](fut: FutureUnlessShutdown[A]) {
     def failOnShutdown(clue: String)(implicit ec: ExecutionContext, pos: Position): Future[A] =
       fut.onShutdown(fail(s"Shutdown during $clue"))
+    def failOnShutdown(implicit ec: ExecutionContext, pos: Position): Future[A] =
+      fut.onShutdown(fail(s"Unexpected shutdown"))
   }
 
   def forEveryParallel[A](inputs: Seq[A])(
@@ -339,6 +311,41 @@ trait BaseTest
 }
 
 object BaseTest {
+
+  /** Keeps evaluating `testCode` until it succeeds or a timeout occurs.
+    * @throws org.scalatest.exceptions.TestFailedException if `testCode` keeps throwing such an exception even after `timeout`
+    * @throws java.lang.Throwable if `testCode` throws any other throwable
+    * @throws java.lang.IllegalArgumentException if `timeUntilSuccess` is negative
+    */
+  @SuppressWarnings(
+    Array(
+      "org.wartremover.warts.Var",
+      "org.wartremover.warts.While",
+      "org.wartremover.warts.Return",
+    )
+  )
+  def eventually[T](
+      timeUntilSuccess: FiniteDuration = 20.seconds,
+      maxPollInterval: FiniteDuration = 5.seconds,
+  )(testCode: => T): T = {
+    require(
+      timeUntilSuccess >= Duration.Zero,
+      s"The timeout must not be negative, but is $timeUntilSuccess",
+    )
+    val deadline = timeUntilSuccess.fromNow
+    var sleepMs = 1L
+    while (deadline.hasTimeLeft()) {
+      try {
+        return testCode
+      } catch {
+        case _: TestFailedException =>
+          val timeLeft = deadline.timeLeft.toMillis max 0
+          Threading.sleep(sleepMs min timeLeft)
+          sleepMs = (sleepMs * 2) min maxPollInterval.toMillis
+      }
+    }
+    testCode // try one last time and throw exception, if assertion keeps failing
+  }
 
   // Uses SymbolicCrypto for the configured crypto schemes
   lazy val defaultStaticDomainParameters: StaticDomainParameters =

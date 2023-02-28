@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -43,6 +44,7 @@ class SyncDomainEphemeralStateFactoryImpl(
     testingConfigInternal: TestingConfigInternal,
     useCausalityTracking: Boolean,
     override val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends SyncDomainEphemeralStateFactory
     with NamedLogging {
@@ -82,6 +84,7 @@ class SyncDomainEphemeralStateFactoryImpl(
         timeouts,
         useCausalityTracking,
         persistentState.loggerFactory,
+        futureSupervisor,
       )
     }
   }

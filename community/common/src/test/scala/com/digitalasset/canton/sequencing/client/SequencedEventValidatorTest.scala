@@ -53,6 +53,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       testedProtocolVersion,
       syncCryptoApi,
       loggerFactory,
+      timeouts,
     )(executorService)
   }
 
@@ -137,7 +138,10 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       for {
         priorEvent <- createEvent()
         validator = mkValidator(priorEvent)
-        _ <- validator.validateOnReconnect(priorEvent).valueOrFail("successful reconnect")
+        _ <- validator
+          .validateOnReconnect(priorEvent)
+          .valueOrFail("successful reconnect")
+          .failOnShutdown
       } yield succeed
     }
 
@@ -152,6 +156,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         _ <- validator
           .validateOnReconnect(eventWithNewSig)
           .valueOrFail("event with regenerated signature")
+          .failOnShutdown
       } yield succeed
     }
 
@@ -168,6 +173,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         _ <- validator
           .validateOnReconnect(deliver2)
           .valueOrFail("Different serialization should be accepted")
+          .failOnShutdown
       } yield succeed
     }
 
@@ -180,7 +186,10 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       )
       for {
         wrongDomain <- createEvent(incorrectDomainId)
-        err <- validator.validateOnReconnect(wrongDomain).leftOrFail("wrong domain ID on reconnect")
+        err <- validator
+          .validateOnReconnect(wrongDomain)
+          .leftOrFail("wrong domain ID on reconnect")
+          .failOnShutdown
       } yield err shouldBe BadDomainId(defaultDomainId, incorrectDomainId)
     }
 
@@ -192,15 +201,20 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         errCounter <- validator
           .validateOnReconnect(differentCounter)
           .leftOrFail("fork on counter")
+          .failOnShutdown
         differentTimestamp <- createEvent(timestamp = CantonTimestamp.MaxValue)
         errTimestamp <- validator
           .validateOnReconnect(differentTimestamp)
           .leftOrFail("fork on timestamp")
+          .failOnShutdown
         differentContent <- createEventWithCounterAndTs(
           counter = updatedCounter,
           CantonTimestamp.Epoch,
         )
-        errContent <- validator.validateOnReconnect(differentContent).leftOrFail("fork on content")
+        errContent <- validator
+          .validateOnReconnect(differentContent)
+          .leftOrFail("fork on content")
+          .failOnShutdown
       } yield {
         errCounter shouldBe ForkHappened(
           SequencerCounter(updatedCounter),
@@ -229,6 +243,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         result <- validator
           .validateOnReconnect(badEvent)
           .leftOrFail("invalid signature on reconnect")
+          .failOnShutdown
       } yield {
         result shouldBe a[SignatureInvalid]
       }
@@ -241,7 +256,10 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       for {
         event <- createEvent(incorrectDomainId)
         validator = mkValidator()
-        result <- validator.validate(event).leftOrFail("wrong domain ID")
+        result <- validator
+          .validate(event)
+          .leftOrFail("wrong domain ID")
+          .failOnShutdown
       } yield result shouldBe BadDomainId(`defaultDomainId`, `incorrectDomainId`)
     }
 
@@ -254,7 +272,10 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
           counter = priorEvent.counter.v + 1L,
         )
         validator = mkValidator(priorEvent)
-        result <- validator.validate(badEvent).leftOrFail("invalid signature")
+        result <- validator
+          .validate(badEvent)
+          .leftOrFail("invalid signature")
+          .failOnShutdown
       } yield {
         result shouldBe a[SignatureInvalid]
       }
@@ -263,8 +284,8 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
     "validate correctly with explicit signing timestamp" in {
       val syncCrypto = mock[DomainSyncCryptoClient]
       when(syncCrypto.pureCrypto).thenReturn(subscriberCryptoApi.pureCrypto)
-      when(syncCrypto.snapshot(timestamp = ts(1))).thenAnswer[CantonTimestamp](tm =>
-        subscriberCryptoApi.snapshot(tm)
+      when(syncCrypto.snapshotUS(timestamp = ts(1))).thenAnswer[CantonTimestamp](tm =>
+        subscriberCryptoApi.snapshotUS(tm)
       )
       when(syncCrypto.topologyKnownUntilTimestamp).thenReturn(CantonTimestamp.MaxValue)
       val validator = mkValidator(
@@ -273,7 +294,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       )
       for {
         deliver <- createEventWithCounterAndTs(42, ts(2), timestampOfSigningKey = Some(ts(1)))
-        _ <- valueOrFail(validator.validate(deliver))("validate")
+        _ <- valueOrFail(validator.validate(deliver))("validate").failOnShutdown
       } yield succeed
     }
 
@@ -285,8 +306,14 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
 
       for {
         deliver <- createEventWithCounterAndTs(42, CantonTimestamp.Epoch)
-        _ <- validator.validate(deliver).valueOrFail("validate1")
-        err <- validator.validate(deliver).leftOrFail("validate2")
+        _ <- validator
+          .validate(deliver)
+          .valueOrFail("validate1")
+          .failOnShutdown
+        err <- validator
+          .validate(deliver)
+          .leftOrFail("validate2")
+          .failOnShutdown
       } yield {
         err shouldBe GapInSequencerCounter(SequencerCounter(42), SequencerCounter(42))
       }
@@ -303,10 +330,22 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         deliver2 <- createEventWithCounterAndTs(0L, CantonTimestamp.MaxValue)
         deliver3 <- createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2))
 
-        error1 <- validator.validate(deliver1).leftOrFail("deliver1")
-        error2 <- validator.validate(deliver2).leftOrFail("deliver2")
-        _ <- validator.validate(deliver3).valueOrFail("deliver3")
-        error3 <- validator.validate(deliver2).leftOrFail("deliver4")
+        error1 <- validator
+          .validate(deliver1)
+          .leftOrFail("deliver1")
+          .failOnShutdown
+        error2 <- validator
+          .validate(deliver2)
+          .leftOrFail("deliver2")
+          .failOnShutdown
+        _ <- validator
+          .validate(deliver3)
+          .valueOrFail("deliver3")
+          .failOnShutdown
+        error3 <- validator
+          .validate(deliver2)
+          .leftOrFail("deliver4")
+          .failOnShutdown
       } yield {
         error1 shouldBe NonIncreasingTimestamp(
           CantonTimestamp.MinValue,
@@ -330,9 +369,18 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         deliver2 <- createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2))
         deliver3 <- createEventWithCounterAndTs(44L, CantonTimestamp.ofEpochSecond(3))
 
-        result1 <- validator.validate(deliver1).leftOrFail("deliver1")
-        _ <- validator.validate(deliver2).valueOrFail("deliver2")
-        result3 <- validator.validate(deliver3).leftOrFail("deliver3")
+        result1 <- validator
+          .validate(deliver1)
+          .leftOrFail("deliver1")
+          .failOnShutdown
+        _ <- validator
+          .validate(deliver2)
+          .valueOrFail("deliver2")
+          .failOnShutdown
+        result3 <- validator
+          .validate(deliver3)
+          .leftOrFail("deliver3")
+          .failOnShutdown
       } yield {
         result1 shouldBe GapInSequencerCounter(SequencerCounter(43), SequencerCounter(41))
         result3 shouldBe GapInSequencerCounter(SequencerCounter(44), SequencerCounter(42))
