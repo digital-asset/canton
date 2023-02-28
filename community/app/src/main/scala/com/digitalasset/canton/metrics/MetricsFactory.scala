@@ -8,7 +8,7 @@ import com.codahale.metrics.{Metric, MetricFilter, MetricRegistry}
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.metrics.grpc.DamlGrpcServerMetrics
-import com.daml.metrics.{ExecutorServiceMetrics, HealthMetrics => DMHealth, JvmMetricSet}
+import com.daml.metrics.{ExecutorServiceMetrics, HealthMetrics as DMHealth, JvmMetricSet}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config.DeprecatedConfigUtils

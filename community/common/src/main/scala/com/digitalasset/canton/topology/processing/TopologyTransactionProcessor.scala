@@ -118,7 +118,8 @@ class TopologyTransactionProcessor(
       loggerFactory.append("role", "incoming"),
     )
   private val listeners = ListBuffer[TopologyTransactionProcessingSubscriber]()
-  private val timeAdjuster = new TopologyTimestampPlusEpsilonTracker(timeouts, loggerFactory)
+  private val timeAdjuster =
+    new TopologyTimestampPlusEpsilonTracker(timeouts, loggerFactory, futureSupervisor)
   private val serializer = new SimpleExecutionQueue()
   private val initialised = new AtomicBoolean(false)
 

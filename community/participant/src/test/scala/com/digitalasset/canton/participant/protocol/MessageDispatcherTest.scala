@@ -93,6 +93,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
   object Fixture {
     def mk(
         mkMd: (
+            ProtocolVersion,
             DomainId,
             ParticipantId,
             RequestTracker,
@@ -125,14 +126,22 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         )
           .thenReturn(processingRequestF)
         when(
-          processor.processResult(any[SignedContent[Deliver[DefaultOpenEnvelope]]])(anyTraceContext)
+          processor.processResult(
+            any[Either[
+              EventWithErrors[Deliver[DefaultOpenEnvelope]],
+              SignedContent[Deliver[DefaultOpenEnvelope]],
+            ]]
+          )(anyTraceContext)
         )
           .thenReturn(processingResultF)
         when(
           processor.processMalformedMediatorRequestResult(
             any[CantonTimestamp],
             any[SequencerCounter],
-            any[SignedContent[Deliver[DefaultOpenEnvelope]]],
+            any[Either[
+              EventWithErrors[Deliver[DefaultOpenEnvelope]],
+              SignedContent[Deliver[DefaultOpenEnvelope]],
+            ]],
           )(anyTraceContext)
         )
           .thenReturn(processingResultF)
@@ -192,7 +201,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           any[CantonTimestamp],
           any[RootHash],
           any[MediatorId],
-          any[String],
+          any[LocalReject],
         )(anyTraceContext)
       )
         .thenReturn(processingRequestF)
@@ -221,6 +230,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       }
 
       val messageDispatcher = mkMd(
+        testedProtocolVersion,
         domainId,
         participantId,
         requestTracker,
@@ -329,6 +339,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
   def messageDispatcher(
       mkMd: (
+          ProtocolVersion,
           DomainId,
           ParticipantId,
           RequestTracker,
@@ -461,14 +472,21 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
     }
 
     def checkProcessResult(processor: AnyProcessor): Assertion = {
-      verify(processor).processResult(any[SignedContent[Deliver[DefaultOpenEnvelope]]])(
+      verify(processor).processResult(
+        any[Either[
+          EventWithErrors[Deliver[DefaultOpenEnvelope]],
+          SignedContent[Deliver[DefaultOpenEnvelope]],
+        ]]
+      )(
         anyTraceContext
       )
       succeed
     }
 
-    def signAndTrace(event: RawProtocolEvent): Traced[Seq[PossiblyIgnoredProtocolEvent]] =
-      Traced(Seq(OrdinarySequencedEvent(signEvent(event))(traceContext)))
+    def signAndTrace(event: RawProtocolEvent): Traced[Seq[Either[Traced[
+      EventWithErrors[SequencedEvent[OpenEnvelope[ProtocolMessage]]]
+    ], PossiblyIgnoredProtocolEvent]]] =
+      Traced(Seq(Right(OrdinarySequencedEvent(signEvent(event))(traceContext))))
 
     def handle(sut: Fixture, event: RawProtocolEvent)(checks: => Assertion): Future[Assertion] = {
       for {
@@ -867,7 +885,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                             eqTo(ts),
                             eqTo(rootHash),
                             eqTo(mediatorId),
-                            eqTo(reason),
+                            eqTo(
+                              LocalReject.MalformedRejects.BadRootHashMessages
+                                .Reject(reason, testedProtocolVersion)
+                            ),
                           )(anyTraceContext)
                         checkTickIdentityProcessor(sut, sc, ts)
                         checkTickRequestTracker(sut, sc, ts)
@@ -1114,7 +1135,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
               verify(processor(sut)).processMalformedMediatorRequestResult(
                 isEq(CantonTimestamp.Epoch),
                 isEq(SequencerCounter(0)),
-                any[SignedContent[Deliver[DefaultOpenEnvelope]]],
+                any[Either[
+                  EventWithErrors[Deliver[DefaultOpenEnvelope]],
+                  SignedContent[Deliver[DefaultOpenEnvelope]],
+                ]],
               )(anyTraceContext)
               checkTickIdentityProcessor(sut)
               checkTickRequestTracker(sut)
@@ -1159,7 +1183,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         )
 
         val sequencedEvents = Seq(deliver1, deliver2, deliver3, deliverError4).map(event =>
-          OrdinarySequencedEvent(signEvent(event))(traceContext)
+          Right(OrdinarySequencedEvent(signEvent(event))(traceContext))
         )
         for {
           _ <- sut.messageDispatcher

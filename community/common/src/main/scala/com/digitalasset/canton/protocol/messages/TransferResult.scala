@@ -17,7 +17,7 @@ import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.Si
 import com.digitalasset.canton.protocol.messages.TransferDomainId.TransferDomainIdCast
 import com.digitalasset.canton.protocol.{RequestId, TransferId, v0, v1}
 import com.digitalasset.canton.sequencing.RawProtocolEvent
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, EventWithErrors, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -223,7 +223,7 @@ case class DeliveredTransferOutResult(result: SignedContent[Deliver[DefaultOpenE
       val size = transferOutResults.size
       if (size != 1)
         throw InvalidTransferOutResult(
-          result,
+          result.content,
           s"The deliver event must contain exactly one transfer-out result, but found $size.",
         )
       transferOutResults(0).protocolMessage.message
@@ -232,7 +232,7 @@ case class DeliveredTransferOutResult(result: SignedContent[Deliver[DefaultOpenE
   unwrap.verdict match {
     case _: Verdict.Approve => ()
     case _: Verdict.MediatorReject | _: Verdict.ParticipantReject =>
-      throw InvalidTransferOutResult(result, "The transfer-out result must be approving.")
+      throw InvalidTransferOutResult(result.content, "The transfer-out result must be approving.")
   }
 
   def transferId: TransferId = TransferId(unwrap.domainId, unwrap.requestId.unwrap)
@@ -243,18 +243,37 @@ case class DeliveredTransferOutResult(result: SignedContent[Deliver[DefaultOpenE
 object DeliveredTransferOutResult {
 
   case class InvalidTransferOutResult(
-      transferOutResult: SignedContent[RawProtocolEvent],
+      transferOutResult: RawProtocolEvent,
       message: String,
   ) extends RuntimeException(s"$message: $transferOutResult")
 
   def create(
-      result: SignedContent[RawProtocolEvent]
+      resultE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[RawProtocolEvent],
+      ]
   ): Either[InvalidTransferOutResult, DeliveredTransferOutResult] =
     for {
+      // The event signature would be invalid if some envelopes could not be opened upstream.
+      // However, this should not happen, because transfer out messages are sent by the mediator,
+      // who is trusted not to send bad envelopes.
+      result <- resultE match {
+        case Left(eventWithErrors) =>
+          Left(
+            InvalidTransferOutResult(
+              eventWithErrors.content,
+              "Result event contains envelopes that could not be deserialized.",
+            )
+          )
+        case Right(event) => Right(event)
+      }
       castToDeliver <- result
         .traverse(Deliver.fromSequencedEvent)
         .toRight(
-          InvalidTransferOutResult(result, "Only a Deliver event contains a transfer-out result.")
+          InvalidTransferOutResult(
+            result.content,
+            "Only a Deliver event contains a transfer-out result.",
+          )
         )
       deliveredTransferOutResult <- Either.catchOnly[InvalidTransferOutResult] {
         DeliveredTransferOutResult(castToDeliver)

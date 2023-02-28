@@ -20,6 +20,7 @@ import io.functionmeta.functionFullName
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, blocking}
+import scala.util.control.NonFatal
 
 object SubscriptionPool {
   sealed trait RegistrationError
@@ -123,6 +124,9 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
           subscription.close()
           if (waitForClosed)
             timeouts.unbounded.await(s"closing subscription for $member")(subscription.closedF)
+        } catch {
+          // We don't want to throw if closing fails because it will stop the chain of closing subsequent subscriptions
+          case NonFatal(e) => logger.warn(s"Failed to close subscription for $member", e)
         } finally {
           removeSubscription(member, subscription)
         }

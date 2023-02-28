@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.{EitherT, OptionT}
+import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
-import com.daml.lf.data.Ref
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -208,7 +208,7 @@ trait TransferProcessingSteps[
       CompletionInfo(
         actAs = List(pendingTransfer.submitterMetadata.submitter),
         applicationId = pendingTransfer.submitterMetadata.applicationId,
-        commandId = Ref.CommandId.assertFromString("command-id"),
+        commandId = pendingTransfer.submitterMetadata.commandId,
         optDeduplicationPeriod = None,
         submissionId = pendingTransfer.submitterMetadata.submissionId,
         statistics = None,
@@ -229,6 +229,20 @@ trait TransferProcessingSteps[
 
     Right(tse)
   }
+
+  override def decisionTimeFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TransferProcessorError, CantonTimestamp] =
+    parameters.decisionTimeFor(requestTs).leftMap(TransferParametersError(parameters.domainId, _))
+
+  override def participantResponseDeadlineFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TransferProcessorError, CantonTimestamp] =
+    parameters
+      .participantResponseDeadlineFor(requestTs)
+      .leftMap(TransferParametersError(parameters.domainId, _))
 
   case class TransferSubmission(
       override val batch: Batch[DefaultOpenEnvelope],
@@ -304,7 +318,11 @@ object TransferProcessingSteps {
 
   case class DomainNotReady(domainId: DomainId, context: String) extends TransferProcessorError {
     override def message: String = s"Domain $domainId is not ready when $context"
+  }
 
+  case class TransferParametersError(domainId: DomainId, context: String)
+      extends TransferProcessorError {
+    override def message: String = s"Unable to compute transfer parameters for $domainId: $context"
   }
 
   case class MetadataNotFound(err: engine.Error) extends TransferProcessorError {
@@ -356,7 +374,7 @@ object TransferProcessingSteps {
       declaredContractStakeholders: Option[Set[LfPartyId]],
       expectedStakeholders: Either[String, Set[LfPartyId]],
   ) extends TransferProcessorError {
-    override def message: String = s"For transfer `$transferId`: stakeholders mistmatch"
+    override def message: String = s"For transfer `$transferId`: stakeholders mismatch"
   }
 
   case class NoStakeholders private (contractId: LfContractId) extends TransferProcessorError {

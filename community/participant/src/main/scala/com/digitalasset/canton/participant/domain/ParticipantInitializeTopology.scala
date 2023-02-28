@@ -11,21 +11,24 @@ import com.digitalasset.canton.crypto.{Crypto, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.{
   RequestSigner,
   SequencerClient,
   SequencerClientFactory,
 }
-import com.digitalasset.canton.sequencing.handlers.{
-  DiscardIgnoredEvents,
-  EnvelopeOpener,
-  StripSignature,
+import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  Deliver,
+  SequencedEvent,
+  SignedContent,
 }
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
+import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -86,7 +89,7 @@ object ParticipantInitializeTopology {
         loggerFactory,
       )
 
-      val eventHandler = new UnsignedProtocolEventHandler {
+      val eventHandler = new OrdinaryApplicationHandler[ClosedEnvelope] {
         override def name: String = s"participant-initialize-topology-$alias"
 
         override def subscriptionStartsAt(
@@ -96,9 +99,25 @@ object ParticipantInitializeTopology {
           FutureUnlessShutdown.unit
 
         override def apply(
-            events: BoxedEnvelope[UnsignedEnvelopeBox, DefaultOpenEnvelope]
-        ): HandlerResult =
-          MonadUtil.sequentialTraverseMonoid(events.value) {
+            tracedEvents: Traced[Seq[BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]]]
+        ): HandlerResult = {
+          val openEvents = tracedEvents.value.map { closedSignedEvent =>
+            val closedEvent = closedSignedEvent.signedEvent.content
+            val (openEvent, openingErrors) = {
+              SequencedEvent.openEnvelopes(closedEvent)(protocolVersion, crypto.pureCrypto)
+            }
+
+            openingErrors.foreach { error =>
+              val cause =
+                s"Received an envelope at ${closedEvent.timestamp} that cannot be opened. " +
+                  s"Discarding envelope... Reason: $error"
+              SyncServiceAlarm.Warn(cause).report()
+            }
+
+            Traced(openEvent)(closedSignedEvent.traceContext)
+          }
+
+          MonadUtil.sequentialTraverseMonoid(openEvents) {
             _.withTraceContext { implicit traceContext =>
               {
                 case Deliver(_, _, _, _, batch) => handle.processor(Traced(batch.envelopes))
@@ -106,6 +125,7 @@ object ParticipantInitializeTopology {
               }
             }
           }
+        }
       }
 
       for {
@@ -114,9 +134,7 @@ object ParticipantInitializeTopology {
             client.subscribeAfterUnauthenticated(
               CantonTimestamp.MinValue,
               // There is no point in ignoring events in an unauthenticated subscription
-              DiscardIgnoredEvents(loggerFactory) {
-                StripSignature { EnvelopeOpener(protocolVersion, crypto.pureCrypto)(eventHandler) }
-              },
+              DiscardIgnoredEvents(loggerFactory)(eventHandler),
               domainTimeTracker,
             )
           )

@@ -51,6 +51,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       submitter,
       LedgerApplicationId.assertFromString("tests"),
       participant.toLf,
+      LedgerCommandId.assertFromString("transfer-in-validation-command-id"),
       None,
     )
   }

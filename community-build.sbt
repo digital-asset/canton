@@ -16,6 +16,7 @@ lazy val `util-internal` = CommunityProjects.`util-internal`
 lazy val `sequencer-driver-api` = CommunityProjects.`sequencer-driver-api`
 lazy val `sequencer-driver-lib` = CommunityProjects.`sequencer-driver-lib`
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
+lazy val `integration-testing-toolkit-junit` = CommunityProjects.`integration-testing-toolkit-junit`
 lazy val `daml-fork` = DamlProjects.`daml-fork`
 lazy val `daml-copy-macro` = DamlProjects.`daml-copy-macro`
 lazy val `daml-copy-protobuf` = DamlProjects.`daml-copy-protobuf`

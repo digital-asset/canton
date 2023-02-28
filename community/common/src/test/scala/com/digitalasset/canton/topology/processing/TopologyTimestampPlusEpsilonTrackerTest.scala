@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -41,7 +41,11 @@ class TopologyTimestampPlusEpsilonTrackerTest
       loggerFactory,
     )
     val tracker =
-      new TopologyTimestampPlusEpsilonTracker(DefaultProcessingTimeouts.testing, loggerFactory)
+      new TopologyTimestampPlusEpsilonTracker(
+        DefaultProcessingTimeouts.testing,
+        loggerFactory,
+        FutureSupervisor.Noop,
+      )
 
     def appendEps(
         sequenced: SequencedTime,

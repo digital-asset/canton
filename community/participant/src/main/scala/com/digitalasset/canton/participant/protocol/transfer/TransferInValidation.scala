@@ -14,9 +14,9 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
+import com.digitalasset.canton.participant.protocol.{ProcessingSteps, SingleDomainCausalTracker}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
@@ -198,32 +198,18 @@ private[transfer] class TransferInValidation(
           )
           _ <- EitherT.fromEither[Future](checkSubmitterIsStakeholder)
           transferOutSubmitter = transferData.transferOutRequest.submitter
-          exclusivityBaseline = transferData.transferOutRequest.targetTimeProof.timestamp
+          targetTimeProof = transferData.transferOutRequest.targetTimeProof.timestamp
 
           // TODO(M40): Check that transferData.transferOutRequest.targetTimeProof.timestamp is in the past
           cryptoSnapshot <- transferCoordination
-            .cryptoSnapshot(
-              transferData.targetDomain,
-              transferData.transferOutRequest.targetTimeProof.timestamp,
+            .cryptoSnapshot(transferData.targetDomain, targetTimeProof)
+
+          exclusivityLimit <- ProcessingSteps
+            .getTransferInExclusivity(
+              cryptoSnapshot.ipsSnapshot,
+              targetTimeProof,
             )
-
-          /*
-            We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
-            because it makes no sense to progress if we don't manage to fetch domain parameters.
-            Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
-            that we don't have here.
-           */
-          domainParameters <- EitherT(
-            cryptoSnapshot.ipsSnapshot
-              .findDynamicDomainParameters()
-              .map(
-                _.toRight(
-                  DomainNotReady(transferData.targetDomain, "Unable to fetch domain parameters")
-                )
-              )
-          )
-
-          exclusivityLimit = domainParameters.transferExclusivityLimitFor(exclusivityBaseline)
+            .leftMap[TransferProcessorError](TransferParametersError(domainId, _))
 
           _ <- condUnitET[Future](
             tsIn >= exclusivityLimit

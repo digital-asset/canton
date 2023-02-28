@@ -9,7 +9,7 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
-import com.daml.lf.data.{Bytes, Ref}
+import com.daml.lf.data.Bytes
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
@@ -470,8 +470,11 @@ private[transfer] class TransferInProcessingSteps(
     s"Transfer-in $requestId: $message"
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
-      message: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, TransferInResult],
+      messageE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, TransferInResult],
       pendingRequestData: PendingTransferIn,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -496,7 +499,7 @@ private[transfer] class TransferInProcessingSteps(
     ) = pendingRequestData
 
     import scala.util.Either.MergeableEither
-    MergeableEither[MediatorResult](result).merge.verdict match {
+    MergeableEither[MediatorResult](resultE).merge.verdict match {
       case _: Verdict.Approve =>
         val commitSet = CommitSet(
           archivals = Map.empty,
@@ -593,7 +596,7 @@ private[transfer] class TransferInProcessingSteps(
           CompletionInfo(
             actAs = List(submitterMetadata.submitter),
             applicationId = submitterMetadata.applicationId,
-            commandId = Ref.CommandId.assertFromString("command-id"),
+            commandId = submitterMetadata.commandId,
             optDeduplicationPeriod = None,
             submissionId = submitterMetadata.submissionId,
             statistics = None,

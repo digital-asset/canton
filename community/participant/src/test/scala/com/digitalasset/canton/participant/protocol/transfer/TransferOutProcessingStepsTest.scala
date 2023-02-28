@@ -59,6 +59,7 @@ import com.digitalasset.canton.{
   BaseTest,
   HasExecutorService,
   LedgerApplicationId,
+  LedgerCommandId,
   LedgerTransactionId,
   LfPartyId,
   LfWorkflowId,
@@ -104,6 +105,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       submitter,
       LedgerApplicationId.assertFromString("tests"),
       submittingParticipant.toLf,
+      LedgerCommandId.assertFromString("transfer-out-processing-steps-command-id"),
       None,
     )
   }
@@ -643,6 +645,15 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           Verdict.Approve(testedProtocolVersion),
           testedProtocolVersion,
         )
+
+      val domainParameters = DynamicDomainParametersWithValidity(
+        DynamicDomainParameters
+          .defaultValues(testedProtocolVersion),
+        CantonTimestamp.MinValue,
+        None,
+        targetDomain,
+      )
+
       for {
         signedResult <- SignedProtocolMessage.tryCreate(
           transferResult,
@@ -666,9 +677,9 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           SymbolicCrypto.emptySignature,
           None,
         )
-        transferInExclusivity = DynamicDomainParameters
-          .defaultValues(testedProtocolVersion)
+        transferInExclusivity = domainParameters
           .transferExclusivityLimitFor(timeEvent.timestamp)
+          .value
         pendingOut = PendingTransferOut(
           RequestId(CantonTimestamp.Epoch),
           RequestCounter(1),
@@ -689,7 +700,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         _ <- valueOrFail(
           outProcessingSteps
             .getCommitSetAndContractsToBeStoredAndEvent(
-              signedContent,
+              Right(signedContent),
               Right(transferResult),
               pendingOut,
               state.pendingTransferOutSubmissions,

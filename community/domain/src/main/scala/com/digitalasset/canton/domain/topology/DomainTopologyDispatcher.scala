@@ -331,18 +331,24 @@ private[domain] class DomainTopologyDispatcher(
                 authorizedStoreSnapshot(txs.last1.validFrom.value).findDynamicDomainParameters()
               )
             )
-            .flatMap(_.fold(empty) { param =>
-              // if new epsilon is smaller than current, then wait current epsilon before dispatching this set of txs
-              val old = param.topologyChangeDelay.duration
-              if (old > mapping.domainParameters.topologyChangeDelay.duration) {
-                logger.debug(
-                  s"Waiting $old due to topology change delay before resuming dispatching"
-                )
-                EitherT.right(
-                  clock.scheduleAfter(_ => (), param.topologyChangeDelay.duration)
-                )
-              } else empty
-            })
+            .flatMap(
+              _.fold(
+                _ => empty,
+                param => {
+                  // if new epsilon is smaller than current, then wait current epsilon before dispatching this set of txs
+                  val old = param.topologyChangeDelay.duration
+                  if (old > mapping.domainParameters.topologyChangeDelay.duration) {
+                    logger.debug(
+                      s"Waiting $old due to topology change delay before resuming dispatching"
+                    )
+                    EitherT.right(
+                      clock.scheduleAfter(_ => (), param.topologyChangeDelay.duration)
+                    )
+                  } else empty
+                },
+              )
+            )
+
         case _ => empty
       }
   }

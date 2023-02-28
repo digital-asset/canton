@@ -324,7 +324,7 @@ class SequencerReader(
 
               case Left(
                     SequencedEventValidator.SigningTimestampTooOld(_) |
-                    SequencedEventValidator.NoDynamicDomainParameters
+                    SequencedEventValidator.NoDynamicDomainParameters(_)
                   ) =>
                 // We can't use the signing timestamp for the sequencing time.
                 // Replace the event with an error that is only sent to the sender
@@ -410,10 +410,10 @@ class SequencerReader(
       store.saveCounterCheckpoint(memberId, checkpoint).valueOr {
         case SaveCounterCheckpointError.CounterCheckpointInconsistent(
               existingTimestamp,
-              existingLatestTopologyClientTimestampg,
+              existingLatestTopologyClientTimestamp,
             ) =>
           val message =
-            s"""|There is an existing checkpoint for member [$member] ($memberId) at counter ${checkpoint.counter} with timestamp $existingTimestamp and latest topology client timestamp $existingLatestTopologyClientTimestampg. 
+            s"""|There is an existing checkpoint for member [$member] ($memberId) at counter ${checkpoint.counter} with timestamp $existingTimestamp and latest topology client timestamp $existingLatestTopologyClientTimestamp.
                 |We attempted to write ${checkpoint.timestamp} and ${checkpoint.latestTopologyClientTimestamp}.""".stripMargin
           ErrorUtil.internalError(new CounterCheckpointInconsistentException(message))
       }

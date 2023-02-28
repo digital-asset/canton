@@ -39,10 +39,11 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, *}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Interface for processing steps that are specific to request types.
   * The [[ProtocolProcessor]] wires up these steps with the necessary synchronization and state management,
@@ -144,6 +145,16 @@ trait ProcessingSteps[
 
   /** Convert [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.NoMediatorError]] into a submission error */
   def embedNoMediatorError(error: NoMediatorError): SubmissionError
+
+  def decisionTimeFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[RequestError with ResultError, CantonTimestamp]
+
+  def participantResponseDeadlineFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[RequestError with ResultError, CantonTimestamp]
 
   sealed trait Submission {
 
@@ -465,9 +476,9 @@ trait ProcessingSteps[
 
   /** Phase 7, step 2:
     *
-    * @param event              The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the mediator result.
+    * @param eventE             The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the mediator result.
     *                           It is ensured that the `event` contains exactly one [[com.digitalasset.canton.protocol.messages.MediatorResult]]
-    * @param result             The unpacked mediator result that is contained in the `event`
+    * @param resultE            The unpacked mediator result that is contained in the `event`
     * @param pendingRequestData The `requestType.PendingRequestData` produced in Phase 3
     * @param pendingSubmissions The data stored on submissions in the [[PendingSubmissions]]
     * @return The [[com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet]],
@@ -475,8 +486,11 @@ trait ProcessingSteps[
     *         and the event to be published
     */
   def getCommitSetAndContractsToBeStoredAndEvent(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, Result],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, Result],
       pendingRequestData: requestType.PendingRequestData,
       pendingSubmissions: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -515,6 +529,31 @@ trait ProcessingSteps[
 }
 
 object ProcessingSteps {
+  def getTransferInExclusivity(
+      topologySnapshot: TopologySnapshot,
+      ts: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, String, CantonTimestamp] =
+    for {
+      domainParameters <- EitherT(topologySnapshot.findDynamicDomainParameters())
+
+      transferInExclusivity <- EitherT
+        .fromEither[Future](domainParameters.transferExclusivityLimitFor(ts))
+    } yield transferInExclusivity
+
+  def getDecisionTime(
+      topologySnapshot: TopologySnapshot,
+      ts: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, String, CantonTimestamp] =
+    for {
+      domainParameters <- EitherT(topologySnapshot.findDynamicDomainParameters())
+      decisionTime <- EitherT.fromEither[Future](domainParameters.decisionTimeFor(ts))
+    } yield decisionTime
 
   trait RequestType {
     type PendingRequestData <: ProcessingSteps.PendingRequestData

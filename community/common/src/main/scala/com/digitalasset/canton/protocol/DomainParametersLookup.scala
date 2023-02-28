@@ -112,7 +112,7 @@ class DynamicDomainParametersLookup[P](
   def getApproximate()(implicit traceContext: TraceContext): Future[Option[P]] =
     topologyClient.currentSnapshotApproximation
       .findDynamicDomainParameters()
-      .map(_.map(projector))
+      .map(_.map(p => projector(p.parameters)).toOption)
 
   def getAll(validAt: CantonTimestamp)(implicit
       traceContext: TraceContext

@@ -21,7 +21,7 @@ import scoverage.ScoverageKeys._
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport._
 
-import java.nio.file.Files
+import java.nio.file.{Files, StandardCopyOption}
 import scala.language.postfixOps
 
 object BuildCommon {
@@ -37,7 +37,7 @@ object BuildCommon {
         addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")) ++
         addCommandAlias(
           "lint",
-          "; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; checkDamlProjectVersions",
+          "; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders",
         ) ++
         addCommandAlias(
           "scalafixCheck",
@@ -66,7 +66,9 @@ object BuildCommon {
         scalaVersion := scala_version,
         resolvers := Seq(Dependencies.use_custom_daml_version).collect { case true =>
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
-        } ++ resolvers.value,
+        } ++ Seq(
+          "Redhat GA for s390x natives" at "https://maven.repository.redhat.com/ga"
+        ) ++ resolvers.value,
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
         // scalacOptions in Test += "-Ystatistics",
       )
@@ -399,19 +401,25 @@ object BuildCommon {
   ).flatMap(_.settings)
 
   // applies to all Canton-based sub-projects (descendants of util-external)
-  lazy val sharedCantonSettings: Seq[Def.Setting[_]] = sharedSettings ++ cantonWarts ++ Seq(
-    // Enable logging of begin and end of test cases, test suites, and test runs.
-    Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter"),
-    // Ignore daml codegen generated files from code coverage
-    coverageExcludedFiles := formatCoverageExcludes(
-      """
+  lazy val sharedCantonSettings: Seq[Def.Setting[_]] =
+    sharedCantonSettingsWithoutTestArguments ++ Seq(
+      // Enable logging of begin and end of test cases, test suites, and test runs.
+      Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter")
+    )
+
+  // used by ``integration-testing-toolkit-junit`` since ``-C`` seems to interfere with ``sbt-jupiter-interface``
+  lazy val sharedCantonSettingsWithoutTestArguments: Seq[Def.Setting[_]] =
+    sharedSettings ++ cantonWarts ++ Seq(
+      // Ignore daml codegen generated files from code coverage
+      coverageExcludedFiles := formatCoverageExcludes(
+        """
         |<empty>
         |.*sbt-buildinfo.BuildInfo
         |.*daml-codegen.*
       """
-    ),
-    scalacOptions += "-Wconf:src=src_managed/.*:silent",
-  )
+      ),
+      scalacOptions += "-Wconf:src=src_managed/.*:silent",
+    )
 
   // applies to all app sub-projects
   lazy val sharedAppSettings = sharedCantonSettings ++ Seq(
@@ -453,6 +461,7 @@ object BuildCommon {
   object CommunityProjects {
 
     lazy val allProjects = Set(
+      `integration-testing-toolkit-junit`,
       `util-external`,
       `util-internal`,
       `community-app`,
@@ -468,6 +477,23 @@ object BuildCommon {
       `akka-fork`,
       `demo`,
     )
+
+    lazy val `integration-testing-toolkit-junit` = project
+      .in(file("community/integration-testing-toolkit-junit"))
+      .settings(
+        sharedCantonSettingsWithoutTestArguments,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+        crossPaths := false,
+        libraryDependencies ++= Seq(
+          junit_api,
+          junit % Test,
+          junit_engine % Test,
+          jupiter_interface % Test,
+        ),
+      )
+      .dependsOn(
+        `community-app` // required for: Environment, CommunityEnvironment
+      )
 
     // Project for utilities that are also used outside of the Canton repo
     lazy val `util-external` = project
@@ -624,6 +650,8 @@ object BuildCommon {
           bouncycastle_bcprov_jdk15on,
           bouncycastle_bcpkix_jdk15on,
           grpc_netty,
+          netty_native,
+          netty_native_s390,
           grpc_services,
           scalapb_runtime_grpc,
           scalapb_runtime,
@@ -880,8 +908,10 @@ object BuildCommon {
         Compile / packageBin := Def.task {
           val src = (`sequencer-driver-api` / assembly).value.toPath
           val dest = (Compile / packageBin / artifactPath).value.toPath
-          Files.deleteIfExists(dest)
-          Files.copy(src, dest).toFile()
+          Files.createDirectories(dest.getParent())
+          Files
+            .copy(src, dest, StandardCopyOption.REPLACE_EXISTING)
+            .toFile()
         }.value,
         Compile / packageSrc := Def.task {
           val src = (`sequencer-driver-api` / Compile / packageSrc).value.toPath

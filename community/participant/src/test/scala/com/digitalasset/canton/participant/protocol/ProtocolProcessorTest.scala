@@ -44,6 +44,7 @@ import com.digitalasset.canton.participant.sync.{
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   DynamicDomainParameters,
+  DynamicDomainParametersWithValidity,
   RequestAndRootHashMessage,
   RequestId,
   RootHash,
@@ -140,8 +141,12 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private val requestSc = SequencerCounter(0)
   private val resultSc = SequencerCounter(1)
   private val rc = RequestCounter(0)
-  private val parameters =
-    DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero, testedProtocolVersion)
+  private val parameters = DynamicDomainParametersWithValidity(
+    DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero, testedProtocolVersion),
+    CantonTimestamp.MinValue,
+    None,
+    domain,
+  )
 
   private type TestInstance =
     ProtocolProcessor[
@@ -365,7 +370,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         .failOnShutdown("shutting down while test is running")
         .futureValue shouldBe (())
       submissionMap.get(1) shouldBe Some(())
-      val afterDecisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).plusMillis(1)
+      val afterDecisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
       val () =
         sut
           .processRequest(afterDecisionTime, rc, requestSc, someRequestBatch)
@@ -380,7 +385,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val crypto2 = TestingIdentityFactory(
         TestingTopology(mediators = Set.empty),
         loggerFactory,
-        parameters,
+        parameters.parameters,
       ).forOwnerAndDomain(participant, domain)
       val (sut, persistent, ephemeral) = testProcessingSteps(crypto = crypto2)
       val res = sut.submit(1).onShutdown(fail("submission shutdown")).value.futureValue
@@ -487,7 +492,10 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       }
 
       // Trigger the timeout for the request
-      ephemeral.requestTracker.tick(requestSc + 1, parameters.decisionTimeFor(requestId.unwrap))
+      ephemeral.requestTracker.tick(
+        requestSc + 1,
+        parameters.decisionTimeFor(requestId.unwrap).value,
+      )
 
       eventually() {
         val state = journal.query(rc).value.futureValue
@@ -649,7 +657,10 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         .thenReturn(EitherT.rightT(()))
       sut
         .performResultProcessing(
-          mock[SignedContent[Deliver[DefaultOpenEnvelope]]],
+          mock[Either[
+            EventWithErrors[Deliver[DefaultOpenEnvelope]],
+            SignedContent[Deliver[DefaultOpenEnvelope]],
+          ]],
           Right(mockSignedProtocolMessage),
           requestId,
           timestamp,

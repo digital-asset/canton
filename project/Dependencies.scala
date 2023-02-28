@@ -41,6 +41,9 @@ object Dependencies {
 
   lazy val aws_kms_version = "2.17.187"
 
+  lazy val junit_jupiter_version = "5.9.2"
+  lazy val jupiter_interface_version = "0.11.1"
+
   lazy val reflections = "org.reflections" % "reflections" % "0.9.12"
   lazy val pureconfig = "com.github.pureconfig" %% "pureconfig" % pureconfig_version
   lazy val pureconfig_cats = "com.github.pureconfig" %% "pureconfig-cats" % pureconfig_version
@@ -60,7 +63,7 @@ object Dependencies {
   lazy val pprint = "com.lihaoyi" %% "pprint" % pprint_version
 
   lazy val h2 = "com.h2database" % "h2" % "2.1.210"
-  lazy val postgres = "org.postgresql" % "postgresql" % "42.2.25"
+  lazy val postgres = "org.postgresql" % "postgresql" % "42.3.8"
   lazy val flyway = "org.flywaydb" % "flyway-core" % "8.4.0"
   lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % "19.13.0.0.1"
 
@@ -80,9 +83,13 @@ object Dependencies {
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
 
-  // pick the version of boring ssl from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
+  // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
   lazy val netty_boring_ssl = "io.netty" % "netty-tcnative-boringssl-static" % "2.0.46.Final"
+  lazy val netty_native =
+    "io.netty" % "netty-transport-native-epoll" % "4.1.72.Final" classifier "linux-x86_64" classifier "linux-aarch_64"
+  lazy val netty_native_s390 =
+    "io.netty" % "netty-transport-native-epoll-s390x" % "4.1.77.Final-redhat-00001" classifier "linux-s390_64"
   lazy val grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
   lazy val grpc_services = "io.grpc" % "grpc-services" % grpc_version
   lazy val grpc_api = "io.grpc" % "grpc-api" % grpc_version
@@ -212,6 +219,11 @@ object Dependencies {
 
   // AWS SDK for Java API to encrypt/decrypt keys using KMS
   lazy val aws_kms = "software.amazon.awssdk" % "kms" % aws_kms_version
+
+  lazy val junit_api = "org.junit.jupiter" % "junit-jupiter-api" % junit_jupiter_version
+  lazy val junit = "org.junit.jupiter" % "junit-jupiter" % junit_jupiter_version
+  lazy val junit_engine = "org.junit.jupiter" % "junit-jupiter-engine" % junit_jupiter_version
+  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % jupiter_interface_version
 
   lazy val damlDependencyMap = {
     import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._

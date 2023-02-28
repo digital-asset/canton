@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, MonadUtil}
@@ -64,15 +65,19 @@ private[mediator] class ConfirmationResponseProcessor(
       events: Seq[Traced[MediatorEvent]],
       callerTraceContext: TraceContext,
   ): HandlerResult = {
+
+    val requestTs = requestId.unwrap
+
     val future = for {
       // FIXME(M40): do not block if requestId is far in the future
       snapshot <- crypto.ips.awaitSnapshot(requestId.unwrap)(callerTraceContext)
-      domainParameters <- snapshot.findDynamicDomainParametersOrDefault(protocolVersion)(
-        callerTraceContext
-      )
-      participantResponseDeadline =
-        domainParameters.participantResponseDeadlineFor(requestId.unwrap)
-      decisionTime = domainParameters.decisionTimeFor(requestId.unwrap)
+
+      domainParameters <- snapshot
+        .findDynamicDomainParameters()(callerTraceContext)
+        .flatMap(_.toFuture(new IllegalStateException(_)))
+
+      participantResponseDeadline <- domainParameters.participantResponseDeadlineForF(requestTs)
+      decisionTime <- domainParameters.decisionTimeForF(requestTs)
 
       _ <- MonadUtil.sequentialTraverse_(events) {
         _.withTraceContext { implicit traceContext =>

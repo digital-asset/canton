@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.digitalasset.canton.LfWorkflowId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
@@ -237,18 +238,12 @@ object TransferCoordination {
               syncCryptoApi.forDomain(domain).toRight(DomainParametersNotAvailable)
             )
 
-            /*
-              We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
-              because it makes no sense to progress if we don't manage to fetch domain parameters.
-              Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
-              that we don't have here.
-             */
             parameters <- EitherT(
               FutureUnlessShutdown
                 .outcomeF(
                   crypto.ips.currentSnapshotApproximation.findDynamicDomainParameters()
                 )
-                .map(_.toRight(DomainParametersNotAvailable))
+                .map(_.leftMap(_ => DomainParametersNotAvailable))
             )
 
             exclusivityTimeout = parameters.transferExclusivityTimeout

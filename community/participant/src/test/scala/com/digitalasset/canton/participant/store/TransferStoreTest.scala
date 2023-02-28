@@ -28,6 +28,7 @@ import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetPr
 import com.digitalasset.canton.{
   BaseTest,
   LedgerApplicationId,
+  LedgerCommandId,
   LedgerParticipantId,
   LedgerSubmissionId,
   LfPartyId,
@@ -629,6 +630,7 @@ object TransferStoreTest {
         LedgerParticipantId.assertFromString(
           "no-participant-id"
         ) // default value in TransferOutView/TransferInView
+
     val applicationId: LedgerApplicationId =
       if (protocolVersion >= ProtocolVersion.v5)
         LedgerApplicationId.assertFromString("application-tests")
@@ -636,10 +638,20 @@ object TransferStoreTest {
         LedgerApplicationId.assertFromString(
           "no-application-id"
         ) // default value in TransferOutView/TransferInView
+
+    val commandId: LedgerCommandId =
+      if (protocolVersion >= ProtocolVersion.v5)
+        LedgerCommandId.assertFromString("transfer-store-command-id")
+      else
+        LedgerCommandId.assertFromString(
+          "no-command-id"
+        ) // default value in TransferOutView/TransferInView
+
     TransferSubmitterMetadata(
       submitter,
       applicationId,
       submittingParticipant,
+      commandId,
       None,
     )
   }

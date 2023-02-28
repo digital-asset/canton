@@ -450,7 +450,7 @@ object DbTransferStore {
       )
 
       result <- DeliveredTransferOutResult
-        .create(signedContent)
+        .create(Right(signedContent))
         .leftMap(err => OtherError(err.toString))
     } yield result
 

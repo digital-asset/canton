@@ -55,6 +55,7 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainEphemeralState,
   SyncDomainPersistentState,
 }
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
@@ -63,16 +64,20 @@ import com.digitalasset.canton.participant.topology.{
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements
-import com.digitalasset.canton.sequencing.handlers.{CleanSequencerCounterTracker, EnvelopeOpener}
-import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope}
+import com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  Envelope,
+  EventWithErrors,
+}
 import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
+  BoxedEnvelope,
   DelayLogger,
   HandlerResult,
   PossiblyIgnoredApplicationHandler,
-  PossiblyIgnoredProtocolEvent,
   SubscriptionStart,
 }
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
@@ -305,6 +310,7 @@ class SyncDomain(
 
   private val messageDispatcher: MessageDispatcher =
     messageDispatcherFactory.create(
+      staticDomainParameters.protocolVersion,
       domainId,
       participantId,
       ephemeral.requestTracker,
@@ -578,7 +584,7 @@ class SyncDomain(
       messageHandler =
         new ApplicationHandler[
           Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
-          DefaultOpenEnvelope,
+          ClosedEnvelope,
         ] {
           override def name: String = s"sync-domain-$domainId"
 
@@ -588,14 +594,40 @@ class SyncDomain(
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
             topologyProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext)
 
-          override def apply(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
-            messageDispatcher.handleAll(events)
+          override def apply(
+              tracedEvents: BoxedEnvelope[Lambda[
+                `+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]
+              ], ClosedEnvelope]
+          ): HandlerResult = {
+            tracedEvents.withTraceContext { traceContext => closedEvents =>
+              val openEvents = closedEvents.map { event =>
+                val openedEvent = PossiblyIgnoredSequencedEvent.openEnvelopes(event)(
+                  staticDomainParameters.protocolVersion,
+                  domainCrypto.crypto.pureCrypto,
+                )
+
+                openedEvent match {
+                  case Right(_) =>
+
+                  case Left(Traced(EventWithErrors(content, openingErrors, _isIgnored))) =>
+                    // Raise alarms
+                    // TODO(i11804): Send a rejection
+                    openingErrors.foreach { error =>
+                      val cause =
+                        s"Received an envelope at ${content.timestamp} that cannot be opened. " +
+                          s"Discarding envelope... Reason: $error"
+                      SyncServiceAlarm.Warn(cause).report()
+                    }
+                }
+
+                openedEvent
+              }
+
+              messageDispatcher.handleAll(Traced(openEvents)(traceContext))
+            }
+          }
         }
-      eventHandler = monitor(
-        EnvelopeOpener(staticDomainParameters.protocolVersion, domainCrypto.crypto.pureCrypto)(
-          messageHandler
-        )
-      )
+      eventHandler = monitor(messageHandler)
 
       cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
         persistent.sequencerCounterTrackerStore,

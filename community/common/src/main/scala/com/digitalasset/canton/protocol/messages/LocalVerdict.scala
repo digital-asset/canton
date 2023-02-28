@@ -332,6 +332,11 @@ object LocalReject extends LocalRejectionGroup {
             _causePrefix = s"Rejected transaction is referring to locked contracts ",
             _resourcesType = Some(CantonErrorResource.ContractId),
           )
+
+      object Reject {
+        def apply(resources: Seq[String], protocolVersion: ProtocolVersion): Reject =
+          Reject(resources)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -351,10 +356,15 @@ object LocalReject extends LocalRejectionGroup {
             _causePrefix = "Rejected transaction is referring to locked keys ",
             _resourcesType = Some(CantonErrorResource.ContractKey),
           )
+
+      object Reject {
+        def apply(resources: Seq[String], protocolVersion: ProtocolVersion): Reject =
+          Reject(resources)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
-      """The transaction is referring to contracts that have either been previously 
+      """The transaction is referring to contracts that have either been previously
                                 archived, transferred to another domain, or do not exist."""
     )
     @Resolution("Inspect your contract state and try a different transaction.")
@@ -370,10 +380,15 @@ object LocalReject extends LocalRejectionGroup {
             _causePrefix = "Rejected transaction is referring to inactive contracts ",
             _resourcesType = Some(CantonErrorResource.ContractId),
           )
+
+      object Reject {
+        def apply(resources: Seq[String], protocolVersion: ProtocolVersion): Reject =
+          Reject(resources)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
-      """If the participant provides unique contract key support, 
+      """If the participant provides unique contract key support,
          this error will indicate that a transaction would create a unique key which already exists."""
     )
     @Resolution(
@@ -394,10 +409,15 @@ object LocalReject extends LocalRejectionGroup {
               "Inconsistent rejected transaction would create a key that already exists (DuplicateKey) ",
             _resourcesType = Some(CantonErrorResource.ContractKey),
           )
+
+      object Reject {
+        def apply(resources: Seq[String], protocolVersion: ProtocolVersion): Reject =
+          Reject(resources)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
-      """If the participant provides unique contract key support, 
+      """If the participant provides unique contract key support,
          this error will indicate that a transaction expected a key to be unallocated, but a contract for the key already exists."""
     )
     @Resolution(
@@ -416,13 +436,18 @@ object LocalReject extends LocalRejectionGroup {
               "Inconsistent rejected transaction expected unassigned key, which already exists ",
             _resourcesType = Some(CantonErrorResource.ContractKey),
           )
+
+      object Reject {
+        def apply(resources: Seq[String], protocolVersion: ProtocolVersion): Reject =
+          Reject(resources)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
   }
 
   object TimeRejects extends ErrorGroup() {
 
     @Explanation(
-      """This error is thrown if the ledger time and the record time differ more than permitted. 
+      """This error is thrown if the ledger time and the record time differ more than permitted.
         This can happen in an overloaded system due to high latencies or for transactions with long interpretation times."""
     )
     @Resolution(
@@ -440,6 +465,11 @@ object LocalReject extends LocalRejectionGroup {
             _causePrefix =
               "Rejected transaction as delta of the ledger time and the record time exceed the time tolerance "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -461,13 +491,18 @@ object LocalReject extends LocalRejectionGroup {
             _causePrefix =
               "Rejected transaction as delta of the submission time and the record time exceed the time tolerance "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
       """This rejection is sent if the participant locally determined a timeout."""
     )
     @Resolution("""In the first instance, resubmit your transaction.
-        | If the rejection still appears spuriously, consider increasing the `participantResponseTimeout` or 
+        | If the rejection still appears spuriously, consider increasing the `participantResponseTimeout` or
         | `mediatorReactionTimeout` values in the `DynamicDomainParameters`.
         | If the rejection appears unrelated to timeout settings, validate that all other Canton components
         |   which take part in the transaction also function correctly and that, e.g., messages are not stuck at the
@@ -510,6 +545,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends Malformed(
             _causePrefix = ""
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -526,6 +566,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to malformed payload within views "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -542,6 +587,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to a failed model conformance check: "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -558,6 +608,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to multiple confirmation policies "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -576,6 +631,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to bad root hash error messages. "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -593,13 +653,18 @@ object LocalReject extends LocalRejectionGroup {
             _causePrefix = "Rejected transaction would create contract(s) that already exist ",
             _resourcesType = Some(CantonErrorResource.ContractId),
           )
+
+      object Reject {
+        def apply(resources: Seq[String], protocolVersion: ProtocolVersion): Reject =
+          Reject(resources)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
   }
 
   object TransferOutRejects extends ErrorGroup() {
 
     @Explanation(
-      """Activeness check failed for transfer out submission. This rejection occurs if the contract to be  
+      """Activeness check failed for transfer out submission. This rejection occurs if the contract to be
         |transferred has already been transferred or is currently locked (due to a competing transaction)
         |on  domain."""
     )
@@ -616,6 +681,11 @@ object LocalReject extends LocalRejectionGroup {
       case class Reject(override val _details: String)(
           override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict]
       ) extends LocalRejectImpl(_causePrefix = "Activeness check failed. ")
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
   }
@@ -636,6 +706,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transfer as transferred contract is already archived. "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -654,6 +729,11 @@ object LocalReject extends LocalRejectionGroup {
             _causePrefix =
               "Rejected transfer as the contract is already active on the target domain. "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -671,6 +751,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transfer as the transferred contract is locked. "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
 
     @Explanation(
@@ -688,6 +773,11 @@ object LocalReject extends LocalRejectionGroup {
       ) extends LocalRejectImpl(
             _causePrefix = "Rejected transfer as the transfer has already completed "
           )
+
+      object Reject {
+        def apply(details: String, protocolVersion: ProtocolVersion): Reject =
+          Reject(details)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
+      }
     }
   }
 
@@ -712,4 +802,18 @@ object LocalReject extends LocalRejectionGroup {
           v0.LocalReject.Code.LocalTimeout, // Using a dummy value, as this will not we used.
         ) {}
       )
+
+  object GenericReject {
+    def apply(
+        causePrefix: String,
+        details: String,
+        resources: Seq[String],
+        id: String,
+        category: ErrorCategory,
+        protocolVersion: ProtocolVersion,
+    ): GenericReject =
+      GenericReject(causePrefix, details, resources, id, category)(
+        LocalVerdict.protocolVersionRepresentativeFor(protocolVersion)
+      )
+  }
 }

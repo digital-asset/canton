@@ -156,9 +156,9 @@ object Threading extends NoTracing {
       .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
 
     val forkJoinPool = createForkJoinPool(parallelism, threadFactory, handler, logger)
-    val monitoringHandle = metrics.monitorForkJoin(name, forkJoinPool)
+    val monitoredExecutorService = metrics.monitorExecutorService(name, forkJoinPool)
 
-    new ForkJoinIdlenessExecutorService(forkJoinPool, reporter, name, monitoringHandle)
+    new ForkJoinIdlenessExecutorService(forkJoinPool, monitoredExecutorService, reporter, name)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))

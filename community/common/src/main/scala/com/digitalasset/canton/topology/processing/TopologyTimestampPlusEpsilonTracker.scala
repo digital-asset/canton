@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.{FutureSupervisor, SupervisedPromise}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
@@ -23,7 +24,7 @@ import io.functionmeta.functionFullName
 import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
-import scala.concurrent.{ExecutionContext, Promise}
+import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
 /** Compute and synchronise the effective timestamps
@@ -43,6 +44,7 @@ import scala.util.{Failure, Success}
 class TopologyTimestampPlusEpsilonTracker(
     val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 ) extends NamedLogging
     with TimeAwaiter
     with FlagCloseable {
@@ -161,16 +163,22 @@ class TopologyTimestampPlusEpsilonTracker(
         )
       )
     }
-    val nextChainP = Promise[UnlessShutdown[EffectiveTime]]()
+    val nextChainP = SupervisedPromise[UnlessShutdown[EffectiveTime]](
+      "synchronized-chain-promise",
+      futureSupervisor,
+    )
     val ret =
       sequentialWait.getAndUpdate(cur => cur.flatMap(_ => FutureUnlessShutdown(nextChainP.future)))
     ret.onComplete {
       case Success(UnlessShutdown.AbortedDueToShutdown) =>
         nextChainP.trySuccess(UnlessShutdown.AbortedDueToShutdown).discard
       case Success(UnlessShutdown.Outcome(previousEffectiveTime)) =>
-        chainUpdates(previousEffectiveTime).map { effectiveTime =>
-          nextChainP.trySuccess(UnlessShutdown.Outcome(effectiveTime)).discard
-        }.discard // this is supervised
+        chainUpdates(previousEffectiveTime)
+          .map { effectiveTime =>
+            nextChainP.trySuccess(UnlessShutdown.Outcome(effectiveTime)).discard
+          }
+          .onShutdown(nextChainP.trySuccess(UnlessShutdown.AbortedDueToShutdown).discard)
+          .discard
       case Failure(exception) => nextChainP.failure(exception)
     }
     FutureUnlessShutdown(nextChainP.future)

@@ -39,6 +39,7 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId, Member, Participa
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, ErrorUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
@@ -51,6 +52,8 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 trait MessageDispatcher { this: NamedLogging =>
   import MessageDispatcher.*
+
+  protected def protocolVersion: ProtocolVersion
 
   protected def domainId: DomainId
 
@@ -80,7 +83,11 @@ trait MessageDispatcher { this: NamedLogging =>
 
   implicit protected val ec: ExecutionContext
 
-  def handleAll(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult
+  def handleAll(
+      events: Traced[Seq[Either[Traced[
+        EventWithErrors[SequencedEvent[DefaultOpenEnvelope]]
+      ], PossiblyIgnoredProtocolEvent]]]
+  ): HandlerResult
 
   /** Returns a future that completes when all calls to [[handleAll]]
     * whose returned [[scala.concurrent.Future]] has completed prior to this call have completed processing.
@@ -160,9 +167,16 @@ trait MessageDispatcher { this: NamedLogging =>
     *     the participant does not process the request at all
     *     because the mediator will reject the request as a whole.
     *   </li>
+    *   <li>
+    *     We do not know the submitting member of a particular submission because such a submission may be sequenced through
+    *     an untrusted individual sequencer node (e.g., on a BFT domain). Such a sequencer node could lie about
+    *     the actual submitting member. These lies work even with signed submission requests
+    *     when an earlier submission request is replayed.
+    *     So we cannot rely on honest domain nodes sending their messages only once and instead must
+    *     deduplicate replays on the recipient side.
+    *   </li>
     * </ul>
     */
-  // TODO(#4827) Use the sender on the `Deliver` to identify mediator results / topology transactions that do not come from the domain
   /* TODO(M40): If the participant does not process the request at all,
    *  this participant's conflict detection state may get desynchronized from other participants' conflict detection state
    *  until the mediator's rejection arrives.
@@ -179,9 +193,13 @@ trait MessageDispatcher { this: NamedLogging =>
    *  Conversely, if `P1`'s rejection arrives before `P2`'s approval, the mediator may raise an alarm when it receives the approval.
    */
   protected def processBatch(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]]
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
-    val Deliver(sc, ts, _, _, batch) = event.content
+    val content = eventE.fold(_.content, _.content)
+    val Deliver(sc, ts, _, _, batch) = content
 
     val envelopesWithCorrectDomainId = filterBatchForDomainId(batch, sc, ts)
 
@@ -189,8 +207,8 @@ trait MessageDispatcher { this: NamedLogging =>
       // Sanity check the batch
       // we can receive an empty batch if it was for a deliver we sent but were not a recipient
       sanityCheck <-
-        if (event.content.isReceipt) {
-          logger.debug(show"Received the receipt for a previously sent batch:\n${event.content}")
+        if (content.isReceipt) {
+          logger.debug(show"Received the receipt for a previously sent batch:\n${content}")
           FutureUnlessShutdown.pure(processingResultMonoid.empty)
         } else if (batch.envelopes.isEmpty) {
           doProcess(
@@ -203,7 +221,7 @@ trait MessageDispatcher { this: NamedLogging =>
       causalityProcessed <- processCausalityMessages(envelopesWithCorrectDomainId)
       acsCommitmentResult <- processAcsCommitmentEnvelope(envelopesWithCorrectDomainId, sc, ts)
       transactionTransferResult <- processTransactionAndTransferMessages(
-        event,
+        eventE,
         sc,
         ts,
         envelopesWithCorrectDomainId,
@@ -248,7 +266,10 @@ trait MessageDispatcher { this: NamedLogging =>
   }
 
   private def processTransactionAndTransferMessages(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
       sc: SequencerCounter,
       ts: CantonTimestamp,
       envelopes: List[DefaultOpenEnvelope],
@@ -291,14 +312,14 @@ trait MessageDispatcher { this: NamedLogging =>
         val regularResult = regularMediatorResults(0)
         val viewType = regularResult.protocolMessage.message.viewType
         val processor = tryProtocolProcessor(viewType)
-        doProcess(ResultKind(viewType), processor.processResult(event))
+        doProcess(ResultKind(viewType), processor.processResult(eventE))
       } else {
         val msg = malformedMediatorRequestResults(0)
         val viewType = msg.protocolMessage.message.viewType
         val processor = tryProtocolProcessor(viewType)
         doProcess(
           MalformedMediatorRequestMessage,
-          processor.processMalformedMediatorRequestResult(ts, sc, event),
+          processor.processMalformedMediatorRequestResult(ts, sc, eventE),
         )
       }
     } else {
@@ -351,7 +372,8 @@ trait MessageDispatcher { this: NamedLogging =>
                 ts,
                 rootHash,
                 mediatorId,
-                reason,
+                LocalReject.MalformedRejects.BadRootHashMessages
+                  .Reject(reason, protocolVersion),
               ),
             )
           }
@@ -425,7 +447,7 @@ trait MessageDispatcher { this: NamedLogging =>
       val goodEncryptedViewsC = NonEmpty.from(goodEncryptedViews) match {
         case None =>
           // We received a batch with at least one root hash message,
-          // but no view with the same root hash and view type.
+          // but no view with the same view type.
           // Send a best-effort Malformed response.
           // This ensures that the mediator doesn't wait until the participant timeout
           // if the mediator expects a confirmation from this participant.
@@ -446,14 +468,12 @@ trait MessageDispatcher { this: NamedLogging =>
     rootHashMessagesNotSentToAMediatorC.flatMap { (_: Unit) =>
       (rootHashMessagesSentToAMediator: @unchecked) match {
         case Seq(rootHashMessage, furtherRHMs @ _*) =>
-          val mediatorId = rootHashMessage.recipients.allRecipients
-            .collectFirst { case mediatorId: MediatorId => mediatorId }
-            .getOrElse {
-              val err = new RuntimeException(
-                "The previous checks ensure that there is exactly one mediator ID"
-              )
-              ErrorUtil.internalError(err)
-            }
+          val mediatorId = allMediators.headOption.getOrElse {
+            val err = new RuntimeException(
+              "The previous checks ensure that there is exactly one mediator ID"
+            )
+            ErrorUtil.internalError(err)
+          }
 
           if (furtherRHMs.isEmpty) {
             val validRecipients = rootHashMessage.recipients.asSingleGroup.contains(
@@ -630,6 +650,7 @@ private[participant] object MessageDispatcher {
 
   trait Factory[+T <: MessageDispatcher] {
     def create(
+        protocolVersion: ProtocolVersion,
         domainId: DomainId,
         participantId: ParticipantId,
         requestTracker: RequestTracker,
@@ -650,6 +671,7 @@ private[participant] object MessageDispatcher {
     )(implicit ec: ExecutionContext, tracer: Tracer): T
 
     def create(
+        protocolVersion: ProtocolVersion,
         domainId: DomainId,
         participantId: ParticipantId,
         requestTracker: RequestTracker,
@@ -694,6 +716,7 @@ private[participant] object MessageDispatcher {
         }
 
       create(
+        protocolVersion,
         domainId,
         participantId,
         requestTracker,
@@ -713,6 +736,7 @@ private[participant] object MessageDispatcher {
 
   object DefaultFactory extends Factory[MessageDispatcher] {
     override def create(
+        protocolVersion: ProtocolVersion,
         domainId: DomainId,
         participantId: ParticipantId,
         requestTracker: RequestTracker,
@@ -732,6 +756,7 @@ private[participant] object MessageDispatcher {
         loggerFactory: NamedLoggerFactory,
     )(implicit ec: ExecutionContext, tracer: Tracer): MessageDispatcher = {
       new DefaultMessageDispatcher(
+        protocolVersion,
         domainId,
         participantId,
         requestTracker,

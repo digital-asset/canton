@@ -23,10 +23,13 @@ import com.digitalasset.canton.time.{
   RemoteClock,
   SimClock,
 }
+import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 
 import scala.annotation.nowarn
+import scala.concurrent.Future
 
 object DomainParameters {
 
@@ -356,31 +359,6 @@ final case class DynamicDomainParameters(
       s"The ledgerTimeRecordTimeTolerance ($ledgerTimeRecordTimeTolerance) must be at most half of the " +
         s"mediatorDeduplicationTimeout ($mediatorDeduplicationTimeout)."
     )
-
-  /** Computes the decision time for the given activeness time.
-    *
-    * Right inverse to [[activenessTimeForDecisionTime]].
-    */
-  def decisionTimeFor(activenessTime: CantonTimestamp): CantonTimestamp =
-    activenessTime.add(participantResponseTimeout.unwrap).add(mediatorReactionTimeout.unwrap)
-
-  /** Left inverse to [[decisionTimeFor]]. Gives the minimum timestamp value if the activeness time would be below this
-    * value.
-    */
-  def activenessTimeForDecisionTime(decisionTime: CantonTimestamp): CantonTimestamp = {
-    val activenessInstant =
-      decisionTime.toInstant
-        .minus(participantResponseTimeout.unwrap)
-        .minus(mediatorReactionTimeout.unwrap)
-    // The activenessInstant may have become smaller than a CantonTimestamp can represent
-    CantonTimestamp.fromInstant(activenessInstant).getOrElse(CantonTimestamp.MinValue)
-  }
-
-  def transferExclusivityLimitFor(baseline: CantonTimestamp): CantonTimestamp =
-    baseline.add(transferExclusivityTimeout.unwrap)
-
-  def participantResponseDeadlineFor(timestamp: CantonTimestamp): CantonTimestamp =
-    timestamp.add(participantResponseTimeout.unwrap)
 
   /** In some situations, the sequencer signs transaction with slightly outdated keys.
     * This is to allow recipients to verify sequencer signatures when the sequencer keys have been rolled over and
@@ -721,4 +699,73 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     lazy val toProtoDeserializationError: ProtoDeserializationError.InvariantViolation =
       ProtoDeserializationError.InvariantViolation(message)
   }
+}
+
+/** Dynamic domain parameters and their validity interval.
+  * Mostly so that we can perform additional checks.
+  *
+  * @param validFrom Start point of the validity interval (exclusive)
+  * @param validUntil End point of the validity interval (inclusive)
+  */
+final case class DynamicDomainParametersWithValidity(
+    parameters: DynamicDomainParameters,
+    validFrom: CantonTimestamp,
+    validUntil: Option[CantonTimestamp],
+    domainId: DomainId,
+) {
+  def map[T](f: DynamicDomainParameters => T): DomainParameters.WithValidity[T] =
+    DomainParameters.WithValidity(validFrom, validUntil, f(parameters))
+
+  def isValidAt(ts: CantonTimestamp) =
+    validFrom < ts && validUntil.forall(ts <= _)
+
+  private def checkValidity(ts: CantonTimestamp, goal: String): Either[String, Unit] = Either.cond(
+    isValidAt(ts),
+    (),
+    s"Cannot compute $goal for `$ts` because validity of parameters is ($validFrom, $validUntil]",
+  )
+
+  /** Computes the decision time for the given activeness time.
+    *
+    * @param activenessTime
+    * @return Left in case of error, the decision time otherwise
+    */
+  def decisionTimeFor(activenessTime: CantonTimestamp): Either[String, CantonTimestamp] =
+    checkValidity(activenessTime, "decision time").map(_ =>
+      activenessTime
+        .add(parameters.participantResponseTimeout.unwrap)
+        .add(parameters.mediatorReactionTimeout.unwrap)
+    )
+
+  /** Computes the decision time for the given activeness time.
+    *
+    * @param activenessTime
+    * @return Decision time or a failed future in case of error
+    */
+  def decisionTimeForF(activenessTime: CantonTimestamp): Future[CantonTimestamp] =
+    decisionTimeFor(activenessTime).fold(
+      err => Future.failed(new IllegalStateException(err)),
+      Future.successful(_),
+    )
+
+  def transferExclusivityLimitFor(baseline: CantonTimestamp): Either[String, CantonTimestamp] =
+    checkValidity(baseline, "transfer exclusivity limit").map(_ =>
+      baseline.add(transferExclusivityTimeout.unwrap)
+    )
+
+  def participantResponseDeadlineFor(timestamp: CantonTimestamp): Either[String, CantonTimestamp] =
+    checkValidity(timestamp, "participant response deadline").map(_ =>
+      timestamp.add(parameters.participantResponseTimeout.unwrap)
+    )
+
+  def participantResponseDeadlineForF(timestamp: CantonTimestamp): Future[CantonTimestamp] =
+    participantResponseDeadlineFor(timestamp).toFuture(new IllegalStateException(_))
+
+  def automaticTransferInEnabled: Boolean = parameters.automaticTransferInEnabled
+  def mediatorDeduplicationTimeout: NonNegativeFiniteDuration =
+    parameters.mediatorDeduplicationTimeout
+
+  def topologyChangeDelay: NonNegativeFiniteDuration = parameters.topologyChangeDelay
+  def transferExclusivityTimeout: NonNegativeFiniteDuration = parameters.transferExclusivityTimeout
+  def sequencerSigningTolerance: NonNegativeFiniteDuration = parameters.sequencerSigningTolerance
 }

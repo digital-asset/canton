@@ -40,7 +40,8 @@ object ParticipantInitConfig {
   }
 
   /** Init configuration of the ledger API for participant nodes
-    * * @param maxDeduplicationDuration  Max deduplication duration of the participant's ledger configuration.
+    * @param maxDeduplicationDuration The max deduplication duration reported by the participant's ledger configuration service.
+    *                                 This duration defines a lower bound on the durations that the participant's command and command submission services accept as command deduplication durations.
     */
   case class ParticipantLedgerApiInitConfig(
       maxDeduplicationDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7L)

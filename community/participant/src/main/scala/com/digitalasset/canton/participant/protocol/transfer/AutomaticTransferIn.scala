@@ -81,6 +81,7 @@ private[participant] object AutomaticTransferIn {
               inParty,
               transferOutSubmitterMetadata.applicationId,
               participantId.toLf,
+              transferOutSubmitterMetadata.commandId,
               None,
             ),
             workflowId = None,
@@ -118,22 +119,29 @@ private[participant] object AutomaticTransferIn {
 
     def triggerAutoIn(
         targetSnapshot: TopologySnapshot,
-        targetDomainParameters: DynamicDomainParameters,
+        targetDomainParameters: DynamicDomainParametersWithValidity,
     ): Unit = {
-      val timeoutTimestamp = targetDomainParameters.transferExclusivityLimitFor(t0)
 
       val autoIn = for {
+        exclusivityLimit <- EitherT
+          .fromEither[Future](
+            targetDomainParameters
+              .transferExclusivityLimitFor(t0)
+              .leftMap(TransferParametersError(targetDomain, _))
+          )
+          .leftWiden[TransferProcessorError]
+
         targetHostedStakeholders <- EitherT.right(hostedStakeholders(targetSnapshot))
         _unit <-
           if (targetHostedStakeholders.nonEmpty) {
             logger.info(
-              s"Registering automatic submission of transfer-in with ID ${id} at time $timeoutTimestamp, where base timestamp is $t0"
+              s"Registering automatic submission of transfer-in with ID ${id} at time $exclusivityLimit, where base timestamp is $t0"
             )
             for {
               timeoutFuture <- EitherT.fromEither[Future](
                 transferCoordination.awaitTimestamp(
                   targetDomain,
-                  timeoutTimestamp,
+                  exclusivityLimit,
                   waitForEffectiveTime = false,
                 )
               )
@@ -164,16 +172,10 @@ private[participant] object AutomaticTransferIn {
       targetIps <- transferCoordination.cryptoSnapshot(targetDomain, t0)
       targetSnapshot = targetIps.ipsSnapshot
 
-      /*
-        We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
-        because it makes no sense to progress if we don't manage to fetch domain parameters.
-        Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
-        that we don't have here.
-       */
       targetDomainParameters <- EitherT(
         targetSnapshot
           .findDynamicDomainParameters()
-          .map(_.toRight(DomainNotReady(targetDomain, "Unable to fetch domain parameters")))
+          .map(_.leftMap(DomainNotReady(targetDomain, _)))
       ).leftWiden[TransferProcessorError]
     } yield {
 

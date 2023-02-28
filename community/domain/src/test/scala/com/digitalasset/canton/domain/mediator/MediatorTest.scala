@@ -7,34 +7,35 @@ import cats.data.NonEmptySeq
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.Mediator.{Safe, SafeUntil}
-import com.digitalasset.canton.protocol.{
-  DomainParameters,
-  DynamicDomainParameters,
-  TestDomainParameters,
-}
+import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, TestDomainParameters}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
 class MediatorTest extends AnyWordSpec with BaseTest {
-  def parametersWith(participantResponseTimeout: NonNegativeFiniteDuration) =
+  private def parametersWith(participantResponseTimeout: NonNegativeFiniteDuration) =
     TestDomainParameters.defaultDynamic.tryUpdate(participantResponseTimeout =
       participantResponseTimeout
     )
 
-  val defaultTimeout = NonNegativeFiniteDuration.ofSeconds(10)
-  val defaultParameters = parametersWith(defaultTimeout)
+  private val defaultTimeout = NonNegativeFiniteDuration.ofSeconds(10)
+  private val defaultParameters = parametersWith(defaultTimeout)
 
-  val origin = CantonTimestamp.now()
-  def relTime(offset: Long): CantonTimestamp = origin.plusSeconds(offset)
+  private val origin = CantonTimestamp.now()
+  private def relTime(offset: Long): CantonTimestamp = origin.plusSeconds(offset)
+
+  private lazy val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::default"))
 
   "Mediator.checkPruningStatus" should {
     "deal with current domain parameters" in {
-      val parameters = DomainParameters.WithValidity[DynamicDomainParameters](
-        CantonTimestamp.Epoch,
-        None,
-        defaultParameters,
-      )
+      val parameters =
+        DynamicDomainParametersWithValidity(
+          defaultParameters,
+          CantonTimestamp.Epoch,
+          None,
+          domainId,
+        )
 
       val cleanTimestamp = CantonTimestamp.now()
       val earliestPruningTimestamp = cleanTimestamp - defaultTimeout
@@ -48,7 +49,8 @@ class MediatorTest extends AnyWordSpec with BaseTest {
       val validFrom = origin
 
       def test(validUntil: Option[CantonTimestamp]): Assertion = {
-        val parameters = DomainParameters.WithValidity(validFrom, validUntil, defaultParameters)
+        val parameters =
+          DynamicDomainParametersWithValidity(defaultParameters, validFrom, validUntil, domainId)
 
         // Capping happen
         Mediator.checkPruningStatus(parameters, validFrom.plusSeconds(1)) shouldBe SafeUntil(
@@ -66,7 +68,8 @@ class MediatorTest extends AnyWordSpec with BaseTest {
     }
 
     "deal with future domain parameters" in {
-      val parameters = DomainParameters.WithValidity(origin, None, defaultParameters)
+      val parameters =
+        DynamicDomainParametersWithValidity(defaultParameters, origin, None, domainId)
 
       Mediator.checkPruningStatus(
         parameters,
@@ -77,11 +80,8 @@ class MediatorTest extends AnyWordSpec with BaseTest {
     "deal with past domain parameters" in {
       val dpChangeTs = relTime(60)
 
-      val parameters = DomainParameters.WithValidity[DynamicDomainParameters](
-        origin,
-        Some(dpChangeTs),
-        defaultParameters,
-      )
+      val parameters =
+        DynamicDomainParametersWithValidity(defaultParameters, origin, Some(dpChangeTs), domainId)
 
       {
         val cleanTimestamp = dpChangeTs + NonNegativeFiniteDuration.ofSeconds(1)
@@ -116,10 +116,15 @@ class MediatorTest extends AnyWordSpec with BaseTest {
     val dpChangeTs2 = relTime(40)
 
     val parameters = NonEmptySeq.of(
-      DomainParameters.WithValidity(origin, Some(dpChangeTs1), defaultParameters),
+      DynamicDomainParametersWithValidity(defaultParameters, origin, Some(dpChangeTs1), domainId),
       // This one prevents pruning for some time
-      DomainParameters.WithValidity(dpChangeTs1, Some(dpChangeTs2), parametersWith(hugeTimeout)),
-      DomainParameters.WithValidity(dpChangeTs2, None, defaultParameters),
+      DynamicDomainParametersWithValidity(
+        parametersWith(hugeTimeout),
+        dpChangeTs1,
+        Some(dpChangeTs2),
+        domainId,
+      ),
+      DynamicDomainParametersWithValidity(defaultParameters, dpChangeTs2, None, domainId),
     )
 
     "query in the first slice" in {

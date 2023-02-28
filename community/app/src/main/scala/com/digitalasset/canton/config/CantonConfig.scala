@@ -1069,8 +1069,8 @@ object CantonConfig {
     lazy implicit val initBaseIdentityConfigWriter: ConfigWriter[InitConfigBase.Identity] =
       deriveWriter[InitConfigBase.Identity]
     lazy implicit val initConfigWriter: ConfigWriter[InitConfig] = deriveWriter[InitConfig]
-    implicit val grpcHealthServerConfigWriter: ConfigWriter[GrpcHealthServerConfig] =
-      ConfigWriter[GrpcHealthServerConfig]
+    lazy implicit val grpcHealthServerConfigWriter: ConfigWriter[GrpcHealthServerConfig] =
+      deriveWriter[GrpcHealthServerConfig]
     lazy implicit val parametersParticipantInitConfigWriter
         : ConfigWriter[ParticipantParametersInitConfig] =
       deriveWriter[ParticipantParametersInitConfig]

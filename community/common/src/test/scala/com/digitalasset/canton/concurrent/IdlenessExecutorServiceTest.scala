@@ -115,11 +115,12 @@ class ForkJoinIdlenessExecutorServiceTest
 
   "awaitIdleness" should {
     behave like awaitIdleness { () =>
+      val pool = new ForkJoinPool()
       new ForkJoinIdlenessExecutorService(
-        new ForkJoinPool(),
+        pool,
+        pool,
         throwable => logger.error(s"Error: $throwable"),
         loggerFactory.threadName + "-fork-join-pool",
-        () => (),
       )
     }
   }

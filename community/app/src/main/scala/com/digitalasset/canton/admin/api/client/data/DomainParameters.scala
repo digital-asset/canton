@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthoriza
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, crypto as DomainCrypto}
+import com.google.common.annotations.VisibleForTesting
 import io.scalaland.chimney.dsl.*
 
 import scala.Ordering.Implicits.*
@@ -319,6 +320,7 @@ final case class DynamicDomainParametersV1(
 object DynamicDomainParameters {
 
   /** Default dynamic domain parameters for non-static clocks */
+  @VisibleForTesting
   def defaultValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
     DynamicDomainParameters(
       DynamicDomainParametersInternal.defaultValues(protocolVersion)

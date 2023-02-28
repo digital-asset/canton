@@ -19,6 +19,7 @@ import scala.collection.immutable.MultiSet
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /** Trait that can be registered with a [FlagCloseable] to run on shutdown */
 trait RunOnShutdown {
@@ -184,7 +185,7 @@ trait FlagCloseable extends AutoCloseable {
     EitherT(performUnlessClosingF(name)(etf.value))
   }
 
-  def performUnlessClosingCheckedT[A, N, R](name: String, onClosing: Checked[A, N, R])(
+  def performUnlessClosingCheckedT[A, N, R](name: String, onClosing: => Checked[A, N, R])(
       etf: => CheckedT[Future, A, N, R]
   )(implicit
       ec: ExecutionContext,
@@ -239,6 +240,7 @@ trait FlagCloseable extends AutoCloseable {
   }
 
   protected def onClosed(): Unit = ()
+  protected def onCloseFailure(e: Throwable): Unit = throw e
 
   /** Blocks until all earlier tasks have completed and then prevents further tasks from being run.
     */
@@ -284,7 +286,11 @@ trait FlagCloseable extends AutoCloseable {
       if (keepTrackOfOpenFutures) {
         logger.warn("Tracking of open futures is enabled, but this is only meant for debugging!")
       }
-      onClosed()
+      try {
+        onClosed()
+      } catch {
+        case NonFatal(e) => onCloseFailure(e)
+      }
     } else {
       // TODO(i8594): Ensure we call close only once
     }

@@ -121,14 +121,20 @@ abstract class AbstractMessageProcessor(
   )(implicit traceContext: TraceContext): Future[Unit] = {
     crypto.ips
       .awaitSnapshot(timestamp)
-      .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
-      .flatMap { domainParameters =>
-        val decisionTime = domainParameters.decisionTimeFor(timestamp)
+      .flatMap(_.findDynamicDomainParameters())
+      .flatMap { domainParametersE =>
+        val decisionTimeE = domainParametersE.flatMap(_.decisionTimeFor(timestamp))
+        val decisionTimeF = decisionTimeE.fold(
+          err => Future.failed(new IllegalStateException(err)),
+          Future.successful(_),
+        )
 
         def onTimeout: Future[Unit] = {
           logger.debug(s"Bad request $requestCounter: Timed out without a mediator result message.")
           performUnlessClosingF(functionFullName) {
-            terminateRequest(requestCounter, sequencerCounter, timestamp, decisionTime)
+
+            decisionTimeF.flatMap(terminateRequest(requestCounter, sequencerCounter, timestamp, _))
+
           }.onShutdown {
             logger.info(s"Ignoring timeout of bad request $requestCounter due to shutdown")
           }
@@ -138,7 +144,7 @@ abstract class AbstractMessageProcessor(
           requestCounter,
           sequencerCounter,
           timestamp,
-          decisionTime,
+          decisionTimeF,
           onTimeout,
         )
       }
@@ -148,10 +154,11 @@ abstract class AbstractMessageProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-      decisionTime: CantonTimestamp,
+      decisionTimeF: Future[CantonTimestamp],
       onTimeout: => Future[Unit],
   )(implicit traceContext: TraceContext): Future[Unit] =
     for {
+      decisionTime <- decisionTimeF
       requestFutures <- ephemeral.requestTracker
         .addRequest(
           requestCounter,
@@ -209,7 +216,7 @@ abstract class AbstractMessageProcessor(
       requestCounter,
       sequencerCounter,
       timestamp,
-      decisionTime,
+      Future.successful(decisionTime),
       terminateRequest(requestCounter, sequencerCounter, timestamp, decisionTime),
     )
   }

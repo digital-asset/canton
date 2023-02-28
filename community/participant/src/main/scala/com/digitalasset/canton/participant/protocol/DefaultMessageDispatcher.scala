@@ -14,20 +14,29 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTra
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing.protocol.{Deliver, DeliverError, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  Deliver,
+  DeliverError,
+  EventWithErrors,
+  SequencedEvent,
+  SignedContent,
+}
 import com.digitalasset.canton.sequencing.{
   AsyncResult,
   HandlerResult,
   OrdinaryProtocolEvent,
   PossiblyIgnoredProtocolEvent,
 }
-import com.digitalasset.canton.store.SequencedEventStore
-import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
+import com.digitalasset.canton.store.SequencedEventStore.{
+  IgnoredSequencedEvent,
+  OrdinarySequencedEvent,
+}
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
@@ -35,6 +44,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 class DefaultMessageDispatcher(
+    override protected val protocolVersion: ProtocolVersion,
     override protected val domainId: DomainId,
     override protected val participantId: ParticipantId,
     override protected val requestTracker: RequestTracker,
@@ -92,19 +102,33 @@ class DefaultMessageDispatcher(
     }
   }
 
-  override def handleAll(tracedEvents: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
+  override def handleAll(
+      tracedEvents: Traced[Seq[Either[
+        Traced[EventWithErrors[SequencedEvent[DefaultOpenEnvelope]]],
+        PossiblyIgnoredProtocolEvent,
+      ]]]
+  ): HandlerResult =
     tracedEvents.withTraceContext { implicit batchTraceContext => events =>
       for {
         _observeSequencing <- observeSequencing(
-          events.collect { case e: OrdinaryProtocolEvent => e.signedEvent.content }
+          events.collect {
+            case Left(Traced(EventWithErrors(e, _, /* isIgnored */ false))) => e
+            case Right(e: OrdinaryProtocolEvent) => e.signedEvent.content
+          }
         )
         result <- MonadUtil.sequentialTraverseMonoid(events)(handle)
       } yield result
     }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  private def handle(event: PossiblyIgnoredProtocolEvent): HandlerResult = {
-    implicit val traceContext: TraceContext = event.traceContext
+  private def handle(
+      eventE: Either[
+        Traced[EventWithErrors[SequencedEvent[DefaultOpenEnvelope]]],
+        PossiblyIgnoredProtocolEvent,
+      ]
+  ): HandlerResult = {
+    implicit val traceContext: TraceContext =
+      eventE.fold(_.traceContext, _.traceContext)
 
     def tickTrackers(
         sc: SequencerCounter,
@@ -124,31 +148,53 @@ class DefaultMessageDispatcher(
       }
 
     withSpan(s"MessageDispatcher.handle") { implicit traceContext => _ =>
-      val future = event match {
-        case ordinaryEvent @ OrdinarySequencedEvent(signedEvent) =>
-          signedEvent.content match {
-            case Deliver(sc, ts, _, _, _) if TimeProof.isTimeProofEvent(ordinaryEvent) =>
-              tickTrackers(sc, ts, triggerAcsChangePublication = true)
-            case Deliver(sc, ts, _, _, _) =>
-              processBatch(signedEvent.asInstanceOf[SignedContent[Deliver[DefaultOpenEnvelope]]])
-                .thereafter {
-                  // Make sure that the tick is not lost unless we're shutting down or getting an exception
-                  case Success(outcome) =>
-                    if (outcome != UnlessShutdown.AbortedDueToShutdown)
-                      requestTracker.tick(sc, ts)
-                  case Failure(ex) =>
-                    logger.error("event processing failed.", ex)
-                }
-            case error @ DeliverError(sc, ts, _, _, _) =>
-              logger.debug(s"Received a deliver error at ${sc} / ${ts}")
-              for {
-                _unit <- observeDeliverError(error)
-                _unit <- tickTrackers(sc, ts, triggerAcsChangePublication = false)
-              } yield ()
-          }
-        case SequencedEventStore.IgnoredSequencedEvent(ts, sc, _) =>
+      def processOrdinary(
+          content: SequencedEvent[DefaultOpenEnvelope],
+          signedEventE: Either[
+            EventWithErrors[SequencedEvent[DefaultOpenEnvelope]],
+            SignedContent[SequencedEvent[DefaultOpenEnvelope]],
+          ],
+      ): FutureUnlessShutdown[Unit] =
+        content match {
+          case deliver @ Deliver(sc, ts, _, _, _) if TimeProof.isTimeProofDeliver(deliver) =>
+            tickTrackers(sc, ts, triggerAcsChangePublication = true)
+          case Deliver(sc, ts, _, _, _) =>
+            val deliverE = signedEventE.fold(
+              eventWithErrors =>
+                Left(eventWithErrors.asInstanceOf[EventWithErrors[Deliver[DefaultOpenEnvelope]]]),
+              event => Right(event.asInstanceOf[SignedContent[Deliver[DefaultOpenEnvelope]]]),
+            )
+            processBatch(deliverE)
+              .thereafter {
+                // Make sure that the tick is not lost unless we're shutting down or getting an exception
+                case Success(outcome) =>
+                  if (outcome != UnlessShutdown.AbortedDueToShutdown)
+                    requestTracker.tick(sc, ts)
+                case Failure(ex) =>
+                  logger.error("event processing failed.", ex)
+              }
+          case error @ DeliverError(sc, ts, _, _, _) =>
+            logger.debug(s"Received a deliver error at ${sc} / ${ts}")
+            for {
+              _unit <- observeDeliverError(error)
+              _unit <- tickTrackers(sc, ts, triggerAcsChangePublication = false)
+            } yield ()
+        }
+
+      val future = eventE match {
+        // Ordinary events
+        case Left(Traced(e @ EventWithErrors(content, _openingErrors, /* isIgnored */ false))) =>
+          processOrdinary(content, Left(e))
+        case Right(OrdinarySequencedEvent(signedEvent)) =>
+          processOrdinary(signedEvent.content, Right(signedEvent))
+
+        // Ignored events
+        case Left(Traced(EventWithErrors(content, _openingErrors, /* isIgnored */ true))) =>
+          tickTrackers(content.counter, content.timestamp, triggerAcsChangePublication = false)
+        case Right(IgnoredSequencedEvent(ts, sc, _)) =>
           tickTrackers(sc, ts, triggerAcsChangePublication = false)
       }
+
       HandlerResult.synchronous(future)
     }(traceContext, tracer)
   }

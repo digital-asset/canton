@@ -13,7 +13,7 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
+import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
@@ -275,12 +275,13 @@ private class ForwardingTopologySnapshotClient(
 
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
-  ): Future[Option[DynamicDomainParameters]] = parent.findDynamicDomainParameters()
+  ): Future[Either[String, DynamicDomainParametersWithValidity]] =
+    parent.findDynamicDomainParameters()
 
   /** List all the dynamic domain parameters (past and current) */
   override def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]] =
+  ): Future[Seq[DynamicDomainParametersWithValidity]] =
     parent.listDynamicDomainParametersChanges()
 
   override private[client] def loadBatchActiveParticipantsOf(
@@ -326,11 +327,11 @@ class CachingTopologySnapshot(
   private val mediatorsCache = new AtomicReference[Option[Future[Seq[MediatorId]]]](None)
 
   private val domainParametersCache =
-    new AtomicReference[Option[Future[Option[DynamicDomainParameters]]]](None)
+    new AtomicReference[Option[Future[Either[String, DynamicDomainParametersWithValidity]]]](None)
 
   private val domainParametersChangesCache =
     new AtomicReference[
-      Option[Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]]]
+      Option[Future[Seq[DynamicDomainParametersWithValidity]]]
     ](None)
 
   override def participants(): Future[Seq[(ParticipantId, ParticipantPermission)]] =
@@ -417,12 +418,12 @@ class CachingTopologySnapshot(
 
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
-  ): Future[Option[DynamicDomainParameters]] =
+  ): Future[Either[String, DynamicDomainParametersWithValidity]] =
     getAndCache(domainParametersCache, parent.findDynamicDomainParameters())
 
   /** List all the dynamic domain parameters (past and current) */
   override def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]] =
+  ): Future[Seq[DynamicDomainParametersWithValidity]] =
     getAndCache(domainParametersChangesCache, parent.listDynamicDomainParametersChanges())
 }

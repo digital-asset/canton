@@ -53,3 +53,6 @@ libraryDependencies ++= Seq(
 
 // JMH for benchmarking purposes
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.3")
+
+// To test the JUnit integration testing framework
+addSbtPlugin("net.aichler" % "sbt-jupiter-interface" % "0.11.1")

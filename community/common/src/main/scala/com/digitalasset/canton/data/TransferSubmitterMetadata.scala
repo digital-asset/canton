@@ -8,12 +8,13 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 
 /** Information about the submitters of the transaction
   * This data structure is similar to [[com.digitalasset.canton.data.SubmitterMetadata]]
-  * Please switch to SubmitterMetadata if you need to add commandId and dedupPeriod to this case class.
+  * Please switch to SubmitterMetadata if you need to add dedupPeriod to this case class.
   */
 final case class TransferSubmitterMetadata(
     submitter: LfPartyId,
     applicationId: LedgerApplicationId,
     submittingParticipant: LedgerParticipantId,
+    commandId: LedgerCommandId,
     submissionId: Option[LedgerSubmissionId],
 ) extends PrettyPrinting {
 
@@ -21,6 +22,7 @@ final case class TransferSubmitterMetadata(
     param("submitter", _.submitter),
     param("application id", _.applicationId),
     param("submitter participant", _.submittingParticipant),
+    param("command id", _.commandId),
     paramIfDefined("submission id", _.submissionId),
   )
 }

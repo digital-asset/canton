@@ -39,6 +39,7 @@ import com.digitalasset.canton.version.{
 }
 import com.digitalasset.canton.{
   LedgerApplicationId,
+  LedgerCommandId,
   LedgerParticipantId,
   LedgerSubmissionId,
   LfPartyId,
@@ -283,6 +284,7 @@ final case class TransferInView private (
   val submittingParticipant: LedgerParticipantId = submitterMetadata.submittingParticipant
   val applicationId: LedgerApplicationId = submitterMetadata.applicationId
   val submissionId: Option[LedgerSubmissionId] = submitterMetadata.submissionId
+  val commandId: LedgerCommandId = submitterMetadata.commandId
 
   protected def toProtoV0: v0.TransferInView =
     v0.TransferInView(
@@ -315,6 +317,7 @@ final case class TransferInView private (
       applicationId = applicationId,
       submissionId = submissionId.getOrElse(""),
       workflowId = workflowId.getOrElse(""),
+      commandId = commandId,
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -339,6 +342,8 @@ object TransferInView
 
   private val noParticipantId = LedgerParticipantId.assertFromString("no-participant-id")
   private val noApplicationId = LedgerApplicationId.assertFromString("no-application-id")
+  private val noCommandId = LedgerCommandId.assertFromString("no-command-id")
+
   private[TransferInView] final case class CommonData(
       salt: Salt,
       submitter: LfPartyId,
@@ -377,7 +382,7 @@ object TransferInView
         )
 
         transferOutResultEvent <- DeliveredTransferOutResult
-          .create(transferOutResultEventMC)
+          .create(Right(transferOutResultEventMC))
           .leftMap(err => OtherError(err.toString))
         creatingTransactionId <- TransactionId.fromProtoPrimitive(creatingTransactionIdP)
       } yield CommonData(
@@ -457,6 +462,7 @@ object TransferInView
         commonData.submitter,
         noApplicationId,
         noParticipantId,
+        noCommandId,
         None,
       ),
       contract,
@@ -497,6 +503,7 @@ object TransferInView
         commonData.submitter,
         noApplicationId,
         noParticipantId,
+        noCommandId,
         None,
       ),
       contract,
@@ -521,6 +528,7 @@ object TransferInView
       applicationIdP,
       submissionIdP,
       workflowIdP,
+      commandIdP,
     ) =
       transferInViewP
     for {
@@ -540,12 +548,14 @@ object TransferInView
       applicationId <- ProtoConverter.parseLFApplicationId(applicationIdP)
       submissionId <- ProtoConverter.parseLFSubmissionIdO(submissionIdP)
       workflowId <- ProtoConverter.parseLFWorkflowIdO(workflowIdP)
+      commandId <- ProtoConverter.parseCommandId(commandIdP)
     } yield TransferInView(
       commonData.salt,
       TransferSubmitterMetadata(
         commonData.submitter,
         applicationId,
         submittingParticipantId,
+        commandId,
         submissionId,
       ),
       contract,

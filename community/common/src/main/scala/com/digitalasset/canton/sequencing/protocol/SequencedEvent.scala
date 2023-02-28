@@ -303,10 +303,11 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       domainId: DomainId = this.domainId,
       messageId: Option[MessageId] = this.messageId,
       batch: Batch[Env2] = this.batch,
+      deserializedFrom: Option[ByteString] = None,
   ): Deliver[Env2] =
     Deliver[Env2](counter, timestamp, domainId, messageId, batch)(
       representativeProtocolVersion,
-      None,
+      deserializedFrom,
     )
 
   override def pretty: Pretty[this.type] =
@@ -351,7 +352,11 @@ object Deliver {
   ) = {
     val (openBatch, openingErrors) =
       Batch.openEnvelopes(deliver.batch)(protocolVersion, hashOps)
-    val openDeliver = deliver.copy(batch = openBatch)
+    val openDeliver = deliver.copy(
+      batch = openBatch,
+      // Keep the serialized representation only if there were no errors
+      deserializedFrom = if (openingErrors.isEmpty) deliver.deserializedFrom else None,
+    )
 
     (openDeliver, openingErrors)
   }

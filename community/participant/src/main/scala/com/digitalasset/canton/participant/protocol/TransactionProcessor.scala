@@ -343,6 +343,14 @@ object TransactionProcessor {
     }
   }
 
+  case class DomainParametersError(domainId: DomainId, context: String)
+      extends TransactionProcessorError {
+    override def pretty: Pretty[DomainParametersError] = prettyOfClass(
+      param("domain", _.domainId),
+      param("context", _.context.unquoted),
+    )
+  }
+
   case class GenericStepsError(error: ProcessorError) extends TransactionProcessorError {
     override def underlyingProcessorError(): Option[ProcessorError] = Some(error)
 

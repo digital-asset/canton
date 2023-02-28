@@ -28,6 +28,7 @@ import com.digitalasset.canton.version.{
 }
 import com.digitalasset.canton.{
   LedgerApplicationId,
+  LedgerCommandId,
   LedgerParticipantId,
   LedgerSubmissionId,
   LfPartyId,
@@ -321,6 +322,8 @@ final case class TransferOutView private (
   val submittingParticipant: LedgerParticipantId = submitterMetadata.submittingParticipant
   val applicationId: LedgerApplicationId = submitterMetadata.applicationId
   val submissionId: Option[LedgerSubmissionId] = submitterMetadata.submissionId
+  val commandId: LedgerCommandId = submitterMetadata.commandId
+
   override def hashPurpose: HashPurpose = HashPurpose.TransferOutView
 
   override def companionObj = TransferOutView
@@ -356,6 +359,7 @@ final case class TransferOutView private (
       applicationId = applicationId,
       submissionId = submissionId.getOrElse(""),
       workflowId = workflowId.getOrElse(""),
+      commandId = commandId,
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -379,6 +383,7 @@ object TransferOutView
   override val name: String = "TransferOutView"
   private val noParticipantId = LedgerParticipantId.assertFromString("no-participant-id")
   private val noApplicationId = LedgerApplicationId.assertFromString("no-application-id")
+  private val noCommandId = LedgerCommandId.assertFromString("no-command-id")
 
   private[TransferOutView] final case class CommonData(
       salt: Salt,
@@ -477,6 +482,7 @@ object TransferOutView
         commonData.submitter,
         noApplicationId,
         noParticipantId,
+        noCommandId,
         None,
       ),
       commonData.contractId,
@@ -515,6 +521,7 @@ object TransferOutView
         commonData.submitter,
         noApplicationId,
         noParticipantId,
+        noCommandId,
         None,
       ),
       commonData.contractId,
@@ -539,6 +546,7 @@ object TransferOutView
       applicationIdP,
       submissionIdP,
       worfklowIdP,
+      commandIdP,
     ) = transferOutViewP
 
     for {
@@ -556,12 +564,14 @@ object TransferOutView
       applicationId <- ProtoConverter.parseLFApplicationId(applicationIdP)
       submissionId <- ProtoConverter.parseLFSubmissionIdO(submissionIdP)
       workflowId <- ProtoConverter.parseLFWorkflowIdO(worfklowIdP)
+      commandId <- ProtoConverter.parseCommandId(commandIdP)
     } yield TransferOutView(
       commonData.salt,
       TransferSubmitterMetadata(
         commonData.submitter,
         applicationId,
         submittingParticipantId,
+        commandId,
         submissionId,
       ),
       commonData.contractId,

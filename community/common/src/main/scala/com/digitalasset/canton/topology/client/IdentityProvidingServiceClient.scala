@@ -14,7 +14,10 @@ import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
+import com.digitalasset.canton.protocol.{
+  DynamicDomainParameters,
+  DynamicDomainParametersWithValidity,
+}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
@@ -349,8 +352,8 @@ trait DomainGovernanceSnapshotClient {
       warnOnUsingDefault: Boolean = true,
   )(implicit traceContext: TraceContext): Future[DynamicDomainParameters] =
     findDynamicDomainParameters().map {
-      case Some(value) => value
-      case None =>
+      case Right(value) => value.parameters
+      case Left(_) =>
         if (warnOnUsingDefault) {
           logger.warn(s"Unexpectedly using default domain parameters at ${timestamp}")
         }
@@ -366,12 +369,12 @@ trait DomainGovernanceSnapshotClient {
 
   def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
-  ): Future[Option[DynamicDomainParameters]]
+  ): Future[Either[String, DynamicDomainParametersWithValidity]]
 
   /** List all the dynamic domain parameters (past and current) */
   def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]]
+  ): Future[Seq[DynamicDomainParametersWithValidity]]
 }
 
 trait TopologySnapshot

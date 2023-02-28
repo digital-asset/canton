@@ -6,9 +6,11 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.Functor
 import cats.data.EitherT
 import cats.syntax.traverse.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
@@ -176,4 +178,30 @@ object SignedContent {
       paramIfDefined("timestamp of signing key", _.timestampOfSigningKey),
     )
   }
+
+  def openEnvelopes(
+      event: SignedContent[SequencedEvent[ClosedEnvelope]]
+  )(
+      protocolVersion: ProtocolVersion,
+      hashOps: HashOps,
+  ): Either[
+    EventWithErrors[SequencedEvent[DefaultOpenEnvelope]],
+    SignedContent[SequencedEvent[DefaultOpenEnvelope]],
+  ] = {
+    val (openSequencedEvent, openingErrors) =
+      SequencedEvent.openEnvelopes(event.content)(protocolVersion, hashOps)
+
+    Either.cond(
+      openingErrors.isEmpty,
+      event.copy(content = openSequencedEvent), // The signature is still valid
+      EventWithErrors(openSequencedEvent, openingErrors, isIgnored = false),
+    )
+  }
+
 }
+
+case class EventWithErrors[Event <: SequencedEvent[_]](
+    content: Event,
+    openingErrors: Seq[ProtoDeserializationError],
+    isIgnored: Boolean,
+)

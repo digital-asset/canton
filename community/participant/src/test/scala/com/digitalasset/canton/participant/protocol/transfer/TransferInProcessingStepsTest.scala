@@ -90,6 +90,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       submitter,
       LedgerApplicationId.assertFromString("tests"),
       participant.toLf,
+      LedgerCommandId.assertFromString("transfer-in-processing-steps-command-id"),
       None,
     )
   }
@@ -661,7 +662,10 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
         _result <- valueOrFail(
           transferInProcessingSteps.getCommitSetAndContractsToBeStoredAndEvent(
-            mock[SignedContent[Deliver[DefaultOpenEnvelope]]],
+            mock[Either[
+              EventWithErrors[Deliver[DefaultOpenEnvelope]],
+              SignedContent[Deliver[DefaultOpenEnvelope]],
+            ]],
             Right(inRes),
             pendingRequestData,
             state.pendingTransferInSubmissions,

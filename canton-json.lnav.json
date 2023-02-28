@@ -1,18 +1,18 @@
 {
     "$schema": "https://lnav.org/schemas/format-v1.schema.json",
-    "logstash_dam": {
-        "title": "Logstash Java JSON",
+    "canton_logstash_json": {
+        "title": "Canton JSON Log",
         "url": "https://github.com/logstash/logstash-logback-encoder",
-        "description": "Log format for DAM Logstash JSON",
+        "description": "Canton JSON log files written using logstash.",
         "json": true,
         "hide-extra": false,
         "file-pattern": "\\.clog.*",
-        "line-format": [ { "field" : "@timestamp" }, " [", { "field" : "thread_name", "max-width" : 50 },"] ", { "field": "level" }, " - ", { "field": "logger_name" }, " (", { "field" : "trace-id", "default-value" : "" }, ") - ", { "field" : "message" }, 
+        "line-format": [ { "field" : "@timestamp" }, " [", { "field" : "thread_name", "max-width" : 20 },"] ", { "field": "level" }, " - ", { "field": "logger_name" }, " (", { "field" : "trace-id", "default-value" : "" }, ") - ", { "field" : "message" },
             " ",
             { "field" : "stack_trace", "default-value" : "" }
         ],
         "timestamp-field" : "@timestamp",
-        "body-field" : "message",        
+        "body-field" : "message",
         "level-field" : "level",
         "level" : {
             "trace" : "TRACE",
@@ -21,6 +21,7 @@
             "error" : "ERROR",
             "warning" : "WARN"
         },
+        "opid-field" : "trace-id",
         "value" : {
             "logger_name" : {
                 "kind" : "string",
@@ -36,15 +37,18 @@
             "stack_trace" : {
                 "kind" : "string"
             },
-            "trace-id" : { 
-                "kind" : "string"
+            "trace-id" : {
+                "kind" : "string",
+                "identifier" : true
             },
             "thread_name" : {
-                "kind" : "string"
+                "kind" : "string",
+                "identifier" : true,
+                "hidden" : true
             },
-            "@version" : { 
-		"hidden" : true 
-	    }
+            "@version" : {
+                "hidden" : true
+            }
         }
     }
 }

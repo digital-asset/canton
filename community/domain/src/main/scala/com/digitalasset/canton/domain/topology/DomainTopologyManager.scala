@@ -109,11 +109,7 @@ object DomainTopologyManager {
     // check that we have at least one mediator and one sequencer
     for {
       // first, check that we have domain parameters
-      _ <- EitherT(
-        dbSnapshot
-          .findDynamicDomainParameters()
-          .map(_.toRight("Dynamic domain parameters are not set yet"))
-      )
+      _ <- EitherT(dbSnapshot.findDynamicDomainParameters())
       // then, check that we have at least one mediator
       mediators <- EitherT.right(dbSnapshot.mediators())
       _ <- EitherT.cond[Future](
@@ -427,7 +423,7 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
   }
 
   @Explanation(
-    """This error is returned if a domain topology manager attempts to activate a 
+    """This error is returned if a domain topology manager attempts to activate a
       participant without having all necessary data, such as keys or domain trust certificates."""
   )
   @Resolution("""Register the necessary keys or trust certificates and try again.""")

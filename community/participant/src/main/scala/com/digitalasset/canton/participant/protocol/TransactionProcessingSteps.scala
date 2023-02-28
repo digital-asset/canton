@@ -190,6 +190,19 @@ class TransactionProcessingSteps(
   override def embedNoMediatorError(error: NoMediatorError): TransactionSubmissionError =
     DomainWithoutMediatorError.Error(error.topologySnapshotTimestamp, domainId)
 
+  override def decisionTimeFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TransactionProcessorError, CantonTimestamp] =
+    parameters.decisionTimeFor(requestTs).leftMap(DomainParametersError(parameters.domainId, _))
+
+  override def participantResponseDeadlineFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TransactionProcessorError, CantonTimestamp] = parameters
+    .participantResponseDeadlineFor(requestTs)
+    .leftMap(DomainParametersError(parameters.domainId, _))
+
   private class TrackedTransactionSubmission(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
@@ -1278,8 +1291,11 @@ class TransactionProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, TransactionResultMessage],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, TransactionResultMessage],
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -1287,7 +1303,8 @@ class TransactionProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
-    val Deliver(_, ts, _, _, _) = event.content
+    val content = eventE.fold(_.content, _.content)
+    val Deliver(_, ts, _, _, _) = content
     val submitterMeta = pendingRequestData.transactionValidationResult.submitterMetadata
     val completionInfo = submitterMeta.flatMap(completionInfoFromSubmitterMetadata)
 
@@ -1303,7 +1320,7 @@ class TransactionProcessingSteps(
         : EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
       import scala.util.Either.MergeableEither
       (
-        MergeableEither[MediatorResult](result).merge.verdict,
+        MergeableEither[MediatorResult](resultE).merge.verdict,
         pendingRequestData.modelConformanceResult,
       ) match {
         case (_: Verdict.Approve, Right(modelConformance)) =>
@@ -1329,12 +1346,12 @@ class TransactionProcessingSteps(
     }
 
     for {
-      domainParameters <- EitherT.right[TransactionProcessorError](
-        crypto.ips
-          .awaitSnapshot(pendingRequestData.requestTime)
-          .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
+      topologySnapshot <- EitherT.right[TransactionProcessorError](
+        crypto.ips.awaitSnapshot(pendingRequestData.requestTime)
       )
-      maxDecisionTime = domainParameters.decisionTimeFor(pendingRequestData.requestTime)
+      maxDecisionTime <- ProcessingSteps
+        .getDecisionTime(topologySnapshot, pendingRequestData.requestTime)
+        .leftMap(DomainParametersError(domainId, _))
       _ <-
         if (ts <= maxDecisionTime) EitherT.pure[Future, TransactionProcessorError](())
         else

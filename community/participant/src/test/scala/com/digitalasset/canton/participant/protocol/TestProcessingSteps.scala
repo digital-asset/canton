@@ -17,7 +17,10 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   RequestType,
   WrapsProcessorError,
 }
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor.NoMediatorError
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
+  DomainParametersError,
+  NoMediatorError,
+}
 import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestPendingRequestData,
   TestPendingRequestDataType,
@@ -39,7 +42,13 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
+import com.digitalasset.canton.protocol.{
+  DynamicDomainParametersWithValidity,
+  LfContractId,
+  RootHash,
+  ViewHash,
+  v0,
+}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -106,6 +115,20 @@ class TestProcessingSteps(
 
   override def embedNoMediatorError(error: NoMediatorError): TestProcessingError =
     TestProcessorError(error)
+
+  override def decisionTimeFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TestProcessingError, CantonTimestamp] = parameters
+    .decisionTimeFor(requestTs)
+    .leftMap(err => TestProcessorError(DomainParametersError(parameters.domainId, err)))
+
+  override def participantResponseDeadlineFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TestProcessingError, CantonTimestamp] = parameters
+    .participantResponseDeadlineFor(requestTs)
+    .leftMap(err => TestProcessorError(DomainParametersError(parameters.domainId, err)))
 
   override def prepareSubmission(
       param: Int,
@@ -237,8 +260,11 @@ class TestProcessingSteps(
     Right(None)
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, TransactionResultMessage],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, TransactionResultMessage],
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,

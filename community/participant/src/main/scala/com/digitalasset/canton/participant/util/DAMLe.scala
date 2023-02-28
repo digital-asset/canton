@@ -267,6 +267,9 @@ class DAMLe(
       case ResultError(err) => Future.successful(Left(err))
       case ResultInterruption(continue) =>
         handleResult(contracts, iterateOverInterrupts(continue))
+      case ResultNeedAuthority(_, _, _) =>
+        // TODO(i11255) Implement the lookup for the authority check for the given consortium party.
+        Future.failed(new Exception("Authority request has not been implemented yet."))
     }
   }
 

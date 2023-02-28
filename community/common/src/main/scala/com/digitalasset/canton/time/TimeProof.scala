@@ -93,6 +93,13 @@ object TimeProof {
       deliver <- PartialFunction
         .condOpt(event.signedEvent.content) { case deliver: Deliver[_] => deliver }
         .toRight("Time Proof must be a deliver event")
+      _ <- validateDeliver(deliver)
+      // is now safe to cast to a `Deliver[Nothing]` as we've validated it has no envelopes
+      emptyDeliver = deliver.asInstanceOf[Deliver[Nothing]]
+    } yield new TimeProof(event, emptyDeliver)
+
+  private def validateDeliver(deliver: Deliver[Envelope[_]]): Either[String, Unit] = {
+    for {
       _ <- Either.cond(
         isTimeEventBatch(deliver.batch),
         (),
@@ -103,16 +110,16 @@ object TimeProof {
         (),
         "Time Proof event should have an expected message id",
       )
-      // is now safe to cast to a `Deliver[Nothing]` as we've validated it has no envelopes
-      emptyDeliver = deliver.asInstanceOf[Deliver[Nothing]]
-    } yield new TimeProof(event, emptyDeliver)
+    } yield ()
+  }
 
   /** Return a wrapped [[TimeProof]] if the given `event` has the correct properties. */
   def fromEventO(event: OrdinarySequencedEvent[Envelope[_]]): Option[TimeProof] =
     fromEvent(event).toOption
 
   /** Is the event a time proof */
-  def isTimeProofEvent(event: OrdinaryProtocolEvent): Boolean = fromEventO(event).isDefined
+  def isTimeProofDeliver(deliver: Deliver[Envelope[_]]): Boolean =
+    validateDeliver(deliver).isRight
 
   /** Does the submission request look like a request to create a time event */
   def isTimeProofSubmission(submission: SubmissionRequest): Boolean =

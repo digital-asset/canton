@@ -72,6 +72,7 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{DiscardOps, DomainAlias, LedgerParticipantId}
 
 import java.time.Instant
+import java.util.UUID
 import scala.concurrent.TimeoutException
 import scala.concurrent.duration.Duration
 
@@ -468,7 +469,7 @@ class LocalParticipantTestingGroup(
     FeatureFlag.Testing,
   )
   @Help.Description(
-    """The state inspection methods can fatally and permanently corrupt the state of a participant. 
+    """The state inspection methods can fatally and permanently corrupt the state of a participant.
       |The API is subject to change in any way."""
   )
   def state_inspection: SyncStateInspection = check(FeatureFlag.Testing) { stateInspection }
@@ -720,7 +721,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |   revoke the vetting for the main package of the DAR, but this automatic vetting revocation will only succeed if the
         |   main package vetting originates from a standard ``dars.upload``. Even if the automatic revocation fails, you can
         |   always manually revoke the package vetting.
-        |   
+        |
         |If synchronizeVetting is true (default), then the command will block until the participant has observed the vetting transactions to be registered with the domain.
         |"""
     )
@@ -756,20 +757,20 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Summary("Upload a Dar to Canton")
     @Help.Description("""Daml code is normally shipped as a Dar archive and must explicitly be uploaded to a participant.
         |A Dar is a collection of LF-packages, the native binary representation of Daml smart contracts.
-        |In order to use Daml templates on a participant, the Dar must first be uploaded and then 
-        |vetted by the participant. Vetting will ensure that other participants can check whether they 
+        |In order to use Daml templates on a participant, the Dar must first be uploaded and then
+        |vetted by the participant. Vetting will ensure that other participants can check whether they
         |can actually send a transaction referring to a particular Daml package and participant.
         |Vetting is done by registering a VettedPackages topology transaction with the topology manager.
-        |By default, vetting happens automatically and this command waits for 
+        |By default, vetting happens automatically and this command waits for
         |the vetting transaction to be successfully registered on all connected domains.
-        |This is the safe default setting minimizing race conditions. 
-        |          
+        |This is the safe default setting minimizing race conditions.
+        |
         |If vetAllPackages is true (default), the packages will all be vetted on all domains the participant is registered.
         |If synchronizeVetting is true (default), then the command will block until the participant has observed the vetting transactions to be registered with the domain.
         |
         |Note that synchronize vetting might block on permissioned domains that do not just allow participants to update the topology state.
-        |In such cases, synchronizeVetting should be turned off. 
-        |Synchronize vetting can be invoked manually using $participant.package.synchronize_vettings()         
+        |In such cases, synchronizeVetting should be turned off.
+        |Synchronize vetting can be invoked manually using $participant.package.synchronize_vettings()
         |""")
     def upload(
         path: String,
@@ -923,7 +924,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       FeatureFlag.Preview,
     )
     @Help.Description(
-      """The standard operation of this command checks that a package is unused and unvetted, and if so 
+      """The standard operation of this command checks that a package is unused and unvetted, and if so
         |removes the package. The force flag can be used to disable the checks, but do not use the force flag unless
         |you're certain you know what you're doing. """
     )
@@ -936,7 +937,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Summary(
       "Ensure that all vetting transactions issued by this participant have been observed by all configured participants"
     )
-    @Help.Description("""Sometimes, when scripting tests and demos, a dar or package is uploaded and we need to ensure 
+    @Help.Description("""Sometimes, when scripting tests and demos, a dar or package is uploaded and we need to ensure
         |that commands are only submitted once the package vetting has been observed by some other connected participant
         |known to the console. This command can be used in such cases.""")
     def synchronize_vetting(
@@ -1042,8 +1043,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       "Test whether a participant is connected to and permissioned on a domain."
     )
     @Help.Description(
-      """Yields false, if the domain is not connected or not healthy. 
-        |Yields false, if the domain is configured in the Canton configuration and 
+      """Yields false, if the domain is not connected or not healthy.
+        |Yields false, if the domain is configured in the Canton configuration and
         |the participant is not active from the perspective of the domain."""
     )
     def active(domainAlias: DomainAlias): Boolean = {
@@ -1145,7 +1146,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |Otherwise the behaviour is equivalent to the connect command with explicit
         |arguments. If the domain is already configured, the domain connection
         |will be attempted. If however the domain is offline, the command will fail.
-        |Generally, this macro should only be used to setup a new domain. However, for 
+        |Generally, this macro should only be used to setup a new domain. However, for
         |convenience, we support idempotent invocations where subsequent calls just ensure
         |that the participant reconnects to the domain.
         |""")
@@ -1188,14 +1189,14 @@ trait ParticipantAdministration extends FeatureFlagFilter {
 
     @Help.Summary("Macro to connect a participant to a domain given by connection")
     @Help.Description("""The connect macro performs a series of commands in order to connect this participant to a domain.
-        |First, `register` will be invoked with the given arguments, but first registered  
+        |First, `register` will be invoked with the given arguments, but first registered
         |with manualConnect = true. If you already set manualConnect = true, then nothing else
         |will happen and you will have to do the remaining steps yourselves.
         |Otherwise, if the domain requires an agreement, it is fetched and presented to the user for evaluation.
         |If the user is fine with it, the agreement is confirmed. If you want to auto-confirm,
         |then set the environment variable CANTON_AUTO_APPROVE_AGREEMENTS=yes.
-        |Finally, the command will invoke `reconnect` to startup the connection. 
-        |If the reconnect succeeded, the registered configuration will be updated  
+        |Finally, the command will invoke `reconnect` to startup the connection.
+        |If the reconnect succeeded, the registered configuration will be updated
         |with manualStart = true. If anything fails, the domain will remain registered with `manualConnect = true` and
         |you will have to perform these steps manually.
         The arguments are:
@@ -1259,17 +1260,17 @@ trait ParticipantAdministration extends FeatureFlagFilter {
            connect_multi("mydomain", Seq(sequencer1, sequencer2))
            or:
            connect_multi("mydomain", Seq("https://host1.mydomain.net", "https://host2.mydomain.net", "https://host3.mydomain.net"))
-        
+
         To create a more advanced connection config use domains.toConfig with a single host,
         |then use config.addConnection to add additional connections before connecting:
            config = myparticipaint.domains.toConfig("mydomain", "https://host1.mydomain.net", ...otherArguments)
            config = config.addConnection("https://host2.mydomain.net", "https://host3.mydomain.net")
            myparticipant.domains.connect(config)
-           
+
         The arguments are:
           domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
           connections - The sequencer connection definitions (can be an URL) to connect to this domain. I.e. https://url:port
-          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.           
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
         """)
     def connect_multi(
         domainAlias: DomainAlias,
@@ -1316,7 +1317,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary("Reconnect this participant to the given local domain")
-    @Help.Description("""Idempotent attempts to re-establish a connection to the given local domain. 
+    @Help.Description("""Idempotent attempts to re-establish a connection to the given local domain.
         |Same behaviour as generic reconnect.
 
         The arguments are:
@@ -1468,6 +1469,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         applicationId: LedgerParticipantId = LedgerParticipantId.assertFromString("AdminConsole"),
         submissionId: String = "",
         workflowId: String = "",
+        commandId: String = "",
     ): TransferId =
       check(FeatureFlag.Preview)(consoleEnvironment.run {
         adminCommand(
@@ -1480,6 +1482,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
               applicationId = applicationId,
               submissionId = submissionId,
               workflowId = workflowId,
+              commandId = if (commandId.isEmpty) UUID.randomUUID().toString else commandId,
             )
         )
       })
@@ -1500,6 +1503,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         applicationId: LedgerParticipantId = LedgerParticipantId.assertFromString("AdminConsole"),
         submissionId: String = "",
         workflowId: String = "",
+        commandId: String = "",
     ): Unit =
       check(FeatureFlag.Preview)(consoleEnvironment.run {
         adminCommand(
@@ -1508,9 +1512,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
               submittingParty,
               transferId.toProtoV0,
               targetDomain,
-              applicationId,
-              submissionId,
-              workflowId,
+              applicationId = applicationId,
+              submissionId = submissionId,
+              workflowId = workflowId,
+              commandId = if (commandId.isEmpty) UUID.randomUUID().toString else commandId,
             )
         )
       })
@@ -1575,24 +1580,24 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |Most importantly, a submission will be rejected **before** it consumes a significant amount of resources.
         |
         |There are three kinds of limits: `maxDirtyRequests`,  `maxRate` and `maxBurstFactor`.
-        |The number of dirty requests of a participant P covers (1) requests initiated by P as well as 
+        |The number of dirty requests of a participant P covers (1) requests initiated by P as well as
         |(2) requests initiated by participants other than P that need to be validated by P.
         |Compared to the maximum rate, the maximum number of dirty requests reflects the load on the participant more accurately.
         |However, the maximum number of dirty requests alone does not protect the system from "bursts":
-        |If an application submits a huge number of commands at once, the maximum number of dirty requests will likely 
-        |be exceeded, as the system is registering dirty requests only during validation and not already during 
+        |If an application submits a huge number of commands at once, the maximum number of dirty requests will likely
+        |be exceeded, as the system is registering dirty requests only during validation and not already during
         |submission.
         |
         |The maximum rate is a hard limit on the rate of commands submitted to this participant through the ledger API.
         |As the rate of commands is checked and updated immediately after receiving a new command submission,
         |an application cannot exceed the maximum rate.
         |
-        |The `maxBurstFactor` parameter (positive, default 0.5) allows to configure how permissive the rate limitation should be 
+        |The `maxBurstFactor` parameter (positive, default 0.5) allows to configure how permissive the rate limitation should be
         |with respect to bursts. The rate limiting will be enforced strictly after having observed `max_burst` * `max_rate` commands.
         |
         |For the sake of illustration, let's assume the configured rate limit is ``100 commands/s`` with a burst ratio of 0.5.
         |If an application submits 100 commands within a single second, waiting exactly 10 milliseconds between consecutive commands,
-        |then the participant will accept all commands.        
+        |then the participant will accept all commands.
         |With a `maxBurstFactor` of 0.5, the participant will accept the first 50 commands and reject the remaining 50.
         |If the application then waits another 500 ms, it may submit another burst of 50 commands. If it waits 250 ms,
         |it may submit only a burst of 25 commands.

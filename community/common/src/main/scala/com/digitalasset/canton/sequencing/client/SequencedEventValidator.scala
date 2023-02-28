@@ -32,7 +32,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggingContext,
   TracedLogger,
 }
-import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.IgnoredSequencedEvent
@@ -283,7 +283,7 @@ object SequencedEventValidator extends HasLoggerName {
       getDynamicDomainParameters: (
           TopologySnapshot,
           TraceContext,
-      ) => F[Option[DynamicDomainParameters]],
+      ) => F[Either[String, DynamicDomainParametersWithValidity]],
   )(implicit
       loggingContext: NamedLoggingContext
   ): EitherT[F, SigningTimestampVerificationError, SyncCryptoApi] = {
@@ -301,9 +301,9 @@ object SequencedEventValidator extends HasLoggerName {
         snapshot: SyncCryptoApi
     ): F[Either[SigningTimestampVerificationError, SyncCryptoApi]] = {
       getDynamicDomainParameters(snapshot.ipsSnapshot, traceContext)
-        .map { dynamicDomainParametersO =>
+        .map { dynamicDomainParametersE =>
           for {
-            dynamicDomainParameters <- dynamicDomainParametersO.toRight(NoDynamicDomainParameters)
+            dynamicDomainParameters <- dynamicDomainParametersE.leftMap(NoDynamicDomainParameters)
             tolerance = dynamicDomainParameters.sequencerSigningTolerance
             withinSigningTolerance = {
               import scala.Ordered.orderingToOrdered
@@ -355,11 +355,11 @@ object SequencedEventValidator extends HasLoggerName {
     )
   }
 
-  case object NoDynamicDomainParameters extends SigningTimestampVerificationError {
-    override def pretty: Pretty[NoDynamicDomainParameters] =
-      prettyOfObject[NoDynamicDomainParameters]
+  case class NoDynamicDomainParameters(error: String) extends SigningTimestampVerificationError {
+    override def pretty: Pretty[NoDynamicDomainParameters] = prettyOfClass(
+      param("error", _.error.unquoted)
+    )
   }
-  type NoDynamicDomainParameters = NoDynamicDomainParameters.type
 }
 
 trait SequencedEventValidatorFactory {

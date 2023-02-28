@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.util
 
+import scala.concurrent.Future
+
 object EitherUtil {
 
   implicit class RichEither[L, R](val either: Either[L, R]) extends AnyVal {
@@ -27,6 +29,11 @@ object EitherUtil {
         either
 
       case Left(_) => either
+    }
+
+    def toFuture(f: L => Throwable): Future[R] = either match {
+      case Left(value) => Future.failed(f(value))
+      case Right(value) => Future.successful(value)
     }
   }
 

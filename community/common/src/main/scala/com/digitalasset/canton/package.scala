@@ -31,6 +31,10 @@ package object canton {
   type LedgerSubmissionId = Ref.SubmissionId
   val LedgerSubmissionId: Ref.SubmissionId.type = Ref.SubmissionId
 
+  // Ledger command id
+  type LedgerCommandId = Ref.CommandId
+  val LedgerCommandId: Ref.CommandId.type = Ref.CommandId
+
   // Ledger application id
   type LedgerApplicationId = Ref.ApplicationId
   val LedgerApplicationId: Ref.ApplicationId.type = Ref.ApplicationId
@@ -81,9 +85,6 @@ package object canton {
 
   type LfFetchByKeyCommand = LfCommand.FetchByKey
   val LfFetchByKeyCommand: LfCommand.FetchByKey.type = LfCommand.FetchByKey
-
-  type LfIdentifier = Ref.Identifier
-  val LfIdentifier: Ref.Identifier.type = Ref.Identifier
 
   type LfLookupByKeyCommand = LfCommand.LookupByKey
   val LfLookupByKeyCommand: LfCommand.LookupByKey.type = LfCommand.LookupByKey

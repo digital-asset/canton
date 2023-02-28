@@ -10,7 +10,6 @@ import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
-import com.daml.lf.data.Ref
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
@@ -375,16 +374,16 @@ class TransferOutProcessingSteps(
         mediatorId,
       )
 
-      sourceDomainParameters <- EitherT.right(
-        sourceIps.findDynamicDomainParametersOrDefault(sourceDomainProtocolVersion.v)
-      )
+      transferOutDecisionTime <- ProcessingSteps
+        .getDecisionTime(sourceIps, ts)
+        .leftMap(TransferParametersError(domainId, _))
 
       transferData = TransferData(
         sourceProtocolVersion = sourceDomainProtocolVersion,
         transferOutTimestamp = ts,
         transferOutRequestCounter = rc,
         transferOutRequest = fullTree,
-        transferOutDecisionTime = sourceDomainParameters.decisionTimeFor(ts),
+        transferOutDecisionTime = transferOutDecisionTime,
         contract = storedContract.contract,
         creatingTransactionId = creatingTransactionId,
         transferOutResult = None,
@@ -482,8 +481,11 @@ class TransferOutProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, TransferOutResult],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, TransferOutResult],
       pendingRequestData: PendingTransferOut,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -512,7 +514,7 @@ class TransferOutProcessingSteps(
     val pendingSubmissionData = pendingSubmissionMap.get(rootHash)
 
     import scala.util.Either.MergeableEither
-    MergeableEither[MediatorResult](result).merge.verdict match {
+    MergeableEither[MediatorResult](resultE).merge.verdict match {
       case _: Verdict.Approve =>
         val commitSet = CommitSet(
           archivals = Map.empty,
@@ -526,7 +528,7 @@ class TransferOutProcessingSteps(
         for {
           _unit <- ifThenET(transferringParticipant) {
             EitherT
-              .fromEither[Future](DeliveredTransferOutResult.create(event))
+              .fromEither[Future](DeliveredTransferOutResult.create(eventE))
               .leftMap(err => InvalidResult(transferId, err))
               .flatMap(deliveredResult =>
                 transferCoordination.addTransferOutResult(targetDomain, deliveredResult)
@@ -601,7 +603,7 @@ class TransferOutProcessingSteps(
           CompletionInfo(
             actAs = List(submitterMetadata.submitter),
             applicationId = submitterMetadata.applicationId,
-            commandId = Ref.CommandId.assertFromString("command-id"),
+            commandId = submitterMetadata.commandId,
             optDeduplicationPeriod = None,
             submissionId = submitterMetadata.submissionId,
             statistics = None,
@@ -729,18 +731,13 @@ class TransferOutProcessingSteps(
           AdminPartiesAndParticipants(expectedAdminParties, expectedParticipants) =
             adminPartiesAndParticipants
 
-          targetDomainParams <- EitherT(
-            targetIps
-              .findDynamicDomainParameters()
-              .map(
-                _.toRight[TransferProcessorError](
-                  DomainNotReady(request.targetDomain, "Unable to fetch domain parameters")
-                )
-              )
-          )
-          transferInExclusivity = targetDomainParams.transferExclusivityLimitFor(
-            request.targetTimeProof.timestamp
-          )
+          transferInExclusivity <- ProcessingSteps
+            .getTransferInExclusivity(
+              targetIps,
+              request.targetTimeProof.timestamp,
+            )
+            .leftMap(TransferParametersError(request.targetDomain, _))
+
           _ <- EitherTUtil.condUnitET[Future](
             adminParties == expectedAdminParties,
             AdminPartiesMismatch(

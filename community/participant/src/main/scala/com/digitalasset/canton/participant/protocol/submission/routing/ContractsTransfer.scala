@@ -45,6 +45,7 @@ private[routing] class ContractsTransfer(
               lfParty,
               submitterInfo.applicationId,
               submittingParticipant.toLf,
+              submitterInfo.commandId,
               submitterInfo.submissionId,
             ),
             workflowId = None,

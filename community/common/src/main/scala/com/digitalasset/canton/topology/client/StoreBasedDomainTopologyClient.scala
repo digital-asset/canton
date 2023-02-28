@@ -14,7 +14,7 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
+import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
@@ -761,7 +761,7 @@ class StoreBasedTopologySnapshot(
 
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
-  ): Future[Option[DynamicDomainParameters]] =
+  ): Future[Either[String, DynamicDomainParametersWithValidity]] =
     findTransactions(
       asOfInclusive = false,
       includeSecondary = false,
@@ -769,25 +769,38 @@ class StoreBasedTopologySnapshot(
       filterUid = None,
       filterNamespace = None,
     ).map { storedTxs =>
+      val domainParameters = storedTxs.result
+        .mapFilter { storedTx =>
+          storedTx.transaction.transaction.element match {
+            case DomainGovernanceElement(DomainParametersChange(domainId, domainParameters)) =>
+              Some(
+                DynamicDomainParametersWithValidity(
+                  domainParameters,
+                  storedTx.validFrom.value,
+                  storedTx.validUntil.map(_.value),
+                  domainId,
+                )
+              )
+            case _ => None
+          }
+        }
+
       // We sort the results to be able to pick the most recent one in case
       // several transactions are found.
-      val domainParameters =
-        StoredTopologyTransactions(storedTxs.result.sortBy(_.validFrom.value)).toTopologyState
-          .collect { case DomainGovernanceElement(DomainParametersChange(_, domainParameters)) =>
-            domainParameters
-          }
-      NonEmpty.from(domainParameters).map { domainParametersNel =>
+      val sortedDomainParameters = domainParameters.sortBy(_.validFrom)
+
+      NonEmpty.from(sortedDomainParameters).map { domainParametersNel =>
         if (domainParametersNel.sizeCompare(1) > 0)
           logger.warn(
             s"Expecting only one dynamic domain parameters, ${domainParametersNel.size} found. Considering the most recent one."
           )
         domainParametersNel.last1
       }
-    }
+    }.map(_.toRight(s"Unable to fetch domain parameters at $timestamp"))
 
   override def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]] = store
+  ): Future[Seq[DynamicDomainParametersWithValidity]] = store
     .inspect(
       stateStore = false,
       timeQuery = TimeQuery.Range(None, Some(timestamp)),
@@ -810,9 +823,9 @@ class StoreBasedTopologySnapshot(
           case (
                 validFrom,
                 validUntil,
-                DomainGovernanceElement(DomainParametersChange(_, domainParameters)),
+                DomainGovernanceElement(DomainParametersChange(domainId, domainParameters)),
               ) =>
-            DomainParameters.WithValidity(validFrom, validUntil, domainParameters)
+            DynamicDomainParametersWithValidity(domainParameters, validFrom, validUntil, domainId)
         }
     }
 }

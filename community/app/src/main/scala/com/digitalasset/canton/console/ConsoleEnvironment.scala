@@ -152,7 +152,12 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
 
   def setCommandTimeout(newTimeout: NonNegativeDuration): Unit = {
     require(newTimeout.duration > SDuration.Zero, "The command timeout must be positive!")
-    val _ = commandTimeoutReference.updateAndGet(cur => cur.copy(bounded = newTimeout))
+    commandTimeoutReference.updateAndGet(cur => cur.copy(bounded = newTimeout)).discard
+  }
+
+  def setLedgerCommandTimeout(newTimeout: NonNegativeDuration): Unit = {
+    require(newTimeout.duration > SDuration.Zero, "The ledger command timeout must be positive!")
+    commandTimeoutReference.updateAndGet(cur => cur.copy(ledgerCommand = newTimeout)).discard
   }
 
   /** returns the currently enabled feature sets */
