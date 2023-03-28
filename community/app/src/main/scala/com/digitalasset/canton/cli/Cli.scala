@@ -30,7 +30,7 @@ object LogEncoder {
   * @param noTty Do we know the process does not have access to a tty?
   *              Used for disabling rich REPL input for environments where it may not be available (e.g. docker, IntelliJ)
   */
-case class Cli(
+final case class Cli(
     configFiles: Seq[File] = Seq(),
     configMap: Map[String, String] = Map(),
     command: Option[Command] = None,
@@ -341,11 +341,11 @@ object Cli {
 
       checkConfig(cli =>
         if (
-          cli.autoConnectLocal && (cli.command.exists {
+          cli.autoConnectLocal && cli.command.exists {
             case Command.Daemon => false
             case Command.RunScript(_) => true
             case Command.Generate(_) => true
-          })
+          }
         ) {
           failure(s"auto-connect-local does not work with run-script or generate")
         } else success

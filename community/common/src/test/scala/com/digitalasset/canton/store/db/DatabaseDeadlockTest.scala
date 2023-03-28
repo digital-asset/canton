@@ -9,6 +9,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
 import io.functionmeta.functionFullName
+import org.scalatest.time.{Millis, Seconds, Span}
 import org.scalatest.{Assertion, BeforeAndAfterAll}
 import slick.jdbc.PositionedParameters
 import slick.sql.SqlAction
@@ -30,6 +31,9 @@ trait DatabaseDeadlockTest
   val roundsNegative = 50
   val roundsPositive = 1
   val maxRetries = 3
+
+  implicit override val defaultPatience: PatienceConfig =
+    PatienceConfig(timeout = Span(60, Seconds), interval = Span(100, Millis))
 
   def createTableAction: SqlAction[Int, NoStream, Effect.Write]
 
@@ -224,7 +228,7 @@ class DatabaseDeadlockTestPostgres extends DatabaseDeadlockTest with PostgresTes
   override lazy val upsertCommand: DbBulkCommand = DbBulkCommand(
     """insert into database_deadlock_test(id, v)
       |values (?, ?)
-      |on conflict (id) do 
+      |on conflict (id) do
       |update set v = excluded.v""".stripMargin,
     setIdValue,
   )

@@ -13,7 +13,7 @@ import slick.jdbc.GetResult
   * @param status The status
   * @param asOf When the change became effective
   */
-case class StateChange[+Status <: PrettyPrinting](status: Status, asOf: TimeOfChange)
+final case class StateChange[+Status <: PrettyPrinting](status: Status, asOf: TimeOfChange)
     extends PrettyPrinting {
 
   def rc: RequestCounter = asOf.rc

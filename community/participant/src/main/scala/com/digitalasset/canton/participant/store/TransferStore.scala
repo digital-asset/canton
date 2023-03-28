@@ -4,7 +4,9 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.TransferId
@@ -83,29 +85,32 @@ object TransferStore {
     def cause: String
   }
 
-  case class UnknownTransferId(transferId: TransferId) extends TransferLookupError {
+  final case class UnknownTransferId(transferId: TransferId) extends TransferLookupError {
     override def cause: String = "unknown transfer id"
   }
 
-  case class TransferCompleted(transferId: TransferId, timeOfCompletion: TimeOfChange)
+  final case class TransferCompleted(transferId: TransferId, timeOfCompletion: TimeOfChange)
       extends TransferLookupError {
     override def cause: String = "transfer already completed"
   }
 
-  case class TransferDataAlreadyExists(old: TransferData, `new`: TransferData)
+  final case class TransferDataAlreadyExists(old: TransferData, `new`: TransferData)
       extends TransferStoreError
 
-  case class TransferOutResultAlreadyExists(
+  final case class TransferOutResultAlreadyExists(
       transferId: TransferId,
       old: DeliveredTransferOutResult,
       `new`: DeliveredTransferOutResult,
   ) extends TransferStoreError
 
-  case class TransferAlreadyCompleted(transferId: TransferId, newCompletion: TimeOfChange)
+  final case class TransferAlreadyCompleted(transferId: TransferId, newCompletion: TimeOfChange)
       extends TransferStoreError
 
   /** The data for a transfer and possible when the transfer was completed. */
-  case class TransferEntry(transferData: TransferData, timeOfCompletion: Option[TimeOfChange]) {
+  final case class TransferEntry(
+      transferData: TransferData,
+      timeOfCompletion: Option[TimeOfChange],
+  ) {
     def isCompleted: Boolean = timeOfCompletion.nonEmpty
 
     def mergeWith(
@@ -199,6 +204,27 @@ trait TransferLookup {
     * @param limit limit the number of results
     */
   def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
+      traceContext: TraceContext
+  ): Future[Seq[TransferData]]
+
+  /** Find utility to look for in-flight transfers.
+    * Transfers are ordered by request timestamp.
+    *
+    * @param sourceDomain source domain of the transfer
+    * @param onlyCompletedTransferOut select only transfers that are successfully transferred-out
+    * @param transferOutRequestNotAfter select only transfers whose transfer-out request counter `rc`
+    *                                   satisfies `rc <= transferOutRequestNotAfter`.
+    * @param stakeholders if non-empty, select only transfers of contracts whose set of stakeholders
+    *                     intersects `stakeholders`.
+    * @param limit limit the number of results
+    */
+  def findInFlight(
+      sourceDomain: DomainId,
+      onlyCompletedTransferOut: Boolean,
+      transferOutRequestNotAfter: LocalOffset,
+      stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+      limit: Int,
+  )(implicit
       traceContext: TraceContext
   ): Future[Seq[TransferData]]
 }

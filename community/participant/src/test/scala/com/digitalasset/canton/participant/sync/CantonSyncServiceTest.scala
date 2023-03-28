@@ -4,10 +4,9 @@
 package com.digitalasset.canton.participant.sync
 
 import akka.stream.Materializer
-import cats.Id
 import cats.data.EitherT
 import cats.implicits.*
-import com.daml.ledger.participant.state.v2.ChangeId
+import cats.{Eval, Id}
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.CommittedTransaction
 import com.daml.lf.transaction.test.TransactionBuilder
@@ -25,6 +24,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.{Fingerprint, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.{
@@ -61,7 +61,6 @@ import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   PartyToParticipant,
@@ -81,6 +80,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   LedgerSubmissionId,
   LfPartyId,
+  config,
 }
 import org.mockito.ArgumentMatchers
 import org.scalatest.Outcome
@@ -94,7 +94,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
   private val LocalNodeParameters = ParticipantNodeParameters(
     general = CantonNodeParameters.General.Impl(
       tracing = TracingConfig(TracingConfig.Propagation.Disabled),
-      delayLoggingThreshold = NonNegativeFiniteDuration.ofMillis(5000),
+      delayLoggingThreshold = NonNegativeFiniteDuration.tryOfMillis(5000),
       enableAdditionalConsistencyChecks = true,
       loggingConfig = LoggingConfig(api = ApiLoggingConfig(messagePayloads = Some(true))),
       logQueryCost = None,
@@ -108,13 +108,13 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     adminWorkflow = AdminWorkflowConfig(
       bongTestMaxLevel = 10,
       retries = 10,
-      submissionTimeout = NonNegativeFiniteDuration.ofHours(1),
+      submissionTimeout = config.NonNegativeFiniteDuration.ofHours(1),
     ),
     maxUnzippedDarSize = 10,
     stores = ParticipantStoreConfig(
       maxItemsInSqlClause = PositiveNumeric.tryCreate(10),
       maxPruningBatchSize = PositiveNumeric.tryCreate(10),
-      acsPruningInterval = NonNegativeFiniteDuration.ofSeconds(30),
+      acsPruningInterval = config.NonNegativeFiniteDuration.ofSeconds(30),
       dbBatchAggregationConfig = BatchAggregatorConfig.defaultsForTesting,
     ),
     transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
@@ -140,7 +140,6 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     private val syncDomainPersistentStateFactory = mock[SyncDomainPersistentStateFactory]
     private val domainConnectionConfigStore = mock[DomainConnectionConfigStore]
     private val packageService = mock[PackageService]
-    private val topologyStoreFactory = mock[TopologyStoreFactory]
     private val causalityLookup = mock[MultiDomainCausalityStore]
     val topologyManager: ParticipantTopologyManager = mock[ParticipantTopologyManager]
     private val identityPusher = mock[ParticipantTopologyDispatcher]
@@ -207,12 +206,11 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       domainRegistry,
       domainConnectionConfigStore,
       aliasManager,
-      participantNodePersistentState,
+      Eval.now(participantNodePersistentState),
       participantNodeEphemeralState,
       syncDomainPersistentStateManager,
       syncDomainPersistentStateFactory,
       packageService,
-      topologyStoreFactory,
       causalityLookup,
       topologyManager,
       identityPusher,

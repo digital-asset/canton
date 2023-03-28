@@ -25,7 +25,7 @@ import scala.concurrent.ExecutionContext
 
 class TransferInProcessor(
     domainId: DomainId,
-    participantId: ParticipantId,
+    override val participantId: ParticipantId,
     damle: DAMLe,
     transferCoordination: TransferCoordination,
     inFlightSubmissionTracker: InFlightSubmissionTracker,

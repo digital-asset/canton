@@ -59,9 +59,9 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
     new DbTopologyStore(
       storage,
       storeId,
-      maxItemsInSqlQuery = 1,
       timeouts,
       loggerFactory,
+      maxItemsInSqlQuery = 1,
     )
 
   "DbTopologyStore" should {
@@ -103,7 +103,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
       DomainParametersChange(
         DefaultTestIdentities.domainId,
         defaultDomainParameters
-          .tryUpdate(topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(10)),
+          .tryUpdate(topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(10)),
       ),
       namespaceKey,
     )
@@ -111,7 +111,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
       DomainParametersChange(
         DefaultTestIdentities.domainId,
         defaultDomainParameters
-          .tryUpdate(topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(100)),
+          .tryUpdate(topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(100)),
       ),
       namespaceKey,
     )

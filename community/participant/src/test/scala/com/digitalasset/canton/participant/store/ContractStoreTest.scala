@@ -13,7 +13,11 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   packageId,
   transactionId,
 }
-import com.digitalasset.canton.protocol.{ExampleTransactionFactory, SerializableContract}
+import com.digitalasset.canton.protocol.{
+  ContractMetadata,
+  ExampleTransactionFactory,
+  SerializableContract,
+}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -92,11 +96,20 @@ trait ContractStoreTest { this: AsyncWordSpec with BaseTest =>
     "update a created contract with instance size > 32kB (oracle related, see DbContractStore)" in {
       val store = mk()
 
+      val manySignatories = 1
+        .to(1000)
+        .map { x =>
+          LfPartyId.assertFromString(s"alicealicealicealicealicealice::$x")
+        }
+        .toSet
+      val metadata = ContractMetadata.tryCreate(Set.empty, manySignatories, None)
+      metadata.toByteArray(testedProtocolVersion).length should be > 32768
       val largeContract: SerializableContract =
         asSerializable(
           contractId,
           contractInstance = contractInstance(),
           agreementText = "A" * 35000,
+          metadata = metadata,
         )
 
       val storedLargeContractUpdated =

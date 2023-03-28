@@ -6,53 +6,59 @@ package com.digitalasset.canton.participant.ledger.api
 import akka.actor.ActorSystem
 import com.daml.api.util.TimeProvider
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
-import com.daml.ledger.api.auth.CachedJwtVerifierLoader
-import com.daml.ledger.api.domain
-import com.daml.ledger.api.health.HealthChecks
 import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationFeatures,
   CommandDeduplicationPeriodSupport,
   CommandDeduplicationType,
   ExperimentalExplicitDisclosure,
 }
-import com.daml.ledger.participant.state.v2.metrics.{TimedReadService, TimedWriteService}
 import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
-import com.daml.platform.LedgerApiServer
-import com.daml.platform.apiserver.ratelimiting.{RateLimitingInterceptor, ThreadpoolCheck}
-import com.daml.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
-import com.daml.platform.configuration.{
+import com.daml.ports.Port
+import com.daml.tracing.Telemetry
+import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.ledger.api.auth.CachedJwtVerifierLoader
+import com.digitalasset.canton.ledger.api.domain
+import com.digitalasset.canton.ledger.api.health.HealthChecks
+import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
+  TimedReadService,
+  TimedWriteService,
+}
+import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.ApiRequestLogger
+import com.digitalasset.canton.participant.config.LedgerApiServerConfig
+import com.digitalasset.canton.platform.LedgerApiServer
+import com.digitalasset.canton.platform.apiserver.ratelimiting.{
+  RateLimitingInterceptor,
+  ThreadpoolCheck,
+}
+import com.digitalasset.canton.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
+import com.digitalasset.canton.platform.configuration.{
   AcsStreamsConfig as LedgerAcsStreamsConfig,
   IndexServiceConfig as LedgerIndexServiceConfig,
   ServerRole,
   TransactionFlatStreamsConfig as LedgerTransactionFlatStreamsConfig,
   TransactionTreeStreamsConfig as LedgerTransactionTreeStreamsConfig,
 }
-import com.daml.platform.index.IndexServiceOwner
-import com.daml.platform.indexer.{
+import com.digitalasset.canton.platform.index.IndexServiceOwner
+import com.digitalasset.canton.platform.indexer.{
   IndexerConfig as DamlIndexerConfig,
   IndexerServiceOwner,
   IndexerStartupMode,
 }
-import com.daml.platform.localstore.api.UserManagementStore
-import com.daml.platform.localstore.{
+import com.digitalasset.canton.platform.localstore.api.UserManagementStore
+import com.digitalasset.canton.platform.localstore.{
   CachedIdentityProviderConfigStore,
   IdentityProviderManagementConfig,
   PersistentIdentityProviderConfigStore,
   PersistentPartyRecordStore,
   PersistentUserManagementStore,
 }
-import com.daml.platform.services.time.TimeProviderType
-import com.daml.platform.store.DbSupport
-import com.daml.platform.store.DbSupport.ParticipantDataSourceConfig
-import com.daml.ports.Port
-import com.daml.tracing.Telemetry
-import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.ApiRequestLogger
-import com.digitalasset.canton.participant.config.LedgerApiServerConfig
+import com.digitalasset.canton.platform.services.time.TimeProviderType
+import com.digitalasset.canton.platform.store.DbSupport
+import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 import io.functionmeta.functionFullName
@@ -62,7 +68,6 @@ import io.scalaland.chimney.dsl.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
-import scala.jdk.DurationConverters.*
 
 /** The StartableStoppableLedgerApi enables a canton participant node to start and stop the ledger API server
   * depending on whether the participant node is a High Availability active or passive replica.
@@ -184,13 +189,13 @@ class StartableStoppableLedgerApiServer(
       maxContractKeyStateCacheSize = config.serverConfig.maxContractKeyStateCacheSize,
       maxTransactionsInMemoryFanOutBufferSize =
         config.serverConfig.maxTransactionsInMemoryFanOutBufferSize,
-      apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.duration.toScala,
+      apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap,
       inMemoryStateUpdaterParallelism = config.serverConfig.inMemoryStateUpdaterParallelism,
       inMemoryFanOutThreadPoolSize = config.serverConfig.inMemoryFanOutThreadPoolSize.getOrElse(
         LedgerApiServerConfig.DefaultInMemoryFanOutThreadPoolSize
       ),
       preparePackageMetadataTimeOutWarning =
-        config.serverConfig.preparePackageMetadataTimeOutWarning.duration.toScala,
+        config.serverConfig.preparePackageMetadataTimeOutWarning.underlying,
     )
 
     val indexerConfig = config.indexerConfig.damlConfig(
@@ -200,7 +205,7 @@ class StartableStoppableLedgerApiServer(
           connectionPool = DamlIndexerConfig
             .createDataSourceProperties(config.indexerConfig.ingestionParallelism.unwrap)
             .connectionPool
-            .copy(connectionTimeout = config.serverConfig.databaseConnectionTimeout.toScala),
+            .copy(connectionTimeout = config.serverConfig.databaseConnectionTimeout.underlying),
           postgres = config.serverConfig.postgresDataSource.damlConfig,
         )
       ),
@@ -253,6 +258,7 @@ class StartableStoppableLedgerApiServer(
         servicesExecutionContext = executionContext,
         engine = config.engine,
         inMemoryState = inMemoryState,
+        tracer = config.tracerProvider.tracer,
       )
       userManagementStore = getUserManagementStore(dbSupport)
       partyRecordStore = new PersistentPartyRecordStore(
@@ -284,6 +290,7 @@ class StartableStoppableLedgerApiServer(
         otherServices = Nil,
         otherInterceptors = getInterceptors(dbSupport.dbDispatcher.executor),
         engine = config.engine,
+        authorityResolver = config.syncService.cantonAuthorityResolver,
         servicesExecutionContext = executionContext,
         checkOverloaded = config.syncService.checkOverloaded,
         ledgerFeatures = getLedgerFeatures,
@@ -371,12 +378,12 @@ class StartableStoppableLedgerApiServer(
 
   private def getApiServerConfig: ApiServerConfig = ApiServerConfig(
     address = Some(config.serverConfig.address),
-    apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap.toScala,
+    apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap,
     command = config.serverConfig.commandService.damlConfig,
-    configurationLoadTimeout = config.serverConfig.configurationLoadTimeout.toScala,
+    configurationLoadTimeout = config.serverConfig.configurationLoadTimeout.unwrap,
     initialLedgerConfiguration =
       None, // CantonSyncService provides ledger configuration via ReadService bypassing the WriteService
-    managementServiceTimeout = config.serverConfig.managementServiceTimeout.toScala,
+    managementServiceTimeout = config.serverConfig.managementServiceTimeout.underlying,
     maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
     port = Port(config.serverConfig.port.unwrap),
     portFile = None,

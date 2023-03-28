@@ -348,7 +348,7 @@ class PingService(
     * a specific contract ID (not contract key).
     */
   private def NoCommandDeduplicationNeeded: NonNegativeFiniteDuration =
-    NonNegativeFiniteDuration.ofMillis(1)
+    NonNegativeFiniteDuration.tryOfMillis(1)
 
   /** Send a ping to the target party, return round-trip time or a timeout
     * @param targetParties String     the parties to send ping to

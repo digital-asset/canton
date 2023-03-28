@@ -15,6 +15,7 @@ import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.gm.{GMNamedCurves, GMObjectIdentifiers}
 import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec
 
+import java.security.spec.ECGenParameterSpec
 import java.security.{
   GeneralSecurityException,
   InvalidAlgorithmParameterException,
@@ -79,26 +80,42 @@ class JcePrivateCrypto(
 
   override protected def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair] =
-    EitherT.fromEither {
-      scheme match {
-        case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
-          for {
-            javaKeyPair <- Either
-              .catchOnly[GeneralSecurityException](
-                EllipticCurves.generateKeyPair(CurveType.NIST_P256)
-              )
-              .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
-            rawKeyPair = fromJavaKeyPair(javaKeyPair)
-          } yield EncryptionKeyPair.create(
-            id = rawKeyPair.id,
-            format = CryptoKeyFormat.Der,
-            publicKeyBytes = rawKeyPair.publicKey,
-            privateKeyBytes = rawKeyPair.privateKey,
-            scheme = scheme,
-          )
-      }
+  ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair] = {
+
+    def convertJavaKeyPair(
+        javaKeyPair: JKeyPair
+    ): EncryptionKeyPair = {
+      val rawKeyPair = fromJavaKeyPair(javaKeyPair)
+      EncryptionKeyPair.create(
+        id = rawKeyPair.id,
+        format = CryptoKeyFormat.Der,
+        publicKeyBytes = rawKeyPair.publicKey,
+        privateKeyBytes = rawKeyPair.privateKey,
+        scheme = scheme,
+      )
     }
+
+    EitherT.fromEither {
+      (scheme match {
+        case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
+          Either
+            .catchOnly[GeneralSecurityException](
+              EllipticCurves.generateKeyPair(CurveType.NIST_P256)
+            )
+            .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
+        case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+          Either
+            .catchOnly[GeneralSecurityException](
+              {
+                val kpGen = KeyPairGenerator.getInstance("EC", "BC")
+                kpGen.initialize(new ECGenParameterSpec("P-256"))
+                kpGen.generateKeyPair()
+              }
+            )
+            .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
+      }).map(convertJavaKeyPair)
+    }
+  }
 
   override protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
       traceContext: TraceContext

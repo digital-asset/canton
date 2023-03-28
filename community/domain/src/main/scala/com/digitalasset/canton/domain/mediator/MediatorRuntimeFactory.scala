@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
@@ -22,7 +22,7 @@ import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
-import com.digitalasset.canton.time.{Clock, DomainTimeTrackerConfig, GrpcDomainTimeService}
+import com.digitalasset.canton.time.{Clock, GrpcDomainTimeService}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.{DomainId, MediatorId}

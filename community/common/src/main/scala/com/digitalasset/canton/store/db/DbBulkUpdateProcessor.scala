@@ -164,7 +164,7 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
 }
 
 object DbBulkUpdateProcessor {
-  case class BulkUpdatePendingCheck[A, B](
+  final case class BulkUpdatePendingCheck[A, B](
       target: Traced[A],
       cell: SingleUseCell[Try[B]],
   )

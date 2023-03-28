@@ -134,7 +134,7 @@ private[submission] object DomainSelectionFixture {
       }
     }
 
-    case class ThreeExercises(
+    final case class ThreeExercises(
         version: language.LanguageVersion = LanguageVersion.StableVersions.max
     ) {
 
@@ -162,7 +162,7 @@ private[submission] object DomainSelectionFixture {
       val correctPackages = Seq[LfPackageId](defaultPackageId, interfacePackageId)
     }
 
-    case class ExerciseByInterface(
+    final case class ExerciseByInterface(
         version: language.LanguageVersion = LanguageVersion.StableVersions.max
     ) {
       import SimpleTopology.*

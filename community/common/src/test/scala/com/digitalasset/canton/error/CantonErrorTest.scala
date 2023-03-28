@@ -16,13 +16,14 @@ object TestGroup extends ErrorGroup()(ErrorClass.root()) {
   object NestedGroup extends ErrorGroup() {
     object MyCode extends ErrorCode(id = "NESTED_CODE", ErrorCategory.ContentionOnSharedResources) {
       override def logLevel: Level = Level.ERROR
-      case class MyError(arg: String)(implicit val loggingContext: ErrorLoggingContext)
+      final case class MyError(arg: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "this is my error")
     }
 
     object TestAlarmErrorCode extends AlarmErrorCode(id = "TEST_MALICIOUS_BEHAVIOR") {
       val exception = new RuntimeException("TestAlarmErrorCode exception")
-      case class MyAlarm() extends Alarm(cause = "My alarm cause", throwableO = Some(exception)) {}
+      final case class MyAlarm()
+          extends Alarm(cause = "My alarm cause", throwableO = Some(exception)) {}
     }
   }
 }

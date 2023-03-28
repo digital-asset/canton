@@ -129,7 +129,7 @@ class Phase37Synchronizer(
             rr.evaluateRequest(requestState, requestId.unwrap, filter)
 
           pendingRequests.replace_(ts, Option(RequestRelation(requestData, newPredicateF)))
-          newPredicateF.map(Option.when(_)(requestData))
+          newPredicateF.map { case (_, resData) => resData }
 
         // Request is already marked timeout
         case Some(None) =>
@@ -142,7 +142,7 @@ class Phase37Synchronizer(
             val promise: Promise[Option[
               PendingRequestDataOrReplayData[T]
             ]] =
-              SupervisedPromise[Option[
+              new SupervisedPromise[Option[
                 PendingRequestDataOrReplayData[T]
               ]]("phase37sync-pending-request-data", futureSupervisor)
 
@@ -171,10 +171,15 @@ class Phase37Synchronizer(
            */
           if (requestId.unwrap <= confirmedLowerBound.get()) {
             Option(requestState.get(requestId.unwrap)) match {
-              // another call to awaitConfirmed has already received and successfully validated the data
+              /* either:
+                  (1) another call to awaitConfirmed has already received and successfully validated the data
+                  (2) a call to [[markTimeout]] followed by a [[cleanOnTimeout]] meaning the request
+                      was marked as a timeout
+               */
               case None | Some(RequestState.ValidatedAndCompleted()) =>
                 logger.debug(
-                  s"Request ${requestId.unwrap}: Request data was already returned to another caller"
+                  s"Request ${requestId.unwrap}: Request data was already returned to another caller" +
+                    s" or has timed out"
                 )
                 Future.successful(None)
               /* request is still not yet validated although a markConfirmed has already been called and, therefore,
@@ -332,7 +337,7 @@ class Phase37Synchronizer(
             )
             val pendingRequestData =
               requestDataO.map(requestData =>
-                RequestRelation(requestData, Future.successful(false))
+                RequestRelation(requestData, Future.successful((false, Some(requestData))))
               )
             pendingRequests.putIfAbsent(ts, pendingRequestData).discard
         }
@@ -382,13 +387,17 @@ class Phase37Synchronizer(
               )
             }
 
-            // tag the current request has confirmed but still not validated
-            requestState
-              .putIfAbsent(
-                requestId.unwrap,
-                RequestState.ConfirmedWithPendingValidation(),
-              )
-              .discard
+            // if request is not a timeout, tag it as confirmed but still not validated
+            pendingRequests.get(TCantonTimestamp[PendingRequestData](timestamp)) match {
+              case None | Some(Some(_)) =>
+                requestState
+                  .putIfAbsent(
+                    requestId.unwrap,
+                    RequestState.ConfirmedWithPendingValidation(),
+                  )
+                  .discard
+              case Some(None) => // request is a timeout and thus is 'completed'
+            }
 
             // remove a particular request given by timestamp
             def clean(requestToRemoveTs: CantonTimestamp): Unit = {
@@ -459,7 +468,7 @@ object Phase37Synchronizer {
     * [[ConcurrentHMap]]. However, since different requests have different `ts` and `id`, we
     * can live we that.
     */
-  private case class TCantonTimestamp[T <: PendingRequestData](ts: CantonTimestamp)
+  private final case class TCantonTimestamp[T <: PendingRequestData](ts: CantonTimestamp)
 
   private class HMapPromiseRelation[K, V]
 
@@ -473,7 +482,7 @@ object Phase37Synchronizer {
     *                        Subsequently, future call to awaitConfirmed will 'flatMap'/chain on this future,
     *                        no longer using the list [[promises]].
     */
-  private case class PromiseRelation[T <: PendingRequestData](
+  private final case class PromiseRelation[T <: PendingRequestData](
       promises: Seq[
         (
             Promise[Option[PendingRequestDataOrReplayData[T]]],
@@ -628,11 +637,14 @@ object Phase37Synchronizer {
     *                        This is first set by the first call to markConfirmed
     *                        that will initialize this future chain.
     *                        Subsequently, future calls to awaitConfirmed will 'flatMap'/chain on this future.
+    *                        The boolean keeps track of the validity state of the predicate future (i.e. isValid),
+    *                        whereas the optional request data is used to serve the caller with the correct data
+    *                        (if valid and firstTime => return the data otherwise None).
     */
-  private case class RequestRelation[T <: PendingRequestData](
+  private final case class RequestRelation[T <: PendingRequestData](
       requestData: PendingRequestDataOrReplayData[T],
       // to chain the futures generated from the filters
-      predicateFuture: Future[Boolean],
+      predicateFuture: Future[(Boolean, Option[PendingRequestDataOrReplayData[T]])],
   ) {
 
     /** Evaluates the current request data based on the result of the previous chained futures and the [[filter]].
@@ -643,20 +655,20 @@ object Phase37Synchronizer {
         filter: PendingRequestDataOrReplayData[T] => Future[Boolean],
     )(implicit
         ec: ExecutionContext
-    ): Future[Boolean] =
+    ): Future[(Boolean, Option[PendingRequestDataOrReplayData[T]])] =
       predicateFuture
-        .flatMap { isValid =>
+        .flatMap { case (isValid, _) =>
           // check that no previous promise has already returned a valid request
           if (isValid) {
-            Future.successful(isValid)
+            Future.successful((isValid, None))
           } else {
             filter(requestData)
               .flatMap {
                 case true =>
                   requestState.put(ts, RequestState.ValidatedAndCompleted()).discard
-                  Future.successful(true)
+                  Future.successful((true, Some(requestData)))
                 case false =>
-                  Future.successful(false)
+                  Future.successful((false, None))
               }
           }
         }
@@ -677,10 +689,10 @@ private object RequestState {
 
   /** Marks a given request as completed and valid.
     */
-  case class ValidatedAndCompleted() extends RequestState
+  final case class ValidatedAndCompleted() extends RequestState
 
   /** Marks a given request as being confirmed but still not validated.
     */
-  case class ConfirmedWithPendingValidation() extends RequestState
+  final case class ConfirmedWithPendingValidation() extends RequestState
 
 }

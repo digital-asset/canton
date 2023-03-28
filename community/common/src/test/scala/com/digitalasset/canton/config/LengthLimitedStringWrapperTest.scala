@@ -12,14 +12,14 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
 }
 import org.scalatest.wordspec.AnyWordSpec
 
-case class TestWrapper(override val str: String255) extends LengthLimitedStringWrapper
+final case class TestWrapper(override val str: String255) extends LengthLimitedStringWrapper
 object TestWrapper extends LengthLimitedStringWrapperCompanion[String255, TestWrapper] {
   override def instanceName: String = "TestWrapper"
   override protected def companion: String255.type = String255
   override protected def factoryMethodWrapper(str: String255): TestWrapper = TestWrapper(str)
 }
 
-case class TestWrapper2(override val str: String255) extends LengthLimitedStringWrapper
+final case class TestWrapper2(override val str: String255) extends LengthLimitedStringWrapper
 object TestWrapper2 extends LengthLimitedStringWrapperCompanion[String255, TestWrapper2] {
   override def instanceName: String = "TestWrapper2"
   override protected def companion: String255.type = String255

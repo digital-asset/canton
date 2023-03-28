@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
+import cats.Eval
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
@@ -10,13 +11,9 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.value.{Identifier, Record}
-import com.daml.ledger.api.validation.StricterValueValidator as LedgerApiValueValidator
-import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.daml.lf.value.Value
-import com.daml.platform.participant.util.LfEngineToApi
-import com.daml.platform.server.api.validation.FieldValidations as LedgerApiFieldValidations
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
@@ -27,6 +24,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashPurpose, Salt, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.api.validation.StricterValueValidator as LedgerApiValueValidator
+import com.digitalasset.canton.ledger.participant.state.v2.TransactionMeta
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, HasCloseContext}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
@@ -51,6 +50,8 @@ import com.digitalasset.canton.participant.sync.{
 }
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
+import com.digitalasset.canton.platform.participant.util.LfEngineToApi
+import com.digitalasset.canton.platform.server.api.validation.FieldValidations as LedgerApiFieldValidations
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
 import com.digitalasset.canton.store.{
@@ -64,8 +65,6 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedTopologySnapshot,
   TopologySnapshot,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreFactory
-import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -95,11 +94,10 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class RepairService(
     participantId: ParticipantId,
-    topologyStoreFactory: TopologyStoreFactory,
     syncCrypto: SyncCryptoApiProvider,
     packagesDarsService: PackageService,
     damle: DAMLe,
-    multiDomainEventLog: MultiDomainEventLog,
+    multiDomainEventLog: Eval[MultiDomainEventLog],
     syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     aliasManager: DomainAliasManager,
     parameters: ParticipantNodeParameters,
@@ -416,7 +414,7 @@ class RepairService(
           persistentState.requestJournalStore,
           persistentState.sequencerCounterTrackerStore,
           persistentState.sequencedEventStore,
-          multiDomainEventLog,
+          multiDomainEventLog.value,
         )
       )
 
@@ -1132,7 +1130,7 @@ class RepairService(
           persistentState.requestJournalStore,
           persistentState.sequencerCounterTrackerStore,
           persistentState.sequencedEventStore,
-          multiDomainEventLog,
+          multiDomainEventLog.value,
         ),
         t => log(s"Failed to compute starting points", t),
       )
@@ -1150,8 +1148,8 @@ class RepairService(
         startingPoints.processingAfterPublished,
         (),
         log(
-          s"""Cannot apply a repair command as events have been published up to 
-             |${startingPoints.eventPublishingNextLocalOffset} offset exclusive 
+          s"""Cannot apply a repair command as events have been published up to
+             |${startingPoints.eventPublishingNextLocalOffset} offset exclusive
              |and the repair command would be assigned the offset $rcRepair.
              |Reconnect to the domain to reprocess the dirty requests and retry repair afterwards.""".stripMargin
         ),
@@ -1168,7 +1166,7 @@ class RepairService(
         rtRepair > incrementalAcsSnapshotWatermark,
         (),
         log(
-          s"""Cannot apply a repair command as the incremental acs snapshot is already at $incrementalAcsSnapshotWatermark 
+          s"""Cannot apply a repair command as the incremental acs snapshot is already at $incrementalAcsSnapshotWatermark
              |and the repair command would be assigned a record time of $rtRepair.
              |Reconnect to the domain to reprocess dirty requests and retry repair afterwards.""".stripMargin
         ),
@@ -1199,11 +1197,10 @@ class RepairService(
             ),
           )
       }
-      topologyStore = topologyStoreFactory.forId(DomainStore(domainId))
       topologySnapshot = new CachingTopologySnapshot(
         new StoreBasedTopologySnapshot(
           tsRepair,
-          topologyStore,
+          persistentState.topologyStore,
           initKeys = Map.empty,
           useStateTxs = true,
           packageId => packagesDarsService.packageDependencies(List(packageId)),
@@ -1336,7 +1333,7 @@ object RepairService {
   /** The timestamp to be used for a repair request on a domain without requests */
   val RepairTimestampOnEmptyDomain: CantonTimestamp = CantonTimestamp.MinValue
 
-  private[RepairService] case class RepairRequest(
+  private[RepairService] final case class RepairRequest(
       domainId: DomainId,
       domainAlias: String, // for logging
       domainParameters: StaticDomainParameters,
@@ -1358,7 +1355,7 @@ object RepairService {
     *                    However, Tracestates aren't limited, so the repair context should be saved as a blob (like [[com.digitalasset.canton.tracing.TraceContext]])
     *                    if we want to use it for repair contexts
     */
-  case class RepairContext(override protected val str: String255)
+  final case class RepairContext(override protected val str: String255)
       extends LengthLimitedStringWrapper
       with PrettyPrinting {
     def toLengthLimitedString: String255 = str

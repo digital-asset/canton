@@ -15,7 +15,7 @@ object ContractConsistencyChecker {
   /** Indicates that the given transaction uses a contract that has been created with a ledger time
     * after the ledger time of the transaction.
     */
-  case class ReferenceToFutureContractError(
+  final case class ReferenceToFutureContractError(
       contractId: LfContractId,
       contractCreationTime: CantonTimestamp,
       transactionLedgerTime: CantonTimestamp,

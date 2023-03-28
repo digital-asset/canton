@@ -12,11 +12,9 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
-import com.daml.platform.akkastreams.dispatcher.Dispatcher
-import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -43,6 +41,8 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
+import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
+import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Implicits.{
   getResultLfPartyId as _,
@@ -89,7 +89,7 @@ class DbMultiDomainEventLog private[db] (
     lastLocalOffsets: TrieMap[Int, LocalOffset],
     inboxSize: Int = 4000,
     maxConcurrentPublications: Int = 100,
-    maxBatchSize: Int,
+    maxBatchSize: PositiveInt,
     batchTimeout: FiniteDuration = 10.millis,
     participantEventLogId: ParticipantEventLogId,
     storage: DbStorage,
@@ -150,7 +150,7 @@ class DbMultiDomainEventLog private[db] (
 
   private val publicationFlow = source
     .viaMat(KillSwitches.single)(Keep.both)
-    .groupedWithin(maxBatchSize, batchTimeout)
+    .groupedWithin(maxBatchSize.unwrap, batchTimeout)
     .mapAsync(1)(doPublish)
     .toMat(Sink.ignore)(Keep.both)
 
@@ -420,7 +420,7 @@ class DbMultiDomainEventLog private[db] (
     dispatcher.startingAt(
       beginWith.getOrElse(MultiDomainEventLog.ledgerFirstOffset) - 1, // start index is exclusive
       RangeSource { (fromExcl, toIncl) =>
-        Source(RangeUtil.partitionIndexRange(fromExcl, toIncl, maxBatchSize.toLong))
+        Source(RangeUtil.partitionIndexRange(fromExcl, toIncl, maxBatchSize.unwrap.toLong))
           .mapAsync(1) { case (batchFromExcl, batchToIncl) =>
             storage.query(
               sql"""select /*+ INDEX (linearized_event_log pk_linearized_event_log, event_log pk_event_log) */ global_offset, content, trace_context
@@ -461,7 +461,7 @@ class DbMultiDomainEventLog private[db] (
           startExclusive = startExclusive,
           subSource = RangeSource { (fromExcl, toIncl) =>
             // TODO(#11002) this batching is not efficient for this use case (pagination with limit might help here)
-            Source(RangeUtil.partitionIndexRange(fromExcl, toIncl, maxBatchSize.toLong))
+            Source(RangeUtil.partitionIndexRange(fromExcl, toIncl, maxBatchSize.unwrap.toLong))
               .mapAsync(1) { case (batchFromExcl, batchToIncl) =>
                 storage.query(
                   sql"""select /*+ INDEX (linearized_event_log pk_linearized_event_log, event_log pk_event_log) */ global_offset, content, trace_context
@@ -510,7 +510,7 @@ class DbMultiDomainEventLog private[db] (
       val inClauses = DbStorage.toInClauses_(
         "el.event_id",
         nonEmptyEventIds,
-        PositiveNumeric.tryCreate(maxBatchSize),
+        maxBatchSize,
       )
       val queries = inClauses.map { inClause =>
         import DbStorage.Implicits.BuilderChain.*
@@ -542,6 +542,30 @@ class DbMultiDomainEventLog private[db] (
     case _ => Future.successful(Map.empty)
   }
 
+  override def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = offsets match {
+    case NonEmpty(offsetsNE) =>
+      val inClauses = DbStorage.toInClauses_(
+        "lel.local_offset",
+        offsetsNE,
+        maxBatchSize,
+      )
+
+      val queries = inClauses.map { inClause =>
+        import DbStorage.Implicits.BuilderChain.*
+        (sql"""
+              select global_offset, el.local_offset, request_sequencer_counter, el.event_id, content, trace_context
+              from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
+              where lel.log_id=$id and
+              """ ++ inClause).as[(GlobalOffset, TimestampedEvent)]
+      }
+      storage
+        .sequentialQueryAndCombine(queries, functionFullName)
+        .map(_.toSeq.sortBy { case (globalOffset, _) => globalOffset })
+    case _ => Future.successful(Seq.empty)
+  }
+
   override def lookupTransactionDomain(transactionId: LedgerTransactionId)(implicit
       traceContext: TraceContext
   ): OptionT[Future, DomainId] = processingTime.optionTEvent {
@@ -559,19 +583,27 @@ class DbMultiDomainEventLog private[db] (
   override def lastLocalOffsetBeforeOrAt(
       eventLogId: EventLogId,
       upToInclusive: GlobalOffset,
-      timestampInclusive: CantonTimestamp,
-  )(implicit traceContext: TraceContext): Future[Option[LocalOffset]] =
+      timestampInclusive: Option[CantonTimestamp],
+  )(implicit traceContext: TraceContext): Future[Option[LocalOffset]] = {
+    import DbStorage.Implicits.BuilderChain.*
+
     processingTime.event {
+      val tsFilter = timestampInclusive.map(ts => sql" and el.ts <= $ts").getOrElse(sql" ")
+
+      val ordering = sql" order by global_offset desc #${storage.limit(1)}"
+
       // Note for idempotent retries, we don't require that the global offset has an actual ledger entry reference
-      val query =
+      val base =
         sql"""select lel.local_offset
               from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
-              where lel.log_id = ${eventLogId.index} and global_offset <= $upToInclusive and el.ts <= $timestampInclusive
-              order by global_offset desc #${storage.limit(1)}"""
-          .as[LocalOffset]
-          .headOption
+              where lel.log_id = ${eventLogId.index} and global_offset <= $upToInclusive
+              """
+
+      val query = (base ++ tsFilter ++ ordering).as[LocalOffset].headOption
+
       storage.query(query, functionFullName)
     }
+  }
 
   override def locateOffset(
       deltaFromBeginning: GlobalOffset
@@ -700,7 +732,7 @@ class DbMultiDomainEventLog private[db] (
       traceContext: TraceContext
   ): Future[Seq[(GlobalOffset, EventLogId, LocalOffset, CantonTimestamp)]] = {
     val query = storage.profile match {
-      case Profile.Oracle(jdbc) =>
+      case Profile.Oracle(_jdbc) =>
         sql"select * from ((select global_offset, log_id, local_offset, publication_time from linearized_event_log order by global_offset desc)) where rownum < ${count + 1}"
           .as[(GlobalOffset, Int, LocalOffset, CantonTimestamp)]
       case _ =>
@@ -760,7 +792,7 @@ object DbMultiDomainEventLog {
       indexedStringStore: IndexedStringStore,
       loggerFactory: NamedLoggerFactory,
       participantEventLogId: ParticipantEventLogId,
-      maxBatchSize: Int = 1000,
+      maxBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
   )(implicit
       ec: ExecutionContext,
       mat: Materializer,

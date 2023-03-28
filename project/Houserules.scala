@@ -7,6 +7,8 @@ import wartremover.contrib.ContribWart
   * settings for tests, etc.
   */
 object JvmRulesPlugin extends AutoPlugin {
+  private val enableUnusedSymbolsChecks = true // Can be turned to false during development
+
   override def trigger = allRequirements
   override def requires = sbt.plugins.JvmPlugin
 
@@ -67,77 +69,87 @@ object JvmRulesPlugin extends AutoPlugin {
     HeaderPattern.commentStartingWith(s"..${System.lineSeparator()}    "),
   )
 
+  lazy val wartsDisabledWithSystemProperty = System.getProperty("canton-disable-warts") == "true"
+
+  def unlessWartsAreDisabledWithSystemProperty[A](a: A, as: A*): Seq[A] =
+    if (wartsDisabledWithSystemProperty) Seq.empty else a +: as
+
+  lazy val scalaOptionsForCompileScope = unlessWartsAreDisabledWithSystemProperty(
+    "-feature",
+    "-unchecked",
+    "-deprecation",
+    "-Xlint:_,-unused",
+    "-Xmacro-settings:materialize-derivations",
+    "-Xfatal-warnings",
+    "-Wconf:cat=unused-imports:info", // reports unused-imports without counting them as warnings, and without causing -Werror to fail.
+    "-Wnonunit-statement", // Warns about any interesting expression whose value is ignored because it is followed by another expression
+    "-Ywarn-numeric-widen",
+    "-Vimplicits",
+    "-Vtype-diffs",
+    "-Xsource:3",
+  )
+
+  lazy val unusedSymbolsChecks =
+    if (enableUnusedSymbolsChecks)
+      Seq(
+        "-Ywarn-dead-code",
+        "-Ywarn-value-discard", // Gives a warning for functions declared as returning Unit, but the body returns a value
+        "-Ywarn-unused:imports",
+        "-Ywarn-unused:implicits",
+        "-Ywarn-unused:locals",
+        "-Ywarn-unused:nowarn",
+      )
+    else Seq.empty
+
+  lazy val scalacOptionsToDisableForTests = Seq(
+    "-Ywarn-value-discard",
+    "-Wnonunit-statement",
+  ) // disable value discard and non-unit statement checks on tests
+
+  lazy val wartremoverErrorsForCompileScope =
+    unlessWartsAreDisabledWithSystemProperty(
+      Wart.AsInstanceOf,
+      Wart.EitherProjectionPartial,
+      Wart.Enumeration,
+      Wart.IsInstanceOf,
+      Wart.JavaConversions,
+      Wart.Null,
+      Wart.Option2Iterable,
+      Wart.OptionPartial,
+      Wart.Product,
+      Wart.Return,
+      Wart.Serializable,
+      Wart.IterableOps,
+      Wart.TryPartial,
+      Wart.Var,
+      Wart.While,
+      Wart.FinalCaseClass,
+      ContribWart.UnintendedLaziness,
+    )
+
+  val wartremoverErrorsForTestScope =
+    unlessWartsAreDisabledWithSystemProperty(
+      Wart.EitherProjectionPartial,
+      Wart.Enumeration,
+      Wart.JavaConversions,
+      Wart.Option2Iterable,
+      Wart.OptionPartial,
+      Wart.Product,
+      Wart.Return,
+      Wart.Serializable,
+      Wart.While,
+      ContribWart.UnintendedLaziness,
+    )
+
   override def projectSettings =
     Seq(
       javacOptions ++= Seq("-encoding", "UTF-8", "-Werror"),
       scalacOptions ++= Seq("-encoding", "UTF-8", "-language:postfixOps"),
-      scalacOptions ++= {
-        if (System.getProperty("canton-disable-warts") == "true") Seq()
-        else
-          Seq(
-            "-feature",
-            "-unchecked",
-            "-deprecation",
-            "-Xlint:_,-unused",
-            "-Xmacro-settings:materialize-derivations",
-            "-Xfatal-warnings",
-            "-Wconf:cat=unused-imports:info", // reports unused-imports without counting them as warnings, and without causing -Werror to fail.
-            "-Wnonunit-statement", // Warns about any interesting expression whose value is ignored because it is followed by another expression
-            "-Ywarn-dead-code",
-            "-Ywarn-numeric-widen",
-            "-Ywarn-value-discard", // Gives a warning for functions declared as returning Unit, but the body returns a value
-            "-Ywarn-unused:imports",
-            "-Ywarn-unused:implicits",
-            "-Ywarn-unused:locals",
-            "-Ywarn-unused:nowarn",
-            "-Vimplicits",
-            "-Vtype-diffs",
-            "-Xsource:3",
-          )
-      },
-      Test / scalacOptions --= Seq(
-        "-Ywarn-value-discard",
-        "-Wnonunit-statement",
-      ), // disable value discard and nonunit statement checks on tests
+      scalacOptions ++= scalaOptionsForCompileScope ++ unusedSymbolsChecks,
+      Test / scalacOptions --= scalacOptionsToDisableForTests,
       addCompilerPlugin("org.typelevel" % "kind-projector" % "0.13.2" cross CrossVersion.full),
-      Compile / compile / wartremoverErrors ++= {
-        if (System.getProperty("canton-disable-warts") == "true") Seq()
-        else
-          Seq(
-            Wart.AsInstanceOf,
-            Wart.EitherProjectionPartial,
-            Wart.Enumeration,
-            Wart.IsInstanceOf,
-            Wart.JavaConversions,
-            Wart.Null,
-            Wart.Option2Iterable,
-            Wart.OptionPartial,
-            Wart.Product,
-            Wart.Return,
-            Wart.Serializable,
-            Wart.IterableOps,
-            Wart.TryPartial,
-            Wart.Var,
-            Wart.While,
-            ContribWart.UnintendedLaziness,
-          )
-      },
-      Test / compile / wartremoverErrors := {
-        if (System.getProperty("canton-disable-warts") == "true") Seq()
-        else
-          Seq(
-            Wart.EitherProjectionPartial,
-            Wart.Enumeration,
-            Wart.JavaConversions,
-            Wart.Option2Iterable,
-            Wart.OptionPartial,
-            Wart.Product,
-            Wart.Return,
-            Wart.Serializable,
-            Wart.While,
-            ContribWart.UnintendedLaziness,
-          )
-      },
+      Compile / compile / wartremoverErrors ++= wartremoverErrorsForCompileScope,
+      Test / compile / wartremoverErrors := wartremoverErrorsForTestScope,
       // Disable wart checks on generated code
       wartremoverExcluded += (Compile / sourceManaged).value,
       // licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt")),

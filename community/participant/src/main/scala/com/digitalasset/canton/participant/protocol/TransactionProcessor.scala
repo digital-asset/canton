@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol
 import cats.data.{EitherT, NonEmptyChain}
 import com.daml.error.definitions.LedgerApiErrors
 import com.daml.error.{ContextualizedErrorLogger, ErrorCategory, ErrorCode, Explanation, Resolution}
-import com.daml.ledger.participant.state.v2.{ChangeId, SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -15,6 +14,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.SubmissionErrorGroup
 import com.digitalasset.canton.error.*
+import com.digitalasset.canton.ledger.participant.state.v2.{
+  ChangeId,
+  SubmitterInfo,
+  TransactionMeta,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -48,7 +52,7 @@ import java.time.Duration
 import scala.concurrent.ExecutionContext
 
 class TransactionProcessor(
-    participantId: ParticipantId,
+    override val participantId: ParticipantId,
     confirmationRequestFactory: ConfirmationRequestFactory,
     domainId: DomainId,
     damle: DAMLe,
@@ -160,7 +164,7 @@ object TransactionProcessor {
         ) {
 
       // TODO(i5990) properly set `definiteAnswer` where appropriate when sub-categories are created
-      case class Error(message: String, reason: ConfirmationRequestCreationError)
+      final case class Error(message: String, reason: ConfirmationRequestCreationError)
           extends TransactionErrorImpl(cause = "Malformed request")
     }
 
@@ -177,7 +181,7 @@ object TransactionProcessor {
           id = "PACKAGE_NOT_VETTED_BY_RECIPIENTS",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(unknownTo: Seq[PackageUnknownTo])
+      final case class Error(unknownTo: Seq[PackageUnknownTo])
           extends TransactionErrorImpl(
             cause =
               "Not all receiving participants have vetted a package that is referenced by the submitted transaction",
@@ -187,7 +191,7 @@ object TransactionProcessor {
     }
 
     // TODO(#7348) Add the submission rank of the in-flight submission
-    case class SubmissionAlreadyInFlight(
+    final case class SubmissionAlreadyInFlight(
         changeId: ChangeId,
         existingSubmissionId: Option[LedgerSubmissionId],
         existingSubmissionDomain: DomainId,
@@ -204,7 +208,7 @@ object TransactionProcessor {
         extends ErrorCode(id = "DOMAIN_BACKPRESSURE", ErrorCategory.ContentionOnSharedResources) {
       override def logLevel: Level = Level.INFO
 
-      case class Rejection(reason: String)
+      final case class Rejection(reason: String)
           extends TransactionErrorImpl(
             cause = "The domain is overloaded.",
             // Only reported asynchronously, so covered by submission rank guarantee
@@ -215,7 +219,7 @@ object TransactionProcessor {
     @Explanation(
       """The participant has rejected all incoming commands during a configurable grace period."""
     )
-    @Resolution("""Configure more restrictive resource limits (enterprise only). 
+    @Resolution("""Configure more restrictive resource limits (enterprise only).
         |Change applications to submit commands at a lower rate.
         |Configure a higher value for `myParticipant.parameters.warnIfOverloadedFor`.""")
     object ParticipantOverloaded
@@ -225,7 +229,7 @@ object TransactionProcessor {
         ) {
       override def logLevel: Level = Level.WARN
 
-      case class Rejection(duration: Duration)
+      final case class Rejection(duration: Duration)
           extends TransactionErrorImpl(
             cause = show"The participant has been overloaded for $duration."
           )
@@ -242,7 +246,7 @@ object TransactionProcessor {
           id = "SUBMISSION_DURING_SHUTDOWN",
           ErrorCategory.ContentionOnSharedResources,
         ) {
-      case class Rejection()
+      final case class Rejection()
           extends TransactionErrorImpl(cause = "Command submitted during shutdown.")
           with TransactionSubmissionError
     }
@@ -255,7 +259,7 @@ object TransactionProcessor {
         ) {
       // TODO(i5990) proper send async client errors
       //  SendAsyncClientError.RequestRefused(SendAsyncError.Overloaded) is already mapped to DomainBackpressure
-      case class Error(sendError: SendAsyncClientError)
+      final case class Error(sendError: SendAsyncClientError)
           extends TransactionErrorImpl(
             cause = "Failed to send command",
             // Only reported asynchronously via timely rejections, so covered by submission rank guarantee
@@ -272,7 +276,7 @@ object TransactionProcessor {
           ErrorCategory.ContentionOnSharedResources,
         ) {
       // TODO(i5990) proper deliver errors
-      case class Error(deliverErrorReason: DeliverErrorReason)
+      final case class Error(deliverErrorReason: DeliverErrorReason)
           extends TransactionErrorImpl(
             cause = "Failed to send command",
             // Only reported asynchronously via timely rejections, so covered by submission rank guarantee
@@ -288,13 +292,13 @@ object TransactionProcessor {
     )
     @Resolution(
       """Resubmit if the delay is caused by high load.
-        |If the command requires substantial processing on the participant, 
+        |If the command requires substantial processing on the participant,
         |specify a higher minimum ledger time with the command submission so that a higher max sequencing time is derived.
         |"""
     )
     object TimeoutError
         extends ErrorCode(id = "NOT_SEQUENCED_TIMEOUT", ErrorCategory.ContentionOnSharedResources) {
-      case class Error(timestamp: CantonTimestamp)
+      final case class Error(timestamp: CantonTimestamp)
           extends TransactionErrorImpl(
             cause =
               "Transaction was not sequenced within the pre-defined max sequencing time and has therefore timed out"
@@ -309,7 +313,7 @@ object TransactionProcessor {
           id = "DOMAIN_WITHOUT_MEDIATOR",
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
-      case class Error(topology_snapshot_timestamp: CantonTimestamp, chosen_domain: DomainId)
+      final case class Error(topology_snapshot_timestamp: CantonTimestamp, chosen_domain: DomainId)
           extends TransactionErrorImpl(
             cause = "There are no active mediators on the domain"
           )
@@ -319,7 +323,7 @@ object TransactionProcessor {
     @Explanation("At least one of the transaction's input contracts could not be authenticated.")
     @Resolution("Retry the submission with correctly authenticated contracts.")
     object ContractAuthenticationFailed extends AlarmErrorCode("CONTRACT_AUTHENTICATION_FAILED") {
-      case class Error(contractId: LfContractId, message: String)
+      final case class Error(contractId: LfContractId, message: String)
           extends Alarm(
             cause = s"Contract with id (${contractId.coid}) could not be authenticated: $message"
           )
@@ -330,26 +334,33 @@ object TransactionProcessor {
       "The mediator chosen for the transaction got deactivated before the request was sequenced."
     )
     @Resolution("Resubmit.")
-    // TODO(#5990) Generalize this for arbitrary requests, not just transactions
     object InactiveMediatorError
         extends ErrorCode(
           id = "CHOSEN_MEDIATOR_IS_INACTIVE",
           ErrorCategory.ContentionOnSharedResources,
         ) {
-      case class Error(chosen_mediator_id: MediatorId, timestamp: CantonTimestamp)
+      final case class Error(chosen_mediator_id: MediatorId, timestamp: CantonTimestamp)
           extends TransactionErrorImpl(
             cause = "the chosen mediator is not active on the domain"
           )
     }
   }
 
-  case class GenericStepsError(error: ProcessorError) extends TransactionProcessorError {
+  final case class DomainParametersError(domainId: DomainId, context: String)
+      extends TransactionProcessorError {
+    override def pretty: Pretty[DomainParametersError] = prettyOfClass(
+      param("domain", _.domainId),
+      param("context", _.context.unquoted),
+    )
+  }
+
+  final case class GenericStepsError(error: ProcessorError) extends TransactionProcessorError {
     override def underlyingProcessorError(): Option[ProcessorError] = Some(error)
 
     override def pretty: Pretty[GenericStepsError] = prettyOfParam(_.error)
   }
 
-  case class ViewParticipantDataError(
+  final case class ViewParticipantDataError(
       transactionId: TransactionId,
       viewHash: ViewHash,
       error: String,
@@ -361,13 +372,14 @@ object TransactionProcessor {
     )
   }
 
-  case class FailedToStoreContract(error: NonEmptyChain[DuplicateContract])
+  final case class FailedToStoreContract(error: NonEmptyChain[DuplicateContract])
       extends TransactionProcessorError {
     override def pretty: Pretty[FailedToStoreContract] = prettyOfClass(
       unnamedParam(_.error.toChain.toList)
     )
   }
-  case class FieldConversionError(field: String, error: String) extends TransactionProcessorError {
+  final case class FieldConversionError(field: String, error: String)
+      extends TransactionProcessorError {
     override def pretty: Pretty[FieldConversionError] = prettyOfClass(
       param("field", _.field.unquoted),
       param("error", _.error.unquoted),

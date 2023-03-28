@@ -8,6 +8,7 @@ import cats.syntax.foldable.*
 import com.digitalasset.canton.crypto.HkdfError.{HkdfHmacError, HkdfInternalError}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink
@@ -46,6 +47,17 @@ class TinkPureCrypto private (
         enc => new Encrypted[M](ByteString.copyFrom(enc)),
       )
   }
+
+  def encryptDeterministicWith[M <: HasVersionedToByteString](
+      message: M,
+      publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
+  )(implicit traceContext: TraceContext): Either[EncryptionError, AsymmetricEncrypted[M]] =
+    Left(
+      EncryptionError.UnsupportedSchemeForDeterministicEncryption(
+        "Tink does not support deterministic encryption"
+      )
+    )
 
   private def decryptWith[M](
       encrypted: Encrypted[M],

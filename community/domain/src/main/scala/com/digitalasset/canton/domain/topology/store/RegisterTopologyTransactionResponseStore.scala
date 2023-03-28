@@ -49,7 +49,7 @@ trait RegisterTopologyTransactionResponseStore extends AutoCloseable {
 }
 
 object RegisterTopologyTransactionResponseStore {
-  case class Response(
+  final case class Response(
       response: RegisterTopologyTransactionResponse.Result,
       isCompleted: Boolean,
   )
@@ -163,7 +163,7 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val setParameterRegisterTopologyTransactionRequest
       : SetParameter[RegisterTopologyTransactionRequest] =
     (r: RegisterTopologyTransactionRequest, pp: PositionedParameters) =>
-      pp >> EnvelopeContent(r, protocolVersion).toByteString.toByteArray
+      pp >> EnvelopeContent.tryCreate(r, protocolVersion).toByteString.toByteArray
 
   implicit val getRegisterTopologyTransactionResponse
       : GetResult[RegisterTopologyTransactionResponse.Result] =
@@ -199,7 +199,7 @@ class DbRegisterTopologyTransactionResponseStore(
     (
         r: RegisterTopologyTransactionResponse.Result,
         pp: PositionedParameters,
-    ) => pp >> EnvelopeContent(r, protocolVersion).toByteString.toByteArray
+    ) => pp >> EnvelopeContent.tryCreate(r, protocolVersion).toByteString.toByteArray
 
   override def savePendingResponse(
       response: RegisterTopologyTransactionResponse.Result

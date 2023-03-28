@@ -51,8 +51,10 @@ sealed trait ServiceAgreementAcceptanceStoreError
 
 object ServiceAgreementAcceptanceStoreError {
 
-  case class FailedToStoreAcceptance(reason: String) extends ServiceAgreementAcceptanceStoreError
+  final case class FailedToStoreAcceptance(reason: String)
+      extends ServiceAgreementAcceptanceStoreError
 
-  case class FailedToListAcceptances(reason: String) extends ServiceAgreementAcceptanceStoreError
+  final case class FailedToListAcceptances(reason: String)
+      extends ServiceAgreementAcceptanceStoreError
 
 }

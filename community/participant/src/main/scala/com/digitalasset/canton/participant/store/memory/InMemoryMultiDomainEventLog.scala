@@ -9,8 +9,6 @@ import cats.data.OptionT
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.platform.akkastreams.dispatcher.Dispatcher
-import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -48,6 +46,8 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
+import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
+import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
@@ -342,6 +342,19 @@ class InMemoryMultiDomainEventLog(
       .map(_.toMap)
   }
 
+  override def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] =
+    offsets
+      .parTraverseFilter { localOffset =>
+        OptionT(globalOffsetFor(id, localOffset)).semiflatMap { case (globalOffset, _) =>
+          lookupEvent(namedLoggingContext)(id, localOffset).map { event =>
+            (globalOffset, event.tse)
+          }
+        }.value
+      }
+      .map(_.sortBy { case (globalOffset, _) => globalOffset })
+
   override def lookupTransactionDomain(
       transactionId: LedgerTransactionId
   )(implicit traceContext: TraceContext): OptionT[Future, DomainId] =
@@ -353,7 +366,7 @@ class InMemoryMultiDomainEventLog(
   override def lastLocalOffsetBeforeOrAt(
       eventLogId: EventLogId,
       upToInclusive: GlobalOffset,
-      timestampInclusive: CantonTimestamp,
+      timestampInclusive: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Option[LocalOffset]] = {
     val referencesUpTo = entriesRef.get().referencesByOffset.rangeTo(upToInclusive).values
     val reversedLocalOffsets =
@@ -361,9 +374,14 @@ class InMemoryMultiDomainEventLog(
         .collect { case (id, localOffset, _processingTime) if id == eventLogId => localOffset }
         .toList
         .reverse
+
     reversedLocalOffsets.collectFirstSomeM { localOffset =>
       lookupEvent(namedLoggingContext)(eventLogId, localOffset).map(eventAndCausalChange =>
-        if (eventAndCausalChange.tse.timestamp <= timestampInclusive) Some(localOffset) else None
+        timestampInclusive
+          .map { ts =>
+            if (eventAndCausalChange.tse.timestamp <= ts) Some(localOffset) else None
+          }
+          .getOrElse(Some(localOffset))
       )
     }
   }
@@ -418,7 +436,7 @@ class InMemoryMultiDomainEventLog(
         publicationTime <= upToInclusive
       }
       .lastOption
-    val offsetO = lastO.map { case (offset, data) => offset }
+    val offsetO = lastO.map { case (offset, _data) => offset }
     OptionT(Future.successful(offsetO))
   }
 

@@ -37,7 +37,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 object CryptoFactory {
 
-  case class CryptoScheme[S](default: S, allowed: NonEmpty[Set[S]])
+  final case class CryptoScheme[S](default: S, allowed: NonEmpty[Set[S]])
 
   def selectSchemes[S](
       configured: CryptoSchemeConfig[S],
@@ -130,7 +130,8 @@ object CryptoFactory {
         case CryptoProvider.Jce =>
           Security.addProvider(new BouncyCastleProvider)
           val javaKeyConverter = new JceJavaConverter(hashAlgorithm)
-          val pureCrypto = new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm)
+          val pureCrypto =
+            new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
           val privateCrypto =
             new JcePrivateCrypto(
               pureCrypto,
@@ -153,7 +154,10 @@ object CryptoFactory {
     } yield crypto
   }
 
-  def createPureCrypto(config: CryptoConfig): Either[String, CryptoPureApi] =
+  def createPureCrypto(
+      config: CryptoConfig,
+      loggerFactory: NamedLoggerFactory,
+  ): Either[String, CryptoPureApi] =
     for {
       symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
         .map(_.default)
@@ -163,7 +167,9 @@ object CryptoFactory {
           TinkPureCrypto.create(symmetricKeyScheme, hashAlgorithm)
         case CryptoProvider.Jce =>
           val javaKeyConverter = new JceJavaConverter(hashAlgorithm)
-          Right(new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm))
+          Right(
+            new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
+          )
       }
     } yield crypto
 

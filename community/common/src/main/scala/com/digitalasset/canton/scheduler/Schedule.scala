@@ -118,10 +118,10 @@ object Cron {
     def message: String
   }
 
-  case class NoNextValidTimeAfter(ts: CantonTimestamp) extends CronNextTimeAfterError {
+  final case class NoNextValidTimeAfter(ts: CantonTimestamp) extends CronNextTimeAfterError {
     override def message = s"No next valid time after ${ts} exists."
   }
 
-  case class DateConversionError(message: String) extends CronNextTimeAfterError
+  final case class DateConversionError(message: String) extends CronNextTimeAfterError
 
 }

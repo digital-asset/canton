@@ -601,7 +601,7 @@ trait TopologyStoreTest
               TopologyStore.Change.TopologyDelay(
                 SequencedTime(ts + sequenced),
                 EffectiveTime(ts + effective),
-                NonNegativeFiniteDuration.ofMillis(epsilon.toLong),
+                NonNegativeFiniteDuration.tryOfMillis(epsilon.toLong),
               )
             }
           }

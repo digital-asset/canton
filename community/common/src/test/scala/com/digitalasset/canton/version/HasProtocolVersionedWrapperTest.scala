@@ -12,6 +12,7 @@ import com.digitalasset.canton.version.HasProtocolVersionedWrapperTest.{
   protocolVersionRepresentative,
 }
 import com.google.protobuf.ByteString
+import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
 class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
@@ -85,6 +86,59 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
       protocolVersionRepresentative(7).representative shouldBe ProtocolVersion(6)
       protocolVersionRepresentative(8).representative shouldBe ProtocolVersion(6)
     }
+
+    "status consistency between protobuf messages and protocol versions" in {
+      new HasMemoizedProtocolVersionedWrapperCompanion[Message] {
+        import com.digitalasset.canton.version.HasProtocolVersionedWrapperTest.Message.*
+
+        val stablePV = ProtocolVersion.stable(10)
+        val unstablePV = ProtocolVersion.unstable(11)
+
+        def name: String = "message"
+
+        override def supportedProtoVersions: SupportedProtoVersions = ???
+
+        clue("can use a stable proto message in a stable protocol version") {
+          assertCompiles(
+            """
+             val _ = VersionedProtoConverter.mk(stablePV)(VersionedMessageV1)(
+               supportedProtoVersionMemoized(_)(fromProtoV1),
+               _.toProtoV1.toByteString
+             )"""
+          ): Assertion
+        }
+
+        clue("can use a stable proto message in an unstable protocol version") {
+          assertCompiles(
+            """
+             val _ = VersionedProtoConverter.mk(unstablePV)(VersionedMessageV1)(
+               supportedProtoVersionMemoized(_)(fromProtoV1),
+               _.toProtoV1.toByteString
+             )"""
+          ): Assertion
+        }
+
+        clue("can use an unstable proto message in an unstable protocol version") {
+          assertCompiles(
+            """
+             val _ = VersionedProtoConverter.mk(unstablePV)(VersionedMessageV2)(
+               supportedProtoVersionMemoized(_)(fromProtoV2),
+               _.toProtoV2.toByteString
+             )"""
+          ): Assertion
+        }
+
+        clue("can not use an unstable proto message in a stable protocol version") {
+          assertTypeError(
+            """
+             val _ = VersionedProtoConverter.mk(stablePV)(VersionedMessageV2)(
+               supportedProtoVersionMemoized(_)(fromProtoV2),
+               _.toProtoV2.toByteString
+             )"""
+          ): Assertion
+        }
+      }
+    }
   }
 }
 
@@ -92,7 +146,7 @@ object HasProtocolVersionedWrapperTest {
   private def protocolVersionRepresentative(i: Int): RepresentativeProtocolVersion[Message] =
     Message.protocolVersionRepresentativeFor(ProtocolVersion(i))
 
-  case class Message(
+  final case class Message(
       msg: String,
       iValue: Int,
       dValue: Double,
@@ -116,19 +170,21 @@ object HasProtocolVersionedWrapperTest {
       protocolVersion     3    4    5    6    7  ...
      */
     val supportedProtoVersions = SupportedProtoVersions(
-      ProtoVersion(1) -> VersionedProtoConverter(
-        ProtocolVersion.v5,
-        supportedProtoVersionMemoized(VersionedMessageV1)(fromProtoV1),
-        _.toProtoV1.toByteString,
-      ),
-      ProtoVersion(0) -> LegacyProtoConverter(
-        ProtocolVersion.v3,
-        supportedProtoVersionMemoized(VersionedMessageV0)(fromProtoV0),
+      ProtoVersion(1) -> VersionedProtoConverter
+        .mk(ProtocolVersion.unstable(5))(VersionedMessageV1)(
+          supportedProtoVersionMemoized(_)(fromProtoV1),
+          _.toProtoV1.toByteString,
+        ),
+      // Can use a stable Protobuf message in a stable protocol version
+      ProtoVersion(0) -> LegacyProtoConverter.mk(ProtocolVersion.stable(3))(VersionedMessageV0)(
+        supportedProtoVersionMemoized(_)(fromProtoV0),
         _.toProtoV0.toByteString,
       ),
-      ProtoVersion(2) -> VersionedProtoConverter(
-        ProtocolVersion(6),
-        supportedProtoVersionMemoized(VersionedMessageV2)(fromProtoV2),
+      // Can use an unstable Protobuf message in an unstable protocol version
+      ProtoVersion(2) -> VersionedProtoConverter.mk(
+        ProtocolVersion.unstable(6)
+      )(VersionedMessageV2)(
+        supportedProtoVersionMemoized(_)(fromProtoV2),
         _.toProtoV2.toByteString,
       ),
     )

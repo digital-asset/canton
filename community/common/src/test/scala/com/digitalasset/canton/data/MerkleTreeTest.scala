@@ -25,7 +25,6 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
-  HasProtocolVersionedWrapperCompanion,
   ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
@@ -241,7 +240,7 @@ object MerkleTreeTest {
 
     override def getCryptographicEvidence: ByteString = DeterministicEncoding.encodeInt(index)
 
-    override val hashPurpose: HashPurpose = HashPurposeTest.testHashPurpose
+    override val hashPurpose: HashPurpose = TestHash.testHashPurpose
 
     override def pretty: Pretty[AbstractLeaf[A]] = prettyOfClass(unnamedParam(_.index))
   }
@@ -261,30 +260,30 @@ object MerkleTreeTest {
       )
     } yield mkLeaf(index)
 
-  case class Leaf1(override val index: Int)(
+  final case class Leaf1(override val index: Int)(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[
         VersionedAbstractLeaf
       ]
   ) extends AbstractLeaf[Leaf1](index) {
-    override def companionObj: HasProtocolVersionedWrapperCompanion[VersionedAbstractLeaf] =
+    override def companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 
-  case class Leaf2(override val index: Int)(
+  final case class Leaf2(override val index: Int)(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[
         VersionedAbstractLeaf
       ]
   ) extends AbstractLeaf[Leaf2](index) {
-    override def companionObj: HasProtocolVersionedWrapperCompanion[VersionedAbstractLeaf] =
+    override def companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 
-  case class Leaf3(override val index: Int)(
+  final case class Leaf3(override val index: Int)(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[
         VersionedAbstractLeaf
       ]
   ) extends AbstractLeaf[Leaf3](index) {
-    override def companionObj: HasProtocolVersionedWrapperCompanion[VersionedAbstractLeaf] =
+    override def companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 
@@ -304,9 +303,9 @@ object MerkleTreeTest {
     )
   }
 
-  case class InnerNode1(override val subtrees: MerkleTree[_]*)
+  final case class InnerNode1(override val subtrees: MerkleTree[_]*)
       extends AbstractInnerNode[InnerNode1](InnerNode1.apply, subtrees: _*) {}
 
-  case class InnerNode2(override val subtrees: MerkleTree[_]*)
+  final case class InnerNode2(override val subtrees: MerkleTree[_]*)
       extends AbstractInnerNode[InnerNode2](InnerNode2.apply, subtrees: _*) {}
 }

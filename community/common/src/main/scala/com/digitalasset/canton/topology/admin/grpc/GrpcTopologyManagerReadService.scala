@@ -32,7 +32,7 @@ import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
-case class BaseQuery(
+final case class BaseQuery(
     filterStore: String,
     useStateStore: Boolean,
     timeQuery: TimeQuery,
@@ -79,7 +79,7 @@ object BaseQuery {
   * @param stores the various identity stores
   */
 class GrpcTopologyManagerReadService(
-    stores: => Future[Seq[TopologyStore[TopologyStoreId]]],
+    stores: => Seq[TopologyStore[TopologyStoreId]],
     ips: IdentityProvidingServiceClient,
     crypto: Crypto,
     val loggerFactory: NamedLoggerFactory,
@@ -99,12 +99,8 @@ class GrpcTopologyManagerReadService(
 
   private def collectStores(
       filterStore: String
-  ): EitherT[Future, CantonError, Seq[TopologyStore[TopologyStoreId]]] = {
-    val res = stores.map { allStores =>
-      allStores.filter(_.storeId.filterName.startsWith(filterStore))
-    }
-    EitherT.right(res)
-  }
+  ): EitherT[Future, CantonError, Seq[TopologyStore[TopologyStoreId]]] =
+    EitherT.rightT(stores.filter(_.storeId.filterName.startsWith(filterStore)))
 
   private def createBaseResult(context: TransactionSearchResult): adminProto.BaseResult =
     new adminProto.BaseResult(
@@ -336,9 +332,9 @@ class GrpcTopologyManagerReadService(
   override def listAvailableStores(
       request: adminProto.ListAvailableStoresRequest
   ): Future[adminProto.ListAvailableStoresResult] =
-    stores.map { allStores =>
-      adminProto.ListAvailableStoresResult(storeIds = allStores.map(_.storeId.filterName))
-    }
+    Future.successful(
+      adminProto.ListAvailableStoresResult(storeIds = stores.map(_.storeId.filterName))
+    )
 
   override def listParticipantDomainState(
       request: adminProto.ListParticipantDomainStateRequest

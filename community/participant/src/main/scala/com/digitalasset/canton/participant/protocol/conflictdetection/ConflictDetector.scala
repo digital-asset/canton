@@ -617,7 +617,7 @@ private[participant] class ConflictDetector(
 }
 
 private[conflictdetection] object ConflictDetector {
-  private[ConflictDetector] case class PendingEvictions(
+  private[ConflictDetector] final case class PendingEvictions(
       lockedStates: LockedStates,
       commitSet: CommitSet,
       pendingContracts: Seq[LfContractId],
@@ -640,7 +640,7 @@ private[conflictdetection] object ConflictDetector {
   )
 
   /** The prefetched states to be inserted into the in-memory states */
-  private case class PrefetchedStates(
+  private final case class PrefetchedStates(
       contracts: Map[LfContractId, ContractState],
       keys: Map[LfGlobalKey, ContractKeyState],
   )
@@ -652,7 +652,7 @@ private[conflictdetection] object ConflictDetector {
     * @param keys The handle for keys
     * @param statesReady The future that completes when all from [[PrefetchHandle.statesReady]]
     */
-  private class PendingActivenessCheck private[ConflictDetector] (
+  private final class PendingActivenessCheck private[ConflictDetector] (
       val transferIds: Set[TransferId],
       val contracts: LockableStatesCheckHandle[LfContractId, ActiveContractStore.Status],
       val keys: LockableStatesCheckHandle[LfGlobalKey, ContractKeyJournal.Status],
@@ -667,7 +667,7 @@ private[conflictdetection] object ConflictDetector {
     * @param contracts The contracts that have been locked
     * @param keys The keys that have been locked
     */
-  case class LockedStates(
+  final case class LockedStates(
       transfers: Set[TransferId],
       contracts: Seq[LfContractId],
       keys: Seq[LfGlobalKey],

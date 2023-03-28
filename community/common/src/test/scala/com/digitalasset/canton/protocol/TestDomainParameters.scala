@@ -43,7 +43,7 @@ object TestDomainParameters {
 
   val defaultDynamic: DynamicDomainParameters =
     DynamicDomainParameters.initialValues(
-      topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(250),
+      topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(250),
       BaseTest.testedProtocolVersion,
     )
 
@@ -52,7 +52,7 @@ object TestDomainParameters {
       maxRequestSize: MaxRequestSize,
   ): DynamicDomainParameters =
     DynamicDomainParameters.initialValues(
-      topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(250),
+      topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(250),
       protocolVersion = BaseTest.testedProtocolVersion,
       maxRatePerParticipant = maxRatePerParticipant,
       maxRequestSize = maxRequestSize,

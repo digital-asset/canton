@@ -243,7 +243,7 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
 object StoredContractManager {
 
   /** The pending contract and the requests that have marked it as pending. */
-  case class PendingContract(
+  final case class PendingContract(
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
       requests: NonEmpty[Set[RequestCounter]],

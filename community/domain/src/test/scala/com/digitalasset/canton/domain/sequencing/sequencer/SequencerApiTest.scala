@@ -20,7 +20,6 @@ import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.util.FutureInstances.*
-import com.google.protobuf.ByteString
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 
@@ -290,15 +289,17 @@ abstract class SequencerApiTest
     }
   }
 
-  case class TestingEnvelope(override val content: String, override val recipients: Recipients)
+  case class TestingEnvelope(content: String, override val recipients: Recipients)
       extends Envelope[String] {
 
     /** Closes the envelope by serializing the contents */
     def closeEnvelope: ClosedEnvelope =
-      ClosedEnvelope(contentAsByteString, recipients)
-
-    override protected def contentAsByteString: ByteString =
-      DeterministicEncoding.encodeString(content)
+      ClosedEnvelope(
+        DeterministicEncoding.encodeString(content),
+        recipients,
+        Seq.empty,
+        testedProtocolVersion,
+      )
 
     override def forRecipient(member: Member): Option[Envelope[String]] = {
       recipients.forMember(member).map(recipients => TestingEnvelope(content, recipients))

@@ -34,7 +34,7 @@ trait IdlenessExecutorServiceTest extends BaseTest { this: AnyWordSpec =>
       })
 
       val start = Deadline.now
-      val terminated = ec.awaitIdleness(waitMillis * 50)
+      val terminated = ec.awaitIdleness(waitMillis * 100)
       val end = Deadline.now
       assume(
         future.isCompleted,
@@ -115,11 +115,12 @@ class ForkJoinIdlenessExecutorServiceTest
 
   "awaitIdleness" should {
     behave like awaitIdleness { () =>
+      val pool = new ForkJoinPool()
       new ForkJoinIdlenessExecutorService(
-        new ForkJoinPool(),
+        pool,
+        pool,
         throwable => logger.error(s"Error: $throwable"),
         loggerFactory.threadName + "-fork-join-pool",
-        () => (),
       )
     }
   }

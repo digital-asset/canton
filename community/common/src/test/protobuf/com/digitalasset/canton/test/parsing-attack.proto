@@ -52,3 +52,20 @@ message VersionedDummyMessage {
     DummyMessage v0 = 1;
   }
 }
+
+
+// Switching to repeated
+message Single {
+  string one = 1;
+  DummyMessage two = 2;
+}
+
+message Repeated {
+  repeated string one = 1;
+  repeated DummyMessage two = 2;
+}
+
+message AttackRepeated {
+  repeated string one = 1;
+  repeated bytes two = 2;
+}

@@ -11,7 +11,7 @@ sealed trait RegisterMemberError
 object RegisterMemberError {
 
   /** The given member is already registered with the sequencer at this time */
-  case class AlreadyRegisteredError(member: Member) extends RegisterMemberError
+  final case class AlreadyRegisteredError(member: Member) extends RegisterMemberError
 
-  case class UnexpectedError(member: Member, message: String) extends RegisterMemberError
+  final case class UnexpectedError(member: Member, message: String) extends RegisterMemberError
 }

@@ -14,6 +14,8 @@ import com.digitalasset.canton.store.memory.{
   InMemorySequencedEventStore,
   InMemorySequencerCounterTrackerStore,
 }
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 
 import scala.concurrent.ExecutionContext
 
@@ -40,6 +42,7 @@ class InMemorySyncDomainPersistentState(
   val sendTrackerStore = new InMemorySendTrackerStore()
   val causalDependencyStore =
     new InMemorySingleDomainCausalDependencyStore(domainId.item, loggerFactory)
+  val topologyStore = new InMemoryTopologyStore(DomainStore(domainId.item), loggerFactory)
 
   override def close(): Unit = ()
 }

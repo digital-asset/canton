@@ -28,7 +28,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
 
   private val requestType = TestPendingRequestDataType
 
-  private val maxDecisionTime = NonNegativeFiniteDuration.ofSeconds(60)
+  private val maxDecisionTime = NonNegativeFiniteDuration.tryOfSeconds(60)
   private val requestId1DecisionTime = requestId1.unwrap.add(maxDecisionTime.unwrap)
   private val requestId2DecisionTime = requestId2.unwrap.add(maxDecisionTime.unwrap)
 
@@ -93,6 +93,16 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
 
     p37s.markTimeout(RequestCounter(0), requestId1, requestId1DecisionTime)
     f.futureValue shouldBe None
+  }
+
+  "return after request is marked as timeout and the memory cleaned" in {
+    val p37s = mk()
+
+    p37s.markTimeout(RequestCounter(0), requestId1, requestId1DecisionTime)
+    p37s.cleanOnTimeout(requestId1)
+    p37s.memoryIsCleaned(requestId1) shouldBe true
+
+    p37s.awaitConfirmed[requestType.PendingRequestData](requestId1).futureValue shouldBe None
   }
 
   "return value only once after reaching confirmed" in {
@@ -349,7 +359,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
     f3.futureValue shouldBe None
   }
 
-  "deal with several calls for the same request with different filters" in {
+  "deal with several calls for the same unconfirmed request with different filters" in {
     val p37s = mk()
     val pendingRequestData = pendingRequestDataFor(0)
 
@@ -399,6 +409,46 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
 
     f1.futureValue.value shouldBe pendingRequestData
     forAll(Seq(f2, f3, f4, f5))(fut => fut.futureValue shouldBe None)
+  }
+
+  "deal with several calls for the same confirmed request with different filters" in {
+    val p37s = mk()
+    val pendingRequestData0 = pendingRequestDataFor(0)
+    val pendingRequestData1 = pendingRequestDataFor(1)
+
+    p37s.markConfirmed(requestType)(
+      RequestCounter(0),
+      requestId1,
+      requestId1DecisionTime,
+      pendingRequestData0,
+    )
+
+    val f1 = p37s
+      .awaitConfirmed[requestType.PendingRequestData](requestId1, _ => Future.successful(true))
+    val f2 = p37s
+      .awaitConfirmed[requestType.PendingRequestData](requestId1, _ => Future.successful(false))
+    val f3 = p37s
+      .awaitConfirmed[requestType.PendingRequestData](requestId1, _ => Future.successful(true))
+
+    f1.futureValue.value shouldBe pendingRequestData0
+    forAll(Seq(f2, f3))(fut => fut.futureValue shouldBe None)
+
+    p37s.markConfirmed(requestType)(
+      RequestCounter(1),
+      requestId2,
+      requestId2DecisionTime,
+      pendingRequestData1,
+    )
+    val f4 = p37s
+      .awaitConfirmed[requestType.PendingRequestData](requestId2, _ => Future.successful(false))
+    val f5 = p37s
+      .awaitConfirmed[requestType.PendingRequestData](requestId2, _ => Future.successful(true))
+    val f6 = p37s
+      .awaitConfirmed[requestType.PendingRequestData](requestId2, _ => Future.successful(false))
+
+    f4.futureValue shouldBe None
+    f5.futureValue.value shouldBe pendingRequestData1
+    f6.futureValue shouldBe None
   }
 
   "a valid confirm even if the bound is updated in the meantime" in {

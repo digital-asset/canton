@@ -13,7 +13,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 
-case class CryptoProviderScheme[S](default: S, supported: NonEmpty[Set[S]]) {
+final case class CryptoProviderScheme[S](default: S, supported: NonEmpty[Set[S]]) {
   require(supported.contains(default))
 }
 
@@ -50,7 +50,10 @@ object CryptoProvider {
     override def encryption: CryptoProviderScheme[EncryptionKeyScheme] =
       CryptoProviderScheme(
         EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
-        NonEmpty.mk(Set, EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm),
+        NonEmpty.mk(
+          Set,
+          EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
+        ),
       )
 
     override def symmetric: CryptoProviderScheme[SymmetricKeyScheme] =
@@ -84,7 +87,11 @@ object CryptoProvider {
     override def encryption: CryptoProviderScheme[EncryptionKeyScheme] =
       CryptoProviderScheme(
         EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
-        NonEmpty.mk(Set, EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm),
+        NonEmpty.mk(
+          Set,
+          EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
+          EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc,
+        ),
       )
 
     override def symmetric: CryptoProviderScheme[SymmetricKeyScheme] =
@@ -106,7 +113,7 @@ object CryptoProvider {
   * @param default The optional scheme to use. If none is specified, use the provider's default scheme of kind S.
   * @param allowed The optional allowed schemes to use. If none is specified, all the provider's supported schemes of kind S are allowed.
   */
-case class CryptoSchemeConfig[S](
+final case class CryptoSchemeConfig[S](
     default: Option[S] = None,
     allowed: Option[NonEmpty[Set[S]]] = None,
 )
@@ -130,9 +137,8 @@ trait CryptoConfig {
   def hash: CryptoSchemeConfig[HashAlgorithm]
 }
 
-case class CommunityCryptoConfig(
-    provider: CryptoProvider =
-      CryptoProvider.Tink, // TODO(i5100): Choosing Tink as default, as long as JCE occasionally throws exceptions on decryption.
+final case class CommunityCryptoConfig(
+    provider: CryptoProvider = CryptoProvider.Tink, // TODO(i12244): Migrate to JCE.
     signing: CryptoSchemeConfig[SigningKeyScheme] = CryptoSchemeConfig(),
     encryption: CryptoSchemeConfig[EncryptionKeyScheme] = CryptoSchemeConfig(),
     symmetric: CryptoSchemeConfig[SymmetricKeyScheme] = CryptoSchemeConfig(),

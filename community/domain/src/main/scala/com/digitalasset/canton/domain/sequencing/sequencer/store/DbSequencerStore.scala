@@ -69,9 +69,14 @@ class DbSequencerStore(
   import storage.api.*
   import storage.converters.*
 
+  override def onClosed(): Unit = {
+    super.onClosed()
+    closeContext.flagCloseable.close()
+  }
+
   implicit val closeContext: CloseContext =
     overrideCloseContext
-      .map(CloseContext.combine(_, CloseContext(this), timeouts, logger)(TraceContext.empty))
+      .map(CloseContext.combineUnsafe(_, CloseContext(this), timeouts, logger)(TraceContext.empty))
       .getOrElse(CloseContext(this))
 
   private implicit val setRecipientsArrayOParameter
@@ -848,41 +853,43 @@ class DbSequencerStore(
       traceContext: TraceContext,
       externalCloseContext: CloseContext,
   ): EitherT[Future, SaveCounterCheckpointError, Unit] = {
-    val combinedCloseContext =
-      CloseContext.combine(closeContext, externalCloseContext, timeouts, logger)
+
     EitherT {
       val CounterCheckpoint(counter, ts, latestTopologyClientTimestamp) = checkpoint
-      storage.queryAndUpdate(
-        for {
-          _ <- profile match {
-            case _: Postgres =>
-              sqlu"""insert into sequencer_counter_checkpoints (member, counter, ts, latest_topology_client_ts)
+      CloseContext.withCombinedContextF(closeContext, externalCloseContext, timeouts, logger)(
+        combinedCloseContext =>
+          storage.queryAndUpdate(
+            for {
+              _ <- profile match {
+                case _: Postgres =>
+                  sqlu"""insert into sequencer_counter_checkpoints (member, counter, ts, latest_topology_client_ts)
              values ($memberId, $counter, $ts, $latestTopologyClientTimestamp)
              on conflict (member, counter) do nothing
              """
-            case _: H2 =>
-              sqlu"""merge into sequencer_counter_checkpoints using dual
+                case _: H2 =>
+                  sqlu"""merge into sequencer_counter_checkpoints using dual
                     on member = $memberId and counter = $counter
                     when not matched then
                       insert (member, counter, ts, latest_topology_client_ts)
                       values ($memberId, $counter, $ts, $latestTopologyClientTimestamp)
                   """
-            case _: Oracle =>
-              sqlu""" insert /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( sequencer_counter_checkpoints ( member, counter ) ) */
+                case _: Oracle =>
+                  sqlu""" insert /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( sequencer_counter_checkpoints ( member, counter ) ) */
             into sequencer_counter_checkpoints (member, counter, ts, latest_topology_client_ts)
           values ($memberId, $counter, $ts, $latestTopologyClientTimestamp)
           """
-          }
-          id <- sql"""
+              }
+              id <- sql"""
             select ts, latest_topology_client_ts
               from sequencer_counter_checkpoints
               where member = $memberId and counter = $counter
               """
-            .as[(CantonTimestamp, Option[CantonTimestamp])]
-            .headOption
-        } yield id,
-        functionFullName,
-      )(traceContext, combinedCloseContext) map {
+                .as[(CantonTimestamp, Option[CantonTimestamp])]
+                .headOption
+            } yield id,
+            functionFullName,
+          )(traceContext, combinedCloseContext)
+      ) map {
         case None =>
           // we should always return a value from the db statement so this is a bug or unexpected behavior
           ErrorUtil.internalError(

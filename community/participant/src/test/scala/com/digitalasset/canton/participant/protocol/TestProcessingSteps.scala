@@ -9,7 +9,8 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOps, Signature}
-import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewTree, ViewType}
+import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
+import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewPosition, ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
@@ -17,7 +18,10 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   RequestType,
   WrapsProcessorError,
 }
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor.NoMediatorError
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
+  DomainParametersError,
+  NoMediatorError,
+}
 import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestPendingRequestData,
   TestPendingRequestDataType,
@@ -39,7 +43,13 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
+import com.digitalasset.canton.protocol.{
+  DynamicDomainParametersWithValidity,
+  LfContractId,
+  RootHash,
+  ViewHash,
+  v0,
+}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -59,6 +69,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class TestProcessingSteps(
     pendingSubmissionMap: concurrent.Map[Int, Unit],
     pendingRequestData: Option[TestPendingRequestData],
+    informeesOfView: ViewHash => Set[Informee] = _ => Set.empty,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       Int,
@@ -107,6 +118,20 @@ class TestProcessingSteps(
   override def embedNoMediatorError(error: NoMediatorError): TestProcessingError =
     TestProcessorError(error)
 
+  override def decisionTimeFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TestProcessingError, CantonTimestamp] = parameters
+    .decisionTimeFor(requestTs)
+    .leftMap(err => TestProcessorError(DomainParametersError(parameters.domainId, err)))
+
+  override def participantResponseDeadlineFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TestProcessingError, CantonTimestamp] = parameters
+    .participantResponseDeadlineFor(requestTs)
+    .leftMap(err => TestProcessorError(DomainParametersError(parameters.domainId, err)))
+
   override def prepareSubmission(
       param: Int,
       mediatorId: MediatorId,
@@ -152,7 +177,8 @@ class TestProcessingSteps(
   )(implicit traceContext: TraceContext): EitherT[Future, TestProcessingError, DecryptedViews] = {
     def treeFor(viewHash: ViewHash, hash: Hash): TestViewTree = {
       val rootHash = RootHash(hash)
-      TestViewTree(viewHash, rootHash)
+      val informees = informeesOfView(viewHash)
+      TestViewTree(viewHash, rootHash, informees)
     }
 
     val decryptedViewTrees = batch.map { envelope =>
@@ -193,14 +219,6 @@ class TestProcessingSteps(
     EitherT.rightT(res)
   }
 
-  override def pendingDataAndResponseArgsForMalformedPayloads(
-      ts: CantonTimestamp,
-      rc: RequestCounter,
-      sc: SequencerCounter,
-      malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
-      snapshot: DomainSnapshotSyncCryptoApi,
-  ): Either[TestProcessingError, Unit] = Right(())
-
   override def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
@@ -223,6 +241,15 @@ class TestProcessingSteps(
     EitherT.rightT(res)
   }
 
+  def constructResponsesForMalformedPayloads(
+      requestId: com.digitalasset.canton.protocol.RequestId,
+      malformedPayloads: Seq[
+        com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedPayload
+      ],
+  )(implicit
+      traceContext: com.digitalasset.canton.tracing.TraceContext
+  ): Seq[com.digitalasset.canton.protocol.messages.MediatorResponse] = Seq.empty
+
   override def eventAndSubmissionIdForInactiveMediator(
       ts: CantonTimestamp,
       rc: RequestCounter,
@@ -237,8 +264,11 @@ class TestProcessingSteps(
     Right(None)
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, TransactionResultMessage],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, TransactionResultMessage],
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -270,7 +300,7 @@ class TestProcessingSteps(
 
 object TestProcessingSteps {
 
-  case class TestViewTree(
+  final case class TestViewTree(
       viewHash: ViewHash,
       rootHash: RootHash,
       informees: Set[Informee] = Set.empty,
@@ -278,6 +308,9 @@ object TestProcessingSteps {
       mediatorId: MediatorId = DefaultTestIdentities.mediator,
   ) extends ViewTree
       with HasVersionedToByteString {
+
+    override def viewPosition: ViewPosition = ViewPosition(List(MerkleSeqIndex(List.empty)))
+
     def toBeSigned: Option[RootHash] = None
     override def pretty: Pretty[TestViewTree] = adHocPrettyInstance
     override def toByteString(version: ProtocolVersion): ByteString =
@@ -292,7 +325,7 @@ object TestProcessingSteps {
   }
   type TestViewType = TestViewType.type
 
-  case class TestPendingRequestData(
+  final case class TestPendingRequestData(
       requestCounter: RequestCounter,
       requestSequencerCounter: SequencerCounter,
       pendingContracts: Set[LfContractId],
@@ -307,7 +340,8 @@ object TestProcessingSteps {
 
   sealed trait TestProcessingError extends WrapsProcessorError
 
-  case class TestProcessorError(err: ProtocolProcessor.ProcessorError) extends TestProcessingError {
+  final case class TestProcessorError(err: ProtocolProcessor.ProcessorError)
+      extends TestProcessingError {
     override def underlyingProcessorError(): Option[ProtocolProcessor.ProcessorError] = Some(err)
   }
 

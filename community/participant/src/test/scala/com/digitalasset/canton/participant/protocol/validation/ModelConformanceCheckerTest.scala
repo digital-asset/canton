@@ -80,7 +80,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       mcc: ModelConformanceChecker,
       views: NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]],
       ips: TopologySnapshot = factory.topologySnapshot,
-  ): EitherT[Future, Error, Result] = {
+  ): EitherT[Future, ErrorWithSubviewsCheck, Result] = {
     val rootViewTrees = views.map(_._1)
     val commonData = TransactionProcessingSteps.tryCommonData(rootViewTrees)
     val keyResolvers = views.forgetNE.toMap
@@ -179,7 +179,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
               viewsWithNoInputKeys(example.rootTransactionViewTrees),
             )
           )("reinterpretation fails")
-        } yield failure shouldBe error
+        } yield failure.error shouldBe error
       }
     }
 
@@ -208,7 +208,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           result <- leftOrFail(
             check(sut, viewsWithNoInputKeys(subviewMissing.rootTransactionViewTrees))
           )("detect missing subview")
-        } yield result shouldBe a[TransactionTreeError]
+        } yield result.error shouldBe a[TransactionTreeError]
       }
 
       /* TODO(#3202) further error cases to test:

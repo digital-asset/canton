@@ -34,7 +34,7 @@ object FutureTraverse extends WartTraverser {
      * @param applicativePosition The type argument of the method that should be future-like
      * @param hint A hint to be included in the error message
      */
-    case class ForbiddenMethod(
+    final case class ForbiddenMethod(
         methodName: TermName,
         receiverTypeSymbol: Symbol,
         applicativePosition: Int,

@@ -307,7 +307,7 @@ class DbContractKeyJournal(
 }
 
 object DbContractKeyJournal {
-  case class DbContractKeyJournalError(err: Throwable) extends ContractKeyJournalError {
+  final case class DbContractKeyJournalError(err: Throwable) extends ContractKeyJournalError {
     override def asThrowable: Throwable = err
   }
 }

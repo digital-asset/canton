@@ -29,6 +29,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   SignedContent,
   SubmissionRequest,
 }
+import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{
   AuthenticatedMember,
@@ -139,7 +140,6 @@ class DatabaseSequencer(
     timeouts,
     storage,
     clock,
-    cryptoApi,
     eventSignaller,
     protocolVersion,
     loggerFactory,
@@ -205,8 +205,8 @@ class DatabaseSequencer(
 
   if (config.highAvailabilityEnabled)
     periodicallyMarkLaggingSequencersOffline(
-      onlineSequencerCheckConfig.onlineCheckInterval,
-      onlineSequencerCheckConfig.offlineDuration,
+      onlineSequencerCheckConfig.onlineCheckInterval.toInternal,
+      onlineSequencerCheckConfig.offlineDuration.toInternal,
     )
 
   private val reader =
@@ -315,11 +315,12 @@ class DatabaseSequencer(
       // Update the max-event-age metric after pruning. Use the actually pruned timestamp as
       // the database sequencer tends to prune fewer events than asked for e.g. not wanting to
       // prune sequencer-counter checkpoints partially.
-      report <- store.prune(requestedTimestamp, status, config.writer.payloadToEventMargin).map {
-        case SequencerPruningResult(tsActuallyPrunedUpTo, report) =>
-          MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, tsActuallyPrunedUpTo.some)
+      report <- store
+        .prune(requestedTimestamp, status, config.writer.payloadToEventMargin.toInternal)
+        .map { case SequencerPruningResult(tsActuallyPrunedUpTo, report) =>
+          MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, tsActuallyPrunedUpTo)
           report
-      }
+        }
     } yield report
 
   override def locatePruningTimestamp(index: PositiveInt)(implicit

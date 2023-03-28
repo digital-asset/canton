@@ -67,13 +67,13 @@ object TimeValidator {
 
   sealed trait TimeCheckFailure extends Product with Serializable
 
-  case class LedgerTimeRecordTimeDeltaTooLargeError(
+  final case class LedgerTimeRecordTimeDeltaTooLargeError(
       ledgerTime: CantonTimestamp,
       recordTime: CantonTimestamp,
       maxDelta: NonNegativeFiniteDuration,
   ) extends TimeCheckFailure
 
-  case class SubmissionTimeRecordTimeDeltaTooLargeError(
+  final case class SubmissionTimeRecordTimeDeltaTooLargeError(
       submissionTime: CantonTimestamp,
       recordTime: CantonTimestamp,
       maxDelta: NonNegativeFiniteDuration,

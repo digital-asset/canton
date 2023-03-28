@@ -10,7 +10,8 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 class TransferStoreTestInMemory extends AsyncWordSpec with BaseTest with TransferStoreTest {
 
-  def mk(domain: DomainId): InMemoryTransferStore = new InMemoryTransferStore(domain, loggerFactory)
+  private def mk(domain: DomainId): InMemoryTransferStore =
+    new InMemoryTransferStore(domain, loggerFactory)
 
   "TransferStoreTestInMemory" should {
     behave like transferStore(mk)

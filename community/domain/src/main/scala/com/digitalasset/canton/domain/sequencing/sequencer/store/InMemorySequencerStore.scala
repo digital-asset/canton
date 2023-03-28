@@ -449,7 +449,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
 }
 
 object InMemorySequencerStore {
-  case class CheckpointDataAtCounter(
+  final case class CheckpointDataAtCounter(
       timestamp: CantonTimestamp,
       latestTopologyClientTimestamp: Option[CantonTimestamp],
   ) {

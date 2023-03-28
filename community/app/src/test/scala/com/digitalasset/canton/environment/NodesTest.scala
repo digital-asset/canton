@@ -13,10 +13,8 @@ import com.digitalasset.canton.lifecycle.ShutdownFailedException
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.CommunityDbMigrationsFactory
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SimClock}
+import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.NodeId
-import com.digitalasset.canton.tracing.TracingConfig
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicReference
@@ -39,21 +37,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def withDefaults(ports: DefaultPorts): TestNodeConfig = this
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig()
   }
-  object TestNodeParameters extends CantonNodeParameters {
-    override def delayLoggingThreshold: NonNegativeFiniteDuration = ???
-    override def enablePreviewFeatures: Boolean = ???
-    override def enableAdditionalConsistencyChecks: Boolean = ???
-    override def processingTimeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
-    override def logQueryCost: Option[QueryCostMonitoringConfig] = ???
-    override def tracing: TracingConfig = ???
-    override def sequencerClient: SequencerClientConfig = ???
-    override def cachingConfigs: CachingConfigs = ???
-    override def nonStandardConfig: Boolean = ???
-    override def loggingConfig: LoggingConfig = ???
-    override def devVersionSupport: Boolean = ???
-    override def dontWarnOnDeprecatedPV: Boolean = ???
-    override def initialProtocolVersion: ProtocolVersion = ???
-  }
+
   class TestNodeBootstrap extends CantonNodeBootstrap[TestNode] {
     override def name: InstanceName = ???
     override def clock: Clock = ???
@@ -82,12 +66,12 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   }
 
   class TestNodes(factory: TestNodeFactory, configs: Map[String, TestNodeConfig])
-      extends ManagedNodes[TestNode, TestNodeConfig, TestNodeParameters.type, TestNodeBootstrap](
+      extends ManagedNodes[TestNode, TestNodeConfig, CantonNodeParameters, TestNodeBootstrap](
         factory.create,
         new CommunityDbMigrationsFactory(loggerFactory),
         timeouts,
         configs,
-        _ => TestNodeParameters,
+        _ => MockedNodeParameters.cantonNodeParameters(),
         NodesTest.this.loggerFactory,
       ) {
     protected val executionContext: ExecutionContextIdlenessExecutorService =

@@ -10,14 +10,14 @@ import pureconfig.{ConfigCursor, ConfigReader, PathSegment}
 import scala.jdk.CollectionConverters.*
 
 object DeprecatedConfigUtils {
-  case class MovedConfigPath(from: String, to: String*)
+  final case class MovedConfigPath(from: String, to: String*)
 
   /** Deprecate a config path. A message will be logged at INFO level if the config path is used
     * @param path config path to deprecated
     * @param since canton version when the deprecation was introduced
     * @param valueFilter optional filter on the value. Only config fields on 'path' with that value will be deprecated
     */
-  case class DeprecatedConfigPath[T: ConfigReader](
+  final case class DeprecatedConfigPath[T: ConfigReader](
       path: String,
       since: String,
       valueFilter: Option[T] = None,

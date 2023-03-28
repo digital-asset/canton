@@ -6,11 +6,10 @@ package com.digitalasset.canton.domain.config
 import cats.syntax.contravariantSemigroupal.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{CryptoConfig, ProtocolConfig}
+import com.digitalasset.canton.config.{CryptoConfig, PositiveDurationSeconds, ProtocolConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
 
 /** Configuration of domain parameters that all members connecting to a domain must adhere to.
@@ -36,7 +35,8 @@ import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
   * @param resetStoredStaticConfig DANGEROUS: If true, then the stored static configuration parameters will be reset to the ones in the configuration file
   */
 final case class DomainParametersConfig(
-    reconciliationInterval: PositiveSeconds = StaticDomainParameters.defaultReconciliationInterval,
+    reconciliationInterval: PositiveDurationSeconds =
+      StaticDomainParameters.defaultReconciliationInterval.toConfig,
     maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
     maxInboundMessageSize: MaxRequestSize =
       StaticDomainParameters.defaultMaxRequestSize, // Cannot change the name for now
@@ -104,7 +104,7 @@ final case class DomainParametersConfig(
       )
     } yield {
       StaticDomainParameters.create(
-        reconciliationInterval = reconciliationInterval,
+        reconciliationInterval = reconciliationInterval.toInternal,
         maxRatePerParticipant = maxRatePerParticipant,
         maxRequestSize = maxInboundMessageSize,
         uniqueContractKeys = uniqueContractKeys,
@@ -141,12 +141,12 @@ final case class DomainParametersConfig(
       Right(())
     } else {
       val reconciliationIntervalValid = Either.cond(
-        reconciliationInterval == StaticDomainParameters.defaultReconciliationInterval,
+        reconciliationInterval == StaticDomainParameters.defaultReconciliationInterval.toConfig,
         (),
         errorMessage(
           "reconciliation interval",
           "set_reconciliation_interval",
-          reconciliationInterval.toFiniteDuration.toString(),
+          reconciliationInterval.underlying.toString(),
           StaticDomainParameters.defaultReconciliationInterval.toFiniteDuration.toString(),
         ),
       )

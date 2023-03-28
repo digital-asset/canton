@@ -23,7 +23,7 @@ trait HasExpiry {
   val expireAt: CantonTimestamp
 }
 
-case class StoredNonce(
+final case class StoredNonce(
     member: Member,
     nonce: Nonce,
     generatedAt: CantonTimestamp,
@@ -39,7 +39,7 @@ object StoredNonce {
   ): StoredNonce =
     StoredNonce(member, nonce, generatedAt, generatedAt.add(expirationDuration))
 }
-case class StoredAuthenticationToken(
+final case class StoredAuthenticationToken(
     member: Member,
     expireAt: CantonTimestamp,
     token: AuthenticationToken,
@@ -184,7 +184,7 @@ class DbMemberAuthenticationStore(
   ): Future[Option[StoredNonce]] =
     for {
       timestampsO <- storage.query(
-        sql"""select generated_at_ts, expire_at_ts 
+        sql"""select generated_at_ts, expire_at_ts
              from sequencer_authentication_nonces
              where nonce = $nonce and member = $member
              """.as[(CantonTimestamp, CantonTimestamp)].headOption,

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton
 
-import com.daml.ledger.offset
 import com.daml.lf.data.Time
+import com.digitalasset.canton.ledger.offset
 
 package object participant {
 

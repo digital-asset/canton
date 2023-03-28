@@ -17,9 +17,9 @@ object Command {
     *
     * @param scriptPath the path to the script
     */
-  case class RunScript(scriptPath: File) extends Command
+  final case class RunScript(scriptPath: File) extends Command
 
-  case class Generate(target: Generate.Target) extends Command
+  final case class Generate(target: Generate.Target) extends Command
 
   object Generate {
     sealed trait Target

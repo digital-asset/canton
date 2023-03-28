@@ -27,8 +27,8 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedTopologySnapshot,
   TopologySnapshot,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
-import com.digitalasset.canton.topology.store.{TopologyStoreFactory, TopologyStoreId}
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyTransaction,
@@ -64,6 +64,7 @@ trait PackageInspectionOps extends NamedLogging {
 class PackageInspectionOpsImpl(
     participantId: ParticipantId,
     storage: Storage,
+    authorizedTopologyStore: TopologyStore[AuthorizedStore],
     aliasManager: DomainAliasManager,
     stateManager: SyncDomainPersistentStateManager,
     syncCryptoApiProvider: SyncCryptoApiProvider,
@@ -79,13 +80,7 @@ class PackageInspectionOpsImpl(
   )(implicit tc: TraceContext): EitherT[Future, PackageVetted, Unit] = {
     // TODO(i9505): Consider unit testing this
 
-    import cats.syntax.functorFilter.*
-
-    val store =
-      TopologyStoreFactory.apply(storage, timeouts, loggerFactory)
-
-    def snapshotFromStore(id: TopologyStoreId) = {
-      val domainStore = store.forId(id)
+    def snapshotFromStore(domainStore: TopologyStore[TopologyStoreId]) = {
 
       new StoreBasedTopologySnapshot(
         CantonTimestamp.MaxValue,
@@ -99,26 +94,16 @@ class PackageInspectionOpsImpl(
 
     // Use the aliasManager to query all domains, even those that are currently disconnected
     val snapshotsForDomains: List[TopologySnapshot] =
-      aliasManager.aliases.toList.mapFilter({ domainAlias =>
-        val maybeTopologyClient = aliasManager
-          .domainIdForAlias(domainAlias)
-          .map({ domainId =>
-            syncCryptoApiProvider.ips
-              .forDomain(domainId)
-              .map(client => (client.headSnapshot))
-              .getOrElse({
-                snapshotFromStore(DomainStore(domainId))
-              })
+      stateManager.getAll.map { case (domainId, state) =>
+        syncCryptoApiProvider.ips
+          .forDomain(domainId)
+          .map(client => (client.headSnapshot))
+          .getOrElse({
+            snapshotFromStore(state.topologyStore)
           })
+      }.toList
 
-        if (maybeTopologyClient.isEmpty) {
-          logger.info(s"No domain ID for alias $domainAlias")
-        }
-
-        maybeTopologyClient
-      })
-
-    val snapshotFromAuthorizedStore = snapshotFromStore(AuthorizedStore)
+    val snapshotFromAuthorizedStore = snapshotFromStore(authorizedTopologyStore)
 
     val packageIsVettedOn = (snapshotFromAuthorizedStore :: snapshotsForDomains)
       .parTraverse { snapshot =>

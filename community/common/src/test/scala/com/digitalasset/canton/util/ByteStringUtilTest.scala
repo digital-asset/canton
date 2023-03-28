@@ -10,10 +10,13 @@ import com.digitalasset.canton.serialization.{
   MaxByteToDecompressExceeded,
 }
 import com.google.protobuf.ByteString
+import org.scalactic.Uniformity
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.io.ByteArrayInputStream
 import java.nio.charset.Charset
 
+// Herein contained compressed test data conforms to pre-Java 16
 // Reused among compression methods that work on arrays and byte strings
 trait GzipCompressionTests extends AnyWordSpec with BaseTest {
 
@@ -36,7 +39,7 @@ trait GzipCompressionTests extends AnyWordSpec with BaseTest {
       val inputCompressed = HexString.parseToByteString(compressedHex).value
 
       val compressed = compressGzip(inputUncompressed)
-      compressed shouldBe inputCompressed
+      inputCompressed should equal(compressed)(after being OsHeaderFieldIgnored)
 
       val uncompressed = decompressGzip(inputCompressed)
       uncompressed shouldBe Right(inputUncompressed)
@@ -91,6 +94,34 @@ trait GzipCompressionTests extends AnyWordSpec with BaseTest {
       }
     }
   }
+}
+
+/** Ignores the 'os id' value, the 10th byte in the gzip file format header because it changed
+  * from 0x00 to 0xFF in Java 16 and later (https://bugs.openjdk.org/browse/JDK-8244706);
+  * enables seamless test execution on Java 11 and 17.
+  */
+private object OsHeaderFieldIgnored extends Uniformity[ByteString] {
+
+  private val osHeaderFieldAt10thBytePosition = 9
+
+  override def normalized(data: ByteString): ByteString = {
+    require(data.size() >= 10, "Gzip compressed data is expected to contain a 10 bytes long header")
+    if (data.byteAt(osHeaderFieldAt10thBytePosition) == 0) {
+      data
+    } else {
+      val array = data.toByteArray
+      array(osHeaderFieldAt10thBytePosition) = 0
+      ByteString.readFrom(new ByteArrayInputStream(array))
+    }
+  }
+
+  override def normalizedOrSame(o: Any): Any =
+    o match {
+      case data: ByteString => normalized(data)
+      case _ => o
+    }
+
+  override def normalizedCanHandle(o: Any): Boolean = o.isInstanceOf[ByteString]
 }
 
 class ByteStringUtilTest extends AnyWordSpec with BaseTest with GzipCompressionTests {

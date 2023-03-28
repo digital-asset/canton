@@ -18,13 +18,13 @@ trait PruningSchedulerStoreTest {
 
     val schedule1 = PruningSchedule(
       Cron.tryCreate("* /10 * * * ? *"),
-      PositiveSeconds.ofSeconds(1),
-      PositiveSeconds.ofSeconds(30),
+      PositiveSeconds.tryOfSeconds(1),
+      PositiveSeconds.tryOfSeconds(30),
     )
     val schedule2 = PruningSchedule(
       Cron.tryCreate("* * 7,19 * * ? *"),
-      PositiveSeconds.ofHours(8),
-      PositiveSeconds.ofDays(14),
+      PositiveSeconds.tryOfHours(8),
+      PositiveSeconds.tryOfDays(14),
     )
 
     assert(schedule1.cron != schedule2.cron)

@@ -27,8 +27,8 @@ class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest with TestMet
     val monitor =
       new ExecutionContextMonitor(
         loggerFactory,
-        NonNegativeFiniteDuration.ofSeconds(1),
-        NonNegativeFiniteDuration.ofSeconds(2),
+        NonNegativeFiniteDuration.tryOfSeconds(1),
+        NonNegativeFiniteDuration.tryOfSeconds(2),
         DefaultProcessingTimeouts.testing,
       )
     monitor.monitor(ec)

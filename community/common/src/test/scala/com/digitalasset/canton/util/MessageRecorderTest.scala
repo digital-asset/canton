@@ -36,6 +36,6 @@ class MessageRecorderTest extends BaseTestWordSpec with HasTempDirectory {
 }
 
 object MessageRecorderTest {
-  case class Data(i: Int)
-  case class Data2(s: String)
+  final case class Data(i: Int)
+  final case class Data2(s: String)
 }

@@ -8,8 +8,8 @@ import com.digitalasset.canton.data.ConfirmingParty
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedPayload
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{ConfirmationPolicy, LfContractId, LfGlobalKey, RequestId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -38,31 +38,8 @@ class ConfirmationResponseFactory(
       topologySnapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext, ec: ExecutionContext): Future[Seq[MediatorResponse]] = {
 
-    def logged[T <: TransactionError](err: T): T = {
-      err.logWithContext(Map("requestId" -> requestId.toString))
-      err
-    }
-
-    def malformed(msg: Malformed): Seq[MediatorResponse] = {
-      val malformedViewHashes = malformedPayloads.map(_.viewHash)
-      val parsedViewsHashes = transactionValidationResult.viewValidationResults.keys.toSeq
-
-      (malformedViewHashes ++ parsedViewsHashes).map { viewHash =>
-        checked(
-          MediatorResponse
-            .tryCreate(
-              requestId,
-              participantId,
-              Some(viewHash),
-              logged(msg),
-              None,
-              Set.empty,
-              domainId,
-              protocolVersion,
-            )
-        )
-      }
-    }
+    val wellformedViewHashes: Seq[ViewHash] =
+      transactionValidationResult.viewValidationResults.keys.toSeq
 
     def hostedConfirmingPartiesOfView(
         viewValidationResult: ViewValidationResult,
@@ -126,8 +103,9 @@ class ConfirmationResponseFactory(
         // The transaction would recreate existing contracts. Reject.
         Some(
           logged(
+            requestId,
             LocalReject.MalformedRejects.CreatesExistingContracts
-              .Reject(existing.toSeq.map(_.coid))(verdictProtocolVersion)
+              .Reject(existing.toSeq.map(_.coid))(verdictProtocolVersion),
           )
         )
       } else {
@@ -213,11 +191,12 @@ class ConfirmationResponseFactory(
 
             // Rejections due to a failed model conformance check
             val modelConformanceRejections =
-              transactionValidationResult.modelConformanceResult.swap.toOption.map(cause =>
+              transactionValidationResult.modelConformanceResultE.swap.toOption.map(cause =>
                 logged(
+                  requestId,
                   LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)(
                     verdictProtocolVersion
-                  )
+                  ),
                 )
               )
 
@@ -227,9 +206,10 @@ class ConfirmationResponseFactory(
                 .get(viewHash)
                 .map(err =>
                   logged(
-                    LocalReject.MalformedRejects.MalformedRequest.Reject(err.toString)(
+                    requestId,
+                    LocalReject.MalformedRejects.MalformedRequest.Reject(err)(
                       verdictProtocolVersion
-                    )
+                    ),
                   )
                 )
 
@@ -239,15 +219,16 @@ class ConfirmationResponseFactory(
                 .get(viewHash)
                 .map(cause =>
                   logged(
+                    requestId,
                     LocalReject.MalformedRejects.MalformedRequest.Reject(cause)(
                       verdictProtocolVersion
-                    )
+                    ),
                   )
                 )
 
             // Rejections due to a failed time validation
             val timeValidationRejections =
-              transactionValidationResult.timeValidationResult.swap.toOption.map {
+              transactionValidationResult.timeValidationResultE.swap.toOption.map {
                 case TimeValidator.LedgerTimeRecordTimeDeltaTooLargeError(
                       ledgerTime,
                       recordTime,
@@ -303,24 +284,64 @@ class ConfirmationResponseFactory(
           }
       }
 
-    if (malformedPayloads.nonEmpty)
+    if (malformedPayloads.nonEmpty) {
       Future.successful(
-        malformed(
-          LocalReject.MalformedRejects.Payloads
-            .Reject(malformedPayloads.toString)(verdictProtocolVersion)
+        createConfirmationResponsesForMalformedPayloads(
+          requestId,
+          malformedPayloads,
+          wellformedViewHashes,
         )
       )
-    else {
-      val confirmationPolicies = transactionValidationResult.confirmationPolicies
-      if (confirmationPolicies.sizeCompare(1) != 0)
-        Future.successful(
-          malformed(
-            LocalReject.MalformedRejects.MultipleConfirmationPolicies
-              .Reject(confirmationPolicies.toString)(verdictProtocolVersion)
+    } else {
+      responsesForWellformedPayloads(
+        transactionValidationResult,
+        transactionValidationResult.confirmationPolicy,
+      )
+    }
+  }
+
+  private def logged[T <: TransactionError](requestId: RequestId, err: T)(implicit
+      traceContext: TraceContext
+  ): T = {
+    err.logWithContext(Map("requestId" -> requestId.toString))
+    err
+  }
+
+  def createConfirmationResponsesForMalformedPayloads(
+      requestId: RequestId,
+      malformedPayloads: Seq[MalformedPayload],
+      wellformedViewHashes: Seq[ViewHash],
+  )(implicit traceContext: TraceContext): Seq[MediatorResponse] =
+    malformed(
+      requestId,
+      malformedPayloads,
+      wellformedViewHashes,
+      LocalReject.MalformedRejects.Payloads
+        .Reject(malformedPayloads.toString)(verdictProtocolVersion),
+    )
+
+  private def malformed(
+      requestId: RequestId,
+      malformedPayloads: Seq[MalformedPayload],
+      wellformedViewHashes: Seq[ViewHash],
+      msg: Malformed,
+  )(implicit traceContext: TraceContext): Seq[MediatorResponse] = {
+    val malformedViewHashes = malformedPayloads.map(_.viewHash)
+
+    (malformedViewHashes ++ wellformedViewHashes).map { viewHash =>
+      checked(
+        MediatorResponse
+          .tryCreate(
+            requestId,
+            participantId,
+            Some(viewHash),
+            logged(requestId, msg),
+            None,
+            Set.empty,
+            domainId,
+            protocolVersion,
           )
-        )
-      else
-        responsesForWellformedPayloads(transactionValidationResult, confirmationPolicies.head1)
+      )
     }
   }
 }

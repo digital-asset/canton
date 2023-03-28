@@ -32,11 +32,10 @@ class GrpcHealthReporter(override val loggerFactory: NamedLoggerFactory)
     */
   private def updateHealthManager(
       healthStatusManager: ServiceHealthStatusManager,
-      serviceHealth: ServiceHealth,
+      servingStatus: ServingStatus,
+      serviceHealth: HealthService,
   ): Unit = blocking {
     synchronized {
-      val servingStatus = serviceHealth.getState
-
       logger.debug(
         show"$serviceHealth in ${healthStatusManager.name} is ${servingStatus.name()}"
       )
@@ -78,8 +77,8 @@ class GrpcHealthReporter(override val loggerFactory: NamedLoggerFactory)
       healthStatusManager: ServiceHealthStatusManager
   ): Unit = {
     healthStatusManager.services.foreach(service =>
-      service.registerOnHealthChange((service: ServiceHealth, _: ServingStatus, _) => {
-        updateHealthManager(healthStatusManager, service)
+      service.registerOnHealthChange((service: HealthService, status: ServingStatus, _) => {
+        updateHealthManager(healthStatusManager, status, service)
       })
     )
   }

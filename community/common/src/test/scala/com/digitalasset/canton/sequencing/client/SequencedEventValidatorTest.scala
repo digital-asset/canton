@@ -4,6 +4,7 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.syntax.either.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.ExampleTransactionFactory
@@ -79,9 +80,11 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         List(
           ClosedEnvelope(
             serializedOverride.getOrElse(
-              EnvelopeContent(message, testedProtocolVersion).toByteString
+              EnvelopeContent.tryCreate(message, testedProtocolVersion).toByteString
             ),
             Recipients.cc(subscriberId),
+            Seq.empty,
+            testedProtocolVersion,
           )
         ),
         testedProtocolVersion,
@@ -93,7 +96,9 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       sig <- signatureOverride
         .map(Future.successful)
         .getOrElse(sign(deliver.getCryptographicEvidence, deliver.timestamp))
-    } yield OrdinarySequencedEvent(SignedContent(deliver, sig, None))(traceContext)
+    } yield OrdinarySequencedEvent(SignedContent(deliver, sig, None, testedProtocolVersion))(
+      traceContext
+    )
   }
 
   private def createEventWithCounterAndTs(
@@ -115,9 +120,9 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         customSerialization.getOrElse(event.getCryptographicEvidence),
         event.timestamp,
       )
-    } yield OrdinarySequencedEvent(SignedContent(event, signature, timestampOfSigningKey))(
-      traceContext
-    )
+    } yield OrdinarySequencedEvent(
+      SignedContent(event, signature, timestampOfSigningKey, testedProtocolVersion)
+    )(traceContext)
   }
 
   private def ts(offset: Int) = CantonTimestamp.Epoch.plusSeconds(offset.toLong)
@@ -149,10 +154,12 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       for {
         priorEvent <- createEvent()
         validator = mkValidator(priorEvent)
-        sig <- sign(priorEvent.signedEvent.getCryptographicEvidence, CantonTimestamp.Epoch)
+        sig <- sign(priorEvent.signedEvent.content.getCryptographicEvidence, CantonTimestamp.Epoch)
         _ = assert(sig != priorEvent.signedEvent.signature)
         eventWithNewSig =
-          priorEvent.copy(priorEvent.signedEvent.copy(signature = sig))(traceContext)
+          priorEvent.copy(priorEvent.signedEvent.copy(signatures = NonEmpty(Seq, sig)))(
+            traceContext
+          )
         _ <- validator
           .validateOnReconnect(eventWithNewSig)
           .valueOrFail("event with regenerated signature")

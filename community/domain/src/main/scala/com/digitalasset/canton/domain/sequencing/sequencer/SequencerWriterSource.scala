@@ -16,7 +16,6 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -28,7 +27,6 @@ import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
@@ -38,7 +36,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** A write we want to make to the db */
 sealed trait Write
 object Write {
-  case class Event(event: Presequenced[StoreEvent[PayloadId]]) extends Write
+  final case class Event(event: Presequenced[StoreEvent[PayloadId]]) extends Write
   case object KeepAlive extends Write
 }
 
@@ -54,16 +52,16 @@ sealed trait SequencedWrite extends HasTraceContext {
 }
 
 object SequencedWrite {
-  case class Event(event: Sequenced[PayloadId]) extends SequencedWrite {
+  final case class Event(event: Sequenced[PayloadId]) extends SequencedWrite {
     override lazy val timestamp: CantonTimestamp = event.timestamp
     override def traceContext: TraceContext = event.traceContext
   }
-  case class KeepAlive(override val timestamp: CantonTimestamp) extends SequencedWrite {
+  final case class KeepAlive(override val timestamp: CantonTimestamp) extends SequencedWrite {
     override def traceContext: TraceContext = TraceContext.empty
   }
 }
 
-case class BatchWritten(notifies: WriteNotification, latestTimestamp: CantonTimestamp)
+final case class BatchWritten(notifies: WriteNotification, latestTimestamp: CantonTimestamp)
 object BatchWritten {
 
   /** Assumes events are ordered by timestamp */
@@ -154,9 +152,7 @@ object SequencerWriterSource {
       writerConfig: SequencerWriterConfig,
       totalNodeCount: PositiveInt,
       keepAliveInterval: Option[NonNegativeFiniteDuration],
-      cryptoApi: DomainSyncCryptoClient,
       store: SequencerWriterStore,
-      protocolVersion: ProtocolVersion,
       clock: Clock,
       eventSignaller: EventSignaller,
       loggerFactory: NamedLoggerFactory,
@@ -184,7 +180,6 @@ object SequencerWriterSource {
 
     val eventGenerator = new SendEventGenerator(
       store,
-      protocolVersion,
       () => PayloadId(payloadIdGenerator.generateNext),
     )
 
@@ -225,7 +220,6 @@ object SequencerWriterSource {
           writerConfig,
           store,
           eventTimestampGenerator,
-          cryptoApi,
           loggerFactory,
         )
       )
@@ -247,7 +241,6 @@ object SequencerWriterSource {
 
 class SendEventGenerator(
     store: SequencerWriterStore,
-    protocolVersion: ProtocolVersion,
     payloadIdGenerator: () => PayloadId,
 )(implicit
     executionContext: ExecutionContext
@@ -320,7 +313,6 @@ object SequenceWritesFlow {
       writerConfig: SequencerWriterConfig,
       store: SequencerWriterStore,
       eventTimestampGenerator: PartitionedTimestampGenerator,
-      cryptoApi: DomainSyncCryptoClient,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): Flow[Write, Traced[BatchWritten], NotUsed] = {
     val logger = TracedLogger(WritePayloadsFlow.getClass, loggerFactory)
@@ -414,7 +406,7 @@ object SequenceWritesFlow {
           // we only need to check deliver events for payloads
           case presequencedDeliver @ Presequenced(deliver: DeliverStoreEvent[PayloadId], _) =>
             val payloadTs = deliver.payload.unwrap
-            val bound = writerConfig.payloadToEventMargin.unwrap
+            val bound = writerConfig.payloadToEventMargin.asJava
             val maxAllowableEventTime = payloadTs.add(bound)
 
             Either
@@ -445,7 +437,7 @@ object SequenceWritesFlow {
     Flow[Write]
       .groupedWithin(
         writerConfig.eventWriteBatchMaxSize,
-        writerConfig.eventWriteBatchMaxDuration.toScala,
+        writerConfig.eventWriteBatchMaxDuration.underlying,
       )
       .mapAsync(1)(sequenceWritesAndStoreEvents)
       .collect { case tew @ Traced(Some(ew)) => tew.map(_ => ew) }
@@ -510,7 +502,7 @@ object WritePayloadsFlow {
     Flow[Presequenced[StoreEvent[Payload]]]
       .groupedWithin(
         writerConfig.payloadWriteBatchMaxSize,
-        writerConfig.payloadWriteBatchMaxDuration.toScala,
+        writerConfig.payloadWriteBatchMaxDuration.underlying,
       )
       .mapAsyncUnordered(writerConfig.payloadWriteMaxConcurrency)(writePayloads(_))
       .mapConcat(identity)

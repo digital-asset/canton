@@ -11,7 +11,7 @@ import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder
   * The [[tracerProviderBuilder]] is the same one used to create the [[openTelemetry]] instance. We can use it to
   * piggy back on the already configured tracer provider and add resource attributes.
   */
-case class ConfiguredOpenTelemetry(
+final case class ConfiguredOpenTelemetry(
     openTelemetry: OpenTelemetrySdk,
     tracerProviderBuilder: SdkTracerProviderBuilder,
     onDemandMetricsReader: OnDemandMetricsReader,

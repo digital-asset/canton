@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.serialization
 
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.version.{
-  HasProtocolVersionedSerializerCompanion,
+  HasProtocolVersionedWrapperCompanion,
   ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
+import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -103,7 +103,10 @@ sealed case class MemoizedEvidenceSUT(b: Byte)(
   }
 }
 
-object MemoizedEvidenceSUT extends HasProtocolVersionedSerializerCompanion[MemoizedEvidenceSUT] {
+object MemoizedEvidenceSUT
+    extends HasProtocolVersionedWrapperCompanion[MemoizedEvidenceSUT, Nothing] {
+
+  override type Deserializer = Unit
 
   val name: String = "MemoizedEvidenceSUT"
 
@@ -130,6 +133,8 @@ object MemoizedEvidenceSUT extends HasProtocolVersionedSerializerCompanion[Memoi
 
     new MemoizedEvidenceSUT(bytes.byteAt(1))(defaultProtocolVersionRepresentative, Some(bytes))
   }
+
+  override protected def deserializationErrorK(error: ProtoDeserializationError): Unit = ()
 }
 
 class MemoizedEvidenceWithFailureTest

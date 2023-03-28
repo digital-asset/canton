@@ -40,7 +40,7 @@ object TransactionViewDecomposition {
     *
     * @throws java.lang.IllegalArgumentException if a subview has the same `informees` and `threshold`
     */
-  case class NewView(
+  final case class NewView(
       rootNode: LfActionNode,
       informees: Set[Informee],
       threshold: NonNegativeInt,
@@ -115,7 +115,7 @@ object TransactionViewDecomposition {
   }
 
   /** Encapsulates a node that belongs to core of some [[com.digitalasset.canton.data.TransactionViewDecomposition.NewView]]. */
-  case class SameView(
+  final case class SameView(
       lfNode: LfActionNode,
       override val nodeId: LfNodeId,
       override val rbContext: RollbackContext,

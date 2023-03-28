@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.util.TimeOfChange
   * @param timestamp ACS change timestamp
   * @param tieBreaker ordering tie-breaker for changes that have the same timestamp (currently, happens only with repair requests)
   */
-case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long) extends PrettyPrinting {
+final case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long) extends PrettyPrinting {
   override lazy val pretty: Pretty[RecordTime] = prettyOfClass(
     param("timestamp", _.timestamp),
     param("tieBreaker", _.tieBreaker),

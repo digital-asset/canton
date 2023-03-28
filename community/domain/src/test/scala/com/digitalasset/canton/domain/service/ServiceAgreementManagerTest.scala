@@ -29,7 +29,7 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
       val sam =
         ServiceAgreementManager.create(
           tmpf,
-          new MemoryStorage(loggerFactory),
+          new MemoryStorage(loggerFactory, timeouts),
           hasher,
           testedProtocolVersion,
           timeouts,
@@ -69,7 +69,7 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
       val sam =
         ServiceAgreementManager.create(
           File(file),
-          new MemoryStorage(loggerFactory),
+          new MemoryStorage(loggerFactory, timeouts),
           hasher,
           testedProtocolVersion,
           timeouts,

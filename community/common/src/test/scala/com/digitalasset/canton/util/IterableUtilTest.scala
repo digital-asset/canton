@@ -81,7 +81,7 @@ class IterableUtilTest extends AnyWordSpec with BaseTest {
 }
 
 object IterableUtilTest {
-  case class CompareOnlyFirst(first: Int, second: Int) extends Ordered[CompareOnlyFirst] {
+  final case class CompareOnlyFirst(first: Int, second: Int) extends Ordered[CompareOnlyFirst] {
     override def compare(that: CompareOnlyFirst): Int = first.compareTo(that.first)
   }
 }

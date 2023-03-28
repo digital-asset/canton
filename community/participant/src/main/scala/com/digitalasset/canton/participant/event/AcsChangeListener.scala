@@ -27,7 +27,7 @@ trait AcsChangeListener {
   *
   * Note that we include both the LfContractId (for uniqueness) and the LfHash (reflecting contract content).
   */
-case class AcsChange(
+final case class AcsChange(
     activations: Map[LfContractId, WithContractHash[ContractMetadata]],
     deactivations: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
 )

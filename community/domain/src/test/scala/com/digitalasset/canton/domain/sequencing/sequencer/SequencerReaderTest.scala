@@ -33,7 +33,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   MessageId,
   Recipients,
 }
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   Member,
@@ -43,7 +42,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.{BaseTest, DiscardOps, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, DiscardOps, SequencerCounter, config}
 import com.google.protobuf.ByteString
 import org.mockito.Mockito
 import org.scalatest.wordspec.FixtureAsyncWordSpec
@@ -111,7 +110,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     val testConfig =
       CommunitySequencerReaderConfig(
         readBatchSize = 10,
-        checkpointInterval = NonNegativeFiniteDuration.ofMillis(800),
+        checkpointInterval = config.NonNegativeFiniteDuration.ofMillis(800),
       )
     val eventSignaller = new ManualEventSignaller()
     val reader = new SequencerReader(
@@ -433,7 +432,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           // read a bunch of items
           readEvents <- MonadUtil.sequentialTraverse(1L to 20L)(_ => pullFromQueue(queue))
           // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
-          _ <- waitFor(testConfig.checkpointInterval.toScala * 6)
+          _ <- waitFor(testConfig.checkpointInterval.underlying * 6)
           checkpointsWritten = saveCounterCheckpointCallCount
           stop = System.nanoTime()
           // close the queue before we make any assertions
@@ -606,7 +605,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           )
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob)),
+            ClosedEnvelope(
+              ByteString.copyFromUtf8("test envelope"),
+              Recipients.cc(alice, bob),
+              Seq.empty,
+              testedProtocolVersion,
+            ),
           )
 
           delivers = testData.map { case (sequenceTs, signingTs) =>
@@ -626,7 +630,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         } yield (signingTolerance, batch, delivers)
       }
 
-      case class DeliveredEventToCheck[A](
+      final case class DeliveredEventToCheck[A](
           delivered: A,
           sequencingTimestamp: CantonTimestamp,
           messageId: MessageId,
@@ -771,7 +775,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           ) ++ (2L to 40L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob)),
+            ClosedEnvelope(
+              ByteString.copyFromUtf8("test envelope"),
+              Recipients.cc(alice, bob),
+              Seq.empty,
+              testedProtocolVersion,
+            ),
           )
 
           delivers = testData.map { case (sequenceTs, signingTsO, recipients) =>
@@ -793,7 +802,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           // read a bunch of items
           readEvents <- MonadUtil.sequentialTraverse(1L to 40L)(_ => pullFromQueue(queue))
           // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
-          _ <- waitFor(testConfig.checkpointInterval.toScala * 3)
+          _ <- waitFor(testConfig.checkpointInterval.underlying * 3)
           // close the queue before we make any assertions
           _ = queue.cancel()
           lastEventRead = readEvents.lastOption.value.value

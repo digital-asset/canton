@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.engine.Blinding
+import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors.{

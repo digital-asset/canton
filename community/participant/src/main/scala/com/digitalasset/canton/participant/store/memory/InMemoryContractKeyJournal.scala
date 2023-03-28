@@ -108,7 +108,7 @@ object InMemoryContractKeyJournal {
   private type ChangeJournal = SortedMap[TimeOfChange, Status]
 
   // Invariant: All values in the change journal are non-negative.
-  case class KeyStatus private (changes: ChangeJournal) {
+  final case class KeyStatus private (changes: ChangeJournal) {
 
     def latest: Option[ContractKeyState] = changes.headOption.map { case (toc, status) =>
       ContractKeyState(status, toc)

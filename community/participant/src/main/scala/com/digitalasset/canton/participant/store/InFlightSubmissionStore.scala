@@ -25,7 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Backing store for [[com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker]].
   *
   * An in-flight submission is uniquely identified by its
-  * [[com.daml.ledger.participant.state.v2.ChangeId]].
+  * [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]].
   * [[com.digitalasset.canton.sequencing.protocol.MessageId]]s should be unique too,
   * but this is not enforced by the store.
   *
@@ -36,7 +36,7 @@ import scala.concurrent.{ExecutionContext, Future}
 trait InFlightSubmissionStore extends AutoCloseable {
 
   /** Retrieves the in-flight submission for the given
-    * [[com.daml.ledger.participant.state.v2.ChangeId]] if one exists.
+    * [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]] if one exists.
     */
   def lookup(changeIdHash: ChangeIdHash)(implicit
       traceContext: TraceContext
@@ -161,7 +161,7 @@ object InFlightSubmissionStore {
   }
 
   /** Identifies an in-flight submission via the [[com.digitalasset.canton.sequencing.protocol.MessageId]] */
-  case class InFlightByMessageId(override val domainId: DomainId, messageId: MessageId)
+  final case class InFlightByMessageId(override val domainId: DomainId, messageId: MessageId)
       extends InFlightReference {
     override def toEither: Either[InFlightByMessageId, InFlightBySequencingInfo] = Left(this)
 
@@ -174,7 +174,7 @@ object InFlightSubmissionStore {
   /** Identifies an in-flight submission via the
     * [[com.digitalasset.canton.participant.protocol.submission.SequencedSubmission]]
     */
-  case class InFlightBySequencingInfo(
+  final case class InFlightBySequencingInfo(
       override val domainId: DomainId,
       sequenced: SequencedSubmission,
   ) extends InFlightReference {

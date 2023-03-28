@@ -44,6 +44,7 @@ import com.digitalasset.canton.protocol.messages.{
   CommitmentPeriod,
   DefaultOpenEnvelope,
   SignedProtocolMessage,
+  TypedSignedProtocolMessageContent,
 }
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -58,7 +59,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
 
-import java.time.{Duration as JDuration}
+import java.time.Duration as JDuration
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import scala.annotation.nowarn
@@ -72,7 +73,7 @@ sealed trait AcsCommitmentProcessorBaseTest
     extends BaseTest
     with SortedReconciliationIntervalsHelpers {
 
-  protected val interval = PositiveSeconds.ofSeconds(5)
+  protected val interval = PositiveSeconds.tryOfSeconds(5)
   protected val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::da"))
   protected val localId = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain")
@@ -250,7 +251,10 @@ sealed trait AcsCommitmentProcessorBaseTest
   val coid = (txId, discriminator) => ExampleTransactionFactory.suffixedId(txId, discriminator)
 }
 
-class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcessorBaseTest {
+class AcsCommitmentProcessorTest
+    extends AsyncWordSpec
+    with AcsCommitmentProcessorBaseTest
+    with ProtocolVersionChecksAsyncWordSpec {
   // This is duplicating the internal logic of the commitment computation, but I don't have a better solution at the moment
   // if we want to test whether commitment buffering works
   // Also assumes that all the contract IDs in the list have the same stakeholders
@@ -287,7 +291,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
 
   "AcsCommitmentProcessor.safeToPrune" must {
     "compute timestamp with no clean replay timestamp (no noOutstandingCommitment tick known)" in {
-      val longInterval = PositiveSeconds.ofDays(100)
+      val longInterval = PositiveSeconds.tryOfDays(100)
       for {
         res <- AcsCommitmentProcessor.safeToPrune_(
           cleanReplayF = Future.successful(CantonTimestamp.MinValue),
@@ -301,7 +305,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     }
 
     "compute safeToPrune timestamp with no clean replay timestamp" in {
-      val longInterval = PositiveSeconds.ofDays(100)
+      val longInterval = PositiveSeconds.tryOfDays(100)
       for {
         res <- AcsCommitmentProcessor.safeToPrune_(
           cleanReplayF = Future.successful(CantonTimestamp.MinValue),
@@ -316,7 +320,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     }
 
     "take checkForOutstandingCommitments flag into account" in {
-      val longInterval = PositiveSeconds.ofDays(100)
+      val longInterval = PositiveSeconds.tryOfDays(100)
       val now = CantonTimestamp.now()
 
       val sortedReconciliationIntervalsProvider =
@@ -506,7 +510,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         delivered = remote.map(cmt =>
           (
             cmt.message.period.toInclusive.plusSeconds(1),
-            List(OpenEnvelope(cmt, Recipients.cc(localId), testedProtocolVersion)),
+            List(OpenEnvelope(cmt, Recipients.cc(localId))(testedProtocolVersion)),
           )
         )
         // First ask for the remote commitments to be processed, and then compute locally
@@ -539,9 +543,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
      This test is disabled for protocol versions for which the reconciliation interval is
      static because the described setting cannot occur.
      */
-    if (testedProtocolVersion >= ProtocolVersion.v4) {
-      "work when commitment tick falls between two participants connection to the domain" in {
-        /*
+    "work when commitment tick falls between two participants connection to the domain" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
+      /*
         The goal here is to check that ACS commitment processing works even when
         a commitment tick falls between two participants' connection timepoints to the domain.
         The reason this scenario is important is because the reconciliation interval (and
@@ -559,89 +562,90 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         At t=13, we check that:
         - Nothing is outstanding at LP
         - Computed and received commitments are correct
-         */
+       */
 
-        interval shouldBe PositiveSeconds.ofSeconds(5)
+      interval shouldBe PositiveSeconds.tryOfSeconds(5)
 
-        val timeProofs = List[Long](9, 13).map(CantonTimestamp.ofEpochSecond)
-        val contractSetup = Map(
-          // contract ID to stakeholders, creation and archival time
-          (coid(0, 0), (Set(alice, bob), toc(8), toc(12)))
-        )
+      val timeProofs = List[Long](9, 13).map(CantonTimestamp.ofEpochSecond)
+      val contractSetup = Map(
+        // contract ID to stakeholders, creation and archival time
+        (coid(0, 0), (Set(alice, bob), toc(8), toc(12)))
+      )
 
-        val topology = Map(
-          localId -> Set(alice),
-          remoteId1 -> Set(bob),
-        )
+      val topology = Map(
+        localId -> Set(alice),
+        remoteId1 -> Set(bob),
+      )
 
-        val sortedReconciliationIntervalsProvider = constantSortedReconciliationIntervalsProvider(
-          interval,
-          domainBootstrappingTime = CantonTimestamp.ofEpochSecond(6),
-        )
+      val sortedReconciliationIntervalsProvider = constantSortedReconciliationIntervalsProvider(
+        interval,
+        domainBootstrappingTime = CantonTimestamp.ofEpochSecond(6),
+      )
 
-        val (processor, store, _) = testSetup(
-          timeProofs,
-          contractSetup,
-          topology,
-          overrideDefaultSortedReconciliationIntervalsProvider =
-            Some(sortedReconciliationIntervalsProvider),
-        )
+      val (processor, store, _) = testSetup(
+        timeProofs,
+        contractSetup,
+        topology,
+        overrideDefaultSortedReconciliationIntervalsProvider =
+          Some(sortedReconciliationIntervalsProvider),
+      )
 
-        val remoteCommitments = List((remoteId1, List(coid(0, 0)), ts(5), ts(10)))
+      val remoteCommitments = List((remoteId1, List(coid(0, 0)), ts(5), ts(10)))
 
-        for {
-          remote <- remoteCommitments.parTraverse(commitmentMsg)
-          delivered = remote.map(cmt =>
-            (
-              cmt.message.period.toInclusive.plusSeconds(1),
-              List(OpenEnvelope(cmt, Recipients.cc(localId), testedProtocolVersion)),
-            )
+      for {
+        remote <- remoteCommitments.parTraverse(commitmentMsg)
+        delivered = remote.map(cmt =>
+          (
+            cmt.message.period.toInclusive.plusSeconds(1),
+            List(OpenEnvelope(cmt, Recipients.cc(localId))(testedProtocolVersion)),
           )
-          // First ask for the remote commitments to be processed, and then compute locally
-          _ <- delivered
-            .parTraverse_ { case (ts, batch) =>
-              processor.processBatchInternal(ts.forgetRefinement, batch)
-            }
-            .onShutdown(fail())
-
-          _ <- processor.queue.flush()
-
-          computed <- store.searchComputedBetween(
-            CantonTimestamp.Epoch,
-            timeProofs.lastOption.value,
-          )
-          received <- store.searchReceivedBetween(
-            CantonTimestamp.Epoch,
-            timeProofs.lastOption.value,
-          )
-          outstanding <- store.outstanding(
-            CantonTimestamp.MinValue,
-            timeProofs.lastOption.value,
-            None,
-          )
-        } yield {
-          computed.size shouldBe 1
-          inside(computed.headOption.value) { case (commitmentPeriod, participantId, _) =>
-            commitmentPeriod shouldBe CommitmentPeriod
-              .create(CantonTimestampSecond.MinValue, ts(10))
-              .value
-            participantId shouldBe remoteId1
+        )
+        // First ask for the remote commitments to be processed, and then compute locally
+        _ <- delivered
+          .parTraverse_ { case (ts, batch) =>
+            processor.processBatchInternal(ts.forgetRefinement, batch)
           }
+          .onShutdown(fail())
 
-          received.size shouldBe 1
+        _ <- processor.queue.flush()
 
-          inside(received.headOption.value) {
-            case SignedProtocolMessage(
-                  AcsCommitment(_, sender, counterParticipant, period, _),
-                  _,
-                ) =>
-              sender shouldBe remoteId1
-              counterParticipant shouldBe localId
-              period shouldBe CommitmentPeriod.create(ts(5), ts(10)).value
-          }
-
-          outstanding shouldBe empty
+        computed <- store.searchComputedBetween(
+          CantonTimestamp.Epoch,
+          timeProofs.lastOption.value,
+        )
+        received <- store.searchReceivedBetween(
+          CantonTimestamp.Epoch,
+          timeProofs.lastOption.value,
+        )
+        outstanding <- store.outstanding(
+          CantonTimestamp.MinValue,
+          timeProofs.lastOption.value,
+          None,
+        )
+      } yield {
+        computed.size shouldBe 1
+        inside(computed.headOption.value) { case (commitmentPeriod, participantId, _) =>
+          commitmentPeriod shouldBe CommitmentPeriod
+            .create(CantonTimestampSecond.MinValue, ts(10))
+            .value
+          participantId shouldBe remoteId1
         }
+
+        received.size shouldBe 1
+
+        inside(received.headOption.value) {
+          case SignedProtocolMessage(
+                TypedSignedProtocolMessageContent(
+                  AcsCommitment(_, sender, counterParticipant, period, _)
+                ),
+                _,
+              ) =>
+            sender shouldBe remoteId1
+            counterParticipant shouldBe localId
+            period shouldBe CommitmentPeriod.create(ts(5), ts(10)).value
+        }
+
+        outstanding shouldBe empty
       }
     }
 
@@ -716,7 +720,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     }
 
     "prevent pruning of requests needed for crash recovery" in {
-      val reconciliationInterval = PositiveSeconds.ofSeconds(1)
+      val reconciliationInterval = PositiveSeconds.tryOfSeconds(1)
       val requestTsDelta = 20.seconds
 
       val acsCommitmentStore = mock[AcsCommitmentStore]
@@ -798,7 +802,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     }
 
     "prevent pruning of the last request known to be clean" in {
-      val reconciliationInterval = PositiveSeconds.ofSeconds(1)
+      val reconciliationInterval = PositiveSeconds.tryOfSeconds(1)
       val requestTsDelta = 20.seconds
 
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
@@ -850,7 +854,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     }
 
     "prevent pruning of dirty sequencer counters" in {
-      val reconciliationInterval = PositiveSeconds.ofSeconds(1)
+      val reconciliationInterval = PositiveSeconds.tryOfSeconds(1)
       val requestTsDelta = 20.seconds
 
       val sortedReconciliationIntervalsProvider =
@@ -896,7 +900,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     }
 
     "prevent pruning of events corresponding to in-flight requests" in {
-      val reconciliationInterval = PositiveSeconds.ofSeconds(1)
+      val reconciliationInterval = PositiveSeconds.tryOfSeconds(1)
       val requestTsDelta = 20.seconds
 
       val changeId1 = mkChangeIdHash(1)

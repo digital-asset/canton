@@ -15,7 +15,7 @@ trait InitializeMediatorResponse {
 }
 
 object InitializeMediatorResponse {
-  case class Success(mediatorKey: SigningPublicKey) extends InitializeMediatorResponse {
+  final case class Success(mediatorKey: SigningPublicKey) extends InitializeMediatorResponse {
     override def toProtoV0: v0.InitializeMediatorResponse =
       v0.InitializeMediatorResponse(
         v0.InitializeMediatorResponse.Value.Success(
@@ -28,7 +28,7 @@ object InitializeMediatorResponse {
     override def toEither: Either[String, SigningPublicKey] = Right(mediatorKey)
   }
 
-  case class Failure(reason: String) extends InitializeMediatorResponse {
+  final case class Failure(reason: String) extends InitializeMediatorResponse {
     override def toProtoV0: v0.InitializeMediatorResponse =
       v0.InitializeMediatorResponse(
         v0.InitializeMediatorResponse.Value.Failure(

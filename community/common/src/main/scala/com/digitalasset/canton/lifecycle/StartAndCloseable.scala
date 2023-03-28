@@ -65,5 +65,5 @@ trait StartAndCloseable[A] extends FlagCloseableAsync {
 }
 
 object StartAndCloseable {
-  case class StartAfterClose() extends RuntimeException
+  final case class StartAfterClose() extends RuntimeException
 }

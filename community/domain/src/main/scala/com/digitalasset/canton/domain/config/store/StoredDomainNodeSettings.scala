@@ -5,4 +5,4 @@ package com.digitalasset.canton.domain.config.store
 
 import com.digitalasset.canton.protocol.StaticDomainParameters
 
-case class StoredDomainNodeSettings(staticDomainParameters: StaticDomainParameters)
+final case class StoredDomainNodeSettings(staticDomainParameters: StaticDomainParameters)

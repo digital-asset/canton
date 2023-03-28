@@ -128,7 +128,7 @@ object ContractKeyJournal {
     def asThrowable: Throwable
   }
 
-  case class InconsistentKeyAllocationStatus(
+  final case class InconsistentKeyAllocationStatus(
       key: LfGlobalKey,
       toc: TimeOfChange,
       oldStatus: Status,

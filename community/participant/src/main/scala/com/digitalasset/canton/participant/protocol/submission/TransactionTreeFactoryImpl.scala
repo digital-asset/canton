@@ -8,12 +8,12 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
-import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
@@ -246,7 +246,7 @@ abstract class TransactionTreeFactoryImpl(
     }
   }
 
-  override def saltsFromView(view: TransactionViewTree): Iterable[Salt] = {
+  override def saltsFromView(view: TransactionView): Iterable[Salt] = {
     val salts = Iterable.newBuilder[Salt]
 
     def addSaltsFrom(subview: TransactionView): Unit = {
@@ -267,7 +267,7 @@ abstract class TransactionTreeFactoryImpl(
         go(subview.subviews.unblindedElements ++ toVisit)
     }
 
-    go(Seq(view.view))
+    go(Seq(view))
 
     salts.result()
   }

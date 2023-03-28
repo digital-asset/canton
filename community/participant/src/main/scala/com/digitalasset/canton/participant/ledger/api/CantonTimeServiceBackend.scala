@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import com.daml.platform.apiserver.TimeServiceBackend
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.platform.apiserver.TimeServiceBackend
 import com.digitalasset.canton.time.{Clock, TestingTimeService}
 import com.digitalasset.canton.tracing.NoTracing
 

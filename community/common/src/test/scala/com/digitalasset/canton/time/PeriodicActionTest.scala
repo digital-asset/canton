@@ -13,7 +13,7 @@ import scala.concurrent.Future
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 class PeriodicActionTest extends AsyncWordSpec with BaseTest with HasExecutionContext {
 
-  private val interval = NonNegativeFiniteDuration.ofSeconds(5)
+  private val interval = NonNegativeFiniteDuration.tryOfSeconds(5)
   private val result = Future.successful(())
 
   class Env() {

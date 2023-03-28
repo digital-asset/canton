@@ -5,31 +5,13 @@ package com.digitalasset.canton.participant.config
 
 import cats.syntax.option.*
 import com.daml.jwt.JwtTimestampLeeway
-import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
-import com.daml.platform.apiserver.SeedService.Seeding
-import com.daml.platform.apiserver.configuration.RateLimitingConfig
-import com.daml.platform.apiserver.ApiServerConfig as DamlApiServerConfig
-import com.daml.platform.configuration.{
-  AcsStreamsConfig as LedgerAcsStreamsConfig,
-  CommandConfiguration,
-  IndexServiceConfig as LedgerIndexServiceConfig,
-  TransactionFlatStreamsConfig as LedgerTransactionFlatStreamsConfig,
-  TransactionTreeStreamsConfig as LedgerTransactionTreeStreamsConfig,
-}
-import com.daml.platform.indexer.ha.HaConfig
-import com.daml.platform.indexer.{
-  IndexerConfig as DamlIndexerConfig,
-  IndexerStartupMode,
-  PackageMetadataViewConfig,
-}
-import com.daml.platform.localstore.UserManagementConfig
-import com.daml.platform.store.DbSupport.DataSourceProperties as DamlDataSourceProperties
-import com.daml.platform.store.backend.postgresql.PostgresDataSourceConfig as DamlPostgresDataSourceConfig
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
+import com.digitalasset.canton.config.NonNegativeFiniteDuration.*
 import com.digitalasset.canton.config.RequireTypes.*
-import com.digitalasset.canton.config.*
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, *}
+import com.digitalasset.canton.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -41,8 +23,26 @@ import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton
   SynchronousCommitValue,
 }
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
+import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
+import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
+import com.digitalasset.canton.platform.apiserver.ApiServerConfig as DamlApiServerConfig
+import com.digitalasset.canton.platform.configuration.{
+  AcsStreamsConfig as LedgerAcsStreamsConfig,
+  CommandConfiguration,
+  IndexServiceConfig as LedgerIndexServiceConfig,
+  TransactionFlatStreamsConfig as LedgerTransactionFlatStreamsConfig,
+  TransactionTreeStreamsConfig as LedgerTransactionTreeStreamsConfig,
+}
+import com.digitalasset.canton.platform.indexer.ha.HaConfig
+import com.digitalasset.canton.platform.indexer.{
+  IndexerConfig as DamlIndexerConfig,
+  IndexerStartupMode,
+  PackageMetadataViewConfig,
+}
+import com.digitalasset.canton.platform.localstore.UserManagementConfig
+import com.digitalasset.canton.platform.store.DbSupport.DataSourceProperties as DamlDataSourceProperties
+import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig as DamlPostgresDataSourceConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import com.digitalasset.canton.{DiscardOps, config}
 import io.netty.handler.ssl.{ClientAuth, SslContext}
@@ -135,7 +135,7 @@ object PartyNotificationConfig {
   case object ViaDomain extends PartyNotificationConfig
 }
 
-case class ParticipantProtocolConfig(
+final case class ParticipantProtocolConfig(
     minimumProtocolVersion: Option[ProtocolVersion],
     override val devVersionSupport: Boolean,
     override val dontWarnOnDeprecatedPV: Boolean,
@@ -150,7 +150,7 @@ case class ParticipantProtocolConfig(
   * Please also note that the participant will refuse to connect to a domain where its max inbound message size is not
   * sufficient to guarantee the processing of all transactions.
   */
-case class CommunityParticipantConfig(
+final case class CommunityParticipantConfig(
     override val init: ParticipantInitConfig = ParticipantInitConfig(),
     override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
     override val ledgerApi: LedgerApiServerConfig = LedgerApiServerConfig(),
@@ -187,7 +187,7 @@ case class CommunityParticipantConfig(
   * @param ledgerApi the configuration to connect the console to the remote ledger api
   * @param token optional bearer token to use on the ledger-api if jwt authorization is enabled
   */
-case class RemoteParticipantConfig(
+final case class RemoteParticipantConfig(
     adminApi: ClientConfig,
     ledgerApi: ClientConfig,
     token: Option[String] = None,
@@ -231,7 +231,7 @@ case class RemoteParticipantConfig(
   * @param explicitDisclosureUnsafe enable usage of explicitly disclosed contracts in command submission and transaction validation.
   *                                 This feature is deemed unstable and unsafe. Should NOT be enabled in production!
   */
-case class LedgerApiServerConfig(
+final case class LedgerApiServerConfig(
     address: String = "127.0.0.1",
     internalPort: Option[Port] = None,
     maxEventCacheWeight: Long = 0L,
@@ -305,7 +305,7 @@ object LedgerApiServerConfig {
     NonNegativeFiniteDuration.ofSeconds(5)
   private val DefaultInMemoryStateUpdaterParallelism: Int = 2
   private val DefaultPreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
-    NonNegativeFiniteDuration(LedgerIndexServiceConfig.PreparePackageMetadataTimeOutWarning.toJava)
+    NonNegativeFiniteDuration(LedgerIndexServiceConfig.PreparePackageMetadataTimeOutWarning)
   val DefaultRateLimit: RateLimitingConfig =
     RateLimitingConfig.Default.copy(
       maxApiServicesQueueSize = 20000,
@@ -527,7 +527,7 @@ object LedgerApiServerConfig {
   *
   * Note _completenessCheck performed in LedgerApiServerConfig above
   */
-case class ActiveContractsServiceConfig(
+final case class ActiveContractsServiceConfig(
     maxWorkingMemoryInBytesForIdPages: Int =
       LedgerAcsStreamsConfig.default.maxWorkingMemoryInBytesForIdPages,
     maxIdsPerIdPage: Int = LedgerAcsStreamsConfig.default.maxIdsPerIdPage,
@@ -574,7 +574,7 @@ object ActiveContractsServiceConfig {
   * @param maxParallelPayloadQueries          Upper bound on the number of parallel queries that fetch payloads. Per single stream.
   * @param transactionsProcessingParallelism  Number of transactions to process in parallel. Per single stream.
   */
-case class FlatTransactionStreamsConfig(
+final case class FlatTransactionStreamsConfig(
     maxIdsPerIdPage: Int = LedgerTransactionFlatStreamsConfig.default.maxIdsPerIdPage,
     maxPagesPerIdPagesBuffer: Int =
       LedgerTransactionFlatStreamsConfig.default.maxPagesPerIdPagesBuffer,
@@ -611,7 +611,7 @@ case class FlatTransactionStreamsConfig(
   * @param maxParallelPayloadQueries              Upper bound on the number of parallel queries that fetch payloads. Per single stream.
   * @param transactionsProcessingParallelism      Number of transactions to process in parallel. Per single stream.
   */
-case class TreeTransactionStreamsConfig(
+final case class TreeTransactionStreamsConfig(
     maxIdsPerIdPage: Int = LedgerTransactionTreeStreamsConfig.default.maxIdsPerIdPage,
     maxPagesPerIdPagesBuffer: Int =
       LedgerTransactionTreeStreamsConfig.default.maxPagesPerIdPagesBuffer,
@@ -643,7 +643,7 @@ case class TreeTransactionStreamsConfig(
   * @param inputBufferSize        maximum number of commands queued for submission for each distinct set of parties
   * @param maxCommandsInFlight    maximum number of submitted commands waiting to be completed for each distinct set of parties
   */
-case class CommandServiceConfig(
+final case class CommandServiceConfig(
     trackerRetentionPeriod: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
       CommandConfiguration.Default.trackerRetentionPeriod
     ),
@@ -687,7 +687,7 @@ object CommandServiceConfig {
   * @param maxRightsPerUser               maximum number of rights per user
   * @param maxUsersPageSize               maximum number of users returned
   */
-case class UserManagementServiceConfig(
+final case class UserManagementServiceConfig(
     enabled: Boolean = true,
     maxCacheSize: Int = UserManagementConfig.DefaultMaxCacheSize,
     cacheExpiryAfterWriteInSeconds: Int =
@@ -786,9 +786,9 @@ object PostgresDataSourceConfigCanton {
 
 /** Ledger api indexer specific configurations
   *
-  * See com.daml.platform.indexer.JdbcIndexer for semantics on these configurations.
+  * See com.digitalasset.canton.platform.indexer.JdbcIndexer for semantics on these configurations.
   */
-case class IndexerConfig(
+final case class IndexerConfig(
     restartDelay: NonNegativeFiniteDuration = IndexerConfig.DefaultRestartDelay,
     maxInputBufferSize: NonNegativeInt =
       NonNegativeInt.tryCreate(DamlIndexerConfig.DefaultMaxInputBufferSize),
@@ -922,7 +922,7 @@ object TestingTimeServiceConfig {
   * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
   * @param excludeInfrastructureTransactions If set, infrastructure transactions (i.e. ping, bong and dar distribution) will be excluded from participant metering.
   */
-case class ParticipantNodeParameterConfig(
+final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
     partyChangeNotification: PartyNotificationConfig = PartyNotificationConfig.ViaDomain,
     maxUnzippedDarSize: Int = 1024 * 1024 * 1024,
@@ -962,11 +962,11 @@ case class ParticipantNodeParameterConfig(
   *                                  below the reconciliation interval doesn't not increase the frequency further.
   * @param dbBatchAggregationConfig Batching configuration for Db queries
   */
-case class ParticipantStoreConfig(
+final case class ParticipantStoreConfig(
     maxItemsInSqlClause: PositiveNumeric[Int] = PositiveNumeric.tryCreate(100),
     maxPruningBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(1000),
     ledgerApiPruningBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(50000),
-    pruningMetricUpdateInterval: Option[config.PositiveDurationSeconds] =
+    pruningMetricUpdateInterval: Option[PositiveDurationSeconds] =
       config.PositiveDurationSeconds.ofHours(1L).some,
     acsPruningInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(60),
     dbBatchAggregationConfig: BatchAggregatorConfig = BatchAggregatorConfig.Batching(),
@@ -979,7 +979,7 @@ case class ParticipantStoreConfig(
   * @param indexer            parameters how the participant populates the index db used to serve the ledger api
   * @param jwtTimestampLeeway leeway parameters for JWTs
   */
-case class LedgerApiServerParametersConfig(
+final case class LedgerApiServerParametersConfig(
     contractIdSeeding: Seeding = Seeding.Strong,
     indexer: IndexerConfig = IndexerConfig(),
     jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,

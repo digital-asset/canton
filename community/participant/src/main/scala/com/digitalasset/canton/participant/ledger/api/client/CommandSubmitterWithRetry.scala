@@ -9,10 +9,10 @@ import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Keep, MergePreferred, Si
 import akka.stream.{FlowShape, KillSwitches, Materializer, OverflowStrategy}
 import com.daml.ledger.api.v1.commands.Commands
 import com.daml.ledger.api.v1.completion.Completion
-import com.daml.ledger.client.services.commands.CommandSubmission
 import com.daml.util.Ctx
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error
+import com.digitalasset.canton.ledger.client.services.commands.CommandSubmission
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -124,19 +124,23 @@ class CommandSubmitterWithRetry(
 object CommandSubmitterWithRetry {
   sealed trait CommandResult extends PrettyPrinting
 
-  case class Success(completion: Completion) extends CommandResult {
+  final case class Success(completion: Completion) extends CommandResult {
     override def pretty: Pretty[Success.this.type] = prettyOfClass(unnamedParam(_.completion))
   }
 
-  case class Failed(completion: Completion) extends CommandResult {
+  final case class Failed(completion: Completion) extends CommandResult {
     override def pretty: Pretty[Failed] = prettyOfClass(unnamedParam(_.completion))
   }
 
-  case class MaxRetriesReached(completion: Completion) extends CommandResult {
+  final case class MaxRetriesReached(completion: Completion) extends CommandResult {
     override def pretty: Pretty[MaxRetriesReached] = prettyOfClass(unnamedParam(_.completion))
   }
 
-  case class CommandsCtx(commands: Commands, promise: Promise[CommandResult], retries: Int = 0)
+  final case class CommandsCtx(
+      commands: Commands,
+      promise: Promise[CommandResult],
+      retries: Int = 0,
+  )
 
   def retryCommandFlow(
       maxRetries: Int,

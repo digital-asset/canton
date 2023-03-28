@@ -5,7 +5,6 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
-import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.daml.lf.transaction.Versioned
@@ -28,6 +27,7 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.{
 }
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{

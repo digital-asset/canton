@@ -14,7 +14,7 @@ import scala.concurrent.Future
 /** @param packageId         the unique identifier for the package
   * @param sourceDescription an informal human readable description of what the package contains
   */
-case class PackageDescription(packageId: LfPackageId, sourceDescription: String256M)
+final case class PackageDescription(packageId: LfPackageId, sourceDescription: String256M)
 
 object PackageDescription {
 

@@ -56,7 +56,7 @@ object TestSubscriptionError {
     }
 }
 
-case class TestHandlerError(message: String)
+final case class TestHandlerError(message: String)
 
 class ResilientSequencerSubscriptionTest
     extends AsyncWordSpec
@@ -435,7 +435,7 @@ trait ResilientSequencerSubscriptionTestUtils {
         sc: Long
     ): SignedContent[SequencedEvent[ClosedEnvelope]] = {
       val deliver = SequencerTestUtils.mockDeliver(sc)
-      SignedContent(deliver, SymbolicCrypto.emptySignature, None)
+      SignedContent(deliver, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
     }
   }
 

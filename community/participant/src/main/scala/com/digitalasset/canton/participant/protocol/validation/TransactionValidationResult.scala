@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.SubmitterMetadata
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
@@ -16,15 +15,18 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfPartyId, WorkflowId}
 
 // TODO(M40): Push model conformance down to individual views, not just for the transaction as a whole
-case class TransactionValidationResult(
+final case class TransactionValidationResult(
     transactionId: TransactionId,
-    confirmationPolicies: NonEmpty[Set[ConfirmationPolicy]],
-    submitterMetadata: Option[SubmitterMetadata],
-    workflowId: Option[WorkflowId],
-    contractConsistencyResult: Either[List[ReferenceToFutureContractError], Unit],
+    confirmationPolicy: ConfirmationPolicy,
+    submitterMetadataO: Option[SubmitterMetadata],
+    workflowIdO: Option[WorkflowId],
+    contractConsistencyResultE: Either[List[ReferenceToFutureContractError], Unit],
     authenticationResult: Map[ViewHash, String],
     authorizationResult: Map[ViewHash, String],
-    modelConformanceResult: Either[ModelConformanceChecker.Error, ModelConformanceChecker.Result],
+    modelConformanceResultE: Either[
+      ModelConformanceChecker.ErrorWithSubviewsCheck,
+      ModelConformanceChecker.Result,
+    ],
     consumedInputsOfHostedParties: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
     witnessedAndDivulged: Map[LfContractId, SerializableContract],
     createdContracts: Map[LfContractId, SerializableContract],
@@ -32,7 +34,7 @@ case class TransactionValidationResult(
     keyUpdates: Map[LfGlobalKey, ContractKeyJournal.Status],
     successfulActivenessCheck: Boolean,
     viewValidationResults: Map[ViewHash, ViewValidationResult],
-    timeValidationResult: Either[TimeCheckFailure, Unit],
+    timeValidationResultE: Either[TimeCheckFailure, Unit],
     hostedInformeeStakeholders: Set[LfPartyId],
 ) {
 

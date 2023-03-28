@@ -180,7 +180,7 @@ private[mediator] object MediatorDeduplicationStore {
       )
   }
 
-  case class DeduplicationData(
+  final case class DeduplicationData(
       uuid: UUID,
       requestTime: CantonTimestamp,
       expireAfter: CantonTimestamp,
@@ -311,7 +311,7 @@ private[mediator] class DbMediatorDeduplicationStore(
       traceContext: TraceContext
   ): Future[Unit] = processingTime.event {
     storage.update_(
-      sqlu"""delete from mediator_deduplication_store 
+      sqlu"""delete from mediator_deduplication_store
           where mediator_id = $mediatorId and expire_after <= $upToInclusive""",
       functionFullName,
     )

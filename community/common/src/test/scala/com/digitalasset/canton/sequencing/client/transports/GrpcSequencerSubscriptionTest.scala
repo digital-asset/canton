@@ -51,7 +51,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
               deliverErrorReason = None,
             ).toByteString
           ),
-          Some(
+          Seq(
             cryptoproto.Signature(
               format = cryptoproto.SignatureFormat.RawSignatureFormat,
               signature = ByteString.copyFromUtf8("not checked in this test"),

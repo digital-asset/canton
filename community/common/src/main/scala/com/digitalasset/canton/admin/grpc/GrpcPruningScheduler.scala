@@ -5,6 +5,7 @@ package com.digitalasset.canton.admin.grpc
 
 import cats.data.EitherT
 import com.digitalasset.canton.pruning.admin.v0
+import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.scheduler.{Cron, PruningSchedule, PruningScheduler}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.PositiveSeconds
@@ -13,6 +14,7 @@ import com.digitalasset.canton.util.EitherTUtil
 import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Failure
 
 trait GrpcPruningScheduler {
   this: HasPruningScheduler =>
@@ -22,7 +24,10 @@ trait GrpcPruningScheduler {
     for {
       scheduler <- ensureScheduler
       schedule <- ensureValidO("schedule", request.schedule, PruningSchedule.fromProtoV0)
-      _scheduleSuccessfullySet <- scheduler.setScheduleWithRetention(schedule)
+      _scheduleSuccessfullySet <- handlePassiveHAStorageError(
+        scheduler.setScheduleWithRetention(schedule),
+        "set_schedule",
+      )
     } yield v0.SetSchedule.Response()
   }
 
@@ -32,7 +37,7 @@ trait GrpcPruningScheduler {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
       scheduler <- ensureScheduler
-      _ <- scheduler.clearSchedule()
+      _ <- handlePassiveHAStorageError(scheduler.clearSchedule(), "clear_schedule")
     } yield v0.ClearSchedule.Response()
   }
 
@@ -41,7 +46,10 @@ trait GrpcPruningScheduler {
     for {
       scheduler <- ensureScheduler
       cron <- ensureValid(Cron.fromProtoPrimitive(request.cron))
-      _cronSuccessfullySet <- handleUserError(scheduler.updateCron(cron))
+      _cronSuccessfullySet <- handlePassiveHAStorageError(
+        handleUserError(scheduler.updateCron(cron)),
+        "set_cron",
+      )
     } yield v0.SetCron.Response()
   }
 
@@ -55,7 +63,10 @@ trait GrpcPruningScheduler {
         PositiveSeconds
           .fromProtoPrimitiveO("max_duration")(request.maxDuration)
       )
-      _maxDurationSuccessfullySet <- handleUserError(scheduler.updateMaxDuration(positiveDuration))
+      _maxDurationSuccessfullySet <- handlePassiveHAStorageError(
+        handleUserError(scheduler.updateMaxDuration(positiveDuration)),
+        "set_max_duration",
+      )
     } yield v0.SetMaxDuration.Response()
   }
 
@@ -69,7 +80,10 @@ trait GrpcPruningScheduler {
         PositiveSeconds
           .fromProtoPrimitiveO("retention")(request.retention)
       )
-      _retentionSuccessfullySet <- handleUserError(scheduler.updateRetention(positiveDuration))
+      _retentionSuccessfullySet <- handlePassiveHAStorageError(
+        handleUserError(scheduler.updateRetention(positiveDuration)),
+        "set_retention",
+      )
     } yield v0.SetRetention.Response()
   }
 
@@ -110,7 +124,7 @@ trait GrpcPruningScheduler {
     Future(_),
   )
 
-  private def handleUserError(update: => EitherT[Future, String, Unit]): Future[Unit] =
+  private def handleUserError(update: EitherT[Future, String, Unit]): Future[Unit] =
     EitherTUtil.toFuture(
       update.leftMap(
         Status.INVALID_ARGUMENT
@@ -118,6 +132,22 @@ trait GrpcPruningScheduler {
           .asRuntimeException()
       )
     )
+
+  private def handlePassiveHAStorageError(
+      update: Future[Unit],
+      commandName: String,
+  ): Future[Unit] =
+    update.transform {
+      case Failure(PassiveInstanceException(_internalMessage)) =>
+        Failure(
+          Status.FAILED_PRECONDITION
+            .withDescription(
+              s"Command ${commandName} sent to passive replica: cannot modify the pruning schedule. Try to submit the command to another replica."
+            )
+            .asRuntimeException()
+        )
+      case x => x
+    }
 
 }
 

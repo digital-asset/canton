@@ -21,6 +21,7 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.NoTracing
 import com.typesafe.config.{Config, ConfigFactory}
 import io.functionmeta.functionFullName
+import org.postgresql.util.PSQLException
 import org.scalatest.Assertions.fail
 import org.testcontainers.containers.PostgreSQLContainer
 
@@ -168,7 +169,16 @@ class PostgresCISetup(
         .flatMap { res =>
           if (res.isEmpty) {
             logger.debug(s"Creating database ${useDb} using connection to ${envDb}")
-            envDbStorage.update_(sqlu"CREATE DATABASE #${useDb}", functionFullName)
+            envDbStorage
+              .update_(sqlu"CREATE DATABASE #${useDb}", functionFullName)
+              .recover {
+                // Due to a race condition, it may happen that between checking if the database exists and creating it,
+                // it has already been created and a duplicate database error is thrown.
+                // We can safely ignore this error.
+                case ex: PSQLException
+                    if ex.getSQLState == "42P04" => // 42P04 means "duplicate_database" (source: https://www.postgresql.org/docs/current/errcodes-appendix.html)
+                  ()
+              }
           } else Future.unit
         }
       DefaultProcessingTimeouts.default.await_(s"creating database $useDb")(genF)
@@ -267,7 +277,7 @@ object DbStorageSetup {
   )(implicit ec: ExecutionContext): H2DbStorageSetup =
     new H2DbStorageSetup(migrationMode, mkDbConfig, loggerFactory).initialized()
 
-  case class DbBasicConfig(
+  final case class DbBasicConfig(
       username: String,
       password: String,
       dbName: String,

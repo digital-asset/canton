@@ -8,9 +8,9 @@ import cats.syntax.either.*
 import com.digitalasset.canton.crypto.{
   Hash,
   HashOps,
-  HashPurposeTest,
   SignatureCheckError,
   SyncCryptoError,
+  TestHash,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
@@ -31,12 +31,12 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
   import DefaultTestIdentities.*
 
   private def getMyHash(hashOps: HashOps, message: String = "dummySignature"): Hash =
-    hashOps.build(HashPurposeTest.testHashPurpose).addWithoutLengthPrefix(message).finish()
+    hashOps.build(TestHash.testHashPurpose).addWithoutLengthPrefix(message).finish()
   def await(eitherT: EitherT[Future, SignatureCheckError, Unit]) = eitherT.value.futureValue
 
   private def increaseParticipantResponseTimeout(old: DynamicDomainParameters) =
     old.tryUpdate(participantResponseTimeout =
-      old.participantResponseTimeout + NonNegativeFiniteDuration.ofSeconds(1)
+      old.participantResponseTimeout + NonNegativeFiniteDuration.tryOfSeconds(1)
     )
 
   private val domainParameters1 = DomainParameters.WithValidity(

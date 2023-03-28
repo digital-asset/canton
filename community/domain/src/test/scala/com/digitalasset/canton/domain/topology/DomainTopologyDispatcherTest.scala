@@ -5,8 +5,8 @@ package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
+import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.DomainNodeParameters
@@ -14,7 +14,10 @@ import com.digitalasset.canton.domain.topology.DomainTopologySender.{
   TopologyDispatchingDegradation,
   TopologyDispatchingInternalError,
 }
+import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
@@ -56,7 +59,12 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  MockedNodeParameters,
+  SequencerCounter,
+}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 
@@ -69,9 +77,25 @@ class DomainTopologyDispatcherTest
     extends FixtureAsyncWordSpec
     with BaseTest
     with HasExecutionContext
-    with MockClock {
+    with MockClock { self =>
 
   import com.digitalasset.canton.topology.DefaultTestIdentities.*
+
+  private def domainNodeParameters(
+      processingTimeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing,
+      cachingConfigs: CachingConfigs = CachingConfigs.testing,
+  ) = DomainNodeParameters(
+    general = MockedNodeParameters.cantonNodeParameters(
+      processingTimeouts,
+      cachingConfigs,
+    ),
+    protocol = CantonNodeParameters.Protocol.Impl(
+      devVersionSupport = false,
+      dontWarnOnDeprecatedPV = false,
+      initialProtocolVersion = testedProtocolVersion,
+    ),
+    maxBurstFactor = PositiveDouble.tryCreate(1.0),
+  )
 
   case class Awaiter(
       atLeast: Int,
@@ -142,9 +166,7 @@ class DomainTopologyDispatcherTest
 
     val clock = mockClock
 
-    val parameters = mock[DomainNodeParameters]
-    when(parameters.processingTimeouts).thenReturn(DefaultProcessingTimeouts.testing)
-    when(parameters.cachingConfigs).thenReturn(CachingConfigs.testing)
+    val parameters = domainNodeParameters(DefaultProcessingTimeouts.testing, CachingConfigs.testing)
 
     val lock = new Object()
     val awaiter = new AtomicReference[Awaiter](Awaiter(0, Seq(), Seq(), Set()))
@@ -184,7 +206,11 @@ class DomainTopologyDispatcherTest
         senderFailure.get().fold(ret)(failure => ret.flatMap(_ => failure))
       }
 
-      override def close(): Unit = {}
+      override def onClosed(): Unit = {}
+      override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
+      override protected val initialHealthState: ComponentHealthState = ComponentHealthState.Ok()
+      override val name: String = "domain-topology-sender"
+      override protected val loggerFactory: NamedLoggerFactory = self.loggerFactory
     }
     val processor = mock[TopologyTransactionProcessor]
 

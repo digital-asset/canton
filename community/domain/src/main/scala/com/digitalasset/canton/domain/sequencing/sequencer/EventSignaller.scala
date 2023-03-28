@@ -25,7 +25,7 @@ object WriteNotification {
     override def union(notification: WriteNotification): WriteNotification = notification
     override def includes(memberId: SequencerMemberId): Boolean = false
   }
-  case class Members(memberIds: SortedSet[SequencerMemberId]) extends WriteNotification {
+  final case class Members(memberIds: SortedSet[SequencerMemberId]) extends WriteNotification {
     override def union(notification: WriteNotification): WriteNotification =
       notification match {
         case Members(newMemberIds) => Members(memberIds ++ newMemberIds)

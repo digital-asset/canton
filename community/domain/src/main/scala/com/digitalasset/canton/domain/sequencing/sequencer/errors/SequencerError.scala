@@ -20,12 +20,12 @@ import com.digitalasset.canton.topology.Member
 object SequencerError extends SequencerErrorGroup {
 
   @Explanation("""
-                 |This error indicates that the member has acknowledged a timestamp that is after the events 
-                 |it has received. This violates the sequencing protocol. 
+                 |This error indicates that the member has acknowledged a timestamp that is after the events
+                 |it has received. This violates the sequencing protocol.
                  |""")
   object InvalidAcknowledgementTimestamp
       extends AlarmErrorCode("INVALID_ACKNOWLEDGEMENT_TIMESTAMP") {
-    case class Error(
+    final case class Error(
         member: Member,
         ackedTimestamp: CantonTimestamp,
         latestValidTimestamp: CantonTimestamp,
@@ -43,7 +43,7 @@ object SequencerError extends SequencerErrorGroup {
                  |""")
   object InvalidAcknowledgementSignature
       extends AlarmErrorCode("INVALID_ACKNOWLEDGEMENT_SIGNATURE") {
-    case class Error(
+    final case class Error(
         signedAcknowledgeRequest: SignedContent[AcknowledgeRequest],
         latestValidTimestamp: CantonTimestamp,
         error: SignatureCheckError,
@@ -65,7 +65,7 @@ object SequencerError extends SequencerErrorGroup {
   )
   object InvalidPruningRequestOnChain
       extends AlarmErrorCode("INVALID_SEQUENCER_PRUNING_REQUEST_ON_CHAIN") {
-    case class Error(
+    final case class Error(
         blockHeight: Long,
         blockLatestTimestamp: CantonTimestamp,
         safePruningTimestamp: CantonTimestamp,
@@ -85,7 +85,7 @@ object SequencerError extends SequencerErrorGroup {
   )
   object MaxRequestSizeExceeded extends AlarmErrorCode("MAX_REQUEST_SIZE_EXCEEDED") {
 
-    case class Error(message: String, maxRequestSize: MaxRequestSize) extends Alarm(message)
+    final case class Error(message: String, maxRequestSize: MaxRequestSize) extends Alarm(message)
   }
 
   @Explanation("""
@@ -95,7 +95,7 @@ object SequencerError extends SequencerErrorGroup {
                  |""")
   object InvalidSubmissionRequestSignature
       extends AlarmErrorCode("INVALID_SUBMISSION_REQUEST_SIGNATURE") {
-    case class Error(
+    final case class Error(
         signedSubmissionRequest: SignedContent[SubmissionRequest],
         error: SignatureCheckError,
         sequencingTimestamp: CantonTimestamp,
@@ -114,7 +114,7 @@ object SequencerError extends SequencerErrorGroup {
       |""")
   object MissingSubmissionRequestSignatureTimestamp
       extends AlarmErrorCode("MISSING_SUBMISSION_REQUEST_SIGNATURE_TIMESTAMP") {
-    case class Error(
+    final case class Error(
         signedSubmissionRequest: SignedContent[SubmissionRequest],
         sequencingTimestamp: CantonTimestamp,
     ) extends Alarm({
@@ -130,7 +130,7 @@ object SequencerError extends SequencerErrorGroup {
       |The event is ignored and processing continues as usual.
       |""")
   object InvalidLedgerEvent extends AlarmErrorCode("INVALID_LEDGER_EVENT") {
-    case class Error(
+    final case class Error(
         blockHeight: Long,
         protoDeserializationError: ProtoDeserializationError,
     )(implicit override val logger: ContextualizedErrorLogger)

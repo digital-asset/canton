@@ -109,11 +109,7 @@ object DomainTopologyManager {
     // check that we have at least one mediator and one sequencer
     for {
       // first, check that we have domain parameters
-      _ <- EitherT(
-        dbSnapshot
-          .findDynamicDomainParameters()
-          .map(_.toRight("Dynamic domain parameters are not set yet"))
-      )
+      _ <- EitherT(dbSnapshot.findDynamicDomainParameters())
       // then, check that we have at least one mediator
       mediators <- EitherT.right(dbSnapshot.mediators())
       _ <- EitherT.cond[Future](
@@ -405,7 +401,7 @@ class DomainTopologyManager(
 sealed trait DomainTopologyManagerError extends CantonError with Product with Serializable
 object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup() {
 
-  case class TopologyManagerParentError(parent: TopologyManagerError)(implicit
+  final case class TopologyManagerParentError(parent: TopologyManagerError)(implicit
       val loggingContext: ErrorLoggingContext
   ) extends DomainTopologyManagerError
       with ParentCantonError[TopologyManagerError]
@@ -419,7 +415,7 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
         id = "FAILED_TO_ADD_MEMBER",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class Failure(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Failure(reason: String)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "The add member hook failed"
         )
@@ -427,7 +423,7 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
   }
 
   @Explanation(
-    """This error is returned if a domain topology manager attempts to activate a 
+    """This error is returned if a domain topology manager attempts to activate a
       participant without having all necessary data, such as keys or domain trust certificates."""
   )
   @Resolution("""Register the necessary keys or trust certificates and try again.""")
@@ -436,13 +432,13 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
         id = "PARTICIPANT_NOT_INITIALIZED",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Failure(participantId: ParticipantId, currentKeys: KeyCollection)(implicit
+    final case class Failure(participantId: ParticipantId, currentKeys: KeyCollection)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "The participant can not be enabled without registering the necessary keys first"
         )
         with DomainTopologyManagerError
-    case class Reject(participantId: ParticipantId, reason: String)(implicit
+    final case class Reject(participantId: ParticipantId, reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(reason)
         with DomainTopologyManagerError
@@ -451,7 +447,7 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
   object InvalidOrFaultyOnboardingRequest
       extends AlarmErrorCode(id = "MALICOUS_OR_FAULTY_ONBOARDING_REQUEST") {
 
-    case class Failure(participantId: ParticipantId, reason: String)(implicit
+    final case class Failure(participantId: ParticipantId, reason: String)(implicit
         override val loggingContext: ErrorLoggingContext
     ) extends Alarm(
           cause =
@@ -471,8 +467,9 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
         id = "ALIEN_DOMAIN_ENTITIES",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Failure(alienUid: UniqueIdentifier)(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
+    final case class Failure(alienUid: UniqueIdentifier)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
           cause =
             "Keys of alien domain entities can not be managed through a domain topology manager"
         )
@@ -490,7 +487,7 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
         id = "WRONG_PROTOCOL_VERSION",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Failure(
+    final case class Failure(
         domainProtocolVersion: ProtocolVersion,
         transactionProtocolVersion: ProtocolVersion,
     )(implicit val loggingContext: ErrorLoggingContext)
@@ -509,8 +506,9 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
   )
   object WrongDomain
       extends ErrorCode(id = "WRONG_DOMAIN", ErrorCategory.InvalidGivenCurrentSystemStateOther) {
-    case class Failure(wrongDomain: DomainId)(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
+    final case class Failure(wrongDomain: DomainId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
           cause = "Domain restricted transaction can not be added to different domain"
         )
         with DomainTopologyManagerError

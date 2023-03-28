@@ -3,37 +3,53 @@
 
 package com.digitalasset.canton.participant.metrics
 
+import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
-import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory, Meter}
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
 import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
-import com.daml.metrics.Metrics as LedgerApiServerMetrics
+import com.daml.metrics.grpc.GrpcServerMetrics
+import com.daml.metrics.{HealthMetrics, Metrics as LedgerApiServerMetrics}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.TaskSchedulerMetrics
-import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
+import com.digitalasset.canton.environment.BaseMetrics
+import com.digitalasset.canton.metrics.MetricHandle.{LabeledMetricsFactory, MetricsFactory}
 import com.digitalasset.canton.metrics.*
 
+import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 
 class ParticipantMetrics(
     name: String,
     val prefix: MetricName,
-    val metricsFactory: MetricsFactory,
+    @deprecated(
+      "Use LabeledMetricsFactory",
+      since = "2.7.0",
+    ) val metricsFactory: MetricsFactory,
     val labeledMetricsFactory: LabeledMetricsFactory,
-) {
+    registry: MetricRegistry,
+) extends BaseMetrics {
+
+  override def grpcMetrics: GrpcServerMetrics = ledgerApiServer.daml.grpc
+  override def healthMetrics: HealthMetrics = ledgerApiServer.daml.health
+  override def storageMetrics: DbStorageMetrics = dbStorage
 
   private implicit val mc: MetricsContext = MetricsContext("participant_name" -> name)
 
+  @nowarn("cat=deprecation")
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
+  @nowarn("cat=deprecation")
   val ledgerApiServer: LedgerApiServerMetrics =
-    new LedgerApiServerMetrics(metricsFactory, labeledMetricsFactory, metricsFactory.registry)
+    new LedgerApiServerMetrics(metricsFactory, labeledMetricsFactory, registry)
 
   private val clients = TrieMap[DomainAlias, SyncDomainMetrics]()
 
+  @nowarn("cat=deprecation")
   object pruning extends PruningMetrics(prefix, metricsFactory)
 
+  @nowarn("cat=deprecation")
   def domainMetrics(alias: DomainAlias): SyncDomainMetrics = {
     clients.getOrElseUpdate(alias, new SyncDomainMetrics(prefix :+ alias.unwrap, metricsFactory))
   }
@@ -45,6 +61,7 @@ class ParticipantMetrics(
         |The indexer will subsequently store the update in a form that allows for querying the ledger efficiently.""",
     qualification = Debug,
   )
+  @nowarn("cat=deprecation")
   val updatesPublished: Meter = metricsFactory.meter(prefix :+ "updates-published")
 
   @MetricDoc.Tag(
@@ -53,9 +70,16 @@ class ParticipantMetrics(
                     |This also covers requests submitted by other participants.
                     |""",
     qualification = Debug,
+    labelsWithDescription = Map(
+      "participant" -> "The id of the participant for which the value applies."
+    ),
   )
   val dirtyRequests: Gauge[Int] =
-    metricsFactory.gauge(prefix :+ "dirty_requests", 0, "Number of requests being validated.")
+    labeledMetricsFactory.gauge(
+      prefix :+ "dirty_requests",
+      0,
+      "Number of requests being validated.",
+    )
 
   @MetricDoc.Tag(
     summary = "Configured maximum number of requests currently being validated.",
@@ -65,13 +89,16 @@ class ParticipantMetrics(
         |A negative value means no configuration value was provided and no limit is enforced.
         |""",
     qualification = Debug,
+    labelsWithDescription = Map(
+      "participant" -> "The id of the participant for which the value applies."
+    ),
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   val maxDirtyRequestGaugeForDocs: Gauge[Int] =
     NoOpGauge(prefix :+ "max_dirty_requests", 0)
 
   def registerMaxDirtyRequest(value: () => Option[Int]): Gauge.CloseableGauge =
-    metricsFactory.gaugeWithSupplier(
+    labeledMetricsFactory.gaugeWithSupplier(
       prefix :+ "max_dirty_requests",
       () => value().getOrElse(-1),
       """
@@ -81,8 +108,12 @@ class ParticipantMetrics(
 
 }
 
-class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
+class SyncDomainMetrics(
+    prefix: MetricName,
+    @deprecated("Use LabeledMetricsFactory", since = "2.7.0") factory: MetricsFactory,
+) {
 
+  @nowarn("cat=deprecation")
   object sequencerClient extends SequencerClientMetrics(prefix, factory)
 
   object conflictDetection extends TaskSchedulerMetrics {
@@ -97,6 +128,7 @@ class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
           |un-processed sequencer messages that will trigger a timestamp advancement.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val sequencerCounterQueue: Counter =
       factory.counter(prefix :+ "sequencer-counter-queue")
 
@@ -109,11 +141,13 @@ class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
       qualification = Debug,
     )
     val taskQueueForDoc: Gauge[Int] = NoOpGauge(prefix :+ "task-queue", 0)
+    @nowarn("cat=deprecation")
     def taskQueue(size: () => Int): CloseableGauge =
       factory.gauge(prefix :+ "task-queue", 0)(MetricsContext.Empty)
 
   }
 
+  @nowarn("cat=deprecation")
   object transactionProcessing extends TransactionProcessingMetrics(prefix, factory)
 
   @MetricDoc.Tag(
@@ -124,6 +158,7 @@ class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
                     |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
     qualification = Debug,
   )
+  @nowarn("cat=deprecation")
   val numDirtyRequests: Counter = factory.counter(prefix :+ "dirty-requests")
 
   object recordOrderPublisher extends TaskSchedulerMetrics {
@@ -136,6 +171,7 @@ class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
           |queues for the publishing to the ledger api server according to record time.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val sequencerCounterQueue: Counter =
       factory.counter(prefix :+ "sequencer-counter-queue")
 
@@ -146,6 +182,7 @@ class SyncDomainMetrics(prefix: MetricName, factory: MetricsFactory) {
       qualification = Debug,
     )
     val taskQueueForDoc: Gauge[Int] = NoOpGauge(prefix :+ "task-queue", 0)
+    @nowarn("cat=deprecation")
     def taskQueue(size: () => Int): CloseableGauge =
       factory.gauge(prefix :+ "task-queue", 0)(MetricsContext.Empty)
   }

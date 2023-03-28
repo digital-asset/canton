@@ -12,10 +12,7 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.error.definitions.LedgerApiErrors
-import com.daml.ledger.api.DeduplicationPeriod
-import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.data.ImmArray
-import com.daml.lf.transaction.ContractStateMachine.{KeyInactive, KeyMapping}
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -24,8 +21,10 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.TransactionError
+import com.digitalasset.canton.ledger.api.DeduplicationPeriod
+import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
@@ -68,7 +67,6 @@ import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{WithRecipients, *}
 import com.digitalasset.canton.serialization.DefaultDeserializationError
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -90,7 +88,6 @@ import com.google.protobuf.ByteString
 
 import scala.annotation.nowarn
 import scala.collection.immutable.SortedMap
-import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -189,6 +186,19 @@ class TransactionProcessingSteps(
 
   override def embedNoMediatorError(error: NoMediatorError): TransactionSubmissionError =
     DomainWithoutMediatorError.Error(error.topologySnapshotTimestamp, domainId)
+
+  override def decisionTimeFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TransactionProcessorError, CantonTimestamp] =
+    parameters.decisionTimeFor(requestTs).leftMap(DomainParametersError(parameters.domainId, _))
+
+  override def participantResponseDeadlineFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[TransactionProcessorError, CantonTimestamp] = parameters
+    .participantResponseDeadlineFor(requestTs)
+    .leftMap(DomainParametersError(parameters.domainId, _))
 
   private class TrackedTransactionSubmission(
       submitterInfo: SubmitterInfo,
@@ -542,7 +552,7 @@ class TransactionProcessingSteps(
       //  crashing the SyncDomain
       val randomnessMap =
         batch.foldLeft(Map.empty[ViewHash, Promise[SecureRandomness]]) { case (m, evt) =>
-          m + (evt.protocolMessage.viewHash -> SupervisedPromise[SecureRandomness](
+          m + (evt.protocolMessage.viewHash -> new SupervisedPromise[SecureRandomness](
             "secure-randomness",
             futureSupervisor,
           ))
@@ -644,15 +654,6 @@ class TransactionProcessingSteps(
       EitherT.right(result)
     }
 
-  override def pendingDataAndResponseArgsForMalformedPayloads(
-      ts: CantonTimestamp,
-      rc: RequestCounter,
-      sc: SequencerCounter,
-      malformedPayloads: Seq[MalformedPayload],
-      snapshot: DomainSnapshotSyncCryptoApi,
-  ): Either[RequestError, PendingDataAndResponseArgs] =
-    Right(PendingDataAndResponseArgs(None, ts, malformedPayloads, rc, sc, snapshot))
-
   override def computeActivenessSetAndPendingContracts(
       ts: CantonTimestamp,
       rc: RequestCounter,
@@ -673,14 +674,35 @@ class TransactionProcessingSteps(
     // so we can take any.
     val transactionId = lightViewTrees.head1.transactionId
 
-    val policies = lightViewTrees.map(_.confirmationPolicy).toSet
-    val workflowId =
-      IterableUtil.assertAtMostOne(lightViewTrees.forgetNE.mapFilter(_.workflowId), "workflow")
-    val submitterMeta =
+    val policy = {
+      val candidates = lightViewTrees.map(_.confirmationPolicy).toSet
+      // The decryptedViews should all have the same root hash and therefore the same confirmation policy.
+      // Bail out, if this is not the case.
+      ErrorUtil.requireArgument(
+        candidates.sizeCompare(1) == 0,
+        s"Decrypted views have different confirmation policies. Bailing out... $candidates",
+      )
+      candidates.head1
+    }
+    val workflowIdO =
+      IterableUtil.assertAtMostOne(lightViewTrees.forgetNE.mapFilter(_.workflowIdO), "workflow")
+    val submitterMetaO =
       IterableUtil.assertAtMostOne(
         lightViewTrees.forgetNE.mapFilter(_.tree.submitterMetadata.unwrap.toOption),
         "submitterMetadata",
       )
+
+    def tryFindViewSignature(viewTree: TransactionViewTree): Option[Signature] =
+      decryptedViewsWithSignatures.find { case (view, _) =>
+        view.unwrap.viewHash == viewTree.viewHash
+      } match {
+        case Some((_, signatureO)) => signatureO
+        case None =>
+          throw new RuntimeException(
+            s"View tree ${viewTree.viewHash} must be present in the list of decrypted views."
+          )
+      }
+
     // TODO(M40): don't die on a malformed light transaction list. Moreover, pick out the views that are valid
     val rootViewTrees = LightTransactionViewTree
       .toToplevelFullViewTrees(protocolVersion, crypto.pureCrypto)(lightViewTrees)
@@ -691,29 +713,22 @@ class TransactionProcessingSteps(
           )
         )
       )
-      .map { viewTree =>
-        (
-          viewTree,
-          decryptedViewsWithSignatures.find { case (view, _) =>
-            view.unwrap.viewHash == viewTree.viewHash
-          } match {
-            case Some((_, signature)) => signature
-            case None =>
-              throw new RuntimeException(
-                s"View tree ${viewTree.viewHash} must be present in the list of decrypted views."
-              )
-          },
-        )
-      }
+      .map { viewTree => (viewTree, tryFindViewSignature(viewTree)) }
 
     // TODO(M40): check that all non-root lightweight trees can be decrypted with the expected (derived) randomness
     //   Also, check that all the view's informees received the derived randomness
 
-    val usedAndCreatedF = extractUsedAndCreated(rootViewTrees, snapshot.ipsSnapshot)
+    val usedAndCreatedF = ExtractUsedAndCreated(
+      participantId,
+      staticDomainParameters,
+      rootViewTrees,
+      snapshot.ipsSnapshot,
+      loggerFactory,
+    )
 
     val fut = usedAndCreatedF.map { usedAndCreated =>
       val enrichedTransaction =
-        EnrichedTransaction(policies, usedAndCreated, workflowId, submitterMeta)
+        EnrichedTransaction(policy, usedAndCreated, workflowIdO, submitterMetaO)
 
       // TODO(M40): Check that the creations don't overlap with archivals
       val activenessSet = usedAndCreated.activenessSet
@@ -725,7 +740,7 @@ class TransactionProcessingSteps(
         activenessSet,
         pendingContracts,
         PendingDataAndResponseArgs(
-          Some(enrichedTransaction),
+          enrichedTransaction,
           ts,
           malformedPayloads,
           rc,
@@ -742,13 +757,9 @@ class TransactionProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, Unit] =
-    pendingDataAndResponseArgs.enrichedTransaction match {
-      case Some(enrichedTransaction) =>
-        authenticateInputContractsInternal(
-          enrichedTransaction.rootViewsWithUsedAndCreated.contracts.used
-        )
-      case None => EitherT.rightT(())
-    }
+    authenticateInputContractsInternal(
+      pendingDataAndResponseArgs.enrichedTransaction.rootViewsWithUsedAndCreated.contracts.used
+    )
 
   override def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
@@ -764,14 +775,13 @@ class TransactionProcessingSteps(
     import cats.Order.*
 
     val PendingDataAndResponseArgs(
-      enrichedTransactionO,
+      enrichedTransaction,
       requestTimestamp,
       malformedPayloads,
       rc,
       sc,
       snapshot,
-    ) =
-      pendingDataAndResponseArgs
+    ) = pendingDataAndResponseArgs
 
     val ipsSnapshot = snapshot.ipsSnapshot
     val requestId = RequestId(requestTimestamp)
@@ -782,8 +792,8 @@ class TransactionProcessingSteps(
         _ <- pendingCursor
 
         rootViewsWithUsedAndCreated = enrichedTransaction.rootViewsWithUsedAndCreated
-        rootViews = rootViewsWithUsedAndCreated.rootViewsWithSignatures.map { case (views, _) =>
-          views
+        rootViews = rootViewsWithUsedAndCreated.rootViewsWithSignatures.map { case (viewTree, _) =>
+          viewTree
         }
 
         authenticationResult <-
@@ -793,7 +803,7 @@ class TransactionProcessingSteps(
             snapshot,
           )
 
-        consistencyResult = ContractConsistencyChecker
+        consistencyResultE = ContractConsistencyChecker
           .assertInputContractsInPast(
             rootViewsWithUsedAndCreated.contracts.used.toList,
             ledgerTime,
@@ -804,10 +814,10 @@ class TransactionProcessingSteps(
         // `tryCommonData` should never throw here because all views have the same root hash
         // which already commits to the ParticipantMetadata and CommonMetadata
         commonData = checked(tryCommonData(rootViews))
-        amSubmitter = enrichedTransaction.submitterMetadata.exists(
+        amSubmitter = enrichedTransaction.submitterMetadataO.exists(
           _.submitterParticipant == participantId
         )
-        timeValidation = TimeValidator.checkTimestamps(
+        timeValidationE = TimeValidator.checkTimestamps(
           commonData,
           requestTimestamp,
           domainParameters.ledgerTimeRecordTimeTolerance,
@@ -821,7 +831,7 @@ class TransactionProcessingSteps(
           ipsSnapshot,
         )
 
-        conformanceResult <- modelConformanceChecker
+        conformanceResultE <- modelConformanceChecker
           .check(
             rootViews,
             rootViewsWithUsedAndCreated.keys.keyResolverFor(_),
@@ -830,12 +840,13 @@ class TransactionProcessingSteps(
             commonData,
           )
           .value
+
       } yield ParallelChecksResult(
         authenticationResult,
-        consistencyResult,
+        consistencyResultE,
         authorizationResult,
-        conformanceResult,
-        timeValidation,
+        conformanceResultE,
+        timeValidationE,
       )
     }
 
@@ -864,7 +875,7 @@ class TransactionProcessingSteps(
       enrichedTransaction.rootViewsWithUsedAndCreated.rootViewsWithSignatures
         .map { case (view, _) => view }
         .forgetNE
-        .flatMap(_.flatten)
+        .flatMap(_.tryFlattenToParticipantViews)
         .foreach { view =>
           val viewParticipantData = view.viewParticipantData
           val createdCore = viewParticipantData.createdCore.map(_.contract.contractId).toSet
@@ -932,13 +943,13 @@ class TransactionProcessingSteps(
 
       validation.TransactionValidationResult(
         transactionId = enrichedTransaction.transactionId,
-        confirmationPolicies = enrichedTransaction.policies,
-        submitterMetadata = enrichedTransaction.submitterMetadata,
-        workflowId = enrichedTransaction.workflowId,
-        contractConsistencyResult = parallelChecksResult.consistencyResult,
+        confirmationPolicy = enrichedTransaction.policy,
+        submitterMetadataO = enrichedTransaction.submitterMetadataO,
+        workflowIdO = enrichedTransaction.workflowIdO,
+        contractConsistencyResultE = parallelChecksResult.consistencyResultE,
         authenticationResult = parallelChecksResult.authenticationResult,
         authorizationResult = parallelChecksResult.authorizationResult,
-        modelConformanceResult = parallelChecksResult.conformanceResult,
+        modelConformanceResultE = parallelChecksResult.conformanceResultE,
         consumedInputsOfHostedParties =
           enrichedTransaction.rootViewsWithUsedAndCreated.contracts.consumedInputsOfHostedStakeholders,
         witnessedAndDivulged =
@@ -949,61 +960,58 @@ class TransactionProcessingSteps(
           enrichedTransaction.rootViewsWithUsedAndCreated.keys.uckUpdatedKeysOfHostedMaintainers,
         successfulActivenessCheck = activenessResult.isSuccessful,
         viewValidationResults = viewResults.result(),
-        timeValidationResult = parallelChecksResult.timeValidationResult,
+        timeValidationResultE = parallelChecksResult.timeValidationResultE,
         hostedInformeeStakeholders =
           enrichedTransaction.rootViewsWithUsedAndCreated.hostedInformeeStakeholders,
       )
     }
 
-    val result = enrichedTransactionO match {
-      case None =>
-        for {
-          _activenessResult <- awaitActivenessResult
-        } yield {
-          // TODO(M40): Gracefully handle the case that the batch contains no parseable transaction view tree with the expected root hash
-          throw new IllegalArgumentException(
-            s"Cannot handle confirmation request with malformed payloads: $malformedPayloads"
-          )
-        }
-      case Some(enrichedTransaction) =>
-        for {
-          parallelChecksResult <- doParallelChecks(enrichedTransaction)
-          activenessResult <- awaitActivenessResult
-          _ = crashOnUnknownKeys(activenessResult)
-          transactionValidationResult = computeValidationResult(
-            enrichedTransaction,
-            parallelChecksResult,
-            activenessResult,
-          )
-          responses <- confirmationResponseFactory.createConfirmationResponses(
-            requestId,
-            malformedPayloads,
-            transactionValidationResult,
-            ipsSnapshot,
-          )
-        } yield {
-          val mediatorRecipient = Recipients.cc(mediatorId)
+    val mediatorRecipient = Recipients.cc(mediatorId)
 
-          // TODO(M40): Handle malformed payloads
-          ErrorUtil.requireArgument(
-            malformedPayloads.isEmpty,
-            s"Cannot handle confirmation request with malformed payloads: $malformedPayloads",
-          )
-          val pendingTransaction =
-            createPendingTransaction(requestId, transactionValidationResult, rc, sc, mediatorId)
-          StorePendingDataAndSendResponseAndCreateTimeout(
+    val result =
+      for {
+        parallelChecksResult <- doParallelChecks(enrichedTransaction)
+        activenessResult <- awaitActivenessResult
+        _ = crashOnUnknownKeys(activenessResult)
+        transactionValidationResult = computeValidationResult(
+          enrichedTransaction,
+          parallelChecksResult,
+          activenessResult,
+        )
+        responses <- confirmationResponseFactory.createConfirmationResponses(
+          requestId,
+          malformedPayloads,
+          transactionValidationResult,
+          ipsSnapshot,
+        )
+      } yield {
+
+        val pendingTransaction =
+          createPendingTransaction(requestId, transactionValidationResult, rc, sc, mediatorId)
+        StorePendingDataAndSendResponseAndCreateTimeout(
+          pendingTransaction,
+          responses.map(_ -> mediatorRecipient),
+          Seq.empty,
+          RejectionArgs(
             pendingTransaction,
-            responses.map(_ -> mediatorRecipient),
-            Seq.empty,
-            RejectionArgs(
-              pendingTransaction,
-              LocalReject.TimeRejects.LocalTimeout.Reject(protocolVersion),
-            ),
-          )
-        }
-    }
+            LocalReject.TimeRejects.LocalTimeout.Reject(protocolVersion),
+          ),
+        )
+      }
     EitherT.right(result)
   }
+
+  override def constructResponsesForMalformedPayloads(
+      requestId: RequestId,
+      malformedPayloads: Seq[MalformedPayload],
+  )(implicit
+      traceContext: TraceContext
+  ): Seq[MediatorResponse] =
+    confirmationResponseFactory.createConfirmationResponsesForMalformedPayloads(
+      requestId,
+      malformedPayloads,
+      Seq.empty,
+    )
 
   /** A key is reported as unknown if the transaction tries to reassign or unassign it,
     * but the key cannot be found in the [[com.digitalasset.canton.participant.store.ContractKeyJournal]].
@@ -1036,7 +1044,7 @@ class TransactionProcessingSteps(
     val someView = decryptedViews.head1
     val mediatorId = someView.unwrap.mediatorId
     val submitterMetadataO = someView.unwrap.tree.submitterMetadata.unwrap.toOption
-    submitterMetadataO.flatMap(completionInfoFromSubmitterMetadata).map { completionInfo =>
+    submitterMetadataO.flatMap(completionInfoFromSubmitterMetadataO).map { completionInfo =>
       val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
         TransactionProcessor.SubmissionErrors.InactiveMediatorError
           .Error(mediatorId, ts)
@@ -1080,9 +1088,9 @@ class TransactionProcessingSteps(
       _,
     ) =
       pendingTransaction
-    val submitterMeta = transactionValidationResult.submitterMetadata
-    val submitterParticipantSubmitterInfo =
-      submitterMeta.flatMap(completionInfoFromSubmitterMetadata)
+    val submitterMetaO = transactionValidationResult.submitterMetadataO
+    val submitterParticipantSubmitterInfoO =
+      submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO)
 
     rejectionReason.logWithContext(Map("requestId" -> pendingTransaction.requestId.toString))
     val rejection =
@@ -1104,14 +1112,14 @@ class TransactionProcessingSteps(
         case reason => LedgerSyncEvent.CommandRejected.FinalReason(reason.rpcStatus())
       }
 
-    val tse = submitterParticipantSubmitterInfo.map(info =>
+    val tseO = submitterParticipantSubmitterInfoO.map(info =>
       TimestampedEvent(
         LedgerSyncEvent.CommandRejected(requestTime.toLf, info, rejection, requestType),
         requestCounter.asLocalOffset,
         Some(requestSequencerCounter),
       )
     )
-    Right(tse)
+    Right(tseO)
   }
 
   @VisibleForTesting
@@ -1134,7 +1142,9 @@ class TransactionProcessingSteps(
           }
       )
 
-  private def completionInfoFromSubmitterMetadata(meta: SubmitterMetadata): Option[CompletionInfo] =
+  private def completionInfoFromSubmitterMetadataO(
+      meta: SubmitterMetadata
+  ): Option[CompletionInfo] =
     if (meta.submitterParticipant == participantId) {
       Some(
         CompletionInfo(
@@ -1158,12 +1168,12 @@ class TransactionProcessingSteps(
     val TransactionValidationResult(
       transactionId,
       confirmationPolicies,
-      submitterMeta,
-      workflowId,
-      contractConsistency,
+      submitterMetaO,
+      workflowIdO,
+      contractConsistencyE,
       authenticationResult,
       authorizationResult,
-      modelConformanceResult,
+      modelConformanceResultE,
       consumedInputsOfHostedParties,
       witnessedAndDivulged,
       createdContracts,
@@ -1171,20 +1181,20 @@ class TransactionProcessingSteps(
       keyUpdates,
       successfulActivenessCheck,
       viewValidationResults,
-      timeValidation,
+      timeValidationE,
       hostedInformeeStakeholders,
     ) = transactionValidationResult
 
     ErrorUtil.requireArgument(
-      contractConsistency.isRight,
-      s"Cannot handle contract-inconsistent transaction $transactionId: $contractConsistency",
+      contractConsistencyE.isRight,
+      s"Cannot handle contract-inconsistent transaction $transactionId: $contractConsistencyE",
     )
 
     // TODO(M40): Do not discard the view validation results
     validation.PendingTransaction(
       transactionId,
-      modelConformanceResult,
-      workflowId,
+      modelConformanceResultE,
+      workflowIdO,
       id.unwrap,
       rc,
       sc,
@@ -1235,7 +1245,7 @@ class TransactionProcessingSteps(
         optCompletionInfo = completionInfo,
         transactionMeta = TransactionMeta(
           ledgerEffectiveTime = lfTx.metadata.ledgerTime.toLf,
-          workflowId = pendingRequestData.workflowId.map(_.unwrap),
+          workflowId = pendingRequestData.workflowIdO.map(_.unwrap),
           submissionTime = lfTx.metadata.submissionTime.toLf,
           // Set the submission seed to zeros one (None no longer accepted) because it is pointless for projected
           // transactions and it leaks the structure of the omitted parts of the transaction.
@@ -1278,8 +1288,11 @@ class TransactionProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, TransactionResultMessage],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, TransactionResultMessage],
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -1287,9 +1300,10 @@ class TransactionProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
-    val Deliver(_, ts, _, _, _) = event.content
-    val submitterMeta = pendingRequestData.transactionValidationResult.submitterMetadata
-    val completionInfo = submitterMeta.flatMap(completionInfoFromSubmitterMetadata)
+    val content = eventE.fold(_.content, _.content)
+    val Deliver(_, ts, _, _, _) = content
+    val submitterMetaO = pendingRequestData.transactionValidationResult.submitterMetadataO
+    val completionInfoO = submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO)
 
     def rejected(error: TransactionError) = {
       for {
@@ -1303,14 +1317,20 @@ class TransactionProcessingSteps(
         : EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
       import scala.util.Either.MergeableEither
       (
-        MergeableEither[MediatorResult](result).merge.verdict,
-        pendingRequestData.modelConformanceResult,
+        MergeableEither[MediatorResult](resultE).merge.verdict,
+        pendingRequestData.modelConformanceResultE,
       ) match {
         case (_: Verdict.Approve, Right(modelConformance)) =>
           getCommitSetAndContractsToBeStoredAndEventApproveConform(
             pendingRequestData,
-            completionInfo,
+            completionInfoO,
             modelConformance,
+          )
+
+        case (_: Verdict.Approve, Left(modelConformanceError))
+            if !ModelConformanceChecker.isSubviewsCheckDisabled && modelConformanceError.aSubviewIsValid =>
+          ErrorUtil.invalidState(
+            s"The Mediator approved a request where a root view fails the model conformance check while a subview passes it"
           )
 
         case (_, Left(modelConformanceError)) =>
@@ -1329,12 +1349,12 @@ class TransactionProcessingSteps(
     }
 
     for {
-      domainParameters <- EitherT.right[TransactionProcessorError](
-        crypto.ips
-          .awaitSnapshot(pendingRequestData.requestTime)
-          .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
+      topologySnapshot <- EitherT.right[TransactionProcessorError](
+        crypto.ips.awaitSnapshot(pendingRequestData.requestTime)
       )
-      maxDecisionTime = domainParameters.decisionTimeFor(pendingRequestData.requestTime)
+      maxDecisionTime <- ProcessingSteps
+        .getDecisionTime(topologySnapshot, pendingRequestData.requestTime)
+        .leftMap(DomainParametersError(domainId, _))
       _ <-
         if (ts <= maxDecisionTime) EitherT.pure[Future, TransactionProcessorError](())
         else
@@ -1349,450 +1369,6 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): Unit = ()
 
-  private[this] def extractUsedAndCreated(
-      rootViewTreesWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
-      topologySnapshot: TopologySnapshot,
-  )(implicit traceContext: TraceContext): Future[UsedAndCreated] = {
-    val rootViewTrees = rootViewTreesWithSignatures.map { case (view, _) => view }
-    val hostsPartyPrefetchF = prefetchHostsParties(rootViewTrees, topologySnapshot)
-    hostsPartyPrefetchF.map { partyPrefetch =>
-      val (usedAndCreatedContracts, hostedInformeeStakeholders) =
-        extractUsedAndCreatedContracts(rootViewTrees, partyPrefetch)
-      val inputAndReassignedKeys =
-        if (protocolVersion >= ProtocolVersion.v3)
-          extractInputAndUpdatedKeysV3(rootViewTrees, partyPrefetch)
-        else
-          extractInputAndUpdatedKeysV2(rootViewTrees, partyPrefetch)
-
-      UsedAndCreated(
-        rootViewsWithSignatures = rootViewTreesWithSignatures,
-        contracts = usedAndCreatedContracts,
-        keys = inputAndReassignedKeys,
-        hostedInformeeStakeholders = hostedInformeeStakeholders,
-      )
-    }
-  }
-
-  private def extractUsedAndCreatedContracts(
-      rootViewTrees: Seq[TransactionViewTree],
-      partyPrefetch: PrefetchedParties,
-  )(implicit traceContext: TraceContext): (UsedAndCreatedContracts, Set[LfPartyId]) = {
-    val divulgedInputsB = Map.newBuilder[LfContractId, SerializableContract]
-    val usedContracts = Map.newBuilder[LfContractId, SerializableContract]
-    val createdContractsOfHostedStakeholdersB =
-      Map.newBuilder[LfContractId, (Option[SerializableContract], Set[LfPartyId])]
-    val contractsForActivenessCheckUnlessRelativeB = Map.newBuilder[LfContractId, Set[LfPartyId]]
-    val witnessedB = Map.newBuilder[LfContractId, SerializableContract]
-    val consumedInputsOfHostedStakeholdersB =
-      Map.newBuilder[LfContractId, WithContractHash[Set[LfPartyId]]]
-    val transientSameViewOrEarlier = mutable.Set.empty[LfContractId]
-
-    rootViewTrees.foreach { rootViewTree =>
-      visitViewInPreOrder(rootViewTree.view) { subview =>
-        val viewParticipantData = subview.viewParticipantData.tryUnwrap
-        val informees = subview.viewCommonData.tryUnwrap.informees.map(_.party)
-
-        viewParticipantData.coreInputs.values.foreach { inputContractWithMetadata =>
-          val contract = inputContractWithMetadata.contract
-          usedContracts += contract.contractId -> contract
-          val stakeholders = inputContractWithMetadata.contract.metadata.stakeholders
-
-          val informeeStakeholders = stakeholders.intersect(informees)
-
-          if (partyPrefetch.hostsAny(informeeStakeholders)) {
-            val contractId = contract.contractId
-            contractsForActivenessCheckUnlessRelativeB += (contractId -> informeeStakeholders)
-            // We do not need to include in consumedInputsOfHostedStakeholders the contracts created in the core
-            // because they are not inputs even if they are consumed.
-            if (inputContractWithMetadata.consumed) {
-              // Input contracts consumed under rollback node are not necessarily consumed in the transaction.
-              if (!viewParticipantData.rollbackContext.inRollback) {
-                consumedInputsOfHostedStakeholdersB +=
-                  contractId -> WithContractHash.fromContract(contract, stakeholders)
-              }
-            }
-          } else if (partyPrefetch.hostsAny(stakeholders.diff(informees))) {
-            // TODO(M40) report view participant data as malformed
-            ErrorUtil.requireArgument(
-              !inputContractWithMetadata.consumed,
-              s"Participant hosts non-informee stakeholder(s) of consumed ${contract.contractId}; stakeholders: $stakeholders, informees: $informees",
-            )
-            // If the participant hosts a non-informee stakeholder of a used contract,
-            // it shouldn't check activeness, so we don't add it to checkActivenessOrRelative
-            // If another view adds the contract nevertheless to it, it will not matter since the participant
-            // will not send a confirmation for this view.
-          } else {
-            divulgedInputsB += (contract.contractId -> contract)
-          }
-        }
-
-        def isCreatedContractRolledBack(createdContract: CreatedContract): Boolean =
-          viewParticipantData.rollbackContext.inRollback || createdContract.rolledBack
-
-        // Since the informees of a Create node are the stakeholders of the created contract,
-        // the participant either witnesses all creations in a view's core or hosts a party of all created contracts.
-        if (partyPrefetch.hostsAny(informees)) {
-          createdContractsOfHostedStakeholdersB ++= viewParticipantData.createdCore.map(
-            createdContract =>
-              idWithSerializable(createdContract).map(sc =>
-                // None out serialized contracts that are rolled back, so we don't actually create those
-                (
-                  if (isCreatedContractRolledBack(createdContract)) None else Some(sc),
-                  createdContract.contract.metadata.stakeholders,
-                )
-              )
-          )
-          addTransientContracts(viewParticipantData, transientSameViewOrEarlier)
-        } else if (!viewParticipantData.rollbackContext.inRollback) {
-          // Contracts created, but rolled back are not witnessed.
-          val _ = witnessedB ++= viewParticipantData.createdCore
-            .filter { case CreatedContract(_, _, rolledBack) => !rolledBack }
-            .map(idWithSerializable)
-        }
-      }
-    }
-
-    val createdResultStakeholders = createdContractsOfHostedStakeholdersB.result()
-    val maybeCreatedResult = createdResultStakeholders.fmap(tuple =>
-      tuple._1
-    ) // includes contracts created under rollback nodes
-    val checkActivenessOrRelative = contractsForActivenessCheckUnlessRelativeB.result()
-
-    // Remove the contracts created in the same transaction from the contracts to be checked for activeness
-    val checkActivenessAndOrderFor = checkActivenessOrRelative -- maybeCreatedResult.keySet
-    val checkActivenessTxInputs = checkActivenessAndOrderFor.keySet
-
-    val consumedInputsOfHostedStakeholders = consumedInputsOfHostedStakeholdersB.result()
-
-    val informeeStakeholdersCreatedContracts =
-      createdResultStakeholders.values
-        .flatMap((x: (Option[SerializableContract], Set[LfPartyId])) => x._2)
-        .toSet
-
-    val informeeStakeholdersUsedContracts = checkActivenessOrRelative.values.flatten.toSet
-
-    // TODO(i6222): Consider tracking causal dependencies from contract keys
-    val informeeStakeholders =
-      informeeStakeholdersUsedContracts ++ informeeStakeholdersCreatedContracts
-
-    // Among the consumed relative contracts, the activeness check on the participant cares only about those
-    // for which the participant hosts a stakeholder, i.e., the participant must also see the creation.
-    // If the contract is created in a view (including subviews) and archived in the core,
-    // then it does not show up as a consumed input of another view, so we explicitly add those.
-    val allConsumed = consumedInputsOfHostedStakeholders.keySet.union(transientSameViewOrEarlier)
-    val transientResult =
-      maybeCreatedResult.collect {
-        case (cid, Some(contract)) if allConsumed.contains(cid) =>
-          cid -> WithContractHash.fromContract(contract, contract.metadata.stakeholders)
-      }
-    val usedAndCreated = UsedAndCreatedContracts(
-      witnessedAndDivulged = divulgedInputsB.result() ++ witnessedB.result(),
-      checkActivenessTxInputs = checkActivenessTxInputs,
-      consumedInputsOfHostedStakeholders =
-        consumedInputsOfHostedStakeholders -- maybeCreatedResult.keySet,
-      maybeCreated = maybeCreatedResult,
-      transient = transientResult,
-      used = usedContracts.result(),
-    )
-    val hostedInformeeStakeholders =
-      informeeStakeholders.filter(s => partyPrefetch.hostsAny(Iterable(s)))
-    (usedAndCreated, hostedInformeeStakeholders)
-  }
-
-  /** For [[com.digitalasset.canton.data.TransactionViewTree]]s produced by
-    * [[com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImplV2]]
-    */
-  private def extractInputAndUpdatedKeysV2(
-      rootViewTrees: Seq[TransactionViewTree],
-      partyPrefetch: PrefetchedParties,
-  )(implicit traceContext: TraceContext): InputAndUpdatedKeys = {
-    val perRootViewInputKeysB = Map.newBuilder[ViewHash, LfKeyResolver]
-    // We had computed `transientSameViewOrEarlier` already in `extractUsedAndCreatedContracts`,
-    // but we need to recompute it again for the keys here.
-    val transientSameViewOrEarlier = mutable.Set.empty[LfContractId]
-    val inputKeysOfHostedMaintainers = mutable.Map.empty[LfGlobalKey, ContractKeyJournal.Status]
-
-    // Stores the change in the number of active contracts for a given key.
-    // We process the nodes in the transaction out of execution order,
-    // so during processing the numbers may lie outside of {-1,0,+1}.
-    // At the end, however, by the assumption of internal key consistency of the submitted transaction
-    // we should end up with 0 or -1 for assigned input keys and 0 or +1 for unassigned ones.
-    // TODO(M40) This assumption holds only for honest submitters
-    //
-    // Keys in this map must be locked during phase 3 even if their status does not change (i.e., maps to 0)
-    // because we cannot guarantee that the transaction is committed atomically (with dishonest submitter and confirmers).
-    val keyUpdatesOfHostedMaintainers = mutable.Map.empty[LfGlobalKey, Int]
-
-    def updateKeyCount(key: LfGlobalKey, delta: Int): Unit = {
-      if (delta == 0) {
-        keyUpdatesOfHostedMaintainers.getOrElseUpdate(key, 0).discard[Int]
-      } else {
-        val previous = keyUpdatesOfHostedMaintainers.getOrElse(key, 0)
-        // We don't have to check for overflow here
-        // because by the assumption on internal key consistency,
-        // the overflows will cancel out in the end.
-        keyUpdatesOfHostedMaintainers += key -> (previous + delta)
-      }
-    }
-
-    def keyMustBeFree(key: LfGlobalKey): Unit = {
-      val _ = inputKeysOfHostedMaintainers.getOrElseUpdate(key, ContractKeyJournal.Unassigned)
-    }
-
-    rootViewTrees.foreach { rootViewTree =>
-      val resolvedKeysInView = mutable.Map.empty[LfGlobalKey, Option[LfContractId]]
-
-      visitViewInPreOrder(rootViewTree.view) { subview =>
-        val viewParticipantData = subview.viewParticipantData.tryUnwrap
-        val informees = subview.viewCommonData.tryUnwrap.informees.map(_.party)
-
-        viewParticipantData.resolvedKeys.foreach { case (key, resolved) =>
-          val _ = resolvedKeysInView.getOrElseUpdate(key, resolved.resolution)
-          resolved match {
-            case FreeKey(maintainers) =>
-              if (partyPrefetch.hostsAny(maintainers)) {
-                keyMustBeFree(key)
-              }
-            case AssignedKey(_) =>
-            // AssignedKeys are part of the coreInputs and thus will be dealt with below.
-          }
-        }
-        viewParticipantData.coreInputs.values.foreach { inputContractWithMetadata =>
-          if (
-            inputContractWithMetadata.consumed &&
-            partyPrefetch.hostsAny(inputContractWithMetadata.maintainers)
-          ) {
-            val key = inputContractWithMetadata.contractKey.getOrElse(
-              throw new RuntimeException(
-                "If there is no key, then there cannot be a hosted maintainer."
-              )
-            )
-            // In UCK mode (inputKeysOfHostedMaintainers only used in UCK mode), key must still be marked as
-            // assigned even if the contract was consumed under a rollback node. (In non-UCK mode the semantics
-            // are more nuanced per https://github.com/digital-asset/daml/pull/9546).
-            val _ =
-              inputKeysOfHostedMaintainers.getOrElseUpdate(key, ContractKeyJournal.Assigned)
-            // Contract key assignments below rollbacks do not change at the level of the transaction.
-            if (!viewParticipantData.rollbackContext.inRollback) {
-              // But under rollback we would not update the key count
-              updateKeyCount(key, delta = -1)
-            }
-          }
-        }
-
-        def isCreatedContractRolledBack(createdContract: CreatedContract): Boolean =
-          viewParticipantData.rollbackContext.inRollback || createdContract.rolledBack
-
-        // Since the informees of a Create node are the stakeholders of the created contract,
-        // the participant either witnesses all creations in a view's core or hosts a party of all created contracts.
-        if (partyPrefetch.hostsAny(informees)) {
-          addTransientContracts(viewParticipantData, transientSameViewOrEarlier)
-
-          // Update the key allocation count for created contracts.
-          // Also deals with their archivals for transient contracts
-          // if the archival happens in the current view's core or one of its parent view's cores.
-          //
-          // If the archival happens in a proper subview or a later subview of the current view,
-          // then this view will list the contract among its core inputs and the archival will be dealt with then.
-          viewParticipantData.createdCore.foreach { createdContract =>
-            createdContract.contract.metadata.maybeKeyWithMaintainers.foreach { keyAndMaintainer =>
-              val LfGlobalKeyWithMaintainers(key, maintainers) = keyAndMaintainer
-              if (partyPrefetch.hostsAny(maintainers)) {
-                keyMustBeFree(key)
-
-                if (isCreatedContractRolledBack(createdContract)) {
-                  // Created contracts under rollback nodes don't update the key count.
-                  updateKeyCount(key, delta = 0)
-                } else if (
-                  transientSameViewOrEarlier.contains(createdContract.contract.contractId)
-                ) {
-                  // If the contract is archived by the core of the current view or a parent view,
-                  // then it's transient and doesn't modify the allocation count.
-                  //
-                  // `transientSameViewOrEarlier` may contain contracts archived in earlier root views or
-                  // from subviews of the current root view that precede the current subview.
-                  // So it is a superset of the contracts we're looking for.
-                  // However, this does not affect the condition here by the assumption of internal consistency,
-                  // because these archivals from preceding non-parent views must refer to different contract IDs
-                  // as the contract ID of the created node is fresh.
-                  // TODO(M40) Internal consistency can be assumed only for an honest submitter
-                  updateKeyCount(key, delta = 0)
-                } else {
-                  updateKeyCount(key, delta = 1)
-                }
-              }
-            }
-          }
-        }
-      }
-      perRootViewInputKeysB += rootViewTree.viewHash -> resolvedKeysInView.toMap
-    }
-
-    // Only perform activeness checks for keys on domains with unique contract key semantics
-    val (updatedKeys, freeKeys) = if (staticDomainParameters.uniqueContractKeys) {
-      val updatedKeys = keyUpdatesOfHostedMaintainers.map { case (key, delta) =>
-        import ContractKeyJournal.*
-        val newStatus = (checked(inputKeysOfHostedMaintainers(key)), delta) match {
-          case (status, 0) => status
-          case (Assigned, -1) => Unassigned
-          case (Unassigned, 1) => Assigned
-          case (status, _) =>
-            throw new IllegalArgumentException(
-              s"Request changes allocation count of $status key $key by $delta."
-            )
-        }
-        key -> newStatus
-      }.toMap
-      val freeKeys = inputKeysOfHostedMaintainers.collect {
-        case (key, ContractKeyJournal.Unassigned) => key
-      }.toSet
-      (updatedKeys, freeKeys)
-    } else (Map.empty[LfGlobalKey, ContractKeyJournal.Status], Set.empty[LfGlobalKey])
-
-    InputAndUpdatedKeysV2(
-      keyResolvers = perRootViewInputKeysB.result(),
-      uckFreeKeysOfHostedMaintainers = freeKeys,
-      uckUpdatedKeysOfHostedMaintainers = updatedKeys,
-    )
-  }
-
-  /** For [[com.digitalasset.canton.data.TransactionViewTree]]s produced by
-    * [[com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImplV3]]
-    */
-  private def extractInputAndUpdatedKeysV3(
-      rootViewTrees: NonEmpty[Seq[TransactionViewTree]],
-      partyPrefetch: PrefetchedParties,
-  )(implicit traceContext: TraceContext): InputAndUpdatedKeys = {
-    val (updatedKeys, freeKeys) = if (staticDomainParameters.uniqueContractKeys) {
-      /* In UCK mode, the globalKeyInputs have been computed with `ContractKeyUniquenessMode.Strict`,
-       * i.e., the global key input of each view contain the expected pre-view state of the key.
-       * So for key freshness, it suffices to combine the global key inputs with earlier view's resolution taking precedence
-       *
-       * For the updates of the key state, we count the created contracts for a key and the archivals for contracts with this key,
-       * and look at the difference. The counting ignore nodes underneath rollback nodes.
-       * This is fine because the nodes under a rollback do not take effect;
-       * even if the transaction was committed only partially,
-       * the committed subtransaction would still contain the rollback node.
-       */
-      val freeKeysB = Set.newBuilder[LfGlobalKey]
-      rootViewTrees
-        .foldLeft(Set.empty[LfGlobalKey]) { (seenKeys, rootViewTree) =>
-          val gki = rootViewTree.view.globalKeyInputs
-          gki.foldLeft(seenKeys) { case (seenKeys, (key, resolution)) =>
-            if (seenKeys.contains(key)) seenKeys
-            else {
-              if (resolution.resolution.isEmpty && partyPrefetch.hostsAny(resolution.maintainers)) {
-                freeKeysB.addOne(key)
-              }
-              seenKeys.incl(key)
-            }
-          }
-        }
-        .discard
-      val freeKeys = freeKeysB.result()
-
-      // Now find out the keys that this transaction updates.
-      // We cannot just compare the end state of the key against the initial state,
-      // because a key may be free at the start and at the end, and yet be allocated in between to a transient contract.
-      // Since transactions can be committed partially, the transient contract may actually be created.
-      // So we have to lock the key.
-
-      val allUpdatedKeys = rootViewTrees.foldLeft(Map.empty[LfGlobalKey, Set[LfPartyId]]) {
-        (acc, rootView) => acc ++ rootView.view.updatedKeys
-      }
-      val updatedKeysOfHostedMaintainer = allUpdatedKeys.filter { case (_key, maintainers) =>
-        partyPrefetch.hostsAny(maintainers)
-      }
-
-      // As the participant receives all views that update a key it hosts a maintainer of,
-      // we simply merge the active ledger states at the end of all root views for the updated keys.
-      // This gives the final resolution for the key.
-      // TODO(M40,#713) validate internal key consistency
-      val mergedKeys = rootViewTrees.foldLeft(Map.empty[LfGlobalKey, KeyMapping]) {
-        (accKeys, rootView) => accKeys ++ rootView.view.updatedKeyValues
-      }
-
-      val updatedKeys = mergedKeys.collect {
-        case (key, keyMapping) if updatedKeysOfHostedMaintainer.contains(key) =>
-          val status =
-            if (keyMapping == KeyInactive) ContractKeyJournal.Unassigned
-            else ContractKeyJournal.Assigned
-          key -> status
-      }
-
-      (updatedKeys, freeKeys)
-    } else (Map.empty[LfGlobalKey, ContractKeyJournal.Status], Set.empty[LfGlobalKey])
-
-    InputAndUpdatedKeysV3(
-      uckFreeKeysOfHostedMaintainers = freeKeys,
-      uckUpdatedKeysOfHostedMaintainers = updatedKeys,
-    )
-  }
-
-  private def visitViewInPreOrder(view: TransactionView)(f: TransactionView => Unit): Unit = {
-    def go(view: TransactionView): Unit = {
-      f(view)
-      view.subviews.assertAllUnblinded(hash =>
-        s"View ${view.viewHash} contains an unexpected blinded subview $hash"
-      )
-      view.subviews.unblindedElements.foreach(go)
-    }
-    go(view)
-  }
-
-  private[this] def idWithSerializable(
-      created: CreatedContract
-  ): (LfContractId, SerializableContract) =
-    created.contract.contractId -> created.contract
-
-  // TODO(#9604) Consider to remove party prefetching and instead query the topology snapshot directly
-  private[this] def prefetchHostsParties(
-      viewTrees: Seq[TransactionViewTree],
-      topologySnapshot: TopologySnapshot,
-  ): Future[PrefetchedParties] = {
-    val prefetchParties = mutable.Set.empty[LfPartyId]
-    viewTrees.foreach { viewTree =>
-      visitViewInPreOrder(viewTree.view) { subview =>
-        val viewParticipantData = subview.viewParticipantData.tryUnwrap
-        prefetchParties ++= subview.viewCommonData.tryUnwrap.informees.map(_.party)
-        viewParticipantData.resolvedKeys.foreach {
-          case (_, FreeKey(maintainers)) => prefetchParties ++= maintainers
-          case _ => ()
-        }
-        viewParticipantData.coreInputs.values.foreach { x =>
-          prefetchParties ++= x.maintainers
-          prefetchParties ++= x.stakeholders
-        }
-      }
-    }
-    prefetchParties.toSeq
-      .parTraverse(partyId =>
-        topologySnapshot.hostedOn(partyId, participantId).map {
-          case Some(relationship) if relationship.permission.isActive => partyId -> true
-          case _ => partyId -> false
-        }
-      )
-      .map(partyHosting => PrefetchedParties(partyHosting.toMap))
-  }
-
-  private[this] def addTransientContracts(
-      viewParticipantData: ViewParticipantData,
-      transient: mutable.Set[LfContractId],
-  ): Unit = {
-    // Only track transient contracts outside of rollback scopes.
-    if (!viewParticipantData.rollbackContext.inRollback) {
-      val transientCore =
-        viewParticipantData.createdCore
-          .filter(x => x.consumedInCore && !x.rolledBack)
-          .map(_.contract.contractId)
-      transient ++= transientCore
-      // The participant might host only an actor and not a stakeholder of the contract that is archived in the core.
-      // We nevertheless add all of them here because we will intersect this set with `createdContractsOfHostedStakeholdersB` later.
-      // This ensures that we only cover contracts of which the participant hosts a stakeholder.
-      transient ++= viewParticipantData.createdInSubviewArchivedInCore
-    }
-  }
-
   override def embedRequestError(
       err: ProtocolProcessor.RequestProcessingError
   ): TransactionProcessorError =
@@ -1806,7 +1382,7 @@ class TransactionProcessingSteps(
 
 object TransactionProcessingSteps {
 
-  case class SubmissionParam(
+  final case class SubmissionParam(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
@@ -1814,11 +1390,11 @@ object TransactionProcessingSteps {
       disclosedContracts: Map[LfContractId, SerializableContract],
   )
 
-  case class EnrichedTransaction(
-      policies: NonEmpty[Set[ConfirmationPolicy]],
+  final case class EnrichedTransaction(
+      policy: ConfirmationPolicy,
       rootViewsWithUsedAndCreated: UsedAndCreated,
-      workflowId: Option[WorkflowId],
-      submitterMetadata: Option[SubmitterMetadata],
+      workflowIdO: Option[WorkflowId],
+      submitterMetadataO: Option[SubmitterMetadata],
   ) {
 
     def transactionId: TransactionId = {
@@ -1832,16 +1408,19 @@ object TransactionProcessingSteps {
     }
   }
 
-  case class ParallelChecksResult(
+  final case class ParallelChecksResult(
       authenticationResult: Map[ViewHash, String],
-      consistencyResult: Either[List[ReferenceToFutureContractError], Unit],
+      consistencyResultE: Either[List[ReferenceToFutureContractError], Unit],
       authorizationResult: Map[ViewHash, String],
-      conformanceResult: Either[ModelConformanceChecker.Error, ModelConformanceChecker.Result],
-      timeValidationResult: Either[TimeCheckFailure, Unit],
+      conformanceResultE: Either[
+        ModelConformanceChecker.ErrorWithSubviewsCheck,
+        ModelConformanceChecker.Result,
+      ],
+      timeValidationResultE: Either[TimeCheckFailure, Unit],
   )
 
-  case class PendingDataAndResponseArgs(
-      enrichedTransaction: Option[EnrichedTransaction],
+  final case class PendingDataAndResponseArgs(
+      enrichedTransaction: EnrichedTransaction,
       requestTimestamp: CantonTimestamp,
       malformedPayloads: Seq[MalformedPayload],
       rc: RequestCounter,
@@ -1849,7 +1428,7 @@ object TransactionProcessingSteps {
       snapshot: DomainSnapshotSyncCryptoApi,
   )
 
-  case class RejectionArgs(pendingTransaction: PendingTransaction, error: TransactionError)
+  final case class RejectionArgs(pendingTransaction: PendingTransaction, error: TransactionError)
 
   /** @throws java.lang.IllegalArgumentException if `receivedViewTrees` contains views with different transaction root hashes
     */
@@ -1864,26 +1443,11 @@ object TransactionProcessingSteps {
       )
   }
 
-  case class CommonData(
+  final case class CommonData(
       transactionId: TransactionId,
       ledgerTime: CantonTimestamp,
       submissionTime: CantonTimestamp,
       confirmationPolicy: ConfirmationPolicy,
   )
 
-  case class PrefetchedParties(hosted: Map[LfPartyId, Boolean]) {
-    def hostsAny(
-        parties: IterableOnce[LfPartyId]
-    )(implicit loggingContext: ErrorLoggingContext): Boolean =
-      parties.iterator.exists(party =>
-        hosted.getOrElse(
-          party, {
-            loggingContext.error(
-              s"Prefetch of parties is wrong and missed to load data for party $party"
-            )
-            false
-          },
-        )
-      )
-  }
 }

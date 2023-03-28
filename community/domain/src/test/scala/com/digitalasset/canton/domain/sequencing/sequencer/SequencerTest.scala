@@ -21,8 +21,9 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   ProtocolMessageV0,
   ProtocolMessageV1,
+  UnsignedProtocolMessageV2,
 }
-import com.digitalasset.canton.protocol.{v0, v1}
+import com.digitalasset.canton.protocol.{v0, v1, v2}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
@@ -83,7 +84,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       DatabaseSequencer.single(
         CommunitySequencerConfig.Database(),
         DefaultProcessingTimeouts.testing,
-        new MemoryStorage(loggerFactory),
+        new MemoryStorage(loggerFactory, timeouts),
         clock,
         domainId,
         topologyClientMember,
@@ -133,7 +134,8 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
   class TestProtocolMessage(text: String)
       extends ProtocolMessage
       with ProtocolMessageV0
-      with ProtocolMessageV1 {
+      with ProtocolMessageV1
+      with UnsignedProtocolMessageV2 {
     private val payload =
       v0.SignedProtocolMessage(
         None,
@@ -151,6 +153,9 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
     override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
       v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload))
+
+    override def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent =
+      v2.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def productElement(n: Int): Any = ???
     override def productArity: Int = ???
@@ -203,11 +208,11 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
         bobDeliverEvent.messageId shouldBe None
         bobDeliverEvent.batch.envelopes.map(_.bytes) should contain only
-          EnvelopeContent(message1, testedProtocolVersion).toByteString
+          EnvelopeContent.tryCreate(message1, testedProtocolVersion).toByteString
 
         caroleDeliverEvent.messageId shouldBe None
         caroleDeliverEvent.batch.envelopes.map(_.bytes) should contain only
-          EnvelopeContent(message2, testedProtocolVersion).toByteString
+          EnvelopeContent.tryCreate(message2, testedProtocolVersion).toByteString
       }
     }
   }

@@ -20,7 +20,7 @@ trait TransactionRoutingErrorWithDomain extends TransactionRoutingError {
 /** All routing errors happen before in-flight submission checking and are therefore never definite answers. */
 object TransactionRoutingError extends RoutingErrorGroup {
 
-  case class SubmissionError(domainId: DomainId, parent: TransactionSubmissionError)
+  final case class SubmissionError(domainId: DomainId, parent: TransactionSubmissionError)
       extends TransactionParentError[TransactionSubmissionError]
       with TransactionRoutingError {
 
@@ -40,7 +40,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           id = "MULTI_DOMAIN_SUPPORT_NOT_ENABLED",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(domains: Set[DomainId])
+      final case class Error(domains: Set[DomainId])
           extends TransactionErrorImpl(
             cause =
               s"""This transaction requires multi-domain support which is turned off on this participant.
@@ -59,7 +59,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           id = "SUBMISSION_DOMAIN_NOT_READY",
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
-      case class Error(domainId: DomainId)
+      final case class Error(domainId: DomainId)
           extends TransactionErrorImpl(
             cause = "Trying to submit to a disconnected or not configured domain."
           )
@@ -73,7 +73,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
 
-      case class InputContractsNotOnDomain(
+      final case class InputContractsNotOnDomain(
           domainId: DomainId,
           inputContractDomain: DomainId,
       ) extends TransactionErrorImpl(
@@ -81,7 +81,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           )
           with TransactionRoutingErrorWithDomain
 
-      case class NotAllInformeeAreOnDomain(
+      final case class NotAllInformeeAreOnDomain(
           domainId: DomainId,
           domainsOfAllInformee: NonEmpty[Set[DomainId]],
       ) extends TransactionErrorImpl(
@@ -90,7 +90,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           )
           with TransactionRoutingErrorWithDomain
 
-      case class Generic(domainId: DomainId, reason: String)
+      final case class Generic(domainId: DomainId, reason: String)
           extends TransactionErrorImpl(
             cause = s"Cannot submit transaction to prescribed domain `$domainId` because: $reason"
           )
@@ -112,7 +112,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidIndependentOfSystemState,
         ) {
 
-      case class Error(submitter: String)
+      final case class Error(submitter: String)
           extends TransactionErrorImpl(
             cause = "Unable to parse submitter."
           )
@@ -132,7 +132,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
 
-      case class Error(problem: String)
+      final case class Error(problem: String)
           extends TransactionErrorImpl(
             cause = "Unable to parse workflow ID."
           )
@@ -151,7 +151,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
 
-      case class Error(invalidDomainId: String)
+      final case class Error(invalidDomainId: String)
           extends TransactionErrorImpl(
             cause = "Unable to parse workflow ID."
           )
@@ -171,7 +171,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidIndependentOfSystemState,
         ) {
 
-      case class Error(err: String)
+      final case class Error(err: String)
           extends TransactionErrorImpl(
             cause = s"The given party is not a valid Canton party identifier: $err"
           )
@@ -193,7 +193,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidIndependentOfSystemState,
         ) {
 
-      case class Error(err: String)
+      final case class Error(err: String)
           extends TransactionErrorImpl(
             cause = s"Invalid disclosed contract: $err"
           )
@@ -214,7 +214,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidIndependentOfSystemState,
         ) {
 
-      case class Error(err: String)
+      final case class Error(err: String)
           extends TransactionErrorImpl(
             cause = s"Disclosed contract authentication failed: $err"
           )
@@ -239,13 +239,13 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
 
-      case class NotAllowed(unknownSubmitter: LfPartyId)
+      final case class NotAllowed(unknownSubmitter: LfPartyId)
           extends TransactionErrorImpl(
             cause = "This participant can not submit as the given submitter on any connected domain"
           )
           with TransactionRoutingError
 
-      case class NoSuitableDomain(unknownSubmitters: Seq[LfPartyId])
+      final case class NoSuitableDomain(unknownSubmitters: Seq[LfPartyId])
           extends TransactionErrorImpl(
             cause =
               "Not connected to a domain on which this participant can submit for all submitters"
@@ -266,7 +266,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
 
-      case class Error(unknownSubmitters: Set[LfPartyId])
+      final case class Error(unknownSubmitters: Set[LfPartyId])
           extends TransactionErrorImpl(
             cause =
               "The participant is not connected to any domain where the given submitters are known."
@@ -287,7 +287,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
 
-      case class Error(unknownInformees: Set[LfPartyId])
+      final case class Error(unknownInformees: Set[LfPartyId])
           extends TransactionErrorImpl(
             cause =
               "The participant is not connected to any domain where the given informees are known."
@@ -307,7 +307,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           id = "SUBMITTERS_NOT_ACTIVE",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(domains: Set[DomainId], informees: Set[LfPartyId])
+      final case class Error(domains: Set[DomainId], informees: Set[LfPartyId])
           extends TransactionErrorImpl(
             cause = "There is no common domain where all submitters are active"
           )
@@ -324,7 +324,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           id = "INFORMEES_NOT_ACTIVE",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(domains: Set[DomainId], informees: Set[LfPartyId])
+      final case class Error(domains: Set[DomainId], informees: Set[LfPartyId])
           extends TransactionErrorImpl(
             cause = "There is no common domain where all informees are active"
           )
@@ -342,7 +342,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           id = "NO_COMMON_DOMAIN",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(submitters: Set[LfPartyId], informees: Set[LfPartyId])
+      final case class Error(submitters: Set[LfPartyId], informees: Set[LfPartyId])
           extends TransactionErrorImpl(
             cause =
               "There is no common domain to which all submitters can submit and all informees are connected."
@@ -361,7 +361,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           id = "SUBMITTER_ALWAYS_STAKEHOLDER",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(cids: Seq[LfContractId])
+      final case class Error(cids: Seq[LfContractId])
           extends TransactionErrorImpl(
             cause = "The given contracts can not be transferred as no submitter is a stakeholder."
           )
@@ -382,7 +382,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
 
       /** @param domainsNotUsed The reason why each domain cannot be used for submission.
         */
-      case class Error(domainsNotUsed: Map[DomainId, String])
+      final case class Error(domainsNotUsed: Map[DomainId, String])
           extends TransactionErrorImpl(
             cause = "No valid domain for submission found."
           )
@@ -399,7 +399,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
 
-      case class Error(contractIds: Map[String, DomainId])
+      final case class Error(contractIds: Map[String, DomainId])
           extends TransactionErrorImpl(
             cause =
               s"The given contracts ${contractIds.keySet} reside on domains ${contractIds.values} to which this participant is currently not connected."
@@ -419,7 +419,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
 
-      case class Error(contractIds: List[String])
+      final case class Error(contractIds: List[String])
           extends TransactionErrorImpl(
             cause =
               s"The domains for the contracts $contractIds are currently unknown due to contract transfers."
@@ -444,7 +444,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
         id = "AUTOMATIC_TRANSFER_FOR_TRANSACTION_FAILED",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Failed(reason: String)
+    final case class Failed(reason: String)
         extends TransactionErrorImpl(
           cause = "Automatically transferring contracts to a common domain failed."
         )
@@ -462,7 +462,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
         id = "UNABLE_TO_GET_TOPOLOGY_SNAPSHOT",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Failed(domainId: DomainId)
+    final case class Failed(domainId: DomainId)
         extends TransactionErrorImpl(
           cause = s"Participant is not connected to domain `$domainId`."
         )
@@ -481,14 +481,14 @@ object TransactionRoutingError extends RoutingErrorGroup {
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
 
-    case class IllformedTransaction(reason: String)
+    final case class IllformedTransaction(reason: String)
         extends TransactionErrorImpl(
           cause = "Illformed transaction received."
         )
         with TransactionRoutingError
 
     // should not happen as this is caught earlier
-    case class InputContractsOnDifferentDomains(domainIds: Iterable[DomainId])
+    final case class InputContractsOnDifferentDomains(domainIds: Iterable[DomainId])
         extends TransactionErrorImpl(
           cause = "Input contracts are on different domains"
         )

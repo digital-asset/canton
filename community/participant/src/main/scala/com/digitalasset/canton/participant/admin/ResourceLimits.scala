@@ -15,7 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDoub
   *                      30 commands can submitted in the same instant, while thereafter, only one command every 10ms
   *                      is accepted.
   */
-case class ResourceLimits(
+final case class ResourceLimits(
     maxDirtyRequests: Option[NonNegativeInt],
     maxRate: Option[NonNegativeInt],
     maxBurstFactor: PositiveDouble = ResourceLimits.defaultMaxBurstFactor,

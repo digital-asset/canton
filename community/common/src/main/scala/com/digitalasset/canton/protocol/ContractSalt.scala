@@ -15,7 +15,7 @@ import java.util.UUID
   *
   * @see UnicumGenerator for the construction details
   */
-case class ContractSalt(unwrap: Salt) extends AnyVal
+final case class ContractSalt(unwrap: Salt) extends AnyVal
 
 object ContractSalt {
 

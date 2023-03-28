@@ -34,7 +34,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
   private lazy val domainId = DefaultTestIdentities.domainId
   private lazy val mediatorId = DefaultTestIdentities.mediator
   private lazy val mediatorMetrics = DomainTestMetrics.mediator
-  private lazy val participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(10)
+  private lazy val participantResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(10)
   private lazy val factory = new ExampleTransactionFactory()(domainId = domainId)
   private lazy val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
   private lazy val alwaysReadyCheck = MediatorReadyCheck.alwaysReady(loggerFactory)
@@ -143,7 +143,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
     )
 
     val signedConfirmationResponse =
-      SignedProtocolMessage(mediatorResponse, mock[Signature], testedProtocolVersion)
+      SignedProtocolMessage.from(mediatorResponse, testedProtocolVersion, Signature.noSignature)
     when(signedConfirmationResponse.message.domainId).thenReturn(domainId)
     val informeeMessageWithWrongDomainId = mock[InformeeMessage]
     when(informeeMessageWithWrongDomainId.domainId)
@@ -220,14 +220,14 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
           CantonTimestamp.Epoch,
           Some(CantonTimestamp.ofEpochSecond(5)),
           initialDomainParameters.tryUpdate(participantResponseTimeout =
-            NonNegativeFiniteDuration.ofSeconds(4)
+            NonNegativeFiniteDuration.tryOfSeconds(4)
           ),
         ),
         DomainParameters.WithValidity(
           CantonTimestamp.ofEpochSecond(5),
           None,
           initialDomainParameters.tryUpdate(participantResponseTimeout =
-            NonNegativeFiniteDuration.ofSeconds(6)
+            NonNegativeFiniteDuration.tryOfSeconds(6)
           ),
         ),
       )

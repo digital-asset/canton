@@ -9,6 +9,6 @@ sealed trait GrpcSequencerAuthenticationSupport
 
 object GrpcSequencerAuthenticationSupport {
   case object Unsupported extends GrpcSequencerAuthenticationSupport
-  case class Supported(acceptedAgreementId: Option[ServiceAgreementId])
+  final case class Supported(acceptedAgreementId: Option[ServiceAgreementId])
       extends GrpcSequencerAuthenticationSupport
 }

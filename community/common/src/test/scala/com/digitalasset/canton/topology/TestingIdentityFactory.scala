@@ -87,7 +87,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
   * @param additionalParticipants Additional participants for which keys should be added besides the ones mentioned in the topology.
   * @param keyPurposes The purposes of the keys that will be generated.
   */
-case class TestingTopology(
+final case class TestingTopology(
     domains: Set[DomainId] = Set(DefaultTestIdentities.domainId),
     topology: Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]] = Map.empty,
     mediators: Set[MediatorId] = Set(DefaultTestIdentities.mediator),
@@ -343,26 +343,28 @@ class TestingIdentityFactory(
 
   private def mkReplace(
       mapping: DomainGovernanceMapping
-  ): SignedTopologyTransaction[TopologyChangeOp.Replace] = SignedTopologyTransaction(
-    DomainGovernanceTransaction(
-      DomainGovernanceElement(mapping),
-      defaultProtocolVersion,
-    ),
-    mock[SigningPublicKey],
-    mock[Signature],
-  )(signedTxProtocolRepresentative, None)
+  ): SignedTopologyTransaction[TopologyChangeOp.Replace] =
+    SignedTopologyTransaction(
+      DomainGovernanceTransaction(
+        DomainGovernanceElement(mapping),
+        defaultProtocolVersion,
+      ),
+      mock[SigningPublicKey],
+      Signature.noSignature,
+    )(signedTxProtocolRepresentative, None)
 
   private def mkAdd(
       mapping: TopologyStateUpdateMapping
-  ): SignedTopologyTransaction[TopologyChangeOp.Add] = SignedTopologyTransaction(
-    TopologyStateUpdate(
-      TopologyChangeOp.Add,
-      TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
-      defaultProtocolVersion,
-    ),
-    mock[SigningPublicKey],
-    mock[Signature],
-  )(signedTxProtocolRepresentative, None)
+  ): SignedTopologyTransaction[TopologyChangeOp.Add] =
+    SignedTopologyTransaction(
+      TopologyStateUpdate(
+        TopologyChangeOp.Add,
+        TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
+        defaultProtocolVersion,
+      ),
+      mock[SigningPublicKey],
+      Signature.noSignature,
+    )(signedTxProtocolRepresentative, None)
 
   private def genKeyCollection(
       owner: KeyOwner
@@ -413,7 +415,9 @@ class TestingIdentityFactory(
           ParticipantAttributes(ParticipantPermission.Submission, TrustLevel.Ordinary),
         )
       val pkgs =
-        if (packages.nonEmpty) Seq(mkAdd(VettedPackages(participantId, packages))) else Seq()
+        if (packages.nonEmpty)
+          Seq(mkAdd(VettedPackages(participantId, packages)))
+        else Seq()
       pkgs ++ genKeyCollection(participantId) :+ mkAdd(
         ParticipantState(
           RequestSide.Both,
@@ -556,7 +560,7 @@ class TestingOwnerWithKeys(
       DomainParametersChange(
         DomainId(uid),
         defaultDomainParameters
-          .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(1)),
+          .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(1)),
       ),
       namespaceKey,
     )
@@ -565,8 +569,8 @@ class TestingOwnerWithKeys(
         DomainId(uid),
         defaultDomainParameters
           .tryUpdate(
-            participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2),
-            topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(100),
+            participantResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(2),
+            topologyChangeDelay = NonNegativeFiniteDuration.tryOfMillis(100),
           ),
       ),
       namespaceKey,

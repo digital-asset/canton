@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.protocol
 
-import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.transaction.Transaction.Metadata
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.v2.TransactionMeta
 
 /** Collects the metadata of a LF transaction to the extent that is needed in Canton
   *
@@ -13,7 +13,7 @@ import com.digitalasset.canton.data.CantonTimestamp
   * @param submissionTime The submission time of the transaction
   * @param seeds The node seeds by node ID
   */
-case class TransactionMetadata(
+final case class TransactionMetadata(
     ledgerTime: CantonTimestamp,
     submissionTime: CantonTimestamp,
     seeds: Map[LfNodeId, LfHash],

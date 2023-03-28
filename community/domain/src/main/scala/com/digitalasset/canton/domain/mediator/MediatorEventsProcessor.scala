@@ -35,7 +35,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * All mediator request related events that can be processed concurrently grouped by requestId.
   */
-private[mediator] case class MediatorEventStage(
+private[mediator] final case class MediatorEventStage(
     requests: NonEmpty[Map[RequestId, NonEmpty[Seq[Traced[MediatorEvent]]]]]
 ) {
   def mergeNewEvents(newEvents: MediatorEventStage): MediatorEventStage = {

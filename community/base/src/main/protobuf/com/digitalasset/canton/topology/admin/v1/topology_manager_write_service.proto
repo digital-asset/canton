@@ -1,0 +1,96 @@
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.topology.admin.v1;
+
+import "com/digitalasset/canton/protocol/v2/topology.proto";
+
+/**
+ * Write operations on the local topology manager.
+ *
+ * Both, participant and domain run a local topology manager exposing the same write interface.
+ */
+service TopologyManagerWriteServiceX {
+
+
+  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+
+  rpc AddTransactions(AddTransactionsRequest) returns (AddTransactionsResponse);
+
+  // TODO(#11255) remove once read service is ready with Namespace and OTK queries
+  rpc GenerateGenesisTopologyTransactions(GenerateGenesisTopologyTransactionsRequest) returns (GenerateGenesisTopologyTransactionsResponse);
+
+}
+
+message AuthorizeRequest {
+  message Proposal {
+    /** Replace / Remove */
+    com.digitalasset.canton.protocol.v2.TopologyChangeOpX change = 1;
+
+    /** Optionally, the serial number of this request (auto-determined if omitted) */
+    uint32 serial = 2;
+
+    /** The mapping to be authorized */
+    com.digitalasset.canton.protocol.v2.TopologyMappingX mapping = 3;
+  }
+
+  oneof type {
+    /**
+     * Propose a transaction and distribute it.
+     * If authorize if the node has enough signing keys
+     */
+    Proposal proposal = 1;
+    /**
+     * Authorize a transaction, meaning the node needs to be able to fully sign it locally
+     */
+    string transaction_hash = 2;
+  }
+
+  /**
+   * If true: the transaction is only signed if the new signatures will result in the transaction being fully
+   * authorized. Otherwise returns as an error.
+   * If false: the transaction is signed and the signature distributed. The transaction may still not be fully
+   * authorized and remain as a proposal.
+   */
+  bool must_fully_authorize = 3;
+
+  /** Force change even if dangerous */
+  bool force_change = 4;
+
+  /**
+   * Fingerprint of the keys signing the authorization
+   *
+   * The signing key is used to identify a particular `NamespaceDelegation` or `IdentifierDelegation` certificate,
+   * which is used to justify the given authorization.
+   * If optional, it will be auto-determined.
+   */
+  repeated string signed_by = 5;
+}
+
+message AuthorizeResponse {
+  /** the generated signed topology transaction */
+  com.digitalasset.canton.protocol.v2.SignedTopologyTransactionX transaction = 1;
+}
+
+message AddTransactionsRequest {
+  repeated com.digitalasset.canton.protocol.v2.SignedTopologyTransactionX transactions = 1;
+  bool force_change = 2;
+}
+
+message AddTransactionsResponse {
+
+}
+
+// TODO(#11255) remove once read service is ready with Namespace and OTK queries
+message GenerateGenesisTopologyTransactionsRequest {
+  string domain_name = 1;
+  repeated string founding_members = 2;
+}
+
+// TODO(#11255) remove once read service is ready with Namespace and OTK queries
+message GenerateGenesisTopologyTransactionsResponse {
+  repeated com.digitalasset.canton.protocol.v2.SignedTopologyTransactionX transactions = 1;
+}
+

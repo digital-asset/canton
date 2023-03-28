@@ -20,10 +20,10 @@ import com.digitalasset.canton.lifecycle.{
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
+import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, ParticipantId}
+import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
@@ -72,12 +72,12 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     override def close(): Unit = ()
   }
 
-  class Env(keepAliveInterval: Option[NonNegativeFiniteDuration]) extends FlagCloseableAsync {
+  private class Env(keepAliveInterval: Option[NonNegativeFiniteDuration])
+      extends FlagCloseableAsync {
     override val timeouts = SequencerWriterSourceTest.this.timeouts
     protected val logger = SequencerWriterSourceTest.this.logger
     implicit val actorSystem = ActorSystem()
     val instanceIndex: Int = 0
-    val keepAliveFrequency = NonNegativeFiniteDuration.ofMillis(100)
     val testWriterConfig =
       SequencerWriterConfig.LowLatency(eventWriteBatchMaxSize = 1, payloadWriteBatchMaxSize = 1)
 
@@ -114,13 +114,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           testWriterConfig,
           totalNodeCount = PositiveInt.tryCreate(1),
           keepAliveInterval,
-          TestDomainParameters.domainSyncCryptoApi(
-            DefaultTestIdentities.domainId,
-            loggerFactory,
-            clock,
-          ),
           writerStore,
-          testedProtocolVersion,
           clock,
           eventSignaller,
           loggerFactory,
@@ -145,7 +139,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       )
   }
 
-  def withEnv(
+  private def withEnv(
       keepAliveInterval: Option[NonNegativeFiniteDuration] = None
   )(testCode: Env => Future[Assertion]): Future[Assertion] = {
     val env = new Env(keepAliveInterval)
@@ -174,7 +168,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       // setup advancing the clock past the payload to event bound immediately after the payload is persisted
       // (but before the event time is generated which will then be beyond a valid bound).
       store.setClockAdvanceBeforeSavePayloads(
-        testWriterConfig.payloadToEventMargin.duration.plusSeconds(1)
+        testWriterConfig.payloadToEventMargin.asJava.plusSeconds(1)
       )
 
       val nowish = clock.now.plusSeconds(10)
@@ -293,7 +287,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       val nowish = CantonTimestamp.Epoch.plusSeconds(10)
 
       // upper bound is inclusive
-      val margin = NonNegativeFiniteDuration.ofMillis(1)
+      val margin = NonNegativeFiniteDuration.tryOfMillis(1)
       val validSigningTimestamp = nowish
 
       for {
@@ -331,7 +325,12 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
               isRequest = true,
               batch = Batch.fromClosed(
                 testedProtocolVersion,
-                ClosedEnvelope(ByteString.EMPTY, Recipients.cc(bob)),
+                ClosedEnvelope(
+                  ByteString.EMPTY,
+                  Recipients.cc(bob),
+                  Seq.empty,
+                  testedProtocolVersion,
+                ),
               ),
               maxSequencingTime = CantonTimestamp.MaxValue,
               timestampOfSigningKey = None,
@@ -432,7 +431,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   }
 
   "an idle writer still updates its watermark to demonstrate that its online" in withEnv(
-    Some(NonNegativeFiniteDuration.ofSeconds(1L))
+    Some(NonNegativeFiniteDuration.tryOfSeconds(1L))
   ) { implicit env =>
     import env.*
     // the specified keepAliveInterval of 1s ensures the watermark gets updated
@@ -448,7 +447,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     } yield succeed
   }
 
-  def eventuallyF[A](timeout: FiniteDuration, checkInterval: FiniteDuration = 100.millis)(
+  private def eventuallyF[A](timeout: FiniteDuration, checkInterval: FiniteDuration = 100.millis)(
       testCode: => Future[A]
   )(implicit env: Env): Future[A] = {
     val giveUpAt = Instant.now().plus(timeout.toMicros, ChronoUnit.MICROS)

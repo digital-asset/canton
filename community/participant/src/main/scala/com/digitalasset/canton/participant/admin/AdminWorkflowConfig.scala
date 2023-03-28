@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 
 /** Configuration options for Canton admin workflows like `participant.health.ping`
   *
@@ -18,7 +18,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
   * @param autoLoadDar If set to true (default), we will load the admin workflow package automatically.
   *                    Setting this to false will break some admin workflows.
   */
-case class AdminWorkflowConfig(
+final case class AdminWorkflowConfig(
     bongTestMaxLevel: Long = 0,
     retries: Int = 10,
     submissionTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofHours(1),

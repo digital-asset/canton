@@ -10,8 +10,11 @@ import net.logstash.logback.encoder.LogstashEncoder;
   * equivalent of:
   * <encoder class="net.logstash.logback.encoder.LogstashEncoder">
   *      <excludeMdcKeyName>err-context</excludeMdcKeyName>
+  *      <shortenedLoggerNameLength>30</shortenedLoggerNameLength>
   * </encoder>
   */
 class CantonJsonEncoder extends LogstashEncoder {
   addExcludeMdcKeyName("err-context")
+  // Set by default here, as Canton logger names are quite long by default.
+  setShortenedLoggerNameLength(30)
 }

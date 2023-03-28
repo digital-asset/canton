@@ -4,8 +4,10 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{Chain, EitherT}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.store.memory.TransferCacheTest.HookTransferStore
@@ -291,6 +293,20 @@ object TransferCacheTest {
     override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
         traceContext: TraceContext
     ): Future[Seq[TransferData]] = baseStore.findAfter(requestAfter, limit)
+
+    override def findInFlight(
+        sourceDomain: DomainId,
+        onlyCompletedTransferOut: Boolean,
+        transferOutRequestNotAfter: LocalOffset,
+        stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+        limit: Int,
+    )(implicit traceContext: TraceContext): Future[Seq[TransferData]] = baseStore.findInFlight(
+      sourceDomain,
+      onlyCompletedTransferOut,
+      transferOutRequestNotAfter,
+      stakeholders,
+      limit,
+    )
 
     override def lookup(transferId: TransferId)(implicit
         traceContext: TraceContext

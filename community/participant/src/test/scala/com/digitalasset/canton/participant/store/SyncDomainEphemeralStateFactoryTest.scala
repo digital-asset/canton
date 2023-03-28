@@ -50,6 +50,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         SequencerTestUtils.mockDeliver(sc.v, timestamp, domainId),
         SymbolicCrypto.emptySignature,
         None,
+        testedProtocolVersion,
       )
     )(TraceContext.empty)
 

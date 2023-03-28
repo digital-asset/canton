@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
@@ -10,9 +11,9 @@ import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
-import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
@@ -56,10 +57,10 @@ import scala.concurrent.{ExecutionContext, Future}
   *                     to what the [[InFlightSubmissionTracker]] uses.
   */
 class InFlightSubmissionTracker(
-    store: InFlightSubmissionStore,
+    store: Eval[InFlightSubmissionStore],
     participantEventPublisher: ParticipantEventPublisher,
     deduplicator: CommandDeduplicator,
-    multiDomainEventLog: MultiDomainEventLog,
+    multiDomainEventLog: Eval[MultiDomainEventLog],
     domainStates: DomainId => Option[InFlightSubmissionTrackerDomainState],
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -86,7 +87,10 @@ class InFlightSubmissionTracker(
     for {
       domainState <- domainStateFor(submission.submissionDomain).mapK(FutureUnlessShutdown.outcomeK)
       _result <- domainState.observedTimestampTracker
-        .runIfAboveWatermark(submission.sequencingInfo.timeout, store.register(submission)) match {
+        .runIfAboveWatermark(
+          submission.sequencingInfo.timeout,
+          store.value.register(submission),
+        ) match {
         case Left(markTooLow) =>
           EitherT.leftT[FutureUnlessShutdown, Unit](
             TimeoutTooLow(submission, markTooLow.highWatermark): InFlightSubmissionTrackerError
@@ -112,7 +116,7 @@ class InFlightSubmissionTracker(
   def observeSequencing(domainId: DomainId, sequenceds: Map[MessageId, SequencedSubmission])(
       implicit traceContext: TraceContext
   ): Future[Unit] =
-    store.observeSequencing(domainId, sequenceds)
+    store.value.observeSequencing(domainId, sequenceds)
 
   /** @see com.digitalasset.canton.participant.store.InFlightSubmissionStore.updateUnsequenced */
   def observeSubmissionError(
@@ -121,16 +125,17 @@ class InFlightSubmissionTracker(
       messageId: MessageId,
       newTrackingData: UnsequencedSubmission,
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    store.updateUnsequenced(changeIdHash, domainId, messageId, newTrackingData).map { (_: Unit) =>
-      // Request a tick for the new timestamp if we're still connected to the domain
-      domainStates(domainId) match {
-        case Some(domainState) =>
-          domainState.domainTimeTracker.requestTick(newTrackingData.timeout)
-        case None =>
-          logger.debug(
-            s"Skipping to request tick at ${newTrackingData.timeout} on $domainId as the domain is not available"
-          )
-      }
+    store.value.updateUnsequenced(changeIdHash, domainId, messageId, newTrackingData).map {
+      (_: Unit) =>
+        // Request a tick for the new timestamp if we're still connected to the domain
+        domainStates(domainId) match {
+          case Some(domainState) =>
+            domainState.domainTimeTracker.requestTick(newTrackingData.timeout)
+          case None =>
+            logger.debug(
+              s"Skipping to request tick at ${newTrackingData.timeout} on $domainId as the domain is not available"
+            )
+        }
     }
   }
 
@@ -162,10 +167,10 @@ class InFlightSubmissionTracker(
     val messageId = deliverError.messageId
 
     for {
-      inFlightO <- store.lookupSomeMessageId(domainId, messageId)
+      inFlightO <- store.value.lookupSomeMessageId(domainId, messageId)
       toUpdateO = updatedTrackingData(inFlightO)
       _ <- toUpdateO.traverse_ { case (changeIdHash, newTrackingData) =>
-        store.updateUnsequenced(changeIdHash, domainId, messageId, newTrackingData)
+        store.value.updateUnsequenced(changeIdHash, domainId, messageId, newTrackingData)
       }
     } yield ()
   }
@@ -199,7 +204,7 @@ class InFlightSubmissionTracker(
         //    does not advance due to a long-running request-response-result cycle, we get here
         //    a second chance of observing the timestamp when the sequencer counter becomes clean.
         _ <- domainState.observedTimestampTracker.increaseWatermark(upToInclusive)
-        timelyRejects <- store.lookupUnsequencedUptoUnordered(domainId, upToInclusive)
+        timelyRejects <- store.value.lookupUnsequencedUptoUnordered(domainId, upToInclusive)
         events = timelyRejects.map(timelyRejectionEventFor)
         skippedE <- participantEventPublisher.publishWithIds(events).value
       } yield {
@@ -241,7 +246,7 @@ class InFlightSubmissionTracker(
                 ) =>
               inFlightReference
           }
-          _ <- store.delete(trackedReferences)
+          _ <- store.value.delete(trackedReferences)
         } yield ()
       }.onShutdown {
         logger.info("Failed to complete and delete in-flight submission due to shutdown.")
@@ -275,11 +280,11 @@ class InFlightSubmissionTracker(
   )(implicit traceContext: TraceContext): Future[Unit] = {
     for {
       unsequenceds <- domains.parTraverse { domainId =>
-        store.lookupUnsequencedUptoUnordered(domainId, CantonTimestamp.MaxValue)
+        store.value.lookupUnsequencedUptoUnordered(domainId, CantonTimestamp.MaxValue)
       }
       unsequenced = unsequenceds.flatten
       eventIds = unsequenced.map(_.timelyRejectionEventId)
-      byEventId <- multiDomainEventLog.lookupByEventIds(eventIds)
+      byEventId <- multiDomainEventLog.value.lookupByEventIds(eventIds)
       (references, publications) = unsequenced.mapFilter { inFlight =>
         byEventId.get(inFlight.timelyRejectionEventId).map {
           case (globalOffset, timestampedEventAndCausalUpdate, publicationTime) =>
@@ -294,7 +299,7 @@ class InFlightSubmissionTracker(
         }
       }.unzip
       _ <- deduplicator.processPublications(publications)
-      _ <- store.delete(references)
+      _ <- store.value.delete(references)
     } yield ()
   }
 
@@ -382,26 +387,28 @@ class InFlightSubmissionTracker(
           (LocalOffset, InFlightSubmission[SequencedSubmission], Option[DeduplicationInfo])
         ]
     ): Future[Seq[(InFlightBySequencingInfo, MultiDomainEventLog.OnPublish.Publication)]] = {
-      EventLogId.forDomain(multiDomainEventLog.indexedStringStore)(domainId).flatMap { eventLogId =>
-        localOffsets
-          .parTraverseFilter { case (localOffset, inFlight, deduplicationInfo) =>
-            multiDomainEventLog.globalOffsetFor(eventLogId, localOffset).map { optPublicationInfo =>
-              optPublicationInfo.map { case (globalOffset, publicationTime) =>
-                val info = inFlight.referenceBySequencingInfo
-                info -> MultiDomainEventLog.OnPublish.Publication(
-                  globalOffset,
-                  publicationTime,
-                  info.some,
-                  deduplicationInfo,
-                )
+      EventLogId.forDomain(multiDomainEventLog.value.indexedStringStore)(domainId).flatMap {
+        eventLogId =>
+          localOffsets
+            .parTraverseFilter { case (localOffset, inFlight, deduplicationInfo) =>
+              multiDomainEventLog.value.globalOffsetFor(eventLogId, localOffset).map {
+                optPublicationInfo =>
+                  optPublicationInfo.map { case (globalOffset, publicationTime) =>
+                    val info = inFlight.referenceBySequencingInfo
+                    info -> MultiDomainEventLog.OnPublish.Publication(
+                      globalOffset,
+                      publicationTime,
+                      info.some,
+                      deduplicationInfo,
+                    )
+                  }
               }
             }
-          }
       }
     }
 
     for {
-      sequencedInFlight <- store.lookupSequencedUptoUnordered(
+      sequencedInFlight <- store.value.lookupSequencedUptoUnordered(
         domainId,
         sequencingTimeInclusive = upToInclusive,
       )
@@ -413,9 +420,9 @@ class InFlightSubmissionTracker(
       (toDelete, publications) = sequencingInfoAndPublications.unzip
       _ <- deduplicator.processPublications(publications)
       _ = logger.debug("Removing in-flight submissions from in-flight submission store")
-      _ <- store.delete(toDelete)
+      _ <- store.value.delete(toDelete)
       // Re-request ticks for all remaining unsequenced timestamps
-      unsequencedInFlights <- store.lookupUnsequencedUptoUnordered(
+      unsequencedInFlights <- store.value.lookupUnsequencedUptoUnordered(
         domainId,
         CantonTimestamp.MaxValue,
       )
@@ -450,7 +457,7 @@ object InFlightSubmissionTracker {
     * @param singleDimensionEventLog
     *   Used to locate the offsets and their events of sequenced requests during crash recovery
     */
-  case class InFlightSubmissionTrackerDomainState(
+  final case class InFlightSubmissionTrackerDomainState(
       observedTimestampTracker: WatermarkTracker[CantonTimestamp],
       domainTimeTracker: DomainTimeTracker,
       singleDimensionEventLog: SingleDimensionEventLogLookup,
@@ -471,15 +478,15 @@ object InFlightSubmissionTracker {
 
   sealed trait InFlightSubmissionTrackerError extends Product with Serializable
 
-  case class SubmissionAlreadyInFlight(
+  final case class SubmissionAlreadyInFlight(
       newSubmission: InFlightSubmission[UnsequencedSubmission],
       existingSubmission: InFlightSubmission[SubmissionSequencingInfo],
   ) extends InFlightSubmissionTrackerError
 
-  case class TimeoutTooLow(
+  final case class TimeoutTooLow(
       submission: InFlightSubmission[UnsequencedSubmission],
       lowerBound: CantonTimestamp,
   ) extends InFlightSubmissionTrackerError
 
-  case class UnknownDomain(domainId: DomainId) extends InFlightSubmissionTrackerError
+  final case class UnknownDomain(domainId: DomainId) extends InFlightSubmissionTrackerError
 }

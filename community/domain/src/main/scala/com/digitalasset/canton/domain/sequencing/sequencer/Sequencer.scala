@@ -16,19 +16,14 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
+import com.digitalasset.canton.health.HealthReporting.BaseHealthComponent
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
-import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggerFactory}
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.protocol.{
-  AcknowledgeRequest,
-  DeliverErrorReason,
-  SendAsyncError,
-  SignedContent,
-  SubmissionRequest,
-}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -49,8 +44,10 @@ object PruningError {
   }
 
   /** The requested timestamp would cause data for enabled members to be removed potentially permanently breaking them. */
-  case class UnsafePruningPoint(requestedTimestamp: CantonTimestamp, safeTimestamp: CantonTimestamp)
-      extends PruningError {
+  final case class UnsafePruningPoint(
+      requestedTimestamp: CantonTimestamp,
+      safeTimestamp: CantonTimestamp,
+  ) extends PruningError {
     override def message: String =
       s"Could not prune at [$requestedTimestamp] as the earliest safe pruning point is [$safeTimestamp]"
   }
@@ -60,8 +57,17 @@ object PruningError {
   * The default [[DatabaseSequencer]] implementation is backed by a database run by a single operator.
   * Other implementations support operating a Sequencer on top of third party ledgers or other infrastructure.
   */
-trait Sequencer extends SequencerPruning with FlagCloseable with HasCloseContext {
-  protected val loggerFactory: NamedLoggerFactory
+trait Sequencer
+    extends SequencerPruning
+    with FlagCloseable
+    with HasCloseContext
+    with NamedLogging
+    with BaseHealthComponent {
+  override val name: String = Sequencer.healthName
+  override type State = SequencerHealthStatus
+  override lazy val initialHealthState: SequencerHealthStatus =
+    SequencerHealthStatus(isActive = true)
+  override val closingState: SequencerHealthStatus = SequencerHealthStatus.shutdownStatus
 
   def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
   def registerMember(member: Member)(implicit
@@ -102,18 +108,6 @@ trait Sequencer extends SequencerPruning with FlagCloseable with HasCloseContext
   def read(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource]
-
-  /** Return a structure indicating the health status of the sequencer implementation.
-    * Should succeed even if the configured datastore is unavailable.
-    */
-  def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus]
-
-  /** Register a listener function that will be called every time the health status of the sequencer changes.
-    * Useful for things like signalling health changes to load balancers
-    */
-  def onHealthChange(f: (SequencerHealthStatus, TraceContext) => Unit)(implicit
-      traceContext: TraceContext
-  ): Unit
 
   /** Return a snapshot state that other newly onboarded sequencers can use as an initial state
     * from which to support serving events. This state depends on the provided timestamp
@@ -240,6 +234,7 @@ trait SequencerPruning {
 }
 
 object Sequencer extends HasLoggerName {
+  val healthName: String = "sequencer"
 
   /** The materialized future completes when all internal side-flows of the source have completed after the kill switch
     * was pulled. Termination of the main flow must be awaited separately.

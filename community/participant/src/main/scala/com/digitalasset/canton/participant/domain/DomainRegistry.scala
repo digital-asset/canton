@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.domain
 
-import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
+import com.daml.error.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -19,7 +19,6 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import org.slf4j.event.Level
 
@@ -54,7 +53,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
     )
     object DomainIsNotAvailable
         extends ErrorCode(id = "DOMAIN_IS_NOT_AVAILABLE", ErrorCategory.TransientServerFailure) {
-      case class Error(alias: DomainAlias, reason: String)(implicit
+      final case class Error(alias: DomainAlias, reason: String)(implicit
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(cause = s"Cannot connect to domain ${alias}")
           with DomainRegistryError
@@ -73,8 +72,9 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "PARTICIPANT_IS_NOT_ACTIVE",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(serverResponse: String)(implicit val loggingContext: ErrorLoggingContext)
-          extends CantonError.Impl(cause = "The participant is not yet active")
+      final case class Error(serverResponse: String)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(cause = "The participant is not yet active")
           with DomainRegistryError
     }
 
@@ -87,7 +87,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "FAILED_TO_CONNECT_TO_SEQUENCER",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "The participant failed to connect to the sequencer")
           with DomainRegistryError
     }
@@ -100,7 +100,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "GRPC_CONNECTION_FAILURE",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(error: GrpcError)(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error(error: GrpcError)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "The domain connection attempt failed with a GRPC error")
           with DomainRegistryError
     }
@@ -111,7 +111,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
 
     @Explanation(
       """This error indicates that the domain this participant is trying to connect to is a domain where unique
-        contract keys are supported, while this participant is already connected to other domains. Multiple domains and 
+        contract keys are supported, while this participant is already connected to other domains. Multiple domains and
         unique contract keys are mutually exclusive features."""
     )
     @Resolution("Use isolated participants for domains that require unique keys.")
@@ -120,14 +120,15 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "INCOMPATIBLE_UNIQUE_CONTRACT_KEYS_MODE",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(override val cause: String)(implicit val loggingContext: ErrorLoggingContext)
-          extends CantonError.Impl(cause)
+      final case class Error(override val cause: String)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(cause)
           with DomainRegistryError {}
     }
 
     @Explanation(
-      """This error indicates that the participant can not issue a domain trust certificate. Such a certificate is 
-        |necessary to become active on a domain. Therefore, it must be present in the authorized store of the 
+      """This error indicates that the participant can not issue a domain trust certificate. Such a certificate is
+        |necessary to become active on a domain. Therefore, it must be present in the authorized store of the
         |participant topology manager."""
     )
     @Resolution(
@@ -139,7 +140,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "CANNOT_ISSUE_DOMAIN_TRUST_CERTIFICATE",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error()(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error()(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(
             cause = "Can not auto-issue a domain-trust certificate on this node."
           )
@@ -153,7 +154,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "INVALID_DOMAIN_CONNECTION",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(message: String)(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error(message: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "Configured domain connection is invalid")
           with DomainRegistryError
     }
@@ -166,7 +167,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "DOMAIN_PARAMETERS_CHANGED",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(
+      final case class Error(
           oldParameters: Option[StaticDomainParameters],
           newParameters: StaticDomainParameters,
       )(implicit
@@ -182,7 +183,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
   object HandshakeErrors extends ErrorGroup() {
 
     @Explanation(
-      """This error indicates that the domain is using crypto settings which are 
+      """This error indicates that the domain is using crypto settings which are
                                 either not supported or not enabled on this participant."""
     )
     @Resolution(
@@ -193,7 +194,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "DOMAIN_CRYPTO_HANDSHAKE_FAILED",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "Crypto method handshake with domain failed")
           with DomainRegistryError
     }
@@ -210,7 +211,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "SERVICE_AGREEMENT_ACCEPTANCE_FAILED",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "Service agreement failed")
           with DomainRegistryError
     }
@@ -225,14 +226,14 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "DOMAIN_HANDSHAKE_FAILED",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "Handshake with domain has failed")
           with DomainRegistryError
     }
 
     @Explanation(
-      """This error indicates that the domain-id does not match the one that the 
-        participant expects. If this error happens on a first connect, then the domain id 
+      """This error indicates that the domain-id does not match the one that the
+        participant expects. If this error happens on a first connect, then the domain id
         defined in the domain connection settings does not match the remote domain.
         If this happens on a reconnect, then the remote domain has been reset for some reason."""
     )
@@ -242,7 +243,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "DOMAIN_ID_MISMATCH",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(expected: DomainId, observed: DomainId)(implicit
+      final case class Error(expected: DomainId, observed: DomainId)(implicit
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(
             cause = "The domain reports a different domain-id than the participant is expecting"
@@ -259,8 +260,8 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "DOMAIN_ALIAS_DUPLICATION",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      case class Error(domainId: DomainId, alias: DomainAlias, expectedDomainId: DomainId)(implicit
-          val loggingContext: ErrorLoggingContext
+      final case class Error(domainId: DomainId, alias: DomainAlias, expectedDomainId: DomainId)(
+          implicit val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(
             cause =
               "The domain with the given alias reports a different domain id than the participant is expecting"
@@ -279,8 +280,9 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
       ) {
 
-    case class Error(override val cause: String)(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(cause)
+    final case class Error(override val cause: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause)
         with DomainRegistryError
   }
 
@@ -293,33 +295,33 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
         id = "DOMAIN_REGISTRY_INTERNAL_ERROR",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class InitialOnboardingError(override val cause: String)(implicit
+    final case class InitialOnboardingError(override val cause: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause)
         with DomainRegistryError
 
-    case class TopologyHandshakeError(throwable: Throwable)(implicit
+    final case class TopologyHandshakeError(throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Handshake with remote topology transaction registrations service failed",
           throwableO = Some(throwable),
         )
         with DomainRegistryError
-    case class InvalidResponse(
+    final case class InvalidResponse(
         override val cause: String,
         override val throwableO: Option[Throwable],
     )(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(cause, throwableO)
         with DomainRegistryError
-    case class DeserializationFailure(override val cause: String)(implicit
+    final case class DeserializationFailure(override val cause: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause)
         with DomainRegistryError
-    case class InvalidState(override val cause: String)(implicit
+    final case class InvalidState(override val cause: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause)
         with DomainRegistryError
-    case class FailedToAddParticipantDomainStateCert(reason: ParticipantTopologyManagerError)(
+    final case class FailedToAddParticipantDomainStateCert(reason: ParticipantTopologyManagerError)(
         implicit val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Failed to issue domain state cert due to an unexpected reason"
@@ -344,8 +346,6 @@ trait DomainHandle extends AutoCloseable {
   def domainAlias: DomainAlias
 
   def topologyClient: DomainTopologyClientWithInit
-
-  def topologyStore: TopologyStore[TopologyStoreId.DomainStore]
 
   def domainPersistentState: SyncDomainPersistentState
 }

@@ -591,7 +591,7 @@ private[conflictdetection] object LockableStates {
     new LockableStates(store, loggerFactory, timeouts, executionContext)
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  case class ConflictDetectionStoreAccessError(msg: String, cause: Throwable = null)
+  final case class ConflictDetectionStoreAccessError(msg: String, cause: Throwable = null)
       extends RuntimeException(msg, cause)
 
   def withRC(rc: RequestCounter, msg: String) = s"Request $rc: $msg"
@@ -638,7 +638,7 @@ private[conflictdetection] object LockableStates {
     * @param state The reference to the [[MutableLockableState]] in [[LockableStates.states]] for this item
     * @param doLock Whether the activeness check shall obtain a lock on this item
     */
-  private case class KeyStateLock[Key, Status <: PrettyPrinting](
+  private final case class KeyStateLock[Key, Status <: PrettyPrinting](
       id: Key,
       state: MutableLockableState[Status],
       doLock: Boolean,

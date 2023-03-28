@@ -41,7 +41,7 @@ class TestVerdictSender extends VerdictSender {
 }
 
 object TestVerdictSender {
-  case class Result(
+  final case class Result(
       requestId: RequestId,
       decisionTime: CantonTimestamp,
       request: Option[MediatorRequest],

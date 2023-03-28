@@ -11,7 +11,8 @@ import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.Domain
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
@@ -37,7 +38,6 @@ class DomainNodeSequencerClientFactory(
     id: DomainId,
     metrics: DomainMetrics,
     topologyClient: DomainTopologyClientWithInit,
-    sequencerConnection: SequencerConnection,
     cantonNodeParameters: CantonNodeParameters,
     crypto: Crypto,
     domainParameters: StaticDomainParameters,
@@ -54,20 +54,25 @@ class DomainNodeSequencerClientFactory(
       sequencedEventStore: SequencedEventStore,
       sendTrackerStore: SendTrackerStore,
       requestSigner: RequestSigner,
+      connection: SequencerConnection,
   )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
   ): EitherT[Future, String, SequencerClient] =
-    factory(member).create(member, sequencedEventStore, sendTrackerStore, requestSigner)
+    factory(member).create(member, sequencedEventStore, sendTrackerStore, requestSigner, connection)
 
-  override def makeTransport(connection: SequencerConnection, member: Member)(implicit
+  override def makeTransport(
+      connection: SequencerConnection,
+      member: Member,
+      requestSigner: RequestSigner,
+  )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
       traceContext: TraceContext,
   ): EitherT[Future, String, SequencerClientTransport] =
-    factory(member).makeTransport(connection, member)
+    factory(member).makeTransport(connection, member, requestSigner)
 
   private def factory(member: Member)(implicit
       executionContext: ExecutionContextExecutor
@@ -96,7 +101,6 @@ class DomainNodeSequencerClientFactory(
       )
 
     SequencerClient(
-      sequencerConnection,
       id,
       sequencerId,
       sequencerClientSyncCrypto,
@@ -127,4 +131,21 @@ class DomainNodeSequencerClientFactory(
       minimumProtocolVersion = None,
     )
   }
+
+  override def validateTransport(
+      connection: SequencerConnection,
+      logWarning: Boolean,
+  )(implicit
+      executionContext: ExecutionContextExecutor,
+      errorLoggingContext: ErrorLoggingContext,
+      closeContext: CloseContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    SequencerClientTransportFactory.validateTransport(
+      connection,
+      cantonNodeParameters.tracing.propagation,
+      cantonNodeParameters.sequencerClient,
+      logWarning,
+      loggerFactory,
+    )
+
 }

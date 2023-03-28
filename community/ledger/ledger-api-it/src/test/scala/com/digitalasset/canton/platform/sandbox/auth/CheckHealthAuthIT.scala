@@ -1,0 +1,20 @@
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.platform.sandbox.auth
+
+import com.daml.platform.testing.StreamConsumer
+import io.grpc.health.v1.{HealthCheckRequest, HealthCheckResponse, HealthGrpc}
+
+import scala.concurrent.Future
+
+final class CheckHealthAuthIT extends UnsecuredServiceCallAuthTests {
+  override def serviceCallName: String = "HealthService"
+
+  private lazy val request = HealthCheckRequest.newBuilder().build()
+
+  override def serviceCall(context: ServiceCallContext): Future[Any] =
+    new StreamConsumer[HealthCheckResponse](
+      stub(HealthGrpc.newStub(channel), context.token).check(request, _)
+    ).first()
+}

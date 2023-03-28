@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -41,7 +41,11 @@ class TopologyTimestampPlusEpsilonTrackerTest
       loggerFactory,
     )
     val tracker =
-      new TopologyTimestampPlusEpsilonTracker(DefaultProcessingTimeouts.testing, loggerFactory)
+      new TopologyTimestampPlusEpsilonTracker(
+        DefaultProcessingTimeouts.testing,
+        loggerFactory,
+        FutureSupervisor.Noop,
+      )
 
     def appendEps(
         sequenced: SequencedTime,
@@ -102,7 +106,7 @@ class TopologyTimestampPlusEpsilonTrackerTest
     fut.onShutdown(fail("should not receive a shutdown"))
 
   private lazy val ts = CantonTimestamp.Epoch
-  private lazy val epsilonFD = NonNegativeFiniteDuration.ofMillis(250)
+  private lazy val epsilonFD = NonNegativeFiniteDuration.tryOfMillis(250)
   private lazy val epsilon = epsilonFD.duration
 
   private def assertEffectiveTimeForUpdate(
@@ -149,7 +153,7 @@ class TopologyTimestampPlusEpsilonTrackerTest
     "properly project during epsilon increase" in { f =>
       import f.*
       init()
-      val newEpsilon = NonNegativeFiniteDuration.ofSeconds(1)
+      val newEpsilon = NonNegativeFiniteDuration.tryOfSeconds(1)
       adjustEpsilon(tracker, newEpsilon)
       // after adjusted ts, we should get the new epsilon
       forAll(Seq(0L, 100L, 250L)) { delta =>
@@ -161,7 +165,7 @@ class TopologyTimestampPlusEpsilonTrackerTest
     "properly deal with epsilon decrease" in { f =>
       import f.*
       init()
-      val newEpsilon = NonNegativeFiniteDuration.ofMillis(100)
+      val newEpsilon = NonNegativeFiniteDuration.tryOfMillis(100)
       adjustEpsilon(tracker, newEpsilon)
 
       // after adjusted ts, we should get the new epsilon, avoiding the "deadzone" of ts + 2*oldEpsilon
@@ -174,11 +178,11 @@ class TopologyTimestampPlusEpsilonTrackerTest
     "correctly initialise with pending changes" in { f =>
       import f.*
 
-      val eS1 = NonNegativeFiniteDuration.ofMillis(100)
+      val eS1 = NonNegativeFiniteDuration.tryOfMillis(100)
       val tsS1 = ts.minusSeconds(1)
       appendEps(SequencedTime(tsS1), EffectiveTime(tsS1), eS1)
 
-      val eM100 = NonNegativeFiniteDuration.ofMillis(100)
+      val eM100 = NonNegativeFiniteDuration.tryOfMillis(100)
       val tsM100 = ts.minusMillis(100)
 
       appendEps(SequencedTime(tsM100), EffectiveTime(ts), eM100)
@@ -191,7 +195,7 @@ class TopologyTimestampPlusEpsilonTrackerTest
         f.crypto.TestingTransactions.p2p1,
       )
 
-      val eM50 = NonNegativeFiniteDuration.ofMillis(200)
+      val eM50 = NonNegativeFiniteDuration.tryOfMillis(200)
       val tsM50 = ts.minusMillis(50)
       appendEps(SequencedTime(tsM50), EffectiveTime(tsM50.plusMillis(100)), eM50)
 
@@ -204,7 +208,7 @@ class TopologyTimestampPlusEpsilonTrackerTest
     "gracefully deal with epsilon decrease on a buggy domain" in { f =>
       import f.*
       init()
-      val newEpsilon = NonNegativeFiniteDuration.ofMillis(100)
+      val newEpsilon = NonNegativeFiniteDuration.tryOfMillis(100)
       adjustEpsilon(tracker, newEpsilon)
 
       // after adjusted ts, we should get a warning and an adjustment in the "deadzone" of ts + 2*oldEpsilon

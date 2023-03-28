@@ -4,6 +4,7 @@
 package com.digitalasset.canton.time
 
 import cats.syntax.option.*
+import com.digitalasset.canton.config.DomainTimeTrackerConfig
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
@@ -12,7 +13,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, S
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, SequencerCounter, config}
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
@@ -49,6 +50,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         ),
         SymbolicCrypto.emptySignature,
         None,
+        testedProtocolVersion,
       )
     )(traceContext)
 
@@ -66,6 +68,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         ),
         SymbolicCrypto.emptySignature,
         None,
+        testedProtocolVersion,
       )
     )(traceContext)
 
@@ -80,14 +83,20 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     val observationLatencySecs = 2
     // put off requesting a time if we've seen an event within the last 4s
     val patienceDurationSecs = 4
-    val config = DomainTimeTrackerConfig(
-      NonNegativeFiniteDuration.ofSeconds(observationLatencySecs.toLong),
-      NonNegativeFiniteDuration.ofSeconds(patienceDurationSecs.toLong),
+    val domainTimeTrackerConfig = DomainTimeTrackerConfig(
+      config.NonNegativeFiniteDuration.ofSeconds(observationLatencySecs.toLong),
+      config.NonNegativeFiniteDuration.ofSeconds(patienceDurationSecs.toLong),
     )
     val clock = new SimClock(loggerFactory = loggerFactory)
     val requestSubmitter = new MockTimeRequestSubmitter
     val timeTracker =
-      new DomainTimeTracker(config, clock, requestSubmitter, timeouts, loggerFactory)
+      new DomainTimeTracker(
+        domainTimeTrackerConfig,
+        clock,
+        requestSubmitter,
+        timeouts,
+        loggerFactory,
+      )
 
     def observeTimeProof(epochSecs: Int): Future[Unit] =
       Future.successful(timeTracker.update(Seq(timeProofEvent(ts(epochSecs)))))
@@ -166,6 +175,12 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         _ = advanceAndFlush(patienceDurationSecs)
       } yield requestSubmitter.hasRequestedTime shouldBe true
     }
+    "request time proof immediately" in { env =>
+      import env.*
+
+      timeTracker.requestTick(ts(2), immediately = true)
+      requestSubmitter.hasRequestedTime shouldBe true
+    }
 
     "hold off requesting time proof if were getting regular updates" in { env =>
       import env.*
@@ -210,7 +225,9 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
       // the upper bound is the time - observationLatency
       loggerFactory.assertLogs(
-        timeTracker.requestTick(CantonTimestamp.MaxValue.minus(config.observationLatency.unwrap)),
+        timeTracker.requestTick(
+          CantonTimestamp.MaxValue.minus(domainTimeTrackerConfig.observationLatency.asJava)
+        ),
         _.warningMessage should (include("Ignoring request for 1 ticks") and include(
           "as they are too large"
         )),
@@ -222,7 +239,9 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         timeTracker.requestTicks(
           Seq(
             CantonTimestamp.MaxValue,
-            CantonTimestamp.MaxValue.minus(config.observationLatency.unwrap).immediatePredecessor,
+            CantonTimestamp.MaxValue
+              .minus(domainTimeTrackerConfig.observationLatency.asJava)
+              .immediatePredecessor,
           )
         ),
         _.warningMessage should (include("Ignoring request for 1 ticks") and include(
@@ -268,14 +287,14 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         _ = clock.advanceTo(ts(5))
         // should return the existing observation as it's within the freshness bounds
         fetch1 <- timeTracker
-          .fetchTime(NonNegativeFiniteDuration.ofSeconds(5))
+          .fetchTime(NonNegativeFiniteDuration.tryOfSeconds(5))
           .failOnShutdown("fetch time")
         _ = fetch1 shouldBe ts(42)
         // we've returned a sufficiently fresh time without causing a request
         _ = requestSubmitter.hasRequestedTime shouldBe false
         // however if we now request a timestamp that was received within the last 2 seconds, we'll have to go fetch one
         fetch2F = timeTracker
-          .fetchTime(NonNegativeFiniteDuration.ofSeconds(2))
+          .fetchTime(NonNegativeFiniteDuration.tryOfSeconds(2))
           .failOnShutdown("fetch time")
         _ = requestSubmitter.hasRequestedTime shouldBe true
         _ <- observeTimeProof(43)
@@ -354,7 +373,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
       timeTracker.subscriptionResumesAfter(ts(0))
       // advance to our min observation duration without witnessing a time
-      clock.advance(config.minObservationDuration.duration.plusMillis(1))
+      clock.advance(domainTimeTrackerConfig.minObservationDuration.asJava.plusMillis(1))
       // we should request one
       requestSubmitter.hasRequestedTime shouldBe true
       requestSubmitter.resetHasRequestedTime() // reset to use again
@@ -363,9 +382,9 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         // will resolve our request to fetch a time
         _ <- observeTimeProof(10)
         // advance to almost the time we should wait
-        _ = clock.advance(config.minObservationDuration.duration.minusSeconds(1))
+        _ = clock.advance(domainTimeTrackerConfig.minObservationDuration.asJava.minusSeconds(1))
         _ <- observeTimeProof(11) // observe a time
-        _ = clock.advance(config.minObservationDuration.duration.minusSeconds(1))
+        _ = clock.advance(domainTimeTrackerConfig.minObservationDuration.asJava.minusSeconds(1))
         _ = requestSubmitter.hasRequestedTime shouldBe false // we shouldn't have requested a time
         _ = clock.advance(
           Duration.ofSeconds(1).plusMillis(1)

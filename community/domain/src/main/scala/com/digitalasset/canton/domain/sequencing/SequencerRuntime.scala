@@ -8,7 +8,12 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
+import com.digitalasset.canton.config
+import com.digitalasset.canton.config.{
+  DomainTimeTrackerConfig,
+  ProcessingTimeout,
+  TestingConfigInternal,
+}
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.admin.v0.{
   SequencerAdministrationServiceGrpc,
@@ -40,7 +45,6 @@ import com.digitalasset.canton.domain.topology.client.DomainInitializationObserv
 import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.resource.Storage
@@ -57,12 +61,7 @@ import com.digitalasset.canton.store.{
   SequencedEventStore,
   SequencerCounterTrackerStore,
 }
-import com.digitalasset.canton.time.{
-  Clock,
-  DomainTimeTracker,
-  DomainTimeTrackerConfig,
-  NonNegativeFiniteDuration,
-}
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
@@ -71,17 +70,16 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.*
-import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
-case class SequencerAuthenticationConfig(
+final case class SequencerAuthenticationConfig(
     agreementManager: Option[ServiceAgreementManager],
-    nonceExpirationTime: NonNegativeFiniteDuration,
-    tokenExpirationTime: NonNegativeFiniteDuration,
+    nonceExpirationTime: config.NonNegativeFiniteDuration,
+    tokenExpirationTime: config.NonNegativeFiniteDuration,
 ) {
   // only authentication tokens are supported
   val check: AuthenticationCheck = AuthenticationCheck.AuthenticationToken
@@ -105,7 +103,7 @@ class SequencerRuntime(
     val metrics: SequencerMetrics,
     val domainId: DomainId,
     crypto: Crypto,
-    sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
+    val sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
     topologyClientMember: Member,
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessor,
@@ -141,7 +139,7 @@ class SequencerRuntime(
       loggerFactory,
     )
 
-  private val sequencer = sequencerFactory
+  private[domain] val sequencer: Sequencer = sequencerFactory
     .create(
       domainId,
       storage,
@@ -245,7 +243,7 @@ class SequencerRuntime(
           SequencedEventValidatorFactory
             .noValidation(domainId, sequencerId, warn = false, timeouts),
           clock,
-          RequestSigner(syncCrypto),
+          RequestSigner(syncCrypto, staticDomainParameters.protocolVersion),
           sequencedEventStore,
           new SendTracker(
             Map(),
@@ -303,27 +301,20 @@ class SequencerRuntime(
     clock,
     sequencerDomainParamsLookup,
     localNodeParameters,
+    staticDomainParameters.protocolVersion,
     loggerFactory,
   )
 
-  private val healthManager = new io.grpc.protobuf.services.HealthStatusManager()
-
-  TraceContext.withNewTraceContext(tc =>
-    sequencer.onHealthChange { (status, traceContext) =>
-      healthManager.setStatus(
-        CantonGrpcUtil.sequencerHealthCheckServiceName,
-        if (status.isActive) ServingStatus.SERVING else ServingStatus.NOT_SERVING,
-      )
-      if (!status.isActive) {
-        logger.warn(
-          s"Sequencer is unhealthy, so disconnecting all members. ${status.details.getOrElse("")}"
-        )(traceContext)
-        sequencerService.disconnectAllMembers()(traceContext)
-      } else {
-        logger.info(s"Sequencer is healthy")(traceContext)
-      }
-    }(tc)
-  )
+  sequencer.registerOnHealthChange { (_, status, traceContext) =>
+    if (!status.isActive && !isClosing) {
+      logger.warn(
+        s"Sequencer is unhealthy, so disconnecting all members. ${status.details.getOrElse("")}"
+      )(traceContext)
+      sequencerService.disconnectAllMembers()(traceContext)
+    } else {
+      logger.info(s"Sequencer is healthy")(traceContext)
+    }
+  }
 
   private val sequencerAdministrationService = new GrpcSequencerAdministrationService(sequencer)
 
@@ -348,8 +339,8 @@ class SequencerRuntime(
       MemberAuthenticationStore(storage, timeouts, loggerFactory, closeContext),
       authenticationConfig.agreementManager,
       clock,
-      authenticationConfig.nonceExpirationTime.unwrap,
-      authenticationConfig.tokenExpirationTime.unwrap,
+      authenticationConfig.nonceExpirationTime.asJava,
+      authenticationConfig.tokenExpirationTime.asJava,
       // closing the subscription when the token expires will force the client to try to reconnect
       // immediately and notice it is unauthenticated, which will cause it to also start reauthenticating
       // it's important to disconnect the member AFTER we expired the token, as otherwise, the member
@@ -379,7 +370,8 @@ class SequencerRuntime(
     )
   }
 
-  def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus] = sequencer.health
+  def health: Future[SequencerHealthStatus] =
+    Future.successful(sequencer.getState)
 
   def topologyQueue: TopologyQueueStatus = TopologyQueueStatus(
     manager = 0,
@@ -430,22 +422,14 @@ class SequencerRuntime(
     additionalAdminServiceFactory(sequencer).foreach(register)
   }
 
-  /** Separate from [[registerPublicGrpcServices]] because this should only be called when the sequencer is external to the domain node (as opposed to embedded).
-    * That's because embedded sequencers (especially the CCF sequencer) still rely on the domain having its own domain service, so in that case we do not
-    * register it twice.
-    */
   @nowarn("cat=deprecation")
-  def registerDomainService(
-      register: ServerServiceDefinition => Unit
-  )(implicit ec: ExecutionContext): Unit = {
-    register(
+  def domainServices(implicit ec: ExecutionContext): Seq[ServerServiceDefinition] = Seq(
+    {
       v0.DomainServiceGrpc.bindService(
         new GrpcDomainService(authenticationConfig.agreementManager, loggerFactory),
         executionContext,
       )
-    )
-
-    register(
+    }, {
       ServerInterceptors.intercept(
         v0.SequencerConnectServiceGrpc.bindService(
           new GrpcSequencerConnectService(
@@ -461,39 +445,26 @@ class SequencerRuntime(
         ),
         new SequencerConnectServerInterceptor(loggerFactory),
       )
-    )
-    ()
-  }
-
-  def registerPublicGrpcServices(
-      register: ServerServiceDefinition => Unit
-  )(implicit ec: ExecutionContext): Unit = {
-    import scala.jdk.CollectionConverters.*
-
-    register(
+    }, {
       SequencerVersionServiceGrpc.bindService(
         new GrpcSequencerVersionService(staticDomainParameters.protocolVersion, loggerFactory),
         ec,
       )
-    )
-
-    register(
+    }, {
       v0.SequencerAuthenticationServiceGrpc
         .bindService(authenticationServices.sequencerAuthenticationService, ec)
-    )
+    }, {
+      import scala.jdk.CollectionConverters.*
 
-    // use the auth service interceptor if available
-    val interceptors = List(authenticationServices.authenticationInterceptor).asJava
+      // use the auth service interceptor if available
+      val interceptors = List(authenticationServices.authenticationInterceptor).asJava
 
-    register(
       ServerInterceptors.intercept(
         v0.SequencerServiceGrpc.bindService(sequencerService, ec),
         interceptors,
       )
-    )
-
-    register(healthManager.getHealthService.bindService())
-  }
+    },
+  )
 
   override def onClosed(): Unit =
     Lifecycle.close(

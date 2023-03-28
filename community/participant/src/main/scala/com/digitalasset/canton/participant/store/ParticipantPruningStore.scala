@@ -45,7 +45,7 @@ object ParticipantPruningStore {
 
   private val dbStoreName = String36.tryCreate("DbParticipantPruningStore")
 
-  case class ParticipantPruningStatus(
+  final case class ParticipantPruningStatus(
       startedO: Option[GlobalOffset],
       completedO: Option[GlobalOffset],
   ) extends PrettyPrinting {

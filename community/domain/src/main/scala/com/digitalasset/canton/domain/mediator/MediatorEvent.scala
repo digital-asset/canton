@@ -22,7 +22,7 @@ private[mediator] sealed trait MediatorEvent {
 }
 
 private[mediator] object MediatorEvent {
-  case class Request(
+  final case class Request(
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
       request: MediatorRequest,
@@ -34,7 +34,7 @@ private[mediator] object MediatorEvent {
   /** A response to a mediator request.
     * Currently each response is processed independently even if they arrive within the same batch.
     */
-  case class Response(
+  final case class Response(
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
       response: SignedProtocolMessage[MediatorResponse],
@@ -42,6 +42,9 @@ private[mediator] object MediatorEvent {
     override val requestId: RequestId = response.message.requestId
   }
 
-  case class Timeout(counter: SequencerCounter, timestamp: CantonTimestamp, requestId: RequestId)
-      extends MediatorEvent
+  final case class Timeout(
+      counter: SequencerCounter,
+      timestamp: CantonTimestamp,
+      requestId: RequestId,
+  ) extends MediatorEvent
 }

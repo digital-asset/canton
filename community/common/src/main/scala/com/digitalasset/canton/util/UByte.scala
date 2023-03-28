@@ -8,7 +8,7 @@ import com.google.protobuf.ByteString
 import io.circe.{Decoder, Encoder}
 
 // This class provides a helper for unsigned bytes as java/scala bytes are signed.
-case class UByte(signed: Byte) extends NoCopy {
+final case class UByte(signed: Byte) extends NoCopy {
   def unsigned: Int = signed & 0xff
 }
 

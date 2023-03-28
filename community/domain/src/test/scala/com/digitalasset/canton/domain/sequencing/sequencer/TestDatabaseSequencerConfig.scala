@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-case class TestDatabaseSequencerConfig(
+final case class TestDatabaseSequencerConfig(
     writer: SequencerWriterConfig = SequencerWriterConfig.LowLatency(),
     reader: SequencerReaderConfig = CommunitySequencerReaderConfig(),
     testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor] = None,

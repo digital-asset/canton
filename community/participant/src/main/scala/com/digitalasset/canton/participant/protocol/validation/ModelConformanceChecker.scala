@@ -10,7 +10,12 @@ import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.data.ViewParticipantData.RootAction
-import com.digitalasset.canton.data.{CantonTimestamp, TransactionView, TransactionViewTree}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  TransactionView,
+  TransactionViewTree,
+  ViewPosition,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
@@ -30,11 +35,14 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithoutSuffixes,
 }
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, RequestCounter, checked}
+import com.google.common.annotations.VisibleForTesting
 
+import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Allows for checking model conformance of a list of transaction view trees.
@@ -69,7 +77,7 @@ class ModelConformanceChecker(
     * @param rootViews all received transaction view trees contained in a confirmation request that
     *                  have the same transaction id and represent a top-most view
     * @param keyResolverFor The key resolver to be used for re-interpreting root views
-    * @param commonData the common data of all the (rootViewTree :  TransactionViewTree) trees in `rootViewsWithInputKeys`
+    * @param commonData the common data of all the (rootViewTree :  TransactionViewTree) trees in `rootViews`
     * @return the resulting LfTransaction with [[com.digitalasset.canton.protocol.LfContractId]]s only
     */
   def check(
@@ -78,14 +86,17 @@ class ModelConformanceChecker(
       requestCounter: RequestCounter,
       topologySnapshot: TopologySnapshot,
       commonData: CommonData,
-  )(implicit traceContext: TraceContext): EitherT[Future, Error, Result] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, ErrorWithSubviewsCheck, Result] = {
     val CommonData(transactionId, ledgerTime, submissionTime, confirmationPolicy) = commonData
 
-    for {
-      suffixedTxs <- rootViews.toNEF.parTraverse { v =>
+    val modelCheckET = for {
+      suffixedTxs <- rootViews.toNEF.parTraverse { viewTree =>
         checkView(
-          v,
-          keyResolverFor(v),
+          viewTree.view,
+          viewTree.viewPosition,
+          viewTree.mediatorId,
+          viewTree.transactionUuid,
+          keyResolverFor(viewTree),
           requestCounter,
           ledgerTime,
           submissionTime,
@@ -100,10 +111,41 @@ class ModelConformanceChecker(
     } yield {
       Result(transactionId, joinedWfTx)
     }
+
+    lazy val aSubviewIsValidF =
+      rootViews.toNEF.parTraverse { viewTree =>
+        viewTree.view
+          .allSubviewsWithPosition(viewTree.viewPosition)
+          .drop(1) // The first entry is the root view itself
+          .parTraverse { case (view, viewPos) =>
+            checkView(
+              view,
+              viewPos,
+              viewTree.mediatorId,
+              viewTree.transactionUuid,
+              keyResolverFor(viewTree),
+              requestCounter,
+              ledgerTime,
+              submissionTime,
+              confirmationPolicy,
+              topologySnapshot,
+            ).swap
+          }
+      }.isLeft
+
+    modelCheckET.leftFlatMap { error =>
+      val errorWithSubviewsCheck = aSubviewIsValidF.map { aSubviewIsValid =>
+        Left(ErrorWithSubviewsCheck(aSubviewIsValid, error))
+      }
+      EitherT[Future, ErrorWithSubviewsCheck, Result](errorWithSubviewsCheck)
+    }
   }
 
   private def checkView(
-      view: TransactionViewTree,
+      view: TransactionView,
+      viewPosition: ViewPosition,
+      mediatorId: MediatorId,
+      transactionUuid: UUID,
       resolverFromView: LfKeyResolver,
       requestCounter: RequestCounter,
       ledgerTime: CantonTimestamp,
@@ -113,10 +155,11 @@ class ModelConformanceChecker(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, Error, WithRollbackScope[WellFormedTransaction[WithSuffixes]]] = {
-    val RootAction(cmd, authorizers, failed) = view.viewParticipantData.rootAction
-    val rbContext = view.viewParticipantData.rollbackContext
-    val seed = view.viewParticipantData.actionDescription.seedOption
-    val viewInputContracts = view.flatten
+    val viewParticipantData = view.viewParticipantData.tryUnwrap
+    val RootAction(cmd, authorizers, failed) = viewParticipantData.rootAction
+    val rbContext = viewParticipantData.rollbackContext
+    val seed = viewParticipantData.actionDescription.seedOption
+    val viewInputContracts = view.tryFlattenToParticipantViews
       .flatMap(_.viewParticipantData.coreInputs.map {
         case (cid, InputContract(contract, _consumed)) =>
           (cid, StoredContract(contract, requestCounter, None))
@@ -158,12 +201,12 @@ class ModelConformanceChecker(
       reconstructedViewAndTx <- checked(
         transactionTreeFactory.tryReconstruct(
           subaction = wfTx,
-          rootPosition = view.viewPosition,
+          rootPosition = viewPosition,
           rbContext = rbContext,
           confirmationPolicy = confirmationPolicy,
-          mediatorId = view.mediatorId,
+          mediatorId = mediatorId,
           salts = salts,
-          transactionUuid = view.transactionUuid,
+          transactionUuid = transactionUuid,
           topologySnapshot = topologySnapshot,
           contractOfId = TransactionTreeFactory.contractInstanceLookup(lookupWithKeys),
           keyResolver = resolverFromReinterpretation,
@@ -172,9 +215,9 @@ class ModelConformanceChecker(
       (reconstructedView, suffixedTx) = reconstructedViewAndTx
 
       _ <- EitherT.cond[Future](
-        view.view == reconstructedView,
+        view == reconstructedView,
         (),
-        ViewReconstructionError(view.view, reconstructedView): Error,
+        ViewReconstructionError(view, reconstructedView): Error,
       )
 
     } yield WithRollbackScope(rbContext.rollbackScope, suffixedTx)
@@ -183,6 +226,12 @@ class ModelConformanceChecker(
 }
 
 object ModelConformanceChecker {
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  @VisibleForTesting
+  // TODO(i12084): Make this more robust
+  var isSubviewsCheckDisabled: Boolean = false
+
   def apply(
       damle: DAMLe,
       transactionTreeFactory: TransactionTreeFactory,
@@ -216,13 +265,21 @@ object ModelConformanceChecker {
 
   sealed trait Error extends PrettyPrinting
 
+  final case class ErrorWithSubviewsCheck(aSubviewIsValid: Boolean, error: Error)
+      extends PrettyPrinting {
+    override def pretty: Pretty[ErrorWithSubviewsCheck] = prettyOfClass(
+      param("a subview is valid", _.aSubviewIsValid),
+      unnamedParam(_.error),
+    )
+  }
+
   /** Indicates that [[ModelConformanceChecker.reinterpret]] has failed. */
-  case class DAMLeError(cause: engine.Error, viewHash: ViewHash) extends Error {
+  final case class DAMLeError(cause: engine.Error, viewHash: ViewHash) extends Error {
     override def pretty: Pretty[DAMLeError] = adHocPrettyInstance
   }
 
   /** Indicates a different number of declared and reconstructed create nodes. */
-  case class CreatedContractsDeclaredIncorrectly(
+  final case class CreatedContractsDeclaredIncorrectly(
       declaredCreateNodes: Seq[CreatedContract],
       reconstructedCreateNodes: Seq[LfNodeCreate],
       viewHash: ViewHash,
@@ -237,14 +294,14 @@ object ModelConformanceChecker {
     )
   }
 
-  case class TransactionNotWellformed(cause: String, viewHash: ViewHash) extends Error {
+  final case class TransactionNotWellformed(cause: String, viewHash: ViewHash) extends Error {
     override def pretty: Pretty[TransactionNotWellformed] = prettyOfClass(
       param("cause", _.cause.unquoted),
       unnamedParam(_.viewHash),
     )
   }
 
-  case class TransactionTreeError(
+  final case class TransactionTreeError(
       details: TransactionTreeConversionError,
       viewHash: ViewHash,
   ) extends Error {
@@ -258,7 +315,7 @@ object ModelConformanceChecker {
     )
   }
 
-  case class ViewReconstructionError(
+  final case class ViewReconstructionError(
       received: TransactionView,
       reconstructed: TransactionView,
   ) extends Error {
@@ -272,7 +329,7 @@ object ModelConformanceChecker {
     )
   }
 
-  case class JoinedTransactionNotWellFormed(
+  final case class JoinedTransactionNotWellFormed(
       cause: String
   ) extends Error {
     override def pretty: Pretty[JoinedTransactionNotWellFormed] = prettyOfClass(
@@ -280,7 +337,7 @@ object ModelConformanceChecker {
     )
   }
 
-  case class Result(
+  final case class Result(
       transactionId: TransactionId,
       suffixedTransaction: WellFormedTransaction[WithSuffixesAndMerged],
   )

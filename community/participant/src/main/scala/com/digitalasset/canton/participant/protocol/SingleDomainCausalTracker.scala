@@ -137,11 +137,11 @@ class SingleDomainCausalTracker(
 
 object SingleDomainCausalTracker {
 
-  case class EventClock(domainId: DomainId, localTs: CantonTimestamp, offset: LocalOffset)(
+  final case class EventClock(domainId: DomainId, localTs: CantonTimestamp, offset: LocalOffset)(
       val waitOn: Map[DomainId, CantonTimestamp]
   )
 
-  case class EventPerPartyCausalState(
+  final case class EventPerPartyCausalState(
       domainId: DomainId,
       localTs: CantonTimestamp,
       offset: LocalOffset,

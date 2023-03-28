@@ -4,11 +4,14 @@
 package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.console.{CommandFailure, LocalDomainReference}
-import com.digitalasset.canton.integration.CommunityEnvironmentDefinition
 import com.digitalasset.canton.integration.CommunityTests.{
   CommunityIntegrationTest,
   CommunityTestConsoleEnvironment,
   SharedCommunityEnvironment,
+}
+import com.digitalasset.canton.integration.{
+  CommunityConfigTransforms,
+  CommunityEnvironmentDefinition,
 }
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.PruningNotSupportedInCommunityEdition
 import monocle.macros.syntax.lens.*
@@ -21,6 +24,7 @@ class EnterpriseFeatureInCommunityIntegrationTest
       .addConfigTransforms(
         _.focus(_.features.enableTestingCommands).replace(true), // For ping
         _.focus(_.features.enablePreviewCommands).replace(true), // For pruning
+        CommunityConfigTransforms.uniquePorts,
       )
       .withSetup { implicit env =>
         // we're only testing domain commands immediately so only start that

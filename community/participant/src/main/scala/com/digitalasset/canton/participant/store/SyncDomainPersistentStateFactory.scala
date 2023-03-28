@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
@@ -30,7 +31,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class SyncDomainPersistentStateFactory(
     syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
-    participantSettings: ParticipantSettingsLookup,
+    participantSettings: Eval[ParticipantSettingsLookup],
     storage: Storage,
     pureCryptoApi: CryptoPureApi,
     val indexedStringStore: IndexedStringStore,
@@ -173,7 +174,7 @@ class SyncDomainPersistentStateFactory(
       connectToUniqueContractKeys: Boolean,
       domainId: DomainId,
   )(implicit traceContext: TraceContext): EitherT[Future, DomainRegistryError, Unit] = {
-    val uckMode = participantSettings.settings.uniqueContractKeys
+    val uckMode = participantSettings.value.settings.uniqueContractKeys
       .getOrElse(
         ErrorUtil.internalError(
           new IllegalStateException("unique-contract-keys setting is undefined")

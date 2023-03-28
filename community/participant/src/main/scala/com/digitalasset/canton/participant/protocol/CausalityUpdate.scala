@@ -40,7 +40,7 @@ sealed trait CausalityUpdate
 
 /** A transaction is causally dependant on all earlier events in the same domain.
   */
-case class TransactionUpdate(
+final case class TransactionUpdate(
     hostedInformeeStakeholders: Set[LfPartyId],
     ts: CantonTimestamp,
     domain: DomainId,
@@ -80,7 +80,7 @@ object TransactionUpdate {
 
 /** A transfer-out is causally dependant on all earlier events in the same domain.
   */
-case class TransferOutUpdate(
+final case class TransferOutUpdate(
     hostedInformeeStakeholders: Set[LfPartyId],
     ts: CantonTimestamp,
     transferId: TransferId,
@@ -124,7 +124,7 @@ object TransferOutUpdate {
 /** A transfer-in is causally dependant on all earlier events in the same domain, as well as all events causally observed
   * by `hostedInformeeStakeholders` at the time of the transfer-out on the target domain.
   */
-case class TransferInUpdate(
+final case class TransferInUpdate(
     hostedInformeeStakeholders: Set[LfPartyId],
     ts: CantonTimestamp,
     domain: DomainId,
@@ -168,9 +168,8 @@ object CausalityUpdate
     extends HasProtocolVersionedCompanion[CausalityUpdate]
     with ProtocolVersionedCompanionDbHelpers[CausalityUpdate] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v3,
-      supportedProtoVersion(v0.CausalityUpdate)(fromProtoV0),
+    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.CausalityUpdate)(
+      supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
   )

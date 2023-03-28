@@ -56,9 +56,8 @@ object InitRequest extends HasProtocolVersionedCompanion[InitRequest] {
       supportedProtoVersion(v0.InitRequest)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.v4,
-      supportedProtoVersion(v1.InitRequest)(fromProtoV1),
+    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.InitRequest)(
+      supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
   )

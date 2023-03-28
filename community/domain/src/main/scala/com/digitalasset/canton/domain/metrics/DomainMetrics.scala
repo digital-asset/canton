@@ -10,19 +10,25 @@ import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcServerMetrics}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.metrics.MetricHandle.{MetricsFactory, NoOpMetricsFactory}
 import com.digitalasset.canton.metrics.{DbStorageMetrics, SequencerClientMetrics}
 import com.google.common.annotations.VisibleForTesting
 
+import scala.annotation.nowarn
+
 class SequencerMetrics(
     parent: MetricName,
-    val factory: MetricsFactory,
+    @nowarn("cat=deprecation")
+    val metricsFactory: MetricsFactory,
     val grpcMetrics: GrpcServerMetrics,
     val healthMetrics: HealthMetrics,
-) {
-  val prefix: MetricName = MetricName(parent :+ "sequencer")
+) extends BaseMetrics {
+  override val prefix: MetricName = MetricName(parent :+ "sequencer")
 
-  object sequencerClient extends SequencerClientMetrics(prefix, factory)
+  override def storageMetrics: DbStorageMetrics = dbStorage
+
+  object sequencerClient extends SequencerClientMetrics(prefix, metricsFactory)
 
   @MetricDoc.Tag(
     summary = "Number of active sequencer subscriptions",
@@ -32,14 +38,14 @@ class SequencerMetrics(
     qualification = Debug,
   )
   val subscriptionsGauge: Gauge[Int] =
-    factory.gauge[Int](MetricName(prefix :+ "subscriptions"), 0)(MetricsContext.Empty)
+    metricsFactory.gauge[Int](MetricName(prefix :+ "subscriptions"), 0)(MetricsContext.Empty)
   @MetricDoc.Tag(
     summary = "Number of messages processed by the sequencer",
     description = """This metric measures the number of successfully validated messages processed
                     |by the sequencer since the start of this process.""",
     qualification = Debug,
   )
-  val messagesProcessed: Meter = factory.meter(prefix :+ "processed")
+  val messagesProcessed: Meter = metricsFactory.meter(prefix :+ "processed")
 
   @MetricDoc.Tag(
     summary = "Number of message bytes processed by the sequencer",
@@ -47,7 +53,7 @@ class SequencerMetrics(
       """This metric measures the total number of message bytes processed by the sequencer.""",
     qualification = Debug,
   )
-  val bytesProcessed: Meter = factory.meter(prefix :+ "processed-bytes")
+  val bytesProcessed: Meter = metricsFactory.meter(prefix :+ "processed-bytes")
 
   @MetricDoc.Tag(
     summary = "Number of time requests received by the sequencer",
@@ -58,7 +64,7 @@ class SequencerMetrics(
         |need to be revised to deal with different clock skews and latencies between the sequencer and participants.""",
     qualification = Debug,
   )
-  val timeRequests: Meter = factory.meter(prefix :+ "time-requests")
+  val timeRequests: Meter = metricsFactory.meter(prefix :+ "time-requests")
 
   @MetricDoc.Tag(
     summary = "Age of oldest unpruned sequencer event.",
@@ -68,9 +74,9 @@ class SequencerMetrics(
     qualification = Debug,
   )
   val maxEventAge: Gauge[Long] =
-    factory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
+    metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
 
-  object dbStorage extends DbStorageMetrics(prefix, factory)
+  object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 }
 
 object SequencerMetrics {
@@ -85,7 +91,9 @@ object SequencerMetrics {
 
 }
 
-class EnvMetrics(factory: MetricsFactory) {
+class EnvMetrics(
+    @deprecated("Use LabeledMetricsFactory", since = "2.7.0") factory: MetricsFactory
+) {
   def prefix: MetricName = MetricName("env")
 
   val executionContextQueueSizeName: MetricName = prefix :+ "execution-context" :+ "queue-size"
@@ -98,6 +106,7 @@ class EnvMetrics(factory: MetricsFactory) {
   private val executionContextQueueSizeDoc: Gauge[Long] = // For docs only
     NoOpGauge(executionContextQueueSizeName, 0L)
 
+  @nowarn("cat=deprecation")
   def registerExecutionContextQueueSize(f: () => Long): Unit = {
     factory
       .gaugeWithSupplier(
@@ -115,10 +124,13 @@ class EnvMetrics(factory: MetricsFactory) {
 )
 class DomainMetrics(
     val prefix: MetricName,
+    @nowarn("cat=deprecation")
     val metricsFactory: MetricsFactory,
     val grpcMetrics: GrpcServerMetrics,
     val healthMetrics: HealthMetrics,
-) {
+) extends BaseMetrics {
+
+  override def storageMetrics: DbStorageMetrics = dbStorage
 
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
@@ -131,17 +143,24 @@ class DomainMetrics(
 
 class MediatorNodeMetrics(
     val prefix: MetricName,
-    val metricsFactory: MetricsFactory,
+    @deprecated("Use LabeledMetricsFactory", since = "2.7.0") val metricsFactory: MetricsFactory,
     val grpcMetrics: GrpcServerMetrics,
     val healthMetrics: HealthMetrics,
-) {
+) extends BaseMetrics {
 
+  override def storageMetrics: DbStorageMetrics = dbStorage
+
+  @nowarn("cat=deprecation")
   object dbStorage extends DbStorageMetrics(prefix, metricsFactory)
 
+  @nowarn("cat=deprecation")
   object mediator extends MediatorMetrics(prefix, metricsFactory)
 }
 
-class MediatorMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
+class MediatorMetrics(
+    basePrefix: MetricName,
+    @nowarn("cat=deprecation") metricsFactory: MetricsFactory,
+) {
 
   val prefix: MetricName = basePrefix :+ "mediator"
 
@@ -175,7 +194,11 @@ class MediatorMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
     metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
 }
 
-class IdentityManagerMetrics(basePrefix: MetricName, metricsFactory: MetricsFactory) {
+class IdentityManagerMetrics(
+    basePrefix: MetricName,
+    @nowarn("cat=deprecation")
+    metricsFactory: MetricsFactory,
+) {
   val prefix: MetricName = basePrefix :+ "topology-manager"
 
   object sequencerClient extends SequencerClientMetrics(prefix, metricsFactory)

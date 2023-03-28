@@ -75,9 +75,9 @@ trait SingleDomainCausalDependencyStore {
 
 object SingleDomainCausalDependencyStore {
 
-  case class CausalityWriteFinished(finished: Future[Unit])
+  final case class CausalityWriteFinished(finished: Future[Unit])
 
-  case class CausalityWrite(
+  final case class CausalityWrite(
       stateAtWrite: Map[LfPartyId, Map[DomainId, CantonTimestamp]],
       finished: CausalityWriteFinished,
   )

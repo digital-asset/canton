@@ -7,7 +7,7 @@ import cats.syntax.flatMap.*
 import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, HashPurposeTest, TestHash}
+import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, TestHash}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
@@ -41,35 +41,52 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.TimeProof
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  DomainId,
+  MediatorId,
+  ParticipantId,
+  TestingTopology,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.{
-  HasProtocolVersionedSerializerCompanion,
+  HasProtocolVersionedWrapperCompanion,
   HasVersionedToByteString,
   ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
-import com.digitalasset.canton.{BaseTest, DiscardOps, LfPartyId, RequestCounter, SequencerCounter}
+import com.digitalasset.canton.{
+  BaseTest,
+  DiscardOps,
+  HasExecutorService,
+  LfPartyId,
+  ProtoDeserializationError,
+  RequestCounter,
+  SequencerCounter,
+}
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.scalatest.Assertion
-import org.scalatest.wordspec.{AsyncWordSpec, AsyncWordSpecLike}
+import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.UUID
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
-trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
+trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorService =>
+
+  implicit lazy val executionContext: ExecutionContext = executorService
 
   import MessageDispatcherTest.*
 
-  val domainId = DomainId.tryFromString("messageDispatcher::domain")
-  val sourceDomain = DomainId.tryFromString("sourceDomain::sourceDomain")
-  val participantId = ParticipantId.tryFromProtoPrimitive("PAR::messageDispatcher::participant")
-  val mediatorId = MediatorId(domainId)
-  val mediatorId2 = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
+  private val domainId = DomainId.tryFromString("messageDispatcher::domain")
+  private val sourceDomain = DomainId.tryFromString("sourceDomain::sourceDomain")
+  private val participantId =
+    ParticipantId.tryFromProtoPrimitive("PAR::messageDispatcher::participant")
+  private val mediatorId = MediatorId(domainId)
+  private val mediatorId2 = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
 
   case class Fixture(
       messageDispatcher: MessageDispatcher,
@@ -93,6 +110,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
   object Fixture {
     def mk(
         mkMd: (
+            ProtocolVersion,
             DomainId,
             ParticipantId,
             RequestTracker,
@@ -125,14 +143,22 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         )
           .thenReturn(processingRequestF)
         when(
-          processor.processResult(any[SignedContent[Deliver[DefaultOpenEnvelope]]])(anyTraceContext)
+          processor.processResult(
+            any[Either[
+              EventWithErrors[Deliver[DefaultOpenEnvelope]],
+              SignedContent[Deliver[DefaultOpenEnvelope]],
+            ]]
+          )(anyTraceContext)
         )
           .thenReturn(processingResultF)
         when(
           processor.processMalformedMediatorRequestResult(
             any[CantonTimestamp],
             any[SequencerCounter],
-            any[SignedContent[Deliver[DefaultOpenEnvelope]]],
+            any[Either[
+              EventWithErrors[Deliver[DefaultOpenEnvelope]],
+              SignedContent[Deliver[DefaultOpenEnvelope]],
+            ]],
           )(anyTraceContext)
         )
           .thenReturn(processingResultF)
@@ -192,7 +218,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           any[CantonTimestamp],
           any[RootHash],
           any[MediatorId],
-          any[String],
+          any[LocalReject],
         )(anyTraceContext)
       )
         .thenReturn(processingRequestF)
@@ -221,6 +247,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       }
 
       val messageDispatcher = mkMd(
+        testedProtocolVersion,
         domainId,
         participantId,
         requestTracker,
@@ -253,7 +280,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
     }
   }
 
-  def mkDeliver(
+  private def mkDeliver(
       batch: Batch[DefaultOpenEnvelope],
       sc: SequencerCounter = SequencerCounter(0),
       ts: CantonTimestamp = CantonTimestamp.Epoch,
@@ -261,18 +288,19 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
   ): Deliver[DefaultOpenEnvelope] =
     Deliver.create(sc, ts, domainId, messageId, batch, testedProtocolVersion)
 
-  def rootHash(index: Int): RootHash = RootHash(TestHash.digest(index))
+  private def rootHash(index: Int): RootHash = RootHash(TestHash.digest(index))
 
-  def signEvent[Env <: Envelope[_]](
+  private def signEvent[Env <: Envelope[_]](
       event: SequencedEvent[Env]
   ): SignedContent[SequencedEvent[Env]] =
     SequencerTestUtils.sign(event)
 
-  val dummySignature = SymbolicCrypto.emptySignature
+  private val dummySignature = SymbolicCrypto.emptySignature
 
-  def mockEncryptedViewTree = mock[Encrypted[CompressedView[MockViewTree]]]
-  val encryptedTestView = EncryptedView(TestViewType)(mockEncryptedViewTree)
-  val encryptedTestViewMessage =
+  private def emptyEncryptedViewTree =
+    Encrypted.fromByteString[CompressedView[MockViewTree]](ByteString.EMPTY).value
+  private val encryptedTestView = EncryptedView(TestViewType)(emptyEncryptedViewTree)
+  private val encryptedTestViewMessage =
     EncryptedViewMessageV0(
       None,
       ViewHash(TestHash.digest(9000)),
@@ -281,8 +309,8 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       domainId,
     )
 
-  val encryptedOtherTestView = EncryptedView(OtherTestViewType)(mockEncryptedViewTree)
-  val encryptedOtherTestViewMessage =
+  private val encryptedOtherTestView = EncryptedView(OtherTestViewType)(emptyEncryptedViewTree)
+  private val encryptedOtherTestViewMessage =
     EncryptedViewMessageV0(
       None,
       ViewHash(TestHash.digest(9001)),
@@ -291,31 +319,31 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       domainId,
     )
 
-  val requestId = RequestId(CantonTimestamp.Epoch)
-  val testMediatorResult =
-    SignedProtocolMessage(
+  private val requestId = RequestId(CantonTimestamp.Epoch)
+  private val testMediatorResult =
+    SignedProtocolMessage.from(
       TestRegularMediatorResult(
         TestViewType,
         domainId,
         Verdict.Approve(testedProtocolVersion),
         requestId,
       ),
-      dummySignature,
       testedProtocolVersion,
+      dummySignature,
     )
-  val otherTestMediatorResult =
-    SignedProtocolMessage(
+  private val otherTestMediatorResult =
+    SignedProtocolMessage.from(
       TestRegularMediatorResult(
         OtherTestViewType,
         domainId,
         Verdict.Approve(testedProtocolVersion),
         requestId,
       ),
-      dummySignature,
       testedProtocolVersion,
+      dummySignature,
     )
 
-  val causalityMessage = CausalityMessage(
+  private val causalityMessage = CausalityMessage(
     domainId,
     testedProtocolVersion,
     TransferId(sourceDomain, CantonTimestamp.Epoch),
@@ -327,8 +355,9 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
     ),
   )
 
-  def messageDispatcher(
+  protected def messageDispatcher(
       mkMd: (
+          ProtocolVersion,
           DomainId,
           ParticipantId,
           RequestTracker,
@@ -354,8 +383,19 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
     ): Fixture =
       Fixture.mk(mkMd, initRc, cleanReplaySequencerCounter)
 
-    val idTx = mock[DomainTopologyTransactionMessage]
-    when(idTx.domainId).thenReturn(domainId)
+    val idTx = DomainTopologyTransactionMessage
+      .tryCreate(
+        transactions = Nil,
+        crypto = TestingTopology()
+          .withDomains(domainId)
+          .withParticipants(participantId)
+          .build()
+          .forOwnerAndDomain(participantId, domainId)
+          .currentSnapshotApproximation,
+        domainId = domainId,
+        protocolVersion = testedProtocolVersion,
+      )
+      .futureValue
 
     val rawCommitment = mock[AcsCommitment]
     when(rawCommitment.domainId).thenReturn(domainId)
@@ -363,11 +403,12 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       AcsCommitment.protocolVersionRepresentativeFor(testedProtocolVersion)
     )
 
-    val commitment = SignedProtocolMessage(rawCommitment, dummySignature, testedProtocolVersion)
+    val commitment =
+      SignedProtocolMessage.from(rawCommitment, testedProtocolVersion, dummySignature)
 
     val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
     val malformedMediatorRequestResult =
-      SignedProtocolMessage(
+      SignedProtocolMessage.from(
         MalformedMediatorRequestResult(
           RequestId(CantonTimestamp.MinValue),
           domainId,
@@ -375,8 +416,8 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           reject,
           testedProtocolVersion,
         ),
-        dummySignature,
         testedProtocolVersion,
+        dummySignature,
       )
 
     def checkTickIdentityProcessor(
@@ -461,14 +502,21 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
     }
 
     def checkProcessResult(processor: AnyProcessor): Assertion = {
-      verify(processor).processResult(any[SignedContent[Deliver[DefaultOpenEnvelope]]])(
+      verify(processor).processResult(
+        any[Either[
+          EventWithErrors[Deliver[DefaultOpenEnvelope]],
+          SignedContent[Deliver[DefaultOpenEnvelope]],
+        ]]
+      )(
         anyTraceContext
       )
       succeed
     }
 
-    def signAndTrace(event: RawProtocolEvent): Traced[Seq[PossiblyIgnoredProtocolEvent]] =
-      Traced(Seq(OrdinarySequencedEvent(signEvent(event))(traceContext)))
+    def signAndTrace(event: RawProtocolEvent): Traced[Seq[Either[Traced[
+      EventWithErrors[SequencedEvent[OpenEnvelope[ProtocolMessage]]]
+    ], PossiblyIgnoredProtocolEvent]]] =
+      Traced(Seq(Right(OrdinarySequencedEvent(signEvent(event))(traceContext))))
 
     def handle(sut: Fixture, event: RawProtocolEvent)(checks: => Assertion): Future[Assertion] = {
       for {
@@ -513,7 +561,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         handle(sut, deliver) {
           verify(sut.recordOrderPublisher).scheduleEmptyAcsChangePublication(isEq(sc), isEq(ts))
           checkTicks(sut, sc, ts)
-        }
+        }.futureValue
       }
     }
 
@@ -526,7 +574,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           mkDeliver(Batch.of(testedProtocolVersion, idTx -> Recipients.cc(participantId)), sc, ts)
         handle(sut, event) {
           checkTicks(sut, sc, ts)
-        }
+        }.futureValue
       }
     }
 
@@ -546,7 +594,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
               anyTraceContext
             )
           checkTicks(sut, sc, ts)
-        }
+        }.futureValue
       }
     }
 
@@ -565,7 +613,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
             .apply(isEq(ts), any[Traced[List[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]]]])
           checkTicks(sut, sc, ts)
         }
-      }
+      }.futureValue
     }
 
     "synchronous shutdown propagates" in {
@@ -596,18 +644,17 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         sc,
         ts,
       )
-      for {
-        result <- sut.messageDispatcher.handleAll(signAndTrace(event)).unwrap
-        _ <- sut.messageDispatcher.flush()
-      } yield {
-        result shouldBe UnlessShutdown.AbortedDueToShutdown
-        verify(sut.acsCommitmentProcessor, never)
-          .apply(
-            any[CantonTimestamp],
-            any[Traced[List[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]]]],
-          )
-        succeed
-      }
+
+      val result = sut.messageDispatcher.handleAll(signAndTrace(event)).unwrap.futureValue
+      sut.messageDispatcher.flush().futureValue
+
+      result shouldBe UnlessShutdown.AbortedDueToShutdown
+      verify(sut.acsCommitmentProcessor, never)
+        .apply(
+          any[CantonTimestamp],
+          any[Traced[List[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]]]],
+        )
+      succeed
     }
 
     "asynchronous shutdown propagates" in {
@@ -631,19 +678,19 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         sc,
         ts,
       )
-      for {
-        result <- sut.messageDispatcher.handleAll(signAndTrace(event)).unwrap
-        _ <- sut.messageDispatcher.flush()
-        abort <- result.traverse(_.unwrap).unwrap
-      } yield {
-        abort.flatten shouldBe UnlessShutdown.AbortedDueToShutdown
-        // Since the shutdown happened asynchronously, we cannot enforce whether the other handlers are called.
-      }
+
+      val result = sut.messageDispatcher.handleAll(signAndTrace(event)).unwrap.futureValue
+      sut.messageDispatcher.flush().futureValue
+      val abort = result.traverse(_.unwrap).unwrap.futureValue
+
+      abort.flatten shouldBe UnlessShutdown.AbortedDueToShutdown
+      // Since the shutdown happened asynchronously, we cannot enforce whether the other handlers are called.
+
     }
 
     "complain about unknown view types in a request" in {
       val sut = mk(initRc = RequestCounter(-12))
-      val encryptedUnknownTestView = EncryptedView(UnknownTestViewType)(mockEncryptedViewTree)
+      val encryptedUnknownTestView = EncryptedView(UnknownTestViewType)(emptyEncryptedViewTree)
       val encryptedUnknownTestViewMessage =
         EncryptedViewMessageV0(
           None,
@@ -669,32 +716,33 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         SequencerCounter(11),
         CantonTimestamp.ofEpochSecond(11),
       )
-      for {
-        error <- loggerFactory.assertLogs(
+
+      val error = loggerFactory
+        .assertLogs(
           sut.messageDispatcher.handleAll(signAndTrace(event)).failed,
           loggerFactory.checkLogsInternalError[IllegalArgumentException](
             _.getMessage should include(show"No processor for view type $UnknownTestViewType")
           ),
           _.errorMessage should include("event processing failed."),
         )
-      } yield {
-        error shouldBe a[IllegalArgumentException]
-        error.getMessage should include(show"No processor for view type $UnknownTestViewType")
-      }
+        .futureValue
+
+      error shouldBe a[IllegalArgumentException]
+      error.getMessage should include(show"No processor for view type $UnknownTestViewType")
     }
 
     "complain about unknown view types in a result" in {
       val sut = mk(initRc = RequestCounter(-11))
       val unknownTestMediatorResult =
-        SignedProtocolMessage(
+        SignedProtocolMessage.from(
           TestRegularMediatorResult(
             UnknownTestViewType,
             domainId,
             Verdict.Approve(testedProtocolVersion),
             requestId,
           ),
-          dummySignature,
           testedProtocolVersion,
+          dummySignature,
         )
       val event =
         mkDeliver(
@@ -705,18 +753,20 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           SequencerCounter(12),
           CantonTimestamp.ofEpochSecond(11),
         )
-      for {
-        error <- loggerFactory.assertLogs(
+
+      val error = loggerFactory
+        .assertLogs(
           sut.messageDispatcher.handleAll(signAndTrace(event)).failed,
           loggerFactory.checkLogsInternalError[IllegalArgumentException](
             _.getMessage should include(show"No processor for view type $UnknownTestViewType")
           ),
           _.errorMessage should include("processing failed"),
         )
-      } yield {
-        error shouldBe a[IllegalArgumentException]
-        error.getMessage should include(show"No processor for view type $UnknownTestViewType")
-      }
+        .futureValue
+
+      error shouldBe a[IllegalArgumentException]
+      error.getMessage should include(show"No processor for view type $UnknownTestViewType")
+
     }
 
     def request(
@@ -755,7 +805,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           checkTickIdentityProcessor(sut, sc, ts)
           checkTickRequestTracker(sut, sc, ts)
           sut.requestCounterAllocator.peek shouldBe initRc + 1
-        }
+        }.futureValue
       }
 
       "expect a valid root hash message" in {
@@ -867,7 +917,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                             eqTo(ts),
                             eqTo(rootHash),
                             eqTo(mediatorId),
-                            eqTo(reason),
+                            eqTo(
+                              LocalReject.MalformedRejects.BadRootHashMessages
+                                .Reject(reason, testedProtocolVersion)
+                            ),
                           )(anyTraceContext)
                         checkTickIdentityProcessor(sut, sc, ts)
                         checkTickRequestTracker(sut, sc, ts)
@@ -883,7 +936,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                 )
               }
           }
-          .map(_ => succeed)
+          .futureValue
       }
 
       "crash upon root hash messages for multiple mediators" in {
@@ -938,7 +991,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
               )
             }
           }
-          .map(_ => succeed)
+          .futureValue
       }
 
       "not get confused about additional envelopes" in {
@@ -1005,7 +1058,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
               )
             }
           }
-          .map(_ => succeed)
+          .futureValue
       }
 
       "be skipped if they precede the clean replay starting point" in {
@@ -1037,7 +1090,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           checkTickIdentityProcessor(sut, sc, ts)
           checkTickRequestTracker(sut, sc, ts)
           sut.requestCounterAllocator.peek shouldBe initRc
-        }
+        }.futureValue
       }
     }
 
@@ -1065,10 +1118,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           }
         }
 
-        for {
+        (for {
           _ <- check(testMediatorResult, _.testProcessor)
           _ <- check(otherTestMediatorResult, _.otherTestProcessor)
-        } yield succeed
+        } yield succeed).futureValue
       }
 
       "come one at a time" in {
@@ -1078,17 +1131,19 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           otherTestMediatorResult -> Recipients.cc(participantId),
         )
         val sut = mk()
-        loggerFactory.assertLogsUnordered(
-          handle(sut, mkDeliver(batch)) {
-            checkTicks(sut)
-          },
-          _.warningMessage should include(
-            show"Received unexpected ${RequestKind(TestViewType)} for $requestId"
-          ),
-          _.warningMessage should include(
-            show"Received unexpected ${RequestKind(OtherTestViewType)} for $requestId"
-          ),
-        )
+        loggerFactory
+          .assertLogsUnordered(
+            handle(sut, mkDeliver(batch)) {
+              checkTicks(sut)
+            },
+            _.warningMessage should include(
+              show"Received unexpected ${RequestKind(TestViewType)} for $requestId"
+            ),
+            _.warningMessage should include(
+              show"Received unexpected ${RequestKind(OtherTestViewType)} for $requestId"
+            ),
+          )
+          .futureValue
       }
 
       "malformed mediator requests be sent to the right processor" in {
@@ -1096,7 +1151,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
 
           val result =
-            SignedProtocolMessage(
+            SignedProtocolMessage.from(
               MalformedMediatorRequestResult(
                 RequestId(CantonTimestamp.MinValue),
                 domainId,
@@ -1104,8 +1159,8 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                 reject,
                 testedProtocolVersion,
               ),
-              dummySignature,
               testedProtocolVersion,
+              dummySignature,
             )
           val batch = Batch.of(testedProtocolVersion, result -> Recipients.cc(participantId))
           val sut = mk()
@@ -1114,7 +1169,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
               verify(processor(sut)).processMalformedMediatorRequestResult(
                 isEq(CantonTimestamp.Epoch),
                 isEq(SequencerCounter(0)),
-                any[SignedContent[Deliver[DefaultOpenEnvelope]]],
+                any[Either[
+                  EventWithErrors[Deliver[DefaultOpenEnvelope]],
+                  SignedContent[Deliver[DefaultOpenEnvelope]],
+                ]],
               )(anyTraceContext)
               checkTickIdentityProcessor(sut)
               checkTickRequestTracker(sut)
@@ -1122,10 +1180,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           }
         }
 
-        for {
+        (for {
           _ <- malformed(TestViewType, _.testProcessor)
           _ <- malformed(OtherTestViewType, _.otherTestProcessor)
-        } yield succeed
+        } yield succeed).futureValue
       }
     }
 
@@ -1159,25 +1217,27 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         )
 
         val sequencedEvents = Seq(deliver1, deliver2, deliver3, deliverError4).map(event =>
-          OrdinarySequencedEvent(signEvent(event))(traceContext)
+          Right(OrdinarySequencedEvent(signEvent(event))(traceContext))
         )
-        for {
-          _ <- sut.messageDispatcher
-            .handleAll(Traced(sequencedEvents))
-            .onShutdown(fail("Encountered shutdown while handling batch of sequenced events"))
-        } yield {
-          checkObserveSequencing(
-            sut,
-            Map(
-              messageId1 -> SequencedSubmission(SequencerCounter(0), CantonTimestamp.Epoch),
-              messageId2 -> SequencedSubmission(
-                SequencerCounter(1),
-                CantonTimestamp.ofEpochSecond(1),
-              ),
+
+        sut.messageDispatcher
+          .handleAll(Traced(sequencedEvents))
+          .onShutdown(fail("Encountered shutdown while handling batch of sequenced events"))
+          .futureValue
+          .discard
+
+        checkObserveSequencing(
+          sut,
+          Map(
+            messageId1 -> SequencedSubmission(SequencerCounter(0), CantonTimestamp.Epoch),
+            messageId2 -> SequencedSubmission(
+              SequencerCounter(1),
+              CantonTimestamp.ofEpochSecond(1),
             ),
-          )
-          checkObserveDeliverError(sut, deliverError4)
-        }
+          ),
+        )
+        checkObserveDeliverError(sut, deliverError4)
+
       }
     }
   }
@@ -1206,7 +1266,7 @@ private[protocol] object MessageDispatcherTest {
   case object UnknownTestViewType extends AbstractTestViewType
   type UnknownTestViewType = OtherTestViewType.type
 
-  case class TestRegularMediatorResult(
+  final case class TestRegularMediatorResult(
       override val viewType: ViewType,
       override val domainId: DomainId,
       override val verdict: Verdict,
@@ -1222,13 +1282,20 @@ private[protocol] object MessageDispatcherTest {
       throw new UnsupportedOperationException(
         s"${this.getClass.getSimpleName} cannot be serialized"
       )
-    override def hashPurpose: HashPurpose = HashPurposeTest.testHashPurpose
+    override def toProtoTypedSomeSignedProtocolMessage
+        : protocolv0.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
+      throw new UnsupportedOperationException(
+        s"${this.getClass.getSimpleName} cannot be serialized"
+      )
+
+    override def hashPurpose: HashPurpose = TestHash.testHashPurpose
     override def deserializedFrom: Option[ByteString] = None
     override protected[this] def toByteStringUnmemoized: ByteString = ByteString.EMPTY
   }
 
   object TestRegularMediatorResult
-      extends HasProtocolVersionedSerializerCompanion[TestRegularMediatorResult] {
+      extends HasProtocolVersionedWrapperCompanion[TestRegularMediatorResult, Nothing] {
+    override type Deserializer = Unit
     val name: String = "TestRegularMediatorResult"
 
     val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
@@ -1238,10 +1305,16 @@ private[protocol] object MessageDispatcherTest {
         _ => throw new NotImplementedError("Serialization is not implemented"),
       )
     )
+
+    override protected def deserializationErrorK(error: ProtoDeserializationError): Unit = ()
   }
 }
 
-class DefaultMessageDispatcherTest extends AsyncWordSpec with BaseTest with MessageDispatcherTest {
+class DefaultMessageDispatcherTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutorService
+    with MessageDispatcherTest {
 
   "DefaultMessageDispatcher" should {
     behave like messageDispatcher(MessageDispatcher.DefaultFactory.create)

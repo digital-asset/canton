@@ -20,7 +20,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.Future
 
 trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
-  self: CantonNodeBootstrapBase[_, _, _] =>
+
+  self: CantonNodeBootstrapBase[_, _, _, _] =>
 
   protected def authorizeDomainGovernance[E <: CantonError](
       manager: TopologyManager[E],

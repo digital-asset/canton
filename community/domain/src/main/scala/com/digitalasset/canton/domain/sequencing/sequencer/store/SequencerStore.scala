@@ -45,7 +45,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** In the sequencer database we use integers to represent members.
   * Wrap this in the APIs to not confuse with other numeric types.
   */
-case class SequencerMemberId(private val id: Int) extends PrettyPrinting {
+final case class SequencerMemberId(private val id: Int) extends PrettyPrinting {
   def unwrap: Int = id
 
   override def pretty: Pretty[SequencerMemberId] = prettyOfParam(_.id)
@@ -70,7 +70,7 @@ object SequencerMemberId {
 /** Identifier for a payload. Should ideally be unique however this will be validated in [[SequencerStore.savePayloads]].
   * Is expected id is a timestamp in microseconds.
   */
-case class PayloadId(private val id: CantonTimestamp) extends PrettyPrinting {
+final case class PayloadId(private val id: CantonTimestamp) extends PrettyPrinting {
   def unwrap: CantonTimestamp = id
 
   override def pretty: Pretty[PayloadId] = prettyOfClass(
@@ -98,7 +98,7 @@ object PayloadId {
 }
 
 /** Payload with a assigned id and content as bytes */
-case class Payload(id: PayloadId, content: ByteString)
+final case class Payload(id: PayloadId, content: ByteString)
 
 /** Sequencer events in a structure suitable for persisting in our events store.
   * The payload type is parameterized to allow specifying either a full payload or just a id referencing a payload.
@@ -126,7 +126,7 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
   * @param signingTimestampO The timestamp of the snapshot to be used for determining the signing key of this event
   *                          [[scala.None]] means that the sequencing timestamp should be used.
   */
-case class DeliverStoreEvent[P](
+final case class DeliverStoreEvent[P](
     sender: SequencerMemberId,
     messageId: MessageId,
     override val members: NonEmpty[SortedSet[SequencerMemberId]],
@@ -172,7 +172,7 @@ object DeliverStoreEvent {
   }
 }
 
-case class DeliverErrorStoreEvent(
+final case class DeliverErrorStoreEvent(
     sender: SequencerMemberId,
     messageId: MessageId,
     message: String256M,
@@ -185,8 +185,10 @@ case class DeliverErrorStoreEvent(
   override def payloadO: Option[Nothing] = None
 }
 
-case class Presequenced[+E <: StoreEvent[_]](event: E, maxSequencingTimeO: Option[CantonTimestamp])
-    extends HasTraceContext {
+final case class Presequenced[+E <: StoreEvent[_]](
+    event: E,
+    maxSequencingTimeO: Option[CantonTimestamp],
+) extends HasTraceContext {
   import cats.implicits.*
 
   def map[F <: StoreEvent[_]](fn: E => F): Presequenced[F] =
@@ -227,7 +229,8 @@ object Presequenced {
   * right before they are persisted (this is effectively the "sequencing" step). Before this point the sequencer
   * component is free to reorder incoming events.
   */
-case class Sequenced[+P](timestamp: CantonTimestamp, event: StoreEvent[P]) extends HasTraceContext {
+final case class Sequenced[+P](timestamp: CantonTimestamp, event: StoreEvent[P])
+    extends HasTraceContext {
   override def traceContext: TraceContext = event.traceContext
 
   def map[A](fn: P => A): Sequenced[A] = copy(event = event.map(fn))
@@ -241,7 +244,7 @@ case class Sequenced[+P](timestamp: CantonTimestamp, event: StoreEvent[P]) exten
   *                                 at which an event was created from a batch
   *                                 that contains an envelope addressed to the topology client used by the SequencerReader.
   */
-case class CounterCheckpoint(
+final case class CounterCheckpoint(
     counter: SequencerCounter,
     timestamp: CantonTimestamp,
     latestTopologyClientTimestamp: Option[CantonTimestamp],
@@ -280,13 +283,15 @@ object SavePayloadsError {
     *                                         this id. The discriminator is logged at debug upon sequencer writer startup
     *                                         so is possible to discover which instance did the write.
     */
-  case class ConflictingPayloadId(payloadId: PayloadId, conflictingInstanceDiscriminator: UUID)
-      extends SavePayloadsError
+  final case class ConflictingPayloadId(
+      payloadId: PayloadId,
+      conflictingInstanceDiscriminator: UUID,
+  ) extends SavePayloadsError
 
   /** We should have already inserted the payload but it wasn't there when reading.
     * Likely can only be caused by the payload being removed unexpectedly.
     */
-  case class PayloadMissing(payloadId: PayloadId) extends SavePayloadsError
+  final case class PayloadMissing(payloadId: PayloadId) extends SavePayloadsError
 }
 
 sealed trait SaveCounterCheckpointError
@@ -295,7 +300,7 @@ object SaveCounterCheckpointError {
   /** We've attempted to write a counter checkpoint but found an existing checkpoint for this counter with a different timestamp.
     * This is very bad and suggests that we are serving inconsistent streams to the member.
     */
-  case class CounterCheckpointInconsistent(
+  final case class CounterCheckpointInconsistent(
       existingTimestamp: CantonTimestamp,
       existingLatestTopologyClientTimestamp: Option[CantonTimestamp],
   ) extends SaveCounterCheckpointError
@@ -305,14 +310,16 @@ sealed trait SaveLowerBoundError
 object SaveLowerBoundError {
 
   /** Returned if the bound we're trying to save is below any existing bound. */
-  case class BoundLowerThanExisting(existingBound: CantonTimestamp, suppliedBound: CantonTimestamp)
-      extends SaveLowerBoundError
+  final case class BoundLowerThanExisting(
+      existingBound: CantonTimestamp,
+      suppliedBound: CantonTimestamp,
+  ) extends SaveLowerBoundError
 }
 
 /** Time that the sequencer commits to not writing events before, and therefore it is safe to read events less or equal
   * to this timestamp.
   */
-case class Watermark(timestamp: CantonTimestamp, online: Boolean)
+final case class Watermark(timestamp: CantonTimestamp, online: Boolean)
 
 sealed trait SaveWatermarkError
 object SaveWatermarkError {
@@ -322,16 +329,16 @@ object SaveWatermarkError {
     * If when checking the value we find it is not what we expect, it likely indicates a configuration error
     * causing multiple sequencer processes to be written as the same sequencer node index.
     */
-  case class WatermarkUnexpectedlyChanged(message: String) extends SaveWatermarkError
+  final case class WatermarkUnexpectedlyChanged(message: String) extends SaveWatermarkError
 }
 
-case class RegisteredMember(memberId: SequencerMemberId, registeredFrom: CantonTimestamp)
+final case class RegisteredMember(memberId: SequencerMemberId, registeredFrom: CantonTimestamp)
 
 case object MemberDisabledError
 
 /** Used for verifying what pruning is doing in tests */
 @VisibleForTesting
-private[store] case class SequencerStoreRecordCounts(
+private[store] final case class SequencerStoreRecordCounts(
     events: Long,
     payloads: Long,
     counterCheckpoints: Long,
@@ -348,12 +355,12 @@ trait ReadEvents {
   def payloads: Seq[Sequenced[Payload]]
 }
 
-case class ReadEventPayloads(payloads: Seq[Sequenced[Payload]]) extends ReadEvents {
+final case class ReadEventPayloads(payloads: Seq[Sequenced[Payload]]) extends ReadEvents {
   def nextTimestamp: Option[CantonTimestamp] = payloads.lastOption.map(_.timestamp)
 }
 
 /** No events found but may return the safe watermark across online sequencers to read from the next time */
-case class SafeWatermark(nextTimestamp: Option[CantonTimestamp]) extends ReadEvents {
+final case class SafeWatermark(nextTimestamp: Option[CantonTimestamp]) extends ReadEvents {
   def payloads: Seq[Sequenced[Payload]] = Seq.empty
 }
 
@@ -621,7 +628,11 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
       )
       _ <- EitherT.right(updateLowerBound(adjustedTimestamp))
       description <- EitherT.right(performPruning(adjustedTimestamp))
-    } yield SequencerPruningResult(adjustedTimestamp, description)
+
+      // Read oldest event timestamp as using adjustedTimestamp would be incorrect when pruning was requested at an
+      // old timestamp at which the sequencer hadn't held any events.
+      actuallyPrunedUpTo <- EitherT.right(locatePruningTimestamp(NonNegativeInt.zero))
+    } yield SequencerPruningResult(actuallyPrunedUpTo, description)
   }
 
   /** This takes the timestamp that is considered safe to prune from and walks it back to ensure that we have
@@ -690,8 +701,13 @@ object SequencerStore {
         )
     }
 
-  case class SequencerPruningResult(
-      actuallyPrunedToUp: CantonTimestamp, // timestamp actually pruned up to, often lower than requested timestamp
-      report: String, // human readable report also used for logging
+  /** Sequencer pruning result
+    * @param actuallyPrunedToUp timestamp actually pruned up to, often lower than requested timestamp;
+    *                           empty when no events remaining after pruning
+    * @param report             human readable report also used for logging
+    */
+  final case class SequencerPruningResult(
+      actuallyPrunedToUp: Option[CantonTimestamp],
+      report: String,
   )
 }

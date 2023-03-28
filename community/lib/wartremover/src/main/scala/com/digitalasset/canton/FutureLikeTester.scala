@@ -69,4 +69,4 @@ object FutureLikeTester {
   *
   * @param transformedTypeArgumentPosition The type argument position for the computation type that is transformed
   */
-case class FutureTransformer(transformedTypeArgumentPosition: Int) extends StaticAnnotation
+final case class FutureTransformer(transformedTypeArgumentPosition: Int) extends StaticAnnotation

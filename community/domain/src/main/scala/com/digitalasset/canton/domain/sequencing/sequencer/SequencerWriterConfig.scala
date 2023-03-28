@@ -5,8 +5,8 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
 
 sealed trait CommitMode {
   private[sequencer] val postgresSettings: NonEmpty[Seq[String]]
@@ -105,7 +105,7 @@ object SequencerWriterConfig {
   /** Use to have events immediately flushed to the database. Useful for decreasing latency however at a high throughput
     * a large number of writes will be detrimental for performance.
     */
-  case class LowLatency(
+  final case class LowLatency(
       override val payloadQueueSize: Int = 1000,
       override val payloadWriteBatchMaxSize: Int = 1,
       override val payloadWriteBatchMaxDuration: NonNegativeFiniteDuration =
@@ -123,7 +123,7 @@ object SequencerWriterConfig {
     * usecase when batches will be quickly filled and written. Will be detrimental for latency if used and a lower throughput
     * of events causes writes to always be delayed to the batch max duration.
     */
-  case class HighThroughput(
+  final case class HighThroughput(
       override val payloadQueueSize: Int = 1000,
       override val payloadWriteBatchMaxSize: Int = 50,
       override val payloadWriteBatchMaxDuration: NonNegativeFiniteDuration =

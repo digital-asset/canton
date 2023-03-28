@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.pruning
 
-import cats.data.{NonEmptyList, ValidatedNec}
+import cats.data.{EitherT, NonEmptyList, ValidatedNec}
 import cats.syntax.contravariantSemigroupal.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
@@ -38,8 +38,9 @@ import com.digitalasset.canton.protocol.messages.{
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.protocol.{LfContractId, LfHash, WithContractHash}
+import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
 import com.digitalasset.canton.sequencing.client.{SendType, SequencerClient}
-import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
+import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients, SendAsyncError}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -581,14 +582,7 @@ class AcsCommitmentProcessor(
       cryptoSnapshot <- domainCrypto.awaitSnapshot(
         message.message.period.toInclusive.forgetRefinement
       )
-      pureCrypto = domainCrypto.pureCrypto
-      msgHash = pureCrypto.digest(
-        HashPurpose.AcsCommitment,
-        message.message.getCryptographicEvidence,
-      )
-      result <- cryptoSnapshot
-        .verifySignature(msgHash, message.message.sender, message.signature)
-        .value
+      result <- message.verifySignature(cryptoSnapshot, message.typedMessage.content.sender).value
     } yield result
       .tapLeft(err => logger.error(s"Commitment signature verification failed with $err"))
       .isRight
@@ -747,14 +741,29 @@ class AcsCommitmentProcessor(
       _ = logger.debug(s"Computed and stored ${msgs.size} commitment messages for period $period")
       batchForm = msgs.toList.map { case (pid, msg) => (msg, Recipients.cc(pid)) }
       batch = Batch.of[ProtocolMessage](protocolVersion, batchForm: _*)
+      // send async: we'll get gaps in the commitments if the send fails, but that shouldn't
+      // hurt if every sequencer connection is reasonably reliably. The next commitments will
+      // go through again and then the counterparticipant has a gap, but we don't really care
+      // about them
       _ = if (batch.envelopes.nonEmpty)
         performUnlessClosingEitherT(functionFullName, ()) {
-          EitherTUtil
-            .logOnError(
-              sequencerClient.sendAsync(batch, SendType.Other, None),
-              s"Failed to send commitment message batch for period $period",
+          def message = s"Failed to send commitment message batch for period $period"
+          EitherT(
+            FutureUtil.logOnFailure(
+              sequencerClient
+                .sendAsync(batch, SendType.Other, None)
+                .leftMap {
+                  case RequestRefused(SendAsyncError.ShuttingDown(msg)) =>
+                    logger.info(
+                      s"${message} as the sequencer is shutting down. Once the sequencer is back, we'll recover."
+                    )
+                  case other =>
+                    logger.warn(s"${message}: ${other}")
+                }
+                .value,
+              message,
             )
-            .leftMap(_ => ())
+          )
         }
     } yield logger.debug(
       s"Request to sequence local commitment messages for period $period sent to sequencer"
@@ -785,7 +794,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
     * @param delta        A sub-map of active with those stakeholders whose commitments have changed since the last snapshot
     * @param deleted      Stakeholder sets whose ACS has gone to empty since the last snapshot (no longer active)
     */
-  case class CommitmentSnapshot(
+  final case class CommitmentSnapshot(
       rt: RecordTime,
       active: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
       delta: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
@@ -1071,8 +1080,12 @@ object AcsCommitmentProcessor extends HasLoggerName {
 
       override protected def exposedViaApi: Boolean = false
 
-      case class MultipleCommitmentsInBatch(domain: DomainId, timestamp: CantonTimestamp, num: Int)(
-          implicit val loggingContext: ErrorLoggingContext
+      final case class MultipleCommitmentsInBatch(
+          domain: DomainId,
+          timestamp: CantonTimestamp,
+          num: Int,
+      )(implicit
+          val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(
             cause = "Received multiple batched ACS commitments over domain"
           )
@@ -1089,7 +1102,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
           |the store of this participant or of the counterparty."""
       )
       object NoSharedContracts extends AlarmErrorCode(id = "ACS_MISMATCH_NO_SHARED_CONTRACTS") {
-        case class Mismatch(domain: DomainId, remote: AcsCommitment)
+        final case class Mismatch(domain: DomainId, remote: AcsCommitment)
             extends Alarm(
               cause = "Received a commitment where we have no shared contract with the sender"
             )
@@ -1105,7 +1118,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
           |the store of this participant or of the counterparty."""
       )
       object CommitmentsMismatch extends AlarmErrorCode(id = "ACS_COMMITMENT_MISMATCH") {
-        case class Mismatch(
+        final case class Mismatch(
             domain: DomainId,
             remote: AcsCommitment,
             local: Seq[(CommitmentPeriod, AcsCommitment.CommitmentType)],
@@ -1115,7 +1128,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       @Explanation("The participant has detected that another node is behaving maliciously.")
       @Resolution("Contact support.")
       object AcsCommitmentAlarm extends AlarmErrorCode(id = "ACS_COMMITMENT_ALARM") {
-        case class Warn(override val cause: String) extends Alarm(cause)
+        final case class Warn(override val cause: String) extends Alarm(cause)
       }
     }
   }

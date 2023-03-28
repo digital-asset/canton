@@ -79,8 +79,8 @@ object BaseNodeSettingsStore {
 
 sealed trait BaseNodeSettingsStoreError
 object BaseNodeSettingsStoreError {
-  case class DbError(exception: Throwable) extends BaseNodeSettingsStoreError
-  case class DeserializationError(deserializationError: ProtoDeserializationError)
+  final case class DbError(exception: Throwable) extends BaseNodeSettingsStoreError
+  final case class DeserializationError(deserializationError: ProtoDeserializationError)
       extends BaseNodeSettingsStoreError
 }
 

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protobuf
 
+import cats.syntax.option.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ProtoDeserializationError.BufferException
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -63,6 +64,39 @@ class ProtobufParsingAttackTest extends AnyWordSpec with BaseTest {
 
       ProtoConverter
         .protoParser(AddVariant.parseFrom)(attackAddVariant)
+        .left
+        .value shouldBe a[BufferException]
+    }
+  }
+
+  // This test shows that it should actually be fine to switch between `optional` and `repeated`
+  // for fields in protobuf definitions. Our buf checks nevertheless forbid this because
+  // buf doesn't offer a dedicated config option; FIELD_SAME_LABEL is needed for WIRE compatibility
+  // and also complains about repeated, as explained in the docs.
+  "repeating a structured field" should {
+    "retain the last message" in {
+      val dummyMessage1 = DummyMessage("dummy1")
+      val dummyMessage2 = DummyMessage("dummy2")
+      val repeated = Repeated(Seq("a", "b"), Seq(dummyMessage1, dummyMessage2)).toByteString
+
+      ProtoConverter.protoParser(Single.parseFrom)(repeated) shouldBe
+        Right(Single("b", dummyMessage2.some))
+    }
+
+    "explode when giving unparseable structured message" in {
+      val dummyMessage = DummyMessage("dummy")
+      val attackRepeated = AttackRepeated(
+        Seq("a", "b"),
+        Seq(ByteString.copyFromUtf8("NOT-A-DUMMY-MESSAGE"), dummyMessage.toByteString),
+      ).toByteString
+
+      ProtoConverter
+        .protoParser(Single.parseFrom)(attackRepeated)
+        .left
+        .value shouldBe a[BufferException]
+
+      ProtoConverter
+        .protoParser(Repeated.parseFrom)(attackRepeated)
         .left
         .value shouldBe a[BufferException]
     }

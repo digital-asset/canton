@@ -145,21 +145,24 @@ object HandshakeErrors extends HandshakeErrorGroup {
     """Migrate to a new domain that uses the most recent protocol version."""
   )
   object DeprecatedProtocolVersion extends ErrorCode("DEPRECATED_PROTOCOL_VERSION", SecurityAlert) {
-    case class WarnSequencerClient(domainAlias: DomainAlias, version: ProtocolVersion)(implicit
-        val loggingContext: ErrorLoggingContext
+    final case class WarnSequencerClient(domainAlias: DomainAlias, version: ProtocolVersion)(
+        implicit val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"This node is connecting to a sequencer using the deprecated protocol version " +
             s"${version} which should not be used in production. We recommend only connecting to sequencers with a later protocol version (such as ${ProtocolVersion.latest})."
         )
-    case class WarnDomain(name: InstanceName, version: ProtocolVersion)(implicit
+    final case class WarnDomain(name: InstanceName, version: ProtocolVersion)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           s"This domain node is configured to use the deprecated protocol version " +
             s"${version} which should not be used in production. We recommend migrating to a later protocol version (such as ${ProtocolVersion.latest})."
         )
 
-    case class WarnParticipant(name: InstanceName, minimumProtocolVersion: Option[ProtocolVersion])(
-        implicit val loggingContext: ErrorLoggingContext
+    final case class WarnParticipant(
+        name: InstanceName,
+        minimumProtocolVersion: Option[ProtocolVersion],
+    )(implicit
+        val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           s"This participant node's configured minimum protocol version ${minimumProtocolVersion} includes deprecated protocol versions. " +
             s"We recommend using only the most recent protocol versions."

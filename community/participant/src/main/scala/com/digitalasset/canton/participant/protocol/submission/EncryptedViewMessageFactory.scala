@@ -129,7 +129,7 @@ object EncryptedViewMessageFactory {
 
   /** Indicates that the participant hosting one or more informees could not be determined.
     */
-  case class UnableToDetermineParticipant(party: Set[LfPartyId], domain: DomainId)
+  final case class UnableToDetermineParticipant(party: Set[LfPartyId], domain: DomainId)
       extends EncryptedViewMessageCreationError {
     override def pretty: Pretty[UnableToDetermineParticipant] =
       prettyOfClass(unnamedParam(_.party), unnamedParam(_.domain))
@@ -137,7 +137,7 @@ object EncryptedViewMessageFactory {
 
   /** Indicates that the public key of an informee participant could not be determined.
     */
-  case class UnableToDetermineKey(
+  final case class UnableToDetermineKey(
       participant: ParticipantId,
       cause: SyncCryptoError,
       domain: DomainId,
@@ -148,30 +148,30 @@ object EncryptedViewMessageFactory {
     )
   }
 
-  case class FailedToGenerateEncryptionKey(cause: EncryptionKeyGenerationError)
+  final case class FailedToGenerateEncryptionKey(cause: EncryptionKeyGenerationError)
       extends EncryptedViewMessageCreationError {
     override def pretty: Pretty[FailedToGenerateEncryptionKey] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }
 
-  case class FailedToCreateEncryptionKey(cause: EncryptionKeyCreationError)
+  final case class FailedToCreateEncryptionKey(cause: EncryptionKeyCreationError)
       extends EncryptedViewMessageCreationError {
     override def pretty: Pretty[FailedToCreateEncryptionKey] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }
 
-  case class FailedToExpandKey(cause: HkdfError) extends EncryptedViewMessageCreationError {
+  final case class FailedToExpandKey(cause: HkdfError) extends EncryptedViewMessageCreationError {
     override def pretty: Pretty[FailedToExpandKey] = prettyOfClass(unnamedParam(_.cause))
   }
 
-  case class FailedToSignViewMessage(cause: SyncCryptoError)
+  final case class FailedToSignViewMessage(cause: SyncCryptoError)
       extends EncryptedViewMessageCreationError {
     override def pretty: Pretty[FailedToSignViewMessage] = prettyOfClass(unnamedParam(_.cause))
   }
 
-  case class FailedToEncryptViewMessage(cause: EncryptionError)
+  final case class FailedToEncryptViewMessage(cause: EncryptionError)
       extends EncryptedViewMessageCreationError {
     override def pretty: Pretty[FailedToEncryptViewMessage] = prettyOfClass(unnamedParam(_.cause))
   }

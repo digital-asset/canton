@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto.provider.symbolic
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
@@ -16,6 +17,9 @@ class SymbolicPureCrypto() extends CryptoPureApi {
   private val symmetricKeyCounter = new AtomicInteger
   private val randomnessCounter = new AtomicInteger
   private val signatureCounter = new AtomicInteger
+
+  // iv to pre-append to the asymmetric ciphertext
+  private val ivForAsymmetricEncryptInBytes = 16
 
   // NOTE: The scheme is not really used by Symbolic crypto
   override val defaultSymmetricKeyScheme: SymmetricKeyScheme = SymmetricKeyScheme.Aes128Gcm
@@ -81,10 +85,11 @@ class SymbolicPureCrypto() extends CryptoPureApi {
   ): Either[EncryptionKeyCreationError, SymmetricKey] =
     Right(SymmetricKey(CryptoKeyFormat.Symbolic, bytes.unwrap, scheme))
 
-  override def encryptWith[M <: HasVersionedToByteString](
+  private def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
       version: ProtocolVersion,
+      randomized: Boolean,
   ): Either[EncryptionError, AsymmetricEncrypted[M]] =
     for {
       _ <- Either.cond(
@@ -100,8 +105,26 @@ class SymbolicPureCrypto() extends CryptoPureApi {
             message.toByteString(version)
           )
         )
-      encrypted = new AsymmetricEncrypted[M](payload, publicKey.id)
+      iv =
+        if (randomized) generateRandomByteString(ivForAsymmetricEncryptInBytes)
+        else ByteString.copyFrom(new Array[Byte](ivForAsymmetricEncryptInBytes))
+
+      encrypted = new AsymmetricEncrypted[M](iv.concat(payload), publicKey.id)
     } yield encrypted
+
+  override def encryptWith[M <: HasVersionedToByteString](
+      message: M,
+      publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
+  ): Either[EncryptionError, AsymmetricEncrypted[M]] =
+    encryptWith(message, publicKey, version, randomized = true)
+
+  def encryptDeterministicWith[M <: HasVersionedToByteString](
+      message: M,
+      publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
+  )(implicit traceContext: TraceContext): Either[EncryptionError, AsymmetricEncrypted[M]] =
+    encryptWith(message, publicKey, version, randomized = false)
 
   override protected def decryptWithInternal[M](
       encrypted: AsymmetricEncrypted[M],
@@ -115,9 +138,12 @@ class SymbolicPureCrypto() extends CryptoPureApi {
         (),
         DecryptionError.InvalidEncryptionKey(s"Provided key not a symbolic key: $privateKey"),
       )
+      // Remove iv
+      ciphertextWithoutIv = encrypted.ciphertext.substring(ivForAsymmetricEncryptInBytes)
+
       // For a symbolic encrypted message, the encryption key id is prepended before the ciphertext/plaintext
       keyIdAndCiphertext <- DeterministicEncoding
-        .decodeString(encrypted.ciphertext)
+        .decodeString(ciphertextWithoutIv)
         .leftMap[DecryptionError](err =>
           DecryptionError.FailedToDecrypt(
             s"Cannot extract public key id from symbolic encrypted payload: $err"

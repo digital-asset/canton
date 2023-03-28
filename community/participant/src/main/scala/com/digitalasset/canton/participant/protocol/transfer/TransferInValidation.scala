@@ -14,9 +14,9 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
+import com.digitalasset.canton.participant.protocol.{ProcessingSteps, SingleDomainCausalTracker}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
@@ -198,32 +198,18 @@ private[transfer] class TransferInValidation(
           )
           _ <- EitherT.fromEither[Future](checkSubmitterIsStakeholder)
           transferOutSubmitter = transferData.transferOutRequest.submitter
-          exclusivityBaseline = transferData.transferOutRequest.targetTimeProof.timestamp
+          targetTimeProof = transferData.transferOutRequest.targetTimeProof.timestamp
 
           // TODO(M40): Check that transferData.transferOutRequest.targetTimeProof.timestamp is in the past
           cryptoSnapshot <- transferCoordination
-            .cryptoSnapshot(
-              transferData.targetDomain,
-              transferData.transferOutRequest.targetTimeProof.timestamp,
+            .cryptoSnapshot(transferData.targetDomain, targetTimeProof)
+
+          exclusivityLimit <- ProcessingSteps
+            .getTransferInExclusivity(
+              cryptoSnapshot.ipsSnapshot,
+              targetTimeProof,
             )
-
-          /*
-            We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
-            because it makes no sense to progress if we don't manage to fetch domain parameters.
-            Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
-            that we don't have here.
-           */
-          domainParameters <- EitherT(
-            cryptoSnapshot.ipsSnapshot
-              .findDynamicDomainParameters()
-              .map(
-                _.toRight(
-                  DomainNotReady(transferData.targetDomain, "Unable to fetch domain parameters")
-                )
-              )
-          )
-
-          exclusivityLimit = domainParameters.transferExclusivityLimitFor(exclusivityBaseline)
+            .leftMap[TransferProcessorError](TransferParametersError(domainId, _))
 
           _ <- condUnitET[Future](
             tsIn >= exclusivityLimit
@@ -280,40 +266,48 @@ private[transfer] class TransferInValidation(
 }
 
 object TransferInValidation {
-  case class TransferInValidationResult(confirmingParties: Set[LfPartyId])
+  final case class TransferInValidationResult(confirmingParties: Set[LfPartyId])
 
   private[transfer] sealed trait TransferInValidationError extends TransferProcessorError
 
-  case class NoTransferData(transferId: TransferId, lookupError: TransferStore.TransferLookupError)
-      extends TransferInValidationError {
+  final case class NoTransferData(
+      transferId: TransferId,
+      lookupError: TransferStore.TransferLookupError,
+  ) extends TransferInValidationError {
     override def message: String =
       s"Cannot find transfer data for transfer `$transferId`: ${lookupError.cause}"
   }
 
-  case class TransferOutIncomplete(transferId: TransferId, participant: ParticipantId)
+  final case class TransferOutIncomplete(transferId: TransferId, participant: ParticipantId)
       extends TransferInValidationError {
     override def message: String =
       s"Cannot transfer-in `$transferId` because transfer-out is incomplete"
   }
 
-  case class PartyNotHosted(transferId: TransferId, party: LfPartyId, participant: ParticipantId)
-      extends TransferInValidationError {
+  final case class PartyNotHosted(
+      transferId: TransferId,
+      party: LfPartyId,
+      participant: ParticipantId,
+  ) extends TransferInValidationError {
     override def message: String =
       s"Cannot transfer-in `$transferId` because $party is not hosted on $participant"
   }
 
-  case class NoParticipantForReceivingParty(transferId: TransferId, party: LfPartyId)
+  final case class NoParticipantForReceivingParty(transferId: TransferId, party: LfPartyId)
       extends TransferInValidationError {
     override def message: String = s"Cannot transfer-in `$transferId` because $party is not active"
   }
 
-  case class UnexpectedDomain(transferId: TransferId, targetDomain: DomainId, receivedOn: DomainId)
-      extends TransferInValidationError {
+  final case class UnexpectedDomain(
+      transferId: TransferId,
+      targetDomain: DomainId,
+      receivedOn: DomainId,
+  ) extends TransferInValidationError {
     override def message: String =
       s"Cannot transfer-in `$transferId`: expecting domain `$targetDomain` but received on `$receivedOn`"
   }
 
-  case class ResultTimestampExceedsDecisionTime(
+  final case class ResultTimestampExceedsDecisionTime(
       transferId: TransferId,
       timestamp: CantonTimestamp,
       decisionTime: CantonTimestamp,
@@ -322,7 +316,7 @@ object TransferInValidation {
       s"Cannot transfer-in `$transferId`: result time $timestamp exceeds decision time $decisionTime"
   }
 
-  case class NonInitiatorSubmitsBeforeExclusivityTimeout(
+  final case class NonInitiatorSubmitsBeforeExclusivityTimeout(
       transferId: TransferId,
       submitter: LfPartyId,
       currentTimestamp: CantonTimestamp,
@@ -332,11 +326,11 @@ object TransferInValidation {
       s"Cannot transfer-in `$transferId`: only submitter can initiate before exclusivity timeout $timeout"
   }
 
-  case class ContractDataMismatch(transferId: TransferId) extends TransferInValidationError {
+  final case class ContractDataMismatch(transferId: TransferId) extends TransferInValidationError {
     override def message: String = s"Cannot transfer-in `$transferId`: contract data mismatch"
   }
 
-  case class CreatingTransactionIdMismatch(
+  final case class CreatingTransactionIdMismatch(
       transferId: TransferId,
       transferInTransactionId: TransactionId,
       localTransactionId: TransactionId,

@@ -12,9 +12,12 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.initialization.TopologyManagementInitialization
 import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyDispatchingErrorGroup
-import com.digitalasset.canton.error.{CantonError, HasDegradationState}
+import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.health.HealthReporting.HealthComponent
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -96,7 +99,7 @@ private[domain] class DomainTopologyDispatcher(
     addressSequencerAsDomainMember: Boolean,
     parameters: CantonNodeParameters,
     futureSupervisor: FutureSupervisor,
-    sender: DomainTopologySender,
+    val sender: DomainTopologySender,
     protected val loggerFactory: NamedLoggerFactory,
     topologyManagerSequencerCounterTrackerStore: SequencerCounterTrackerStore,
 )(implicit val ec: ExecutionContext)
@@ -331,18 +334,24 @@ private[domain] class DomainTopologyDispatcher(
                 authorizedStoreSnapshot(txs.last1.validFrom.value).findDynamicDomainParameters()
               )
             )
-            .flatMap(_.fold(empty) { param =>
-              // if new epsilon is smaller than current, then wait current epsilon before dispatching this set of txs
-              val old = param.topologyChangeDelay.duration
-              if (old > mapping.domainParameters.topologyChangeDelay.duration) {
-                logger.debug(
-                  s"Waiting $old due to topology change delay before resuming dispatching"
-                )
-                EitherT.right(
-                  clock.scheduleAfter(_ => (), param.topologyChangeDelay.duration)
-                )
-              } else empty
-            })
+            .flatMap(
+              _.fold(
+                _ => empty,
+                param => {
+                  // if new epsilon is smaller than current, then wait current epsilon before dispatching this set of txs
+                  val old = param.topologyChangeDelay.duration
+                  if (old > mapping.domainParameters.topologyChangeDelay.duration) {
+                    logger.debug(
+                      s"Waiting $old due to topology change delay before resuming dispatching"
+                    )
+                    EitherT.right(
+                      clock.scheduleAfter(_ => (), param.topologyChangeDelay.duration)
+                    )
+                  } else empty
+                },
+              )
+            )
+
         case _ => empty
       }
   }
@@ -606,7 +615,7 @@ private[domain] object DomainTopologyDispatcher {
 
 }
 
-trait DomainTopologySender extends AutoCloseable {
+trait DomainTopologySender extends FlagCloseable with HealthComponent with NamedLogging {
   def sendTransactions(
       snapshot: DomainSnapshotSyncCryptoApi,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
@@ -628,10 +637,10 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
       val loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
   )(implicit executionContext: ExecutionContext)
-      extends NamedLogging
-      with HasDegradationState[DomainTopologySender.TopologyDispatchingDegradation]
-      with DomainTopologySender
-      with FlagCloseable {
+      extends DomainTopologySender {
+
+    override val name: String = TopologyManagementInitialization.topologySenderHealthName
+    override protected val initialHealthState: ComponentHealthState = ComponentHealthState.Ok()
 
     private val currentJob =
       new AtomicReference[Option[Promise[UnlessShutdown[Either[String, Unit]]]]](None)
@@ -659,7 +668,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
                 _ <- ensureDelivery(
                   Batch(
                     List(
-                      OpenEnvelope(message, nonEmptyRecipients, protocolVersion)
+                      OpenEnvelope(message, nonEmptyRecipients)(protocolVersion)
                     ),
                     protocolVersion,
                   ),
@@ -719,11 +728,8 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
 
       lazy val callback: SendCallback = {
         case UnlessShutdown.Outcome(_: SendResult.Success) =>
-          val msg = s"Successfully registered $message with the sequencer."
-          if (isDegraded)
-            resolveDegradationIfExists(_ => msg)
-          else
-            logger.debug(msg)
+          if (getState.isOk) resolveUnhealthy_
+          logger.debug(s"Successfully registered $message with the sequencer.")
           finalizeCurrentJob(UnlessShutdown.Outcome(Right(())))
         case UnlessShutdown.Outcome(SendResult.Error(error)) =>
           TopologyDispatchingInternalError.SendResultError(error).discard
@@ -788,14 +794,14 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
         id = "TOPOLOGY_DISPATCHING_DEGRADATION",
         ErrorCategory.BackgroundProcessDegradationWarning,
       ) {
-    case class SendTrackerTimeout()(implicit
+    final case class SendTrackerTimeout()(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
             "The submitted domain topology transactions never appeared on the domain. Will try again."
         )
         with TopologyDispatchingDegradation
-    case class SendRefused(err: SendAsyncError)(implicit
+    final case class SendRefused(err: SendAsyncError)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
@@ -816,17 +822,17 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
         id = "TOPOLOGY_DISPATCHING_INTERNAL_ERROR",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class SendResultError(err: DeliverError)(implicit
+    final case class SendResultError(err: DeliverError)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Received an unexpected deliver error during topology dispatching."
         )
-    case class AsyncResultError(err: SendAsyncClientError)(implicit
+    final case class AsyncResultError(err: SendAsyncClientError)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Received an unexpected send async client error during topology dispatching."
         )
-    case class UnexpectedException(throwable: Throwable)(implicit
+    final case class UnexpectedException(throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Send async threw an unexpected exception during topology dispatching.",

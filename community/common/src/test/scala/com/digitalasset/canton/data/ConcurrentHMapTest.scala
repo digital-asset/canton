@@ -85,7 +85,7 @@ class ConcurrentHMapTest extends AnyWordSpec with BaseTest {
     }
 
     "not be typesafe if different keys are comparable" in {
-      case class Key[A](x: Int)
+      final case class Key[A](x: Int)
 
       class HMapRelation[K, V]
       val map = ConcurrentHMap.empty[HMapRelation]

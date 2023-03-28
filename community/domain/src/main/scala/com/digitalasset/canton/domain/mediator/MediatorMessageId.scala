@@ -20,7 +20,7 @@ private[mediator] sealed trait MediatorMessageId {
 }
 
 private[mediator] object MediatorMessageId {
-  case class VerdictMessageId(requestId: RequestId) extends MediatorMessageId {
+  final case class VerdictMessageId(requestId: RequestId) extends MediatorMessageId {
     val toMessageId: MessageId =
       mkMessageId(verdictPrefix)(requestId.unwrap.toLf.micros)
   }
@@ -28,14 +28,14 @@ private[mediator] object MediatorMessageId {
   /** Message ID for mediator heartbeats.
     * @param id value to ensure the message id is unique for the sender (but isn't significant elsewhere)
     */
-  case class MediatorHeartbeatMessageId(id: Long) extends MediatorMessageId {
+  final case class MediatorHeartbeatMessageId(id: Long) extends MediatorMessageId {
     val toMessageId: MessageId = mkMessageId(mediatorHeartbeatPrefix)(id)
   }
 
   /** Message ID for mediator leadership requests.
     * @param id value to ensure the message id is unique for the sender (but isn't significant elsewhere)
     */
-  case class LeadershipEventMessageId(id: Long) extends MediatorMessageId {
+  final case class LeadershipEventMessageId(id: Long) extends MediatorMessageId {
     val toMessageId: MessageId = mkMessageId(leadershipRequestPrefix)(id)
   }
 

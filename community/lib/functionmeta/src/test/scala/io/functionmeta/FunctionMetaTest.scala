@@ -9,7 +9,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
   "arguments" should {
     "return list of arguments" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       def method(a: List[String], b: Int, c: Foo): Unit = {
         arguments shouldBe List(List("hello", "yesterday"), 1100, Foo(12.3))
@@ -21,7 +21,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
 
     "return list of arguments when assigned to val" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       def method(a: List[String], b: Int, c: Foo): Unit = {
         val args = arguments
@@ -34,7 +34,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
 
     "return list of vararg arguments" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       def method(a: String*): Unit = {
         arguments shouldBe List(List("hello", "yesterday"))
@@ -45,7 +45,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
     }
     "return list of vararg arguments when assigned to val" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       def method(a: String*): Unit = {
         val args = arguments
@@ -70,7 +70,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
     "not compile outside function" in {
 
       illTyped("""
-          case class Test() {
+    final case class Test() {
             arguments
           }
         """)
@@ -84,7 +84,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
   "argumentsMap" should {
     "return map of argument names and values" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       def method(a: List[String], b: Int, c: Foo): Unit = {
         argumentsMap shouldBe Map("a" -> List("hello", "yesterday"), "b" -> 1100, "c" -> Foo(12.3))
@@ -95,7 +95,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
     }
     "return map of argument names and values when assigned to val" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       def method(a: List[String], b: Int, c: Foo): Unit = {
         val am = argumentsMap
@@ -112,7 +112,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
         """)
 
       illTyped("""
-           case class Test() {
+    final case class Test() {
              argumentsMap
           }
         """)
@@ -133,7 +133,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
   "functionName" should {
     "return name of the function" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       def method(a: List[String], b: Int, c: Foo): Unit = {
         functionName shouldBe "method"
@@ -169,7 +169,7 @@ class FunctionMetaTest extends AnyWordSpec with Matchers {
   "functionFullName" should {
     "return full name of the method" in {
 
-      case class Foo(bar: Double)
+    final case class Foo(bar: Double)
 
       class Bar {
 

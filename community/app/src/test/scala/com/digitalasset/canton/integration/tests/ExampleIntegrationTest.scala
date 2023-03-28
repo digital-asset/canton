@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests
 
 import better.files.*
 import com.digitalasset.canton.ConsoleScriptRunner
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.integration.CommunityTests.{
@@ -13,6 +14,7 @@ import com.digitalasset.canton.integration.CommunityTests.{
 }
 import com.digitalasset.canton.integration.tests.ExampleIntegrationTest.{
   advancedConfiguration,
+  ensureSystemProperties,
   repairConfiguration,
   simpleTopology,
 }
@@ -35,20 +37,17 @@ abstract class ExampleIntegrationTest(configPaths: File*)
   override lazy val environmentDefinition: CommunityEnvironmentDefinition =
     CommunityEnvironmentDefinition
       .fromFiles(configPaths: _*)
-      .clearConfigTransforms() // intentionally don't want to randomize ports as we've allocated each config their own range manually (see app/src/test/resources/README.md)
-      .addConfigTransform(
-        CommunityConfigTransforms.uniqueH2DatabaseNames
-      ) // but lets not share databases
-      .addConfigTransform(
-        _.focus(_.monitoring.tracing.propagation).replace(TracingConfig.Propagation.Enabled)
-      )
-      .addConfigTransform(
+      .addConfigTransforms(
+        // lets not share databases
+        CommunityConfigTransforms.uniqueH2DatabaseNames,
+        _.focus(_.monitoring.tracing.propagation).replace(TracingConfig.Propagation.Enabled),
         CommunityConfigTransforms.updateAllParticipantConfigs { case (_, config) =>
           // to make sure that the picked up time for the snapshot is the most recent one
           config
             .focus(_.parameters.transferTimeProofFreshnessProportion)
             .replace(NonNegativeInt.zero)
-        }
+        },
+        CommunityConfigTransforms.uniquePorts,
       )
 }
 
@@ -89,7 +88,16 @@ class SimplePingExampleIntegrationTest
     extends ExampleIntegrationTest(simpleTopology / "simple-topology.conf") {
 
   "run simple-ping.canton successfully" in { implicit env =>
-    runScript(simpleTopology / "simple-ping.canton")(env.environment)
+    import env.*
+    val port = environment.config
+      .domains(InstanceName.tryCreate("mydomain"))
+      .publicApi
+      .internalPort
+      .value
+      .unwrap
+      .toString
+    ensureSystemProperties(("canton-examples.mydomain-port", port))
+    runScript(simpleTopology / "simple-ping.canton")(environment)
   }
 }
 

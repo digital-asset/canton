@@ -17,7 +17,7 @@ class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
     s"${cantonContractIdVersion}" when {
       val discriminator = ExampleTransactionFactory.lfHash(1)
       val hash =
-        Hash.build(HashPurposeTest.testHashPurpose, HashAlgorithm.Sha256).add(0).finish()
+        Hash.build(TestHash.testHashPurpose, HashAlgorithm.Sha256).add(0).finish()
 
       val unicum = Unicum(hash)
       val cid = cantonContractIdVersion.fromDiscriminator(discriminator, unicum)
@@ -46,7 +46,7 @@ class CantonContractIdVersionTest extends AnyWordSpec with BaseTest {
         "work both ways" in {
           val discriminator = ExampleTransactionFactory.lfHash(1)
           val hash =
-            Hash.build(HashPurposeTest.testHashPurpose, HashAlgorithm.Sha256).add(0).finish()
+            Hash.build(TestHash.testHashPurpose, HashAlgorithm.Sha256).add(0).finish()
           val unicum = Unicum(hash)
           val lfCid = cantonContractIdVersion.fromDiscriminator(discriminator, unicum)
 

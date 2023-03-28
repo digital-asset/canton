@@ -59,11 +59,15 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
           CantonTimestamp.Epoch,
           domainId,
           Some(MessageId.tryCreate("test-deliver")),
-          Batch(List(ClosedEnvelope(message, Recipients.cc(member))), testedProtocolVersion),
+          Batch(
+            List(ClosedEnvelope(message, Recipients.cc(member), Seq.empty, testedProtocolVersion)),
+            testedProtocolVersion,
+          ),
           testedProtocolVersion,
         ),
         SymbolicCrypto.emptySignature,
         None,
+        testedProtocolVersion,
       )
       handler.fold(fail("handler not registered"))(h =>
         Await.result(h(OrdinarySequencedEvent(event)(traceContext)), 5.seconds)

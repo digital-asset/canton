@@ -120,7 +120,7 @@ object ComparesLfTransactions {
   /** The TxTree class adds the ability to arrange LfTransaction nodes in a tree structure rather than the flat
     * node-id-based arrangement.
     */
-  case class TxTree(lfNode: LfNode, childNodes: TxTree*) extends PrettyPrinting {
+  final case class TxTree(lfNode: LfNode, childNodes: TxTree*) extends PrettyPrinting {
     override lazy val pretty: Pretty[TxTree] = prettyOfClass(
       unnamedParam(_.lfNode),
       unnamedParamIfNonEmpty(_.childNodes),
@@ -139,6 +139,6 @@ object ComparesLfTransactions {
 
   /** TransactionBuilder context combines multiple implicits: transaction builder and contract ids
     */
-  case class TbContext(tb: TransactionBuilder, contractIds: Seq[LfContractId])
+  final case class TbContext(tb: TransactionBuilder, contractIds: Seq[LfContractId])
 
 }

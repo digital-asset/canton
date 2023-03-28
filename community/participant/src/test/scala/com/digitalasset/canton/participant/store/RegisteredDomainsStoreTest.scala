@@ -14,7 +14,7 @@ trait RegisteredDomainsStoreTest {
   protected implicit def traceContext: TraceContext
 
   private def alias(a: String) = DomainAlias.tryCreate(a)
-  private def id(a: String) = new DomainId(UniqueIdentifier.tryFromProtoPrimitive(s"$a::default"))
+  private def id(a: String) = DomainId(UniqueIdentifier.tryFromProtoPrimitive(s"$a::default"))
 
   def registeredDomainsStore(mk: () => RegisteredDomainsStore): Unit = {
     "be able to retrieve a map from alias to domain ids" in {

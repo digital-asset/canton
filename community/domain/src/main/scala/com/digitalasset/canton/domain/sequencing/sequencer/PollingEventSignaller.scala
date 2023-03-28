@@ -4,7 +4,6 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.NotUsed
-import akka.stream.DelayOverflowStrategy
 import akka.stream.scaladsl.Source
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -32,8 +31,9 @@ class PollingEventSignaller(
       memberId: SequencerMemberId,
   )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
     Source
-      .repeat(ReadSignal)
-      .delay(pollingInterval.toScala, strategy = DelayOverflowStrategy.backpressure)
+      .tick(pollingInterval.toScala, pollingInterval.toScala, ReadSignal)
+      .conflate((a, _) => a)
+      .mapMaterializedValue(_ => NotUsed)
 
   override def close(): Unit = ()
 }

@@ -13,13 +13,13 @@ import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.refinements.ApiTypes as A
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
-import com.daml.ledger.client.configuration.CommandClientConfiguration
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.language.Ast
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AdminWorkflowServicesErrorGroup
 import com.digitalasset.canton.error.{CantonError, DecodedRpcStatus}
+import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -227,7 +227,7 @@ class AdminWorkflowServices(
           1000000, // We need a high value to work around https://github.com/digital-asset/daml/issues/8017
         // This defines the maximum timeout that can be specified on admin workflow services such as the ping command
         // The parameter name is misleading; it does not affect the deduplication period for the commands.
-        defaultDeduplicationTime = parameters.adminWorkflow.submissionTimeout.unwrap,
+        defaultDeduplicationTime = parameters.adminWorkflow.submissionTimeout.asJava,
       ),
       Some(adminToken.secret),
       parameters.processingTimeouts,
@@ -294,17 +294,17 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
       )
 
   @Explanation(
-    """This error indicates that the admin workflow package could not be vetted. The admin workflows is 
-      |a set of packages that are pre-installed and can be used for administrative processes. 
-      |The error can happen if the participant is initialised manually but is missing the appropriate 
+    """This error indicates that the admin workflow package could not be vetted. The admin workflows is
+      |a set of packages that are pre-installed and can be used for administrative processes.
+      |The error can happen if the participant is initialised manually but is missing the appropriate
       |signing keys or certificates in order to issue new topology transactions within the participants
       |namespace.
       |The admin workflows can not be used until the participant has vetted the package."""
   )
   @Resolution(
-    """This error can be fixed by ensuring that an appropriate vetting transaction is issued in the 
+    """This error can be fixed by ensuring that an appropriate vetting transaction is issued in the
       |name of this participant and imported into this participant node.
-      |If the corresponding certificates have been added after the participant startup, then 
+      |If the corresponding certificates have been added after the participant startup, then
       |this error can be fixed by either restarting the participant node, issuing the vetting transaction manually
       |or re-uploading the Dar (leaving the vetAllPackages argument as true)"""
   )
@@ -313,7 +313,7 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
         id = "CAN_NOT_AUTOMATICALLY_VET_ADMIN_WORKFLOW_PACKAGE",
         ErrorCategory.BackgroundProcessDegradationWarning,
       ) {
-    case class Error()(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error()(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause =
             "Unable to vet `AdminWorkflows` automatically. Please ensure you vet this package before using one of the admin workflows."

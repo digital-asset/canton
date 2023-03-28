@@ -31,7 +31,7 @@ class DatabaseSequencerApiTest extends SequencerApiTest {
     DatabaseSequencer.single(
       TestDatabaseSequencerConfig(),
       DefaultProcessingTimeouts.testing,
-      new MemoryStorage(loggerFactory),
+      new MemoryStorage(loggerFactory, timeouts),
       clock,
       domainId,
       topologyClientMember,

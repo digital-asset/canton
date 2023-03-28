@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.sync
 import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
@@ -16,10 +17,6 @@ import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.*
 import com.daml.error.definitions.PackageServiceError
-import com.daml.ledger.api.health.HealthStatus
-import com.daml.ledger.configuration.*
-import com.daml.ledger.participant.state
-import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.ProcessedDisclosedContract
@@ -35,7 +32,14 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
 import com.digitalasset.canton.error.*
-import com.digitalasset.canton.health.HealthReporting.DeferredHealthComponent
+import com.digitalasset.canton.health.HealthReporting.{
+  BaseMutableHealthComponent,
+  MutableHealthComponent,
+}
+import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.ledger.configuration.*
+import com.digitalasset.canton.ledger.participant.state
+import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -44,6 +48,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.Pruning.*
+import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.domain.*
@@ -70,7 +75,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.participant.{ParticipantNodeParameters, *}
+import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
@@ -80,7 +85,6 @@ import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
@@ -115,12 +119,11 @@ class CantonSyncService(
     private[participant] val domainRegistry: DomainRegistry,
     private[canton] val domainConnectionConfigStore: DomainConnectionConfigStore,
     private[participant] val aliasManager: DomainAliasManager,
-    participantNodePersistentState: ParticipantNodePersistentState,
+    private[canton] val participantNodePersistentState: Eval[ParticipantNodePersistentState],
     participantNodeEphemeralState: ParticipantNodeEphemeralState,
     private[canton] val syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
     private[canton] val packageService: PackageService,
-    topologyStoreFactory: TopologyStoreFactory,
     domainCausalityStore: MultiDomainCausalityStore,
     topologyManager: ParticipantTopologyManager,
     identityPusher: ParticipantTopologyDispatcher,
@@ -149,15 +152,15 @@ class CantonSyncService(
 
   import ShowUtil.*
 
-  val syncDomainHealth: DeferredHealthComponent =
-    DeferredHealthComponent(loggerFactory, SyncDomain.healthName)
-  val ephemeralHealth: DeferredHealthComponent =
-    DeferredHealthComponent(loggerFactory, SyncDomainEphemeralState.healthName)
-  val sequencerClientHealth: DeferredHealthComponent =
-    DeferredHealthComponent(loggerFactory, SequencerClient.healthName)
+  val syncDomainHealth: MutableHealthComponent =
+    BaseMutableHealthComponent(loggerFactory, SyncDomain.healthName, timeouts)
+  val ephemeralHealth: MutableHealthComponent =
+    BaseMutableHealthComponent(loggerFactory, SyncDomainEphemeralState.healthName, timeouts)
+  val sequencerClientHealth: MutableHealthComponent =
+    BaseMutableHealthComponent(loggerFactory, SequencerClient.healthName, timeouts)
 
   val maxDeduplicationDuration: NonNegativeFiniteDuration =
-    participantNodePersistentState.settingsStore.settings.maxDeduplicationDuration
+    participantNodePersistentState.value.settingsStore.settings.maxDeduplicationDuration
       .getOrElse(throw new RuntimeException("Max deduplication duration is not available"))
 
   private val ledgerInitialConditionsInternal = LedgerInitialConditions(
@@ -290,9 +293,11 @@ class CantonSyncService(
   )
 
   private val commandDeduplicator = new CommandDeduplicatorImpl(
-    participantNodePersistentState.commandDeduplicationStore,
+    participantNodePersistentState.map(_.commandDeduplicationStore),
     clock,
-    participantNodePersistentState.multiDomainEventLog.publicationTimeLowerBound,
+    participantNodePersistentState.flatMap(mdel =>
+      Eval.always(mdel.multiDomainEventLog.publicationTimeLowerBound)
+    ),
     loggerFactory,
   )
 
@@ -305,10 +310,10 @@ class CantonSyncService(
     }
 
     new InFlightSubmissionTracker(
-      participantNodePersistentState.inFlightSubmissionStore,
+      participantNodePersistentState.map(_.inFlightSubmissionStore),
       participantNodeEphemeralState.participantEventPublisher,
       commandDeduplicator,
-      participantNodePersistentState.multiDomainEventLog,
+      participantNodePersistentState.map(_.multiDomainEventLog),
       domainStateFor,
       timeouts,
       loggerFactory,
@@ -317,7 +322,7 @@ class CantonSyncService(
 
   // Setup the propagation from the MultiDomainEventLog to the InFlightSubmissionTracker
   // before we run crash recovery
-  participantNodePersistentState.multiDomainEventLog.setOnPublish(
+  participantNodePersistentState.value.multiDomainEventLog.setOnPublish(
     inFlightSubmissionTracker.onPublishListener
   )
 
@@ -327,20 +332,25 @@ class CantonSyncService(
     }
   }
 
-  private val damle =
+  private val repairServiceDAMLe =
     new DAMLe(
       pkgId => traceContext => packageService.getPackage(pkgId)(traceContext),
+      // The repair service should not need any topology-aware authorisation because it only needs DAMLe
+      // to check contract instance arguments, which cannot trigger a ResultNeedAuthority.
+      CantonAuthorityResolver.topologyUnawareAuthorityResolver,
+      None,
       engine,
       loggerFactory,
     )
 
+  val cantonAuthorityResolver: AuthorityResolver = new CantonAuthorityResolver
+
   val repairService: RepairService = new RepairService(
     participantId,
-    topologyStoreFactory,
     syncCrypto,
     packageService,
-    damle,
-    participantNodePersistentState.multiDomainEventLog,
+    repairServiceDAMLe,
+    participantNodePersistentState.map(_.multiDomainEventLog),
     syncDomainPersistentStateManager,
     aliasManager,
     parameters,
@@ -564,7 +574,7 @@ class CantonSyncService(
         .fold(
           e => Source.failed(new IllegalArgumentException(e)),
           beginStartingAt =>
-            participantNodePersistentState.multiDomainEventLog
+            participantNodePersistentState.value.multiDomainEventLog
               .subscribe(beginStartingAt)
               .map { case (offset, tracedEvent) =>
                 tracedEvent
@@ -664,7 +674,7 @@ class CantonSyncService(
     */
   private def recoverParticipantNodeState()(implicit traceContext: TraceContext): Unit = {
 
-    val participantEventLogId = participantNodePersistentState.participantEventLog.id
+    val participantEventLogId = participantNodePersistentState.value.participantEventLog.id
 
     // Note that state from domain event logs is recovered when the participant reconnects to domains.
 
@@ -679,7 +689,7 @@ class CantonSyncService(
         _ <- inFlightSubmissionTracker.recoverPublishedTimelyRejections(domains)
         _ = logger.info("Publishing the unpublished events from the ParticipantEventLog")
         // These publications will propagate to the CommandDeduplicator and InFlightSubmissionTracker like during normal processing
-        unpublished <- participantNodePersistentState.multiDomainEventLog.fetchUnpublished(
+        unpublished <- participantNodePersistentState.value.multiDomainEventLog.fetchUnpublished(
           participantEventLogId,
           None,
         )
@@ -694,7 +704,7 @@ class CantonSyncService(
         }
 
         _units <- MonadUtil.sequentialTraverse(unpublishedEvents) { tse =>
-          participantNodePersistentState.multiDomainEventLog.publish(
+          participantNodePersistentState.value.multiDomainEventLog.publish(
             PublicationData(participantEventLogId, tse, None)
           )
         }
@@ -775,7 +785,7 @@ class CantonSyncService(
   )(implicit traceContext: TraceContext): EitherT[Future, SyncServiceError, Unit] =
     domainConnectionConfigStore
       .replace(config)
-      .leftMap(e => SyncServiceError.SyncServiceInternalError.MissingDomainConfig(e.alias))
+      .leftMap(e => SyncServiceError.SyncServiceUnknownDomain.Error(e.alias))
 
   def migrateDomain(
       source: DomainAlias,
@@ -871,13 +881,13 @@ class CantonSyncService(
                       AttemptReconnect(
                         con,
                         clock.now,
-                        parameters.sequencerClient.startupConnectionRetryDelay.toScala,
+                        parameters.sequencerClient.startupConnectionRetryDelay.unwrap,
                         traceContext,
                       ),
                     )
                     .discard
                   scheduleReconnectAttempt(
-                    clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.duration)
+                    clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.asJava)
                   )
                 } else {
                   logger.warn(
@@ -988,7 +998,7 @@ class CantonSyncService(
               AttemptReconnect(
                 domainAlias,
                 clock.now,
-                parameters.sequencerClient.startupConnectionRetryDelay.toScala,
+                parameters.sequencerClient.startupConnectionRetryDelay.unwrap,
                 traceContext,
               ),
             )
@@ -1019,7 +1029,7 @@ class CantonSyncService(
                    s"Initial connection attempt to ${domainAlias} failed. Will keep on trying."
                  )
                scheduleReconnectAttempt(
-                 clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.duration)
+                 clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.asJava)
                )
                Right(false)
              case Right(()) =>
@@ -1053,7 +1063,7 @@ class CantonSyncService(
             else {
               // update when we retried
               val nextRetry = item.retryDelay.*(2.0)
-              val maxRetry = parameters.sequencerClient.maxConnectionRetryDelay.toScala
+              val maxRetry = parameters.sequencerClient.maxConnectionRetryDelay.unwrap
               val nextRetryCapped = if (nextRetry > maxRetry) maxRetry else nextRetry
               attemptReconnect
                 .put(alias, item.copy(last = ts, retryDelay = nextRetryCapped))
@@ -1123,7 +1133,7 @@ class CantonSyncService(
         domainConnectionConfig <- domainConnectionConfigByAlias(domainAlias)
           .mapK(FutureUnlessShutdown.outcomeK)
           .leftMap[SyncServiceError] { case MissingConfigForAlias(alias) =>
-            SyncServiceError.SyncServiceInternalError.MissingDomainConfig(alias)
+            SyncServiceError.SyncServiceUnknownDomain.Error(alias)
           }
         // do not connect to a domain that is not active
         _ <- EitherT.cond[FutureUnlessShutdown](
@@ -1141,7 +1151,7 @@ class CantonSyncService(
             syncDomainStateFactory
               .createFromPersistent(
                 persistent,
-                participantNodePersistentState.multiDomainEventLog,
+                participantNodePersistentState.map(_.multiDomainEventLog),
                 globalTracker,
                 inFlightSubmissionTracker,
                 (loggerFactory: NamedLoggerFactory) =>
@@ -1162,7 +1172,8 @@ class CantonSyncService(
           domainId,
           domainHandle,
           participantId,
-          damle,
+          engine,
+          cantonAuthorityResolver,
           parameters,
           participantNodePersistentState,
           persistent,
@@ -1423,6 +1434,9 @@ class CantonSyncService(
     for {
       _ <- domainConnectionConfigStore.refreshCache()
       _ <- resourceManagementService.refreshCache()
+      _ = participantNodePersistentState.value.multiDomainEventLog.setOnPublish(
+        inFlightSubmissionTracker.onPublishListener
+      )
     } yield ()
 
   override def onClosed(): Unit = {
@@ -1443,7 +1457,7 @@ class CantonSyncService(
       domainConnectionConfigStore,
       domainCausalityStore,
       syncDomainPersistentStateManager,
-      participantNodePersistentState,
+      participantNodePersistentState.value,
     )
 
     Lifecycle.close(instances: _*)(logger)
@@ -1459,12 +1473,11 @@ object CantonSyncService {
         domainRegistry: DomainRegistry,
         domainConnectionConfigStore: DomainConnectionConfigStore,
         domainAliasManager: DomainAliasManager,
-        participantNodePersistentState: ParticipantNodePersistentState,
+        participantNodePersistentState: Eval[ParticipantNodePersistentState],
         participantNodeEphemeralState: ParticipantNodeEphemeralState,
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
         syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
         packageService: PackageService,
-        topologyStoreFactory: TopologyStoreFactory,
         multiDomainCausalityStore: MultiDomainCausalityStore,
         topologyManager: ParticipantTopologyManager,
         identityPusher: ParticipantTopologyDispatcher,
@@ -1491,12 +1504,11 @@ object CantonSyncService {
         domainRegistry: DomainRegistry,
         domainConnectionConfigStore: DomainConnectionConfigStore,
         domainAliasManager: DomainAliasManager,
-        participantNodePersistentState: ParticipantNodePersistentState,
+        participantNodePersistentState: Eval[ParticipantNodePersistentState],
         participantNodeEphemeralState: ParticipantNodeEphemeralState,
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
         syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
         packageService: PackageService,
-        topologyStoreFactory: TopologyStoreFactory,
         multiDomainCausalityStore: MultiDomainCausalityStore,
         topologyManager: ParticipantTopologyManager,
         identityPusher: ParticipantTopologyDispatcher,
@@ -1525,7 +1537,6 @@ object CantonSyncService {
         syncDomainPersistentStateManager,
         syncDomainPersistentStateFactory,
         packageService,
-        topologyStoreFactory,
         multiDomainCausalityStore,
         topologyManager,
         identityPusher,
@@ -1561,7 +1572,7 @@ object SyncServiceInjectionError extends InjectionErrorGroup {
         id = "NODE_IS_PASSIVE_REPLICA",
         ErrorCategory.TransientServerFailure,
       ) {
-    case class Error(applicationId: ApplicationId, commandId: CommandId)
+    final case class Error(applicationId: ApplicationId, commandId: CommandId)
         extends TransactionErrorImpl(
           cause = "Cannot process submitted command. This participant is the passive replica."
         )
@@ -1578,7 +1589,7 @@ object SyncServiceInjectionError extends InjectionErrorGroup {
         id = "NOT_CONNECTED_TO_ANY_DOMAIN",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Error()
+    final case class Error()
         extends TransactionErrorImpl(cause = "This participant is not connected to any domain.")
   }
 
@@ -1589,7 +1600,7 @@ object SyncServiceInjectionError extends InjectionErrorGroup {
         id = "COMMAND_INJECTION_FAILURE",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class Failure(throwable: Throwable)
+    final case class Failure(throwable: Throwable)
         extends TransactionErrorImpl(
           cause = "Command failed with an exception",
           throwableO = Some(throwable),
@@ -1603,12 +1614,15 @@ object SyncServiceError extends SyncServiceErrorGroup {
   @Explanation(
     "This error results if a domain connectivity command is referring to a domain alias that has not been registered."
   )
+  @Resolution(
+    "Please confirm the domain alias is correct, or configure the domain before (re)connecting."
+  )
   object SyncServiceUnknownDomain
       extends ErrorCode(
         "SYNC_SERVICE_UNKNOWN_DOMAIN",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
       ) {
-    case class Error(domain: DomainAlias)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error(domain: DomainAlias)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(cause = s"The domain with alias ${domain.unwrap} is unknown.")
         with SyncServiceError
   }
@@ -1621,7 +1635,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
         "SYNC_SERVICE_ALREADY_ADDED",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
       ) {
-    case class Error(domain: DomainAlias)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error(domain: DomainAlias)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(cause = "The domain with the given alias has already been added.")
         with SyncServiceError
   }
@@ -1630,8 +1644,11 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
   abstract class DomainRegistryErrorGroup extends ErrorGroup()
 
-  case class SyncServiceFailedDomainConnection(domain: DomainAlias, parent: DomainRegistryError)(
-      implicit val loggingContext: ErrorLoggingContext
+  final case class SyncServiceFailedDomainConnection(
+      domain: DomainAlias,
+      parent: DomainRegistryError,
+  )(implicit
+      val loggingContext: ErrorLoggingContext
   ) extends SyncServiceError
       with ParentCantonError[DomainRegistryError] {
 
@@ -1640,7 +1657,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
   }
 
-  case class SyncServiceMigrationError(
+  final case class SyncServiceMigrationError(
       from: DomainAlias,
       to: DomainAlias,
       parent: SyncDomainMigrationError,
@@ -1666,7 +1683,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
     override def logLevel: Level = Level.WARN
 
-    case class Error(domain: DomainAlias, reason: String)(implicit
+    final case class Error(domain: DomainAlias, reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"$domain rejected our subscription attempt with permission denied."
@@ -1686,7 +1703,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
 
-    case class Error(domain: DomainAlias, status: DomainConnectionConfigStore.Status)(implicit
+    final case class Error(domain: DomainAlias, status: DomainConnectionConfigStore.Status)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"$domain has status $status and can therefore not be connected to."
@@ -1706,7 +1723,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
     override def logLevel: Level = Level.WARN
 
-    case class Error(domain: DomainAlias)(implicit
+    final case class Error(domain: DomainAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"$domain disconnected because participant became passive."
@@ -1723,7 +1740,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
 
-    case class Error(domain: DomainAlias)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error(domain: DomainAlias)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(cause = show"$domain must be disconnected for the given operation")
         with SyncServiceError
 
@@ -1740,10 +1757,10 @@ object SyncServiceError extends SyncServiceErrorGroup {
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
 
-    case class UnrecoverableError(domain: DomainAlias, _reason: String)(implicit
+    final case class UnrecoverableError(domain: DomainAlias, _reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = show"$domain fatally disconnected because of ${_reason}")
-    case class UnrecoverableException(domain: DomainAlias, throwable: Throwable)(implicit
+    final case class UnrecoverableException(domain: DomainAlias, throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
@@ -1760,19 +1777,15 @@ object SyncServiceError extends SyncServiceErrorGroup {
         "SYNC_SERVICE_INTERNAL_ERROR",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class MissingDomainConfig(domain: DomainAlias)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(cause = "A domain config is missing for the given alias.")
-        with SyncServiceError
 
-    case class UnknownDomainParameters(domain: DomainAlias)(implicit
+    final case class UnknownDomainParameters(domain: DomainAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "The domain parameters for the given domain are missing in the store"
         )
         with SyncServiceError
 
-    case class Failure(domain: DomainAlias, throwable: Throwable)(implicit
+    final case class Failure(domain: DomainAlias, throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "The domain failed to startup due to an internal error",
@@ -1780,12 +1793,12 @@ object SyncServiceError extends SyncServiceErrorGroup {
         )
         with SyncServiceError
 
-    case class InitError(domain: DomainAlias, error: SyncDomainInitializationError)(implicit
+    final case class InitError(domain: DomainAlias, error: SyncDomainInitializationError)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = "The domain failed to initialize due to an internal error")
         with SyncServiceError
 
-    case class DomainIsMissingInternally(domain: DomainAlias, where: String)(implicit
+    final case class DomainIsMissingInternally(domain: DomainAlias, where: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Failed to await for participant becoming active due to missing domain objects"
@@ -1797,11 +1810,11 @@ object SyncServiceError extends SyncServiceErrorGroup {
   @Explanation("The participant has detected that another node is behaving maliciously.")
   @Resolution("Contact support.")
   object SyncServiceAlarm extends AlarmErrorCode("SYNC_SERVICE_ALARM") {
-    case class Warn(override val cause: String) extends Alarm(cause)
+    final case class Warn(override val cause: String) extends Alarm(cause)
   }
 
-  case class SyncServiceStartupError(override val errors: NonEmpty[Seq[SyncServiceError]])(implicit
-      val loggingContext: ErrorLoggingContext
+  final case class SyncServiceStartupError(override val errors: NonEmpty[Seq[SyncServiceError]])(
+      implicit val loggingContext: ErrorLoggingContext
   ) extends SyncServiceError
       with CombinedError[SyncServiceError]
 
@@ -1817,7 +1830,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
         "PARTY_ALLOCATION_WITHOUT_CONNECTED_DOMAIN",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Error(submission_id: LedgerSubmissionId)(implicit
+    final case class Error(submission_id: LedgerSubmissionId)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"Cannot allocate a party without being connected to a domain"

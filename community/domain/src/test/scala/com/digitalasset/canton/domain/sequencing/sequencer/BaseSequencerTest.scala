@@ -41,7 +41,12 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
   val messageId = MessageId.tryCreate("test-message-id")
   def mkBatch(recipients: Set[Member]): Batch[ClosedEnvelope] =
     Batch[ClosedEnvelope](
-      ClosedEnvelope(ByteString.EMPTY, Recipients.ofSet(recipients).value) :: Nil,
+      ClosedEnvelope(
+        ByteString.EMPTY,
+        Recipients.ofSet(recipients).value,
+        Seq.empty,
+        testedProtocolVersion,
+      ) :: Nil,
       testedProtocolVersion,
     )
   def submission(from: Member, to: Set[Member]) =
@@ -145,11 +150,6 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         traceContext: TraceContext
     ): EitherT[Future, String, Unit] = ???
 
-    // making this public on purpose so we can test
-    override def healthChanged(health: SequencerHealthStatus)(implicit
-        traceContext: TraceContext
-    ): Unit = super.healthChanged(health)
-
     override protected def healthInternal(implicit
         traceContext: TraceContext
     ): Future[SequencerHealthStatus] = Future.successful(SequencerHealthStatus(isActive = true))
@@ -163,7 +163,9 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
   Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>
     def send(sequencer: Sequencer)(submission: SubmissionRequest) =
       if (useSignedSend)
-        sequencer.sendAsyncSigned(SignedContent(submission, Signature.noSignature, None))
+        sequencer.sendAsyncSigned(
+          SignedContent(submission, Signature.noSignature, None, testedProtocolVersion)
+        )
       else sequencer.sendAsync(submission)
 
     name should {
@@ -211,7 +213,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     "onHealthChange should register listener and immediately call it with current status" in {
       val sequencer = new StubSequencer(Set())
       var status = SequencerHealthStatus(false)
-      sequencer.onHealthChange { (newHealth, _tc) =>
+      sequencer.registerOnHealthChange { (_listener, newHealth, _tc) =>
         status = newHealth
       }
 
@@ -221,12 +223,12 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     "health status change should trigger registered health listener" in {
       val sequencer = new StubSequencer(Set())
       var status = SequencerHealthStatus(true)
-      sequencer.onHealthChange { (newHealth, _tc) =>
+      sequencer.registerOnHealthChange { (_listener, newHealth, _tc) =>
         status = newHealth
       }
 
       val badHealth = SequencerHealthStatus(false, Some("something bad happened"))
-      sequencer.healthChanged(badHealth)
+      sequencer.reportHealthState(badHealth)
 
       status shouldBe badHealth
 

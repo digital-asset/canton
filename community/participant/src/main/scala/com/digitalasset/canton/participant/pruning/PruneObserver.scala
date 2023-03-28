@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.pruning
 
+import cats.Eval
 import cats.syntax.functor.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
@@ -28,7 +29,7 @@ private[participant] class PruneObserver(
     acsCommitmentStore: AcsCommitmentStore,
     acs: ActiveContractStore,
     keyJournal: ContractKeyJournal,
-    inFlightSubmissionStore: InFlightSubmissionStore,
+    inFlightSubmissionStore: Eval[InFlightSubmissionStore],
     domainId: DomainId,
     acsPruningInterval: NonNegativeFiniteDuration,
     clock: Clock,
@@ -78,7 +79,7 @@ private[participant] class PruneObserver(
               sequencerCounterTrackerStore,
               sortedReconciliationIntervalsProvider,
               acsCommitmentStore,
-              inFlightSubmissionStore,
+              inFlightSubmissionStore.value,
               domainId,
               checkForOutstandingCommitments = false,
             )

@@ -29,7 +29,7 @@ private[transfer] final case class PartyParticipantPermissions(
 )
 
 private[transfer] object PartyParticipantPermissions {
-  case class PartyParticipants(
+  final case class PartyParticipants(
       submission: Set[ParticipantId],
       confirmation: Set[ParticipantId],
       other: Set[ParticipantId],

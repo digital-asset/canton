@@ -3,14 +3,17 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import cats.Monad
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.store.TransferStore.*
@@ -20,19 +23,19 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
-import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent, SignedContent}
-import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.sequencing.protocol.{SequencedEvent, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
-import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
+import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -303,12 +306,25 @@ class DbTransferStore(
     storage.update_(query, functionFullName)
   }
 
-  private lazy val findPendingBase = sql"""
+  // TODO(#11722) Parameter domainIsTarget can be dropped once TransferStore is owned by source domain
+  private def findPendingBase(domainIsTarget: Boolean = true, domainId: DomainId = domain) = {
+    import DbStorage.Implicits.BuilderChain.*
+
+    val domainFilter =
+      if (domainIsTarget) sql"target_domain=$domainId" else sql"origin_domain=$domainId"
+
+    val notFinishedFilter =
+      sql" and time_of_completion_request_counter is null and time_of_completion_timestamp is null"
+
+    val base: SQLActionBuilder = sql"""
      select source_protocol_version, transfer_out_timestamp, transfer_out_request_counter, transfer_out_request, transfer_out_decision_time,
      contract, creating_transaction_id, transfer_out_result, source_protocol_version, time_of_completion_request_counter, time_of_completion_timestamp
      from transfers
-     where target_domain=$domain and time_of_completion_request_counter is null and time_of_completion_timestamp is null
-    """
+     where
+   """
+
+    base ++ domainFilter ++ notFinishedFilter
+  }
 
   override def find(
       filterSource: Option[DomainId],
@@ -327,7 +343,7 @@ class DbTransferStore(
           val submitterFilter =
             filterSubmitter.fold(sql"")(submitter => sql" and submitter_lf=${submitter}")
           val limitSql = storage.limitSql(limit)
-          (findPendingBase ++ sourceFilter ++ timestampFilter ++ submitterFilter ++ limitSql)
+          (findPendingBase() ++ sourceFilter ++ timestampFilter ++ submitterFilter ++ limitSql)
             .as[TransferData]
         },
         functionFullName,
@@ -344,22 +360,93 @@ class DbTransferStore(
           import DbStorage.Implicits.BuilderChain.*
 
           val timestampFilter =
-            requestAfter.fold(sql"")({ case (requestTimestamp, sourceDomain) =>
+            requestAfter.fold(sql"") { case (requestTimestamp, sourceDomain) =>
               storage.profile match {
                 case Profile.Oracle(_) =>
-                  sql"and (request_timestamp > ${requestTimestamp} or (request_timestamp = ${requestTimestamp} and origin_domain > ${sourceDomain}))"
+                  sql" and (request_timestamp > ${requestTimestamp} or (request_timestamp = ${requestTimestamp} and origin_domain > ${sourceDomain}))"
                 case _ =>
                   sql" and (request_timestamp, origin_domain) > (${requestTimestamp}, ${sourceDomain}) "
               }
-            })
+            }
           val order = sql" order by request_timestamp, origin_domain "
           val limitSql = storage.limitSql(limit)
 
-          (findPendingBase ++ timestampFilter ++ order ++ limitSql).as[TransferData]
+          (findPendingBase() ++ timestampFilter ++ order ++ limitSql).as[TransferData]
         },
         functionFullName,
       )
     }
+
+  private def findInFlight(
+      sourceDomain: DomainId,
+      transferredOutOnly: Boolean,
+      transferOutRequestNotAfter: LocalOffset,
+      start: Long,
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
+    storage.query(
+      {
+        import DbStorage.Implicits.BuilderChain.*
+
+        val offsetFilter = sql" and transfer_out_request_counter <= $transferOutRequestNotAfter"
+
+        val transferredOutOnlyFilter =
+          if (transferredOutOnly)
+            sql" and transfer_out_result is not null"
+          else sql""
+
+        val order = sql" order by request_timestamp "
+        val limitSql = storage.limitSql(numberOfItems = limit, skipItems = start)
+
+        val base = findPendingBase(false, sourceDomain)
+
+        (base ++ offsetFilter ++ transferredOutOnlyFilter ++ order ++ limitSql).as[TransferData]
+      },
+      functionFullName,
+    )
+
+  override def findInFlight(
+      sourceDomain: DomainId,
+      onlyCompletedTransferOut: Boolean,
+      transferOutRequestNotAfter: LocalOffset,
+      stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Seq[TransferData]] = processingTime.event {
+
+    // We tend to use 1000 to limit queries
+    val dbQueryLimit = 1000
+
+    def stakeholderFilter(data: TransferData): Boolean = stakeholders
+      .map(_.intersect(data.contract.metadata.stakeholders).nonEmpty)
+      .getOrElse(true)
+
+    // We cannot do the stakeholders filtering in the DB, so we may need to query the
+    // DB several times in order to be able to return `limit` elements.
+    // TODO(#11735)
+    Monad[Future].tailRecM((Vector.empty[TransferData], 0, 0L)) { case (acc, accSize, start) =>
+      val missing = limit - accSize
+
+      if (missing <= 0)
+        Future.successful(Right(acc))
+      else {
+        findInFlight(
+          sourceDomain,
+          onlyCompletedTransferOut,
+          transferOutRequestNotAfter,
+          limit = dbQueryLimit,
+          start = start,
+        ).map { result =>
+          val filteredResult = result.filter(stakeholderFilter).take(missing)
+          val filteredResultSize = filteredResult.size
+
+          if (result.isEmpty)
+            Right(acc)
+          else
+            Left((acc ++ filteredResult, accSize + filteredResultSize, start + dbQueryLimit))
+        }
+      }
+    }
+  }
 
   private def insertDependentDeprecated[E, W, A, R](
       exists: DBIO[Option[A]],
@@ -420,37 +507,20 @@ object DbTransferStore {
       )
   }
 
-  private val protoConverterSequencedEventOpenEnvelope =
-    SignedContent.versionedProtoConverter[SequencedEvent[DefaultOpenEnvelope]](
-      "OpenEnvelope[ProtocolMessage]"
-    )
-
-  private def parseSignedContentProto(cryptoApi: CryptoPureApi)(
-      signedContentProto: VersionedMessage[SignedContent[SequencedEvent[DefaultOpenEnvelope]]],
-      sourceProtocolVersion: SourceProtocolVersion,
-  ): ParsingResult[SignedContent[SequencedEvent[DefaultOpenEnvelope]]] =
-    protoConverterSequencedEventOpenEnvelope.fromProtoVersioned(
-      SequencedEvent.fromByteString(
-        OpenEnvelope.fromProtoV0(
-          EnvelopeContent.messageFromByteString(sourceProtocolVersion.v, cryptoApi),
-          sourceProtocolVersion.v,
-        )
-      )
-    )(signedContentProto)
-
   private def tryCreateDeliveredTransferOutResult(cryptoApi: CryptoPureApi)(
       bytes: Array[Byte],
       sourceProtocolVersion: SourceProtocolVersion,
   ) = {
     val res: ParsingResult[DeliveredTransferOutResult] = for {
-      signedContentP <- ProtoConverter.protoParserArray(UntypedVersionedMessage.parseFrom)(bytes)
-      signedContent <- parseSignedContentProto(cryptoApi)(
-        VersionedMessage(signedContentP),
-        sourceProtocolVersion,
-      )
-
+      signedContent <- SignedContent
+        .fromByteArray(bytes)
+        .flatMap(
+          _.deserializeContent(
+            SequencedEvent.fromByteStringOpen(cryptoApi, sourceProtocolVersion.v)
+          )
+        )
       result <- DeliveredTransferOutResult
-        .create(signedContent)
+        .create(Right(signedContent))
         .leftMap(err => OtherError(err.toString))
     } yield result
 

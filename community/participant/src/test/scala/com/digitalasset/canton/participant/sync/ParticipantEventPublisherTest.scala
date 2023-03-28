@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.sync
 
+import cats.Eval
 import cats.syntax.option.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.participant.domain.DomainAliasResolution
@@ -70,10 +71,10 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
     )
     val publisher = new ParticipantEventPublisher(
       participantId,
-      eventLog,
-      multiDomainEventLog,
+      Eval.now(eventLog),
+      Eval.now(multiDomainEventLog),
       clock,
-      Duration.ofDays(1),
+      Eval.now(Duration.ofDays(1)),
       DefaultProcessingTimeouts.testing,
       loggerFactory,
     )

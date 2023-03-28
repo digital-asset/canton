@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, S
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.admin.PackageService
@@ -24,6 +25,7 @@ import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.WriteOnly
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.SimpleExecutionQueue
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
 
@@ -42,6 +44,9 @@ class DbDamlPackageStore(
   import storage.api.*
   import storage.converters.*
   import DbStorage.Implicits.*
+
+  // Execution queue for serializable writes (i.e. append)
+  private val writeQueue = new SimpleExecutionQueue()
 
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("daml-packages-dars-store")
@@ -159,7 +164,7 @@ class DbDamlPackageStore(
       sourceDescription,
     )
 
-    val writeDar: List[WriteOnly[Int]] = dar.map(dar => (appendToDarStore(dar))).toList
+    val writeDar: List[WriteOnly[Int]] = dar.map(dar => appendToDarStore(dar)).toList
 
     // Combine all the operations into a single transaction.
     // Use Serializable isolation to protect against concurrent deletions from the `dars` or `daml_packages` tables,
@@ -171,11 +176,15 @@ class DbDamlPackageStore(
       .transactionally
       .withTransactionIsolation(Serializable)
 
-    storage
-      .queryAndUpdate(
-        action = writeDarAndPackages,
-        operationName = s"${this.getClass}: append Daml LF archive",
-      )
+    val desc = "append Daml LF archive"
+    writeQueue.execute(
+      storage
+        .queryAndUpdate(
+          action = writeDarAndPackages,
+          operationName = s"${this.getClass}: " + desc,
+        ),
+      desc,
+    )
   }
 
   private def appendToDarStore(dar: Dar) = {
@@ -321,10 +330,17 @@ class DbDamlPackageStore(
     )
   }
 
+  override def onClosed(): Unit = {
+    import TraceContext.Implicits.Empty.*
+    Lifecycle.close(
+      writeQueue.asCloseable("write-daml-package-store-queue", timeouts.closing.unwrap)
+    )(logger)
+  }
+
 }
 
 object DbDamlPackageStore {
-  private case class DamlPackage(packageId: LfPackageId, data: Array[Byte])
+  private final case class DamlPackage(packageId: LfPackageId, data: Array[Byte])
 
-  private case class DarRecord(hash: Hash, data: Array[Byte], name: DarName)
+  private final case class DarRecord(hash: Hash, data: Array[Byte], name: DarName)
 }

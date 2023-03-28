@@ -147,7 +147,7 @@ object TimestampedEvent {
   }
 
   /** The transaction ID of a `TransactionAccepted` event */
-  case class TransactionEventId(transactionId: LedgerTransactionId) extends EventId {
+  final case class TransactionEventId(transactionId: LedgerTransactionId) extends EventId {
     override def asString300: String300 = checked(
       String300.tryCreate("T" + transactionId, "TransactionEventId".some)
     )
@@ -164,7 +164,7 @@ object TimestampedEvent {
     * We use a [[java.util.UUID]] instead of a general [[com.digitalasset.canton.sequencing.protocol.MessageId]]
     * so that we stay below the 300 character limit.
     */
-  case class TimelyRejectionEventId(domainId: DomainId, uuid: UUID) extends EventId {
+  final case class TimelyRejectionEventId(domainId: DomainId, uuid: UUID) extends EventId {
     override def asString300: String300 = {
       // Maximum character length: 293
       // - Domain ID: 255
@@ -187,7 +187,7 @@ object TimestampedEvent {
     )
   }
 }
-case class TimestampedEventAndCausalChange(
+final case class TimestampedEventAndCausalChange(
     tse: TimestampedEvent,
     causalityUpdate: Option[CausalityUpdate],
 )

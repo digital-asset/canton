@@ -10,7 +10,7 @@ import java.io.File
 import scala.annotation.nowarn
 
 /** Configuration for Java keystore with optional password protection. */
-case class KeyStoreConfig(path: File, password: Password)
+final case class KeyStoreConfig(path: File, password: Password)
 
 @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
 class KeyStoreConfigWriters(confidential: Boolean) {
@@ -29,7 +29,7 @@ object KeyStoreConfig {
 /** Password wrapper for keystores to prevent the values being printed in logs.
   * @param pw password value - public for supporting PureConfig parsing but callers should prefer accessing through unwrap
   */
-case class Password(pw: String) extends AnyVal {
+final case class Password(pw: String) extends AnyVal {
   def unwrap: String = pw
 
   def toCharArray: Array[Char] = pw.toCharArray
