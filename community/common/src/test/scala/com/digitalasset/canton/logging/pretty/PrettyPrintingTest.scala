@@ -124,11 +124,11 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
   }
 
   "catch exception when pretty printing invalid control-chars" in {
-    case class Invalid(str: String) extends PrettyPrinting {
+    final case class Invalid(str: String) extends PrettyPrinting {
       override protected[pretty] def pretty: Pretty[Invalid] = prettyOfString(_.str)
     }
 
-    case class Invalid2(str: String)
+    final case class Invalid2(str: String)
 
     val invalidAnsi = "\u001b[0;31m"
     val errorStr =

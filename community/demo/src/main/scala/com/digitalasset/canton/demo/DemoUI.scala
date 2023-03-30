@@ -14,12 +14,12 @@ import com.daml.ledger.api.v1.transaction_service.{
   TransactionServiceGrpc,
 }
 import com.daml.ledger.api.v1.value.{Record, Value}
-import com.daml.ledger.configuration.LedgerId
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.ParticipantReference
+import com.digitalasset.canton.ledger.configuration.LedgerId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.topology.{Identifier, UniqueIdentifier}
@@ -53,7 +53,7 @@ import scala.util.{Failure, Success, Try}
 sealed trait Step
 
 object Step {
-  case class Action(
+  final case class Action(
       description: String,
       api: String,
       command: String,
@@ -85,11 +85,11 @@ trait BaseScript extends NamedLogging {
   }
 }
 
-private[demo] case class DarData(filenameS: String, hashS: String) {
+private[demo] final case class DarData(filenameS: String, hashS: String) {
   val filename = new StringProperty(this, "fileName", filenameS)
 }
 
-private[demo] case class MetaInfo(darData: Seq[DarData], hosted: String, connections: String)
+private[demo] final case class MetaInfo(darData: Seq[DarData], hosted: String, connections: String)
 
 class ParticipantTab(
     party: String,

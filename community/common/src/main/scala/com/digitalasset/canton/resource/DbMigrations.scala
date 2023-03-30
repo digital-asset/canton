@@ -57,6 +57,7 @@ trait DbMigrations { this: NamedLogging =>
     Flyway.configure
       .locations(dbConfig.buildMigrationsPaths(devVersionSupport): _*)
       .dataSource(dataSource)
+      .cleanDisabled(!dbConfig.parameters.unsafeCleanOnValidationError)
       .cleanOnValidationError(dbConfig.parameters.unsafeCleanOnValidationError)
       .baselineOnMigrate(dbConfig.parameters.unsafeBaselineOnMigrate)
       .lockRetryCount(60)
@@ -305,21 +306,21 @@ object DbMigrations {
     }
 
   sealed trait Error extends PrettyPrinting
-  case class FlywayError(err: FlywayException) extends Error {
+  final case class FlywayError(err: FlywayException) extends Error {
     override def pretty: Pretty[FlywayError] = prettyOfClass(unnamedParam(_.err))
   }
-  case class PendingMigrationError(msg: String) extends Error {
+  final case class PendingMigrationError(msg: String) extends Error {
     override def pretty: Pretty[PendingMigrationError] = prettyOfClass(unnamedParam(_.msg.unquoted))
   }
-  case class DatabaseError(error: String) extends Error {
+  final case class DatabaseError(error: String) extends Error {
     override def pretty: Pretty[DatabaseError] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
-  case class DatabaseVersionError(error: String) extends Error {
+  final case class DatabaseVersionError(error: String) extends Error {
     override def pretty: Pretty[DatabaseVersionError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
-  case class DatabaseConfigError(error: String) extends Error {
+  final case class DatabaseConfigError(error: String) extends Error {
     override def pretty: Pretty[DatabaseConfigError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )

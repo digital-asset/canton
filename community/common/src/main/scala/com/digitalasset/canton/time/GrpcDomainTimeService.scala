@@ -21,7 +21,7 @@ import io.grpc.Status
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Admin service to expose the time of domains to a participant and other nodes */
-class GrpcDomainTimeService(
+private[time] class GrpcDomainTimeService(
     lookupTimeTracker: Option[DomainId] => Either[String, DomainTimeTracker],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -74,7 +74,7 @@ class GrpcDomainTimeService(
     EitherTUtil.toFuture(handler.leftMap(_.asRuntimeException()))
 }
 
-case class FetchTimeRequest(
+final case class FetchTimeRequest(
     domainIdO: Option[DomainId],
     freshnessBound: NonNegativeFiniteDuration,
 ) {
@@ -96,7 +96,7 @@ object FetchTimeRequest {
     } yield FetchTimeRequest(domainIdO, freshnessBound)
 }
 
-case class FetchTimeResponse(timestamp: CantonTimestamp) {
+final case class FetchTimeResponse(timestamp: CantonTimestamp) {
   def toProtoV0: v0.FetchTimeResponse =
     v0.FetchTimeResponse(timestamp.toProtoPrimitive.some)
 }
@@ -114,7 +114,7 @@ object FetchTimeResponse {
     } yield FetchTimeResponse(timestamp)
 }
 
-case class AwaitTimeRequest(domainIdO: Option[DomainId], timestamp: CantonTimestamp) {
+final case class AwaitTimeRequest(domainIdO: Option[DomainId], timestamp: CantonTimestamp) {
   def toProtoV0: v0.AwaitTimeRequest =
     v0.AwaitTimeRequest(domainIdO.map(_.toProtoPrimitive), timestamp.toProtoPrimitive.some)
 }

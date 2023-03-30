@@ -12,7 +12,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 /** Represents the confirmation request as sent from a submitting node to the sequencer.
   */
-case class ConfirmationRequest(
+final case class ConfirmationRequest(
     informeeMessage: InformeeMessage,
     viewEnvelopes: Seq[OpenEnvelope[TransactionViewMessage]],
     protocolVersion: ProtocolVersion,
@@ -22,7 +22,7 @@ case class ConfirmationRequest(
 
   def asBatch: Batch[DefaultOpenEnvelope] = {
     val mediatorEnvelope: DefaultOpenEnvelope =
-      OpenEnvelope(informeeMessage, Recipients.cc(mediator), protocolVersion)
+      OpenEnvelope(informeeMessage, Recipients.cc(mediator))(protocolVersion)
 
     val rootHashMessage = RootHashMessage(
       rootHash = informeeMessage.fullInformeeTree.transactionId.toRootHash,
@@ -49,7 +49,8 @@ case class ConfirmationRequest(
         OpenEnvelope(
           rootHashMessage,
           Recipients.groups(participantsNE.map(NonEmpty.mk(Set, _, mediator))),
-          protocolVersion,
+        )(
+          protocolVersion
         )
       }
       .toList

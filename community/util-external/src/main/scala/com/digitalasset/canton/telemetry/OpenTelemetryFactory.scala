@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.telemetry
 
+import com.daml.metrics.HistogramDefinition
 import com.daml.telemetry.OpenTelemetryOwner.addViewsToProvider
 import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.metrics.OpenTelemetryOnDemandMetricsReader
@@ -27,6 +28,7 @@ object OpenTelemetryFactory {
       setGlobal: Boolean,
       metricsEnabled: Boolean,
       config: TracingConfig.Tracer,
+      histograms: Seq[HistogramDefinition],
   ): ConfiguredOpenTelemetry = {
     val autoconfigureBuilder =
       new AtomicReference[Option[SdkTracerProviderBuilder]](None)
@@ -65,7 +67,7 @@ object OpenTelemetryFactory {
           builder
       }
       .addMeterProviderCustomizer { case (builder, _) =>
-        val meterProviderBuilder = addViewsToProvider(builder)
+        val meterProviderBuilder = addViewsToProvider(builder, histograms)
         /* To integrate with prometheus we're using the deprecated [[PrometheusCollector]].
          * More details about the deprecation here: https://github.com/open-telemetry/opentelemetry-java/issues/4284
          * This forces us to keep the current OpenTelemetry version (see ticket for potential paths forward).

@@ -39,7 +39,7 @@ object DamlPackageLoader {
       .readArchive(name, new ZipInputStream(inputStream))
       .bimap(t => LoadError(t.toString), _.all.toMap)
 
-  case class LoadError(message: String)
+  final case class LoadError(message: String)
 
   /** Utility to check that the DAR file is valid.
     * This will check useful things such as whether the DAR file is potentially a zipbomb and that it

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.*
@@ -11,12 +12,13 @@ import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
+  DomainTimeTrackerConfig,
   LoggingConfig,
   ProcessingTimeout,
   TestingConfigInternal,
 }
+import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{Hash, HashPurpose, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{
@@ -46,7 +48,7 @@ import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.{
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
+import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{
@@ -59,71 +61,68 @@ import com.digitalasset.canton.store.{
   SequencedEventStore,
   SequencerCounterTrackerStore,
 }
-import com.digitalasset.canton.time.{
-  DomainTimeTracker,
-  DomainTimeTrackerConfig,
-  MockTimeRequestSubmitter,
-  SimClock,
-}
+import com.digitalasset.canton.time.{DomainTimeTracker, MockTimeRequestSubmitter, SimClock}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.annotation.tailrec
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success}
 
-class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorService {
+class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorService {
 
-  lazy val metrics =
+  implicit lazy val executionContext: ExecutionContext = executorService
+
+  private lazy val metrics =
     new SequencerClientMetrics(
       MetricName("SequencerClientTest"),
       NoOpMetricsFactory,
     )
-  lazy val deliver: Deliver[Nothing] =
+  private lazy val deliver: Deliver[Nothing] =
     SequencerTestUtils.mockDeliver(
       42,
       CantonTimestamp.Epoch,
       DefaultTestIdentities.domainId,
     )
-  lazy val signedDeliver: OrdinarySerializedEvent = {
+  private lazy val signedDeliver: OrdinarySerializedEvent = {
     OrdinarySequencedEvent(SequencerTestUtils.sign(deliver))(traceContext)
   }
 
-  lazy val nextDeliver: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+  private lazy val nextDeliver: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
     43,
     CantonTimestamp.ofEpochSecond(1),
     DefaultTestIdentities.domainId,
   )
-  lazy val deliver44: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+  private lazy val deliver44: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
     44,
     CantonTimestamp.ofEpochSecond(2),
     DefaultTestIdentities.domainId,
   )
-  lazy val deliver45: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+  private lazy val deliver45: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
     45,
     CantonTimestamp.ofEpochSecond(3),
     DefaultTestIdentities.domainId,
   )
-  lazy val dummyHash: Hash = TestHash.digest(0)
 
-  lazy val alwaysSuccessfulHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
+  private lazy val alwaysSuccessfulHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
     ApplicationHandler.success()
-  lazy val failureException = new IllegalArgumentException("application handler failed")
-  lazy val alwaysFailingHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
+  private lazy val failureException = new IllegalArgumentException("application handler failed")
+  private lazy val alwaysFailingHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
     ApplicationHandler.create("always-fails")(_ =>
       HandlerResult.synchronous(FutureUnlessShutdown.failed(failureException))
     )
 
   "subscribe" should {
     "throws if more than one handler is subscribed" in {
-      for {
+      (for {
         env <- Env.create()
         _ <- env.subscribeAfter()
         error <- loggerFactory
@@ -132,42 +131,44 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
             _.warningMessage shouldBe "Cannot create additional subscriptions to the sequencer from the same client",
           )
           .failed
-      } yield error shouldBe a[RuntimeException]
+      } yield error).futureValue shouldBe a[RuntimeException]
     }
 
     "start from genesis if there is no recorded event" in {
-      for {
+      val counterF = for {
         env <- Env.create()
         _ <- env.subscribeAfter()
-      } yield {
-        env.transport.subscriber.value.request.counter shouldBe SequencerCounter.Genesis
-      }
+      } yield env.transport.subscriber.value.request.counter
+
+      counterF.futureValue shouldBe SequencerCounter.Genesis
     }
 
     "starts subscription at last stored event (for fork verification)" in {
-      for {
+      val counterF = for {
         env <- Env.create(
           storedEvents = Seq(deliver)
         )
         _ <- env.subscribeAfter()
-      } yield {
-        env.transport.subscriber.value.request.counter shouldBe deliver.counter
-      }
+      } yield env.transport.subscriber.value.request.counter
+
+      counterF.futureValue shouldBe deliver.counter
     }
 
     "stores the event in the SequencedEventStore" in {
-      for {
+      val storedEventF = for {
         env @ Env(client, transport, _, sequencedEventStore, _) <- Env.create()
 
         _ <- env.subscribeAfter()
         _ <- transport.subscriber.value.handler(signedDeliver)
         _ <- client.flush()
         storedEvent <- sequencedEventStore.sequencedEvents()
-      } yield storedEvent shouldBe Seq(signedDeliver)
+      } yield storedEvent
+
+      storedEventF.futureValue shouldBe Seq(signedDeliver)
     }
 
     "stores the event even if the handler fails" in {
-      for {
+      val storedEventF = for {
         env @ Env(client, transport, _, sequencedEventStore, _) <- Env.create()
 
         _ <- env.subscribeAfter(eventHandler = alwaysFailingHandler)
@@ -186,14 +187,16 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           },
         )
         storedEvent <- sequencedEventStore.sequencedEvents()
-      } yield storedEvent shouldBe Seq(signedDeliver)
+      } yield storedEvent
+
+      storedEventF.futureValue shouldBe Seq(signedDeliver)
     }
 
     "doesn't give prior event to the application handler" in {
       val validated = new AtomicBoolean()
       val processed = new AtomicBoolean()
       val testLogger = logger
-      for {
+      val testF = for {
         env @ Env(_client, transport, _, _, _) <- Env.create(
           eventValidator = new SequencedEventValidator {
             override def validate(
@@ -226,11 +229,13 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         validated.get() shouldBe true
         processed.get() shouldBe false
       }
+
+      testF.futureValue
     }
 
     "picks the last prior event" in {
       val triggerNextDeliverHandling = new AtomicBoolean()
-      for {
+      val testF = for {
         env <- Env.create(
           storedEvents = Seq(deliver, nextDeliver, deliver44)
         )
@@ -243,15 +248,16 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
             HandlerResult.done
           },
         )
-      } yield {
-        triggerNextDeliverHandling.get shouldBe true
-      }
+      } yield ()
+
+      testF.futureValue
+      triggerNextDeliverHandling.get shouldBe true
     }
 
     "completes the sequencer client if the subscription closes due to an error" in {
       val error =
         EventValidationError(GapInSequencerCounter(SequencerCounter(666), SequencerCounter(0)))
-      for {
+      val closeReasonF = for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
 
         _ <- env.subscribeAfter(CantonTimestamp.MinValue, alwaysSuccessfulHandler)
@@ -266,10 +272,11 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           },
           _.warningMessage should include("sequencer"),
         )
-      } yield closeReason should matchPattern {
+      } yield closeReason
+
+      closeReasonF.futureValue should matchPattern {
         case e: UnrecoverableError if e.cause == s"handler returned error: $error" =>
       }
-
     }
 
     "completes the sequencer client if the application handler fails" in {
@@ -279,7 +286,8 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         ApplicationHandler.create("async-failure")(_ =>
           FutureUnlessShutdown.failed[AsyncResult](error)
         )
-      for {
+
+      val closeReasonF = for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(CantonTimestamp.MinValue, handler)
         closeReason <- loggerFactory.assertLogs(
@@ -306,16 +314,19 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
       } yield {
         client.close() // make sure that we can still close the sequencer client
-        closeReason should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $syncError" =>
-        }
+        closeReason
+      }
+
+      closeReasonF.futureValue should matchPattern {
+        case e: UnrecoverableError if e.cause == s"handler returned error: $syncError" =>
       }
     }
 
     "completes the sequencer client if the application handler shuts down synchronously" in {
       val handler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
         ApplicationHandler.create("shutdown")(_ => FutureUnlessShutdown.abortedDueToShutdown)
-      for {
+
+      val closeReasonF = for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(eventHandler = handler)
         closeReason <- {
@@ -329,15 +340,18 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         }
       } yield {
         client.close() // make sure that we can still close the sequencer client
-        closeReason shouldBe ClientShutdown
+        closeReason
       }
+
+      closeReasonF.futureValue shouldBe ClientShutdown
     }
 
     "completes the sequencer client if asynchronous event processing fails" in {
       val error = new RuntimeException("asynchronous failure")
       val asyncFailure = HandlerResult.asynchronous(FutureUnlessShutdown.failed(error))
       val asyncException = ApplicationHandlerException(error, deliver.counter, deliver.counter)
-      for {
+
+      val closeReasonF = for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(
           eventHandler = ApplicationHandler.create("async-failure")(_ => asyncFailure)
@@ -371,16 +385,17 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
             s"Closing resilient sequencer subscription due to error: HandlerError($asyncException)"
           ),
         )
-      } yield {
-        closeReason should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $asyncException" =>
-        }
+      } yield closeReason
+
+      closeReasonF.futureValue should matchPattern {
+        case e: UnrecoverableError if e.cause == s"handler returned error: $asyncException" =>
       }
     }
 
     "completes the sequencer client if asynchronous event processing shuts down" in {
       val asyncShutdown = HandlerResult.asynchronous(FutureUnlessShutdown.abortedDueToShutdown)
-      for {
+
+      val closeReasonF = for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(
           CantonTimestamp.MinValue,
@@ -389,7 +404,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         closeReason <- {
           for {
             _ <- transport.subscriber.value.sendToHandler(deliver)
-            _ <- client.flush() // Make sure that the asynchronous error has been noticed
+            _ <- client.flushClean() // Make sure that the asynchronous error has been noticed
             // Send the next event so that the client notices that an error has occurred.
             _ <- transport.subscriber.value.sendToHandler(nextDeliver)
             _ <- client.flush()
@@ -398,13 +413,16 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         }
       } yield {
         client.close() // make sure that we can still close the sequencer client
-        closeReason shouldBe ClientShutdown
+        closeReason
       }
+
+      closeReasonF.futureValue shouldBe ClientShutdown
     }
 
     "replays messages from the SequencedEventStore" in {
       val processedEvents = new ConcurrentLinkedQueue[SequencerCounter]
-      for {
+
+      val testF = for {
         env <- Env.create(
           storedEvents = Seq(deliver, nextDeliver, deliver44)
         )
@@ -415,20 +433,22 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
             alwaysSuccessfulHandler(events)
           },
         )
-      } yield {
-        import scala.jdk.CollectionConverters.*
-        processedEvents.iterator().asScala.toSeq shouldBe Seq(
-          nextDeliver.counter,
-          deliver44.counter,
-        )
-      }
+      } yield ()
+
+      testF.futureValue
+
+      processedEvents.iterator().asScala.toSeq shouldBe Seq(
+        nextDeliver.counter,
+        deliver44.counter,
+      )
     }
 
     "propagates errors during replay" in {
       val syncError =
         ApplicationHandlerException(failureException, nextDeliver.counter, deliver44.counter)
       val syncExc = SequencerClientSubscriptionException(syncError)
-      for {
+
+      val errorF = for {
         env <- Env.create(
           storedEvents = Seq(deliver, nextDeliver, deliver44)
         )
@@ -443,15 +463,15 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
             logEntry.throwable shouldBe Some(syncExc)
           },
         )
-      } yield {
-        error shouldBe syncExc
-      }
+      } yield error
+
+      errorF.futureValue shouldBe syncExc
     }
   }
 
   "subscribeTracking" should {
     "updates sequencer counter prehead" in {
-      for {
+      val preHeadF = for {
         Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create()
 
         _ <- client.subscribeTracking(
@@ -460,15 +480,18 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           timeTracker,
         )
         _ <- transport.subscriber.value.handler(signedDeliver)
-        _ <- client.flush()
+        _ <- client.flushClean()
         preHead <- sequencerCounterTrackerStore.preheadSequencerCounter
-      } yield preHead.value shouldBe CursorPrehead(deliver.counter, deliver.timestamp)
+      } yield preHead.value
+
+      preHeadF.futureValue shouldBe CursorPrehead(deliver.counter, deliver.timestamp)
     }
 
     "replays from the sequencer counter prehead" in {
       val processedEvents = new ConcurrentLinkedQueue[SequencerCounter]
-      for {
-        Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create(
+
+      val preheadF = for {
+        Env(client, _transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create(
           storedEvents = Seq(deliver, nextDeliver, deliver44, deliver45),
           cleanPrehead = Some(CursorPrehead(nextDeliver.counter, nextDeliver.timestamp)),
         )
@@ -481,21 +504,22 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           },
           timeTracker,
         )
-        _ <- client.flush()
+        _ <- client.flushClean()
         prehead <- sequencerCounterTrackerStore.preheadSequencerCounter
-      } yield {
-        import scala.jdk.CollectionConverters.*
-        processedEvents.iterator().asScala.toSeq shouldBe Seq(
-          deliver44.counter,
-          deliver45.counter,
-        )
-        prehead.value shouldBe CursorPrehead(deliver45.counter, deliver45.timestamp)
-      }
+      } yield prehead.value
+
+      preheadF.futureValue shouldBe CursorPrehead(deliver45.counter, deliver45.timestamp)
+      processedEvents.iterator().asScala.toSeq shouldBe Seq(
+        deliver44.counter,
+        deliver45.counter,
+      )
+
     }
 
     "resubscribes after replay" in {
       val processedEvents = new ConcurrentLinkedQueue[SequencerCounter]
-      for {
+
+      val preheadF = for {
         Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create(
           storedEvents = Seq(deliver, nextDeliver, deliver44),
           cleanPrehead = Some(CursorPrehead(nextDeliver.counter, nextDeliver.timestamp)),
@@ -509,20 +533,20 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           timeTracker,
         )
         _ <- transport.subscriber.value.sendToHandler(deliver45)
-        _ <- client.flush()
+        _ <- client.flushClean()
         prehead <- sequencerCounterTrackerStore.preheadSequencerCounter
-      } yield {
-        import scala.jdk.CollectionConverters.*
-        processedEvents.iterator().asScala.toSeq shouldBe Seq(
-          deliver44.counter,
-          deliver45.counter,
-        )
-        prehead.value shouldBe CursorPrehead(deliver45.counter, deliver45.timestamp)
-      }
+      } yield prehead.value
+
+      preheadF.futureValue shouldBe CursorPrehead(deliver45.counter, deliver45.timestamp)
+
+      processedEvents.iterator().asScala.toSeq shouldBe Seq(
+        deliver44.counter,
+        deliver45.counter,
+      )
     }
 
     "does not update the prehead if the application handler fails" in {
-      for {
+      val preHeadF = for {
         Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create()
 
         _ <- client.subscribeTracking(
@@ -534,7 +558,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           {
             for {
               _ <- transport.subscriber.value.handler(signedDeliver)
-              _ <- client.flush()
+              _ <- client.flushClean()
             } yield ()
           },
           logEntry => {
@@ -545,7 +569,9 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           },
         )
         preHead <- sequencerCounterTrackerStore.preheadSequencerCounter
-      } yield preHead shouldBe None
+      } yield preHead
+
+      preHeadF.futureValue shouldBe None
     }
 
     "updates the prehead only after the asynchronous processing has been completed" in {
@@ -563,13 +589,13 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           }
         }
 
-      for {
+      val testF = for {
         Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create(
           options = SequencerClientConfig(eventInboxSize = PositiveInt.tryCreate(1))
         )
         _ <- client.subscribeTracking(sequencerCounterTrackerStore, handler, timeTracker)
         _ <- transport.subscriber.value.sendToHandler(deliver)
-        _ <- client.flush()
+        _ <- client.flushClean()
         prehead42 <- sequencerCounterTrackerStore.preheadSequencerCounter
         _ <- transport.subscriber.value.sendToHandler(nextDeliver)
         prehead43 <- sequencerCounterTrackerStore.preheadSequencerCounter
@@ -579,7 +605,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         _ = promises(nextDeliver.counter).success(
           UnlessShutdown.unit
         ) // now we can advance the prehead
-        _ <- client.flush()
+        _ <- client.flushClean()
         prehead44 <- sequencerCounterTrackerStore.preheadSequencerCounter
       } yield {
         prehead42 shouldBe Some(CursorPrehead(deliver.counter, deliver.timestamp))
@@ -587,13 +613,15 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         prehead43a shouldBe Some(CursorPrehead(deliver.counter, deliver.timestamp))
         prehead44 shouldBe Some(CursorPrehead(deliver44.counter, deliver44.timestamp))
       }
+
+      testF.futureValue
     }
   }
 
   "changeTransport" should {
     "create second subscription from the same counter as the previous one when there are no events" in {
       val secondTransport = new MockTransport
-      for {
+      val testF = for {
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter()
         _ <- env.changeTransport(secondTransport)
@@ -610,16 +638,19 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
         env.client.completion.isCompleted shouldBe false
       }
+
+      testF.futureValue
     }
 
     "create second subscription from the same counter as the previous one when there are events" in {
       val secondTransport = new MockTransport
-      for {
+
+      val testF = for {
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter()
 
         _ <- env.transport.subscriber.value.handler(signedDeliver)
-        _ <- env.client.flush()
+        _ <- env.client.flushClean()
 
         _ <- env.changeTransport(secondTransport)
       } yield {
@@ -631,12 +662,14 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
         env.client.completion.isCompleted shouldBe false
       }
+
+      testF.futureValue
     }
 
     "have new transport be used for sends" in {
       val secondTransport = new MockTransport
 
-      for {
+      val testF = for {
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.changeTransport(secondTransport)
         _ <- env.sendAsync(Batch.empty(testedProtocolVersion))
@@ -647,12 +680,14 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         env.transport.isClosing shouldBe true
         secondTransport.isClosing shouldBe false
       }
+
+      testF.futureValue
     }
 
     "have new transport be used for sends when there is subscription" in {
       val secondTransport = new MockTransport
 
-      for {
+      val testF = for {
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter()
         _ <- env.changeTransport(secondTransport)
@@ -661,10 +696,12 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         env.transport.lastSend.get() shouldBe None
         secondTransport.lastSend.get() should not be None
       }
+
+      testF.futureValue
     }
   }
 
-  case class Subscriber[E](
+  private case class Subscriber[E](
       request: SubscriptionRequest,
       handler: SerializedEventHandler[E],
       subscription: MockSubscription[E],
@@ -682,7 +719,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     }
   }
 
-  case class Env(
+  private case class Env(
       client: SequencerClient,
       transport: MockTransport,
       sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -712,7 +749,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
   }
 
-  class MockSubscription[E] extends SequencerSubscription[E] {
+  private class MockSubscription[E] extends SequencerSubscription[E] {
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
     override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
@@ -727,7 +764,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       this.closeReasonPromise.success(HandlerException(error))
   }
 
-  class MockTransport extends SequencerClientTransport with NamedLogging {
+  private class MockTransport extends SequencerClientTransport with NamedLogging {
 
     override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
@@ -808,7 +845,17 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     )(implicit traceContext: TraceContext): SequencerSubscription[E] = ???
   }
 
-  object Env {
+  private implicit class RichSequencerClient(client: SequencerClient) {
+    // flush needs to be called twice in order to finish asynchronous processing
+    // (see comment around shutdown in SequencerClient). So we have this small
+    // helper for the tests.
+    def flushClean(): Future[Unit] = for {
+      _ <- client.flush()
+      _ <- client.flush()
+    } yield ()
+  }
+
+  private object Env {
     val eventAlwaysValid: SequencedEventValidator = SequencedEventValidator.noValidation(
       DefaultTestIdentities.domainId,
       DefaultTestIdentities.sequencer,
@@ -894,7 +941,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         eventValidatorFactory,
         clock,
         new RequestSigner {
-          override def signRequest[A <: ProtocolVersionedMemoizedEvidence](
+          override def signRequest[A <: HasCryptographicEvidence](
               request: A,
               hashPurpose: HashPurpose,
           )(implicit
@@ -903,10 +950,9 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           ): EitherT[Future, String, SignedContent[A]] =
             EitherT(
               Future.successful(
-                Right(SignedContent(request, SymbolicCrypto.emptySignature, None)): Either[
-                  String,
-                  SignedContent[A],
-                ]
+                Either.right[String, SignedContent[A]](
+                  SignedContent(request, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
+                )
               )
             )
         },

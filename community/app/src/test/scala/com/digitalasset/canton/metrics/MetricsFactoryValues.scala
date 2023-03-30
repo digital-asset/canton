@@ -7,18 +7,21 @@ import com.daml.metrics.api.testing.InMemoryMetricsFactory.{MetricsByName, Metri
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{MetricName, MetricsContext}
 
+import scala.annotation.nowarn
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
 import scala.language.implicitConversions
 
 trait MetricsFactoryValues extends MetricValues {
 
+  @nowarn("cat=deprecation")
   implicit def convertFactoryToValuable(
       factory: MetricHandle.MetricsFactory
   ): MetricsFactoryValuable = MetricsFactoryValuable(
     factory
   )
 
+  @nowarn("cat=deprecation")
   case class MetricsFactoryValuable(factory: MetricHandle.MetricsFactory) {
 
     def asInMemory: InMemoryMetricsFactory = factory match {

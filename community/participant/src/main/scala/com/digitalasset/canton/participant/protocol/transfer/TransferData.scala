@@ -12,7 +12,7 @@ import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 
 /** Stores the data for a transfer that needs to be passed from the source domain to the target domain. */
-case class TransferData(
+final case class TransferData(
     sourceProtocolVersion: SourceProtocolVersion,
     transferOutTimestamp: CantonTimestamp,
     transferOutRequestCounter: RequestCounter,

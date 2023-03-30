@@ -148,10 +148,10 @@ object SequencerAuthenticationServerInterceptor {
     val errorCode: Option[String]
   }
   object VerifyTokenError {
-    case class GeneralError(message: String) extends VerifyTokenError {
+    final case class GeneralError(message: String) extends VerifyTokenError {
       val errorCode: Option[String] = None
     }
-    case class AuthError(authenticationError: AuthenticationError) extends VerifyTokenError {
+    final case class AuthError(authenticationError: AuthenticationError) extends VerifyTokenError {
       val message: String = authenticationError.reason
       val errorCode: Option[String] = Some(authenticationError.code)
     }

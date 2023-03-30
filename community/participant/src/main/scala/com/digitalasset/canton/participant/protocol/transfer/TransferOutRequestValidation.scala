@@ -218,38 +218,38 @@ object TransferOutRequestValidation {
 
   sealed trait TransferOutProcessorError extends TransferProcessorError
 
-  case class UnexpectedDomain(transferId: TransferId, receivedOn: DomainId)
+  final case class UnexpectedDomain(transferId: TransferId, receivedOn: DomainId)
       extends TransferOutProcessorError {
     override def message: String =
       s"Cannot transfer-out `$transferId`: received transfer on $receivedOn"
   }
 
-  case class TargetDomainIsSourceDomain(domain: DomainId, contractId: LfContractId)
+  final case class TargetDomainIsSourceDomain(domain: DomainId, contractId: LfContractId)
       extends TransferOutProcessorError {
     override def message: String =
       s"Cannot transfer-out contract `$contractId`: source and target domains are the same"
   }
 
-  case class UnknownContract(contractId: LfContractId) extends TransferOutProcessorError {
+  final case class UnknownContract(contractId: LfContractId) extends TransferOutProcessorError {
     override def message: String = s"Cannot transfer-out contract `$contractId`: unknown contract"
   }
 
-  case class InvalidResult(
+  final case class InvalidResult(
       transferId: TransferId,
       result: DeliveredTransferOutResult.InvalidTransferOutResult,
   ) extends TransferOutProcessorError {
     override def message: String = s"Cannot transfer-out `$transferId`: invalid result"
   }
 
-  case class AutomaticTransferInError(message: String) extends TransferOutProcessorError
+  final case class AutomaticTransferInError(message: String) extends TransferOutProcessorError
 
-  case class PermissionErrors(message: String) extends TransferOutProcessorError
+  final case class PermissionErrors(message: String) extends TransferOutProcessorError
 
-  case class AdminPartyPermissionErrors(message: String) extends TransferOutProcessorError
+  final case class AdminPartyPermissionErrors(message: String) extends TransferOutProcessorError
 
-  case class StakeholderHostingErrors(message: String) extends TransferOutProcessorError
+  final case class StakeholderHostingErrors(message: String) extends TransferOutProcessorError
 
-  case class AdminPartiesMismatch(
+  final case class AdminPartiesMismatch(
       contractId: LfContractId,
       expected: Set[LfPartyId],
       declared: Set[LfPartyId],
@@ -258,7 +258,7 @@ object TransferOutRequestValidation {
       s"Cannot transfer-out contract `$contractId`: admin parties mismatch"
   }
 
-  case class RecipientsMismatch(
+  final case class RecipientsMismatch(
       contractId: LfContractId,
       expected: Option[Recipients],
       declared: Recipients,
@@ -267,7 +267,7 @@ object TransferOutRequestValidation {
       s"Cannot transfer-out contract `$contractId`: recipients mismatch"
   }
 
-  case class ContractStoreFailed(transferId: TransferId, error: ContractStoreError)
+  final case class ContractStoreFailed(transferId: TransferId, error: ContractStoreError)
       extends TransferProcessorError {
     override def message: String =
       s"Cannot transfer-out `$transferId`: internal contract store error"

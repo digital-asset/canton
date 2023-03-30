@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.Eval
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
@@ -20,18 +21,18 @@ class ParticipantNodeEphemeralState(
 object ParticipantNodeEphemeralState {
   def apply(
       participantId: ParticipantId,
-      persistentState: ParticipantNodePersistentState,
+      persistentState: Eval[ParticipantNodePersistentState],
       clock: Clock,
-      maxDeduplicationDuration: NonNegativeFiniteDuration,
+      maxDeduplicationDuration: Eval[NonNegativeFiniteDuration],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): ParticipantNodeEphemeralState = {
     val participantEventPublisher = new ParticipantEventPublisher(
       participantId,
-      persistentState.participantEventLog,
-      persistentState.multiDomainEventLog,
+      persistentState.map(_.participantEventLog),
+      persistentState.map(_.multiDomainEventLog),
       clock,
-      maxDeduplicationDuration.unwrap,
+      maxDeduplicationDuration.map(_.unwrap),
       timeouts,
       loggerFactory,
     )

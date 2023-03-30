@@ -64,21 +64,23 @@ object ServiceAgreementStore {
     def description = toString
   }
 
-  case class UnknownServiceAgreement(domainId: DomainId, agreementId: ServiceAgreementId)
+  final case class UnknownServiceAgreement(domainId: DomainId, agreementId: ServiceAgreementId)
       extends ServiceAgreementStoreError {
     override def toString = s"The agreement '$agreementId' is not known at domain '$domainId'."
   }
 
-  case class ServiceAgreementAlreadyExists(domainId: DomainId, existingAgreement: ServiceAgreement)
-      extends ServiceAgreementStoreError
+  final case class ServiceAgreementAlreadyExists(
+      domainId: DomainId,
+      existingAgreement: ServiceAgreement,
+  ) extends ServiceAgreementStoreError
 
-  case class FailedToStoreAgreement(
+  final case class FailedToStoreAgreement(
       domainId: DomainId,
       agreementId: ServiceAgreementId,
       override val description: String,
   ) extends ServiceAgreementStoreError
 
-  case class FailedToAcceptAgreement(
+  final case class FailedToAcceptAgreement(
       domainId: DomainId,
       agreementId: ServiceAgreementId,
       override val description: String,

@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.time.Clock
 
 import scala.concurrent.ExecutionContext
 
@@ -31,14 +32,14 @@ object DatabaseSequencerConfig {
 
 sealed trait CommunitySequencerConfig extends SequencerConfig
 
-case class CommunitySequencerReaderConfig(
+final case class CommunitySequencerReaderConfig(
     override val readBatchSize: Int = SequencerReaderConfig.defaultReadBatchSize,
     override val checkpointInterval: NonNegativeFiniteDuration =
       SequencerReaderConfig.defaultCheckpointInterval,
 ) extends SequencerReaderConfig
 
 object CommunitySequencerConfig {
-  case class Database(
+  final case class Database(
       writer: SequencerWriterConfig = SequencerWriterConfig.LowLatency(),
       reader: CommunitySequencerReaderConfig = CommunitySequencerReaderConfig(),
       testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor] = None,
@@ -51,6 +52,6 @@ object CommunitySequencerConfig {
 /** Health check related sequencer config
   * @param backendCheckPeriod interval with which the sequencer will poll the health of its backend connection or state.
   */
-case class SequencerHealthConfig(
+final case class SequencerHealthConfig(
     backendCheckPeriod: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5)
 )

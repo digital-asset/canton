@@ -8,12 +8,12 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.daml.ledger.participant.state.v2.CompletionInfo
-import com.daml.lf.data.{Bytes, Ref}
+import com.daml.lf.data.Bytes
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
@@ -470,8 +470,11 @@ private[transfer] class TransferInProcessingSteps(
     s"Transfer-in $requestId: $message"
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
-      message: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, TransferInResult],
+      messageE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, TransferInResult],
       pendingRequestData: PendingTransferIn,
       pendingSubmissionMap: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -496,7 +499,7 @@ private[transfer] class TransferInProcessingSteps(
     ) = pendingRequestData
 
     import scala.util.Either.MergeableEither
-    MergeableEither[MediatorResult](result).merge.verdict match {
+    MergeableEither[MediatorResult](resultE).merge.verdict match {
       case _: Verdict.Approve =>
         val commitSet = CommitSet(
           archivals = Map.empty,
@@ -541,7 +544,15 @@ private[transfer] class TransferInProcessingSteps(
           ),
         )
 
-      case Verdict.ParticipantReject(_) | (_: Verdict.MediatorReject) =>
+      case reasons: Verdict.ParticipantReject =>
+        // TODO(M40): Implement checks against malicious rejections and scrutinize the reasons such that an alarm is raised if necessary
+        EitherT
+          .fromEither[Future](
+            createRejectionEvent(RejectionArgs(pendingRequestData, reasons.keyEvent))
+          )
+          .map(CommitAndStoreContractsAndPublishEvent(None, Set(), _, None))
+
+      case (_: Verdict.MediatorReject) =>
         EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None, None))
     }
   }
@@ -593,7 +604,7 @@ private[transfer] class TransferInProcessingSteps(
           CompletionInfo(
             actAs = List(submitterMetadata.submitter),
             applicationId = submitterMetadata.applicationId,
-            commandId = Ref.CommandId.assertFromString("command-id"),
+            commandId = submitterMetadata.commandId,
             optDeduplicationPeriod = None,
             submissionId = submitterMetadata.submissionId,
             statistics = None,
@@ -618,7 +629,7 @@ private[transfer] class TransferInProcessingSteps(
 
 object TransferInProcessingSteps {
 
-  case class SubmissionParam(
+  final case class SubmissionParam(
       submitterMetadata: TransferSubmitterMetadata,
       transferId: TransferId,
       workflowId: Option[LfWorkflowId],
@@ -627,9 +638,9 @@ object TransferInProcessingSteps {
     val submitterLf: LfPartyId = submitterMetadata.submitter
   }
 
-  case class SubmissionResult(transferInCompletionF: Future[com.google.rpc.status.Status])
+  final case class SubmissionResult(transferInCompletionF: Future[com.google.rpc.status.Status])
 
-  case class PendingTransferIn(
+  final case class PendingTransferIn(
       override val requestId: RequestId,
       override val requestCounter: RequestCounter,
       override val requestSequencerCounter: SequencerCounter,
@@ -686,7 +697,7 @@ object TransferInProcessingSteps {
     FullTransferInTree(tree)
   }
 
-  case class PendingDataAndResponseArgs(
+  final case class PendingDataAndResponseArgs(
       txInRequest: FullTransferInTree,
       ts: CantonTimestamp,
       rc: RequestCounter,

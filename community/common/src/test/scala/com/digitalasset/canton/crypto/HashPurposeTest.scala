@@ -22,11 +22,10 @@ class HashPurposeTest extends AnyWordSpec with BaseTest {
 }
 
 object HashPurposeTest {
-  val testHashPurpose: HashPurpose = HashPurpose(-1, "testing")
 
   /** Mockito argument matcher that matches any [[HashPurpose]]. */
   def anyHashPurpose: HashPurpose = {
     org.mockito.ArgumentMatchers.any[Int]
-    testHashPurpose
+    TestHash.testHashPurpose
   }
 }

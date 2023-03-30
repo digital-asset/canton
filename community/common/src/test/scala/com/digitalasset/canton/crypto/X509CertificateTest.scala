@@ -24,7 +24,7 @@ class X509CertificateTest extends FixtureAsyncWordSpec with BaseTest {
     val fixtureE = for {
       crypto <- CryptoFactory.create(
         CommunityCryptoConfig(),
-        new MemoryStorage(loggerFactory),
+        new MemoryStorage(loggerFactory, timeouts),
         new CommunityCryptoPrivateStoreFactory,
         testedReleaseProtocolVersion,
         timeouts,

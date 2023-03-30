@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import com.daml.ledger.api.auth.AuthService.AUTHORIZATION_KEY
-import com.daml.ledger.api.auth.{AuthService, ClaimSet}
 import com.digitalasset.canton.crypto.RandomOps
+import com.digitalasset.canton.ledger.api.auth.AuthService.AUTHORIZATION_KEY
+import com.digitalasset.canton.ledger.api.auth.{AuthService, ClaimSet}
 import com.digitalasset.canton.util.HexString
 import io.grpc.Metadata
 
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 
-case class CantonAdminToken private (secret: String)
+final case class CantonAdminToken private (secret: String)
 object CantonAdminToken {
   def create(randomOps: RandomOps): CantonAdminToken = {
     val secret = HexString.toHexString(randomOps.generateRandomByteString(64))

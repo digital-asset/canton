@@ -48,7 +48,7 @@ object ActionBasedSQLInterpolation {
 
 }
 
-case class SQLActionBuilder(queryParts: Seq[Any], unitPConv: SetParameter[Unit]) {
+final case class SQLActionBuilder(queryParts: Seq[Any], unitPConv: SetParameter[Unit]) {
   private def asInternal[R, E <: Effect](implicit rconv: GetResult[R]): SqlStreamingAction[Vector[R], R, E] = {
     val query =
       if (queryParts.length == 1 && queryParts(0).isInstanceOf[String]) queryParts(0).asInstanceOf[String]

@@ -39,8 +39,7 @@ import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   DomainTopologyClientWithInit,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory, TopologyStoreId}
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersionCompatibility
 import io.opentelemetry.api.trace.Tracer
@@ -69,7 +68,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
       cryptoApiProvider: SyncCryptoApiProvider,
       cryptoConfig: CryptoConfig,
-      topologyStoreFactory: TopologyStoreFactory,
       clock: Clock,
       testingConfig: TestingConfigInternal,
       recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
@@ -132,8 +130,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
-      targetDomainStore = topologyStoreFactory.forId(DomainStore(domainId))
-
       // check and issue the domain trust certificate
       _ <- EitherT(trustDomain(domainId, staticDomainParameters, traceContext)).leftMap {
         case ParticipantTopologyManagerError.IdentityManagerParentError(
@@ -161,7 +157,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
             clock,
             domainId,
             staticDomainParameters.protocolVersion,
-            targetDomainStore,
+            persistentState.topologyStore,
             Map(),
             packageDependencies,
             participantNodeParameters.cachingConfigs,
@@ -187,10 +183,13 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         // apply optional domain specific overrides to the nodes general sequencer client config
         val sequencerClientConfig = participantNodeParameters.sequencerClient.copy(
           initialConnectionRetryDelay = config.initialRetryDelay
+            .map(_.toConfig)
             .getOrElse(participantNodeParameters.sequencerClient.initialConnectionRetryDelay),
-          maxConnectionRetryDelay = config.maxRetryDelay.getOrElse(
-            participantNodeParameters.sequencerClient.maxConnectionRetryDelay
-          ),
+          maxConnectionRetryDelay = config.maxRetryDelay
+            .map(_.toConfig)
+            .getOrElse(
+              participantNodeParameters.sequencerClient.maxConnectionRetryDelay
+            ),
         )
 
         // Yields a unique path inside the given directory for record/replay purposes.
@@ -205,7 +204,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           case _ => None // unauthenticated members don't need it
         }
         SequencerClient(
-          sequencerConnection,
           domainId,
           sequencerId,
           domainCryptoApi,
@@ -254,9 +252,10 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
               config.timeTracker,
               participantNodeParameters.processingTimeouts,
               authorizedStore,
-              targetDomainStore,
+              persistentState.topologyStore,
               loggerFactory,
               sequencerClientFactory,
+              sequencerConnection,
               cryptoApiProvider.crypto,
               staticDomainParameters.protocolVersion,
             )
@@ -281,7 +280,8 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           participantId,
           persistentState.sequencedEventStore,
           persistentState.sendTrackerStore,
-          RequestSigner(domainCryptoApi),
+          RequestSigner(domainCryptoApi, staticDomainParameters.protocolVersion),
+          sequencerConnection,
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
@@ -293,7 +293,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       staticDomainParameters,
       sequencerClient,
       topologyClient,
-      targetDomainStore,
       persistentState,
       timeouts,
     )
@@ -409,13 +408,12 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
 }
 
 object DomainRegistryHelpers {
-  private[domain] case class DomainHandle(
+  private[domain] final case class DomainHandle(
       domainId: DomainId,
       alias: DomainAlias,
       staticParameters: StaticDomainParameters,
       sequencer: SequencerClient,
       topologyClient: DomainTopologyClientWithInit,
-      topologyStore: TopologyStore[TopologyStoreId.DomainStore],
       domainPersistentState: SyncDomainPersistentState,
       timeouts: ProcessingTimeout,
   )

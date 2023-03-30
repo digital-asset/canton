@@ -15,7 +15,7 @@ class HashTest extends AnyWordSpec with BaseTest {
   forAll(HashAlgorithm.algorithms.values) { algorithm =>
     s"${algorithm.name}" should {
       val hash =
-        Hash.digest(HashPurposeTest.testHashPurpose, ByteString.copyFromUtf8(longString), algorithm)
+        Hash.digest(TestHash.testHashPurpose, ByteString.copyFromUtf8(longString), algorithm)
 
       "serializing and deserializing via bytestring" in {
         Hash.fromByteString(hash.getCryptographicEvidence) === Right(hash)

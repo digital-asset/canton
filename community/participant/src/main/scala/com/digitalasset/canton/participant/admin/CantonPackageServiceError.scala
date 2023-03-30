@@ -19,7 +19,7 @@ import scala.annotation.nowarn
 
 object CantonPackageServiceError extends PackageServiceErrorGroup {
   @nowarn("msg=early initializers are deprecated")
-  case class IdentityManagerParentError(parent: ParticipantTopologyManagerError)(implicit
+  final case class IdentityManagerParentError(parent: ParticipantTopologyManagerError)(implicit
       val loggingContext: ErrorLoggingContext,
       override val code: ErrorCode,
   ) extends {

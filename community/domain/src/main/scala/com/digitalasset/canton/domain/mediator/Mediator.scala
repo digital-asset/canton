@@ -10,7 +10,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.Mediator.PruningError
@@ -33,7 +33,7 @@ import com.digitalasset.canton.protocol.messages.{
   SerializedRootHashMessagePayload,
   Verdict,
 }
-import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters, RequestId}
+import com.digitalasset.canton.protocol.{DynamicDomainParametersWithValidity, RequestId}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
@@ -46,11 +46,12 @@ import com.digitalasset.canton.sequencing.protocol.{
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
-import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
+import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.ShowUtil.*
@@ -199,7 +200,7 @@ private[mediator] class Mediator(
   private def prune(
       pruneAt: CantonTimestamp,
       cleanTimestamp: CantonTimestamp,
-      domainParametersChanges: NonEmptySeq[DomainParameters.WithValidity[DynamicDomainParameters]],
+      domainParametersChanges: NonEmptySeq[DynamicDomainParametersWithValidity],
   ): EitherT[Future, PruningError, Unit] = {
     val latestSafePruningTsO = Mediator.latestSafePruningTsBefore(
       domainParametersChanges,
@@ -253,11 +254,11 @@ private[mediator] class Mediator(
 
         for {
           snapshot <- syncCrypto.awaitSnapshot(timestamp)
-          topoSnapshot = snapshot.ipsSnapshot
-          domainParameters <- topoSnapshot.findDynamicDomainParametersOrDefault(
-            protocolVersion
-          )
-          decisionTime = domainParameters.decisionTimeFor(timestamp)
+          domainParameters <- snapshot.ipsSnapshot
+            .findDynamicDomainParameters()
+            .flatMap(_.toFuture(new RuntimeException(_)))
+
+          decisionTime <- domainParameters.decisionTimeForF(timestamp)
           _ <- processor.sendMalformedRejection(
             requestId,
             None,
@@ -280,7 +281,7 @@ private[mediator] class Mediator(
               syncCrypto.crypto.pureCrypto,
             )
 
-            val rejectionsF = openingErrors.parTraverse_(error => {
+            val rejectionsF = openingErrors.parTraverse_ { error =>
               val cause =
                 s"Received an envelope at ${closedEvent.timestamp} that cannot be opened. Discarding envelope... Reason: ${error}"
               val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
@@ -298,7 +299,7 @@ private[mediator] class Mediator(
                   alarm,
                 )
               } else Future.unit
-            })
+            }
 
             (Traced(openEvent)(closedSignedEvent.traceContext), rejectionsF)
           }
@@ -349,14 +350,14 @@ private[mediator] object Mediator {
     }
 
     /** Dynamic domain parameters available for ts were not found */
-    case class MissingDomainParametersForValidPruningTsComputation(ts: CantonTimestamp)
+    final case class MissingDomainParametersForValidPruningTsComputation(ts: CantonTimestamp)
         extends PruningError {
       override def message: String =
         show"Dynamic domain parameters to compute earliest available pruning timestamp not found for ts [$ts]"
     }
 
     /** The mediator can prune some data but data for the requested timestamp cannot yet be removed */
-    case class CannotPruneAtTimestamp(
+    final case class CannotPruneAtTimestamp(
         requestedTimestamp: CantonTimestamp,
         earliestPruningTimestamp: CantonTimestamp,
     ) extends PruningError {
@@ -367,13 +368,13 @@ private[mediator] object Mediator {
 
   sealed trait PruningSafetyCheck extends Product with Serializable
   case object Safe extends PruningSafetyCheck
-  case class SafeUntil(ts: CantonTimestamp) extends PruningSafetyCheck
+  final case class SafeUntil(ts: CantonTimestamp) extends PruningSafetyCheck
 
   private[mediator] def checkPruningStatus(
-      domainParameters: DomainParameters.WithValidity[DynamicDomainParameters],
+      domainParameters: DynamicDomainParametersWithValidity,
       cleanTs: CantonTimestamp,
   ): PruningSafetyCheck = {
-    lazy val timeout = domainParameters.parameter.participantResponseTimeout
+    lazy val timeout = domainParameters.parameters.participantResponseTimeout
     lazy val cappedSafePruningTs =
       CantonTimestamp.max(cleanTs - timeout, domainParameters.validFrom)
 
@@ -391,9 +392,7 @@ private[mediator] object Mediator {
 
   /** Returns the latest safe pruning ts which is <= cleanTs */
   private[mediator] def latestSafePruningTsBefore(
-      allDomainParametersChanges: NonEmptySeq[
-        DomainParameters.WithValidity[DynamicDomainParameters]
-      ],
+      allDomainParametersChanges: NonEmptySeq[DynamicDomainParametersWithValidity],
       cleanTs: CantonTimestamp,
   ): Option[CantonTimestamp] = allDomainParametersChanges
     .map(checkPruningStatus(_, cleanTs))

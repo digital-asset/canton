@@ -24,10 +24,12 @@ import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.{DomainParametersLookup, v0 as protocolV0}
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{Clock, TimeProof}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, RateLimiter}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.empty.Empty
@@ -41,7 +43,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Authenticate the current user can perform an operation on behalf of the given member */
 private[sequencing] trait AuthenticationCheck {
 
-  /** Can the current user perform an action on behalf of the provided member.
+  /** Can the authenticated member perform an action on behalf of the provided member.
     * Return a left with a user presentable error message if not.
     * Right if the operation can continue.
     */
@@ -94,6 +96,7 @@ object GrpcSequencerService {
       clock: Clock,
       domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
       parameters: SequencerParameters,
+      protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
     new GrpcSequencerService(
@@ -115,33 +118,129 @@ object GrpcSequencerService {
       ),
       domainParamsLookup,
       parameters,
+      protocolVersion,
     )
 
-  private sealed trait WrappedSubmissionRequest extends Product with Serializable {
-    def unwrap: SubmissionRequest
-    def proto: v0.SubmissionRequest
+  /** Abstracts the steps that are different in processing the submission requests coming from the various sendAsync endpoints
+    * @tparam ProtoClass The scalapb generated class of the RPC request message
+    */
+  private sealed trait SubmissionRequestProcessing[ProtoClass <: scalapb.GeneratedMessage] {
+
+    /** The Scala class to which the `ProtoClass` should deserialize to */
+    type ValueClass
+
+    /** Tries to parse the proto class to the value class, erroring if the request exceeds the given limit. */
+    def parse(requestP: ProtoClass, maxRequestSize: MaxRequestSize): ParsingResult[ValueClass]
+
+    /** Extract the [[SubmissionRequest]] from the value class */
+    def unwrap(request: ValueClass): SubmissionRequest
+
+    /** Call the appropriate send method on the [[Sequencer]] */
+    def send(request: ValueClass, sequencer: Sequencer)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, SendAsyncError, Unit]
   }
-  private case class PlainSubmissionRequest(
-      request: SubmissionRequest,
-      override val proto: v0.SubmissionRequest,
-  ) extends WrappedSubmissionRequest {
-    override def unwrap: SubmissionRequest = request
+
+  private object PlainSubmissionRequestProcessing
+      extends SubmissionRequestProcessing[protocolV0.SubmissionRequest] {
+    override type ValueClass = SubmissionRequest
+
+    override def parse(
+        requestP: protocolV0.SubmissionRequest,
+        maxRequestSize: MaxRequestSize,
+    ): ParsingResult[SubmissionRequest] =
+      SubmissionRequest.fromProtoV0(
+        requestP,
+        MaxRequestSizeToDeserialize.Limit(maxRequestSize.value),
+      )
+
+    override def unwrap(request: SubmissionRequest): SubmissionRequest = request
+
+    override def send(request: SubmissionRequest, sequencer: Sequencer)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, SendAsyncError, Unit] =
+      sequencer.sendAsync(request)
   }
-  private case class SignedSubmissionRequest(signedRequest: SignedContent[SubmissionRequest])
-      extends WrappedSubmissionRequest {
-    override def unwrap: SubmissionRequest = signedRequest.content
-    override lazy val proto: v0.SubmissionRequest = signedRequest.content.toProtoV0
+
+  private object SignedSubmissionRequestProcessing
+      extends SubmissionRequestProcessing[protocolV0.SignedContent] {
+    override type ValueClass = SignedContent[SubmissionRequest]
+
+    override def parse(
+        requestP: protocolV0.SignedContent,
+        maxRequestSize: MaxRequestSize,
+    ): ParsingResult[SignedContent[SubmissionRequest]] =
+      SignedContent
+        .fromProtoV0(requestP)
+        .flatMap(
+          _.deserializeContent(
+            SubmissionRequest
+              .fromByteString(MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
+          )
+        )
+
+    override def unwrap(request: SignedContent[SubmissionRequest]): SubmissionRequest =
+      request.content
+
+    override def send(request: SignedContent[SubmissionRequest], sequencer: Sequencer)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, SendAsyncError, Unit] = sequencer.sendAsyncSigned(request)
+  }
+
+  private object VersionedSignedSubmissionRequestProcessing
+      extends SubmissionRequestProcessing[v0.SendAsyncVersionedRequest] {
+    override type ValueClass = SignedContent[SubmissionRequest]
+
+    override def parse(
+        requestP: v0.SendAsyncVersionedRequest,
+        maxRequestSize: MaxRequestSize,
+    ): ParsingResult[SignedContent[SubmissionRequest]] = {
+      for {
+        signedContent <- SignedContent.fromByteString(requestP.signedSubmissionRequest)
+        signedSubmissionRequest <- signedContent.deserializeContent(
+          SubmissionRequest
+            .fromByteString(MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
+        )
+      } yield signedSubmissionRequest
+    }
+
+    override def unwrap(request: SignedContent[SubmissionRequest]): SubmissionRequest =
+      request.content
+
+    override def send(request: SignedContent[SubmissionRequest], sequencer: Sequencer)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, SendAsyncError, Unit] = sequencer.sendAsyncSigned(request)
+  }
+
+  private object VersionedUnsignedSubmissionRequestProcessing
+      extends SubmissionRequestProcessing[v0.SendAsyncUnauthenticatedVersionedRequest] {
+    override type ValueClass = SubmissionRequest
+
+    override def parse(
+        requestP: v0.SendAsyncUnauthenticatedVersionedRequest,
+        maxRequestSize: MaxRequestSize,
+    ): ParsingResult[SubmissionRequest] =
+      SubmissionRequest.fromByteString(MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))(
+        requestP.submissionRequest
+      )
+
+    override def unwrap(request: SubmissionRequest): SubmissionRequest = request
+
+    override def send(request: SubmissionRequest, sequencer: Sequencer)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, SendAsyncError, Unit] = sequencer.sendAsync(request)
   }
 
   private sealed trait WrappedAcknowledgeRequest extends Product with Serializable {
     def unwrap: AcknowledgeRequest
   }
-  private case class PlainAcknowledgeRequest(request: AcknowledgeRequest)
+  private final case class PlainAcknowledgeRequest(request: AcknowledgeRequest)
       extends WrappedAcknowledgeRequest {
     override def unwrap: AcknowledgeRequest = request
   }
-  private case class SignedAcknowledgeRequest(val signedRequest: SignedContent[AcknowledgeRequest])
-      extends WrappedAcknowledgeRequest {
+  private final case class SignedAcknowledgeRequest(
+      signedRequest: SignedContent[AcknowledgeRequest]
+  ) extends WrappedAcknowledgeRequest {
     override def unwrap: AcknowledgeRequest = signedRequest.content
   }
 
@@ -161,6 +260,7 @@ class GrpcSequencerService(
     directSequencerSubscriptionFactory: DirectSequencerSubscriptionFactory,
     domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
     parameters: SequencerParameters,
+    protocolVersion: ProtocolVersion,
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
     with NamedLogging
@@ -178,232 +278,205 @@ class GrpcSequencerService(
     subscriptionPool.closeAllSubscriptions()
 
   override def sendAsyncSigned(
-      request: protocolV0.SignedContent
-  ): Future[v0.SendAsyncSignedResponse] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val senderFromMetadata =
-      authenticationCheck
-        .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
-    lazy val sendF = for {
-      maxRequestSize <- domainParamsLookup
-        .getApproximateOrDefaultValue(
-          warnOnUsingDefaults(senderFromMetadata)
-        )
-        .map(_.maxRequestSize)
-      send <- send[SignedContent[SubmissionRequest], v0.SendAsyncSignedResponse](
-        maxRequestSize,
-        SignedContent
-          .fromProtoV0[SubmissionRequest](
-            SubmissionRequest.fromByteString(
-              MaxRequestSizeToDeserialize.Limit(maxRequestSize.value)
-            ),
-            request,
-          )
-          .map(request => GrpcSequencerService.SignedSubmissionRequest(request)),
-        SendAsyncResponse(_).toSendAsyncSignedResponseProto,
-        senderFromMetadata,
+      requestP: protocolV0.SignedContent
+  ): Future[v0.SendAsyncSignedResponse] =
+    if (!SubmissionRequest.usingSignedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The unsigned send endpoints must be used with protocol version $protocolVersion"
+        ).asException
       )
-    } yield send
-
-    onShutDown(
-      sendF,
-      SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncSignedResponseProto,
-    )
-  }
-
-  override def sendAsync(requestP: v0.SubmissionRequest): Future[v0.SendAsyncResponse] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-
-    val senderFromMetadata =
-      authenticationCheck
-        .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
-    lazy val sendF = for {
-      maxRequestSize <- domainParamsLookup
-        .getApproximateOrDefaultValue(
-          warnOnUsingDefaults(senderFromMetadata)
-        )
-        .map(_.maxRequestSize)
-      send <- send[SubmissionRequest, v0.SendAsyncResponse](
-        maxRequestSize,
-        SubmissionRequest
-          .fromProtoV0(requestP, MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
-          .map(request => GrpcSequencerService.PlainSubmissionRequest(request, requestP)),
-        SendAsyncResponse(_).toSendAsyncResponseProto,
-        senderFromMetadata,
+    } else if (SubmissionRequest.usingVersionedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The versioned send endpoints must be used with protocol version $protocolVersion"
+        ).asException
       )
-    } yield send
-
-    onShutDown(
-      sendF,
-      SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncResponseProto,
-    )
-  }
-
-  private def send[Req, Response](
-      maxRequestSize: MaxRequestSize,
-      submissionRequestE: Either[
-        ProtoDeserializationError,
-        WrappedSubmissionRequest,
-      ],
-      toResponse: Option[SendAsyncError] => Response,
-      senderFromMetadata: Option[Member],
-  )(implicit traceContext: TraceContext): Future[Response] = {
-    val validatedRequestEither: Either[SendAsyncError, WrappedSubmissionRequest] = for {
-      result <- submissionRequestE
-        .leftMap {
-          case ProtoDeserializationError.MaxBytesToDecompressExceeded(message) =>
-            val alarm =
-              SequencerError.MaxRequestSizeExceeded.Error(message, maxRequestSize)
-            alarm.report()
-            message
-          case error: ProtoDeserializationError =>
-            logger.warn(error.toString)
-            error.toString
-        }
-        .leftMap(SendAsyncError.RequestInvalid)
-      // validateSubmissionRequest is thread-local and therefore we need to validate the submission request
-      // before we switch threads
-      validatedRequest <- validateSubmissionRequest(result.proto, result.unwrap, senderFromMetadata)
-      _ <- checkAuthenticatedSenderPermission(validatedRequest)
-    } yield result
-
-    val validatedRequestF =
-      for {
-        validatedRequest <- EitherT.fromEither[Future](validatedRequestEither)
-        _ <- checkRate(validatedRequest.unwrap)
-      } yield validatedRequest
-
-    sendRequestIfValid(validatedRequestF, toResponse)
-  }
-
-  def onShutDown[Response](sendF: => Future[Response], onShutdown: Response)(implicit
-      traceContext: TraceContext
-  ): Future[Response] = {
-    val sendUnlessShutdown = performUnlessClosingF(functionFullName)(sendF)
-    sendUnlessShutdown.onShutdown(onShutdown)
-  }
-
-  private def checkAuthenticatedSenderPermission(
-      submissionRequest: SubmissionRequest
-  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = {
-    val sender = submissionRequest.sender
-    sender match {
-      case authMember: AuthenticatedMember =>
-        checkAuthenticatedSendPermission(
-          submissionRequest,
-          authMember,
-          sender,
-        )
-      case _: UnauthenticatedMemberId =>
-        Left(
-          refuse(submissionRequest.messageId.unwrap, sender)(
-            s"Sender $sender needs to use unauthenticated send operation"
-          )
-        )
+    } else {
+      validateAndSend(
+        requestP,
+        SignedSubmissionRequestProcessing,
+        isUsingAuthenticatedEndpoint = true,
+      ).map(_.toSendAsyncSignedResponseProto)
     }
-  }
+
+  override def sendAsync(requestP: protocolV0.SubmissionRequest): Future[v0.SendAsyncResponse] =
+    if (SubmissionRequest.usingSignedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The signed send endpoints must be used with protocol version $protocolVersion"
+        ).asException
+      )
+    } else {
+      validateAndSend(
+        requestP,
+        PlainSubmissionRequestProcessing,
+        isUsingAuthenticatedEndpoint = true,
+      ).map(_.toSendAsyncResponseProto)
+    }
 
   override def sendAsyncUnauthenticated(
-      requestP: v0.SubmissionRequest
-  ): Future[v0.SendAsyncResponse] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    lazy val sendF = {
-      val messageIdP = requestP.messageId
-      val senderFromMetadata =
-        authenticationCheck
-          .lookupCurrentMember() // This has to run at the beginning, because it reads from a thread-local.
-      def validatedRequestEither(maxRequestSize: MaxRequestSize) = for {
-        request <- SubmissionRequest
-          .fromProtoV0(requestP, MaxRequestSizeToDeserialize.Limit(maxRequestSize.value))
-          .leftMap(err => SendAsyncError.RequestInvalid(err.toString))
-        validatedRequest <- validateSubmissionRequest(requestP, request, senderFromMetadata)
-        sender = validatedRequest.sender
-        _ <- sender match {
-          case _: UnauthenticatedMemberId =>
-            checkUnauthenticatedSendPermission(messageIdP, validatedRequest, sender)
-          case _: AuthenticatedMember =>
-            Left(
-              refuse(messageIdP, sender)(
-                s"Sender $sender needs to use authenticated send operation"
-              )
-            )
-        }
-      } yield validatedRequest
-
-      val validatedRequestF =
-        for {
-          maxRequestSize <- EitherTUtil
-            .fromFuture(
-              domainParamsLookup.getApproximateOrDefaultValue(),
-              e => SendAsyncError.Internal(s"Unable to retrieve domain parameters: ${e.getMessage}"),
-            )
-            .map(_.maxRequestSize)
-          validatedRequest <- EitherT.fromEither[Future](validatedRequestEither(maxRequestSize))
-          _ <- checkRate(validatedRequest)
-        } yield PlainSubmissionRequest(validatedRequest, requestP): WrappedSubmissionRequest
-
-      sendRequestIfValid(
-        validatedRequestF,
-        SendAsyncResponse(_).toSendAsyncResponseProto,
+      requestP: protocolV0.SubmissionRequest
+  ): Future[v0.SendAsyncResponse] =
+    if (SubmissionRequest.usingVersionedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The versioned send endpoints must be used with protocol version $protocolVersion"
+        ).asException
       )
+    } else {
+      validateAndSend(
+        requestP,
+        PlainSubmissionRequestProcessing,
+        isUsingAuthenticatedEndpoint = false,
+      ).map(_.toSendAsyncResponseProto)
     }
 
-    performUnlessClosingF(functionFullName)(sendF).onShutdown(
-      SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toSendAsyncResponseProto
-    )
-  }
+  override def sendAsyncVersioned(
+      requestP: v0.SendAsyncVersionedRequest
+  ): Future[v0.SendAsyncSignedResponse] =
+    if (!SubmissionRequest.usingVersionedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The unversioned send endpoints must be used with protocol version $protocolVersion"
+        ).asException
+      )
+    } else {
+      validateAndSend(
+        requestP,
+        VersionedSignedSubmissionRequestProcessing,
+        isUsingAuthenticatedEndpoint = true,
+      ).map(_.toSendAsyncSignedResponseProto)
+    }
 
-  private def sendRequestIfValid[Req, Response](
-      validatedRequestEither: EitherT[Future, SendAsyncError, WrappedSubmissionRequest],
-      errorToResponse: Option[SendAsyncError] => Response,
-  )(implicit traceContext: TraceContext): Future[Response] = {
-    val resultET = for {
-      validatedRequest <- validatedRequestEither
-      _ <- validatedRequest match {
-        case p: PlainSubmissionRequest => sequencer.sendAsync(p.request)
-        case s: SignedSubmissionRequest => sequencer.sendAsyncSigned(s.signedRequest)
-      }
+  override def sendAsyncUnauthenticatedVersioned(
+      requestP: v0.SendAsyncUnauthenticatedVersionedRequest
+  ): Future[v0.SendAsyncResponse] =
+    if (!SubmissionRequest.usingVersionedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The unversioned send endpoints must be used with protocol version $protocolVersion"
+        ).asException
+      )
+    } else {
+      validateAndSend(
+        requestP,
+        VersionedUnsignedSubmissionRequestProcessing,
+        isUsingAuthenticatedEndpoint = false,
+      ).map(_.toSendAsyncResponseProto)
+    }
+
+  private def validateAndSend[ProtoClass <: scalapb.GeneratedMessage](
+      proto: ProtoClass,
+      processing: SubmissionRequestProcessing[ProtoClass],
+      isUsingAuthenticatedEndpoint: Boolean,
+  ): Future[SendAsyncResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    // This has to run at the beginning, because it reads from a thread-local.
+    val senderFromMetadata = authenticationCheck.lookupCurrentMember()
+
+    def parseAndValidate(
+        maxRequestSize: MaxRequestSize
+    ): Either[SendAsyncError, processing.ValueClass] = for {
+      request <- processing
+        .parse(proto, maxRequestSize)
+        .leftMap(requestDeserializationError(_, maxRequestSize))
+      _ <- validateSubmissionRequest(
+        proto.serializedSize,
+        processing.unwrap(request),
+        senderFromMetadata,
+      )
+      _ <- checkSenderPermission(processing.unwrap(request), isUsingAuthenticatedEndpoint)
+    } yield request
+
+    lazy val sendET = for {
+      domainParameters <- EitherT.right[SendAsyncError](
+        domainParamsLookup.getApproximateOrDefaultValue(warnOnUsingDefaults(senderFromMetadata))
+      )
+      request <- EitherT.fromEither[Future](parseAndValidate(domainParameters.maxRequestSize))
+      _ <- checkRate(processing.unwrap(request))
+      _ <- processing.send(request, sequencer)
     } yield ()
 
-    resultET
-      .fold(
-        err => errorToResponse(Some(err)),
-        _ => errorToResponse(None),
-      ) // extract the error if available
+    performUnlessClosingF(functionFullName)(sendET.value.map(toSendAsyncResponse))
+      .onShutdown(SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())))
+  }
+
+  private def toSendAsyncResponse(result: Either[SendAsyncError, Unit]): SendAsyncResponse =
+    SendAsyncResponse(result.swap.toOption)
+
+  private def requestDeserializationError(
+      error: ProtoDeserializationError,
+      maxRequestSize: MaxRequestSize,
+  )(implicit traceContext: TraceContext): SendAsyncError = {
+    val message = error match {
+      case ProtoDeserializationError.MaxBytesToDecompressExceeded(message) =>
+        val alarm =
+          SequencerError.MaxRequestSizeExceeded.Error(message, maxRequestSize)
+        alarm.report()
+        message
+      case error: ProtoDeserializationError =>
+        logger.warn(error.toString)
+        error.toString
+    }
+    SendAsyncError.RequestInvalid(message)
+  }
+
+  private def checkSenderPermission(
+      submissionRequest: SubmissionRequest,
+      isUsingAuthenticatedEndpoint: Boolean,
+  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = {
+    val sender = submissionRequest.sender
+    for {
+      _ <- Either.cond(
+        sender.isAuthenticated == isUsingAuthenticatedEndpoint,
+        (),
+        refuse(submissionRequest.messageId.toProtoPrimitive, sender)(
+          s"Sender $sender needs to use ${if (isUsingAuthenticatedEndpoint) "unauthenticated"
+            else "authenticated"} send operation"
+        ),
+      )
+      _ <- sender match {
+        case authMember: AuthenticatedMember =>
+          checkAuthenticatedSendPermission(submissionRequest, authMember)
+        case unauthMember: UnauthenticatedMemberId =>
+          checkUnauthenticatedSendPermission(submissionRequest, unauthMember)
+      }
+    } yield ()
   }
 
   private def validateSubmissionRequest(
-      requestP: v0.SubmissionRequest,
+      requestSize: Int,
       request: SubmissionRequest,
       memberFromMetadata: Option[Member],
-  )(implicit traceContext: TraceContext): Either[SendAsyncError, SubmissionRequest] = {
-    val messageIdP = requestP.messageId
-
-    val requestSize = requestP.serializedSize
+  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = {
+    val messageId = request.messageId
 
     // TODO(i2741) properly deal with malicious behaviour
     def refuseUnless(
         sender: Member
     )(condition: Boolean, message: => String): Either[SendAsyncError, Unit] =
-      Either.cond(condition, (), refuse(messageIdP, sender)(message))
+      Either.cond(condition, (), refuse(messageId.toProtoPrimitive, sender)(message))
 
     def invalidUnless(
         sender: Member
     )(condition: Boolean, message: => String): Either[SendAsyncError, Unit] =
-      Either.cond(condition, (), invalid(messageIdP, sender)(message))
+      Either.cond(condition, (), invalid(messageId.toProtoPrimitive, sender)(message))
 
+    val sender = request.sender
     for {
-      sender <- extractSender(messageIdP, requestP.sender)
-
       // do the security checks
       _ <- authenticationCheck
         .authenticate(sender, memberFromMetadata)
-        .leftMap(err => refuse(messageIdP, sender)(s"$sender is not authorized to send: $err"))
+        .leftMap(err =>
+          refuse(messageId.toProtoPrimitive, sender)(s"$sender is not authorized to send: $err")
+        )
 
       _ = {
         val envelopesCount = request.batch.envelopesCount
         auditLogger.info(
-          s"'$sender' sends request with id '$messageIdP' of size $requestSize bytes with $envelopesCount envelopes."
+          s"'$sender' sends request with id '$messageId' of size $requestSize bytes with $envelopesCount envelopes."
         )
       }
 
@@ -429,11 +502,14 @@ class GrpcSequencerService(
         "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key",
       )
     } yield {
+      // TODO(M40) requestSize might be misleading under faulty participants.
+      // A faulty submitter may include irrelevant fields / repeated fields in the sent message
+      // and this will not be reported here because we're recomputing the size from the deserialized protobuf
       metrics.bytesProcessed.mark(requestSize.toLong)(MetricsContext.Empty)
       metrics.messagesProcessed.mark()
       if (TimeProof.isTimeProofSubmission(request)) metrics.timeRequests.mark()
 
-      request
+      ()
     }
   }
 
@@ -492,18 +568,17 @@ class GrpcSequencerService(
     SendAsyncError.RequestRefused(message)
   }
 
-  private def extractSender(messageIdP: String, senderP: String)(implicit
+  private def extractSender(messageId: MessageId, senderP: String)(implicit
       traceContext: TraceContext
   ): Either[SendAsyncError, Member] =
     Member
       .fromProtoPrimitive(senderP, "member")
-      .leftMap(err => invalid(messageIdP, senderP)(s"Unable to parse sender: $err"))
+      .leftMap(err => invalid(messageId.toProtoPrimitive, senderP)(s"Unable to parse sender: $err"))
 
   private def checkAuthenticatedSendPermission(
       request: SubmissionRequest,
-      authMember: AuthenticatedMember,
-      sender: Member,
-  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = authMember match {
+      sender: AuthenticatedMember,
+  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = sender match {
     case _: DomainTopologyManagerId =>
       Right(())
     case _ =>
@@ -516,35 +591,31 @@ class GrpcSequencerService(
       Either.cond(
         unauthRecipients.isEmpty,
         (),
-        refuse(request.messageId.unwrap, sender)(
+        refuse(request.messageId.toProtoPrimitive, sender)(
           s"Member is trying to send message to unauthenticated ${unauthRecipients.mkString(" ,")}. Only domain manager can do that."
         ),
       )
   }
 
   private def checkUnauthenticatedSendPermission(
-      messageIdP: String,
       request: SubmissionRequest,
-      sender: Member,
-  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = sender match {
-    case _: UnauthenticatedMemberId =>
-      // unauthenticated member can only send messages to IDM
-      val nonIdmRecipients = request.batch.envelopes
-        .toSet[ClosedEnvelope]
-        .flatMap(_.recipients.allRecipients)
-        .filter {
-          case _: DomainTopologyManagerId => false
-          case _ => true
-        }
-      Either.cond(
-        nonIdmRecipients.isEmpty,
-        (),
-        refuse(messageIdP, sender)(
-          s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients
-              .mkString(" ,")}."
-        ),
-      )
-    case _ => Right(())
+      unauthenticatedMember: UnauthenticatedMemberId,
+  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = {
+    // unauthenticated member can only send messages to IDM
+    val nonIdmRecipients = request.batch.envelopes
+      .flatMap(_.recipients.allRecipients)
+      .filter {
+        case _: DomainTopologyManagerId => false
+        case _ => true
+      }
+    Either.cond(
+      nonIdmRecipients.isEmpty,
+      (),
+      refuse(request.messageId.toProtoPrimitive, unauthenticatedMember)(
+        s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients.toSet
+            .mkString(" ,")}."
+      ),
+    )
   }
 
   private def checkRate(
@@ -688,18 +759,33 @@ class GrpcSequencerService(
     }
 
   override def acknowledge(requestP: v0.AcknowledgeRequest): Future[Empty] =
-    performAcknowledge(
-      AcknowledgeRequest
-        .fromProtoV0Unmemoized(requestP)
-        .map(ack => PlainAcknowledgeRequest(ack))
-    )
+    if (SubmissionRequest.usingSignedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The signed acknowledgement endpoints must be used with protocol version $protocolVersion"
+        ).asException
+      )
+    } else
+      performAcknowledge(
+        AcknowledgeRequest
+          .fromProtoV0Unmemoized(requestP)
+          .map(ack => PlainAcknowledgeRequest(ack))
+      )
 
-  override def acknowledgeSigned(request: protocolV0.SignedContent): Future[Empty] =
-    performAcknowledge(
-      SignedContent
-        .fromProtoV0[AcknowledgeRequest](AcknowledgeRequest.fromByteString, request)
-        .map(ack => SignedAcknowledgeRequest(ack))
-    )
+  override def acknowledgeSigned(request: protocolV0.SignedContent): Future[Empty] = {
+    if (!SubmissionRequest.usingSignedSubmissionRequest(protocolVersion)) {
+      Future.failed(
+        wrongProtocolVersion(
+          s"The unsigned acknowledgement endpoints must be used with protocol version $protocolVersion"
+        ).asException
+      )
+    } else {
+      val acknowledgeRequestE = SignedContent
+        .fromProtoV0(request)
+        .flatMap(_.deserializeContent(AcknowledgeRequest.fromByteString))
+      performAcknowledge(acknowledgeRequestE.map(SignedAcknowledgeRequest))
+    }
+  }
 
   private def performAcknowledge(
       acknowledgeRequestE: Either[
@@ -792,6 +878,9 @@ class GrpcSequencerService(
 
   private def permissionDenied(message: String): Status =
     Status.PERMISSION_DENIED.withDescription(message)
+
+  private def wrongProtocolVersion(message: String): Status =
+    Status.UNIMPLEMENTED.withDescription(message)
 
   // avoid emitting a warning during the first sequencing of the topology snapshot
   private def warnOnUsingDefaults(sender: Option[Member]): Boolean = sender match {

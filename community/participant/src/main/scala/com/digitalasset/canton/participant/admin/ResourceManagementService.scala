@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.admin
 
 import com.daml.error.definitions.LedgerApiErrors.ParticipantBackpressure
-import com.daml.ledger.participant.state.v2.SubmissionResult
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics

@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.HealthReporting
-import com.digitalasset.canton.health.HealthReporting.ComponentHealth
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, Lifecycle}
+import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.health.HealthReporting.HealthComponent
+import com.digitalasset.canton.lifecycle.{AsyncCloseable, FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -44,25 +45,26 @@ import scala.concurrent.ExecutionContext
   */
 class SyncDomainEphemeralState(
     persistentState: SyncDomainPersistentState,
-    multiDomainEventLog: MultiDomainEventLog,
+    multiDomainEventLog: Eval[MultiDomainEventLog],
     val singleDomainCausalTracker: SingleDomainCausalTracker,
     inFlightSubmissionTracker: InFlightSubmissionTracker,
     val startingPoints: ProcessingStartingPoints,
     createTimeTracker: NamedLoggerFactory => DomainTimeTracker,
     metrics: SyncDomainMetrics,
-    timeouts: ProcessingTimeout,
+    override val timeouts: ProcessingTimeout,
     useCausalityTracking: Boolean,
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext)
     extends SyncDomainEphemeralStateLookup
-    with AutoCloseable
+    with FlagCloseable
     with NamedLogging
-    with ComponentHealth {
+    with HealthComponent {
 
   override val name: String = SyncDomainEphemeralState.healthName
-  override val initialState: HealthReporting.ComponentState =
-    HealthReporting.ComponentState.NotInitialized
+  override val initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
+  override val closingState: ComponentHealthState =
+    ComponentHealthState.failed("Disconnected from domain")
 
   // Key is the root hash of the transfer tree
   val pendingTransferOutSubmissions: TrieMap[RootHash, PendingTransferSubmission] =
@@ -147,7 +149,7 @@ class SyncDomainEphemeralState(
       throw new IllegalStateException("SyncDomainState has already been marked as recovered.")
   }
 
-  override def close(): Unit = {
+  override def onClosed(): Unit = {
     import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
     Lifecycle.close(
       requestTracker,

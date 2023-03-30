@@ -9,12 +9,16 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.health.ComponentHealthState.UnhealthyState
+import com.digitalasset.canton.health.HealthReporting.ComponentStatus
 import com.digitalasset.canton.health.admin.data.NodeStatus.{multiline, portsString}
 import com.digitalasset.canton.health.admin.v0
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.health.{ComponentHealthState, ToComponentHealthState}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.util.ShowUtil
 import com.google.protobuf.ByteString
 
 import java.time.Duration
@@ -30,7 +34,7 @@ sealed trait NodeStatus[+S <: NodeStatus.Status]
 object NodeStatus {
 
   /** A failure to query the node's status */
-  case class Failure(msg: String) extends NodeStatus[Nothing] {
+  final case class Failure(msg: String) extends NodeStatus[Nothing] {
     override def pretty: Pretty[Failure] = prettyOfString(_.msg)
     override def trySuccess: Nothing =
       sys.error(s"Status did not complete successfully. Error: $msg")
@@ -38,13 +42,13 @@ object NodeStatus {
   }
 
   /** A node is running but not yet initialized. */
-  case class NotInitialized(active: Boolean) extends NodeStatus[Nothing] {
+  final case class NotInitialized(active: Boolean) extends NodeStatus[Nothing] {
     override def pretty: Pretty[NotInitialized] = prettyOfClass(param("active", _.active))
     override def trySuccess: Nothing = sys.error(s"Node is not yet initialized.")
     override def successOption: Option[Nothing] = None
   }
 
-  case class Success[S <: Status](status: S) extends NodeStatus[S] {
+  final case class Success[S <: Status](status: S) extends NodeStatus[S] {
     override def trySuccess: S = status
     override def pretty: Pretty[Success.this.type] = prettyOfParam(_.status)
     override def successOption: Option[S] = status.some
@@ -56,6 +60,7 @@ object NodeStatus {
     def ports: Map[String, Port]
     def active: Boolean
     def toProtoV0: v0.NodeStatus.Status // explicitly making it public
+    def components: Seq[ComponentStatus]
   }
 
   private[data] def portsString(ports: Map[String, Port]): String =
@@ -66,12 +71,13 @@ object NodeStatus {
     if (elements.isEmpty) "None" else elements.map(el => s"\n\t$el").mkString
 }
 
-case class SimpleStatus(
+final case class SimpleStatus(
     uid: UniqueIdentifier,
     uptime: Duration,
     ports: Map[String, Port],
     active: Boolean,
     topologyQueue: TopologyQueueStatus,
+    components: Seq[ComponentStatus],
 ) extends NodeStatus.Status {
   override def pretty: Pretty[SimpleStatus] =
     prettyOfString(_ =>
@@ -80,6 +86,7 @@ case class SimpleStatus(
         show"Uptime: $uptime",
         s"Ports: ${portsString(ports)}",
         s"Active: $active",
+        s"Components: ${multiline(components.map(_.toString))}",
       ).mkString(System.lineSeparator())
     )
 
@@ -91,6 +98,7 @@ case class SimpleStatus(
       ByteString.EMPTY,
       active,
       topologyQueues = Some(topologyQueue.toProtoV0),
+      components = components.map(_.toProtoV0),
     )
 }
 
@@ -111,27 +119,49 @@ object SimpleStatus {
         "topologyQueues",
         proto.topologyQueues,
       )
-    } yield SimpleStatus(uid, uptime, ports, proto.active, topology)
+      components <- proto.components.toList.traverse(ComponentStatus.fromProtoV0)
+    } yield SimpleStatus(
+      uid,
+      uptime,
+      ports,
+      proto.active,
+      topology,
+      components,
+    )
   }
 }
 
 /** Health status of the sequencer component itself.
   * @param isActive implementation specific flag indicating whether the sequencer is active
   */
-case class SequencerHealthStatus(isActive: Boolean, details: Option[String] = None)
-    extends PrettyPrinting {
+final case class SequencerHealthStatus(isActive: Boolean, details: Option[String] = None)
+    extends ToComponentHealthState {
   def toProtoV0: v0.SequencerHealthStatus = v0.SequencerHealthStatus(isActive, details)
-  override def pretty: Pretty[SequencerHealthStatus] = prettyOfClass(
-    param("isActive", _.isActive),
-    paramIfDefined("details", _.details.map(_.unquoted)),
-  )
+
+  override def toComponentHealthState: ComponentHealthState = if (isActive)
+    ComponentHealthState.Ok(details)
+  else
+    ComponentHealthState.Failed(UnhealthyState(details))
+
+  override def pretty: Pretty[SequencerHealthStatus] =
+    SequencerHealthStatus.prettySequencerHealthStatus
 }
 
-object SequencerHealthStatus {
+object SequencerHealthStatus extends PrettyUtil with ShowUtil {
+  val shutdownStatus: SequencerHealthStatus =
+    SequencerHealthStatus(isActive = false, details = Some("Sequencer is closed"))
+
   def fromProto(
       statusP: v0.SequencerHealthStatus
   ): ParsingResult[SequencerHealthStatus] =
     Right(SequencerHealthStatus(statusP.active, statusP.details))
+
+  implicit val implicitPrettyString: Pretty[String] = PrettyInstances.prettyString
+  implicit val prettySequencerHealthStatus: Pretty[SequencerHealthStatus] =
+    prettyOfClass[SequencerHealthStatus](
+      param("active", _.isActive),
+      paramIfDefined("details", _.details.map(_.unquoted)),
+    )
 }
 
 /** Topology manager queue status
@@ -141,7 +171,8 @@ object SequencerHealthStatus {
   * @param dispatcher number of queued transactions in the dispatcher
   * @param clients number of observed transactions that are not yet effective
   */
-case class TopologyQueueStatus(manager: Int, dispatcher: Int, clients: Int) extends PrettyPrinting {
+final case class TopologyQueueStatus(manager: Int, dispatcher: Int, clients: Int)
+    extends PrettyPrinting {
   def toProtoV0: v0.TopologyQueueStatus =
     v0.TopologyQueueStatus(manager = manager, dispatcher = dispatcher, clients = clients)
 
@@ -163,13 +194,14 @@ object TopologyQueueStatus {
   }
 }
 
-case class DomainStatus(
+final case class DomainStatus(
     uid: UniqueIdentifier,
     uptime: Duration,
     ports: Map[String, Port],
     connectedParticipants: Seq[ParticipantId],
     sequencer: SequencerHealthStatus,
     topologyQueue: TopologyQueueStatus,
+    components: Seq[ComponentStatus],
 ) extends NodeStatus.Status {
   val id: DomainId = DomainId(uid)
 
@@ -184,12 +216,13 @@ case class DomainStatus(
         s"Ports: ${portsString(ports)}",
         s"Connected Participants: ${multiline(connectedParticipants.map(_.toString))}",
         show"Sequencer: $sequencer",
+        s"Components: ${multiline(components.map(_.toString))}",
       ).mkString(System.lineSeparator())
     )
 
   def toProtoV0: v0.NodeStatus.Status = {
     val participants = connectedParticipants.map(_.toProtoPrimitive)
-    SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0
       .copy(
         extra = v0.DomainStatusInfo(participants, Some(sequencer.toProtoV0)).toByteString
       )
@@ -221,6 +254,7 @@ object DomainStatus {
               participants,
               sequencer,
               status.topologyQueue,
+              status.components,
             )
           },
           proto.extra,
@@ -228,13 +262,14 @@ object DomainStatus {
     } yield domainStatus
 }
 
-case class ParticipantStatus(
+final case class ParticipantStatus(
     uid: UniqueIdentifier,
     uptime: Duration,
     ports: Map[String, Port],
     connectedDomains: Map[DomainId, Boolean],
     active: Boolean,
     topologyQueue: TopologyQueueStatus,
+    components: Seq[ComponentStatus],
 ) extends NodeStatus.Status {
   val id: ParticipantId = ParticipantId(uid)
   override def pretty: Pretty[ParticipantStatus] =
@@ -246,6 +281,7 @@ case class ParticipantStatus(
         s"Connected domains: ${multiline(connectedDomains.filter(_._2).map(_._1.toString).toSeq)}",
         s"Unhealthy domains: ${multiline(connectedDomains.filterNot(_._2).map(_._1.toString).toSeq)}",
         s"Active: $active",
+        s"Components: ${multiline(components.map(_.toString))}",
       ).mkString(System.lineSeparator())
     )
 
@@ -256,7 +292,7 @@ case class ParticipantStatus(
         healthy = healthy,
       )
     }.toList
-    SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0
       .copy(extra = v0.ParticipantStatusInfo(domains, active).toByteString)
   }
 }
@@ -292,13 +328,14 @@ object ParticipantStatus {
               connectedDomains.toMap: Map[DomainId, Boolean],
               participantStatusInfoP.active,
               status.topologyQueue,
+              status.components,
             ),
           proto.extra,
         )
     } yield participantStatus
 }
 
-case class SequencerNodeStatus(
+final case class SequencerNodeStatus(
     uid: UniqueIdentifier,
     domainId: DomainId,
     uptime: Duration,
@@ -306,11 +343,12 @@ case class SequencerNodeStatus(
     connectedParticipants: Seq[ParticipantId],
     sequencer: SequencerHealthStatus,
     topologyQueue: TopologyQueueStatus,
+    components: Seq[ComponentStatus],
 ) extends NodeStatus.Status {
   override def active: Boolean = sequencer.isActive
   def toProtoV0: v0.NodeStatus.Status = {
     val participants = connectedParticipants.map(_.toProtoPrimitive)
-    SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0.copy(
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0.copy(
       extra = v0
         .SequencerNodeStatus(participants, sequencer.toProtoV0.some, domainId.toProtoPrimitive)
         .toByteString
@@ -327,6 +365,7 @@ case class SequencerNodeStatus(
         s"Connected Participants: ${multiline(connectedParticipants.map(_.toString))}",
         show"Sequencer: $sequencer",
         s"details-extra: ${sequencer.details}",
+        s"Components: ${multiline(components.map(_.toString))}",
       ).mkString(System.lineSeparator())
     )
 }
@@ -361,6 +400,7 @@ object SequencerNodeStatus {
             participants,
             sequencer,
             status.topologyQueue,
+            status.components,
           ),
         sequencerP.extra,
       )
@@ -368,13 +408,14 @@ object SequencerNodeStatus {
 
 }
 
-case class MediatorNodeStatus(
+final case class MediatorNodeStatus(
     uid: UniqueIdentifier,
     domainId: DomainId,
     uptime: Duration,
     ports: Map[String, Port],
     active: Boolean,
     topologyQueue: TopologyQueueStatus,
+    components: Seq[ComponentStatus],
 ) extends NodeStatus.Status {
   override def pretty: Pretty[MediatorNodeStatus] =
     prettyOfString(_ =>
@@ -384,11 +425,12 @@ case class MediatorNodeStatus(
         show"Uptime: $uptime",
         s"Ports: ${portsString(ports)}",
         s"Active: $active",
+        s"Components: ${multiline(components.map(_.toString))}",
       ).mkString(System.lineSeparator())
     )
 
   def toProtoV0: v0.NodeStatus.Status =
-    SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0.copy(
+    SimpleStatus(uid, uptime, ports, active, topologyQueue, components).toProtoV0.copy(
       extra = v0
         .MediatorNodeStatus(domainId.toProtoPrimitive)
         .toByteString
@@ -414,6 +456,7 @@ object MediatorNodeStatus {
             status.ports,
             status.active,
             status.topologyQueue,
+            status.components,
           ),
         proto.extra,
       )

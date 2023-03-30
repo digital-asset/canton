@@ -5,8 +5,10 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
 import cats.implicits.catsSyntaxPartialOrder
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.util.TimeOfChange
@@ -144,7 +146,7 @@ class InMemoryTransferStore(
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
     Future.successful {
       def filter(entry: TransferEntry): Boolean =
-        entry.timeOfCompletion.isEmpty && // Always filter out completed transfers
+        entry.timeOfCompletion.isEmpty && // Always filter out completed transfer-in
           filterSource.forall(source => entry.transferData.sourceDomain == source) &&
           filterTimestamp.forall(ts => entry.transferData.transferId.requestTimestamp == ts) &&
           filterSubmitter.forall(party => entry.transferData.transferOutRequest.submitter == party)
@@ -154,16 +156,16 @@ class InMemoryTransferStore(
 
   override def deleteTransfer(
       transferId: TransferId
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    Future.successful {
-      val _ = transferDataMap.remove(transferId)
-    }
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    transferDataMap.remove(transferId).discard
+    Future.unit
+  }
 
   override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
       traceContext: TraceContext
   ): Future[Seq[TransferData]] = Future.successful {
     def filter(entry: TransferEntry): Boolean =
-      entry.timeOfCompletion.isEmpty && // Always filter out completed transfers
+      entry.timeOfCompletion.isEmpty && // Always filter out completed transfer-in
         requestAfter.forall(ts =>
           (entry.transferData.transferId.requestTimestamp, entry.transferData.sourceDomain) > ts
         )
@@ -181,5 +183,32 @@ class InMemoryTransferStore(
           DomainId.orderDomainId.toOrdering,
         )
       )
+  }
+
+  override def findInFlight(
+      sourceDomain: DomainId,
+      onlyCompletedTransferOut: Boolean,
+      transferOutRequestNotAfter: LocalOffset,
+      stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Seq[TransferData]] = {
+    def filter(entry: TransferEntry): Boolean = {
+      entry.transferData.sourceDomain == sourceDomain &&
+      entry.timeOfCompletion.isEmpty && // Always filter out completed transfer-in
+      entry.transferData.transferOutRequestCounter.asLocalOffset <= transferOutRequestNotAfter &&
+      (!onlyCompletedTransferOut || entry.transferData.transferOutResult.isDefined == onlyCompletedTransferOut) && // Transfer-out is completed condition
+      stakeholders
+        .map(_.intersect(entry.transferData.contract.metadata.stakeholders).nonEmpty)
+        .getOrElse(true)
+    }
+
+    val values = transferDataMap.values
+      .to(LazyList)
+      .filter(filter)
+      .sortBy(_.transferData.transferOutTimestamp)
+      .take(limit)
+      .map(_.transferData)
+
+    Future.successful(values)
   }
 }

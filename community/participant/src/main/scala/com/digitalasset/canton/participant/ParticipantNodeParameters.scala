@@ -14,7 +14,7 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.version.ProtocolVersion
 
-case class ParticipantNodeParameters(
+final case class ParticipantNodeParameters(
     general: CantonNodeParameters.General,
     partyChangeNotification: PartyNotificationConfig,
     adminWorkflow: AdminWorkflowConfig,

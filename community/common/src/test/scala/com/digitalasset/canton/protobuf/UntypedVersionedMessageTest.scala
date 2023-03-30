@@ -68,7 +68,7 @@ object UntypedVersionedMessageTest {
       .flatMap(fromProtoVersioned)
   }
 
-  case class Message(content: String) extends HasVersionedWrapper[Message] {
+  final case class Message(content: String) extends HasVersionedWrapper[Message] {
 
     override protected def companionObj = Message
 

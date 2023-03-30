@@ -81,9 +81,9 @@ object DamlPlugin extends AutoPlugin {
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
 
-        IO.delete(scalaOutputDirectory)
-
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
+          IO.delete(scalaOutputDirectory)
+
           settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
             Seq((Codegen.Scala, scalaOutputDirectory))
               .flatMap { case (codegen, outputDirectory) =>
@@ -171,7 +171,7 @@ object DamlPlugin extends AutoPlugin {
         // With Daml 0.13.56 characters are no longer allowed in project versions as
         // GHC does not like non-numbers in versions.
         val projectVersion = {
-          val reg = "^([0-9]+\\.[0-9]+\\.[0-9])(-[^\\s]+)?$".r
+          val reg = "^([0-9]+\\.[0-9]+\\.[0-9]+)(-[^\\s]+)?$".r
           version.value match {
             case reg(vers, _) => vers
             case _ => throw new IllegalArgumentException(s"can not parse version ${version.value}")

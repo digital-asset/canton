@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.sync
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.option.*
@@ -43,10 +44,10 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class ParticipantEventPublisher(
     participantId: ParticipantId,
-    private val participantEventLog: ParticipantEventLog,
-    multiDomainEventLog: MultiDomainEventLog,
+    private val participantEventLog: Eval[ParticipantEventLog],
+    multiDomainEventLog: Eval[MultiDomainEventLog],
     participantClock: Clock,
-    maxDeduplicationDuration: Duration,
+    maxDeduplicationDuration: Eval[Duration],
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -61,7 +62,7 @@ class ParticipantEventPublisher(
       event: LedgerSyncEvent
   )(implicit traceContext: TraceContext): Future[Unit] = {
     for {
-      localOffset <- participantEventLog.nextLocalOffset()
+      localOffset <- participantEventLog.value.nextLocalOffset()
       timestampedEvent = TimestampedEvent(
         event,
         localOffset,
@@ -71,13 +72,13 @@ class ParticipantEventPublisher(
       _ = logger.debug(
         s"Publishing event with local offset ${localOffset} at record time ${event.recordTime}: ${event.description}"
       )
-      _ <- participantEventLog.insert(timestampedEvent, None)
+      _ <- participantEventLog.value.insert(timestampedEvent, None)
       publicationData = PublicationData(
-        participantEventLog.id,
+        participantEventLog.value.id,
         timestampedEvent,
         inFlightReference = None, // No in-flight tracking for events published via this method
       )
-      _ <- multiDomainEventLog.publish(publicationData)
+      _ <- multiDomainEventLog.value.publish(publicationData)
     } yield ()
   }
 
@@ -117,8 +118,8 @@ class ParticipantEventPublisher(
               Some(timelyReject.asInFlightReference)
             case _: TransactionEventId => None
           }
-          multiDomainEventLog.publish(
-            PublicationData(participantEventLog.id, event, inFlightReference)
+          multiDomainEventLog.value.publish(
+            PublicationData(participantEventLog.value.id, event, inFlightReference)
           )
         }
       } yield Either.cond(clashes.isEmpty, (), clashes)
@@ -132,14 +133,14 @@ class ParticipantEventPublisher(
   )(implicit traceContext: TraceContext): Future[Seq[Either[TimestampedEvent, LocalOffset]]] = {
     val eventCount = events.size
     for {
-      newOffsets <- participantEventLog.nextLocalOffsets(eventCount)
+      newOffsets <- participantEventLog.value.nextLocalOffsets(eventCount)
       offsetAndEvent = newOffsets.lazyZip(events)
       timestampedEvents = offsetAndEvent.map((localOffset, tracedEvent) =>
         tracedEvent.withTraceContext(implicit traceContext => { case (eventId, event) =>
           TimestampedEvent(event, localOffset, None, eventId.some)
         })
       )
-      insertionResult <- participantEventLog.insertsUnlessEventIdClash(
+      insertionResult <- participantEventLog.value.insertsUnlessEventIdClash(
         timestampedEvents.map(e => TimestampedEventAndCausalChange(e, None))
       )
     } yield newOffsets.lazyZip(insertionResult).map { (localOffset, result) =>
@@ -152,7 +153,7 @@ class ParticipantEventPublisher(
   ): Future[Unit] = {
     executionQueue.execute(
       for {
-        maybeFirstOffset <- multiDomainEventLog.locateOffset(1).value
+        maybeFirstOffset <- multiDomainEventLog.value.locateOffset(1).value
         _ <-
           if (maybeFirstOffset.isEmpty) {
             logger.debug("Attempt to publish ledger configuration update")
@@ -163,7 +164,7 @@ class ParticipantEventPublisher(
               newConfiguration = LedgerConfiguration(
                 generation = 1L,
                 timeModel = CantonLedgerApiServerWrapper.maximumToleranceTimeModel,
-                maxDeduplicationDuration = maxDeduplicationDuration,
+                maxDeduplicationDuration = maxDeduplicationDuration.value,
               ),
             )
             // Do not call `publish` because this is already running inside the execution queue

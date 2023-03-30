@@ -35,7 +35,7 @@ trait ParticipantSettingsStoreTest
   lazy val resourceLimits4: ResourceLimits =
     ResourceLimits(None, Some(NonNegativeInt.tryCreate(22)), PositiveNumeric.tryCreate(0.4))
 
-  lazy val maxDedupDuration = NonNegativeFiniteDuration.ofMicros(123456789L)
+  lazy val maxDedupDuration = NonNegativeFiniteDuration.tryOfMicros(123456789L)
 
   def participantSettingsStore(mk: () => ParticipantSettingsStore): Unit = {
     "resource limits" should {

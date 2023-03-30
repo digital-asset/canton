@@ -6,28 +6,21 @@ package com.digitalasset.canton.participant.domain
 import akka.stream.Materializer
 import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{Crypto, HashPurpose}
+import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
+import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.{
-  RequestSigner,
-  SequencerClient,
-  SequencerClientFactory,
-}
-import com.digitalasset.canton.sequencing.handlers.{
-  DiscardIgnoredEvents,
-  EnvelopeOpener,
-  StripSignature,
-}
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
-import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
+import com.digitalasset.canton.sequencing.client.RequestSigner.UnauthenticatedRequestSigner
+import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
+import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
+import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, Deliver, SequencedEvent}
+import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
-import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -35,7 +28,7 @@ import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
 object ParticipantInitializeTopology {
@@ -56,6 +49,7 @@ object ParticipantInitializeTopology {
       targetDomainStore: TopologyStore[TopologyStoreId.DomainStore],
       loggerFactory: NamedLoggerFactory,
       sequencerClientFactory: SequencerClientFactory,
+      connection: SequencerConnection,
       crypto: Crypto,
       protocolVersion: ProtocolVersion,
   )(implicit
@@ -86,7 +80,7 @@ object ParticipantInitializeTopology {
         loggerFactory,
       )
 
-      val eventHandler = new UnsignedProtocolEventHandler {
+      val eventHandler = new OrdinaryApplicationHandler[ClosedEnvelope] {
         override def name: String = s"participant-initialize-topology-$alias"
 
         override def subscriptionStartsAt(
@@ -96,9 +90,25 @@ object ParticipantInitializeTopology {
           FutureUnlessShutdown.unit
 
         override def apply(
-            events: BoxedEnvelope[UnsignedEnvelopeBox, DefaultOpenEnvelope]
-        ): HandlerResult =
-          MonadUtil.sequentialTraverseMonoid(events.value) {
+            tracedEvents: Traced[Seq[BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]]]
+        ): HandlerResult = {
+          val openEvents = tracedEvents.value.map { closedSignedEvent =>
+            val closedEvent = closedSignedEvent.signedEvent.content
+            val (openEvent, openingErrors) = {
+              SequencedEvent.openEnvelopes(closedEvent)(protocolVersion, crypto.pureCrypto)
+            }
+
+            openingErrors.foreach { error =>
+              val cause =
+                s"Received an envelope at ${closedEvent.timestamp} that cannot be opened. " +
+                  s"Discarding envelope... Reason: $error"
+              SyncServiceAlarm.Warn(cause).report()
+            }
+
+            Traced(openEvent)(closedSignedEvent.traceContext)
+          }
+
+          MonadUtil.sequentialTraverseMonoid(openEvents) {
             _.withTraceContext { implicit traceContext =>
               {
                 case Deliver(_, _, _, _, batch) => handle.processor(Traced(batch.envelopes))
@@ -106,6 +116,7 @@ object ParticipantInitializeTopology {
               }
             }
           }
+        }
       }
 
       for {
@@ -114,9 +125,7 @@ object ParticipantInitializeTopology {
             client.subscribeAfterUnauthenticated(
               CantonTimestamp.MinValue,
               // There is no point in ignoring events in an unauthenticated subscription
-              DiscardIgnoredEvents(loggerFactory) {
-                StripSignature { EnvelopeOpener(protocolVersion, crypto.pureCrypto)(eventHandler) }
-              },
+              DiscardIgnoredEvents(loggerFactory)(eventHandler),
               domainTimeTracker,
             )
           )
@@ -144,16 +153,8 @@ object ParticipantInitializeTopology {
           unauthenticatedMember,
           new InMemorySequencedEventStore(loggerFactory),
           new InMemorySendTrackerStore(),
-          new RequestSigner {
-            override def signRequest[A <: ProtocolVersionedMemoizedEvidence](
-                request: A,
-                hashPurpose: HashPurpose,
-            )(implicit
-                ec: ExecutionContext,
-                traceContext: TraceContext,
-            ): EitherT[Future, String, SignedContent[A]] =
-              EitherT.leftT("Unauthenticated members do not sign submission requests")
-          },
+          UnauthenticatedRequestSigner,
+          connection,
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)

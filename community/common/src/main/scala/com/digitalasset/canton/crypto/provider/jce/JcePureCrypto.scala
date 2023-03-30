@@ -6,7 +6,14 @@ package com.digitalasset.canton.crypto.provider.jce
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.HkdfError.HkdfInternalError
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.crypto.deterministic.encryption.DeterministicRandom
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
+  DeserializationError,
+  DeterministicEncoding,
+}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink.subtle.EllipticCurves.EcdsaEncoding
@@ -18,8 +25,10 @@ import org.bouncycastle.asn1.gm.GMObjectIdentifiers
 import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.generators.HKDFBytesGenerator
 import org.bouncycastle.crypto.params.HKDFParameters
+import org.bouncycastle.jce.spec.IESParameterSpec
 
 import java.security.interfaces.{ECPrivateKey, ECPublicKey}
+import java.security.spec.EllipticCurve
 import java.security.{
   GeneralSecurityException,
   InvalidKeyException,
@@ -30,12 +39,13 @@ import java.security.{
   Signature as JSignature,
   SignatureException,
 }
+import javax.crypto.Cipher
 import scala.collection.concurrent.TrieMap
 
 object JceSecureRandom {
 
   /** Uses [[ThreadLocal]] here to reduce contention and improve performance. */
-  private val random: ThreadLocal[SecureRandom] = new ThreadLocal[SecureRandom] {
+  private[crypto] val random: ThreadLocal[SecureRandom] = new ThreadLocal[SecureRandom] {
     override def initialValue(): SecureRandom = newSecureRandom()
   }
 
@@ -56,14 +66,39 @@ class JcePureCrypto(
     javaKeyConverter: JceJavaConverter,
     override val defaultSymmetricKeyScheme: SymmetricKeyScheme,
     override val defaultHashAlgorithm: HashAlgorithm,
+    override val loggerFactory: NamedLoggerFactory,
 ) extends CryptoPureApi
-    with ShowUtil {
+    with ShowUtil
+    with NamedLogging {
 
   // Cache for the java key conversion results
   private val javaPublicKeyCache: TrieMap[Fingerprint, Either[JavaKeyConversionError, JPublicKey]] =
     TrieMap.empty
   private val javaPrivateKeyCache
       : TrieMap[Fingerprint, Either[JavaKeyConversionError, JPrivateKey]] = TrieMap.empty
+
+  /* security parameters for EciesP256HmacSha256Aes128Cbc encryption scheme,
+    in particular for the HMAC and symmetric crypto algorithms.
+   */
+  private object EciesP256HmacSha256Aes128CbcParams {
+    // the internal jce designation for this scheme
+    val jceInternalName: String = "ECIESwithSHA256andAES-CBC"
+    // the key size in bits for HMACSHA256 is 64bytes (recommended)
+    val macKeySizeInBits: Int = 512
+    // the key size in bits for AES-128-CBC is 16 bytes
+    val cipherKeySizeInBits: Int = 128
+    // the IV for AES-128-CBC is 16 bytes
+    val ivSizeForAesCbcInBytes: Int = 16
+    // the parameter specification for this scheme.
+    def parameterSpec(iv: Array[Byte]) = new IESParameterSpec(
+      // we do no use any encoding or derivation vector for the KDF.
+      Array[Byte](),
+      Array[Byte](),
+      macKeySizeInBits,
+      cipherKeySizeInBits,
+      iv,
+    )
+  }
 
   private def checkKeyFormat[E](
       expected: CryptoKeyFormat,
@@ -361,88 +396,197 @@ class JcePureCrypto(
     } yield ()
   }
 
+  private def checkFormatAndGetECPublicKey(
+      publicKey: EncryptionPublicKey,
+      curve: EllipticCurve,
+  ): Either[EncryptionError, ECPublicKey] =
+    for {
+      _ <- checkKeyFormat(
+        CryptoKeyFormat.Der,
+        publicKey.format,
+        EncryptionError.InvalidEncryptionKey,
+      )
+      javaPublicKey <- javaPublicKeyCache
+        .getOrElseUpdate(
+          publicKey.id,
+          javaKeyConverter
+            .toJava(publicKey)
+            .map(_._2),
+        )
+        .leftMap(err => EncryptionError.InvalidEncryptionKey(err.toString))
+      ecPublicKey <- javaPublicKey match {
+        case k: ECPublicKey =>
+          Either.cond(
+            k.getParams.getCurve.equals(curve),
+            k,
+            EncryptionError.InvalidEncryptionKey(
+              s"Public key ${publicKey.id} is not a key in curve $curve"
+            ),
+          )
+        case _ =>
+          Left(EncryptionError.InvalidEncryptionKey(s"Public key ${publicKey.id} is not an EC key"))
+      }
+    } yield ecPublicKey
+
+  private def encryptWithEciesP256HmacSha256Aes128Cbc[M <: HasVersionedToByteString](
+      message: ByteString,
+      publicKey: EncryptionPublicKey,
+      random: SecureRandom,
+  ): Either[EncryptionError, AsymmetricEncrypted[M]] =
+    for {
+      ecPublicKey <- checkFormatAndGetECPublicKey(
+        publicKey,
+        EllipticCurves.getNistP256Params.getCurve,
+      )
+      /* this encryption scheme makes use of AES-128-CBC as a DEM (Data Encapsulation Method)
+       * and therefore we need to generate a IV/nonce of 16bytes as the IV for CBC mode.
+       */
+      iv = new Array[Byte](EciesP256HmacSha256Aes128CbcParams.ivSizeForAesCbcInBytes)
+      _ = random.nextBytes(iv)
+      encrypter <- Either
+        .catchOnly[GeneralSecurityException] {
+          val cipher = Cipher
+            .getInstance(EciesP256HmacSha256Aes128CbcParams.jceInternalName, "BC")
+          cipher.init(
+            Cipher.ENCRYPT_MODE,
+            ecPublicKey,
+            EciesP256HmacSha256Aes128CbcParams.parameterSpec(iv),
+            random,
+          )
+          cipher
+        }
+        .leftMap(err => EncryptionError.InvalidEncryptionKey(err.toString))
+      ciphertext <- Either
+        .catchOnly[GeneralSecurityException](
+          encrypter.doFinal(message.toByteArray)
+        )
+        .leftMap(err => EncryptionError.FailedToEncrypt(err.toString))
+    } yield new AsymmetricEncrypted[M](
+      /* Prepend our IV to the ciphertext. On contrary to the Tink library, BouncyCastle's
+       * ECIES encryption does not deal with the AES IV by itself and we have to randomly generate it and
+       * manually prepend it to the ciphertext.
+       */
+      ByteString.copyFrom(iv ++ ciphertext),
+      publicKey.fingerprint,
+    )
+
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
       version: ProtocolVersion,
-  ): Either[EncryptionError, AsymmetricEncrypted[M]] = publicKey.scheme match {
-    case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
-      for {
-        _ <- checkKeyFormat(
-          CryptoKeyFormat.Der,
-          publicKey.format,
-          EncryptionError.InvalidEncryptionKey,
-        )
-        javaPublicKey <- javaPublicKeyCache
-          .getOrElseUpdate(
-            publicKey.id,
-            javaKeyConverter
-              .toJava(publicKey)
-              .map(_._2),
+  ): Either[EncryptionError, AsymmetricEncrypted[M]] =
+    publicKey.scheme match {
+      case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
+        for {
+          ecPublicKey <- checkFormatAndGetECPublicKey(
+            publicKey,
+            EllipticCurves.getNistP256Params.getCurve,
           )
-          .leftMap(err => EncryptionError.InvalidEncryptionKey(err.toString))
-        ecPublicKey <- javaPublicKey match {
-          case k: ECPublicKey => Right(k)
-          case _ =>
-            Left(EncryptionError.InvalidEncryptionKey(s"Public key $publicKey is not an EC key"))
-        }
-        encrypter <- Either
-          .catchOnly[GeneralSecurityException](
-            new EciesAeadHkdfHybridEncrypt(
-              ecPublicKey,
-              Array[Byte](),
-              "HmacSha256",
-              EllipticCurves.PointFormatType.UNCOMPRESSED,
-              Aes128GcmDemHelper,
-            )
-          )
-          .leftMap(err => EncryptionError.InvalidEncryptionKey(err.toString))
-        ciphertext <- Either
-          .catchOnly[GeneralSecurityException](
-            encrypter
-              .encrypt(
-                message.toByteString(version).toByteArray,
+          encrypter <- Either
+            .catchOnly[GeneralSecurityException](
+              new EciesAeadHkdfHybridEncrypt(
+                ecPublicKey,
                 Array[Byte](),
+                "HmacSha256",
+                EllipticCurves.PointFormatType.UNCOMPRESSED,
+                Aes128GcmDemHelper,
               )
+            )
+            .leftMap(err => EncryptionError.InvalidEncryptionKey(err.toString))
+          ciphertext <- Either
+            .catchOnly[GeneralSecurityException](
+              encrypter
+                .encrypt(
+                  message.toByteString(version).toByteArray,
+                  Array[Byte](),
+                )
+            )
+            .leftMap(err => EncryptionError.FailedToEncrypt(err.toString))
+          encrypted = new AsymmetricEncrypted[M](
+            ByteString.copyFrom(ciphertext),
+            publicKey.fingerprint,
           )
-          .leftMap(err => EncryptionError.FailedToEncrypt(err.toString))
-        encrypted = new AsymmetricEncrypted[M](
-          ByteString.copyFrom(ciphertext),
-          publicKey.fingerprint,
+        } yield encrypted
+      case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+        encryptWithEciesP256HmacSha256Aes128Cbc(
+          message.toByteString(version),
+          publicKey,
+          JceSecureRandom.random.get(),
         )
-      } yield encrypted
-  }
+    }
+
+  override def encryptDeterministicWith[M <: HasVersionedToByteString](
+      message: M,
+      publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
+  )(implicit traceContext: TraceContext): Either[EncryptionError, AsymmetricEncrypted[M]] =
+    publicKey.scheme match {
+      case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
+        Left(
+          EncryptionError.UnsupportedSchemeForDeterministicEncryption(
+            s"${EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm.name} does not support deterministic asymmetric/hybrid encryption"
+          )
+        )
+      case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+        val messageSerialized = message.toByteString(version)
+        val deterministicRandomGenerator = DeterministicRandom.getDeterministicRandomGenerator(
+          messageSerialized,
+          publicKey.fingerprint,
+          loggerFactory,
+        )
+        encryptWithEciesP256HmacSha256Aes128Cbc(
+          messageSerialized,
+          publicKey,
+          deterministicRandomGenerator,
+        )
+    }
 
   override protected def decryptWithInternal[M](
       encrypted: AsymmetricEncrypted[M],
       privateKey: EncryptionPrivateKey,
   )(
       deserialize: ByteString => Either[DeserializationError, M]
-  ): Either[DecryptionError, M] =
+  ): Either[DecryptionError, M] = {
+
+    def checkFormatAndGetECPrivateKey(
+        curve: EllipticCurve
+    ): Either[DecryptionError.InvalidEncryptionKey, ECPrivateKey] = {
+      for {
+        _ <- checkKeyFormat(
+          CryptoKeyFormat.Der,
+          privateKey.format,
+          DecryptionError.InvalidEncryptionKey,
+        )
+        javaPrivateKey <- javaPrivateKeyCache
+          .getOrElseUpdate(
+            privateKey.id,
+            javaKeyConverter
+              .toJava(privateKey),
+          )
+          .leftMap(err => DecryptionError.InvalidEncryptionKey(err.toString))
+        ecPrivateKey <- javaPrivateKey match {
+          case k: ECPrivateKey =>
+            Either.cond(
+              k.getParams.getCurve.equals(curve),
+              k,
+              DecryptionError.InvalidEncryptionKey(
+                s"Private key ${privateKey.id} is not a key in curve $curve"
+              ),
+            )
+          case _ =>
+            Left(
+              DecryptionError.InvalidEncryptionKey(
+                s"Private key ${privateKey.id} is not an EC key"
+              )
+            )
+        }
+      } yield ecPrivateKey
+    }
+
     privateKey.scheme match {
       case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
         for {
-          _ <- checkKeyFormat(
-            CryptoKeyFormat.Der,
-            privateKey.format,
-            DecryptionError.InvalidEncryptionKey,
-          )
-          javaPrivateKey <- javaPrivateKeyCache
-            .getOrElseUpdate(
-              privateKey.id,
-              javaKeyConverter
-                .toJava(privateKey),
-            )
-            .leftMap(err => DecryptionError.InvalidEncryptionKey(err.toString))
-          ecPrivateKey <- javaPrivateKey match {
-            case k: ECPrivateKey => Right(k)
-            case _ =>
-              Left(
-                DecryptionError.InvalidEncryptionKey(
-                  s"Private key ${privateKey.id} is not an EC key"
-                )
-              )
-          }
+          ecPrivateKey <- checkFormatAndGetECPrivateKey(EllipticCurves.getNistP256Params.getCurve)
           decrypter <- Either
             .catchOnly[GeneralSecurityException](
               new EciesAeadHkdfHybridDecrypt(
@@ -462,7 +606,46 @@ class JcePureCrypto(
           message <- deserialize(ByteString.copyFrom(plaintext))
             .leftMap(DecryptionError.FailedToDeserialize)
         } yield message
+      case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+        for {
+          ecPrivateKey <- checkFormatAndGetECPrivateKey(EllipticCurves.getNistP256Params.getCurve)
+          /* we split at 'ivSizeForAesCbc' (=16) because that is the size of our iv (for AES-128-CBC)
+           * that gets  pre-appended to the ciphertext.
+           */
+          ciphertextSplit <- DeterministicEncoding
+            .splitAt(
+              EciesP256HmacSha256Aes128CbcParams.ivSizeForAesCbcInBytes,
+              encrypted.ciphertext,
+            )
+            .leftMap(err =>
+              DecryptionError.FailedToDeserialize(DefaultDeserializationError(err.show))
+            )
+          (iv, ciphertext) = ciphertextSplit
+          decrypter <- Either
+            .catchOnly[GeneralSecurityException] {
+              val cipher = Cipher
+                .getInstance(
+                  EciesP256HmacSha256Aes128CbcParams.jceInternalName,
+                  "BC",
+                )
+              cipher.init(
+                Cipher.DECRYPT_MODE,
+                ecPrivateKey,
+                EciesP256HmacSha256Aes128CbcParams.parameterSpec(iv.toByteArray),
+              )
+              cipher
+            }
+            .leftMap(err => DecryptionError.InvalidEncryptionKey(err.toString))
+          plaintext <- Either
+            .catchOnly[GeneralSecurityException](
+              decrypter.doFinal(ciphertext.toByteArray)
+            )
+            .leftMap(err => DecryptionError.FailedToDecrypt(err.toString))
+          message <- deserialize(ByteString.copyFrom(plaintext))
+            .leftMap(DecryptionError.FailedToDeserialize)
+        } yield message
     }
+  }
 
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,

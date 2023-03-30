@@ -192,7 +192,7 @@ object LedgerApiJdbcUrl {
     }) map ("jdbc:postgresql:" + _) // add the common prefix to all successfully generated urls
   }
 
-  private case class UrlBuilder(
+  private final case class UrlBuilder(
       baseUrl: String,
       options: Map[String, String],
       format: JdbcUrlFormat,
@@ -231,7 +231,7 @@ object LedgerApiJdbcUrl {
     }
   }
 
-  private case class JdbcUrlFormat(queryStringSeparator: String, parameterSeparator: String)
+  private final case class JdbcUrlFormat(queryStringSeparator: String, parameterSeparator: String)
   private object JdbcUrlFormat {
     val h2: JdbcUrlFormat = JdbcUrlFormat(";", ";")
     val postgres: JdbcUrlFormat = JdbcUrlFormat("?", "&")
@@ -283,11 +283,11 @@ object LedgerApiJdbcUrl {
     }
   }
 
-  private case class CustomLedgerApiUrl(override val url: String) extends LedgerApiJdbcUrl {
+  private final case class CustomLedgerApiUrl(override val url: String) extends LedgerApiJdbcUrl {
     override def createLedgerApiSchemaIfNotExists(): Unit = ()
   }
 
-  private case class ReuseCantonDb(override val url: String, private val cantonUrl: String)
+  private final case class ReuseCantonDb(override val url: String, private val cantonUrl: String)
       extends LedgerApiJdbcUrl {
     override def createLedgerApiSchemaIfNotExists(): Unit =
       DbActions.createSchemaIfNotExists(cantonUrl)

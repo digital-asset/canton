@@ -14,7 +14,8 @@ import scala.collection.mutable
 
 /** Our representation of the w3c trace context values: https://www.w3.org/TR/trace-context/
   */
-case class W3CTraceContext(parent: String, state: Option[String] = None) extends Serializable {
+final case class W3CTraceContext(parent: String, state: Option[String] = None)
+    extends Serializable {
   import W3CTraceContext.*
 
   def toTraceContext: TraceContext = W3CTraceContext.toTraceContext(Some(parent), state)
@@ -62,7 +63,7 @@ object W3CTraceContext {
       headers.get(TRACESTATE_HEADER_NAME),
     ).build
 
-  private case class W3CTraceContextBuilder(
+  private final case class W3CTraceContextBuilder(
       parent: Option[String] = None,
       state: Option[String] = None,
   ) {

@@ -422,7 +422,7 @@ object ParticipantTopologyManager {
 sealed trait ParticipantTopologyManagerError extends CantonError
 object ParticipantTopologyManagerError extends ParticipantErrorGroup {
 
-  case class IdentityManagerParentError(parent: TopologyManagerError)(implicit
+  final case class IdentityManagerParentError(parent: TopologyManagerError)(implicit
       val loggingContext: ErrorLoggingContext
   ) extends ParticipantTopologyManagerError
       with ParentCantonError[TopologyManagerError] {
@@ -443,7 +443,7 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
         id = "CANNOT_VET_DUE_TO_MISSING_PACKAGES",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
       ) {
-    case class Missing(packages: PackageId)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Missing(packages: PackageId)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "Package vetting failed due to packages not existing on the local node"
         )
@@ -465,7 +465,7 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
         id = "DANGEROUS_VETTING_COMMANDS_REQUIRE_FORCE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Reject()(implicit val loggingContext: ErrorLoggingContext)
+    final case class Reject()(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "Package vetting failed due to packages not existing on the local node"
         )
@@ -485,8 +485,9 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
         id = "DEPENDENCIES_NOT_VETTED",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Reject(unvetted: Set[PackageId])(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
+    final case class Reject(unvetted: Set[PackageId])(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
           cause = "Package vetting failed due to dependencies not being vetted"
         )
         with ParticipantTopologyManagerError
@@ -502,7 +503,7 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
         id = "UNINITIALIZED_PARTICIPANT",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Reject(_cause: String)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Reject(_cause: String)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = _cause
         )
@@ -528,14 +529,15 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
         id = "DANGEROUS_KEY_USE_COMMAND_REQUIRES_FORCE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class AlienParticipant(participant: ParticipantId)(implicit
+    final case class AlienParticipant(participant: ParticipantId)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Issuing owner to key mappings for alien participants requires force=yes"
         )
         with ParticipantTopologyManagerError
-    case class NoSuchKey(fingerprint: Fingerprint)(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
+    final case class NoSuchKey(fingerprint: Fingerprint)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
           cause = show"Can not assign unknown key $fingerprint to this participant"
         )
         with ParticipantTopologyManagerError
@@ -553,7 +555,7 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
         id = "DISABLE_PARTY_WITH_ACTIVE_CONTRACTS_REQUIRES_FORCE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Reject(partyId: PartyId)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Reject(partyId: PartyId)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause =
             show"Disable party $partyId failed because there are active contracts where the party is a stakeholder"

@@ -4,9 +4,11 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore.{
   TransferAlreadyCompleted,
@@ -129,10 +131,27 @@ class TransferCache(transferStore: TransferStore, override val loggerFactory: Na
   ): Future[Seq[TransferData]] = transferStore
     .findAfter(requestAfter, limit)
     .map(_.filter(transferData => !pendingCompletions.contains(transferData.transferId)))
+
+  override def findInFlight(
+      sourceDomain: DomainId,
+      onlyCompletedTransferOut: Boolean,
+      transferOutRequestNotAfter: LocalOffset,
+      stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
+    transferStore
+      .findInFlight(
+        sourceDomain,
+        onlyCompletedTransferOut,
+        transferOutRequestNotAfter,
+        stakeholders,
+        limit,
+      )
+      .map(_.filter(transferData => !pendingCompletions.contains(transferData.transferId)))
 }
 
 object TransferCache {
-  case class PendingTransferCompletion(timeOfCompletion: TimeOfChange)(
+  final case class PendingTransferCompletion(timeOfCompletion: TimeOfChange)(
       val completion: Promise[Checked[Nothing, TransferStoreError, Unit]] =
         Promise[Checked[Nothing, TransferStoreError, Unit]]()
   )

@@ -4,10 +4,10 @@ import better.files.{File => BetterFile, _}
 import com.typesafe.sbt.SbtLicenseReport.autoImportImpl._
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
 import org.scalafmt.sbt.ScalafmtPlugin
+import pl.project13.scala.sbt.JmhPlugin
 import sbt.Keys._
+import sbt.Tests.{Group, SubProcess}
 import sbt._
-import sbt.internal.BuildDependencies
-import sbt.internal.librarymanagement.ProjectResolver
 import sbt.internal.util.ManagedLogger
 import sbt.nio.Keys._
 import sbtassembly.AssemblyKeys._
@@ -21,7 +21,7 @@ import scoverage.ScoverageKeys._
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport._
 
-import java.nio.file.Files
+import java.nio.file.{Files, StandardCopyOption}
 import scala.language.postfixOps
 
 object BuildCommon {
@@ -37,7 +37,7 @@ object BuildCommon {
         addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")) ++
         addCommandAlias(
           "lint",
-          "; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; checkDamlProjectVersions",
+          "; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; damlCheckProjectVersions",
         ) ++
         addCommandAlias(
           "scalafixCheck",
@@ -45,15 +45,11 @@ object BuildCommon {
         ) ++
         addCommandAlias(
           "format",
-          "; scalafmt ; Test / scalafmt ; scalafmtSbt; createLicenseHeaders",
-        ) ++
-        addCommandAlias(
-          "formatAll",
           "; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders",
         ) ++
         // To be used by CI:
         // enable coverage and compile
-        addCommandAlias("compileWithCoverage", "; clean; coverage; test:compile") ++
+        addCommandAlias("compileWithCoverage", "; clean; coverage; Test/compile") ++
         // collect coverage information (once the tests have terminated)
         addCommandAlias("collectCoverage", "; coverageReport; coverageAggregate") ++
         // To be used locally
@@ -66,7 +62,9 @@ object BuildCommon {
         scalaVersion := scala_version,
         resolvers := Seq(Dependencies.use_custom_daml_version).collect { case true =>
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
-        } ++ resolvers.value,
+        } ++ Seq(
+          "Redhat GA for s390x natives" at "https://maven.repository.redhat.com/ga"
+        ) ++ resolvers.value,
         // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
         // scalacOptions in Test += "-Ystatistics",
       )
@@ -94,6 +92,8 @@ object BuildCommon {
         ),
       Global / excludeLintKeys += Global / damlCodeGeneration,
       Global / excludeLintKeys ++= DamlProjects.allProjects.map(_ / wartremoverErrors),
+      Global / excludeLintKeys += Compile / ideExcludeDirectories,
+      Global / excludeLintKeys += Test / ideExcludeDirectories,
     )
 
     // Inspired by https://www.viget.com/articles/two-ways-to-share-git-hooks-with-your-team/
@@ -209,19 +209,16 @@ object BuildCommon {
       }
   }
 
-  // https://tanin.nanakorn.com/technical/2018/09/10/parallelise-tests-in-sbt-on-circle-ci.html
+  // Originally https://tanin.nanakorn.com/technical/2018/09/10/parallelise-tests-in-sbt-on-circle-ci.html
   lazy val printTestTask = {
+    val destination = "test-full-class-names.log"
     val printTests =
-      taskKey[Unit]("Print full class names of tests to the file `test-full-class-names.log`.")
+      taskKey[Unit](s"Print full class names of tests to the file `$destination`.")
     printTests := {
-      import java.io._
-      println("Appending full class names of tests to the file `test-full-class-names.log`.")
-      val pw = new PrintWriter(new FileWriter(s"test-full-class-names.log", true))
-      val tmp = (Test / definedTests).value
-      tmp.sortBy(_.name).foreach { t =>
-        pw.println(t.name)
-      }
-      pw.close()
+      val testNames = (Test / definedTestNames).value.toVector
+      val projectName = thisProjectRef.value.project
+      IO.writeLines(file(destination), testNames, append = true)
+      println(s"Printed ${testNames.size} tests for `$projectName`")
     }
   }
 
@@ -313,8 +310,8 @@ object BuildCommon {
           Seq()
       }
       //  here, we copy the protobuf files of community manually
-      val communityCommonProto: Seq[(File, String)] = packProtobufFiles(
-        "community" / "common",
+      val communityBaseProto: Seq[(File, String)] = packProtobufFiles(
+        "community" / "base",
         "community",
       )
       val communityParticipantProto: Seq[(File, String)] = packProtobufFiles(
@@ -334,7 +331,7 @@ object BuildCommon {
         else Nil
 
       val protoFiles =
-        communityCommonProto ++ communityParticipantProto ++ communityDomainProto ++ researchAppProto
+        communityBaseProto ++ communityParticipantProto ++ communityDomainProto ++ researchAppProto
 
       log.info("Invoking bundle generator")
       // add license to package
@@ -381,11 +378,19 @@ object BuildCommon {
     case x => oldStrategy(x)
   }
 
+  // `ide-excluded-directories` is a key used by the intellij SBT integration.
+  // we can "re-declare" it here and the canton build and intellij will use the
+  // same setting
+  lazy val ideExcludeDirectories =
+    SettingKey[Seq[File]]("ide-excluded-directories", "Directories to exclude in intellij")
+
   // applies to all sub-projects
   lazy val sharedSettings = Seq(
     printTestTask,
     unitTestTask,
     oracleUnitTestTask,
+    ignoreScalacOptionsWithPathsInIncrementalCompilation,
+    ideExcludeDirectories := Seq(target.value),
   )
 
   lazy val cantonWarts = Seq(
@@ -412,6 +417,15 @@ object BuildCommon {
     ),
     scalacOptions += "-Wconf:src=src_managed/.*:silent",
   )
+
+  // On circle-ci, between machine executors and dockers, some plugins have different paths
+  // ex: -Xplugin:/root/.cache vs -Xplugin:/home/********/.cache/
+  // which makes the cache invalid. To fix this, we ignore the scalacOptions that starts with -Xplugin:.* when
+  // comparing scalacOptions between the cache and the current compilation.
+  lazy val ignoreScalacOptionsWithPathsInIncrementalCompilation =
+    incOptions := incOptions.value.withIgnoredScalacOptions(
+      incOptions.value.ignoredScalacOptions() :+ "-Xplugin:.*"
+    )
 
   // applies to all app sub-projects
   lazy val sharedAppSettings = sharedCantonSettings ++ Seq(
@@ -456,9 +470,13 @@ object BuildCommon {
       `util-external`,
       `util-internal`,
       `community-app`,
+      `community-app-base`,
+      `community-base`,
       `community-common`,
       `community-domain`,
       `community-participant`,
+      `community-testing`,
+      `community-integration-testing`,
       `sequencer-driver-api`,
       `sequencer-driver-lib`,
       blake2b,
@@ -467,6 +485,11 @@ object BuildCommon {
       `wartremover-extension`,
       `akka-fork`,
       `demo`,
+      `ledger-common`,
+      `ledger-api-core`,
+      `ledger-api-it`,
+      `ledger-api-tools`,
+      `ledger-api-string-interning-benchmark`,
     )
 
     // Project for utilities that are also used outside of the Canton repo
@@ -475,8 +498,7 @@ object BuildCommon {
       .dependsOn(
         `akka-fork`,
         `wartremover-extension` % "compile->compile;test->test",
-        DamlProjects.`daml-copy-common`,
-        DamlProjects.`daml-copy-testing` % "test->test",
+        `ledger-common`,
       )
       .settings(
         sharedCantonSettings,
@@ -536,16 +558,16 @@ object BuildCommon {
     lazy val `community-app` = project
       .in(file("community/app"))
       .dependsOn(
+        `akka-fork`,
+        `community-app-base`,
         `community-common` % "compile->compile;test->test",
-        `community-domain`,
-        `community-participant`,
+        `community-integration-testing` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
         sharedAppSettings,
         libraryDependencies ++= Seq(
           scala_logging,
-          jul_to_slf4j,
           janino, // not used at compile time, but required for conditionals in logback configuration
           logstash, // not used at compile time, but required for the logback json encoder
           scalatest % Test,
@@ -557,16 +579,15 @@ object BuildCommon {
           logback_classic,
           logback_core,
           akka_stream_testkit % Test,
-          akka_http,
           akka_http_testkit % Test,
-          pureconfig_cats,
           cats,
-          ammonite,
           better_files,
           toxiproxy_java % Test,
           dropwizard_metrics_jvm, // not used at compile time, but required at runtime to report jvm metrics
           dropwizard_metrics_jmx,
           dropwizard_metrics_graphite,
+          monocle_macro,
+          scala_logging,
         ),
         // core packaging commands
         bundlePack := sharedAppPack,
@@ -585,78 +606,55 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
-    lazy val `community-common` = project
-      .in(file("community/common"))
-      .enablePlugins(BuildInfoPlugin, DamlPlugin)
+    lazy val `community-app-base` = project
+      .in(file("community/app-base"))
       .dependsOn(
-        blake2b,
-        functionmeta,
-        `slick-fork`,
-        `akka-fork`,
-        `wartremover-extension` % "compile->compile;test->test",
-        DamlProjects.`daml-copy-common`,
-        DamlProjects.`daml-copy-testing` % "test;test->test",
-        `util-external` % "compile->compile;test->test",
-        `util-internal` % "compile->compile;test->test",
+        `community-domain`,
+        `community-participant`,
       )
       .settings(
         sharedCantonSettings,
+        JvmRulesPlugin.damlRepoHeaderSettings,
         libraryDependencies ++= Seq(
-          akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
-          logback_classic,
-          logback_core,
-          scala_logging,
-          scala_collection_contrib,
-          scalatest % Test,
-          scalacheck % Test,
-          scalatestScalacheck % Test,
-          cats_scalacheck % Test,
-          mockito_scala % Test,
-          scalatestMockito % Test,
+          akka_http,
+          ammonite,
+          jul_to_slf4j,
+          pureconfig_cats,
+        ),
+      )
+
+    // The purpose of this module is to collect `compile`-scoped classes shared by `community-testing` (which
+    // is in turn meant to be imported at `test` scope) as well as other projects which need it in `compile`
+    // scope. This is to avoid cyclic dependencies. As such, this module should _not_ depend on anything internal,
+    // possibly with the exception of `util-internal` and/or `util-external`.
+    // In principle this might be merged into `util-external` at a later time, but this is separate for the time
+    // being to ensure a clean separation of modules.
+    lazy val `community-base` = project
+      .in(file("community/base"))
+      .enablePlugins(BuildInfoPlugin)
+      .dependsOn(
+        functionmeta,
+        `slick-fork`,
+        `util-external`,
+        DamlProjects.`daml-copy-common`,
+        // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
+      )
+      .settings(
+        sharedCantonSettings,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+        libraryDependencies ++= Seq(
           better_files,
+          bouncycastle_bcpkix_jdk15on,
+          bouncycastle_bcprov_jdk15on,
           cats,
-          cats_law % Test,
           chimney,
           circe_core,
           circe_generic,
-          circe_generic_extras,
-          jul_to_slf4j % Test,
-          bouncycastle_bcprov_jdk15on,
-          bouncycastle_bcpkix_jdk15on,
-          grpc_netty,
-          grpc_services,
-          scalapb_runtime_grpc,
-          scalapb_runtime,
-          log4j_core,
-          log4j_api,
-          flyway excludeAll (ExclusionRule("org.apache.logging.log4j")),
-          h2,
-          tink,
-          slick,
-          slick_hikaricp,
-          testcontainers % Test,
-          testcontainers_postgresql % Test,
           postgres,
-          sttp,
-          sttp_okhttp,
-          sttp_circe,
-          monocle_macro, // Include it here, even if unused, so that it can be used everywhere
           pprint,
-          pureconfig, // Only dependencies may be needed, but it is simplest to include it like this
-          dropwizard_metrics_core,
-          prometheus_dropwizard, // Include it here to overwrite transitive dependencies by DAML libraries
-          prometheus_httpserver, // Include it here to overwrite transitive dependencies by DAML libraries
-          prometheus_hotspot, // Include it here to overwrite transitive dependencies by DAML libraries
-          opentelemetry_api,
-          opentelemetry_sdk,
-          opentelemetry_sdk_autoconfigure,
-          opentelemetry_instrumentation_grpc,
-          opentelemetry_zipkin,
-          opentelemetry_jaeger,
           scaffeine,
-          aws_kms,
+          slick_hikaricp,
         ),
-        dependencyOverrides ++= Seq(log4j_core, log4j_api),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
@@ -667,7 +665,6 @@ object BuildCommon {
             "ScalaPB-Options-Proto" -> "com/digitalasset/canton/scalapb/package.proto"
           )
         ),
-        Compile / PB.protoSources ++= (Test / PB.protoSources).value,
         buildInfoKeys := Seq[BuildInfoKey](
           version,
           scalaVersion,
@@ -690,6 +687,75 @@ object BuildCommon {
             |com\.digitalasset\.canton\.protobuf\..*
       """
         ),
+        addProtobufFilesToHeaderCheck(Compile),
+      )
+
+    lazy val `community-common` = project
+      .in(file("community/common"))
+      .enablePlugins(DamlPlugin)
+      .dependsOn(
+        blake2b,
+        `akka-fork`,
+        `community-base`,
+        `community-testing` % Test,
+        `wartremover-extension` % "compile->compile;test->test",
+        `ledger-common`,
+        `util-external` % "compile->compile;test->test",
+        `util-internal` % "compile->compile;test->test",
+      )
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
+          logback_classic,
+          logback_core,
+          scala_logging,
+          scala_collection_contrib,
+          scalatest % Test,
+          scalacheck % Test,
+          scalatestScalacheck % Test,
+          cats_scalacheck % Test,
+          mockito_scala % Test,
+          scalatestMockito % Test,
+          cats_law % Test,
+          circe_generic_extras,
+          jul_to_slf4j % Test,
+          grpc_netty,
+          netty_native,
+          netty_native_s390,
+          grpc_services,
+          scalapb_runtime_grpc,
+          scalapb_runtime,
+          log4j_core,
+          log4j_api,
+          flyway excludeAll (ExclusionRule("org.apache.logging.log4j")),
+          h2,
+          tink,
+          slick,
+          testcontainers % Test,
+          testcontainers_postgresql % Test,
+          sttp,
+          sttp_okhttp,
+          sttp_circe,
+          monocle_macro, // Include it here, even if unused, so that it can be used everywhere
+          pureconfig, // Only dependencies may be needed, but it is simplest to include it like this
+          dropwizard_metrics_core,
+          prometheus_dropwizard, // Include it here to overwrite transitive dependencies by DAML libraries
+          prometheus_httpserver, // Include it here to overwrite transitive dependencies by DAML libraries
+          prometheus_hotspot, // Include it here to overwrite transitive dependencies by DAML libraries
+          opentelemetry_api,
+          opentelemetry_sdk,
+          opentelemetry_sdk_autoconfigure,
+          opentelemetry_instrumentation_grpc,
+          opentelemetry_zipkin,
+          opentelemetry_jaeger,
+          aws_kms,
+        ),
+        dependencyOverrides ++= Seq(log4j_core, log4j_api),
+        Compile / PB.targets := Seq(
+          scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
+        ),
+        Compile / PB.protoSources ++= (Test / PB.protoSources).value,
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "CantonExamples",
@@ -697,7 +763,6 @@ object BuildCommon {
             "com.digitalasset.canton.examples",
           )
         ),
-        addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -707,6 +772,7 @@ object BuildCommon {
       .dependsOn(
         `community-common` % "compile->compile;test->test",
         `akka-fork`,
+        `community-testing` % Test,
       )
       .settings(
         sharedCantonSettings,
@@ -748,10 +814,10 @@ object BuildCommon {
       .in(file("community/participant"))
       .dependsOn(
         `community-common` % "compile->compile;test->test",
-        DamlProjects.`daml-copy-common`,
-        DamlProjects.`daml-copy-participant`,
+        `community-testing` % Test,
+        `ledger-common`,
+        `ledger-api-core`,
         DamlProjects.`daml-copy-testing` % "test",
-        DamlProjects.`daml-copy-testing` % "test->test",
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -802,6 +868,58 @@ object BuildCommon {
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    lazy val `community-testing` = project
+      .in(file("community/testing"))
+      .disablePlugins(WartRemover)
+      .dependsOn(
+        `community-base`,
+        DamlProjects.`daml-copy-common`,
+        DamlProjects.`daml-copy-testing`,
+      )
+      .settings(
+        sharedSettings,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+        libraryDependencies ++= Seq(
+          better_files,
+          cats,
+          cats_law,
+          jul_to_slf4j,
+          mockito_scala,
+          opentelemetry_api,
+          scalatest,
+          scalatestScalacheck,
+        ),
+
+        // This library contains a lot of testing helpers that previously existing in testing scope
+        // As such, in order to minimize the diff when creating this library, the same rules that
+        // applied to `test` scope are used here. This can be reviewed in the future.
+        scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
+        Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
+      )
+
+    lazy val `community-integration-testing` = project
+      .in(file("community/integration-testing"))
+      .dependsOn(
+        `community-app-base`,
+        `community-testing`,
+      )
+      .settings(
+        sharedCantonSettings,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+
+        // The dependency override is needed because `community-testing` depends transitively on
+        // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
+        // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
+        // runtime errors while testing and none have been found so far, so this should be fine for now
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+
+        // This library contains a lot of testing helpers that previously existing in testing scope
+        // As such, in order to minimize the diff when creating this library, the same rules that
+        // applied to `test` scope are used here. This can be reviewed in the future.
+        scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
+        Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
       )
 
     // Project for specifying the sequencer driver API
@@ -880,8 +998,10 @@ object BuildCommon {
         Compile / packageBin := Def.task {
           val src = (`sequencer-driver-api` / assembly).value.toPath
           val dest = (Compile / packageBin / artifactPath).value.toPath
-          Files.deleteIfExists(dest)
-          Files.copy(src, dest).toFile()
+          Files.createDirectories(dest.getParent())
+          Files
+            .copy(src, dest, StandardCopyOption.REPLACE_EXISTING)
+            .toFile()
         }.value,
         Compile / packageSrc := Def.task {
           val src = (`sequencer-driver-api` / Compile / packageSrc).value.toPath
@@ -1011,28 +1131,192 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
+    lazy val `ledger-common` = project
+      .in(file("community/ledger/ledger-common"))
+      .dependsOn(
+        DamlProjects.`daml-copy-macro`,
+        DamlProjects.`daml-copy-protobuf`,
+        DamlProjects.`daml-copy-protobuf-java`,
+        DamlProjects.`daml-copy-common`,
+        DamlProjects.`daml-copy-testing` % "test",
+      )
+      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
+      .settings(
+        sharedSettings,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        Compile / PB.targets := Seq(
+          PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
+          scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf",
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        libraryDependencies ++= Seq(
+          dropwizard_metrics_core,
+          opentelemetry_api,
+          akka_stream,
+          slf4j_api,
+          grpc_api,
+          reflections,
+          grpc_netty,
+          netty_boring_ssl, // This should be a Runtime dep, but needs to be declared at Compile scope due to https://github.com/sbt/sbt/issues/5568
+          netty_handler,
+          caffeine,
+          scalapb_runtime,
+          scalapb_runtime_grpc,
+          awaitility % Test,
+          logback_classic % Test,
+          scalatest % Test,
+          mockito_scala % Test,
+          scalatestMockito % Test,
+          akka_stream_testkit % Test,
+          scalacheck % Test,
+          opentelemetry_sdk_testing % Test,
+          scalatestScalacheck % Test,
+        ),
+        Test / fork := true,
+        Test / testForkedParallel := true,
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    // The TlsCertificateRevocationCheckingSpec relies on the "com.sun.net.ssl.checkRevocation" system variable to
+    // function properly. However, if another test (e.g. TlsSpec) modifies this variable, the change will not be
+    // realized. This happens since java.sun.security.validator.PKIXValidator uses a static variable that is initialized
+    // by the system variable "com.sun.net.ssl.checkRevocation". To ensure that the test runs correctly it needs to be
+    // executed in its own JVM instance that is isolated from other tests.
+    def separateRevocationTest(tests: Seq[TestDefinition]): Seq[Group] =
+      tests groupBy (_.name.contains("TlsCertificateRevocationCheckingSpec")) map {
+        case (true, tests) =>
+          // enable when debugging ocsp tests
+          // val debugOptions = ForkOptions().withRunJVMOptions(Vector("-Djava.security.debug=certpath ocsp"))
+          val options = ForkOptions()
+          new Group("TlsCertificateRevocationCheckingSpec", tests, SubProcess(options))
+        case (false, tests) =>
+          new Group("rest", tests, SubProcess(ForkOptions()))
+      } toSeq
+
+    lazy val `ledger-api-core` = project
+      .in(file("community/ledger/ledger-api-core"))
+      .dependsOn(
+        `ledger-common` % "compile->compile;test->test",
+        `community-base`,
+      )
+      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
+      .settings(
+        sharedSettings,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        Compile / PB.targets := Seq(
+          scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf"
+        ),
+        libraryDependencies ++= Seq(
+          auth0_java,
+          auth0_jwks,
+          circe_core,
+          netty_boring_ssl,
+          netty_handler,
+          hikaricp,
+          guava,
+          dropwizard_metrics_core,
+          bouncycastle_bcprov_jdk15on % Test,
+          bouncycastle_bcpkix_jdk15on % Test,
+          scalaz_scalacheck % Test,
+          grpc_netty,
+          grpc_services,
+          grpc_protobuf,
+          postgres,
+          h2,
+          flyway,
+          oracle,
+          anorm,
+          scalapb_runtime_grpc,
+          scalapb_json4s % Test,
+          scalapb_runtime,
+          testcontainers % Test,
+          testcontainers_postgresql % Test,
+        ),
+        Test / parallelExecution := true,
+        Test / fork := false,
+        Test / testGrouping := separateRevocationTest((Test / definedTests).value),
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    lazy val `ledger-api-tools` = project
+      .in(file("community/ledger/ledger-api-tools"))
+      .dependsOn(
+        `ledger-api-core`,
+        DamlProjects.`daml-copy-testing`, // for testing metrics dependency
+      )
+      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
+      .settings(
+        sharedSettings,
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    // TODO(#12060) This sbt project relies on the deprecated Sandbox-on-X sources
+    //              for ensuring test coverage only.
+    //              Once a Canton-based SandboxFixture is available,
+    //              use it to run the integration tests in this module
+    //              and remove the sandbox-on-x sources.
+    lazy val `ledger-api-it` = project
+      .in(file("community/ledger/ledger-api-it"))
+      .dependsOn(`ledger-api-core` % "test->test")
+      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
+      .settings(
+        sharedSettings,
+        libraryDependencies ++= Seq(
+          lihaoyi_sourcecode % Test, // Needed by integration tests in Sandbox-on-X
+          better_files % Test, // Needed by integration tests in Sandbox-on-X
+          circe_core % Test, // Needed by integration tests in Sandbox-on-X
+          circe_generic % Test, // Needed by integration tests in Sandbox-on-X
+          circe_generic_extras % Test, // Needed by integration tests in Sandbox-on-X
+        ),
+        Test / parallelExecution := true,
+        Test / fork := true,
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    lazy val `ledger-api-string-interning-benchmark` = project
+      .in(file("community/ledger/ledger-api-string-interning-benchmark"))
+      .enablePlugins(JmhPlugin)
+      .dependsOn(`ledger-api-core`)
+      .settings(
+        sharedSettings,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+        Test / parallelExecution := true,
+        Test / fork := false,
+      )
   }
 
   object DamlProjects {
+
+    import CommunityProjects.`community-base`
 
     lazy val damlFolder = Def.setting((ThisBuild / baseDirectory).value / "daml")
 
     lazy val allProjects = Set(
       `daml-copy-macro`,
-      `daml-fork`,
       `daml-copy-protobuf`,
       `daml-copy-protobuf-java`,
       `google-common-protos-scala`,
       `daml-copy-common`,
+      `daml-copy-common-0`,
+      `daml-copy-common-1`,
+      `daml-copy-common-2`,
+      `daml-copy-common-3`,
+      `daml-copy-common-4`,
+      `daml-copy-common-5`,
       `daml-copy-testing`,
-      `daml-copy-participant`,
+      `daml-copy-testing-0`,
+      `daml-copy-testing-1`,
     )
 
     lazy val removeCompileFlagsForDaml =
       Seq("-Xsource:3", "-deprecation", "-Xfatal-warnings", "-Ywarn-unused", "-Ywarn-value-discard")
 
     lazy val `daml-copy-macro` = project
-      .in(file("community/lib/daml-copy-marco"))
+      .in(file("community/lib/daml-copy-macro"))
       .disablePlugins(
         ScalafixPlugin,
         ScalafmtPlugin,
@@ -1068,12 +1352,14 @@ object BuildCommon {
         scalacOptions --= removeCompileFlagsForDaml,
         sharedSettings,
         dependencyOverrides ++= Seq(),
+        // Intellij bug for breaking code dependencies for visual compiler involves non-root common ancestor of
+        // referred unmanaged source directories, which is resolved by isolating these directories via symlinks.
         Compile / PB.protoSources ++= Seq(
-          "daml-lf/archive/src/main/protobuf",
-          "daml-lf/transaction/src/main/protobuf",
-        ).map(f => damlFolder.value / f),
+          "community/lib/daml-copy-protobuf-java/protobuf-daml-symlinks/archive",
+          "community/lib/daml-copy-protobuf-java/protobuf-daml-symlinks/transaction",
+        ).map(file),
         Compile / PB.targets := Seq(
-          PB.gens.java -> (Compile / sourceManaged).value
+          PB.gens.java(PB.protocVersion.value) -> (Compile / sourceManaged).value
         ),
         coverageEnabled := false,
         // skip header check
@@ -1127,6 +1413,8 @@ object BuildCommon {
           grpc_services % "protobuf",
           google_common_protos % "protobuf",
           google_common_protos,
+          google_protobuf_java,
+          google_protobuf_java_util,
         ),
       )
 
@@ -1146,9 +1434,7 @@ object BuildCommon {
         // are copied by sbt to the target directory
         excludeFilter := HiddenFileFilter || "*.bazel" || "scalapb.proto",
         Compile / PB.protoSources ++= Seq(
-          "ledger-api/grpc-definitions",
-          "ledger/participant-integration-api/src/main/protobuf",
-          "ledger/ledger-configuration/protobuf",
+          "ledger-api/grpc-definitions"
         ).map(f => damlFolder.value / f),
         Compile / PB.targets := Seq(
           // build java codegen too
@@ -1169,9 +1455,14 @@ object BuildCommon {
         ),
       )
 
-    lazy val `daml-copy-common` = project
-      .in(file("community/lib/daml-copy-common"))
+    // Intellij bug for breaking code dependencies for visual compiler involves sbt project with unmanaged source
+    // directories, which contain code, that depend on each other. This is resolved by splitting up source folders
+    // amongst a sequence of sbt projects so, that each separate sbt project contains only unmanaged source folders,
+    // which depend exclusively on external code and libraries.
+    lazy val `daml-copy-common-0` = project
+      .in(file("community/lib/daml-copy-common-0"))
       .dependsOn(`daml-copy-macro`, `daml-copy-protobuf`, `daml-copy-protobuf-java`)
+      .enablePlugins(BuildInfoPlugin)
       .disablePlugins(
         ScalafixPlugin,
         ScalafmtPlugin,
@@ -1204,65 +1495,70 @@ object BuildCommon {
           grpc_netty,
           scalapb_runtime_grpc,
           spray,
-          caffeine,
           cats,
           apache_commons_text,
           typelevel_paiges,
           commons_io,
           commons_codec,
           pureconfig,
+          auth0_java,
+          auth0_jwks,
+          scala_logging,
         ),
-        dependencyOverrides ++= Seq(),
         Compile / unmanagedSourceDirectories ++=
           Seq(
-            "observability/metrics/src/main/scala",
-            "observability/tracing/src/main/scala",
-            "observability/telemetry/src/main/scala",
-            "libs-scala/concurrent/src/main/scala",
-            "libs-scala/executors/src/main/scala",
-            "libs-scala/resources/src/main/2.13",
-            "libs-scala/resources/src/main/scala",
-            "libs-scala/resources-akka/src/main/scala",
-            "libs-scala/resources-grpc/src/main/scala",
-            "libs-scala/contextualized-logging/src/main/scala",
-            "libs-scala/grpc-utils/src/main/scala",
-            "libs-scala/logging-entries/src/main/scala",
-            "libs-scala/timer-utils/src/main/scala",
-            "libs-scala/nonempty/src/main/scala",
-            "libs-scala/nonempty-cats/src/main/scala",
-            "libs-scala/scala-utils/src/main/scala",
-            "libs-scala/safe-proto/src/main/scala",
-            "libs-scala/crypto/src/main/scala",
-            "libs-scala/build-info/src/main/scala",
-            "ledger-api/rs-grpc-bridge/src/main/java",
-            "ledger-api/rs-grpc-akka/src/main/scala",
-            "ledger/metrics/src/main/scala",
-            "libs-scala/ledger-resources/src/main/scala",
-            "ledger/error/src/main/scala",
-            "ledger/ledger-offset/src/main/scala",
-            "ledger/ledger-grpc/src/main/scala",
-            "ledger/caching/src/main/scala",
-            "ledger/ledger-api-domain/src/main/scala",
-            // used by ledger-api-errors
-            "ledger/participant-state/src/main/scala",
-            "ledger/ledger-api-errors/src/main/scala",
-            // used by participant state
-            "ledger/ledger-configuration/src/main/scala",
-            // used by ledger-api-common
-            "ledger/ledger-api-health/src/main/scala",
-            // depends on ledger-api-errors, needed for community-common/tls
-            "ledger/ledger-api-common/src/main/scala",
-            "language-support/scala/bindings/src/main/scala",
+            // 0
             "language-support/scala/bindings/src/main/2.13",
-            // used by engine
-            "daml-lf/archive/src/main/scala",
-            "daml-lf/data/src/main/scala",
-            "daml-lf/language/src/main/scala",
-            "daml-lf/transaction/src/main/scala",
-            // used by daml-error
-            "daml-lf/engine/src/main/scala",
-            "daml-lf/interpreter/src/main/scala",
-            "daml-lf/validation/src/main/scala",
+            "ledger-api/rs-grpc-bridge/src/main/java",
+            "libs-scala/build-info/src/main/scala",
+            "libs-scala/concurrent/src/main/scala",
+            "libs-scala/grpc-utils/src/main/scala", // (ledger-api/grpc-definitions:ledger_api_proto_scala)
+            "libs-scala/jwt/src/main/scala",
+            "libs-scala/logging-entries/src/main/scala",
+            "libs-scala/ports/src/main/scala",
+            "libs-scala/resources/src/main/2.13",
+            "libs-scala/safe-proto/src/main/scala",
+            "libs-scala/scala-utils/src/main/scala",
+            "libs-scala/struct-json/struct-spray-json/src/main/scala",
+            "libs-scala/timer-utils/src/main/scala",
+            "observability/tracing/src/main/scala",
+          ).map(f => damlFolder.value / f),
+        Compile / unmanagedSourceDirectories ++= Seq(
+          (ThisBuild / baseDirectory).value / "community/lib/daml-copy-common/src/main/scala"
+        ),
+        // TODO(#12335) Move and rename the Ledger API version file into the current scope
+        Compile / unmanagedResources += damlFolder.value / "ledger-api/VERSION",
+        buildInfoPackage := "com.daml",
+        buildInfoObject := "SdkVersion",
+        buildInfoKeys := Seq[BuildInfoKey](
+          "sdkVersion" -> Dependencies.daml_libraries_version,
+          "mvnVersion" -> Dependencies.daml_libraries_version,
+        ),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+      )
+
+    lazy val `daml-copy-common-1` = project
+      .in(file("community/lib/daml-copy-common-1"))
+      .dependsOn(`daml-copy-common-0`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      ) // to accommodate different daml repo coding style
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            // 1
+            "ledger-api/rs-grpc-akka/src/main/scala", // (ledger-api/rs-grpc-bridge)
+            "libs-scala/contextualized-logging/src/main/scala", // (libs-scala/grpc-utils, libs-scala/logging-entries)
+            "libs-scala/crypto/src/main/scala", // (libs-scala/scala-utils)
+            "libs-scala/nonempty/src/main/scala", // (libs-scala/scala-utils)
+            "observability/metrics/src/main/scala", // (libsscala/concurrent,buildinfo,scalautils)
           ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
@@ -1270,8 +1566,132 @@ object BuildCommon {
         headerResources / excludeFilter := HiddenFileFilter || "*",
       )
 
-    lazy val `daml-copy-testing` = project
-      .in(file("community/lib/daml-copy-testing"))
+    lazy val `daml-copy-common-2` = project
+      .in(file("community/lib/daml-copy-common-2"))
+      .dependsOn(`daml-copy-common-1`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      ) // to accommodate different daml repo coding style
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            // 2
+            "daml-lf/data/src/main/scala", // (libs-scala/crypto, libs-scala/logging-entries, libs-scala/scala-utils)
+            "libs-scala/executors/src/main/scala", // (observability/metrics,libs-scala/scala-utils)
+            "libs-scala/nonempty-cats/src/main/scala", // (libs-scala/nonempty, libs-scala/scala-utils)
+            "libs-scala/resources/src/main/scala", // (libs-scala/contextualized-logging, libs-scala/resources/src/main/2.13)
+          ).map(f => damlFolder.value / f),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+      )
+
+    lazy val `daml-copy-common-3` = project
+      .in(file("community/lib/daml-copy-common-3"))
+      .dependsOn(`daml-copy-common-2`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      ) // to accommodate different daml repo coding style
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            // 3
+            "daml-lf/language/src/main/scala", // (daml-lf/data, libs-scala/nameof)
+            "language-support/scala/bindings/src/main/scala", // (ledger-api/grpc-definitions:ledger_api_proto_scala, daml-lf/data, language-support/scala/bindings/src/main/2.13)
+            "libs-scala/resources-grpc/src/main/scala", // (libs-scala/resources)
+            "libs-scala/resources-akka/src/main/scala", // (libs-scala/resources)
+          ).map(f => damlFolder.value / f),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+      )
+
+    lazy val `daml-copy-common-4` = project
+      .in(file("community/lib/daml-copy-common-4"))
+      .dependsOn(`daml-copy-common-3`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      ) // to accommodate different daml repo coding style
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            // 4
+            "daml-lf/archive/src/main/scala", // (daml-lf/data, daml-lf/language, libs-scala/crypto, libs-scala/nameof, libs-scala/scala-utils)
+            "daml-lf/transaction/src/main/scala", // (daml-lf/data, daml-lf/language, libs-scala/crypto, libs-scala/nameof, libs-scala/safe-proto, libs-scala/scala-utils)
+            "daml-lf/validation/src/main/scala", // (daml-lf/data, daml-lf/language, libs-scala/scala-utils)
+            "libs-scala/ledger-resources/src/main/scala", // (libs-scala/resources, libs-scala/resources-akka, libs-scala/resources-grpc)
+          ).map(f => damlFolder.value / f),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+      )
+
+    lazy val `daml-copy-common-5` = project
+      .in(file("community/lib/daml-copy-common-5"))
+      .dependsOn(`daml-copy-common-4`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      ) // to accommodate different daml repo coding style
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            // 5
+            "daml-lf/interpreter/src/main/scala", // (daml-lf/data, daml-lf/language, daml-lf/transaction, daml-lf/validation, libs-scala/contextualized-logging, libs-scala/nameof, libs-scala/scala-utils)
+            "observability/telemetry/src/main/scala", // (libs-scala/resources,ledger-resources)
+          ).map(f => damlFolder.value / f),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+      )
+
+    lazy val `daml-copy-common` = project
+      .in(file("community/lib/daml-copy-common"))
+      .dependsOn(`daml-copy-common-5`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      ) // to accommodate different daml repo coding style
+      .settings(
+        scalacOptions --= removeCompileFlagsForDaml,
+        sharedSettings,
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            // 6
+            "daml-lf/engine/src/main/scala" // (daml-lf/data, daml-lf/interpreter, daml-lf/language, daml-lf/transaction, daml-lf/validation, libs-scala/contextualized-logging, libs-scala/nameof, libs-scala/scala-utils)
+          ).map(f => damlFolder.value / f),
+        coverageEnabled := false,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
+      )
+
+    // Intellij bug for breaking code dependencies for visual compiler involves sbt project with unmanaged source
+    // directories, which contain code, that depend on each other. This is resolved by splitting up source folders
+    // amongst a sequence of sbt projects so, that each separate sbt project contains only unmanaged source folders,
+    // which depend exclusively on external code and libraries.
+    lazy val `daml-copy-testing-0` = project
+      .in(file("community/lib/daml-copy-testing-0"))
       .dependsOn(`daml-copy-common`)
       .disablePlugins(
         ScalafixPlugin,
@@ -1296,28 +1716,54 @@ object BuildCommon {
           lihaoyi_sourcecode,
           logback_classic,
           logback_core,
+          opentelemetry_sdk_testing,
+          scalatestScalacheck,
+          awaitility,
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
-            "observability/metrics/src/test/lib/scala",
-            "libs-scala/test-evidence/generator/src/main/scala",
-            "libs-scala/test-evidence/scalatest/src/main/scala",
-            "libs-scala/test-evidence/tag/src/main/scala",
             "daml-lf/api-type-signature/src/main/scala",
-            "daml-lf/interface/src/main/scala",
+            "daml-lf/archive/encoder/src/main/scala", // Needed by participant-integration-api
             "daml-lf/data-scalacheck/src/main/scala",
+            "daml-lf/encoder/src/main/scala", // Needed by participant-integration-api
+            "daml-lf/parser/src/main/scala", // Needed by participant-integration-api
             "daml-lf/transaction-test-lib/src/main/scala",
-            "observability/metrics/src/test/lib/scala",
+            "ledger-api/rs-grpc-testing-utils/src/main/scala",
+            "ledger-api/testing-utils/src/main/scala",
+            "libs-scala/adjustable-clock/src/main/scala", // Used by ledger-api-auth
+            "libs-scala/fs-utils/src/main/scala",
+            "libs-scala/scalatest-utils/src/main/scala", // Needed by participant-integration-api
+            "libs-scala/test-evidence/tag/src/main/scala",
             "test-common/src/main/scala",
           ).map(f => damlFolder.value / f),
+        // Intellij bug for breaking code dependencies for visual compiler involves non-root common ancestor of
+        // referred unmanaged source directories, which is resolved by isolating these directories via symlinks.
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            "community/lib/daml-copy-testing-0/rs-grpc-bridge-test-symlink/java", // Needed by participant-integration-api
+            "community/lib/daml-copy-testing-0/ledger-resources-test-symlink/scala", // Needed by participant-integration-api
+            "community/lib/daml-copy-testing-0/observability-metrics-test-symlink/scala",
+            "community/lib/daml-copy-testing-0/observability-tracing-test-symlink/scala",
+          ).map(file),
+        // Intellij bug for breaking code dependencies for visual compiler involves non-root common ancestor of
+        // referred unmanaged source directories, which is resolved by isolating these directories via symlinks.
+        Compile / PB.protoSources ++= Seq(
+          file("community/lib/daml-copy-testing-0/protobuf-daml-symlinks/ledger-api-sample-service")
+        ),
+        Compile / PB.targets := Seq(
+          scalapb.gen(flatPackage =
+            false // consistent with upstream daml
+          ) -> (Compile / sourceManaged).value / "protobuf"
+        ),
         coverageEnabled := false,
         // skip header check
         headerSources / excludeFilter := HiddenFileFilter || "*",
         headerResources / excludeFilter := HiddenFileFilter || "*",
       )
-    lazy val `daml-copy-participant` = project
-      .in(file("community/lib/daml-copy-participant"))
-      .dependsOn(`daml-copy-common`)
+
+    lazy val `daml-copy-testing-1` = project
+      .in(file("community/lib/daml-copy-testing-1"))
+      .dependsOn(`daml-copy-testing-0`)
       .disablePlugins(
         ScalafixPlugin,
         ScalafmtPlugin,
@@ -1326,42 +1772,10 @@ object BuildCommon {
       .settings(
         sharedSettings,
         scalacOptions --= removeCompileFlagsForDaml,
-        libraryDependencies ++= Seq(
-          auth0_java,
-          auth0_jwks,
-          scala_logging,
-          hikaricp,
-          guava,
-          dropwizard_metrics_core,
-          grpc_netty,
-          grpc_services,
-          grpc_protobuf,
-          postgres,
-          h2,
-          flyway,
-          oracle,
-          anorm,
-          scalapb_json4s,
-          reflections,
-        ),
-        Compile / unmanagedResourceDirectories ++= Seq(
-          damlFolder.value / "ledger/participant-integration-api/src/main/resources"
-        ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
-            "ledger/participant-local-store/src/main/scala",
-            "ledger/ledger-api-auth/src/main/scala",
-            "libs-scala/ports/src/main/scala",
-            "libs-scala/build-info/src/main/scala",
-            "libs-scala/jwt/src/main/scala",
-            "libs-scala/struct-json/struct-spray-json/src/main/scala",
-            "ledger/ledger-api-client/src/main/scala",
-            "ledger/ledger-api-auth-client/src/main/java",
-            "ledger/caching/src/main/scala",
-            "ledger/participant-state-index/src/main/scala",
-            "ledger/participant-state-metrics/src/main/scala",
-            "ledger/participant-integration-api/src/main/scala",
-            "ledger/error/generator/lib/src/main/scala",
+            "ledger-api/sample-service/src/main/scala", // Needed by participant-integration-api
+            "libs-scala/test-evidence/scalatest/src/main/scala",
           ).map(f => damlFolder.value / f),
         coverageEnabled := false,
         // skip header check
@@ -1369,22 +1783,32 @@ object BuildCommon {
         headerResources / excludeFilter := HiddenFileFilter || "*",
       )
 
-    lazy val `daml-fork` = project
-      .in(file("community/lib/daml"))
-      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
+    lazy val `daml-copy-testing` = project
+      .in(file("community/lib/daml-copy-testing"))
+      .dependsOn(`daml-copy-testing-1`)
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      ) // to accommodate different daml repo coding style
       .settings(
         sharedSettings,
-        libraryDependencies ++= Seq(),
-        dependencyOverrides ++= Seq(log4j_core, log4j_api),
-        Compile / PB.targets := Seq(
-          scalapb.gen(flatPackage =
-            false // consistent with upstream daml
-          ) -> (Compile / sourceManaged).value / "protobuf"
-        ),
+        scalacOptions --= removeCompileFlagsForDaml,
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            "libs-scala/test-evidence/generator/src/main/scala"
+          ).map(f => damlFolder.value / f),
+        // Intellij bug for breaking code dependencies for visual compiler involves non-root common ancestor of
+        // referred unmanaged source directories, which is resolved by isolating these directories via symlinks.
+        Compile / unmanagedSourceDirectories ++=
+          Seq(
+            "community/lib/daml-copy-testing/rs-grpc-akka-test-symlink/scala", // Needed by participant-integration-api
+            "community/lib/daml-copy-testing/sample-service-test-symlink/scala", // Needed by participant-integration-api
+          ).map(file),
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        // skip header check
+        headerSources / excludeFilter := HiddenFileFilter || "*",
+        headerResources / excludeFilter := HiddenFileFilter || "*",
       )
-
   }
-
 }

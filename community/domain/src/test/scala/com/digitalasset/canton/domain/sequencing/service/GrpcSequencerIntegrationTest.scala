@@ -34,12 +34,14 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   ProtocolMessageV0,
   ProtocolMessageV1,
+  UnsignedProtocolMessageV2,
 }
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
   TestDomainParameters,
   v0 as protocolV0,
   v1 as protocolV1,
+  v2 as protocolV2,
 }
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client.*
@@ -50,7 +52,7 @@ import com.digitalasset.canton.sequencing.{
   OrdinaryApplicationHandler,
   SerializedEventHandler,
 }
-import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
+import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{DomainTimeTracker, SimClock}
 import com.digitalasset.canton.topology.*
@@ -73,7 +75,7 @@ import org.scalatest.wordspec.FixtureAnyWordSpec
 import scala.concurrent.*
 import scala.concurrent.duration.*
 
-case class Env(loggerFactory: NamedLoggerFactory)(implicit
+final case class Env(loggerFactory: NamedLoggerFactory)(implicit
     ec: ExecutionContextExecutor,
     tracer: Tracer,
     traceContext: TraceContext,
@@ -159,6 +161,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
       sequencerSubscriptionFactory,
       domainParamsLookup,
       params,
+      BaseTest.testedProtocolVersion,
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,
@@ -217,7 +220,6 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   val client = Await
     .result(
       SequencerClient(
-        connection,
         domainId,
         DefaultTestIdentities.sequencer,
         cryptoApi,
@@ -245,13 +247,21 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         sequencedEventStore,
         sendTrackerStore,
         new RequestSigner {
-          override def signRequest[A <: ProtocolVersionedMemoizedEvidence](
+          override def signRequest[A <: HasCryptographicEvidence](
               request: A,
               hashPurpose: HashPurpose,
           )(implicit ec: ExecutionContext, traceContext: TraceContext)
               : EitherT[Future, String, SignedContent[A]] =
-            EitherT.rightT(SignedContent(request, SymbolicCrypto.emptySignature, None))
+            EitherT.rightT(
+              SignedContent(
+                request,
+                SymbolicCrypto.emptySignature,
+                None,
+                BaseTest.testedProtocolVersion,
+              )
+            )
         },
+        connection,
       ).value,
       10.seconds,
     )
@@ -375,7 +385,8 @@ class GrpcSequencerIntegrationTest
   private case object MockProtocolMessage
       extends ProtocolMessage
       with ProtocolMessageV0
-      with ProtocolMessageV1 {
+      with ProtocolMessageV1
+      with UnsignedProtocolMessageV2 {
     // no significance to this payload, just need anything valid and this was the easiest to construct
     private val payload =
       protocolV0.SignedProtocolMessage(
@@ -396,5 +407,8 @@ class GrpcSequencerIntegrationTest
       protocolV1.EnvelopeContent(
         protocolV1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
       )
+
+    override def toProtoSomeEnvelopeContentV2: protocolV2.EnvelopeContent.SomeEnvelopeContent =
+      protocolV2.EnvelopeContent.SomeEnvelopeContent.Empty
   }
 }

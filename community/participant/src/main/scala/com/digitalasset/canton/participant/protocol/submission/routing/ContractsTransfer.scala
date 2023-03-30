@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.LfWorkflowId
 import com.digitalasset.canton.data.TransferSubmitterMetadata
+import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.routing.ContractsTransfer.TransferArgs
@@ -45,6 +45,7 @@ private[routing] class ContractsTransfer(
               lfParty,
               submitterInfo.applicationId,
               submittingParticipant.toLf,
+              submitterInfo.commandId,
               submitterInfo.submissionId,
             ),
             workflowId = None,
@@ -132,7 +133,7 @@ private[routing] class ContractsTransfer(
 }
 
 private[routing] object ContractsTransfer {
-  case class TransferArgs(
+  final case class TransferArgs(
       sourceDomain: DomainId,
       targetDomain: DomainId,
       submitterMetadata: TransferSubmitterMetadata,

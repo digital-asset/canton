@@ -6,12 +6,14 @@ package com.digitalasset.canton.domain.initialization
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.DomainTimeTrackerConfig
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.DomainNodeParameters
 import com.digitalasset.canton.domain.mediator.{MediatorRuntime, MediatorRuntimeFactory}
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.{RequestSigner, SequencerClientFactory}
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.store.{
@@ -20,7 +22,7 @@ import com.digitalasset.canton.store.{
   SequencedEventStore,
   SequencerCounterTrackerStore,
 }
-import com.digitalasset.canton.time.{Clock, DomainTimeTrackerConfig}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -43,6 +45,7 @@ object EmbeddedMediatorInitialization {
       timeTrackerConfig: DomainTimeTrackerConfig,
       storage: Storage,
       sequencerClientFactoryFactory: DomainTopologyClientWithInit => SequencerClientFactory,
+      connection: SequencerConnection,
       metrics: DomainMetrics,
       mediatorFactory: MediatorRuntimeFactory,
       indexedStringStore: IndexedStringStore,
@@ -108,7 +111,8 @@ object EmbeddedMediatorInitialization {
         mediatorId,
         sequencedEventStore,
         sendTrackerStore,
-        RequestSigner(syncCrypto),
+        RequestSigner(syncCrypto, protocolVersion),
+        connection,
       )
       mediatorRuntime <- mediatorFactory
         .create(

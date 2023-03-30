@@ -70,7 +70,7 @@ object PruningServiceError extends PruningServiceErrorGroup {
   )
   object NonCantonOffset
       extends ErrorCode(id = "NON_CANTON_OFFSET", ErrorCategory.InvalidIndependentOfSystemState) {
-    case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "Offset length does not match ledger standard of 9 bytes"
         )
@@ -85,7 +85,7 @@ object PruningServiceError extends PruningServiceErrorGroup {
         // TODO(#5990) According to the WriteParticipantPruningService, this should give the status code UNIMPLEMENTED. Introduce a new error category for that!
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Error()(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error()(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "Pruning is only supported in the Enterprise Edition"
         )
@@ -107,7 +107,7 @@ object PruningServiceError extends PruningServiceErrorGroup {
   )
   object UnsafeToPrune
       extends ErrorCode(id = "UNSAFE_TO_PRUNE", ErrorCategory.InvalidGivenCurrentSystemStateOther) {
-    case class Error(_cause: String, reason: String, safe_offset: String)(implicit
+    final case class Error(_cause: String, reason: String, safe_offset: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"Participant cannot prune at specified offset due to ${_cause}"
@@ -126,7 +126,7 @@ object PruningServiceError extends PruningServiceErrorGroup {
         id = "SHUTDOWN_INTERRUPTED_PRUNING",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class Error()(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error()(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "Participant has been pruned only partially due to shutdown."
         )
@@ -140,7 +140,7 @@ object PruningServiceError extends PruningServiceErrorGroup {
         id = "INTERNAL_PRUNING_ERROR",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+    final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = "Internal error such as the inability to write to the database"
         )

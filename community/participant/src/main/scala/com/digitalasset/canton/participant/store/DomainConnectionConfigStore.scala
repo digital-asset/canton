@@ -119,8 +119,8 @@ object DomainConnectionConfigStore {
   }
 
   sealed trait Error extends Serializable with Product
-  case class AlreadyAddedForAlias(alias: DomainAlias) extends Error
-  case class MissingConfigForAlias(alias: DomainAlias) extends Error {
+  final case class AlreadyAddedForAlias(alias: DomainAlias) extends Error
+  final case class MissingConfigForAlias(alias: DomainAlias) extends Error {
     override def toString: String = s"$alias is unknown. Has the domain been registered?"
   }
 

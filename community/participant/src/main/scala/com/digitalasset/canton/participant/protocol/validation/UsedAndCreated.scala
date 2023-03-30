@@ -19,7 +19,7 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
 
 /** @param rootViewsWithSignatures The root views of the projected transaction with their respective signatures */
-case class UsedAndCreated(
+final case class UsedAndCreated(
     rootViewsWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
     contracts: UsedAndCreatedContracts,
     keys: InputAndUpdatedKeys,
@@ -33,7 +33,7 @@ case class UsedAndCreated(
     )
 }
 
-case class UsedAndCreatedContracts(
+final case class UsedAndCreatedContracts(
     witnessedAndDivulged: Map[LfContractId, SerializableContract],
     checkActivenessTxInputs: Set[LfContractId],
     consumedInputsOfHostedStakeholders: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
@@ -79,7 +79,7 @@ trait InputAndUpdatedKeys extends PrettyPrinting {
 }
 
 /** @param keyResolvers The key resolvers for the root views with the given hashes */
-case class InputAndUpdatedKeysV2(
+final case class InputAndUpdatedKeysV2(
     keyResolvers: Map[ViewHash, LfKeyResolver],
     override val uckFreeKeysOfHostedMaintainers: Set[LfGlobalKey],
     override val uckUpdatedKeysOfHostedMaintainers: Map[LfGlobalKey, ContractKeyJournal.Status],
@@ -101,7 +101,7 @@ case class InputAndUpdatedKeysV2(
   )
 }
 
-case class InputAndUpdatedKeysV3(
+final case class InputAndUpdatedKeysV3(
     override val uckFreeKeysOfHostedMaintainers: Set[LfGlobalKey],
     override val uckUpdatedKeysOfHostedMaintainers: Map[LfGlobalKey, ContractKeyJournal.Status],
 ) extends InputAndUpdatedKeys {

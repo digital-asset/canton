@@ -18,16 +18,16 @@ import com.daml.ledger.api.v1.package_service.GetPackageStatusResponse
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.value.Identifier
-import com.daml.ledger.client.LedgerClient
 import com.daml.ledger.client.binding.{Primitive as P}
-import com.daml.ledger.client.configuration.{
+import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
+import com.digitalasset.canton.ledger.client.LedgerClient
+import com.digitalasset.canton.ledger.client.configuration.{
   CommandClientConfiguration,
   LedgerClientChannelConfiguration,
   LedgerClientConfiguration,
   LedgerIdRequirement,
 }
-import com.daml.ledger.client.services.commands.tracker.CompletionResponse
-import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
+import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,

@@ -4,18 +4,21 @@
 package com.digitalasset.canton.participant.config
 
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
-import com.digitalasset.canton.config.{DeprecatedConfigUtils, InitConfigBase}
+import com.digitalasset.canton.config.{
+  DeprecatedConfigUtils,
+  InitConfigBase,
+  NonNegativeFiniteDuration,
+}
 import com.digitalasset.canton.participant.config.ParticipantInitConfig.{
   ParticipantLedgerApiInitConfig,
   ParticipantParametersInitConfig,
 }
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
 
 /** Init configuration specific to participant nodes
   * @param ledgerApi ledgerApi related init config
   * @param parameters participant init config parameters
   */
-case class ParticipantInitConfig(
+final case class ParticipantInitConfig(
     identity: Option[InitConfigBase.Identity] = Some(InitConfigBase.Identity()),
     ledgerApi: ParticipantLedgerApiInitConfig = ParticipantLedgerApiInitConfig(),
     parameters: ParticipantParametersInitConfig = ParticipantParametersInitConfig(),
@@ -40,9 +43,10 @@ object ParticipantInitConfig {
   }
 
   /** Init configuration of the ledger API for participant nodes
-    * * @param maxDeduplicationDuration  Max deduplication duration of the participant's ledger configuration.
+    * @param maxDeduplicationDuration The max deduplication duration reported by the participant's ledger configuration service.
+    *                                 This duration defines a lower bound on the durations that the participant's command and command submission services accept as command deduplication durations.
     */
-  case class ParticipantLedgerApiInitConfig(
+  final case class ParticipantLedgerApiInitConfig(
       maxDeduplicationDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7L)
   )
 
@@ -50,7 +54,7 @@ object ParticipantInitConfig {
     * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
     * @param unsafeEnableCausalityTracking Experimental. Ensures that the event ordering on the participant node is consistent even for cross domain contracts
     */
-  case class ParticipantParametersInitConfig(
+  final case class ParticipantParametersInitConfig(
       uniqueContractKeys: Boolean = true,
       unsafeEnableCausalityTracking: Boolean = false,
   )

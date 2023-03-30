@@ -232,23 +232,23 @@ object SyncDomainMigrationError extends MigrationErrors() {
         "INVALID_DOMAIN_MIGRATION_REQUEST",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    case class SameDomainAlias(domain: DomainAlias)(implicit
+    final case class SameDomainAlias(domain: DomainAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = "Source domain must differ from target domain.")
         with SyncDomainMigrationError
-    case class UnknownSourceDomain(domain: DomainAlias)(implicit
+    final case class UnknownSourceDomain(domain: DomainAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = s"Source domain $domain is unknown.")
         with SyncDomainMigrationError
 
-    case class SourceDomainIdUnknown(source: DomainAlias)(implicit
+    final case class SourceDomainIdUnknown(source: DomainAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"Source domain $source has no domain-id stored: it's completely empty"
         )
         with SyncDomainMigrationError
 
-    case class InvalidDomainConfigStatus(
+    final case class InvalidDomainConfigStatus(
         domain: DomainAlias,
         status: DomainConnectionConfigStore.Status,
     )(implicit
@@ -259,21 +259,25 @@ object SyncDomainMigrationError extends MigrationErrors() {
         )
         with SyncDomainMigrationError
 
-    case class DomainIdAlreadyAssigned(domain: DomainAlias, domainId: DomainId)(implicit
+    final case class DomainIdAlreadyAssigned(domain: DomainAlias, domainId: DomainId)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"The domain id $domainId of the target domain is already assigned to $domain"
         )
         with SyncDomainMigrationError
 
-    case class ExpectedDomainIdsDiffer(alias: DomainAlias, expected: DomainId, remote: DomainId)(
-        implicit val loggingContext: ErrorLoggingContext
+    final case class ExpectedDomainIdsDiffer(
+        alias: DomainAlias,
+        expected: DomainId,
+        remote: DomainId,
+    )(implicit
+        val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"The domain id for $alias was expected to be $expected, but is $remote"
         )
         with SyncDomainMigrationError
 
-    case class SourceAndTargetAreSame(source: DomainId)(implicit
+    final case class SourceAndTargetAreSame(source: DomainId)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"The target domain id needs to be different from the source domain id"
@@ -282,7 +286,7 @@ object SyncDomainMigrationError extends MigrationErrors() {
 
   }
 
-  case class MigrationParentError(domain: DomainAlias, parent: SyncServiceError)(implicit
+  final case class MigrationParentError(domain: DomainAlias, parent: SyncServiceError)(implicit
       val loggingContext: ErrorLoggingContext
   ) extends SyncDomainMigrationError
       with ParentCantonError[SyncServiceError] {
@@ -297,34 +301,34 @@ object SyncDomainMigrationError extends MigrationErrors() {
         "BROKEN_DOMAIN_MIGRATION",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class DuplicateConfig(alias: DomainAlias)(implicit
+    final case class DuplicateConfig(alias: DomainAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"The domain alias $alias was already present, but shouldn't be"
         )
         with SyncDomainMigrationError
-    case class AliasManagerError(err: DomainAliasManager.Error)(implicit
+    final case class AliasManagerError(err: DomainAliasManager.Error)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"Alias manager complained with an unexpected error "
         )
         with SyncDomainMigrationError
 
-    case class FailedReadingAcs(source: DomainAlias, err: AcsError)(implicit
+    final case class FailedReadingAcs(source: DomainAlias, err: AcsError)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"Failed reading the ACS"
         )
         with SyncDomainMigrationError
 
-    case class FailedMigratingContracts(source: DomainAlias, err: String)(implicit
+    final case class FailedMigratingContracts(source: DomainAlias, err: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"Migrating the ACS to the new domain failed unexpectedly!"
         )
         with SyncDomainMigrationError
 
-    case class Generic(reason: String)(implicit
+    final case class Generic(reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"Failure during migration"

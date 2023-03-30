@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.DomainTimeTrackerConfig
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
@@ -12,7 +13,7 @@ import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
   MissingConfigForAlias,
 }
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
-import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.{BaseTest, DomainAlias}
 import com.google.protobuf.ByteString
@@ -36,8 +37,8 @@ trait DomainConnectionConfigStoreTest {
     manualConnect = false,
     Some(domainId),
     42,
-    Some(NonNegativeFiniteDuration.ofSeconds(1)),
-    Some(NonNegativeFiniteDuration.ofSeconds(5)),
+    Some(NonNegativeFiniteDuration.tryOfSeconds(1)),
+    Some(NonNegativeFiniteDuration.tryOfSeconds(5)),
     DomainTimeTrackerConfig(),
   )
 

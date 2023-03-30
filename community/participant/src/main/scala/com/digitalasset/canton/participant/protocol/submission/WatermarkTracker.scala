@@ -151,7 +151,7 @@ class WatermarkTracker[Mark: Pretty](
       traceContext: TraceContext
   ): Future[Unit] = withLock {
     highWatermarkV = ordering.max(highWatermarkV, mark)
-    val promise = SupervisedPromise[Unit]("increase-watermark", futureSupervisor)
+    val promise = new SupervisedPromise[Unit]("increase-watermark", futureSupervisor)
     val previousO = Option(waitForTasksFinishing.put(mark, promise))
     previousO.foreach(_.completeWith(promise.future))
     drainAndNotify()
@@ -186,7 +186,7 @@ class WatermarkTracker[Mark: Pretty](
 object WatermarkTracker {
 
   /** The task's mark is lower than or equal to the high watermark */
-  case class MarkTooLow[A: Pretty](highWatermark: A) extends PrettyPrinting {
+  final case class MarkTooLow[A: Pretty](highWatermark: A) extends PrettyPrinting {
     override def pretty: Pretty[MarkTooLow.this.type] = prettyOfClass(
       param("high watermark", _.highWatermark)
     )

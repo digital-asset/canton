@@ -14,7 +14,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, MediatorId, UniqueIdentifier}
 
-case class InitializeMediatorRequest(
+final case class InitializeMediatorRequest(
     domainId: DomainId,
     mediatorId: MediatorId,
     topologyState: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],

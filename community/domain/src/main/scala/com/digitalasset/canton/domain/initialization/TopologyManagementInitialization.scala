@@ -73,6 +73,7 @@ final case class TopologyManagementComponents(
 }
 
 object TopologyManagementInitialization {
+  val topologySenderHealthName: String = "domain-topology-sender"
 
   def sequenceInitialTopology(
       id: DomainId,
@@ -92,7 +93,7 @@ object TopologyManagementInitialization {
       content <- DomainTopologyTransactionMessage
         .tryCreate(transactions.toList, recentSnapshot, id, protocolVersion)
       batch = domainMembers.map(member =>
-        OpenEnvelope(content, Recipients.cc(member), protocolVersion)
+        OpenEnvelope(content, Recipients.cc(member))(protocolVersion)
       )
       _ = logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
       _ <- SequencerClient.sendWithRetries(
@@ -163,7 +164,8 @@ object TopologyManagementInitialization {
           managerId,
           sequencedEventStore,
           sendTrackerStore,
-          RequestSigner(syncCrypto),
+          RequestSigner(syncCrypto, protocolVersion),
+          sequencerConnection,
         )
       }
       timeTracker = DomainTimeTracker(config.timeTracker, clock, newClient, loggerFactory)
@@ -199,6 +201,7 @@ object TopologyManagementInitialization {
           }
         }
       }
+
       _ <- EitherT.right[String](
         newClient.subscribeTracking(
           topologyManagerSequencerCounterTrackerStore,

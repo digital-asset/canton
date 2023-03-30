@@ -8,12 +8,13 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.config.DomainTimeTrackerConfig
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.admin.v0
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.{
@@ -45,7 +46,7 @@ import java.net.URI
   * @param maxRetryDelay control the backoff parameter such that the retry interval does not grow above this value
   * @param timeTracker the domain time tracker settings. don't change it unless you know what you are doing.
   */
-case class DomainConnectionConfig(
+final case class DomainConnectionConfig(
     domain: DomainAlias,
     sequencerConnection: SequencerConnection,
     manualConnect: Boolean = false,

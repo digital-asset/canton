@@ -229,7 +229,7 @@ object ActiveContractStore {
     def unwrap: Option[DomainId]
     def isTransfer: Boolean
   }
-  case class TransferDetail(domain: DomainId) extends ActivenessChangeDetail {
+  final case class TransferDetail(domain: DomainId) extends ActivenessChangeDetail {
     override def unwrap: Option[DomainId] = Some(domain)
     override def isTransfer: Boolean = true
   }
@@ -255,7 +255,7 @@ object ActiveContractStore {
   trait AcsError extends AcsBaseError
 
   /** A contract is simultaneously created and/or transferred from possibly several source domains */
-  case class SimultaneousActivation(
+  final case class SimultaneousActivation(
       contractId: LfContractId,
       toc: TimeOfChange,
       detail1: ActivenessChangeDetail,
@@ -263,7 +263,7 @@ object ActiveContractStore {
   ) extends AcsWarning
 
   /** A contract is simultaneously archived and/or transferred out to possibly several source domains */
-  case class SimultaneousDeactivation(
+  final case class SimultaneousDeactivation(
       contractId: LfContractId,
       toc: TimeOfChange,
       detail1: ActivenessChangeDetail,
@@ -271,28 +271,28 @@ object ActiveContractStore {
   ) extends AcsWarning
 
   /** The given contract is archived a second time, but with a different time of change. */
-  case class DoubleContractArchival(
+  final case class DoubleContractArchival(
       contractId: LfContractId,
       oldTime: TimeOfChange,
       newTime: TimeOfChange,
   ) extends AcsWarning
 
   /** The given contract is created a second time, but with a different time of change. */
-  case class DoubleContractCreation(
+  final case class DoubleContractCreation(
       contractId: LfContractId,
       oldTime: TimeOfChange,
       newTime: TimeOfChange,
   ) extends AcsWarning
 
   /** The state of a contract is changed before its `creation`. */
-  case class ChangeBeforeCreation(
+  final case class ChangeBeforeCreation(
       contractId: LfContractId,
       creation: TimeOfChange,
       change: TimeOfChange,
   ) extends AcsWarning
 
   /** The state of a contract is changed after its `archival`. */
-  case class ChangeAfterArchival(
+  final case class ChangeAfterArchival(
       contractId: LfContractId,
       archival: TimeOfChange,
       change: TimeOfChange,
@@ -327,7 +327,7 @@ object ActiveContractStore {
     *   <li>The contract is active or archived on any other domain.</li>
     * </ul>
     */
-  case class TransferredAway(targetDomain: DomainId) extends Status {
+  final case class TransferredAway(targetDomain: DomainId) extends Status {
     override def prunable: Boolean = true
     override def pretty: Pretty[TransferredAway] = prettyOfClass(unnamedParam(_.targetDomain))
   }
@@ -399,7 +399,7 @@ trait ActiveContractSnapshot {
 
 object ActiveContractSnapshot {
 
-  case class ActiveContractIdsChange(
+  final case class ActiveContractIdsChange(
       activations: Set[LfContractId],
       deactivations: Set[LfContractId],
   )

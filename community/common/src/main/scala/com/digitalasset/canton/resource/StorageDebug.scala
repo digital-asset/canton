@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicReference
   */
 object StorageDebug {
 
-  case class Argument(pos: Int, typ: String, value: String)
+  final case class Argument(pos: Int, typ: String, value: String)
 
   def extractArguments(builder: SQLActionBuilder): Seq[Argument] = {
     val ex = new ExtractArguments()

@@ -74,7 +74,7 @@ object ParticipantSettingsStore {
     }
   }
 
-  case class Settings(
+  final case class Settings(
       resourceLimits: ResourceLimits = ResourceLimits.default,
       maxDeduplicationDuration: Option[NonNegativeFiniteDuration] = None,
       uniqueContractKeys: Option[Boolean] = None,

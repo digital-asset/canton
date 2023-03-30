@@ -42,7 +42,7 @@ class PingServiceTest
     val bobId = "bob::default"
     val charlieId = "Charlie::default"
 
-    def setupTest(recipients: Set[String], pingTimeoutMs: Long, gracePeriod: Long) = {
+    def setupTest(recipients: Set[String], pingTimeoutMs: Long, gracePeriod: Long, tag: Int) = {
       val submitter = new MockLedgerAcs(logger, alice)
       scheduler = Threading.singleThreadScheduledExecutor("ping-service-tests", logger)
       service = new PingService(
@@ -50,10 +50,10 @@ class PingServiceTest
         aliceId,
         maxLevelSupported = 10,
         DefaultProcessingTimeouts.testing,
-        pingDeduplicationTime = NonNegativeFiniteDuration.ofMinutes(5),
+        pingDeduplicationTime = NonNegativeFiniteDuration.tryOfMinutes(5),
         isActive = true,
         None,
-        loggerFactory,
+        loggerFactory.append("tag", tag.toString),
         clock,
       )(parallelExecutionContext, scheduler)
       val res = service.ping(recipients, Set(), pingTimeoutMs, gracePeriod)
@@ -99,27 +99,27 @@ class PingServiceTest
 
     "happy ping path of single ping is reported correctly" in {
       val recipients = Set(bobId)
-      val (service, id, pingRes) = setupTest(recipients, 5000, 5)
+      val (service, id, pingRes) = setupTest(recipients, 5000, 5, 1)
       respond(id, bobId, service, recipients)
       verifySuccess(pingRes)
     }
 
     "happy bong is reported correctly" in {
       val recipients = Set(bobId, charlieId)
-      val (service, id, pingRes) = setupTest(recipients, 5000, 5)
+      val (service, id, pingRes) = setupTest(recipients, 5000, 5, 2)
       respond(id, charlieId, service, recipients)
       verifySuccess(pingRes)
     }
 
     "ping times out gracefully" in {
-      val (_, _, pingRes) = setupTest(Set(bobId, charlieId), 2, 5)
+      val (_, _, pingRes) = setupTest(Set(bobId, charlieId), 2, 5, 3)
       verifyFailure(pingRes)
     }
 
     "discovers duplicate pongs correctly" in {
       loggerFactory.suppressWarningsAndErrors {
         val recipients = Set(bobId, charlieId)
-        val (service, id, pingRes) = setupTest(recipients, 5000, 2000)
+        val (service, id, pingRes) = setupTest(recipients, 5000, 2000, 4)
         // we don't really care about the results of these responses
         // but we want to avoid running them concurrently to mirror how transactions are processed (one at a time)
         respond(id, charlieId, service, recipients)

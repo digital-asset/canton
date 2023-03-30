@@ -53,4 +53,10 @@ trait StartStoppable {
 
   /** Stop scheduler(s). */
   def stop()(implicit traceContext: TraceContext): Unit
+
+  /** Convenience method for restart */
+  def restart()(implicit traceContext: TraceContext): Future[Unit] = {
+    stop()
+    start()
+  }
 }

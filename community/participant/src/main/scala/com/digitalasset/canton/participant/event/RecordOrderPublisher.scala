@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.event
 
+import cats.Eval
 import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
@@ -17,6 +18,7 @@ import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsy
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
+import com.digitalasset.canton.participant.protocol.ProcessingSteps.RequestType
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventClock
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
@@ -68,7 +70,7 @@ class RecordOrderPublisher(
     initSc: SequencerCounter,
     initTimestamp: CantonTimestamp,
     eventLog: SingleDimensionEventLog[DomainEventLogId],
-    multiDomainEventLog: MultiDomainEventLog,
+    multiDomainEventLog: Eval[MultiDomainEventLog],
     singleDomainCausalTracker: SingleDomainCausalTracker,
     inFlightSubmissionTracker: InFlightSubmissionTracker,
     metrics: TaskSchedulerMetrics,
@@ -106,17 +108,30 @@ class RecordOrderPublisher(
       requestTimestamp: CantonTimestamp,
       eventO: Option[TimestampedEvent],
       updateO: Option[CausalityUpdate],
+      requestType: RequestType,
   )(implicit traceContext: TraceContext): Future[Unit] =
     if (eventO.isEmpty && updateO.isEmpty) Future.unit
     else {
       logger.debug(
         s"Schedule publication for request counter $requestCounter: event = ${eventO.isDefined}, causality update = ${updateO.isDefined}"
       )
+
+      val isTransfer = requestType match {
+        case values: RequestType.Values =>
+          values match {
+            case RequestType.Transaction => false
+            case _: RequestType.Transfer => true
+          }
+        case _ => false
+      }
+
       for {
-        _unit <- eventO.fold(
-          // There is no [[TimestampedEvent]], so this publication represents a transfer
-          updateO.traverse_[Future, Unit](u => eventLog.storeTransferUpdate(u))
-        )(event => eventLog.insert(event, updateO))
+        _ <-
+          if (isTransfer)
+            updateO.traverse_[Future, Unit](u => eventLog.storeTransferUpdate(u))
+          else Future.unit
+
+        _ <- eventO.traverse_(eventLog.insert(_, updateO))
       } yield {
         val inFlightReference =
           InFlightBySequencingInfo(
@@ -311,7 +326,7 @@ class RecordOrderPublisher(
       clockO <- waitPublishableO(updateO)
       _published <- eventO.fold(Future.unit) { event =>
         val data = PublicationData(eventLog.id, event, inFlightRef)
-        multiDomainEventLog.publish(data)
+        multiDomainEventLog.value.publish(data)
       }
     } yield {
       published(clockO, requestCounter)
@@ -400,7 +415,7 @@ object RecordOrderPublisher {
     val eventLogId: EventLogId
   }
 
-  case class PendingTransferPublish(
+  final case class PendingTransferPublish(
       override val rc: RequestCounter,
       updateS: CausalityUpdate,
       ts: CantonTimestamp,
@@ -410,7 +425,7 @@ object RecordOrderPublisher {
     override val createsEvent: Boolean = false
   }
 
-  case class PendingEventPublish(
+  final case class PendingEventPublish(
       update: Option[CausalityUpdate],
       event: TimestampedEvent,
       ts: CantonTimestamp,

@@ -22,7 +22,12 @@ import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, LfPartyId, TestMetrics}
+import com.digitalasset.canton.{
+  BaseTest,
+  LfPartyId,
+  ProtocolVersionChecksAsyncWordSpec,
+  TestMetrics,
+}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -50,7 +55,7 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
   val remoteId2 = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant2::domain")
   )
-  val interval = PositiveSeconds.ofSeconds(1)
+  val interval = PositiveSeconds.tryOfSeconds(1)
 
   def ts(time: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(time.toLong)
   def meta(stakeholders: LfPartyId*): ContractMetadata =
@@ -92,7 +97,7 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
       testedProtocolVersion,
     )
   val dummySigned =
-    SignedProtocolMessage(dummyCommitmentMsg, dummySignature, testedProtocolVersion)
+    SignedProtocolMessage.from(dummyCommitmentMsg, testedProtocolVersion, dummySignature)
 
   val alice: LfPartyId = LfPartyId.assertFromString("Alice")
   val bob: LfPartyId = LfPartyId.assertFromString("bob")
@@ -103,7 +108,8 @@ trait AcsCommitmentStoreTest
     extends CommitmentStoreBaseTest
     with PrunableByTimeTest
     with SortedReconciliationIntervalsHelpers
-    with TestMetrics {
+    with TestMetrics
+    with ProtocolVersionChecksAsyncWordSpec {
 
   lazy val srip: SortedReconciliationIntervalsProvider =
     constantSortedReconciliationIntervalsProvider(interval)
@@ -178,37 +184,35 @@ trait AcsCommitmentStoreTest
      This test is disabled for protocol versions for which the reconciliation interval is
      static because the described setting cannot occur.
      */
-    if (testedProtocolVersion >= ProtocolVersion.v4) {
-      "correctly compute outstanding commitments when intersection contains no tick" in {
-        /*
+    "correctly compute outstanding commitments when intersection contains no tick" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
+      /*
         This copies the scenario of the test
         `work when commitment tick falls between two participants connection to the domain`
         in ACSCommitmentProcessorTest.
 
         We check that when markSafe yield an outstanding interval which contains no tick,
         then this "empty" interval is not inserted in the store.
-         */
-        val store = mk()
+       */
+      val store = mk()
 
-        lazy val sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider =
-          constantSortedReconciliationIntervalsProvider(interval, domainBootstrappingTime = ts(6))
+      lazy val sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider =
+        constantSortedReconciliationIntervalsProvider(interval, domainBootstrappingTime = ts(6))
 
-        for {
-          outstanding0 <- store.outstanding(ts(0), ts(10), None)
-          _ <- store.markOutstanding(period(0, 10), Set(remoteId))
-          outstanding1 <- store.outstanding(ts(0), ts(10), None)
-          _ <- store.markSafe(remoteId, period(5, 10), sortedReconciliationIntervalsProvider)
-          outstanding2 <- store.outstanding(ts(0), ts(10), None)
-        } yield {
-          outstanding0.toSet shouldBe Set.empty
-          outstanding1.toSet shouldBe Set(period(0, 10) -> remoteId)
+      for {
+        outstanding0 <- store.outstanding(ts(0), ts(10), None)
+        _ <- store.markOutstanding(period(0, 10), Set(remoteId))
+        outstanding1 <- store.outstanding(ts(0), ts(10), None)
+        _ <- store.markSafe(remoteId, period(5, 10), sortedReconciliationIntervalsProvider)
+        outstanding2 <- store.outstanding(ts(0), ts(10), None)
+      } yield {
+        outstanding0.toSet shouldBe Set.empty
+        outstanding1.toSet shouldBe Set(period(0, 10) -> remoteId)
 
-          /*
+        /*
           Period (0, 5) is not explicitly marked as safe but since it contains no tick
           (because domainBootstrapping=6), then it is dropped and we get an empty result.
-           */
-          outstanding2.toSet shouldBe Set.empty
-        }
+         */
+        outstanding2.toSet shouldBe Set.empty
       }
     }
 
@@ -347,7 +351,8 @@ trait AcsCommitmentStoreTest
         dummyCommitment,
         testedProtocolVersion,
       )
-      val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature, testedProtocolVersion)
+      val dummySigned2 =
+        SignedProtocolMessage.from(dummyMsg2, testedProtocolVersion, dummySignature)
       val dummyMsg3 = AcsCommitment.create(
         domainId,
         remoteId2,
@@ -356,7 +361,8 @@ trait AcsCommitmentStoreTest
         dummyCommitment,
         testedProtocolVersion,
       )
-      val dummySigned3 = SignedProtocolMessage(dummyMsg3, dummySignature, testedProtocolVersion)
+      val dummySigned3 =
+        SignedProtocolMessage.from(dummyMsg3, testedProtocolVersion, dummySignature)
 
       for {
         _ <- store.storeReceived(dummySigned)
@@ -381,7 +387,8 @@ trait AcsCommitmentStoreTest
         dummyCommitment2,
         testedProtocolVersion,
       )
-      val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature, testedProtocolVersion)
+      val dummySigned2 =
+        SignedProtocolMessage.from(dummyMsg2, testedProtocolVersion, dummySignature)
 
       for {
         _ <- store.storeReceived(dummySigned)
@@ -578,7 +585,7 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         domainId,
         remoteId,
         localId,
-        CommitmentPeriod.create(ts(start), ts(end), PositiveSeconds.ofSeconds(5)).value,
+        CommitmentPeriod.create(ts(start), ts(end), PositiveSeconds.tryOfSeconds(5)).value,
         cmt,
         testedProtocolVersion,
       )

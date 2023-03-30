@@ -6,14 +6,14 @@ package com.digitalasset.canton.sequencing.handlers
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.sequencing.{SequencerTestUtils, SerializedEventHandler}
-import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
+import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future
 
-case class HandlerError(message: String)
+final case class HandlerError(message: String)
 
 class CounterCaptureTest extends AnyWordSpec with BaseTest {
   type TestEventHandler = SerializedEventHandler[HandlerError]
@@ -57,6 +57,6 @@ class CounterCaptureTest extends AnyWordSpec with BaseTest {
     }
   }
 
-  private def sign[A <: ProtocolVersionedMemoizedEvidence](content: A): SignedContent[A] =
-    SignedContent(content, SymbolicCrypto.emptySignature, None)
+  private def sign[A <: HasCryptographicEvidence](content: A): SignedContent[A] =
+    SignedContent(content, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
 }

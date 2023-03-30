@@ -78,7 +78,7 @@ object ShareError {
   object DarNotFound extends ShareError
 
   /** Failed to submit the Share request to the ledger */
-  case class SubmissionFailed(result: CommandResult) extends ShareError
+  final case class SubmissionFailed(result: CommandResult) extends ShareError
 }
 
 sealed trait AcceptRejectError
@@ -88,12 +88,12 @@ object AcceptRejectError {
   object OfferNotFound extends AcceptRejectError
 
   /** We could not append the DAR to our ledger. May indicate a problem with the DAR. */
-  case class FailedToAppendDar(reason: DamlError) extends AcceptRejectError
+  final case class FailedToAppendDar(reason: DamlError) extends AcceptRejectError
 
   /** Failed to submit the response to the share offer to the ledger */
-  case class SubmissionFailed(result: CommandResult) extends AcceptRejectError
+  final case class SubmissionFailed(result: CommandResult) extends AcceptRejectError
 
-  case class InvalidOffer(error: String) extends AcceptRejectError
+  final case class InvalidOffer(error: String) extends AcceptRejectError
 }
 
 /** Exception to carry the accept reject error where a `Future[Unit]` return is expected (transaction processing) */

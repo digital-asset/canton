@@ -46,10 +46,15 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
     Batch(envelopes.toList, testedProtocolVersion)
 
   def signDeliver(event: Deliver[ClosedEnvelope]): SignedContent[Deliver[ClosedEnvelope]] =
-    SignedContent(event, sign(s"deliver signature ${event.counter}"), None)
+    SignedContent(event, sign(s"deliver signature ${event.counter}"), None, testedProtocolVersion)
 
   lazy val closedEnvelope =
-    ClosedEnvelope(ByteString.copyFromUtf8("message"), RecipientsTest.testInstance)
+    ClosedEnvelope(
+      ByteString.copyFromUtf8("message"),
+      RecipientsTest.testInstance,
+      Seq.empty,
+      testedProtocolVersion,
+    )
 
   def mkDeliver(counter: Long, ts: CantonTimestamp): OrdinarySerializedEvent =
     mkOrdinaryEvent(
@@ -64,6 +69,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
         ),
         sign("deliver signature"),
         None,
+        testedProtocolVersion,
       ),
       nonEmptyTraceContext2,
     )
@@ -84,6 +90,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
         ),
         sign("single deliver signature"),
         Some(CantonTimestamp.MaxValue),
+        testedProtocolVersion,
       ),
       nonEmptyTraceContext2,
     )
@@ -101,6 +108,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
         ),
         sign("single deliver signature"),
         Some(CantonTimestamp.MinValue),
+        testedProtocolVersion,
       ),
       nonEmptyTraceContext2,
     )
@@ -118,6 +126,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
         ),
         singleDeliver.signedEvent.signature,
         None,
+        testedProtocolVersion,
       ),
       nonEmptyTraceContext2,
     )
@@ -128,6 +137,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
         SequencerTestUtils.mockDeliver(sc, ts, domainId),
         sign("Mock deliver signature"),
         None,
+        testedProtocolVersion,
       ),
       nonEmptyTraceContext1,
     )
@@ -147,6 +157,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
         ),
         sign("Deliver signature"),
         None,
+        testedProtocolVersion,
       )
     )
 
@@ -163,6 +174,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
         ),
         sign("Deliver error signature"),
         None,
+        testedProtocolVersion,
       )
     )
 
@@ -254,6 +266,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
               .mockDeliver(2 * i + 1000, CantonTimestamp.ofEpochMilli(i * 2), domainId),
             sign(s"signature $i"),
             None,
+            testedProtocolVersion,
           )
         )
       }
@@ -286,6 +299,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
               .mockDeliver(2 * i + 1000, CantonTimestamp.Epoch.plusMillis(i * 2), domainId),
             sign(s"signature $i"),
             None,
+            testedProtocolVersion,
           )
         )
       }
@@ -313,6 +327,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
               .mockDeliver(2 * i + 1000, CantonTimestamp.Epoch.plusMillis(i * 2), domainId),
             sign(s"signature $i"),
             None,
+            testedProtocolVersion,
           )
         )
       }
@@ -341,6 +356,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
               .mockDeliver(delta * i, CantonTimestamp.Epoch.plusMillis(i * delta), domainId),
             sign(s"signature $i"),
             None,
+            testedProtocolVersion,
           )
         )
       }
@@ -393,6 +409,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
             SequencerTestUtils.mockDeliver(getSc(i), getTs(i), domainId),
             sign(s"signature $i"),
             None,
+            testedProtocolVersion,
           )
         )
       }
@@ -417,6 +434,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
               .mockDeliver(2 * i + 1000, CantonTimestamp.Epoch.plusMillis(i * 2), domainId),
             sign(s"signature $i"),
             None,
+            testedProtocolVersion,
           )
         )
       }
@@ -441,6 +459,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
             SequencerTestUtils.mockDeliver(i, CantonTimestamp.ofEpochSecond(i), domainId),
             sign(s"signature $i"),
             None,
+            testedProtocolVersion,
           )
         )
       }

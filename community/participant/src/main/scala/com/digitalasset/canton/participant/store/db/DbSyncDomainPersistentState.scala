@@ -18,6 +18,8 @@ import com.digitalasset.canton.store.db.{
 }
 import com.digitalasset.canton.store.memory.InMemorySendTrackerStore
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.store.db.DbTopologyStore
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 
@@ -30,7 +32,7 @@ class DbSyncDomainPersistentState(
     override val pureCryptoApi: CryptoPureApi,
     parameters: ParticipantStoreConfig,
     caching: CachingConfigs,
-    numDbConnections: Int,
+    maxDbConnections: Int,
     processingTimeouts: ProcessingTimeout,
     override val enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -55,7 +57,7 @@ class DbSyncDomainPersistentState(
       domainId,
       protocolVersion,
       parameters.maxItemsInSqlClause,
-      numDbConnections,
+      maxDbConnections,
       caching.contractStore,
       dbQueryBatcherConfig = parameters.dbBatchAggregationConfig,
       insertBatchAggregatorConfig = parameters.dbBatchAggregationConfig,
@@ -127,6 +129,8 @@ class DbSyncDomainPersistentState(
       processingTimeouts,
       loggerFactory,
     )
+  val topologyStore =
+    new DbTopologyStore(storage, DomainStore(domainId.item), processingTimeouts, loggerFactory)
 
   override def close() = Lifecycle.close(
     eventLog,
@@ -141,5 +145,6 @@ class DbSyncDomainPersistentState(
     sequencerCounterTrackerStore,
     sendTrackerStore,
     causalDependencyStore,
+    topologyStore,
   )(logger)
 }

@@ -22,7 +22,7 @@ object InitConfigBase {
     /** Sets an explicit name for the node identifier
       * @param name name to use as identifier
       */
-    case class Explicit(name: String) extends NodeIdentifierConfig {
+    final case class Explicit(name: String) extends NodeIdentifierConfig {
       override val identifierName: Option[String] = Some(name)
     }
 
@@ -40,7 +40,7 @@ object InitConfigBase {
     * @param generateLegalIdentityCertificate If true create a signing key and self-signed certificate that is submitted as legal identity to the domain.
     * @param nodeIdentifier Controls the identifier that will be assigned to the node during auto-init
     */
-  case class Identity(
+  final case class Identity(
       generateLegalIdentityCertificate: Boolean = false,
       nodeIdentifier: NodeIdentifierConfig = NodeIdentifierConfig.Config,
   )
@@ -54,7 +54,7 @@ trait InitConfigBase {
 /** Configuration for the node's init process
   * @param nodeIdentifier Controls the identifier that will be assigned to the node during auto-init
   */
-case class InitConfig(
+final case class InitConfig(
     identity: Option[Identity] = None,
     nodeIdentifier: NodeIdentifierConfig = NodeIdentifierConfig.Config,
 ) extends InitConfigBase

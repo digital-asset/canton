@@ -70,7 +70,7 @@ class SortedReconciliationIntervalsProviderTest
         .create(reconciliationIntervals, clock.now)
         .value
       provider.getApproximateLatestReconciliationInterval.value.intervalLength shouldBe PositiveSeconds
-        .ofSeconds(2)
+        .tryOfSeconds(2)
     }
 
     "allow to query reconciliation intervals (PV < 4)" in {
@@ -82,7 +82,7 @@ class SortedReconciliationIntervalsProviderTest
       val updatedStaticDomainParameters =
         BaseTest.defaultStaticDomainParametersWith(
           reconciliationInterval =
-            PositiveSeconds.ofSeconds(defaultReconciliationInterval.unwrap.getSeconds + 1),
+            PositiveSeconds.tryOfSeconds(defaultReconciliationInterval.unwrap.getSeconds + 1),
           protocolVersion = protocolVersion,
         )
 
@@ -146,7 +146,7 @@ class SortedReconciliationIntervalsProviderTest
         loggerFactory = loggerFactory,
       )
 
-      val invalidQueryTime = topologyKnownAt + NonNegativeFiniteDuration.ofMillis(1)
+      val invalidQueryTime = topologyKnownAt + NonNegativeFiniteDuration.tryOfMillis(1)
       val validQueryTime = topologyKnownAt
 
       provider

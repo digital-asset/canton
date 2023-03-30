@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -42,6 +43,8 @@ object DAMLeTestInstance {
     val packageResolver = DAMLe.packageResolver(mockPackageService)
     new DAMLe(
       packageResolver,
+      AuthorityResolver(),
+      None,
       engine,
       loggerFactory,
     ) {

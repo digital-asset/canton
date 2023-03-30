@@ -6,6 +6,7 @@ package com.digitalasset.canton.time
 import cats.data.EitherT
 import cats.syntax.option.*
 import com.digitalasset.canton.config.CantonRequireTypes.String73
+import com.digitalasset.canton.config.TimeProofRequestConfig
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
@@ -79,6 +80,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
             ),
             SymbolicCrypto.emptySignature,
             None,
+            testedProtocolVersion,
           )
         )(traceContext)
       TimeProof.fromEventO(event).value
@@ -128,13 +130,13 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
           // setup waiting for the next request but don't yet wait for it
           request2F = waitForNextRequest()
           // now advance past the time that we think we should have seen the time event
-          _ = clock.advance(config.maxSequencingDelay.unwrap)
+          _ = clock.advance(config.maxSequencingDelay.asJava)
           // now expect that a new request is made
           _ <- timeRequestSubmitter.flush()
           _ <- request2F
           // if a time event is now witnessed we don't make another request
           _ = timeRequestSubmitter.handleTimeProof(mkTimeProof(0))
-          _ = clock.advance(config.maxSequencingDelay.unwrap.plusMillis(1))
+          _ = clock.advance(config.maxSequencingDelay.asJava.plusMillis(1))
           _ <- timeRequestSubmitter.flush()
         } yield callCount.get() shouldBe 2
     }
@@ -162,7 +164,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
           // now when the maxSequencingDelay has elapsed we'll have two scheduled checks looking to see if they should attempt another request
           // the first has actually already been satisfied but the second is still pending
           // we want to see only a single request being made as the first request should determine it's no longer active
-          _ = clock.advance(config.maxSequencingDelay.unwrap)
+          _ = clock.advance(config.maxSequencingDelay.asJava)
           _ <- timeRequestSubmitter.flush()
           callCountAfter = callCount.get()
         } yield {

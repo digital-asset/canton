@@ -17,7 +17,10 @@ import com.digitalasset.canton.tracing.TraceContext
   * @see NamedLogging.namedLoggingContext for implicitly creating this from the [[NamedLoggerFactory]] of the caller
   * @see ErrorLoggingContext for a variant that fixes the logger name to the caller
   */
-case class NamedLoggingContext(loggerFactory: NamedLoggerFactory, traceContext: TraceContext) {
+final case class NamedLoggingContext(
+    loggerFactory: NamedLoggerFactory,
+    traceContext: TraceContext,
+) {
 
   /** Log something using the captured trace context */
   def trace(message: String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =

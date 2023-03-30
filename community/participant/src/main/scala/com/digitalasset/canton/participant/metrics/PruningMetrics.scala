@@ -7,7 +7,12 @@ import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.{Gauge, MetricsFactory, Timer}
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 
-class PruningMetrics(val prefix: MetricName, metricsFactory: MetricsFactory) {
+import scala.annotation.nowarn
+
+class PruningMetrics(
+    val prefix: MetricName,
+    @deprecated("Use LabeledMetricsFactory", since = "2.7.0") metricsFactory: MetricsFactory,
+) {
 
   object commitments {
     private val prefix: MetricName = MetricName(PruningMetrics.this.prefix :+ "commitments")
@@ -20,6 +25,7 @@ class PruningMetrics(val prefix: MetricName, metricsFactory: MetricsFactory) {
         |starts to exceed the commitment intervals, this likely indicates a problem.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val compute: Timer = metricsFactory.timer(prefix :+ "compute")
   }
 
@@ -32,6 +38,7 @@ class PruningMetrics(val prefix: MetricName, metricsFactory: MetricsFactory) {
         """This timer exposes the duration of pruning requests from the Canton portion of the ledger.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val overall: Timer = metricsFactory.timer(prefix)
 
     @MetricDoc.Tag(
@@ -41,6 +48,7 @@ class PruningMetrics(val prefix: MetricName, metricsFactory: MetricsFactory) {
           |pruning backlog.""",
       qualification = Debug,
     )
+    @nowarn("cat=deprecation")
     val maxEventAge: Gauge[Long] =
       metricsFactory.gauge[Long](MetricName(prefix :+ "max-event-age"), 0L)(MetricsContext.Empty)
 

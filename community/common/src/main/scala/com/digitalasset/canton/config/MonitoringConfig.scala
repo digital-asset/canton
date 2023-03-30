@@ -15,6 +15,8 @@ import com.digitalasset.canton.networking.grpc.{
 import com.digitalasset.canton.tracing.TracingConfig
 import io.netty.handler.ssl.SslContext
 
+import scala.annotation.nowarn
+
 /** Configuration of the gRPC health server for a canton node.
   * @param parallelism number of threads to be used in the gRPC server
   */
@@ -31,7 +33,7 @@ final case class GrpcHealthServerConfig(
       tracingConfig: TracingConfig,
       apiLoggingConfig: ApiLoggingConfig,
       metricsPrefix: MetricName,
-      metrics: MetricsFactory,
+      @nowarn("cat=deprecation") metrics: MetricsFactory,
       loggerFactory: NamedLoggerFactory,
       grpcMetrics: GrpcServerMetrics,
   ): CantonServerInterceptors =

@@ -6,12 +6,14 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.stream.*
 import akka.stream.scaladsl.{Keep, Sink}
 import cats.data.EitherT
+import cats.instances.option.*
 import cats.syntax.bifunctor.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
+import cats.syntax.parallel.*
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
-import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.{
@@ -28,6 +30,7 @@ import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRe
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Pause, Success}
@@ -42,9 +45,11 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Failure
 import scala.util.control.NonFatal
 
-case class OnlineSequencerCheckConfig(
-    onlineCheckInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5L),
-    offlineDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(8L),
+final case class OnlineSequencerCheckConfig(
+    onlineCheckInterval: config.NonNegativeFiniteDuration =
+      config.NonNegativeFiniteDuration.ofSeconds(5L),
+    offlineDuration: config.NonNegativeFiniteDuration =
+      config.NonNegativeFiniteDuration.ofSeconds(8L),
 )
 
 object TotalNodeCountValues {
@@ -320,7 +325,12 @@ class SequencerWriter(
       withNewTraceContext { implicit traceContext =>
         performUnlessClosing(functionFullName) { // close will take care of shutting down a running writer if close is invoked
           // close the running writer and reset the reference
-          runningWriterRef.getAndSet(None).foreach(_.close())
+          val closed = runningWriterRef
+            .getAndSet(None)
+            .parTraverse_(_.close())
+            .recover { case NonFatal(e) =>
+              logger.debug("Failed to close running writer", e)
+            }
 
           // determine whether we can run recovery or not
           val shouldRecover = result match {
@@ -335,7 +345,9 @@ class SequencerWriter(
             result.fold(ex => logger.info(message, ex), _ => logger.info(message))
 
             FutureUtil.doNotAwait(
-              startOrLogError(),
+              // Wait for the writer store to be closed before re-starting, otherwise we might end up with
+              // concurrent write stores trying to connect to the DB within the same sequencer node
+              closed.flatMap(_ => startOrLogError()),
               "SequencerWriter recovery",
             )
           } else {
@@ -382,7 +394,6 @@ object SequencerWriter {
       processingTimeout: ProcessingTimeout,
       storage: Storage,
       clock: Clock,
-      cryptoApi: DomainSyncCryptoClient,
       eventSignaller: EventSignaller,
       protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
@@ -398,9 +409,7 @@ object SequencerWriter {
           writerConfig,
           totalNodeCount,
           keepAliveInterval,
-          cryptoApi,
           store,
-          protocolVersion,
           clock,
           eventSignaller,
           loggerFactory,

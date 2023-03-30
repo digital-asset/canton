@@ -26,7 +26,8 @@ object TimeProofTestUtil {
       Batch.empty(BaseTest.testedProtocolVersion),
       BaseTest.testedProtocolVersion,
     )
-    val signedContent = SignedContent(deliver, SymbolicCrypto.emptySignature, None)
+    val signedContent =
+      SignedContent(deliver, SymbolicCrypto.emptySignature, None, BaseTest.testedProtocolVersion)
     val event = OrdinarySequencedEvent(signedContent)(TraceContext.empty)
     TimeProof
       .fromEvent(event)

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import akka.stream.Materializer
+import cats.Eval
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -56,6 +57,60 @@ class ParticipantNodePersistentState private (
     )(logger)
 }
 
+trait ParticipantNodePersistentStateFactory {
+  def create(
+      syncDomainPersistentStates: SyncDomainPersistentStateLookup,
+      storage: Storage,
+      clock: Clock,
+      maxDeduplicationDurationO: Option[NonNegativeFiniteDuration],
+      uniqueContractKeysO: Option[Boolean],
+      parameters: ParticipantStoreConfig,
+      releaseProtocolVersion: ReleaseProtocolVersion,
+      metrics: ParticipantMetrics,
+      indexedStringStore: IndexedStringStore,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext,
+      mat: Materializer,
+      traceContext: TraceContext,
+  ): Future[Eval[ParticipantNodePersistentState]]
+}
+
+object ParticipantNodePersistentStateFactory extends ParticipantNodePersistentStateFactory {
+  override def create(
+      syncDomainPersistentStates: SyncDomainPersistentStateLookup,
+      storage: Storage,
+      clock: Clock,
+      maxDeduplicationDurationO: Option[NonNegativeFiniteDuration],
+      uniqueContractKeysO: Option[Boolean],
+      parameters: ParticipantStoreConfig,
+      releaseProtocolVersion: ReleaseProtocolVersion,
+      metrics: ParticipantMetrics,
+      indexedStringStore: IndexedStringStore,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext,
+      mat: Materializer,
+      traceContext: TraceContext,
+  ): Future[Eval[ParticipantNodePersistentState]] = ParticipantNodePersistentState
+    .create(
+      syncDomainPersistentStates,
+      storage,
+      clock,
+      maxDeduplicationDurationO,
+      uniqueContractKeysO,
+      parameters,
+      releaseProtocolVersion,
+      metrics,
+      indexedStringStore,
+      timeouts,
+      loggerFactory,
+    )
+    .map(Eval.now)
+}
+
 object ParticipantNodePersistentState extends HasLoggerName {
 
   /** Creates a [[ParticipantNodePersistentState]] and initializes the settings store.
@@ -65,7 +120,7 @@ object ParticipantNodePersistentState extends HasLoggerName {
     *                            the domain's parameter for unique contract keys takes precedence.
     *                            If [[scala.None$]], skip storing and checking the UCK setting.
     */
-  def apply(
+  def create(
       syncDomainPersistentStates: SyncDomainPersistentStateLookup,
       storage: Storage,
       clock: Clock,

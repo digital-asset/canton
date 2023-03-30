@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol
 import com.daml.lf.data.Bytes
 import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.daml.lf.value.Value
-import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurposeTest, TestSalt}
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, TestHash, TestSalt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId, LfTimestamp, LfValue}
@@ -58,7 +58,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
 
     val contractIdDiscriminator = ExampleTransactionFactory.lfHash(0)
     val contractIdSuffix =
-      Unicum(Hash.build(HashPurposeTest.testHashPurpose, HashAlgorithm.Sha256).add(0).finish())
+      Unicum(Hash.build(TestHash.testHashPurpose, HashAlgorithm.Sha256).add(0).finish())
 
     val invalidFormatContractId = LfContractId.assertFromString("00" * 34)
 

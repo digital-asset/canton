@@ -121,7 +121,7 @@ private[domain] class ParticipantDomainTopologyService(
     EitherTUtil.logOnError(
       send(
         traceContext,
-        OpenEnvelope(request, Recipients.cc(DomainTopologyManagerId(domainId)), protocolVersion),
+        OpenEnvelope(request, Recipients.cc(DomainTopologyManagerId(domainId)))(protocolVersion),
       ),
       s"Failed sending register topology transaction request ${requestDescription(request)}",
     )

@@ -4,16 +4,11 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.transaction.Transaction.KeyInputError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{Salt, SaltSeed}
-import com.digitalasset.canton.data.{
-  GenTransactionTree,
-  TransactionView,
-  TransactionViewTree,
-  ViewPosition,
-}
+import com.digitalasset.canton.data.{GenTransactionTree, TransactionView, ViewPosition}
+import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   SerializableContractOfId,
@@ -77,7 +72,7 @@ trait TransactionTreeFactory {
   /** Extracts the salts for the view from a transaction view tree.
     * The salts appear in the same order as they are needed by [[tryReconstruct]].
     */
-  def saltsFromView(view: TransactionViewTree): Iterable[Salt]
+  def saltsFromView(view: TransactionView): Iterable[Salt]
 
 }
 
@@ -95,7 +90,7 @@ object TransactionTreeFactory {
   sealed trait TransactionTreeConversionError extends Product with Serializable with PrettyPrinting
 
   /** Indicates that a contract instance could not be looked up by an instance of [[SerializableContractOfId]]. */
-  case class ContractLookupError(id: LfContractId, message: String)
+  final case class ContractLookupError(id: LfContractId, message: String)
       extends TransactionTreeConversionError {
     override def pretty: Pretty[ContractLookupError] = prettyOfClass(
       param("id", _.id),
@@ -103,33 +98,35 @@ object TransactionTreeFactory {
     )
   }
 
-  case class SubmitterMetadataError(message: String) extends TransactionTreeConversionError {
+  final case class SubmitterMetadataError(message: String) extends TransactionTreeConversionError {
     override def pretty: Pretty[SubmitterMetadataError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   // TODO(i3013) Remove this error
-  case class ViewParticipantDataError(message: String) extends TransactionTreeConversionError {
+  final case class ViewParticipantDataError(message: String)
+      extends TransactionTreeConversionError {
     override def pretty: Pretty[ViewParticipantDataError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
-  case class DivergingKeyResolutionError(divergingKeys: Map[LfGlobalKey, Set[Option[LfContractId]]])
-      extends TransactionTreeConversionError {
+  final case class DivergingKeyResolutionError(
+      divergingKeys: Map[LfGlobalKey, Set[Option[LfContractId]]]
+  ) extends TransactionTreeConversionError {
     override def pretty: Pretty[DivergingKeyResolutionError] = prettyOfClass(
       unnamedParam(_.divergingKeys)
     )
   }
 
-  case class MissingContractKeyLookupError(key: LfGlobalKey)
+  final case class MissingContractKeyLookupError(key: LfGlobalKey)
       extends TransactionTreeConversionError {
     override def pretty: Pretty[MissingContractKeyLookupError] =
       prettyOfClass(unnamedParam(_.key))
   }
 
-  case class ContractKeyResolutionError(error: KeyInputError)
+  final case class ContractKeyResolutionError(error: KeyInputError)
       extends TransactionTreeConversionError {
     override def pretty: Pretty[ContractKeyResolutionError] =
       prettyOfClass(unnamedParam(_.error))
@@ -141,13 +138,13 @@ object TransactionTreeFactory {
   }
   type TooFewSalts = TooFewSalts.type
 
-  case class UnknownPackageError(unknownTo: Seq[PackageUnknownTo])
+  final case class UnknownPackageError(unknownTo: Seq[PackageUnknownTo])
       extends TransactionTreeConversionError {
     override def pretty: Pretty[UnknownPackageError] =
       prettyOfString(err => show"Some packages are not known to all informees.\n${err.unknownTo}")
   }
 
-  case class PackageUnknownTo(
+  final case class PackageUnknownTo(
       packageId: LfPackageId,
       description: String,
       participantId: ParticipantId,

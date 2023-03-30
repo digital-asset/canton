@@ -7,8 +7,11 @@ package com.digitalasset.canton.domain.admin.v0;
 
 import "google/protobuf/timestamp.proto";
 import "com/digitalasset/canton/domain/admin/v0/sequencer_administration_service.proto";
+import "scalapb/scalapb.proto";
 
 message SequencerSnapshot {
+    option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
     google.protobuf.Timestamp latest_timestamp = 1;
     map<string, int64> head_member_counters = 2;
     com.digitalasset.canton.domain.admin.v0.SequencerPruningStatus status = 3;

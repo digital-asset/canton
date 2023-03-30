@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.{
@@ -103,7 +104,7 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
       DefaultProcessingTimeouts.testing,
       indexedStringStore,
       loggerFactory,
-      maxBatchSize = 3,
+      maxBatchSize = PositiveInt.tryCreate(3),
       participantEventLogId = participantEventLogId,
     )
   }

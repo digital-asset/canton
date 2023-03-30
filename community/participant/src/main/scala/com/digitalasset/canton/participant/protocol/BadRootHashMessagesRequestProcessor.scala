@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
-import com.digitalasset.canton.protocol.messages.{LocalReject, LocalVerdict, MediatorResponse}
+import com.digitalasset.canton.protocol.messages.{LocalReject, MediatorResponse}
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.Recipients
@@ -68,7 +68,7 @@ class BadRootHashMessagesRequestProcessor(
       timestamp: CantonTimestamp,
       rootHash: RootHash,
       mediatorId: MediatorId,
-      rejectionReason: String,
+      reject: LocalReject,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     performUnlessClosingF(functionFullName) {
       val domainId = sequencerClient.domainId
@@ -81,10 +81,7 @@ class BadRootHashMessagesRequestProcessor(
             requestId = requestId,
             sender = participantId,
             viewHash = None,
-            localVerdict = LocalReject.MalformedRejects.BadRootHashMessages
-              .Reject(rejectionReason)(
-                LocalVerdict.protocolVersionRepresentativeFor(protocolVersion)
-              ),
+            localVerdict = reject,
             rootHash = Some(rootHash),
             confirmingParties = Set.empty,
             domainId = domainId,

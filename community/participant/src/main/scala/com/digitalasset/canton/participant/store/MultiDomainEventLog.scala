@@ -9,10 +9,10 @@ import akka.stream.scaladsl.Source
 import cats.data.OptionT
 import cats.syntax.option.*
 import cats.syntax.parallel.*
-import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -139,6 +139,14 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): Future[Map[EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]]
 
+  /** Yields all the published events with the given IDs.
+    * Unpublished events are ignored.
+    * Results are sorted by global offset.
+    */
+  def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]]
+
   /** Find the domain of a committed transaction. */
   def lookupTransactionDomain(transactionId: LedgerTransactionId)(implicit
       traceContext: TraceContext
@@ -164,14 +172,14 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
         lastLocalOffsetBeforeOrAt(
           DomainEventLogId(domainId),
           upToInclusive,
-          CantonTimestamp.MaxValue,
+          None,
         )
           .map(_.map(domainId.item -> _))
       }
       participantOffset <- lastLocalOffsetBeforeOrAt(
         participantEventLogId,
         upToInclusive,
-        CantonTimestamp.MaxValue,
+        None,
       )
     } yield (domainOffsets.toMap, participantOffset)
   }
@@ -180,13 +188,13 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
     * such that the following holds:
     * <ol>
     *   <li>The assigned global offset is below or at `upToInclusive`.</li>
-    *   <li>The record time of the event is below or at `timestampInclusive`</li>
+    *   <li>The record time of the event is below or at `timestampInclusive` (if defined)</li>
     * </ol>
     */
   def lastLocalOffsetBeforeOrAt(
       eventLogId: EventLogId,
       upToInclusive: GlobalOffset,
-      timestampInclusive: CantonTimestamp,
+      timestampInclusive: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Future[Option[LocalOffset]]
 
   /** Yields the `deltaFromBeginning`-lowest global offset (if it exists).
@@ -320,14 +328,13 @@ object MultiDomainEventLog {
         )
     }
 
-  case class PublicationData(
+  final case class PublicationData(
       eventLogId: EventLogId,
       event: TimestampedEvent,
       inFlightReference: Option[InFlightReference],
   ) extends HasTraceContext {
     override def traceContext: TraceContext = event.traceContext
     def localOffset: LocalOffset = event.localOffset
-    def numberOfNodes: Int = event.eventSize
   }
 
   /** Listener for publications of the multi-domain event log.
@@ -351,7 +358,7 @@ object MultiDomainEventLog {
   }
 
   object OnPublish {
-    case class Publication(
+    final case class Publication(
         globalOffset: GlobalOffset,
         publicationTime: CantonTimestamp,
         inFlightReference: Option[InFlightReference],
@@ -372,7 +379,7 @@ object MultiDomainEventLog {
     }
   }
 
-  case class DeduplicationInfo(
+  final case class DeduplicationInfo(
       changeId: ChangeId,
       submissionId: Option[LedgerSubmissionId],
       acceptance: Boolean,

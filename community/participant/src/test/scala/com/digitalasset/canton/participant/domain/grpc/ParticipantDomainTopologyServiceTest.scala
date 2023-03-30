@@ -92,10 +92,8 @@ class ParticipantDomainTopologyServiceTest
       sendRequest.apply(
         eqTo(traceContext),
         eqTo(
-          OpenEnvelope(
-            request,
-            Recipients.cc(DomainTopologyManagerId(domainId)),
-            testedProtocolVersion,
+          OpenEnvelope(request, Recipients.cc(DomainTopologyManagerId(domainId)))(
+            testedProtocolVersion
           )
         ),
       )
@@ -116,7 +114,7 @@ class ParticipantDomainTopologyServiceTest
       // after response is processed, the future will be completed
       val handlerResult = sut.processor.apply(
         Traced(
-          List(OpenEnvelope(response, Recipients.cc(response.requestedBy), testedProtocolVersion))
+          List(OpenEnvelope(response, Recipients.cc(response.requestedBy))(testedProtocolVersion))
         )
       )
 

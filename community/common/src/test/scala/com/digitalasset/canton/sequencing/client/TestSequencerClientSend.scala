@@ -38,7 +38,7 @@ class TestSequencerClientSend extends SequencerClientSend {
 }
 
 object TestSequencerClientSend {
-  case class Request(
+  final case class Request(
       batch: Batch[DefaultOpenEnvelope],
       sendType: SendType,
       timestampOfSigningKey: Option[CantonTimestamp],

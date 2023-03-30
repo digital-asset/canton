@@ -127,11 +127,7 @@ class DomainTopologyManagerEventHandler(
   private def sendResponse(
       response: RegisterTopologyTransactionResponse.Result
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val batch = OpenEnvelope(
-      response,
-      Recipients.cc(response.requestedBy),
-      protocolVersion,
-    )
+    val batch = OpenEnvelope(response, Recipients.cc(response.requestedBy))(protocolVersion)
     SequencerClient
       .sendWithRetries(
         sequencerSendResponse(batch, _),

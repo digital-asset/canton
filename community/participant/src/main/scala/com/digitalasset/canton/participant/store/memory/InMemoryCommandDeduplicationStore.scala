@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.OptionT
 import cats.syntax.option.*
-import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.ChangeIdHash

@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.mediator
 import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -31,11 +32,11 @@ import com.digitalasset.canton.sequencing.protocol.{
   OpenEnvelope,
   Recipients,
 }
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -151,16 +152,35 @@ private[mediator] class DefaultVerdictSender(
       informeesMap <- EitherT.right(
         informeesByParticipant(request.allInformees.toList, snapshot.ipsSnapshot)
       )
+      envelopes <- {
+        if (protocolVersion >= ProtocolVersion.v5) {
+          val result = request.createMediatorResult(requestId, verdict, request.allInformees)
+          val recipients =
+            NonEmpty
+              .from(informeesMap.keysIterator.toSeq.map { (r: Member) => NonEmpty(Set, r).toSet })
+              .map(Recipients.groups)
+              .getOrElse(
+                // Should never happen as the topology (same snapshot) is checked in
+                // `ConfirmationResponseProcessor.validateRequest`
+                ErrorUtil.invalidState("No active participants for informees")
+              )
 
-      envelopes <- informeesMap.toList
-        .parTraverse { case (participantId, informees) =>
-          val result = request.createMediatorResult(requestId, verdict, informees)
           SignedProtocolMessage
             .create(result, snapshot, protocolVersion)
-            .map(signedResult =>
-              OpenEnvelope(signedResult, Recipients.cc(participantId), protocolVersion)
-            )
+            .map(signedResult => List(OpenEnvelope(signedResult, recipients)(protocolVersion)))
+        } else {
+          // TODO(i12171): Remove this block in 3.0
+          informeesMap.toList
+            .parTraverse { case (participantId, informees) =>
+              val result = request.createMediatorResult(requestId, verdict, informees)
+              SignedProtocolMessage
+                .create(result, snapshot, protocolVersion)
+                .map(signedResult =>
+                  OpenEnvelope(signedResult, Recipients.cc(participantId))(protocolVersion)
+                )
+            }
         }
+      }
     } yield Batch(envelopes, protocolVersion)
 
   private def informeesByParticipant(

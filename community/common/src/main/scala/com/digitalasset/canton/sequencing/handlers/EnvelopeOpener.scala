@@ -7,25 +7,22 @@ import cats.instances.either.*
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.HashOps
-import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, EnvelopeContent}
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener.EventDeserializationError
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Envelope}
 import com.digitalasset.canton.sequencing.{ApplicationHandler, EnvelopeBox}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.ProtocolVersion
 
 /** Opener for envelopes inside an arbitrary [[EnvelopeBox]] */
 class EnvelopeOpener[Box[+_ <: Envelope[_]]](protocolVersion: ProtocolVersion, hashOps: HashOps)(
     implicit Box: EnvelopeBox[Box]
 ) {
-  def tryOpen(closed: Box[ClosedEnvelope]): Box[DefaultOpenEnvelope] = {
-    val openedEventE = Box.traverse(closed) { closedEnvelope =>
-      closedEnvelope.openEnvelope(
-        EnvelopeContent.messageFromByteString(protocolVersion, hashOps),
-        protocolVersion,
-      )
-    }
+  def open(closed: Box[ClosedEnvelope]): ParsingResult[Box[DefaultOpenEnvelope]] =
+    Box.traverse(closed)(_.openEnvelope(hashOps, protocolVersion))
 
-    openedEventE.valueOr { error =>
+  def tryOpen(closed: Box[ClosedEnvelope]): Box[DefaultOpenEnvelope] = {
+    open(closed).valueOr { error =>
       // TODO(M40) We shouldn't open the envelopes in the sequencer client because the mediator may want to react to
       //  a garbage informee message by sending a rejection to all recipients of the root hash messages
       throw EventDeserializationError(error, protocolVersion)
@@ -45,7 +42,7 @@ object EnvelopeOpener {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  case class EventDeserializationError(
+  final case class EventDeserializationError(
       error: ProtoDeserializationError,
       protocolVersion: ProtocolVersion,
       cause: Throwable = null,

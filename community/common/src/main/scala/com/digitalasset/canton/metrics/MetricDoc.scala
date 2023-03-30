@@ -13,12 +13,12 @@ import scala.reflect.runtime.universe as ru
 
 object MetricDoc {
 
-  case class GroupInfo(
+  final case class GroupInfo(
       instances: Seq[String],
       fullNames: Seq[String],
   )
 
-  case class Item(
+  final case class Item(
       tag: Tag,
       name: String,
       metricType: String,

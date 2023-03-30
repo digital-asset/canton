@@ -6,12 +6,12 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
@@ -203,7 +203,7 @@ class ConfirmationRequestFactory(
             recipients <- witnesses
               .toRecipients(cryptoSnapshot.ipsSnapshot)
               .leftMap[ConfirmationRequestCreationError](e => RecipientsCreationError(e.message))
-          } yield OpenEnvelope(viewMessage, recipients, protocolVersion)
+          } yield OpenEnvelope(viewMessage, recipients)(protocolVersion)
         }
     } yield res
   }
@@ -245,7 +245,7 @@ object ConfirmationRequestFactory {
 
   /** Indicates that the submitterNode is not allowed to represent the submitter or to submit requests.
     */
-  case class ParticipantAuthorizationError(message: String)
+  final case class ParticipantAuthorizationError(message: String)
       extends ConfirmationRequestCreationError {
     override def pretty: Pretty[ParticipantAuthorizationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
@@ -255,7 +255,8 @@ object ConfirmationRequestFactory {
   /** Indicates that the submitter is not authorized to commit the given transaction.
     * I.e. the commit built from the submitter and the transaction is not well-authorized.
     */
-  case class DamlAuthorizationError(message: String) extends ConfirmationRequestCreationError {
+  final case class DamlAuthorizationError(message: String)
+      extends ConfirmationRequestCreationError {
     override def pretty: Pretty[DamlAuthorizationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
@@ -263,7 +264,8 @@ object ConfirmationRequestFactory {
 
   /** Indicates that the given transaction is malformed in some way, e.g., it has cycles.
     */
-  case class MalformedLfTransaction(message: String) extends ConfirmationRequestCreationError {
+  final case class MalformedLfTransaction(message: String)
+      extends ConfirmationRequestCreationError {
     override def pretty: Pretty[MalformedLfTransaction] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
@@ -271,7 +273,7 @@ object ConfirmationRequestFactory {
 
   /** Indicates that the submitter could not be mapped to a party.
     */
-  case class MalformedSubmitter(message: String) extends ConfirmationRequestCreationError {
+  final case class MalformedSubmitter(message: String) extends ConfirmationRequestCreationError {
     override def pretty: Pretty[MalformedSubmitter] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
@@ -279,13 +281,13 @@ object ConfirmationRequestFactory {
 
   /** Indicates that the given transaction is contract-inconsistent.
     */
-  case class ContractConsistencyError(errors: Seq[ReferenceToFutureContractError])
+  final case class ContractConsistencyError(errors: Seq[ReferenceToFutureContractError])
       extends ConfirmationRequestCreationError {
     override def pretty: Pretty[ContractConsistencyError] = prettyOfClass(unnamedParam(_.errors))
   }
 
   /** Indicates that the given transaction is contract key-inconsistent. */
-  case class ContractKeyConsistencyError(key: LfGlobalKey)
+  final case class ContractKeyConsistencyError(key: LfGlobalKey)
       extends ConfirmationRequestCreationError
       with PrettyPrinting {
     override def pretty: Pretty[ContractKeyConsistencyError] =
@@ -295,7 +297,7 @@ object ConfirmationRequestFactory {
   }
 
   /** Indicates that the given transaction yields a duplicate for a key. */
-  case class ContractKeyDuplicateError(key: LfGlobalKey)
+  final case class ContractKeyDuplicateError(key: LfGlobalKey)
       extends ConfirmationRequestCreationError
       with PrettyPrinting {
     override def pretty: Pretty[ContractKeyDuplicateError] =
@@ -305,7 +307,7 @@ object ConfirmationRequestFactory {
   }
 
   /** Indicates that the encrypted view message could not be created. */
-  case class EncryptedViewMessageCreationError(
+  final case class EncryptedViewMessageCreationError(
       error: EncryptedViewMessageFactory.EncryptedViewMessageCreationError
   ) extends ConfirmationRequestCreationError {
     override def pretty: Pretty[EncryptedViewMessageCreationError] = prettyOfParam(_.error)
@@ -314,22 +316,23 @@ object ConfirmationRequestFactory {
   /** Indicates that the transaction could not be converted to a transaction tree.
     * @see TransactionTreeFactory.TransactionTreeConversionError for more information.
     */
-  case class TransactionTreeFactoryError(cause: TransactionTreeConversionError)
+  final case class TransactionTreeFactoryError(cause: TransactionTreeConversionError)
       extends ConfirmationRequestCreationError {
     override def pretty: Pretty[TransactionTreeFactoryError] = prettyOfParam(_.cause)
   }
 
-  case class SeedGeneratorError(cause: SaltError) extends ConfirmationRequestCreationError {
+  final case class SeedGeneratorError(cause: SaltError) extends ConfirmationRequestCreationError {
     override def pretty: Pretty[SeedGeneratorError] = prettyOfParam(_.cause)
   }
 
-  case class RecipientsCreationError(message: String) extends ConfirmationRequestCreationError {
+  final case class RecipientsCreationError(message: String)
+      extends ConfirmationRequestCreationError {
     override def pretty: Pretty[RecipientsCreationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
-  case class KeySeedError(cause: HkdfError) extends ConfirmationRequestCreationError {
+  final case class KeySeedError(cause: HkdfError) extends ConfirmationRequestCreationError {
     override def pretty: Pretty[KeySeedError] = prettyOfParam(_.cause)
   }
 }

@@ -22,7 +22,7 @@ object WriterStartupError {
   /** We don't want to run the sequencer with a database commit mode that could lead to data loss,
     * so this is optionally and by default validated upon startup.
     */
-  case class BadCommitMode(message: String) extends WriterStartupError {
+  final case class BadCommitMode(message: String) extends WriterStartupError {
     override val retryable =
       false // likely set at the database or user level, so retrying won't make a difference
   }
@@ -31,7 +31,7 @@ object WriterStartupError {
     * an enterprise config validation should prevent starting a node with a bad configuration however if we reach creating
     * a Writer with this config this error will be returned.
     */
-  case class DatabaseNotSupported(message: String) extends WriterStartupError {
+  final case class DatabaseNotSupported(message: String) extends WriterStartupError {
     override val retryable = false // config or setup error
   }
 
@@ -39,7 +39,7 @@ object WriterStartupError {
     * are allocated). We can not start a new sequencer instance if locks for all of these counters are allocated and
     * appear online. However we can keep retrying starting on the chance that one of these will eventually go offline.
     */
-  case class AllInstanceIndexesInUse(message: String) extends WriterStartupError {
+  final case class AllInstanceIndexesInUse(message: String) extends WriterStartupError {
     override val retryable = true
   }
 
@@ -56,7 +56,7 @@ object WriterStartupError {
     * with the same instance index. This is expected and we can just safely retry
     * as a new free instance index will be assigned.
     */
-  case class FailedToCreateExclusiveStorage(message: String) extends WriterStartupError {
+  final case class FailedToCreateExclusiveStorage(message: String) extends WriterStartupError {
     override val retryable = true
   }
 }

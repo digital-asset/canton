@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
+import cats.Eval
 import cats.syntax.option.*
-import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.{
   AlreadyExists,
@@ -101,7 +102,8 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
   def mk(lowerBound: CantonTimestamp = CantonTimestamp.MinValue): Fixture = {
     val store = new InMemoryCommandDeduplicationStore(loggerFactory)
-    val dedup = new CommandDeduplicatorImpl(store, clock, lowerBound, loggerFactory)
+    val dedup =
+      new CommandDeduplicatorImpl(Eval.now(store), clock, Eval.now(lowerBound), loggerFactory)
     new Fixture(dedup, store)
   }
 

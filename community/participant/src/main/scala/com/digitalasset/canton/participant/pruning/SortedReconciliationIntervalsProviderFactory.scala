@@ -13,14 +13,12 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.StoreBasedDomainTopologyClient
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime}
-import com.digitalasset.canton.topology.store.{TopologyStoreFactory, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class SortedReconciliationIntervalsProviderFactory(
     clock: Clock,
-    topologyStoreFactory: TopologyStoreFactory,
     syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
@@ -52,7 +50,7 @@ class SortedReconciliationIntervalsProviderFactory(
         clock = clock,
         domainId = domainId,
         protocolVersion = staticDomainParameters.protocolVersion,
-        store = topologyStoreFactory.forId(TopologyStoreId.DomainStore(domainId)),
+        store = syncDomainPersistentStateManager.topologyStore,
         initKeys = Map.empty,
         packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
         timeouts = timeouts,

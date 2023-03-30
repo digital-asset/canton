@@ -328,7 +328,7 @@ trait TaskSchedulerMetrics {
 
 object TaskScheduler {
 
-  case class TimeBarrier(timestamp: CantonTimestamp) {
+  final case class TimeBarrier(timestamp: CantonTimestamp) {
     private[TaskScheduler] val completion: Promise[Unit] = Promise[Unit]()
   }
   trait TimedTask extends PrettyPrinting {

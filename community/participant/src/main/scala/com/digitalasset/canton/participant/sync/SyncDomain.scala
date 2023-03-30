@@ -4,18 +4,19 @@
 package com.digitalasset.canton.participant.sync
 
 import akka.stream.Materializer
-import cats.Monad
 import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
+import cats.{Eval, Monad}
+import com.daml.lf.engine.Engine
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
-import com.digitalasset.canton.health.HealthReporting
-import com.digitalasset.canton.health.HealthReporting.ComponentHealth
+import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.health.HealthReporting.HealthComponent
+import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -55,29 +56,36 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainEphemeralState,
   SyncDomainPersistentState,
 }
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
   ParticipantTopologyDispatcher,
 }
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
+import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements
-import com.digitalasset.canton.sequencing.handlers.{CleanSequencerCounterTracker, EnvelopeOpener}
-import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope}
+import com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  Envelope,
+  EventWithErrors,
+}
 import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
+  BoxedEnvelope,
   DelayLogger,
   HandlerResult,
   PossiblyIgnoredApplicationHandler,
-  PossiblyIgnoredProtocolEvent,
   SubscriptionStart,
 }
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
+import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{
@@ -111,9 +119,10 @@ class SyncDomain(
     val domainId: DomainId,
     domainHandle: DomainHandle,
     participantId: ParticipantId,
-    damle: DAMLe,
+    engine: Engine,
+    authorityResolver: AuthorityResolver,
     parameters: ParticipantNodeParameters,
-    participantNodePersistentState: ParticipantNodePersistentState,
+    participantNodePersistentState: Eval[ParticipantNodePersistentState],
     private[sync] val persistent: SyncDomainPersistentState,
     val ephemeral: SyncDomainEphemeralState,
     val packageService: PackageService,
@@ -134,13 +143,13 @@ class SyncDomain(
     extends NamedLogging
     with StartAndCloseable[Either[SyncDomainInitializationError, Unit]]
     with TransferSubmissionHandle
-    with ComponentHealth {
+    with HealthComponent {
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
   override val name = SyncDomain.healthName
-  override val initialState: HealthReporting.ComponentState = HealthReporting.ComponentState.Failed(
-    HealthReporting.ComponentState.UnhealthyState(Some("Initial state - not connected to domain"))
-  )
+  override val initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
+  override val closingState: ComponentHealthState =
+    ComponentHealthState.failed("Disconnected from domain")
 
   private[canton] val sequencerClient = domainHandle.sequencerClient
   val timeTracker: DomainTimeTracker = ephemeral.timeTracker
@@ -156,6 +165,15 @@ class SyncDomain(
       packageService,
       parameters.loggingConfig,
       staticDomainParameters.uniqueContractKeys,
+      loggerFactory,
+    )
+
+  private val damle =
+    new DAMLe(
+      pkgId => traceContext => packageService.getPackage(pkgId)(traceContext),
+      authorityResolver,
+      Some(domainId),
+      engine,
       loggerFactory,
     )
 
@@ -222,9 +240,9 @@ class SyncDomain(
     persistent.acsCommitmentStore,
     persistent.activeContractStore,
     persistent.contractKeyJournal,
-    participantNodePersistentState.inFlightSubmissionStore,
+    participantNodePersistentState.map(_.inFlightSubmissionStore),
     domainId,
-    parameters.stores.acsPruningInterval,
+    parameters.stores.acsPruningInterval.toInternal,
     clock,
     timeouts,
     loggerFactory,
@@ -251,7 +269,7 @@ class SyncDomain(
   val topologyProcessor = new TopologyTransactionProcessor(
     domainId,
     domainCrypto.pureCrypto,
-    domainHandle.topologyStore,
+    domainHandle.domainPersistentState.topologyStore,
     acsCommitmentProcessor.scheduleTopologyTick,
     futureSupervisor,
     parameters.processingTimeouts,
@@ -305,6 +323,7 @@ class SyncDomain(
 
   private val messageDispatcher: MessageDispatcher =
     messageDispatcherFactory.create(
+      staticDomainParameters.protocolVersion,
       domainId,
       participantId,
       ephemeral.requestTracker,
@@ -375,7 +394,7 @@ class SyncDomain(
     def loadPendingEffectiveTimesFromTopologyStore(
         timestamp: CantonTimestamp
     ): EitherT[Future, SyncDomainInitializationError, Unit] = {
-      val store = domainHandle.topologyStore
+      val store = domainHandle.domainPersistentState.topologyStore
       EitherT.right(store.findUpcomingEffectiveChanges(timestamp).map { changes =>
         changes.headOption.foreach { head =>
           logger.debug(
@@ -456,7 +475,9 @@ class SyncDomain(
       // if someone rewound the clean request prehead (e.g., for testing), so this is only a lower bound!
       _ = logger.info(s"Publishing pending events up to ${cleanHeadRc - 1L}")
       lastLocalOffset <- EitherT.right(
-        participantNodePersistentState.multiDomainEventLog.lastLocalOffset(persistent.eventLog.id)
+        participantNodePersistentState.value.multiDomainEventLog.lastLocalOffset(
+          persistent.eventLog.id
+        )
       )
 
       _unit <- EitherT.right(
@@ -481,7 +502,7 @@ class SyncDomain(
       // Phase 2: recover events that have been published to the single-dimension event log, but were not published at
       // the multi-domain event log before the crash
       pending <- EitherT.right(
-        participantNodePersistentState.multiDomainEventLog
+        participantNodePersistentState.value.multiDomainEventLog
           .fetchUnpublished(persistent.eventLog.id, Some(cleanHeadRc.asLocalOffset - 1L))
       )
 
@@ -578,7 +599,7 @@ class SyncDomain(
       messageHandler =
         new ApplicationHandler[
           Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
-          DefaultOpenEnvelope,
+          ClosedEnvelope,
         ] {
           override def name: String = s"sync-domain-$domainId"
 
@@ -588,14 +609,40 @@ class SyncDomain(
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
             topologyProcessor.subscriptionStartsAt(start, domainTimeTracker)(traceContext)
 
-          override def apply(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
-            messageDispatcher.handleAll(events)
+          override def apply(
+              tracedEvents: BoxedEnvelope[Lambda[
+                `+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]
+              ], ClosedEnvelope]
+          ): HandlerResult = {
+            tracedEvents.withTraceContext { traceContext => closedEvents =>
+              val openEvents = closedEvents.map { event =>
+                val openedEvent = PossiblyIgnoredSequencedEvent.openEnvelopes(event)(
+                  staticDomainParameters.protocolVersion,
+                  domainCrypto.crypto.pureCrypto,
+                )
+
+                openedEvent match {
+                  case Right(_) =>
+
+                  case Left(Traced(EventWithErrors(content, openingErrors, _isIgnored))) =>
+                    // Raise alarms
+                    // TODO(i11804): Send a rejection
+                    openingErrors.foreach { error =>
+                      val cause =
+                        s"Received an envelope at ${content.timestamp} that cannot be opened. " +
+                          s"Discarding envelope... Reason: $error"
+                      SyncServiceAlarm.Warn(cause).report()
+                    }
+                }
+
+                openedEvent
+              }
+
+              messageDispatcher.handleAll(Traced(openEvents)(traceContext))
+            }
+          }
         }
-      eventHandler = monitor(
-        EnvelopeOpener(staticDomainParameters.protocolVersion, domainCrypto.crypto.pureCrypto)(
-          messageHandler
-        )
-      )
+      eventHandler = monitor(messageHandler)
 
       cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
         persistent.sequencerCounterTrackerStore,
@@ -626,7 +673,7 @@ class SyncDomain(
             staticDomainParameters.protocolVersion,
             registerIdentityTransactionHandle,
             domainHandle.topologyClient,
-            domainHandle.topologyStore,
+            domainHandle.domainPersistentState.topologyStore,
             domainCrypto.crypto,
           )(initializationTraceContext)
           .onShutdown(Right(()))
@@ -637,7 +684,7 @@ class SyncDomain(
       ephemeral.markAsRecovered()
       logger.debug("Sync domain is ready.")(initializationTraceContext)
       FutureUtil.doNotAwait(
-        completeTxIn,
+        completeTxIn.unwrap,
         "Failed to complete outstanding transfer-ins on startup. " +
           "You may have to complete the transfer-ins manually.",
       )
@@ -645,33 +692,38 @@ class SyncDomain(
     }).value
   }
 
-  def completeTxIn(implicit tc: TraceContext): Future[Unit] = {
+  def completeTxIn(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
 
     val fetchLimit = 1000
 
     def completeTransfers(
         previous: Option[(CantonTimestamp, DomainId)]
-    ): Future[Either[Option[(CantonTimestamp, DomainId)], Unit]] = {
+    ): FutureUnlessShutdown[Either[Option[(CantonTimestamp, DomainId)], Unit]] = {
       logger.debug(s"Fetch $fetchLimit pending transfers")
       val resF = for {
-        pendingTransfers <- persistent.transferStore.findAfter(
-          requestAfter = previous,
-          limit = fetchLimit,
+        pendingTransfers <- performUnlessClosingF(functionFullName)(
+          persistent.transferStore.findAfter(
+            requestAfter = previous,
+            limit = fetchLimit,
+          )
         )
         // TODO(i9500): Here, transfer-ins are completed sequentially. Consider running several in parallel to speed
         // this up. It may be helpful to use the `RateLimiter`
         eithers <- MonadUtil
           .sequentialTraverse(pendingTransfers) { data =>
             logger.debug(s"Complete ${data.transferId} after startup")
-            val eitherF = AutomaticTransferIn.perform(
-              data.transferId,
-              domainId,
-              transferCoordination,
-              data.contract.metadata.stakeholders,
-              data.transferOutRequest.submitterMetadata,
-              participantId,
-              data.transferOutRequest.targetTimeProof.timestamp,
-            )
+            val eitherF =
+              performUnlessClosingEitherU[TransferProcessorError, Unit](functionFullName)(
+                AutomaticTransferIn.perform(
+                  data.transferId,
+                  domainId,
+                  transferCoordination,
+                  data.contract.metadata.stakeholders,
+                  data.transferOutRequest.submitterMetadata,
+                  participantId,
+                  data.transferOutRequest.targetTimeProof.timestamp,
+                )
+              )
             eitherF.value.map(_.left.map(err => data.transferId -> err))
           }
 
@@ -699,16 +751,20 @@ class SyncDomain(
       // Wait to see a timestamp >= now from the domain -- when we see such a timestamp, it means that the participant
       // has "caught up" on messages from the domain (and so should have seen all the transfer-ins)
       // TODO(i9009): This assumes the participant and domain clocks are synchronized, which may not be the case
-      waitForReplay <- timeTracker
-        .awaitTick(clock.now)
-        .map(_.void)
-        .getOrElse(Future.unit)
-
-      params <- topologyClient.currentSnapshotApproximation.findDynamicDomainParametersOrDefault(
-        staticDomainParameters.protocolVersion
+      waitForReplay <- FutureUnlessShutdown.outcomeF(
+        timeTracker
+          .awaitTick(clock.now)
+          .map(_.void)
+          .getOrElse(Future.unit)
       )
 
-      _bool <- Monad[Future].tailRecM(None: Option[(CantonTimestamp, DomainId)])(ts =>
+      params <- performUnlessClosingF(functionFullName)(
+        topologyClient.currentSnapshotApproximation.findDynamicDomainParametersOrDefault(
+          staticDomainParameters.protocolVersion
+        )
+      )
+
+      _bool <- Monad[FutureUnlessShutdown].tailRecM(None: Option[(CantonTimestamp, DomainId)])(ts =>
         completeTransfers(ts)
       )
     } yield {
@@ -718,10 +774,10 @@ class SyncDomain(
   }
 
   /** A [[SyncDomain]] is ready when it has resubscribed to the sequencer client. */
-  def ready: Boolean = ephemeral.isNotFailed
+  def ready: Boolean = !ephemeral.isFailed
 
   def readyForSubmission: Boolean =
-    ready && isNotFailed && sequencerClient.healthComponent.isNotFailed
+    ready && !isFailed && !sequencerClient.healthComponent.isFailed
 
   /** @return The outer future completes after the submission has been registered as in-flight.
     *         The inner future completes after the submission has been sequenced or if it will never be sequenced.
@@ -915,9 +971,10 @@ object SyncDomain {
         domainId: DomainId,
         domainHandle: DomainHandle,
         participantId: ParticipantId,
-        damle: DAMLe,
+        engine: Engine,
+        authorityResolver: AuthorityResolver,
         parameters: ParticipantNodeParameters,
-        participantNodePersistentState: ParticipantNodePersistentState,
+        participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncDomainPersistentState,
         ephemeralState: SyncDomainEphemeralState,
         packageService: PackageService,
@@ -941,9 +998,10 @@ object SyncDomain {
         domainId: DomainId,
         domainHandle: DomainHandle,
         participantId: ParticipantId,
-        damle: DAMLe,
+        engine: Engine,
+        authorityResolver: AuthorityResolver,
         parameters: ParticipantNodeParameters,
-        participantNodePersistentState: ParticipantNodePersistentState,
+        participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncDomainPersistentState,
         ephemeralState: SyncDomainEphemeralState,
         packageService: PackageService,
@@ -964,7 +1022,8 @@ object SyncDomain {
         domainId,
         domainHandle,
         participantId,
-        damle,
+        engine,
+        authorityResolver,
         parameters,
         participantNodePersistentState,
         persistentState,
@@ -988,8 +1047,8 @@ object SyncDomain {
 }
 
 sealed trait SyncDomainInitializationError
-case class SequencedEventStoreError(err: store.SequencedEventStoreError)
+final case class SequencedEventStoreError(err: store.SequencedEventStoreError)
     extends SyncDomainInitializationError
-case class ParticipantTopologyHandshakeError(err: DomainRegistryError)
+final case class ParticipantTopologyHandshakeError(err: DomainRegistryError)
     extends SyncDomainInitializationError
-case class ParticipantDidNotBecomeActive(msg: String) extends SyncDomainInitializationError
+final case class ParticipantDidNotBecomeActive(msg: String) extends SyncDomainInitializationError

@@ -43,6 +43,12 @@ class TinkPrivateCrypto private (
       keyTemplate <- scheme match {
         case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
           EitherT.rightT(HybridKeyTemplates.ECIES_P256_HKDF_HMAC_SHA256_AES128_GCM)
+        case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+          EitherT.leftT(
+            EncryptionKeyGenerationError.UnsupportedKeyScheme(
+              EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc
+            )
+          )
       }
       keysetHandle <- generateKey[EncryptionKeyGenerationError](
         keyTemplate,

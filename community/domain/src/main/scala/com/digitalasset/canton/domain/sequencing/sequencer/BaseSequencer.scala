@@ -18,6 +18,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   SignedContent,
   SubmissionRequest,
 }
+import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.topology.{DomainTopologyManagerId, Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.Spanning.SpanWrapper
@@ -26,7 +27,6 @@ import com.digitalasset.canton.util.EitherTUtil.ifThenET
 import com.digitalasset.canton.util.FutureInstances.*
 import io.opentelemetry.api.trace.Tracer
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Provides additional functionality that is common between sequencer implementations:
@@ -44,21 +44,16 @@ abstract class BaseSequencer(
     with NamedLogging
     with Spanning {
 
-  private val healthListeners =
-    new AtomicReference[List[(SequencerHealthStatus, TraceContext) => Unit]](Nil)
-  private val currentHealth =
-    new AtomicReference[SequencerHealthStatus](SequencerHealthStatus(isActive = true))
-
   val periodicHealthCheck: Option[PeriodicAction] = healthConfig.map(conf =>
     // periodically calling the sequencer's health check in order to continuously notify
     // listeners in case the health status has changed.
     new PeriodicAction(
       clock,
-      conf.backendCheckPeriod,
+      conf.backendCheckPeriod.toInternal,
       loggerFactory,
       timeouts,
       "health-check",
-    )(tc => health(tc))
+    )(tc => healthInternal(tc).map(reportHealthState(_)(tc)))
   )
 
   /** The domain manager is responsible for identities within the domain.
@@ -168,29 +163,7 @@ abstract class BaseSequencer(
     )
   }
 
-  override def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus] = for {
-    newHealth <- healthInternal
-  } yield {
-    val old = currentHealth.getAndSet(newHealth)
-    if (old != newHealth) healthChanged(newHealth)
-    newHealth
-  }
-
   protected def healthInternal(implicit traceContext: TraceContext): Future[SequencerHealthStatus]
-
-  override def onHealthChange(
-      listener: (SequencerHealthStatus, TraceContext) => Unit
-  )(implicit traceContext: TraceContext): Unit = {
-    healthListeners.getAndUpdate(listener :: _)
-    listener(currentHealth.get(), traceContext)
-  }
-
-  protected def healthChanged(
-      health: SequencerHealthStatus
-  )(implicit traceContext: TraceContext): Unit = {
-    currentHealth.set(health)
-    healthListeners.get().foreach(_(health, traceContext))
-  }
 
   protected def sendAsyncInternal(submission: SubmissionRequest)(implicit
       traceContext: TraceContext

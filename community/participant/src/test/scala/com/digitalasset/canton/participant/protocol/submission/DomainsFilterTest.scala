@@ -145,7 +145,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
 }
 
 private[submission] object DomainsFilterTest {
-  case class DomainsFilterForTx(
+  final case class DomainsFilterForTx(
       tx: LfVersionedTransaction,
       domainProtocolVersion: ProtocolVersion,
   ) {

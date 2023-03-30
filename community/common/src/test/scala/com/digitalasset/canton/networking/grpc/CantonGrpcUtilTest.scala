@@ -202,7 +202,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
             val (unavailableEntries, giveUpEntry) = logEntries.splitAt(logEntries.size - 1)
             forEvery(unavailableEntries) { logEntry =>
               logEntry.warningMessage shouldBe
-                s"""Request failed for serverName. Is the server running? Did you configure the server address as 0.0.0.0? Are you using the right TLS settings?
+                s"""Request failed for serverName. Is the server running? Did you configure the server address as 0.0.0.0? Are you using the right TLS settings? (details logged as DEBUG)
                    |  GrpcServiceUnavailable: UNAVAILABLE/Could not find server: $channelName
                    |  Request: command""".stripMargin
             }
@@ -232,7 +232,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
             logEntries should not be empty
             forEvery(logEntries) { logEntry =>
               logEntry.warningMessage shouldBe
-                s"""Request failed for serverName. Is the server running? Did you configure the server address as 0.0.0.0? Are you using the right TLS settings?
+                s"""Request failed for serverName. Is the server running? Did you configure the server address as 0.0.0.0? Are you using the right TLS settings? (details logged as DEBUG)
                    |  GrpcServiceUnavailable: UNAVAILABLE/Could not find server: $channelName
                    |  Request: command""".stripMargin
             }

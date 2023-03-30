@@ -28,7 +28,7 @@ import slick.jdbc.GetResult
 import java.io.IOException
 import scala.concurrent.{ExecutionContext, Future}
 
-case class ServiceAgreementAcceptance(
+final case class ServiceAgreementAcceptance(
     agreementId: ServiceAgreementId,
     participantId: ParticipantId,
     signature: Signature,
@@ -141,10 +141,10 @@ sealed trait ServiceAgreementManagerError
 
 object ServiceAgreementManagerError {
 
-  case class ServiceAgreementStoreError(error: ServiceAgreementAcceptanceStoreError)
+  final case class ServiceAgreementStoreError(error: ServiceAgreementAcceptanceStoreError)
       extends ServiceAgreementManagerError
 
-  case class ServiceAgreementMismatch(
+  final case class ServiceAgreementMismatch(
       configuredId: ServiceAgreementId,
       acceptedId: ServiceAgreementId,
   ) extends ServiceAgreementManagerError

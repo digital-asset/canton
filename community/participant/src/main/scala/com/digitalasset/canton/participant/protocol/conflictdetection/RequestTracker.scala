@@ -298,7 +298,7 @@ object RequestTracker {
     * @param timeoutResult The future for the [[TimeoutResult]] that will be completed when the
     *                      request times out or a transaction result is added.
     */
-  case class RequestFutures(
+  final case class RequestFutures(
       activenessResult: Future[ActivenessResult],
       timeoutResult: Future[TimeoutResult],
   )
@@ -322,7 +322,7 @@ object RequestTracker {
   /** Returned by [[RequestTracker!.addRequest]] if the same request was added before with different
     * parameters (as given).
     */
-  case class RequestAlreadyExists(
+  final case class RequestAlreadyExists(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
@@ -338,7 +338,7 @@ object RequestTracker {
   sealed trait ResultError extends RequestTrackerError
 
   /** The request is not (any longer) tracked by the request tracker */
-  case class RequestNotFound(requestCounter: RequestCounter)
+  final case class RequestNotFound(requestCounter: RequestCounter)
       extends ResultError
       with CommitSetError {
     override def pretty: Pretty[RequestNotFound] = prettyOfClass(unnamedParam(_.requestCounter))
@@ -347,7 +347,7 @@ object RequestTracker {
   /** Returned by [[RequestTracker!.addResult]] if the result has been signalled beforehand
     * with different parameters for the same request
     */
-  case class ResultAlreadyExists(requestCounter: RequestCounter) extends ResultError {
+  final case class ResultAlreadyExists(requestCounter: RequestCounter) extends ResultError {
     override def pretty: Pretty[ResultAlreadyExists] = prettyOfClass(unnamedParam(_.requestCounter))
   }
 
@@ -357,14 +357,14 @@ object RequestTracker {
   /** Returned by [[RequestTracker!.addCommitSet]] if no result has been signalled beforehand for the
     * request
     */
-  case class ResultNotFound(requestCounter: RequestCounter) extends CommitSetError {
+  final case class ResultNotFound(requestCounter: RequestCounter) extends CommitSetError {
     override def pretty: Pretty[ResultNotFound] = prettyOfClass(unnamedParam(_.requestCounter))
   }
 
   /** Returned by [[RequestTracker!.addCommitSet]] if a different commit set has already been supplied
     * for the given request counter.
     */
-  case class CommitSetAlreadyExists(requestCounter: RequestCounter) extends CommitSetError {
+  final case class CommitSetAlreadyExists(requestCounter: RequestCounter) extends CommitSetError {
     override def pretty: Pretty[CommitSetAlreadyExists] = prettyOfClass(
       unnamedParam(_.requestCounter)
     )
@@ -373,7 +373,7 @@ object RequestTracker {
   /** The commit set tries to activate or deactivate contracts
     * that were not locked during the activeness check.
     */
-  case class InvalidCommitSet(
+  final case class InvalidCommitSet(
       requestCounter: RequestCounter,
       commitSet: CommitSet,
       locked: LockedStates,
@@ -384,11 +384,12 @@ object RequestTracker {
   /** Errors while writing to the stores */
   sealed trait RequestTrackerStoreError extends Product with Serializable
 
-  case class AcsError(error: ActiveContractStore.AcsBaseError) extends RequestTrackerStoreError
-
-  case class TransferStoreError(error: TransferStore.TransferStoreError)
+  final case class AcsError(error: ActiveContractStore.AcsBaseError)
       extends RequestTrackerStoreError
 
-  case class ContractKeyJournalError(error: ContractKeyJournal.ContractKeyJournalError)
+  final case class TransferStoreError(error: TransferStore.TransferStoreError)
+      extends RequestTrackerStoreError
+
+  final case class ContractKeyJournalError(error: ContractKeyJournal.ContractKeyJournalError)
       extends RequestTrackerStoreError
 }

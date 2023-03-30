@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
-import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.{
   AlreadyExists,
@@ -30,7 +31,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * All method calls should be coordinated by the [[InFlightSubmissionTracker]].
   * In particular, `checkDeduplication` must not be called concurrently with
-  * `processPublications` for the same [[com.daml.ledger.participant.state.v2.ChangeId]]s.
+  * `processPublications` for the same [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]]s.
   */
 trait CommandDeduplicator {
 
@@ -40,16 +41,16 @@ trait CommandDeduplicator {
   ): Future[Unit]
 
   /** Perform deduplication for the given [[com.digitalasset.canton.participant.protocol.submission.ChangeIdHash]]
-    * and [[com.daml.ledger.api.DeduplicationPeriod]].
+    * and [[com.digitalasset.canton.ledger.api.DeduplicationPeriod]].
     *
     * @param changeIdHash The change ID hash of the submission to be deduplicated
     * @param deduplicationPeriod The deduplication period specified with the submission
     *
-    * @return The [[com.daml.ledger.api.DeduplicationPeriod.DeduplicationOffset]]
-    *         to be included in the command completion's [[com.daml.ledger.participant.state.v2.CompletionInfo]].
-    *         Canton always returns a [[com.daml.ledger.api.DeduplicationPeriod.DeduplicationOffset]]
+    * @return The [[com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationOffset]]
+    *         to be included in the command completion's [[com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo]].
+    *         Canton always returns a [[com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationOffset]]
     *         because it cannot meet the the record time requirements for the other kinds of
-    *         [[com.daml.ledger.api.DeduplicationPeriod]]s.
+    *         [[com.digitalasset.canton.ledger.api.DeduplicationPeriod]]s.
     */
   def checkDuplication(changeIdHash: ChangeIdHash, deduplicationPeriod: DeduplicationPeriod)(
       implicit traceContext: TraceContext
@@ -59,24 +60,24 @@ trait CommandDeduplicator {
 object CommandDeduplicator {
   sealed trait DeduplicationFailed extends Product with Serializable
 
-  case class MalformedOffset(error: String) extends DeduplicationFailed
+  final case class MalformedOffset(error: String) extends DeduplicationFailed
 
-  case class AlreadyExists(
+  final case class AlreadyExists(
       completionOffset: GlobalOffset,
       accepted: Boolean,
       existingSubmissionId: Option[LedgerSubmissionId],
   ) extends DeduplicationFailed
 
-  case class DeduplicationPeriodTooEarly(
+  final case class DeduplicationPeriodTooEarly(
       requested: DeduplicationPeriod,
       earliestDeduplicationStart: DeduplicationPeriod,
   ) extends DeduplicationFailed
 }
 
 class CommandDeduplicatorImpl(
-    store: CommandDeduplicationStore,
+    store: Eval[CommandDeduplicationStore],
     clock: Clock,
-    publicationTimeLowerBound: => CantonTimestamp,
+    publicationTimeLowerBound: Eval[CantonTimestamp],
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends CommandDeduplicator
@@ -105,7 +106,7 @@ class CommandDeduplicatorImpl(
           )
         }
     }
-    store.storeDefiniteAnswers(offsetsAndComletionInfos)
+    store.value.storeDefiniteAnswers(offsetsAndComletionInfos)
   }
 
   override def checkDuplication(
@@ -148,12 +149,13 @@ class CommandDeduplicatorImpl(
       // where the clock lags behind.  We accept this for now as the deduplication guarantee
       // does not forbid clocks that run backwards. Including `clock.now` ensures that time advances
       // for deduplication even if no events happen on the domain.
-      val baseline = Ordering[CantonTimestamp].max(clock.now, publicationTimeLowerBound).toInstant
+      val baseline =
+        Ordering[CantonTimestamp].max(clock.now, publicationTimeLowerBound.value).toInstant
 
       def checkAgainstPruning(
           deduplicationStart: CantonTimestamp
       ): EitherT[Future, DeduplicationFailed, GlobalOffset] = {
-        EitherTUtil.leftSubflatMap(store.latestPruning().toLeft(unprunedDedupOffset)) {
+        EitherTUtil.leftSubflatMap(store.value.latestPruning().toLeft(unprunedDedupOffset)) {
           case OffsetAndPublicationTime(prunedOffset, prunedPublicationTime) =>
             Either.cond(
               deduplicationStart > prunedPublicationTime,
@@ -176,7 +178,7 @@ class CommandDeduplicatorImpl(
               )
           }
         )
-        dedupEntryO <- EitherT.right(store.lookup(changeIdHash).value)
+        dedupEntryO <- EitherT.right(store.value.lookup(changeIdHash).value)
         reportedDedupOffset <- dedupEntryO match {
           case None =>
             checkAgainstPruning(deduplicationStart)
@@ -207,7 +209,7 @@ class CommandDeduplicatorImpl(
       def checkAgainstPruning(
           dedupOffset: GlobalOffset
       ): EitherT[Future, DeduplicationFailed, GlobalOffset] = {
-        EitherTUtil.leftSubflatMap(store.latestPruning().toLeft(unprunedDedupOffset)) {
+        EitherTUtil.leftSubflatMap(store.value.latestPruning().toLeft(unprunedDedupOffset)) {
           case OffsetAndPublicationTime(prunedOffset, prunedPublicationTime) =>
             Either.cond(
               prunedOffset <= dedupOffset,
@@ -223,7 +225,7 @@ class CommandDeduplicatorImpl(
             .toGlobalOffset(offset)
             .leftMap[DeduplicationFailed](err => MalformedOffset(err))
         )
-        dedupEntryO <- EitherT.right(store.lookup(changeIdHash).value)
+        dedupEntryO <- EitherT.right(store.value.lookup(changeIdHash).value)
         reportedDedupOffset <- dedupEntryO match {
           case None =>
             checkAgainstPruning(dedupOffset)

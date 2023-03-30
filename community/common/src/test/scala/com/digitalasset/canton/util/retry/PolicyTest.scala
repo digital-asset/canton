@@ -436,7 +436,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
 
     it("should handle future failures") {
       implicit val success: Success[Boolean] = Success(identity)
-      case class RetryAfter(duration: FiniteDuration) extends RuntimeException
+      final case class RetryAfter(duration: FiniteDuration) extends RuntimeException
       val retried = new AtomicBoolean
 
       def run() =
@@ -458,7 +458,7 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService with
 
     it("should handle synchronous failures") {
       implicit val success: Success[Boolean] = Success(identity)
-      case class RetryAfter(duration: FiniteDuration) extends RuntimeException
+      final case class RetryAfter(duration: FiniteDuration) extends RuntimeException
       val retried = new AtomicBoolean
 
       def run() =

@@ -26,7 +26,7 @@ object FabricErrors extends FabricErrorGroup {
     )
     object ManyBlocksBehindHead
         extends ErrorCode("FABRIC_MANY_BLOCKS_BEHIND_HEAD", BackgroundProcessDegradationWarning) {
-      case class Warn(currBlock: Long, blockchainHead: Long)(implicit
+      final case class Warn(currBlock: Long, blockchainHead: Long)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(
             s"The Fabric sequencer is ${blockchainHead - currBlock} blocks behind the head of the blockchain. This might take a while. Consider updating `start-block-height`."
@@ -46,7 +46,7 @@ object FabricErrors extends FabricErrorGroup {
     )
     object AheadOfHead
         extends ErrorCode("FABRIC_AHEAD_OF_HEAD", BackgroundProcessDegradationWarning) {
-      case class Warn(firstBlockToRead: Long, blockchainHead: Long)(implicit
+      final case class Warn(firstBlockToRead: Long, blockchainHead: Long)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(
             s"The Fabric sequencer attempted to start reading from block $firstBlockToRead but the last block that was ordered is only block $blockchainHead. The Fabric sequencer might be reading from the wrong channel."
@@ -71,7 +71,7 @@ object FabricErrors extends FabricErrorGroup {
           "FABRIC_TRANSACTION_PROPOSAL_SUBMISSION_FAILED",
           TransientServerFailure,
         ) {
-      case class Warn(
+      final case class Warn(
           fcn: String,
           args: Seq[Array[Byte]],
           transientMap: Map[String, Array[Byte]],
@@ -83,7 +83,7 @@ object FabricErrors extends FabricErrorGroup {
           )
     }
 
-    case class ProposalResponseSummary(message: String, verified: Boolean)
+    final case class ProposalResponseSummary(message: String, verified: Boolean)
 
     @Explanation("""
                    |This error is logged when the Sequencer Fabric application receives an error during any of the
@@ -99,7 +99,7 @@ object FabricErrors extends FabricErrorGroup {
           "FABRIC_TRANSACTION_SUBMISSION_FAILED",
           TransientServerFailure,
         ) {
-      case class Warn(
+      final case class Warn(
           fcn: String,
           args: Seq[Array[Byte]],
           transientMap: Map[String, Array[Byte]],
@@ -125,7 +125,7 @@ object FabricErrors extends FabricErrorGroup {
                   |""")
     object InvalidTransaction extends AlarmErrorCode("FABRIC_TRANSACTION_INVALID") {
 
-      case class Warn(fcn: String, msg: String, blockHeight: Long)
+      final case class Warn(fcn: String, msg: String, blockHeight: Long)
           extends Alarm(
             s"At block $blockHeight found invalid $fcn transaction. That indicates malicious or faulty behavior, so skipping it. Error: $msg"
           )

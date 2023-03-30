@@ -6,6 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.parallel.*
 import com.daml.metrics
 import com.daml.metrics.api.MetricHandle.Gauge
+import com.daml.metrics.api.MetricHandle.Gauge.SimpleCloseableGauge
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.noop.NoOpCounter
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -30,16 +31,20 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
     val EPOCH = CantonTimestamp.Epoch
 
     "correctly order tasks and barriers" in {
-      case class TaskData(timestamp: CantonTimestamp, sequencerCounter: SequencerCounter, kind: Int)
+      final case class TaskData(
+          timestamp: CantonTimestamp,
+          sequencerCounter: SequencerCounter,
+          kind: Int,
+      )
       sealed trait TickOrTask extends Product with Serializable {
         def sequencerCounter: SequencerCounter
       }
-      case class Tick(sequencerCounter: SequencerCounter, timestamp: CantonTimestamp)
+      final case class Tick(sequencerCounter: SequencerCounter, timestamp: CantonTimestamp)
           extends TickOrTask
       object Tick {
         def apply(args: (SequencerCounter, CantonTimestamp)): Tick = Tick(args._1, args._2)
       }
-      case class Task(data: TaskData, taskIndex: Int) extends TickOrTask {
+      final case class Task(data: TaskData, taskIndex: Int) extends TickOrTask {
         override def sequencerCounter: SequencerCounter = data.sequencerCounter
       }
       object Task {
@@ -368,7 +373,8 @@ object TaskSchedulerTest {
       prefix :+ "counter"
     )
 
-    override def taskQueue(size: () => Int): Gauge.CloseableGauge = () => ()
+    override def taskQueue(size: () => Int): Gauge.CloseableGauge =
+      SimpleCloseableGauge("test", () => ())
   }
 
   val Finalization: Int = 0

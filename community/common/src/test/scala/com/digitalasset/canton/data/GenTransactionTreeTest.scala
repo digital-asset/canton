@@ -5,12 +5,12 @@ package com.digitalasset.canton.data
 
 import cats.syntax.option.*
 import cats.syntax.semigroup.*
-import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric
 import com.digitalasset.canton.crypto.{HashPurpose, Salt, TestSalt}
 import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransactionViewTree
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
+import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.transaction.{
@@ -20,13 +20,22 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTestWordSpec, DefaultDamlValues, HasExecutionContext, LfPartyId}
+import com.digitalasset.canton.{
+  BaseTestWordSpec,
+  DefaultDamlValues,
+  HasExecutionContext,
+  LfPartyId,
+  ProtocolVersionChecksAnyWordSpec,
+}
 
 import java.time.Duration
 import scala.annotation.nowarn
 
 @nowarn("msg=match may not be exhaustive")
-class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
+class GenTransactionTreeTest
+    extends BaseTestWordSpec
+    with HasExecutionContext
+    with ProtocolVersionChecksAnyWordSpec {
 
   val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
 
@@ -352,38 +361,36 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
   }
 
   // Before v3, the subview hashes do not need to be passed at construction
-  if (testedProtocolVersion >= ProtocolVersion.v4) {
-    "A light transaction view tree" when {
-      val example = factory.ViewInterleavings
+  "A light transaction view tree" onlyRunWithOrGreaterThan ProtocolVersion.v4 when {
+    val example = factory.ViewInterleavings
 
-      forEvery(example.transactionViewTrees.zipWithIndex) { case (tvt, index) =>
-        val viewWithBlindedSubviews = tvt.view.copy(subviews = tvt.view.subviews.blindFully)
-        val genTransactionTree =
-          tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, viewWithBlindedSubviews))
+    forEvery(example.transactionViewTrees.zipWithIndex) { case (tvt, index) =>
+      val viewWithBlindedSubviews = tvt.view.copy(subviews = tvt.view.subviews.blindFully)
+      val genTransactionTree =
+        tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, viewWithBlindedSubviews))
 
-        val dummyViewHash = ViewHash(
-          factory.cryptoOps.build(HashPurpose.MerkleTreeInnerNode).add("hummous").finish()
-        )
-        val mangledSubviewHashes =
-          if (tvt.subviewHashes.isEmpty) Seq(dummyViewHash)
-          else tvt.subviewHashes.updated(0, dummyViewHash)
+      val dummyViewHash = ViewHash(
+        factory.cryptoOps.build(HashPurpose.MerkleTreeInnerNode).add("hummous").finish()
+      )
+      val mangledSubviewHashes =
+        if (tvt.subviewHashes.isEmpty) Seq(dummyViewHash)
+        else tvt.subviewHashes.updated(0, dummyViewHash)
 
-        "given consistent subview hashes" must {
-          s"pass sanity tests at creation (for the $index-th transaction view tree)" in {
-            noException should be thrownBy LightTransactionViewTree
-              .tryCreate(genTransactionTree, tvt.subviewHashes, testedProtocolVersion)
-          }
+      "given consistent subview hashes" must {
+        s"pass sanity tests at creation (for the $index-th transaction view tree)" in {
+          noException should be thrownBy LightTransactionViewTree
+            .tryCreate(genTransactionTree, tvt.subviewHashes, testedProtocolVersion)
         }
+      }
 
-        "given inconsistent subview hashes" must {
-          s"reject creation (for the $index-th transaction view tree)" in {
+      "given inconsistent subview hashes" must {
+        s"reject creation (for the $index-th transaction view tree)" in {
+          an[InvalidLightTransactionViewTree] should be thrownBy LightTransactionViewTree
+            .tryCreate(genTransactionTree, mangledSubviewHashes, testedProtocolVersion)
+
+          if (tvt.subviewHashes.nonEmpty)
             an[InvalidLightTransactionViewTree] should be thrownBy LightTransactionViewTree
-              .tryCreate(genTransactionTree, mangledSubviewHashes, testedProtocolVersion)
-
-            if (tvt.subviewHashes.nonEmpty)
-              an[InvalidLightTransactionViewTree] should be thrownBy LightTransactionViewTree
-                .tryCreate(genTransactionTree, Seq.empty, testedProtocolVersion)
-          }
+              .tryCreate(genTransactionTree, Seq.empty, testedProtocolVersion)
         }
       }
     }
@@ -577,29 +584,26 @@ class GenTransactionTreeTest extends BaseTestWordSpec with HasExecutionContext {
       s"it contains $nViews subviews" must {
         // We only check that the number of leaf nodes did not change between protocols V3 and V4,
         // leaving future changes possible
-        if (testedProtocolVersion == ProtocolVersion.v4) {
-          "have the same number of leaves in its set of transaction view trees when using MerkleSeq subviews" in {
-            val (nLeavesP4, _) = countAll(mkTransactionTree(ProtocolVersion.v4)(nViews))
-            nLeavesP3 shouldBe nLeavesP4
-          }
+        "have the same number of leaves in its set of transaction view trees when using MerkleSeq subviews" onlyRunWith ProtocolVersion.v4 in {
+          val (nLeavesP4, _) = countAll(mkTransactionTree(ProtocolVersion.v4)(nViews))
+          nLeavesP3 shouldBe nLeavesP4
         }
 
         // We check for non-regression of the size reduction for all protocol versions >= V4
-        if (testedProtocolVersion >= ProtocolVersion.v4)
-          "use significant less space for its set of transaction view trees when using MerkleSeq subviews" in {
-            // With subtrees as a sequence, the number of blinded nodes is roughly O(n^2);
-            // thanks to the MerkleSeq, this gets down to roughly O(n * log_2(n));
-            // the ratio is therefore roughly O(n / log_2(n))
-            val (_, nBlindedTested) = countAll(mkTransactionTree(testedProtocolVersion)(nViews))
-            val actualRatio = nBlindedP3.toDouble / nBlindedTested
-            val expectedRatio = {
-              val n = nViews.toDouble
-              n / (Math.log(n) / Math.log(2))
-            }
-
-            // We give a bit of leeway and check against half the expected ratio
-            actualRatio should be >= expectedRatio / 2
+        "use significant less space for its set of transaction view trees when using MerkleSeq subviews" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
+          // With subtrees as a sequence, the number of blinded nodes is roughly O(n^2);
+          // thanks to the MerkleSeq, this gets down to roughly O(n * log_2(n));
+          // the ratio is therefore roughly O(n / log_2(n))
+          val (_, nBlindedTested) = countAll(mkTransactionTree(testedProtocolVersion)(nViews))
+          val actualRatio = nBlindedP3.toDouble / nBlindedTested
+          val expectedRatio = {
+            val n = nViews.toDouble
+            n / (Math.log(n) / Math.log(2))
           }
+
+          // We give a bit of leeway and check against half the expected ratio
+          actualRatio should be >= expectedRatio / 2
+        }
       }
     }
 

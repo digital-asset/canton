@@ -54,6 +54,13 @@ class DefaultPorts {
   /** Domain node default ports */
   val domainManagerAdminApiPort = defaultPortStart(4801)
 
+  /** External sequencer node x default ports (enterprise-only) */
+  val sequencerXPublicApiPort = defaultPortStart(5001)
+  val sequencerXAdminApiPort = defaultPortStart(5002)
+
+  /** External mediator node x default port (enterprise-only) */
+  val mediatorXAdminApiPort = defaultPortStart(5202)
+
   /** Increase the default port number for each new instance by portStep */
   private val portStep = 10
   // user-manual-entry-end: ConfigDefaults

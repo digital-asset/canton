@@ -367,7 +367,7 @@ class DbRequestJournalStore(
 
 object DbRequestJournalStore {
 
-  case class ReplaceRequest(
+  final case class ReplaceRequest(
       rc: RequestCounter,
       requestTimestamp: CantonTimestamp,
       oldState: RequestState,

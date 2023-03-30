@@ -116,7 +116,7 @@ sealed trait CantonScript {
   def path: Option[File]
   def read(): Either[HeadlessConsole.IoError, String]
 }
-case class CantonScriptFromFile(scriptPath: File) extends CantonScript {
+final case class CantonScriptFromFile(scriptPath: File) extends CantonScript {
   override val path = Some(scriptPath)
   override def read(): Either[HeadlessConsole.IoError, String] =
     readScript(scriptPath)
@@ -146,10 +146,6 @@ case class CantonScriptFromFile(scriptPath: File) extends CantonScript {
     }
   }
 }
-case class CantonScriptFromCode(scriptCode: String) extends CantonScript {
-  override def path: Option[File] = None
-  override def read(): Either[HeadlessConsole.IoError, String] = Right(scriptCode)
-}
 
 object ConsoleScriptRunner extends NoTracing {
   def apply[E <: Environment](
@@ -170,20 +166,22 @@ object ConsoleScriptRunner extends NoTracing {
       logger: TracedLogger,
   ): Either[HeadlessConsole.HeadlessConsoleError, Unit] = {
     val consoleEnvironment = environment.createConsole()
-
-    for {
-      scriptCode <- cantonScript.read()
-
-      _ <- HeadlessConsole.run(
-        consoleEnvironment,
-        scriptCode,
-        cantonScript.path,
-        // clone error stream such that we also log the error message
-        // unfortunately, this means that if somebody outputs INFO to stdout,
-        // he will observe the error twice
-        transformer = x => x.copy(errorStream = new CopyOutputWriter(x.errorStream, logger)),
-        logger = logger,
-      )
-    } yield ()
+    try {
+      for {
+        scriptCode <- cantonScript.read()
+        _ <- HeadlessConsole.run(
+          consoleEnvironment,
+          scriptCode,
+          cantonScript.path,
+          // clone error stream such that we also log the error message
+          // unfortunately, this means that if somebody outputs INFO to stdout,
+          // he will observe the error twice
+          transformer = x => x.copy(errorStream = new CopyOutputWriter(x.errorStream, logger)),
+          logger = logger,
+        )
+      } yield ()
+    } finally {
+      consoleEnvironment.closeChannels()
+    }
   }
 }

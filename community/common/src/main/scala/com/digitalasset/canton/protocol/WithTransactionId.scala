@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.logging.pretty.Pretty
 
-case class WithTransactionId[+A](private val x: A, transactionId: TransactionId) {
+final case class WithTransactionId[+A](private val x: A, transactionId: TransactionId) {
   def unwrap: A = x
 
   def map[B](f: A => B): WithTransactionId[B] = this.copy(x = f(x))

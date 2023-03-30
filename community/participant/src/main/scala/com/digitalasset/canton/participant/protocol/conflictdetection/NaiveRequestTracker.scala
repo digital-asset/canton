@@ -525,7 +525,7 @@ private[conflictdetection] object NaiveRequestTracker {
     *                             As long as this cell is not filled, the request tracker will not progress beyond the request's
     *                             commit time.
     */
-  private[NaiveRequestTracker] case class RequestData private (
+  private[NaiveRequestTracker] final case class RequestData private (
       sequencerCounter: SequencerCounter,
       requestTimestamp: CantonTimestamp,
       decisionTime: CantonTimestamp,
@@ -555,10 +555,10 @@ private[conflictdetection] object NaiveRequestTracker {
         activenessSet = activenessSet,
       )(
         activenessResult =
-          SupervisedPromise[ActivenessResult]("activeness-result", futureSupervisor),
+          new SupervisedPromise[ActivenessResult]("activeness-result", futureSupervisor),
         timeoutResult = Promise[TimeoutResult](),
         finalizationDataCell = new SingleUseCell[FinalizationData],
-        commitSetPromise = SupervisedPromise[CommitSet]("commit-set", futureSupervisor),
+        commitSetPromise = new SupervisedPromise[CommitSet]("commit-set", futureSupervisor),
       )
   }
 
@@ -570,7 +570,7 @@ private[conflictdetection] object NaiveRequestTracker {
     * @param result The promise to fulfill once the request has been finalized
     *               and all changes have been persisted to the ACS.
     */
-  private case class FinalizationData(
+  private final case class FinalizationData(
       resultTimestamp: CantonTimestamp,
       commitTime: CantonTimestamp,
   )(val result: Promise[Either[NonEmptyChain[RequestTrackerStoreError], Unit]])

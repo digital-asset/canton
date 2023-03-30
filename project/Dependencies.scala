@@ -40,6 +40,7 @@ object Dependencies {
   lazy val scalatest_version = "3.2.9"
 
   lazy val aws_kms_version = "2.17.187"
+  lazy val netty_version = "4.1.72.Final"
 
   lazy val reflections = "org.reflections" % "reflections" % "0.9.12"
   lazy val pureconfig = "com.github.pureconfig" %% "pureconfig" % pureconfig_version
@@ -60,8 +61,8 @@ object Dependencies {
   lazy val pprint = "com.lihaoyi" %% "pprint" % pprint_version
 
   lazy val h2 = "com.h2database" % "h2" % "2.1.210"
-  lazy val postgres = "org.postgresql" % "postgresql" % "42.2.25"
-  lazy val flyway = "org.flywaydb" % "flyway-core" % "8.4.0"
+  lazy val postgres = "org.postgresql" % "postgresql" % "42.3.8"
+  lazy val flyway = "org.flywaydb" % "flyway-core" % "9.15.2"
   lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % "19.13.0.0.1"
 
   // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
@@ -80,9 +81,14 @@ object Dependencies {
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
 
-  // pick the version of boring ssl from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
+  // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
   lazy val netty_boring_ssl = "io.netty" % "netty-tcnative-boringssl-static" % "2.0.46.Final"
+  lazy val netty_handler = "io.netty" % "netty-handler" % netty_version
+  lazy val netty_native =
+    "io.netty" % "netty-transport-native-epoll" % netty_version classifier "linux-x86_64" classifier "linux-aarch_64"
+  lazy val netty_native_s390 =
+    "io.netty" % "netty-transport-native-epoll-s390x" % "4.1.77.Final-redhat-00001" classifier "linux-s390_64"
   lazy val grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
   lazy val grpc_services = "io.grpc" % "grpc-services" % grpc_version
   lazy val grpc_api = "io.grpc" % "grpc-api" % grpc_version
@@ -157,6 +163,8 @@ object Dependencies {
   lazy val opentelemetry_version = "1.12.0"
   lazy val opentelemetry_api = "io.opentelemetry" % "opentelemetry-api" % opentelemetry_version
   lazy val opentelemetry_sdk = "io.opentelemetry" % "opentelemetry-sdk" % opentelemetry_version
+  lazy val opentelemetry_sdk_testing =
+    "io.opentelemetry" % "opentelemetry-sdk-testing" % opentelemetry_version
   lazy val opentelemetry_sdk_autoconfigure =
     "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % s"$opentelemetry_version-alpha"
   lazy val opentelemetry_zipkin =
@@ -196,11 +204,9 @@ object Dependencies {
   lazy val toxiproxy_java = "eu.rekawek.toxiproxy" % "toxiproxy-java" % "2.1.7"
 
   lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.13"
+  lazy val snakeyaml = "org.yaml" % "snakeyaml" % "2.0"
 
   lazy val web3j = "org.web3j" % "core" % "4.9.6"
-
-  lazy val dummy_sequencer_driver_bare_uberjar_name: String =
-    "dummy-driver-isolated-bare-impl.jar"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"
@@ -253,7 +259,11 @@ object Dependencies {
   lazy val fasterjackson_core = damlDependency("com.fasterxml.jackson.core", "jackson-core")
   // TODO(#10852) yet another json library
   lazy val spray = damlDependency("io.spray", "spray-json")
-  lazy val google_protos = damlDependency("com.google.protobuf", "protobuf-java")
+  lazy val google_protobuf_java = damlDependency("com.google.protobuf", "protobuf-java")
+  lazy val protobuf_version = google_protobuf_java.revision
+  // To override 3.19.2 from the daml repo's maven_install_2.13.json
+  lazy val google_protobuf_java_util =
+    "com.google.protobuf" % "protobuf-java-util" % protobuf_version
 
   // version depends actually on scalapb
   lazy val google_common_protos =
@@ -277,5 +287,7 @@ object Dependencies {
   // it should be kept up-to-date with the scaffeine version to avoid incompatibilities
   lazy val caffeine = damlDependency("com.github.ben-manes.caffeine", "caffeine")
   lazy val hikaricp = damlDependency("com.zaxxer", "HikariCP")
+
+  lazy val awaitility = "org.awaitility" % "awaitility" % "4.2.0"
 
 }

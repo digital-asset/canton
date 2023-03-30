@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.syntax.parallel.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
@@ -18,18 +20,25 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   transactionId,
 }
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, TransferId}
+import com.digitalasset.canton.protocol.{
+  ContractMetadata,
+  LfContractId,
+  RequestId,
+  SerializableContract,
+  TransferId,
+}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   LedgerApplicationId,
+  LedgerCommandId,
   LedgerParticipantId,
-  LedgerSubmissionId,
   LfPartyId,
   LfWorkflowId,
   RequestCounter,
@@ -46,12 +55,20 @@ trait TransferStoreTest {
 
   import TransferStoreTest.*
 
-  def transferStore(mk: DomainId => TransferStore): Unit = {
+  protected def transferStore(mk: DomainId => TransferStore): Unit = {
     val transferData = FutureUtil.noisyAwaitResult(
       mkTransferData(transfer10, mediator1),
       "make transfer data",
       10.seconds,
     )
+
+    def transferDataFor(transferId: TransferId, contract: SerializableContract) =
+      FutureUtil.noisyAwaitResult(
+        mkTransferData(transferId, mediator1, contract = contract),
+        "make transfer data",
+        10.seconds,
+      )
+
     val transferOutResult = mkTransferOutResult(transferData)
     val withTransferOutResult = transferData.copy(transferOutResult = Some(transferOutResult))
     val toc = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(3))
@@ -288,6 +305,157 @@ trait TransferStoreTest {
           assert(lookup == Seq(transfer3, transfer1, transfer4))
         }
 
+      }
+    }
+
+    "findInFlight" should {
+
+      "not return transfer being transferred-out" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+          lookup <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
+        } yield {
+          lookup shouldBe empty
+        }
+      }
+
+      "take stakeholders filter into account" in {
+        val store = mk(targetDomain)
+
+        val alice = TransferStoreTest.alice
+        val bob = TransferStoreTest.bob
+
+        val aliceContract = TransferStoreTest.contract(TransferStoreTest.coidAbs1, alice)
+        val bobContract = TransferStoreTest.contract(TransferStoreTest.coidAbs2, bob)
+
+        val transfersData =
+          Seq(aliceContract, bobContract, aliceContract, bobContract).zipWithIndex.map {
+            case (contract, idx) =>
+              val transferId = TransferId(domain1, CantonTimestamp.Epoch.plusSeconds(idx.toLong))
+
+              transferDataFor(transferId, contract)
+          }
+
+        val addTransfersET = transfersData.parTraverse(store.addTransfer)
+
+        def lift(stakeholder: LfPartyId, others: LfPartyId*): Option[NonEmpty[Set[LfPartyId]]] =
+          Option(NonEmpty.mk(Set, stakeholder, others: _*))
+
+        for {
+          _ <- valueOrFail(addTransfersET)("add failed")
+
+          lookupNone <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+          lookupAll <- store.findInFlight(domain1, false, Long.MaxValue, lift(alice, bob), 10)
+
+          lookupAlice <- store.findInFlight(domain1, false, Long.MaxValue, lift(alice), 10)
+          lookupBob <- store.findInFlight(domain1, false, Long.MaxValue, lift(bob), 10)
+        } yield {
+
+          lookupNone shouldBe transfersData
+          lookupAll shouldBe transfersData
+          lookupAlice shouldBe transfersData.filter(
+            _.contract.metadata.stakeholders.contains(alice)
+          )
+          lookupBob shouldBe transfersData.filter(_.contract.metadata.stakeholders.contains(bob))
+        }
+      }
+
+      "take onlyCompletedTransferOut filter into account" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+          lookup1a <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+          lookup1b <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
+
+          _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
+          lookup2a <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
+          lookup2b <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
+        } yield {
+          lookup1a shouldBe Seq(transferData)
+          lookup1b shouldBe Seq()
+
+          val transferDataCompleted = transferData.copy(transferOutResult = Some(transferOutResult))
+
+          lookup2a shouldBe Seq(transferDataCompleted)
+          lookup2b shouldBe Seq(transferDataCompleted)
+        }
+      }
+
+      "take transferOutRequestNotAfter filter into account" in {
+        val store = mk(targetDomain)
+
+        val transferOutLocalOffset = transferData.transferOutRequestCounter.asLocalOffset
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+
+          lookup1a <- store.findInFlight(domain1, false, transferOutLocalOffset - 1, None, 10)
+          lookup1b <- store.findInFlight(domain1, false, transferOutLocalOffset, None, 10)
+        } yield {
+          lookup1a shouldBe Seq()
+          lookup1b shouldBe Seq(transferData)
+        }
+      }
+
+      "take domainId filter into account" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+
+          lookup1a <- store.findInFlight(domain2, false, Long.MaxValue, None, 10)
+          lookup1b <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+        } yield {
+          lookup1a shouldBe Seq()
+          lookup1b shouldBe Seq(transferData)
+        }
+      }
+
+      "do not return transferred-in transfers" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+          lookup1 <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+
+          _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
+          lookup2 <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+
+          _ <- store.completeTransfer(transferData.transferId, toc).value
+          lookup3 <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+        } yield {
+          lookup1 shouldBe Seq(transferData)
+
+          val transferDataCompleted = transferData.copy(transferOutResult = Some(transferOutResult))
+          lookup2 shouldBe Seq(transferDataCompleted)
+
+          lookup3 shouldBe Seq()
+        }
+      }
+
+      "limit the results" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+          lookup11 <- store.findInFlight(domain1, false, Long.MaxValue, None, 1)
+          lookup10 <- store.findInFlight(domain1, false, Long.MaxValue, None, 0)
+
+          _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
+          lookup21 <- store.findInFlight(domain1, true, Long.MaxValue, None, 1)
+          lookup20 <- store.findInFlight(domain1, true, Long.MaxValue, None, 0)
+        } yield {
+          lookup11 shouldBe Seq(transferData)
+          lookup10 shouldBe Seq()
+
+          val transferDataCompleted = transferData.copy(transferOutResult = Some(transferOutResult))
+
+          lookup21 shouldBe Seq(transferDataCompleted)
+          lookup20 shouldBe Seq()
+        }
       }
     }
 
@@ -573,9 +741,21 @@ trait TransferStoreTest {
 
 object TransferStoreTest {
 
+  val alice = LfPartyId.assertFromString("alice")
+  val bob = LfPartyId.assertFromString("bob")
+
+  private def contract(id: LfContractId, signatory: LfPartyId): SerializableContract =
+    asSerializable(
+      contractId = id,
+      contractInstance = contractInstance(),
+      ledgerTime = CantonTimestamp.Epoch,
+      metadata = ContractMetadata.tryCreate(Set.empty, Set(signatory), None),
+    )
+
   val coidAbs1 = suffixedId(1, 0)
+  val coidAbs2 = suffixedId(2, 0)
   val contract = asSerializable(
-    coidAbs1,
+    contractId = coidAbs1,
     contractInstance = contractInstance(),
     ledgerTime = CantonTimestamp.Epoch,
   )
@@ -604,7 +784,6 @@ object TransferStoreTest {
   val privateCrypto = cryptoFactory.crypto.privateCrypto
   val pureCryptoApi: CryptoPureApi = cryptoFactory.pureCrypto
 
-  private val submissionId: Option[LedgerSubmissionId] = None
   private val workflowId: Option[LfWorkflowId] = None
   def sign(str: String): Signature = {
     val hash =
@@ -629,6 +808,7 @@ object TransferStoreTest {
         LedgerParticipantId.assertFromString(
           "no-participant-id"
         ) // default value in TransferOutView/TransferInView
+
     val applicationId: LedgerApplicationId =
       if (protocolVersion >= ProtocolVersion.v5)
         LedgerApplicationId.assertFromString("application-tests")
@@ -636,18 +816,30 @@ object TransferStoreTest {
         LedgerApplicationId.assertFromString(
           "no-application-id"
         ) // default value in TransferOutView/TransferInView
+
+    val commandId: LedgerCommandId =
+      if (protocolVersion >= ProtocolVersion.v5)
+        LedgerCommandId.assertFromString("transfer-store-command-id")
+      else
+        LedgerCommandId.assertFromString(
+          "no-command-id"
+        ) // default value in TransferOutView/TransferInView
+
     TransferSubmitterMetadata(
       submitter,
       applicationId,
       submittingParticipant,
+      commandId,
       None,
     )
   }
+
   def mkTransferDataForDomain(
       transferId: TransferId,
       sourceMediator: MediatorId,
       submittingParty: LfPartyId = LfPartyId.assertFromString("submitter"),
       targetDomainId: DomainId,
+      contract: SerializableContract = contract,
   ): Future[TransferData] = {
 
     /*
@@ -664,7 +856,7 @@ object TransferStoreTest {
       Set(submittingParty),
       Set.empty,
       workflowId,
-      coidAbs1,
+      contract.contractId,
       transferId.sourceDomain,
       SourceProtocolVersion(protocolVersion),
       sourceMediator,
@@ -699,8 +891,9 @@ object TransferStoreTest {
       transferId: TransferId,
       sourceMediator: MediatorId,
       submitter: LfPartyId = LfPartyId.assertFromString("submitter"),
+      contract: SerializableContract = contract,
   ) =
-    mkTransferDataForDomain(transferId, sourceMediator, submitter, targetDomain)
+    mkTransferDataForDomain(transferId, sourceMediator, submitter, targetDomain, contract)
 
   def mkTransferOutResult(transferData: TransferData): DeliveredTransferOutResult =
     DeliveredTransferOutResult {
@@ -713,7 +906,7 @@ object TransferStoreTest {
         mediatorMessage.allInformees,
       )
       val signedResult =
-        SignedProtocolMessage(result, sign("TransferOutResult-mediator"), protocolVersion)
+        SignedProtocolMessage.from(result, protocolVersion, sign("TransferOutResult-mediator"))
       val batch = Batch.of(protocolVersion, signedResult -> RecipientsTest.testInstance)
       val deliver =
         Deliver.create(
@@ -728,6 +921,7 @@ object TransferStoreTest {
         deliver,
         sign("TransferOutResult-sequencer"),
         Some(transferData.transferOutTimestamp),
+        protocolVersion,
       )
     }
 }

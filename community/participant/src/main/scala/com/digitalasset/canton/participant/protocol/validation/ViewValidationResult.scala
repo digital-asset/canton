@@ -7,7 +7,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ParticipantTransactionView
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey}
 
-case class ViewValidationResult(
+final case class ViewValidationResult(
     view: ParticipantTransactionView,
     activenessResult: ViewActivenessResult,
 )
@@ -21,7 +21,7 @@ case class ViewValidationResult(
   * @param inconsistentKeys Contract keys that should be free (in terms of lookupByKey), but are not
   * @param lockedKeys Keys that are already locked
   */
-case class ViewActivenessResult(
+final case class ViewActivenessResult(
     inactiveContracts: Set[LfContractId],
     alreadyLockedContracts: Set[LfContractId],
     existingContracts: Set[LfContractId],

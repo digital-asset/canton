@@ -199,7 +199,7 @@ object DomainUsabilityChecker {
     def domainId: DomainId
   }
 
-  case class MissingActiveParticipant(domainId: DomainId, parties: Set[LfPartyId])
+  final case class MissingActiveParticipant(domainId: DomainId, parties: Set[LfPartyId])
       extends DomainNotUsedReason {
     override def pretty: Pretty[MissingActiveParticipant] =
       prettyOfString(err =>
@@ -207,7 +207,7 @@ object DomainUsabilityChecker {
       )
   }
 
-  case class UnknownPackage(domainId: DomainId, unknownTo: Set[PackageUnknownTo])
+  final case class UnknownPackage(domainId: DomainId, unknownTo: Set[PackageUnknownTo])
       extends DomainNotUsedReason {
     override def pretty: Pretty[UnknownPackage] =
       prettyOfString(err =>
@@ -215,7 +215,7 @@ object DomainUsabilityChecker {
       )
   }
 
-  case class PackageUnknownTo(
+  final case class PackageUnknownTo(
       packageId: LfPackageId,
       description: String,
       participantId: ParticipantId,
@@ -225,7 +225,7 @@ object DomainUsabilityChecker {
     }
   }
 
-  case class DomainNotSupportingMinimumProtocolVersion(
+  final case class DomainNotSupportingMinimumProtocolVersion(
       domainId: DomainId,
       currentPV: ProtocolVersion,
       requiredPV: ProtocolVersion,

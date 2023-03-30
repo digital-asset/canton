@@ -503,7 +503,7 @@ private[conflictdetection] class LockableStatesTest
 }
 
 object LockableStatesTest {
-  case class Status(status: Int) extends PrettyPrinting with HasPrunable {
+  final case class Status(status: Int) extends PrettyPrinting with HasPrunable {
     override def pretty: Pretty[Status.this.type] = status => Pretty[Int].treeOf(status.status)
     override def prunable: Boolean = status < 0
   }
@@ -522,7 +522,7 @@ object LockableStatesTest {
     val evictableActive: Status = Status(2)
   }
 
-  case class StoreError(error: String)
+  final case class StoreError(error: String)
 
   type StateId = String
 

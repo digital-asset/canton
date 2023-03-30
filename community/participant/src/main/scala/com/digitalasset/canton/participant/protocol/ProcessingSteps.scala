@@ -5,10 +5,10 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
-import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps, Signature}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
@@ -36,13 +36,14 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, *}
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Interface for processing steps that are specific to request types.
   * The [[ProtocolProcessor]] wires up these steps with the necessary synchronization and state management,
@@ -145,6 +146,16 @@ trait ProcessingSteps[
   /** Convert [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.NoMediatorError]] into a submission error */
   def embedNoMediatorError(error: NoMediatorError): SubmissionError
 
+  def decisionTimeFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[RequestError with ResultError, CantonTimestamp]
+
+  def participantResponseDeadlineFor(
+      parameters: DynamicDomainParametersWithValidity,
+      requestTs: CantonTimestamp,
+  ): Either[RequestError with ResultError, CantonTimestamp]
+
   sealed trait Submission {
 
     /** Optional timestamp for the max sequencing time of the event.
@@ -184,7 +195,7 @@ trait ProcessingSteps[
     /** The submission ID of the submission, optional. */
     def submissionId: Option[LedgerSubmissionId]
 
-    /** The deduplication period for the submission as specified in the [[com.daml.ledger.participant.state.v2.SubmitterInfo]]
+    /** The deduplication period for the submission as specified in the [[com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo]]
       */
     def specifiedDeduplicationPeriod: DeduplicationPeriod
 
@@ -209,7 +220,7 @@ trait ProcessingSteps[
     /** Phase 1, step 1a
       *
       * Prepare the batch of envelopes to be sent off
-      * given the [[com.daml.ledger.api.DeduplicationPeriod.DeduplicationOffset]] chosen
+      * given the [[com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationOffset]] chosen
       * by in-flight submission tracking and deduplication.
       *
       * Errors will be reported asynchronously by updating the
@@ -348,20 +359,6 @@ trait ProcessingSteps[
       traceContext: TraceContext
   ): EitherT[Future, RequestError, CheckActivenessAndWritePendingContracts]
 
-  /** Phase 3, step 2 (only malformed payloads):
-    *
-    * Called when no decrypted view has the right root hash.
-    * @return [[scala.Left$]] aborts processing and
-    *         [[scala.Right$]] continues processing with an empty activeness set and no pending contracts
-    */
-  def pendingDataAndResponseArgsForMalformedPayloads(
-      ts: CantonTimestamp,
-      rc: RequestCounter,
-      sc: SequencerCounter,
-      malformedPayloads: Seq[MalformedPayload],
-      snapshot: DomainSnapshotSyncCryptoApi,
-  ): Either[RequestError, PendingDataAndResponseArgs]
-
   /** Phase 3, step 2 (some good views, but the chosen mediator is inactive)
     *
     * @param ts         The timestamp of the request
@@ -415,6 +412,7 @@ trait ProcessingSteps[
   ): EitherT[Future, RequestError, Unit]
 
   /** Phase 3, step 3:
+    * Yields the pending data and mediator responses for the case that at least one payload is well-formed.
     *
     * @param pendingDataAndResponseArgs Implementation-specific data passed from [[decryptViews]]
     * @param transferLookup             Read-only interface of the [[com.digitalasset.canton.participant.store.memory.TransferCache]]
@@ -441,6 +439,16 @@ trait ProcessingSteps[
   ): EitherT[Future, RequestError, StorePendingDataAndSendResponseAndCreateTimeout]
 
   /** Phase 3:
+    * Yields the mediator responses (i.e. rejections) for the case that all payloads are malformed.
+    */
+  def constructResponsesForMalformedPayloads(
+      requestId: RequestId,
+      malformedPayloads: Seq[MalformedPayload],
+  )(implicit
+      traceContext: TraceContext
+  ): Seq[MediatorResponse]
+
+  /** Phase 3:
     *
     * @param pendingData   The `requestType.PendingRequestData` to be stored until Phase 7
     * @param mediatorResponses     The responses to be sent to the mediator
@@ -465,9 +473,9 @@ trait ProcessingSteps[
 
   /** Phase 7, step 2:
     *
-    * @param event              The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the mediator result.
+    * @param eventE             The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the mediator result.
     *                           It is ensured that the `event` contains exactly one [[com.digitalasset.canton.protocol.messages.MediatorResult]]
-    * @param result             The unpacked mediator result that is contained in the `event`
+    * @param resultE            The unpacked mediator result that is contained in the `event`
     * @param pendingRequestData The `requestType.PendingRequestData` produced in Phase 3
     * @param pendingSubmissions The data stored on submissions in the [[PendingSubmissions]]
     * @return The [[com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet]],
@@ -475,8 +483,11 @@ trait ProcessingSteps[
     *         and the event to be published
     */
   def getCommitSetAndContractsToBeStoredAndEvent(
-      event: SignedContent[Deliver[DefaultOpenEnvelope]],
-      result: Either[MalformedMediatorRequestResult, Result],
+      eventE: Either[
+        EventWithErrors[Deliver[DefaultOpenEnvelope]],
+        SignedContent[Deliver[DefaultOpenEnvelope]],
+      ],
+      resultE: Either[MalformedMediatorRequestResult, Result],
       pendingRequestData: requestType.PendingRequestData,
       pendingSubmissions: PendingSubmissions,
       tracker: SingleDomainCausalTracker,
@@ -515,6 +526,31 @@ trait ProcessingSteps[
 }
 
 object ProcessingSteps {
+  def getTransferInExclusivity(
+      topologySnapshot: TopologySnapshot,
+      ts: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, String, CantonTimestamp] =
+    for {
+      domainParameters <- EitherT(topologySnapshot.findDynamicDomainParameters())
+
+      transferInExclusivity <- EitherT
+        .fromEither[Future](domainParameters.transferExclusivityLimitFor(ts))
+    } yield transferInExclusivity
+
+  def getDecisionTime(
+      topologySnapshot: TopologySnapshot,
+      ts: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, String, CantonTimestamp] =
+    for {
+      domainParameters <- EitherT(topologySnapshot.findDynamicDomainParameters())
+      decisionTime <- EitherT.fromEither[Future](domainParameters.decisionTimeFor(ts))
+    } yield decisionTime
 
   trait RequestType {
     type PendingRequestData <: ProcessingSteps.PendingRequestData

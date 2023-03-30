@@ -4,6 +4,7 @@
 package com.digitalasset.canton.external
 
 import better.files.File
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{ProcessingTimeout, RequireTypes}
 import com.digitalasset.canton.lifecycle.FlagCloseable
@@ -33,16 +34,24 @@ class BackgroundRunnerHandler[ProcessInfo](
   private sealed trait ProcessHandle {
     def info: ProcessInfo
   }
-  private case class Configured(name: String, command: Seq[String], info: ProcessInfo)
-      extends ProcessHandle {
+  private case class Configured(
+      name: String,
+      command: Seq[String],
+      addEnvironment: Map[String, String],
+      info: ProcessInfo,
+  ) extends ProcessHandle {
     def start(): Running =
-      Running(name, runner = new BackgroundRunner(name, command, timeouts, loggerFactory), info)
+      Running(
+        name,
+        runner = new BackgroundRunner(name, command, addEnvironment, timeouts, loggerFactory),
+        info,
+      )
   }
   private case class Running(name: String, runner: BackgroundRunner, info: ProcessInfo)
       extends ProcessHandle {
     def kill(force: Boolean = false): Configured = {
       runner.kill(force)
-      Configured(name, runner.command, info)
+      Configured(name, runner.command, runner.addEnvironment, info)
     }
     def restart(): Running = {
       Running(name, runner.restart(), info)
@@ -51,8 +60,14 @@ class BackgroundRunnerHandler[ProcessInfo](
 
   private val external = new TrieMap[String, ProcessHandle]()
 
-  def tryAdd(instanceName: String, command: Seq[String], info: ProcessInfo, manualStart: Boolean)(
-      implicit traceContext: TraceContext
+  def tryAdd(
+      instanceName: String,
+      command: Seq[String],
+      addEnvironment: Map[String, String],
+      info: ProcessInfo,
+      manualStart: Boolean,
+  )(implicit
+      traceContext: TraceContext
   ): Unit = {
     ErrorUtil.requireArgument(
       !external.contains(instanceName),
@@ -62,7 +77,7 @@ class BackgroundRunnerHandler[ProcessInfo](
       command.nonEmpty,
       s"you've supplied empty commands for ${instanceName}",
     )
-    val configured = Configured(instanceName, command, info)
+    val configured = Configured(instanceName, command, addEnvironment, info)
     external.put(instanceName, if (!manualStart) configured.start() else configured).discard
   }
 
@@ -138,7 +153,7 @@ class BackgroundRunnerHandler[ProcessInfo](
         case x: Running =>
           noTracingLogger.info(s"Restarting external process for ${instanceName}")
           x.restart()
-        case Configured(_, _, _) =>
+        case Configured(_, _, _, _) =>
           ErrorUtil.internalError(
             new IllegalStateException(s"can not kill ${instanceName} as instance is not running")
           )
@@ -160,7 +175,7 @@ class BackgroundRunnerHandler[ProcessInfo](
   def killAndRemove(): Unit = {
     logger.info("Killing background processes due to shutdown")
     external.values.foreach {
-      case Configured(_, _, _) => ()
+      case Configured(_, _, _, _) => ()
       case Running(_, runner, _) =>
         runner.kill()
     }
@@ -173,6 +188,7 @@ class BackgroundRunnerHandler[ProcessInfo](
 class BackgroundRunner(
     val name: String,
     val command: Seq[String],
+    val addEnvironment: Map[String, String],
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     waitBeforeRestartMs: Int = 250,
@@ -226,8 +242,15 @@ class BackgroundRunner(
   }
 
   private val pb = new ProcessBuilder(command.toList.asJava)
+
   pb.redirectOutput()
   pb.redirectErrorStream()
+  addEnvironment.foreach { case (k, v) =>
+    Option(pb.environment().put(k, v)) match {
+      case Some(prev) => noTracingLogger.debug(s"Changed ${k} to ${v} from ${prev}")
+      case None => noTracingLogger.debug(s"Set ${k} to ${v}")
+    }
+  }
 
   noTracingLogger.info(s"Starting command $name ${command.map(_.limit(160)).toString}")
   private val rt = pb.start()
@@ -260,7 +283,7 @@ class BackgroundRunner(
     kill()
     Threading.sleep(waitBeforeRestartMs.toLong)
     noTracingLogger.info(s"Restarting background runner with ${command}")
-    new BackgroundRunner(name, command, timeouts, loggerFactory)
+    new BackgroundRunner(name, command, addEnvironment, timeouts, loggerFactory)
   }
 
   override protected def onClosed(): Unit = {

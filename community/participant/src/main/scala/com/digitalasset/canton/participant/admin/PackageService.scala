@@ -510,14 +510,14 @@ object PackageService {
   def getArchives(filename: String): Either[Throwable, Seq[DamlLf.Archive]] =
     DarParser.readArchiveFromFile(new File(filename)).map(_.all)
 
-  case class DarDescriptor(hash: Hash, name: DarName)
+  final case class DarDescriptor(hash: Hash, name: DarName)
 
   object DarDescriptor {
     implicit val getResult: GetResult[DarDescriptor] =
       GetResult(r => DarDescriptor(r.<<, String255.tryCreate(r.<<)))
   }
 
-  case class Dar(descriptor: DarDescriptor, bytes: Array[Byte]) {
+  final case class Dar(descriptor: DarDescriptor, bytes: Array[Byte]) {
     override def equals(other: Any): Boolean = other match {
       case that: Dar =>
         // Array equality only returns true when both are the same instance.

@@ -53,6 +53,12 @@ trait SequencerDriverFactory {
     *                     If [[usesTimeProvider]] returns true, must be used instead of system time
     *                     so that we can modify time in tests.
     * @param firstBlockHeight Initial block from which the driver will start serving the block subscription.
+    *                         It will be valued when a sequencer is restarted or dynamically onboarded based
+    *                         on the state of a running sequencer.
+    *                         In the case of a newly started sequencer, it will be `None` and the driver
+    *                         will start serving from whichever block it considers the beginning.
+    *                         Given a specific `firstBlockHeight`, the sequence of blocks served by a driver
+    *                         must be always exactly the same and the blocks must be consecutively numbered.
     * @param domainTopologyManagerId The Canton identifier of the Topology Manager for the domain being
     *                                supported.
     * @param loggerFactory A logger factory through which all logging should be done.
@@ -180,7 +186,7 @@ object SequencerDriver {
   * @param blockHeight The height of the block. Block heights must be consecutive.
   * @param events The events in the given block.
   */
-case class RawLedgerBlock(
+final case class RawLedgerBlock(
     blockHeight: Long,
     events: Seq[Traced[RawLedgerBlock.RawBlockEvent]],
 )
@@ -189,18 +195,18 @@ object RawLedgerBlock {
   sealed trait RawBlockEvent extends Product with Serializable
 
   object RawBlockEvent {
-    case class Send(
+    final case class Send(
         request: ByteString,
         microsecondsSinceEpoch: Long,
     ) extends RawBlockEvent
 
-    case class AddMember(member: String) extends RawBlockEvent
+    final case class AddMember(member: String) extends RawBlockEvent
 
-    case class Acknowledgment(acknowledgement: ByteString) extends RawBlockEvent
+    final case class Acknowledgment(acknowledgement: ByteString) extends RawBlockEvent
   }
 }
 
-case class SequencerDriverHealthStatus(
+final case class SequencerDriverHealthStatus(
     isActive: Boolean,
     description: Option[String],
 )

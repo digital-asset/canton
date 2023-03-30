@@ -70,7 +70,7 @@ trait SequencerStoreTest
     val instanceDiscriminator1 = UUID.randomUUID()
     val instanceDiscriminator2 = UUID.randomUUID()
 
-    case class Env(store: SequencerStore = mk()) {
+    final case class Env(store: SequencerStore = mk()) {
 
       def deliverEventWithDefaults(
           ts: CantonTimestamp,
@@ -311,7 +311,7 @@ trait SequencerStoreTest
           error: DeliverErrorStoreEvent = DeliverErrorStoreEvent(
             aliceId,
             messageId1,
-            String256M.tryCreate("Something went wrong"),
+            String256M.tryCreate("Something went wrong".repeat(22000)),
             traceContext,
           )
           timestampedError: Sequenced[Nothing] = Sequenced(ts1, error)
@@ -681,7 +681,7 @@ trait SequencerStoreTest
           _tsAndReport <- {
             logger.debug(s"Pruning sequencer store from $pruningTimestamp")
             store
-              .prune(pruningTimestamp, statusBefore, NonNegativeFiniteDuration.ofSeconds(1))
+              .prune(pruningTimestamp, statusBefore, NonNegativeFiniteDuration.tryOfSeconds(1))
               .valueOrFail("prune")
           }
           statusAfter <- store.status(ts(10))
@@ -752,7 +752,7 @@ trait SequencerStoreTest
           _tsAndReport <- {
             logger.debug(s"Pruning sequencer store from $pruningTimestamp")
             store
-              .prune(pruningTimestamp, statusBefore, NonNegativeFiniteDuration.ofSeconds(1))
+              .prune(pruningTimestamp, statusBefore, NonNegativeFiniteDuration.tryOfSeconds(1))
               .valueOrFail("prune")
           }
           recordCountsAfter <- store.countRecords
@@ -864,7 +864,11 @@ trait SequencerStoreTest
             status <- store.status(ts(3))
             exception <- loggerFactory.assertLogs(
               store
-                .prune(status.safePruningTimestamp, status, NonNegativeFiniteDuration.ofSeconds(1))
+                .prune(
+                  status.safePruningTimestamp,
+                  status,
+                  NonNegativeFiniteDuration.tryOfSeconds(1),
+                )
                 .valueOrFail("prune")
                 .failed,
               _.errorMessage should include(

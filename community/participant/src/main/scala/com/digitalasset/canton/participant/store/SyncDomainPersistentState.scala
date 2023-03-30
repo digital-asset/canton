@@ -13,6 +13,8 @@ import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
 import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.*
+import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -37,6 +39,8 @@ trait SyncDomainPersistentState extends NamedLogging with AutoCloseable {
   def acsCommitmentStore: AcsCommitmentStore
   def parameterStore: DomainParameterStore
   def causalDependencyStore: SingleDomainCausalDependencyStore
+  def topologyStore: TopologyStore[DomainStore]
+
 }
 
 object SyncDomainPersistentState {

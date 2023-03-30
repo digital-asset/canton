@@ -12,22 +12,22 @@ sealed trait CreateSubscriptionError
 object CreateSubscriptionError {
 
   /** The member is not registered with the sequencer */
-  case class UnknownMember(member: Member) extends CreateSubscriptionError
+  final case class UnknownMember(member: Member) extends CreateSubscriptionError
 
   /** Problem registering an unauthenticated member */
-  case class RegisterUnauthenticatedMemberError(e: SequencerWriteError[RegisterMemberError])
+  final case class RegisterUnauthenticatedMemberError(e: SequencerWriteError[RegisterMemberError])
       extends CreateSubscriptionError
 
   /** The member has been disabled and can no longer read. */
-  case class MemberDisabled(member: Member) extends CreateSubscriptionError
+  final case class MemberDisabled(member: Member) extends CreateSubscriptionError
 
   /** The provided sequencer counter cannot be used for a subscription (currently will only occur if counter <0) */
-  case class InvalidCounter(counter: SequencerCounter) extends CreateSubscriptionError
+  final case class InvalidCounter(counter: SequencerCounter) extends CreateSubscriptionError
 
   /** Returned if the counter is valid but this sequencer instance does not hold sufficient data to fulfill the request
     * from this point. Potentially because this data has been pruned or the sequencer was initialized at a later point.
     */
-  case class EventsUnavailable(counter: SequencerCounter, message: String)
+  final case class EventsUnavailable(counter: SequencerCounter, message: String)
       extends CreateSubscriptionError
 
   /** In case the sequencer is being shut down as we are creating the subscription */

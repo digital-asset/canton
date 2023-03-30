@@ -1,9 +1,9 @@
-sdk-version: 2.6.0-snapshot.20230216.11444.0.59bc473b
+sdk-version: 2.7.0-snapshot.20230327.11615.0.9aa586fb
 build-options: 
 - --target=1.14
 name: CantonExamples
 source: .
-version: 2.6.0
+version: 2.7.0
 dependencies: 
 - daml-prim
 - daml-stdlib

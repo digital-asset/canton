@@ -27,7 +27,7 @@ import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcTopologyAggregationService(
-    storesF: => Future[Seq[TopologyStore[TopologyStoreId.DomainStore]]],
+    stores: => Seq[TopologyStore[TopologyStoreId.DomainStore]],
     ips: IdentityProvidingServiceClient,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -39,7 +39,6 @@ class GrpcTopologyAggregationService(
   ): EitherT[Future, CantonError, List[(DomainId, StoreBasedTopologySnapshot)]] = {
     for {
       asOfO <- wrapErr(asOf.traverse(CantonTimestamp.fromProtoPrimitive))
-      stores <- EitherT.right(storesF)
     } yield {
       stores.collect {
         case store if store.storeId.filterName.startsWith(filterStore) =>

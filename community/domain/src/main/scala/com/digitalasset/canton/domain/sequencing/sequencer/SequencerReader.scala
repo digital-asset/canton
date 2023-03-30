@@ -9,7 +9,6 @@ import akka.{Done, NotUsed}
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.option.*
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -24,13 +23,13 @@ import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil.CombinedKillSwitch
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{SequencerCounter, config}
 import io.functionmeta.functionFullName
 
 import java.sql.SQLTransientConnectionException
@@ -49,12 +48,13 @@ trait SequencerReaderConfig {
   def readBatchSize: Int
 
   /** how frequently to checkpoint state */
-  def checkpointInterval: NonNegativeFiniteDuration
+  def checkpointInterval: config.NonNegativeFiniteDuration
 }
 
 object SequencerReaderConfig {
   val defaultReadBatchSize: Int = 100
-  val defaultCheckpointInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5)
+  val defaultCheckpointInterval: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration.ofSeconds(5)
 }
 
 class SequencerReader(
@@ -172,7 +172,7 @@ class SequencerReader(
         }
         Flow[UnsignedEventData]
           .buffer(1, OverflowStrategy.dropTail) // we only really need one event and can drop others
-          .throttle(1, config.checkpointInterval.toScala)
+          .throttle(1, config.checkpointInterval.underlying)
           // The kill switch must sit after the throttle because throttle will pass the completion downstream
           // only after the bucket with unprocessed events has been drained, which happens only every checkpoint interval
           .viaMat(KillSwitches.single)(Keep.right)
@@ -324,7 +324,7 @@ class SequencerReader(
 
               case Left(
                     SequencedEventValidator.SigningTimestampTooOld(_) |
-                    SequencedEventValidator.NoDynamicDomainParameters
+                    SequencedEventValidator.NoDynamicDomainParameters(_)
                   ) =>
                 // We can't use the signing timestamp for the sequencing time.
                 // Replace the event with an error that is only sent to the sender
@@ -410,10 +410,10 @@ class SequencerReader(
       store.saveCounterCheckpoint(memberId, checkpoint).valueOr {
         case SaveCounterCheckpointError.CounterCheckpointInconsistent(
               existingTimestamp,
-              existingLatestTopologyClientTimestampg,
+              existingLatestTopologyClientTimestamp,
             ) =>
           val message =
-            s"""|There is an existing checkpoint for member [$member] ($memberId) at counter ${checkpoint.counter} with timestamp $existingTimestamp and latest topology client timestamp $existingLatestTopologyClientTimestampg. 
+            s"""|There is an existing checkpoint for member [$member] ($memberId) at counter ${checkpoint.counter} with timestamp $existingTimestamp and latest topology client timestamp $existingLatestTopologyClientTimestamp.
                 |We attempted to write ${checkpoint.timestamp} and ${checkpoint.latestTopologyClientTimestamp}.""".stripMargin
           ErrorUtil.internalError(new CounterCheckpointInconsistentException(message))
       }
@@ -424,7 +424,6 @@ class SequencerReader(
     )(implicit
         traceContext: TraceContext
     ): Future[(ReadState, Seq[(SequencerCounter, Sequenced[Payload])])] = {
-      logger.debug(s"Reading events from $readState...")
       for {
         readEvents <- store.readEvents(
           readState.memberId,
@@ -439,7 +438,9 @@ class SequencerReader(
           (nextSequencerCounter + n, event)
         }
         val newReadState = readState.update(readEvents, config.readBatchSize)
-        logger.debug(s"New state is $newReadState.")
+        if (logger.underlying.isDebugEnabled) {
+          newReadState.changeString(readState).foreach(logger.debug(_))
+        }
         (newReadState, eventsWithCounter)
       }
     }
@@ -456,6 +457,7 @@ class SequencerReader(
           event,
           signingTimestampO,
           HashPurpose.SequencedEventSignature,
+          protocolVersion,
         )
       } yield OrdinarySequencedEvent(signedEvent)(traceContext)
     }
@@ -481,7 +483,7 @@ class SequencerReader(
           val messageIdO =
             Option(messageId).filter(_ => memberId == sender) // message id only goes to sender
           val batch: Batch[ClosedEnvelope] = Batch
-            .batchClosedEnvelopesFromByteString(payload.content)
+            .fromByteString(payload.content)
             .fold(err => throw new DbDeserializationException(err.toString), identity)
           val filteredBatch = Batch.filterClosedEnvelopesFor(batch, member)
           Deliver.create[ClosedEnvelope](
@@ -527,7 +529,7 @@ class SequencerReader(
 object SequencerReader {
 
   /** State to keep track of when serving a read subscription */
-  private[SequencerReader] case class ReadState(
+  private[SequencerReader] final case class ReadState(
       member: Member,
       memberId: SequencerMemberId,
       nextReadTimestamp: CantonTimestamp,
@@ -535,6 +537,19 @@ object SequencerReader {
       lastBatchWasFull: Boolean = false,
       nextCounterAccumulator: SequencerCounter = SequencerCounter.Genesis,
   ) extends PrettyPrinting {
+
+    def changeString(previous: ReadState): Option[String] = {
+      def build[T](a: T, b: T, name: String): Option[String] =
+        Option.when(a != b)(s"${name}=$a (from $b)")
+      val items = Seq(
+        build(nextReadTimestamp, previous.nextReadTimestamp, "nextReadTs"),
+        build(nextCounterAccumulator, previous.nextCounterAccumulator, "nextCounterAcc"),
+        build(lastBatchWasFull, previous.lastBatchWasFull, "lastBatchWasFull"),
+      ).flatten
+      if (items.nonEmpty) {
+        Some("New state is: " + items.mkString(", "))
+      } else None
+    }
 
     /** Update the state after reading a new page of results */
     def update(
@@ -582,14 +597,14 @@ object SequencerReader {
       )
   }
 
-  private[SequencerReader] case class UnvalidatedEventWithMetadata(
+  private[SequencerReader] final case class UnvalidatedEventWithMetadata(
       unvalidatedEvent: Sequenced[Payload],
       counter: SequencerCounter,
       topologyClientTimestampBefore: Option[CantonTimestamp],
       topologyClientTimestampAfter: Option[CantonTimestamp],
   )
 
-  private[SequencerReader] case class UnsignedEventData(
+  private[SequencerReader] final case class UnsignedEventData(
       event: SequencedEvent[ClosedEnvelope],
       signingTimestampAndSnapshotO: Option[(CantonTimestamp, SyncCryptoApi)],
       previousTopologyClientTimestamp: Option[CantonTimestamp],

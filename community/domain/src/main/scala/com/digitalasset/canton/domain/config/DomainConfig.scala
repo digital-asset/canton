@@ -15,7 +15,6 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.domain.sequencing.sequencer.CommunitySequencerConfig
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
 import io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens.*
 
@@ -62,7 +61,7 @@ trait PublicServerConfig extends ServerConfig {
   }
 }
 
-case class CommunityPublicServerConfig(
+final case class CommunityPublicServerConfig(
     override val address: String = "127.0.0.1",
     override val internalPort: Option[Port] = None,
     override val tls: Option[TlsBaseServerConfig] = None,
@@ -149,7 +148,7 @@ trait DomainConfig extends DomainBaseConfig {
   *
   * @param maxBurstFactor how forgiving should the participant rate limiting be with respect to bursts
   */
-case class DomainNodeParametersConfig(
+final case class DomainNodeParametersConfig(
     maxBurstFactor: PositiveDouble = PositiveDouble.tryCreate(0.5)
 )
 

@@ -36,7 +36,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
   val msgId2 = MessageId.tryCreate("msgId2")
 
   def sign(event: RawProtocolEvent): SignedContent[RawProtocolEvent] =
-    SignedContent(event, SymbolicCrypto.emptySignature, None)
+    SignedContent(event, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
 
   def deliverDefault(timestamp: CantonTimestamp): OrdinaryProtocolEvent =
     OrdinarySequencedEvent(

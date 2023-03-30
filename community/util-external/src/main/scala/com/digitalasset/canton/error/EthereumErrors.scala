@@ -4,7 +4,6 @@
 package com.digitalasset.canton.error
 
 import com.daml.error.ErrorCategory.{
-  AuthInterceptorInvalidAuthenticationCredentials,
   BackgroundProcessDegradationWarning,
   InvalidGivenCurrentSystemStateOther,
   InvalidIndependentOfSystemState,
@@ -32,7 +31,7 @@ object EthereumErrors extends EthereumErrorGroup {
     )
     object BesuVersionMismatch
         extends ErrorCode("BESU_VERSION_MISMATCH", InvalidIndependentOfSystemState) {
-      case class Error(actual: String, expected: String)(implicit
+      final case class Error(actual: String, expected: String)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(
             s"The sequencer is configured to interact with a Besu client of version $expected but" +
@@ -50,7 +49,7 @@ object EthereumErrors extends EthereumErrorGroup {
     @Resolution("""Change the configuration of the Ethereum network to a free-gas network. """)
     object NotFreeGasNetwork
         extends ErrorCode("NOT_FREE_GAS_NETWORK", InvalidIndependentOfSystemState) {
-      case class Error(gasCost: Long)(implicit val logger: ContextualizedErrorLogger)
+      final case class Error(gasCost: Long)(implicit val logger: ContextualizedErrorLogger)
           extends SequencerBaseError.Impl(
             s"Gas cost of Ethereum network is $gasCost Gwei and not zero."
           )
@@ -72,7 +71,7 @@ object EthereumErrors extends EthereumErrorGroup {
     )
     object ManyBlocksBehindHead
         extends ErrorCode("MANY_BLOCKS_BEHIND_HEAD", BackgroundProcessDegradationWarning) {
-      case class Warn(currBlock: Long, blockchainHead: Long)(implicit
+      final case class Warn(currBlock: Long, blockchainHead: Long)(implicit
           val loggingContext: ErrorLoggingContext
       ) extends SequencerBaseError.Impl(
             s"The Ethereum sequencer is ${blockchainHead - currBlock} blocks behind the head of the blockchain. " +
@@ -94,7 +93,7 @@ object EthereumErrors extends EthereumErrorGroup {
         |  Validate these settings and ensure that the sequencer is still reading from the same blockchain. """
     )
     object AheadOfHead extends ErrorCode("AHEAD_OF_HEAD", BackgroundProcessDegradationWarning) {
-      case class Warn(firstBlockToRead: Long, blockchainHead: Long)(implicit
+      final case class Warn(firstBlockToRead: Long, blockchainHead: Long)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(
             s"The Ethereum sequencer attempted to start reading from block $firstBlockToRead but the last block that was mined is only block $blockchainHead. The Ethereum sequencer might be reading from the wrong blockchain."
@@ -124,7 +123,7 @@ object EthereumErrors extends EthereumErrorGroup {
           "ATTEMPT_TO_CHANGE_IMMUTABLE_VALUE",
           InvalidGivenCurrentSystemStateOther,
         ) {
-      case class TopologyManagerId(message: String)(implicit
+      final case class TopologyManagerId(message: String)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(message)
 
@@ -143,7 +142,7 @@ object EthereumErrors extends EthereumErrorGroup {
       |""")
     object WrongEVMBytecode
         extends ErrorCode("WRONG_EVM_BYTECODE", InvalidGivenCurrentSystemStateOther) {
-      case class Error(
+      final case class Error(
           foundBytecode: String,
           detectedEthereumContractVersion: EthereumContractVersion,
       )(implicit
@@ -166,7 +165,7 @@ object EthereumErrors extends EthereumErrorGroup {
         |""")
     object UnableToQueryVersion
         extends ErrorCode("ETHEREUM_CANT_QUERY_VERSION", InvalidGivenCurrentSystemStateOther) {
-      case class Error(throwable: Throwable)(implicit
+      final case class Error(throwable: Throwable)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(
             "Received an error when attempting to query the version of the Sequencer.sol contract in the latest block.",
@@ -174,46 +173,6 @@ object EthereumErrors extends EthereumErrorGroup {
           )
 
       override def logLevel: Level = Level.WARN
-    }
-
-    @Explanation(
-      """This error is logged when the sequencer detects that (according to the configuration)
-        |the corresponding Sequencer.sol contract should have authorization enabled but doesn't (and vice versa).
-        |"""
-    )
-    @Resolution(
-      """Validate that the sequencer is configured with the correct Sequencer.sol contract and whether it
-        |should be using authorization or not. """
-    )
-    object AuthorizationEnabledMismatch
-        extends ErrorCode("AUTHORIZATION_ENABLEMENT_MISMATCH", InvalidIndependentOfSystemState) {
-      case class Error(actual: Boolean, expected: Boolean, contractAddress: String)(implicit
-          val logger: ContextualizedErrorLogger
-      ) extends SequencerBaseError.Impl(
-            s"The sequencer is configured to interact with a sequencer smart contract ${if (expected) "with"
-              else "without"} authorization. However, the sequencer contract ${if (actual) "has"
-              else "doesn't have"} authorization enabled."
-          )
-    }
-
-    @Explanation(
-      """This error is logged during setup when the sequencer detects that authorization is enabled on
-        |the Sequencer.sol contract, but the Ethereum account used by the sequencer node is not authorized to interact with the contract.
-        |"""
-    )
-    @Resolution(
-      """Authorize this sequencer node from another already-authorized sequencer node (see console
-        |command `authorize_ledger_identity`).
-        |
-        |"""
-    )
-    object Unauthorized
-        extends ErrorCode("UNAUTHORIZED", AuthInterceptorInvalidAuthenticationCredentials) {
-      case class Error(ethereumAccountAddress: String)(implicit
-          val logger: ContextualizedErrorLogger
-      ) extends SequencerBaseError.Impl(
-            s"The sequencer's configured Ethereum account is not authorized to interact with the configured Sequencer.sol contract."
-          )
     }
   }
 
@@ -235,7 +194,7 @@ object EthereumErrors extends EthereumErrorGroup {
           "ETHEREUM_TRANSACTION_SUBMISSION_FAILED",
           BackgroundProcessDegradationWarning,
         ) {
-      case class Warn(payload: String, throwable: Throwable)(implicit
+      final case class Warn(payload: String, throwable: Throwable)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(
             s"Ethereum transaction submission failed: $throwable ",
@@ -256,7 +215,7 @@ object EthereumErrors extends EthereumErrorGroup {
                   |""")
     object InvalidTransaction extends AlarmErrorCode("ETHEREUM_TRANSACTION_INVALID") {
 
-      case class Warn[EventResponse](
+      final case class Warn[EventResponse](
           msg: String,
           blockHeight: BigInteger,
           eventResponse: EventResponse,
@@ -284,7 +243,7 @@ object EthereumErrors extends EthereumErrorGroup {
           "ETHEREUM_TRANSACTION_RECEIPT_FETCHING_FAILED",
           BackgroundProcessDegradationWarning,
         ) {
-      case class Warn(e: Throwable)(implicit
+      final case class Warn(e: Throwable)(implicit
           val logger: ContextualizedErrorLogger
       ) extends SequencerBaseError.Impl(
             s"Fetching the transaction receipt of an Ethereum transaction generated an exception: ${e.getMessage}",

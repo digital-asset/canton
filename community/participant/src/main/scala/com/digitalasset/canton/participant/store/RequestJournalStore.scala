@@ -139,18 +139,19 @@ trait RequestJournalStore { this: NamedLogging =>
 
 sealed trait RequestJournalStoreError extends Product with Serializable
 
-case class UnknownRequestCounter(requestCounter: RequestCounter) extends RequestJournalStoreError
-case class CommitTimeBeforeRequestTime(
+final case class UnknownRequestCounter(requestCounter: RequestCounter)
+    extends RequestJournalStoreError
+final case class CommitTimeBeforeRequestTime(
     requestCounter: RequestCounter,
     requestTime: CantonTimestamp,
     commitTime: CantonTimestamp,
 ) extends RequestJournalStoreError
-case class InconsistentRequestTimestamp(
+final case class InconsistentRequestTimestamp(
     requestCounter: RequestCounter,
     storedTimestamp: CantonTimestamp,
     expectedTimestamp: CantonTimestamp,
 ) extends RequestJournalStoreError
-case class InconsistentRequestState(
+final case class InconsistentRequestState(
     requestCounter: RequestCounter,
     storedState: RequestState,
     expectedState: RequestState,

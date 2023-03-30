@@ -8,7 +8,10 @@ import com.digitalasset.canton.tracing.TracingConfig.{Propagation, Tracer}
 /** @param propagation       How should trace contexts (debugging details associated with actions) be propagated between nodes.
   * @param tracer            Tracer configuration
   */
-case class TracingConfig(propagation: Propagation = Propagation.Enabled, tracer: Tracer = Tracer())
+final case class TracingConfig(
+    propagation: Propagation = Propagation.Enabled,
+    tracer: Tracer = Tracer(),
+)
 
 object TracingConfig {
 
@@ -19,22 +22,25 @@ object TracingConfig {
     case object Disabled extends Propagation
   }
 
-  case class Tracer(exporter: Exporter = Exporter.Disabled, sampler: Sampler = Sampler.AlwaysOn())
+  final case class Tracer(
+      exporter: Exporter = Exporter.Disabled,
+      sampler: Sampler = Sampler.AlwaysOn(),
+  )
 
   sealed trait Sampler {
     def parentBased: Boolean
   }
   object Sampler {
-    case class AlwaysOn(parentBased: Boolean = true) extends Sampler
-    case class AlwaysOff(parentBased: Boolean = true) extends Sampler
-    case class TraceIdRatio(ratio: Double, parentBased: Boolean = true) extends Sampler
+    final case class AlwaysOn(parentBased: Boolean = true) extends Sampler
+    final case class AlwaysOff(parentBased: Boolean = true) extends Sampler
+    final case class TraceIdRatio(ratio: Double, parentBased: Boolean = true) extends Sampler
   }
 
   /** Configuration for how to export spans */
   sealed trait Exporter
   object Exporter {
     case object Disabled extends Exporter
-    case class Jaeger(address: String = "localhost", port: Int = 14250) extends Exporter
-    case class Zipkin(address: String = "localhost", port: Int = 9411) extends Exporter
+    final case class Jaeger(address: String = "localhost", port: Int = 14250) extends Exporter
+    final case class Zipkin(address: String = "localhost", port: Int = 9411) extends Exporter
   }
 }

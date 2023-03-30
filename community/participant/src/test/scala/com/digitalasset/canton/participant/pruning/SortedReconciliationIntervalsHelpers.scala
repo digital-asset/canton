@@ -9,11 +9,12 @@ import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.protocol.{
   DomainParameters,
-  DynamicDomainParameters,
+  DynamicDomainParametersWithValidity,
   TestDomainParameters,
 }
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -22,30 +23,35 @@ trait SortedReconciliationIntervalsHelpers {
   this: BaseTest =>
   protected val defaultParameters = TestDomainParameters.defaultDynamic
   protected val defaultReconciliationInterval = defaultParameters.reconciliationInterval
+  private lazy val defaultDomainId = DomainId(
+    UniqueIdentifier.tryFromProtoPrimitive("domain::default")
+  )
 
   protected def mkDynamicDomainParameters(
       validFrom: Long,
       validTo: Long,
       reconciliationInterval: Long,
-  ): DomainParameters.WithValidity[DynamicDomainParameters] =
-    DomainParameters.WithValidity(
+  ): DynamicDomainParametersWithValidity =
+    DynamicDomainParametersWithValidity(
+      defaultParameters.tryUpdate(reconciliationInterval =
+        PositiveSeconds.tryOfSeconds(reconciliationInterval)
+      ),
       fromEpoch(validFrom),
       Some(fromEpoch(validTo)),
-      defaultParameters.tryUpdate(reconciliationInterval =
-        PositiveSeconds.ofSeconds(reconciliationInterval)
-      ),
+      defaultDomainId,
     )
 
   protected def mkDynamicDomainParameters(
       validFrom: Long,
       reconciliationInterval: Long,
-  ): DomainParameters.WithValidity[DynamicDomainParameters] =
-    DomainParameters.WithValidity(
+  ): DynamicDomainParametersWithValidity =
+    DynamicDomainParametersWithValidity(
+      defaultParameters.tryUpdate(reconciliationInterval =
+        PositiveSeconds.tryOfSeconds(reconciliationInterval)
+      ),
       fromEpoch(validFrom),
       None,
-      defaultParameters.tryUpdate(reconciliationInterval =
-        PositiveSeconds.ofSeconds(reconciliationInterval)
-      ),
+      defaultDomainId,
     )
 
   protected def mkParameters(
@@ -56,7 +62,7 @@ trait SortedReconciliationIntervalsHelpers {
     DomainParameters.WithValidity(
       validFrom,
       Some(validTo),
-      PositiveSeconds.ofSeconds(reconciliationInterval),
+      PositiveSeconds.tryOfSeconds(reconciliationInterval),
     )
 
   protected def mkParameters(
@@ -66,21 +72,22 @@ trait SortedReconciliationIntervalsHelpers {
     DomainParameters.WithValidity(
       validFrom,
       None,
-      PositiveSeconds.ofSeconds(reconciliationInterval),
+      PositiveSeconds.tryOfSeconds(reconciliationInterval),
     )
 
   protected def mkDynamicDomainParameters(
       validFrom: CantonTimestamp,
       reconciliationInterval: PositiveSeconds,
-  ): DomainParameters.WithValidity[DynamicDomainParameters] =
-    DomainParameters.WithValidity(
+  ): DynamicDomainParametersWithValidity =
+    DynamicDomainParametersWithValidity(
+      defaultParameters.tryUpdate(reconciliationInterval = reconciliationInterval),
       validFrom,
       None,
-      defaultParameters.tryUpdate(reconciliationInterval = reconciliationInterval),
+      defaultDomainId,
     )
 
   protected def fromEpoch(seconds: Long): CantonTimestamp =
-    CantonTimestamp.Epoch + NonNegativeFiniteDuration.ofSeconds(seconds)
+    CantonTimestamp.Epoch + NonNegativeFiniteDuration.tryOfSeconds(seconds)
 
   protected def mkCommitmentPeriod(times: (Long, Long)): CommitmentPeriod = {
     val (after, beforeAndAt) = times

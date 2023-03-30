@@ -37,4 +37,4 @@ object WriteRequestRefused {
 /** When the write was attempted the request was rejected by the operation itself.
   * Typically due to a validation failing with the sequencer state when attempting to apply the write.
   */
-case class OperationError[E](error: E) extends SequencerWriteError[E]
+final case class OperationError[E](error: E) extends SequencerWriteError[E]

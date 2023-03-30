@@ -95,6 +95,10 @@ final case class ReleaseVersion(
     optSuffix: Option[String] = None,
 ) extends CantonVersion {
   def majorMinor: (Int, Int) = (major, minor)
+
+  def majorMinorMatches(other: ReleaseVersion): Boolean =
+    major == other.major && minor == other.minor
+
 }
 
 object ReleaseVersion {

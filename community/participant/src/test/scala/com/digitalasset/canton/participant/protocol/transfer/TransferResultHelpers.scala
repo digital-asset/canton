@@ -65,6 +65,7 @@ private[transfer] object TransferResultHelpers {
       deliver,
       signature,
       None,
+      BaseTest.testedProtocolVersion,
     )
 
     val transferOutResult = DeliveredTransferOutResult(signedContent)

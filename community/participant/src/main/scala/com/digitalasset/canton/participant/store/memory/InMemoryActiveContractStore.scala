@@ -255,7 +255,7 @@ object InMemoryActiveContractStore {
       Activation(toc) -> TransferDetail(sourceDomain)
   }
 
-  case class ActivenessChange(toc: TimeOfChange, isActivation: Boolean) {
+  final case class ActivenessChange(toc: TimeOfChange, isActivation: Boolean) {
     def assertSameDetail(
         detail1: ActivenessChangeDetail,
         detail2: ActivenessChangeDetail,
@@ -306,7 +306,7 @@ object InMemoryActiveContractStore {
     *                         If the contract is archived several times, only the earliest archive is tracked.
     *                         Transfer-outs do not count as archivals.
     */
-  case class ContractStatus private (
+  final case class ContractStatus private (
       changes: ChangeJournal,
       latestCreation: Option[TimeOfChange],
       earliestArchival: Option[TimeOfChange],

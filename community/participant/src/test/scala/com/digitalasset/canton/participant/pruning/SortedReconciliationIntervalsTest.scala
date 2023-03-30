@@ -52,9 +52,9 @@ class SortedReconciliationIntervalsTest
         SortedReconciliationIntervals.create(parameters, validUntil).value
 
       builtSortedReconciliationIntervals.intervals shouldBe List(
-        ReconciliationInterval(ts3, None, PositiveSeconds.ofSeconds(3)),
-        ReconciliationInterval(ts2, Some(ts3), PositiveSeconds.ofSeconds(2)),
-        ReconciliationInterval(ts1, Some(ts2), PositiveSeconds.ofSeconds(1)),
+        ReconciliationInterval(ts3, None, PositiveSeconds.tryOfSeconds(3)),
+        ReconciliationInterval(ts2, Some(ts3), PositiveSeconds.tryOfSeconds(2)),
+        ReconciliationInterval(ts1, Some(ts2), PositiveSeconds.tryOfSeconds(1)),
       )
 
       builtSortedReconciliationIntervals.validUntil shouldBe validUntil
@@ -80,7 +80,7 @@ class SortedReconciliationIntervalsTest
         .create(
           List(
             mkParameters(ts2, ts3, 2),
-            mkParameters(ts1, ts2 + NonNegativeFiniteDuration.ofMillis(1), 1),
+            mkParameters(ts1, ts2 + NonNegativeFiniteDuration.tryOfMillis(1), 1),
           ),
           validUntil,
         )
@@ -243,13 +243,13 @@ class SortedReconciliationIntervalsTest
 
       "consider previous parameters if the interval contains no tick" in {
         val origin = CantonTimestampSecond.Epoch
-        val ts1 = origin + PositiveSeconds.ofSeconds(1)
+        val ts1 = origin + PositiveSeconds.tryOfSeconds(1)
 
         val firstInterval = mkParameters(origin, ts1, 1)
         val noTickIntervals = (0L until 20L).map { i =>
           mkParameters(
-            ts1 + NonNegativeFiniteDuration.ofSeconds(i),
-            ts1 + NonNegativeFiniteDuration.ofSeconds(i + 1),
+            ts1 + NonNegativeFiniteDuration.tryOfSeconds(i),
+            ts1 + NonNegativeFiniteDuration.tryOfSeconds(i + 1),
             3600, // much bigger than the bounds
           )
         }
@@ -257,7 +257,7 @@ class SortedReconciliationIntervalsTest
         val intervals =
           SortedReconciliationIntervals.create(firstInterval +: noTickIntervals, validUntil).value
 
-        intervals.tickBeforeOrAt(origin + NonNegativeFiniteDuration.ofSeconds(20)) shouldBe Some(
+        intervals.tickBeforeOrAt(origin + NonNegativeFiniteDuration.tryOfSeconds(20)) shouldBe Some(
           ts1
         )
       }
@@ -323,13 +323,13 @@ class SortedReconciliationIntervalsTest
 
       "consider previous parameters if the interval contains no tick" in {
         val origin = CantonTimestampSecond.Epoch
-        val ts1 = origin + PositiveSeconds.ofSeconds(1)
+        val ts1 = origin + PositiveSeconds.tryOfSeconds(1)
 
         val firstInterval = mkParameters(origin, ts1, 1)
         val noTickIntervals = (0L until 20L).map { i =>
           mkParameters(
-            ts1 + NonNegativeFiniteDuration.ofSeconds(i),
-            ts1 + NonNegativeFiniteDuration.ofSeconds(i + 1),
+            ts1 + NonNegativeFiniteDuration.tryOfSeconds(i),
+            ts1 + NonNegativeFiniteDuration.tryOfSeconds(i + 1),
             3600, // much bigger than the bounds
           )
         }
@@ -337,7 +337,7 @@ class SortedReconciliationIntervalsTest
         val intervals =
           SortedReconciliationIntervals.create(firstInterval +: noTickIntervals, validUntil).value
 
-        intervals.tickBefore(origin + NonNegativeFiniteDuration.ofSeconds(20)) shouldBe Some(
+        intervals.tickBefore(origin + NonNegativeFiniteDuration.tryOfSeconds(20)) shouldBe Some(
           ts1
         )
       }
@@ -389,7 +389,7 @@ class SortedReconciliationIntervalsTest
     }
 
     "work when MinValue.getEpochSeconds isn't a multiple of the reconciliation interval" in {
-      val longInterval = PositiveSeconds.ofDays(100)
+      val longInterval = PositiveSeconds.tryOfDays(100)
       val longIntervalSeconds = longInterval.unwrap.getSeconds
       assert(
         CantonTimestamp.MinValue.getEpochSecond % longIntervalSeconds != 0,
@@ -418,7 +418,7 @@ class SortedReconciliationIntervalsPropertyTest
   import SortedReconciliationIntervalsTestHelpers.*
 
   "SortedReconciliationIntervals" must {
-    val interval = PositiveSeconds.ofSeconds(5)
+    val interval = PositiveSeconds.tryOfSeconds(5)
 
     "compute tick periods with no gaps" in {
       implicit lazy val incrementArb: Arbitrary[Seq[(Long, Long)]] =

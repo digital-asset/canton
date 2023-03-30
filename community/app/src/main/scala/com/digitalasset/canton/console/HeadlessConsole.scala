@@ -60,7 +60,10 @@ class HeadlessConsole(
     }
   }
 
-  def runModule(code: String, path: Option[File] = None): Either[HeadlessConsoleError, Unit] =
+  private def runModule(
+      code: String,
+      path: Option[File] = None,
+  ): Either[HeadlessConsoleError, Unit] =
     for {
       interpreter <- interpreterO
         .get()

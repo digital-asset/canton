@@ -112,5 +112,5 @@ class AgreementService(
 }
 
 object AgreementService {
-  case class AgreementServiceError(reason: String)
+  final case class AgreementServiceError(reason: String)
 }

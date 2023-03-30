@@ -6,9 +6,9 @@ package com.digitalasset.canton.participant.store
 import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.option.*
-import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.GlobalOffset
@@ -39,7 +39,7 @@ trait CommandDeduplicationStore extends AutoCloseable {
   ): OptionT[Future, CommandDeduplicationData]
 
   /** Updates the [[com.digitalasset.canton.participant.protocol.submission.ChangeIdHash]]'s for the given
-    * [[com.daml.ledger.participant.state.v2.ChangeId]]s with the given [[DefiniteAnswerEvent]]s.
+    * [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]]s with the given [[DefiniteAnswerEvent]]s.
     * The [[scala.Boolean]] specifies whether the definite answer is an acceptance.
     *
     * Does not overwrite the data if the existing data has a higher [[DefiniteAnswerEvent.offset]]. This should never
@@ -50,7 +50,7 @@ trait CommandDeduplicationStore extends AutoCloseable {
   ): Future[Unit]
 
   /** Updates the [[com.digitalasset.canton.participant.protocol.submission.ChangeIdHash]]'s for the given
-    * [[com.daml.ledger.participant.state.v2.ChangeId]] with the given [[DefiniteAnswerEvent]].
+    * [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]] with the given [[DefiniteAnswerEvent]].
     *
     * Does not overwrite the data if the existing data has a higher [[DefiniteAnswerEvent.offset]]. This should never
     * happen in practice.
@@ -96,7 +96,7 @@ object CommandDeduplicationStore {
         new DbCommandDeduplicationStore(jdbc, timeouts, releaseProtocolVersion, loggerFactory)
     }
 
-  case class OffsetAndPublicationTime(offset: GlobalOffset, publicationTime: CantonTimestamp)
+  final case class OffsetAndPublicationTime(offset: GlobalOffset, publicationTime: CantonTimestamp)
       extends PrettyPrinting {
     override def pretty: Pretty[OffsetAndPublicationTime] = prettyOfClass(
       param("offset", _.offset),
@@ -114,13 +114,13 @@ object CommandDeduplicationStore {
   }
 }
 
-/** The command deduplication data associated with a [[com.daml.ledger.participant.state.v2.ChangeId]].
+/** The command deduplication data associated with a [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]].
   *
   * @param changeId The change ID this command deduplication data is associated with
   * @param latestDefiniteAnswer The latest definite answer for the change ID
   * @param latestAcceptance The latest accepting completion for the change ID, if any
   */
-case class CommandDeduplicationData private (
+final case class CommandDeduplicationData private (
     changeId: ChangeId,
     latestDefiniteAnswer: DefiniteAnswerEvent,
     latestAcceptance: Option[DefiniteAnswerEvent],
@@ -142,7 +142,7 @@ case class CommandDeduplicationData private (
 
 object CommandDeduplicationData {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  case class InvalidCommandDeduplicationData(message: String, cause: Throwable = null)
+  final case class InvalidCommandDeduplicationData(message: String, cause: Throwable = null)
       extends RuntimeException(message, cause)
 
   def create(
@@ -185,7 +185,7 @@ object CommandDeduplicationData {
   * @param publicationTime The publication time associated with the `offset`
   * @param traceContext The trace context that created the completion offset.
   */
-case class DefiniteAnswerEvent(
+final case class DefiniteAnswerEvent(
     offset: GlobalOffset,
     publicationTime: CantonTimestamp,
     submissionId: Option[LedgerSubmissionId],

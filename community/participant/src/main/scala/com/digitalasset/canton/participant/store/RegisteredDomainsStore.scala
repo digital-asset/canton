@@ -34,8 +34,8 @@ trait DomainAliasAndIdStore extends AutoCloseable {
 
 object DomainAliasAndIdStore {
   trait Error
-  case class DomainAliasAlreadyAdded(alias: DomainAlias, domainId: DomainId) extends Error
-  case class DomainIdAlreadyAdded(domainId: DomainId, alias: DomainAlias) extends Error
+  final case class DomainAliasAlreadyAdded(alias: DomainAlias, domainId: DomainId) extends Error
+  final case class DomainIdAlreadyAdded(domainId: DomainId, alias: DomainAlias) extends Error
 }
 
 object RegisteredDomainsStore {

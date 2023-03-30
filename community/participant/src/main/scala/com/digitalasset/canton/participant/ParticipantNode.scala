@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant
 
 import akka.actor.ActorSystem
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
@@ -11,29 +12,26 @@ import cats.syntax.option.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
-import com.daml.platform.apiserver.meteringreport.MeteringReportKey
-import com.daml.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.concurrent.{
-  ExecutionContextIdlenessExecutorService,
-  FutureSupervisor,
-}
-import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.{DbConfig, H2DbConfig, InitConfigBase, TestingConfigInternal}
-import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.{
-  CommunityGrpcVaultServiceFactory,
-  GrpcVaultServiceFactory,
-}
-import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
-  CommunityCryptoPrivateStoreFactory,
-  CryptoPrivateStoreFactory,
-}
+import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.config.{DbConfig, H2DbConfig, InitConfigBase}
+import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.CommunityGrpcVaultServiceFactory
+import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
-import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
-import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
+import com.digitalasset.canton.environment.{
+  CantonNode,
+  CantonNodeBootstrapBase,
+  CantonNodeBootstrapCommonArguments,
+  NodeFactoryArguments,
+}
 import com.digitalasset.canton.health.HealthReporting
-import com.digitalasset.canton.health.HealthReporting.{DeferredHealthComponent, ServiceHealth}
+import com.digitalasset.canton.health.HealthReporting.{
+  BaseMutableHealthComponent,
+  ComponentStatus,
+  HealthService,
+  MutableHealthComponent,
+}
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -63,13 +61,7 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryDamlPackageStore,
   InMemoryServiceAgreementStore,
 }
-import com.digitalasset.canton.participant.sync.{
-  CantonSyncService,
-  ParticipantEventPublisher,
-  SyncDomain,
-  SyncDomainPersistentStateManager,
-  SyncServiceError,
-}
+import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManager.PostInitCallbacks
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
@@ -77,17 +69,19 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManager,
 }
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
+import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.scheduler.SchedulersWithPruning
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
-import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
+import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
   IdentityProvidingServiceClient,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
+import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerToKeyMapping}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -100,36 +94,29 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 class ParticipantNodeBootstrap(
-    override val name: InstanceName,
-    val config: LocalParticipantConfig,
-    val cantonParameterConfig: ParticipantNodeParameters,
-    val testingConfig: TestingConfigInternal,
-    clock: Clock,
+    arguments: CantonNodeBootstrapCommonArguments[
+      LocalParticipantConfig,
+      ParticipantNodeParameters,
+      ParticipantMetrics,
+    ],
     engine: Engine,
     testingTimeService: TestingTimeService,
     cantonSyncServiceFactory: CantonSyncService.Factory[CantonSyncService],
-    metrics: ParticipantMetrics,
-    storageFactory: StorageFactory,
-    cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
-    grpcVaultServiceFactory: GrpcVaultServiceFactory,
     setStartableStoppableLedgerApiAndCantonServices: (
         StartableStoppableLedgerApiServer,
         StartableStoppableLedgerApiDependentServices,
     ) => Unit,
-    resourceManagementServiceFactory: ParticipantSettingsStore => ResourceManagementService,
+    resourceManagementServiceFactory: Eval[ParticipantSettingsStore] => ResourceManagementService,
     replicationServiceFactory: Storage => ServerServiceDefinition,
     allocateIndexerLockIds: DbConfig => Either[String, Option[IndexerLockIds]],
-    futureSupervisor: FutureSupervisor,
-    parentLogger: NamedLoggerFactory,
-    writeHealthDumpToFile: HealthDumpFunction,
     meteringReportKey: MeteringReportKey,
     additionalGrpcServices: (
         CantonSyncService,
-        ParticipantNodePersistentState,
+        Eval[ParticipantNodePersistentState],
     ) => List[BindableService] = (_, _) => Nil,
     createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithPruning] = _ =>
       Future.successful(SchedulersWithPruning.noop),
-    configuredOpenTelemetry: ConfiguredOpenTelemetry,
+    private[canton] val persistentStateFactory: ParticipantNodePersistentStateFactory,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -139,26 +126,13 @@ class ParticipantNodeBootstrap(
       ParticipantNode,
       LocalParticipantConfig,
       ParticipantNodeParameters,
-    ](
-      name,
-      config,
-      cantonParameterConfig,
-      clock,
-      metrics.prefix,
-      metrics.metricsFactory,
-      metrics.dbStorage,
-      storageFactory,
-      cryptoPrivateStoreFactory,
-      grpcVaultServiceFactory,
-      parentLogger.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
-      writeHealthDumpToFile,
-      metrics.ledgerApiServer.daml.grpc,
-      configuredOpenTelemetry,
-      metrics.ledgerApiServer.daml.health,
-    ) {
+      ParticipantMetrics,
+    ](arguments) {
 
   /** per session created admin token for in-process connections to ledger-api */
   val adminToken: CantonAdminToken = CantonAdminToken.create(crypto.pureCrypto)
+
+  override def config: LocalParticipantConfig = arguments.config
 
   override protected def connectionPoolForParticipant: Boolean = true
 
@@ -171,21 +145,26 @@ class ParticipantNodeBootstrap(
     None
   )
 
-  lazy val syncDomainHealth: DeferredHealthComponent = DeferredHealthComponent(
+  lazy val syncDomainHealth: MutableHealthComponent = BaseMutableHealthComponent(
     loggerFactory,
     SyncDomain.healthName,
+    timeouts,
   )
-  lazy val syncDomainEphemeralHealth: DeferredHealthComponent = DeferredHealthComponent(
-    loggerFactory,
-    SyncDomainEphemeralState.healthName,
-  )
-  lazy val syncDomainSequencerClientHealth: DeferredHealthComponent = DeferredHealthComponent(
-    loggerFactory,
-    SequencerClient.healthName,
-  )
+  lazy val syncDomainEphemeralHealth: MutableHealthComponent =
+    BaseMutableHealthComponent(
+      loggerFactory,
+      SyncDomainEphemeralState.healthName,
+      timeouts,
+    )
+  lazy val syncDomainSequencerClientHealth: MutableHealthComponent =
+    BaseMutableHealthComponent(
+      loggerFactory,
+      SequencerClient.healthName,
+      timeouts,
+    )
 
-  override protected lazy val nodeHealthService: HealthReporting.ServiceHealth =
-    HealthReporting.ServiceHealth(
+  override protected lazy val nodeHealthService: HealthReporting.HealthService =
+    HealthReporting.HealthService(
       "participant",
       criticalDependencies = Seq(storage),
       // The sync service won't be reporting Ok until the node is initialized, but that shouldn't prevent traffic from
@@ -194,16 +173,17 @@ class ParticipantNodeBootstrap(
         Seq(syncDomainHealth, syncDomainEphemeralHealth, syncDomainSequencerClientHealth),
     )
 
-  private val authorizedTopologyStore = topologyStoreFactory.forId(AuthorizedStore)
   private val topologyManager =
     new ParticipantTopologyManager(
       clock,
       authorizedTopologyStore,
       crypto,
-      cantonParameterConfig.processingTimeouts,
+      parameterConfig.processingTimeouts,
       config.parameters.initialProtocolVersion.unwrap,
       loggerFactory,
     )
+  private val partyMetadataStore =
+    PartyMetadataStore(storage, parameterConfig.processingTimeouts, loggerFactory)
   // add participant node topology manager
   startTopologyManagementWriteService(topologyManager, topologyManager.store)
 
@@ -211,7 +191,7 @@ class ParticipantNodeBootstrap(
       ledgerId: String,
       participantId: LedgerParticipantId,
       sync: CantonSyncService,
-      participantNodePersistentState: ParticipantNodePersistentState,
+      participantNodePersistentState: Eval[ParticipantNodePersistentState],
   ): EitherT[Future, String, CantonLedgerApiServerWrapper.LedgerApiServerState] = {
 
     val ledgerTestingTimeService = (config.testingTime, clock) match {
@@ -227,7 +207,7 @@ class ParticipantNodeBootstrap(
     for {
       // For participants with append-only schema enabled, we allocate lock IDs for the indexer
       indexerLockIds <-
-        storageFactory.config match {
+        arguments.storageFactory.config match {
           case _: H2DbConfig =>
             // For H2 the non-unique indexer lock ids are sufficient.
             logger.debug("Not allocating indexer lock IDs on H2 config")
@@ -247,19 +227,19 @@ class ParticipantNodeBootstrap(
         .initialize(
           CantonLedgerApiServerWrapper.Config(
             config.ledgerApi,
-            cantonParameterConfig.ledgerApiServerParameters.indexer,
+            parameterConfig.ledgerApiServerParameters.indexer,
             indexerLockIds,
             ledgerId,
             participantId,
             engine,
             sync,
             config.storage,
-            cantonParameterConfig,
+            parameterConfig,
             ledgerTestingTimeService,
             adminToken,
             loggerFactory,
             tracerProvider,
-            metrics.ledgerApiServer,
+            arguments.metrics.ledgerApiServer,
             meteringReportKey,
           ),
           // start ledger API server iff participant replica is active
@@ -360,7 +340,7 @@ class ParticipantNodeBootstrap(
     val identityPusher =
       new ParticipantTopologyDispatcher(
         topologyManager,
-        cantonParameterConfig.processingTimeouts,
+        parameterConfig.processingTimeouts,
         loggerFactory,
       )
 
@@ -384,7 +364,7 @@ class ParticipantNodeBootstrap(
     }
 
     val agreementService =
-      new AgreementService(acceptedAgreements, cantonParameterConfig, loggerFactory)
+      new AgreementService(acceptedAgreements, parameterConfig, loggerFactory)
 
     for {
       domainConnectionConfigStore <- EitherT.right(
@@ -404,17 +384,17 @@ class ParticipantNodeBootstrap(
       )
 
       persistentState <- EitherT.right(
-        ParticipantNodePersistentState(
+        persistentStateFactory.create(
           syncDomainPersistentStateManager,
           storage,
           clock,
-          config.init.ledgerApi.maxDeduplicationDuration.some,
+          config.init.ledgerApi.maxDeduplicationDuration.toInternal.some,
           config.init.parameters.uniqueContractKeys.some,
-          cantonParameterConfig.stores,
+          parameterConfig.stores,
           ReleaseProtocolVersion.latest,
-          metrics,
+          arguments.metrics,
           indexedStringStore,
-          cantonParameterConfig.processingTimeouts,
+          parameterConfig.processingTimeouts,
           loggerFactory,
         )
       )
@@ -423,13 +403,15 @@ class ParticipantNodeBootstrap(
         participantId,
         persistentState,
         clock,
-        maxDeduplicationDuration = persistentState.settingsStore.settings.maxDeduplicationDuration
-          .getOrElse(
-            ErrorUtil.internalError(
-              new RuntimeException("Max deduplication duration is not available")
+        maxDeduplicationDuration = persistentState.map(
+          _.settingsStore.settings.maxDeduplicationDuration
+            .getOrElse(
+              ErrorUtil.internalError(
+                new RuntimeException("Max deduplication duration is not available")
+              )
             )
-          ),
-        timeouts = cantonParameterConfig.processingTimeouts,
+        ),
+        timeouts = parameterConfig.processingTimeouts,
         loggerFactory,
       )
 
@@ -440,9 +422,9 @@ class ParticipantNodeBootstrap(
             new InMemoryDamlPackageStore(loggerFactory)
           case pool: DbStorage =>
             new DbDamlPackageStore(
-              cantonParameterConfig.stores.maxItemsInSqlClause,
+              parameterConfig.stores.maxItemsInSqlClause,
               pool,
-              cantonParameterConfig.processingTimeouts,
+              parameterConfig.processingTimeouts,
               loggerFactory,
             )
         }
@@ -460,15 +442,16 @@ class ParticipantNodeBootstrap(
           new PackageInspectionOpsImpl(
             participantId,
             storage,
+            authorizedTopologyStore,
             domainAliasManager,
             syncDomainPersistentStateManager,
             syncCrypto,
-            cantonParameterConfig.processingTimeouts,
+            parameterConfig.processingTimeouts,
             topologyManager,
-            cantonParameterConfig.initialProtocolVersion,
+            parameterConfig.initialProtocolVersion,
             loggerFactory,
           ),
-          cantonParameterConfig.processingTimeouts,
+          parameterConfig.processingTimeouts,
           loggerFactory,
         )
       }
@@ -480,10 +463,9 @@ class ParticipantNodeBootstrap(
         domainAliasManager,
         syncCrypto,
         config.crypto,
-        topologyStoreFactory,
         clock,
-        cantonParameterConfig,
-        testingConfig,
+        parameterConfig,
+        arguments.testingConfig,
         recordSequencerInteractions,
         replaySequencerConfig,
         (domainId, staticDomainParameters, traceContext) =>
@@ -493,15 +475,15 @@ class ParticipantNodeBootstrap(
             staticDomainParameters.protocolVersion,
           )(traceContext),
         packageId => packageService.packageDependencies(List(packageId)),
-        metrics.domainMetrics,
+        arguments.metrics.domainMetrics,
         futureSupervisor,
         loggerFactory,
       )
 
       syncDomainEphemeralStateFactory = new SyncDomainEphemeralStateFactoryImpl(
-        cantonParameterConfig.processingTimeouts,
-        testingConfig,
-        cantonParameterConfig.enableCausalityTracking,
+        parameterConfig.processingTimeouts,
+        arguments.testingConfig,
+        parameterConfig.enableCausalityTracking,
         loggerFactory,
         futureSupervisor,
       )
@@ -510,14 +492,14 @@ class ParticipantNodeBootstrap(
       partyNotifier = new LedgerServerPartyNotifier(
         participantId,
         ephemeralState.participantEventPublisher,
-        topologyStoreFactory.partyMetadataStore(),
+        partyMetadataStore,
         clock,
-        cantonParameterConfig.processingTimeouts,
+        parameterConfig.processingTimeouts,
         loggerFactory,
       )
 
       // Notify at participant level if eager notification is configured, else rely on notification via domain.
-      _ = if (cantonParameterConfig.partyChangeNotification == PartyNotificationConfig.Eager) {
+      _ = if (parameterConfig.partyChangeNotification == PartyNotificationConfig.Eager) {
         topologyManager.addObserver(partyNotifier.attachToIdentityManager())
       }
 
@@ -525,11 +507,11 @@ class ParticipantNodeBootstrap(
       // an interrupted prune after a shutdown or crash, which touches the domain stores.
       syncDomainPersistentStateFactory = new SyncDomainPersistentStateFactory(
         syncDomainPersistentStateManager,
-        persistentState.settingsStore,
+        persistentState.map(_.settingsStore),
         storage,
         crypto.pureCrypto,
         indexedStringStore,
-        cantonParameterConfig,
+        parameterConfig,
         loggerFactory,
       )
       _ <- EitherT.right[String](
@@ -542,17 +524,19 @@ class ParticipantNodeBootstrap(
 
       ledgerId = participantId.uid.id.unwrap
 
-      resourceManagementService = resourceManagementServiceFactory(persistentState.settingsStore)
+      resourceManagementService = resourceManagementServiceFactory(
+        persistentState.map(_.settingsStore)
+      )
 
       schedulers <-
         EitherT.liftF(
           createSchedulers(
             ParticipantSchedulersParameters(
               isActive,
-              persistentState.multiDomainEventLog,
+              persistentState.map(_.multiDomainEventLog),
               storage,
               adminToken,
-              cantonParameterConfig.stores,
+              parameterConfig.stores,
             )
           )
         )
@@ -568,7 +552,6 @@ class ParticipantNodeBootstrap(
         syncDomainPersistentStateManager,
         syncDomainPersistentStateFactory,
         packageService,
-        topologyStoreFactory,
         multiDomainCausalityStore,
         topologyManager,
         identityPusher,
@@ -580,11 +563,11 @@ class ParticipantNodeBootstrap(
         storage,
         clock,
         resourceManagementService,
-        cantonParameterConfig,
+        parameterConfig,
         indexedStringStore,
         schedulers,
-        metrics,
-        futureSupervisor,
+        arguments.metrics,
+        arguments.futureSupervisor,
         loggerFactory,
       )
 
@@ -625,7 +608,7 @@ class ParticipantNodeBootstrap(
       val ledgerApiDependentServices =
         new StartableStoppableLedgerApiDependentServices(
           config,
-          cantonParameterConfig,
+          parameterConfig,
           packageService,
           sync,
           participantId,
@@ -647,7 +630,7 @@ class ParticipantNodeBootstrap(
         domainAliasManager,
         agreementService,
         domainRegistry.sequencerConnectClientBuilder,
-        cantonParameterConfig.processingTimeouts,
+        parameterConfig.processingTimeouts,
         loggerFactory,
       )
 
@@ -699,12 +682,24 @@ class ParticipantNodeBootstrap(
             executionContext,
           )
         )
+      adminServerRegistry
+        .addServiceU(
+          ParticipantRepairServiceGrpc.bindService(
+            new GrpcParticipantRepairService(
+              sync,
+              domainAliasManager,
+              parameterConfig.processingTimeouts,
+              loggerFactory,
+            ),
+            executionContext,
+          )
+        )
 
       new ParticipantNode(
         participantId,
-        metrics,
+        arguments.metrics,
         config,
-        cantonParameterConfig,
+        parameterConfig,
         storage,
         clock,
         topologyManager,
@@ -722,12 +717,25 @@ class ParticipantNodeBootstrap(
         schedulers,
         loggerFactory,
         nodeHealthService,
+        nodeHealthService.dependencies.map(_.toComponentStatus),
       )
 
     }
   }
 
   override def isActive: Boolean = storage.isActive
+
+  override def onClosed(): Unit = {
+    Lifecycle.close(partyMetadataStore)(logger)
+    super.onClosed()
+  }
+
+  /** All existing domain stores */
+  override protected def sequencedTopologyStores: Seq[TopologyStore[TopologyStoreId]] =
+    this.getNode.toList.flatMap(_.sync.syncDomainPersistentStateManager.getAll.map {
+      case (_, state) =>
+        state.topologyStore
+    })
 }
 
 object ParticipantNodeBootstrap {
@@ -735,17 +743,8 @@ object ParticipantNodeBootstrap {
 
   trait Factory[PC <: LocalParticipantConfig] {
     def create(
-        name: String,
-        participantConfig: PC,
-        participantNodeParameters: ParticipantNodeParameters,
-        clock: Clock,
+        arguments: NodeFactoryArguments[PC, ParticipantNodeParameters, ParticipantMetrics],
         testingTimeService: TestingTimeService,
-        participantMetrics: ParticipantMetrics,
-        testingConfig: TestingConfigInternal,
-        futureSupervisor: FutureSupervisor,
-        loggerFactory: NamedLoggerFactory,
-        writeHealthDumpToFile: HealthDumpFunction,
-        configuredOpenTelemetry: ConfiguredOpenTelemetry,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
@@ -756,63 +755,51 @@ object ParticipantNodeBootstrap {
 
   object CommunityParticipantFactory extends Factory[CommunityParticipantConfig] {
     override def create(
-        name: String,
-        participantConfig: CommunityParticipantConfig,
-        participantNodeParameters: ParticipantNodeParameters,
-        clock: Clock,
+        arguments: NodeFactoryArguments[
+          CommunityParticipantConfig,
+          ParticipantNodeParameters,
+          ParticipantMetrics,
+        ],
         testingTimeService: TestingTimeService,
-        participantMetrics: ParticipantMetrics,
-        testingConfigInternal: TestingConfigInternal,
-        futureSupervisor: FutureSupervisor,
-        loggerFactory: NamedLoggerFactory,
-        writeHealthDumpToFile: HealthDumpFunction,
-        configuredOpenTelemetry: ConfiguredOpenTelemetry,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
         actorSystem: ActorSystem,
         executionSequencerFactory: ExecutionSequencerFactory,
     ): Either[String, ParticipantNodeBootstrap] =
-      InstanceName
-        .create(name)
-        .map(
+      arguments
+        .toCantonNodeBootstrapCommonArguments(
+          new CommunityStorageFactory(arguments.config.storage),
+          new CommunityCryptoPrivateStoreFactory,
+          new CommunityGrpcVaultServiceFactory,
+        )
+        .map { arguments =>
           new ParticipantNodeBootstrap(
-            _,
-            participantConfig,
-            participantNodeParameters,
-            testingConfigInternal,
-            clock,
+            arguments,
             DAMLe.newEngine(
-              participantNodeParameters.uniqueContractKeys,
-              participantNodeParameters.devVersionSupport,
+              arguments.parameterConfig.uniqueContractKeys,
+              arguments.parameterConfig.devVersionSupport,
             ),
             testingTimeService,
             CantonSyncService.DefaultFactory,
-            participantMetrics,
-            new CommunityStorageFactory(participantConfig.storage),
-            new CommunityCryptoPrivateStoreFactory,
-            new CommunityGrpcVaultServiceFactory,
             (_ledgerApi, _ledgerApiDependentServices) => (),
             _ =>
               new ResourceManagementService.CommunityResourceManagementService(
-                participantConfig.parameters.warnIfOverloadedFor,
-                participantMetrics,
+                arguments.config.parameters.warnIfOverloadedFor.map(_.toInternal),
+                arguments.metrics,
               ),
             _ =>
               StaticGrpcServices
                 .notSupportedByCommunity(
                   EnterpriseParticipantReplicationServiceGrpc.SERVICE,
-                  loggerFactory,
+                  arguments.loggerFactory,
                 ),
             _dbConfig => Option.empty[IndexerLockIds].asRight,
-            futureSupervisor,
-            loggerFactory,
-            writeHealthDumpToFile,
             meteringReportKey = CommunityKey,
-            configuredOpenTelemetry = configuredOpenTelemetry,
+            persistentStateFactory = ParticipantNodePersistentStateFactory,
           )
-        )
-        .leftMap(_.toString)
+        }
+
   }
 }
 
@@ -860,7 +847,8 @@ class ParticipantNode(
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
-    val serviceHealth: ServiceHealth,
+    val serviceHealth: HealthService,
+    healthData: => Seq[ComponentStatus],
 ) extends CantonNode
     with NamedLogging
     with HasUptime
@@ -916,7 +904,15 @@ class ParticipantNode(
     val domains = readyDomains
     val topologyQueues = identityPusher.queueStatus
     Future.successful(
-      ParticipantStatus(id.uid, uptime(), ports, domains, sync.isActive(), topologyQueues)
+      ParticipantStatus(
+        id.uid,
+        uptime(),
+        ports,
+        domains,
+        sync.isActive(),
+        topologyQueues,
+        healthData,
+      )
     )
   }
 

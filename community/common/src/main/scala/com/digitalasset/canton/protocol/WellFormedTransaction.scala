@@ -45,7 +45,7 @@ import scala.collection.mutable
   *     been merged by Canton.</li>
   * </ul>
   */
-case class WellFormedTransaction[+S <: State] private (
+final case class WellFormedTransaction[+S <: State] private (
     private val tx: LfVersionedTransaction,
     metadata: TransactionMetadata,
 )(state: S) {
@@ -496,7 +496,7 @@ object WellFormedTransaction {
 
   sealed trait InvalidInput
   object InvalidInput extends {
-    case class InvalidParty(cause: String) extends InvalidInput
+    final case class InvalidParty(cause: String) extends InvalidInput
   }
 
   /** Sanity check the transaction before submission for any invalid input values

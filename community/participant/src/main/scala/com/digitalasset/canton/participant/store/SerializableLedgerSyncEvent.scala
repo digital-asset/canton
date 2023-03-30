@@ -6,8 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.ledger.configuration.*
-import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.crypto.Hash as LfHash
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Bytes as LfBytes, ImmArray}
@@ -17,6 +15,8 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   TimeModelConversionError,
   ValueConversionError,
 }
+import com.digitalasset.canton.ledger.configuration.*
+import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.participant.protocol.{ProcessingSteps, v0}
 import com.digitalasset.canton.participant.store.DamlLfSerializers.*
 import com.digitalasset.canton.participant.sync.LedgerSyncEvent

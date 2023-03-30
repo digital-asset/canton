@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.config
 
 import com.digitalasset.canton.config.InitConfigBase
 
-case class DomainInitConfig(
+final case class DomainInitConfig(
     identity: Option[InitConfigBase.Identity] = Some(InitConfigBase.Identity()),
     domainParameters: DomainParametersConfig = DomainParametersConfig(),
 ) extends InitConfigBase

@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.store
 
 import cats.syntax.option.*
-import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.participant.protocol.submission.ChangeIdHash
 import com.digitalasset.canton.participant.store.CommandDeduplicationStore.OffsetAndPublicationTime
 import com.digitalasset.canton.tracing.TraceContext

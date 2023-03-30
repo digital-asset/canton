@@ -16,10 +16,11 @@ import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.protobuf.services.ProtoReflectionService
 
 import java.util.concurrent.ExecutorService
+import scala.annotation.nowarn
 
 class GrpcHealthServer(
     config: GrpcHealthServerConfig,
-    metrics: MetricHandle.MetricsFactory,
+    @nowarn("cat=deprecation") metrics: MetricHandle.MetricsFactory,
     executor: ExecutorService,
     override val loggerFactory: NamedLoggerFactory,
     apiConfig: ApiLoggingConfig,

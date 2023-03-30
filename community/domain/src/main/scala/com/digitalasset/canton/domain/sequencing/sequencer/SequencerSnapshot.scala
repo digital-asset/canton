@@ -19,7 +19,7 @@ import com.digitalasset.canton.version.{
 }
 import com.google.protobuf.ByteString
 
-case class SequencerSnapshot(
+final case class SequencerSnapshot(
     lastTs: CantonTimestamp,
     heads: Map[Member, SequencerCounter],
     status: SequencerPruningStatus,
@@ -40,9 +40,8 @@ case class SequencerSnapshot(
 }
 object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v3,
-      supportedProtoVersion(v0.SequencerSnapshot)(fromProtoV0),
+    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.SequencerSnapshot)(
+      supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
   )
@@ -66,7 +65,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
     None,
   )(protocolVersionRepresentativeFor(protocolVersion))
 
-  case class ImplementationSpecificInfo(implementationName: String, info: ByteString)
+  final case class ImplementationSpecificInfo(implementationName: String, info: ByteString)
 
   def fromProtoV0(
       request: v0.SequencerSnapshot
@@ -97,7 +96,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
     )(protocolVersionRepresentativeFor(ProtoVersion(0)))
 }
 
-case class SequencerInitialState(
+final case class SequencerInitialState(
     snapshot: SequencerSnapshot,
     latestTopologyClientTimestamp: Option[CantonTimestamp],
 )

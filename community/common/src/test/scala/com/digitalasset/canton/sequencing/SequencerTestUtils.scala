@@ -31,7 +31,7 @@ object SequencerTestUtils extends BaseTest {
   }
 
   def sign[M <: ProtocolVersionedMemoizedEvidence](content: M): SignedContent[M] =
-    SignedContent(content, SymbolicCrypto.emptySignature, None)
+    SignedContent(content, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def mockDeliverClosedEnvelope(
@@ -49,14 +49,14 @@ object SequencerTestUtils extends BaseTest {
       domainId,
       messageId,
       batch,
-      BaseTest.testedProtocolVersion,
+      testedProtocolVersion,
     )
 
     deserializedFrom match {
       case Some(bytes) =>
         // Somehow ugly way to tweak the `deserializedFrom` attribute of Deliver
         SequencedEvent
-          .fromProtoWithV0(ClosedEnvelope.fromProtoV0)(deliver.toProtoV0, bytes)
+          .fromProtoV0(deliver.toProtoV0)(bytes)
           .value
           .asInstanceOf[Deliver[ClosedEnvelope]]
 

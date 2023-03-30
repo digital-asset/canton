@@ -16,7 +16,8 @@ class DelayLoggerTest extends AnyWordSpec with BaseTest {
   "checkForDelay" should {
     val clock = new SimClock(start = CantonTimestamp.now(), loggerFactory = loggerFactory)
     val gauge = NoOpGauge[Long]("test", 0L)
-    val delayLogger = new DelayLogger(clock, logger, NonNegativeFiniteDuration.ofSeconds(1), gauge)
+    val delayLogger =
+      new DelayLogger(clock, logger, NonNegativeFiniteDuration.tryOfSeconds(1), gauge)
 
     def probe(delayMs: Long, assertion: Seq[LogEntry] => Assertion) = {
       val event = mock[PossiblyIgnoredProtocolEvent]

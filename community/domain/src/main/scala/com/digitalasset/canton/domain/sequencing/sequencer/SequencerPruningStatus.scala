@@ -11,7 +11,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, pars
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
 
-case class SequencerMemberStatus(
+final case class SequencerMemberStatus(
     member: Member,
     registeredAt: CantonTimestamp,
     lastAcknowledged: Option[CantonTimestamp],
@@ -39,7 +39,7 @@ case class SequencerMemberStatus(
 /** Structure housing both members and instances of those members. Used to list clients that have been or need to be
   * disabled.
   */
-case class SequencerClients(
+final case class SequencerClients(
     members: Set[Member] = Set.empty
 )
 
@@ -66,7 +66,7 @@ trait AbstractSequencerPruningStatus {
   }
 }
 
-private[canton] case class InternalSequencerPruningStatus(
+private[canton] final case class InternalSequencerPruningStatus(
     override val lowerBound: CantonTimestamp,
     override val members: Seq[SequencerMemberStatus],
 ) extends AbstractSequencerPruningStatus {
@@ -86,7 +86,7 @@ private[canton] object InternalSequencerPruningStatus {
   *
   * @param now the current time of the sequencer clock
   */
-case class SequencerPruningStatus(
+final case class SequencerPruningStatus(
     override val lowerBound: CantonTimestamp,
     now: CantonTimestamp,
     override val members: Seq[SequencerMemberStatus],

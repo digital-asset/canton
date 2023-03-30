@@ -143,7 +143,7 @@ object SortedReconciliationIntervals {
   val empty: SortedReconciliationIntervals =
     SortedReconciliationIntervals(Nil, CantonTimestamp.MinValue)
 
-  case class ReconciliationInterval(
+  final case class ReconciliationInterval(
       validFrom: CantonTimestamp,
       validUntil: Option[CantonTimestamp],
       intervalLength: PositiveSeconds,

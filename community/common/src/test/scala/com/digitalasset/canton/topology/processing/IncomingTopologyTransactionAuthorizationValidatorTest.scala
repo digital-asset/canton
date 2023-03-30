@@ -135,7 +135,7 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
     DomainParametersChange(
       DomainId(uid1a),
       defaultDomainParameters
-        .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(1)),
+        .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(1)),
     ),
     key1,
   )
@@ -144,7 +144,7 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
     DomainParametersChange(
       DomainId(uid1a),
       defaultDomainParameters
-        .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2)),
+        .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(2)),
     ),
     key1,
   )

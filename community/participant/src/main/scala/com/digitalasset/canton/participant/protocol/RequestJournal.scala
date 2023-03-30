@@ -303,7 +303,7 @@ class RequestJournal(
       if (newState.hasCursor) {
         // Synchronously add the new entry to the cursor queue, if there is a cursor queue
         val info =
-          CursorInfo(requestTimestamp, SupervisedPromise[Unit]("cursor-info", futureSupervisor))
+          CursorInfo(requestTimestamp, new SupervisedPromise[Unit]("cursor-info", futureSupervisor))
         newState.visitCursor {
           case Pending => Some(pendingCursor.insert(rc, info))
           case Clean => Some(cleanCursor.insert(rc, info))
@@ -378,7 +378,7 @@ class RequestJournal(
   private def drain(
       pq: PeanoQueue[RequestCounter, CursorInfo]
   )(implicit traceContext: TraceContext): Option[(RequestCounterCursorPrehead, Promise[Unit])] = {
-    val completionPromise = SupervisedPromise[Unit]("drain", futureSupervisor)
+    val completionPromise = new SupervisedPromise[Unit]("drain", futureSupervisor)
 
     @tailrec def drain(
         currentPrehead: Option[RequestCounterCursorPrehead]
@@ -475,7 +475,7 @@ object RequestJournal {
     * @throws java.lang.IllegalArgumentException if the `commitTime` is specified and `state` is not [[RequestState.Clean]].
     *                                            or if the `commitTime` is before the `requestTimestamp`
     */
-  case class RequestData(
+  final case class RequestData(
       rc: RequestCounter,
       state: RequestState,
       requestTimestamp: CantonTimestamp,
@@ -531,7 +531,7 @@ object RequestJournal {
       new RequestData(requestCounter, Clean, requestTimestamp, Some(commitTime), repairContext)
   }
 
-  private case class CursorInfo(timestamp: CantonTimestamp, signal: Promise[Unit])
+  private final case class CursorInfo(timestamp: CantonTimestamp, signal: Promise[Unit])
 }
 
 trait RequestJournalReader {

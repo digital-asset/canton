@@ -20,7 +20,7 @@ import java.util.UUID
   * @param targetTimeProof a sequenced event that the submitter has recently observed on the target domain.
   *                        Determines the timestamp of the topology at the target domain.
   */
-case class TransferOutRequest(
+final case class TransferOutRequest(
     submitterMetadata: TransferSubmitterMetadata,
     stakeholders: Set[LfPartyId],
     adminParties: Set[LfPartyId],

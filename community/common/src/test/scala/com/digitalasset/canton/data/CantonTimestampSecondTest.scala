@@ -25,7 +25,7 @@ class CantonTimestampSecondTest extends AnyWordSpec with BaseTest {
 
     "have factory method to build from CantonTimestamp" in {
       val tsRounded = CantonTimestamp.fromInstant(Instant.parse("2022-12-12T12:00:00Z")).value
-      val tsNotRounded = tsRounded + NonNegativeFiniteDuration.ofMillis(500)
+      val tsNotRounded = tsRounded + NonNegativeFiniteDuration.tryOfMillis(500)
 
       CantonTimestampSecond
         .fromCantonTimestamp(tsRounded)

@@ -6,13 +6,13 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.*
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
   UnableToDetermineKey,
@@ -163,7 +163,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
         (TransactionView, WellFormedTransaction[WithSuffixes]),
       ] = ???
 
-      override def saltsFromView(view: TransactionViewTree): Iterable[Salt] = ???
+      override def saltsFromView(view: TransactionView): Iterable[Salt] = ???
     }
 
     new ConfirmationRequestFactory(submitterParticipant, domain, LoggingConfig(), loggerFactory)(
@@ -289,11 +289,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             )
         }
 
-        OpenEnvelope(
-          encryptedViewMessage,
-          recipients,
-          testedProtocolVersion,
-        )
+        OpenEnvelope(encryptedViewMessage, recipients)(testedProtocolVersion)
     }
 
     ConfirmationRequest(

@@ -67,7 +67,7 @@ class ConfirmationResponseProcessorTest
     LocalVerdict.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   val participantResponseTimeout: NonNegativeFiniteDuration =
-    NonNegativeFiniteDuration.ofMillis(100L)
+    NonNegativeFiniteDuration.tryOfMillis(100L)
 
   "ConfirmationResponseProcessor" should {
     lazy val submitter = ExampleTransactionFactory.submitter
@@ -222,8 +222,7 @@ class ConfirmationResponseProcessorTest
           SerializedRootHashMessagePayload.empty,
         ),
         Recipients.cc(participant, mediatorId),
-        testedProtocolVersion,
-      )
+      )(testedProtocolVersion)
     )
 
     "timestamp of mediator request is propagated" in {
@@ -291,12 +290,13 @@ class ConfirmationResponseProcessorTest
         )(any[TraceContext])
       )
         .thenReturn(Future.successful(initialDomainParameters))
-
-      when(mockSnapshot.verifySignature(any[Hash], any[KeyOwner], any[Signature]))
+      when(mockTopologySnapshot.canConfirm(any[ParticipantId], any[LfPartyId], any[TrustLevel]))
+        .thenReturn(Future.successful(true))
+      when(mockSnapshot.ipsSnapshot).thenReturn(mockTopologySnapshot)
+      when(mockSnapshot.verifySignatures(any[Hash], any[KeyOwner], any[NonEmpty[Seq[Signature]]]))
         .thenReturn(EitherT.rightT(()))
       when(mockSnapshot.sign(any[Hash])(anyTraceContext))
         .thenReturn(EitherT.rightT[Future, SyncCryptoError](mockSignature))
-      when(mockSnapshot.ipsSnapshot).thenReturn(mockTopologySnapshot)
       when(mockSnapshot.pureCrypto).thenReturn(domainSyncCryptoApi.pureCrypto)
 
       val mockedSnapshotCrypto = new DomainSyncCryptoClient(
@@ -312,8 +312,11 @@ class ConfirmationResponseProcessorTest
         override def awaitSnapshot(timestamp: CantonTimestamp)(implicit
             traceContext: TraceContext
         ): Future[DomainSnapshotSyncCryptoApi] =
-          if (timestamp == requestTimestamp) Future.successful(mockSnapshot)
-          else super.snapshot(timestamp)
+          if (timestamp == requestTimestamp) {
+            Future.successful(mockSnapshot)
+          } else {
+            super.snapshot(timestamp)
+          }
       }
 
       val responseF =
@@ -352,10 +355,10 @@ class ConfirmationResponseProcessorTest
         for {
           response <- responseF
           _ <- handleEvents(sut.processor)
-          _ = verify(mockSnapshot, timeout(1000)).verifySignature(
+          _ = verify(mockSnapshot, timeout(1000)).verifySignatures(
             any[Hash],
             any[KeyOwner],
-            eqMatch(response.signature),
+            eqMatch(response.signatures),
           )
         } yield succeed
       }
@@ -402,10 +405,8 @@ class ConfirmationResponseProcessorTest
           ts.plusSeconds(120),
           mediatorRequest,
           List(
-            OpenEnvelope(
-              rootHashMessage,
-              Recipients.cc(mediatorId, participant),
-              testedProtocolVersion,
+            OpenEnvelope(rootHashMessage, Recipients.cc(mediatorId, participant))(
+              testedProtocolVersion
             )
           ),
         )
@@ -489,7 +490,7 @@ class ConfirmationResponseProcessorTest
       sequentialTraverse_(tests.zipWithIndex) { case ((_testName, recipients), i) =>
         withClueF("testname") {
           val rootHashMessages =
-            recipients.map(r => OpenEnvelope(rootHashMessage, r, testedProtocolVersion))
+            recipients.map(r => OpenEnvelope(rootHashMessage, r)(testedProtocolVersion))
           val ts = CantonTimestamp.ofEpochSecond(i.toLong)
           sut.processor.processRequest(
             RequestId(ts),
@@ -510,7 +511,7 @@ class ConfirmationResponseProcessorTest
       val rootHash = informeeMessage.rootHash.value
       val wrongRootHash =
         RootHash(
-          domainSyncCryptoApi.pureCrypto.digest(HashPurposeTest.testHashPurpose, ByteString.EMPTY)
+          domainSyncCryptoApi.pureCrypto.digest(TestHash.testHashPurpose, ByteString.EMPTY)
         )
       val correctViewType = informeeMessage.viewType
       val wrongViewType = TransferInViewType
@@ -534,7 +535,7 @@ class ConfirmationResponseProcessorTest
         (
           request,
           rootHashMessages.map { case (rootHashMessage, recipients) =>
-            OpenEnvelope(rootHashMessage, recipients, testedProtocolVersion)
+            OpenEnvelope(rootHashMessage, recipients)(testedProtocolVersion)
           }.toList,
         )
       def example(
@@ -701,10 +702,8 @@ class ConfirmationResponseProcessorTest
             ts.plusSeconds(120),
             mediatorRequest,
             List(
-              OpenEnvelope(
-                rootHashMessage,
-                Recipients.cc(mediatorId, participant),
-                testedProtocolVersion,
+              OpenEnvelope(rootHashMessage, Recipients.cc(mediatorId, participant))(
+                testedProtocolVersion
               )
             ),
           ),
@@ -735,10 +734,8 @@ class ConfirmationResponseProcessorTest
           decisionTime,
           informeeMessage,
           List(
-            OpenEnvelope(
-              rootHashMessage,
-              Recipients.cc(mediatorId, participant),
-              testedProtocolVersion,
+            OpenEnvelope(rootHashMessage, Recipients.cc(mediatorId, participant))(
+              testedProtocolVersion
             )
           ),
         )
@@ -997,10 +994,8 @@ class ConfirmationResponseProcessorTest
           requestIdTs.plusSeconds(120),
           informeeMessage,
           List(
-            OpenEnvelope(
-              rootHashMessage,
-              Recipients.cc(mediatorId, participant),
-              testedProtocolVersion,
+            OpenEnvelope(rootHashMessage, Recipients.cc(mediatorId, participant))(
+              testedProtocolVersion
             )
           ),
         )

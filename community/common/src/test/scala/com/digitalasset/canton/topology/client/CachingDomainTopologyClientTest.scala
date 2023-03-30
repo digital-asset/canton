@@ -8,12 +8,12 @@ import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, DefaultProcessingTimeouts}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, KeyCollection, TestingOwnerWithKeys}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, SequencerCounter, config}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.concurrent.Future
@@ -59,7 +59,7 @@ class CachingDomainTopologyClientTest extends AsyncWordSpecLike with BaseTest {
         CachingConfigs(
           topologySnapshot = CacheConfig(
             maximumSize = PositiveNumeric.tryCreate(100L),
-            expireAfterAccess = NonNegativeFiniteDuration.ofMinutes(5),
+            expireAfterAccess = config.NonNegativeFiniteDuration.ofMinutes(5),
           )
         ),
         DefaultProcessingTimeouts.testing,

@@ -4,15 +4,15 @@
 package com.digitalasset.canton.participant.sync
 
 import com.daml.daml_lf_dev.DamlLf
-import com.daml.ledger.grpc.GrpcStatuses
-import com.daml.ledger.participant.state.v2.{
+import com.daml.lf.data.{Bytes, ImmArray}
+import com.daml.lf.transaction.{BlindingInfo, CommittedTransaction}
+import com.digitalasset.canton.ledger.grpc.GrpcStatuses
+import com.digitalasset.canton.ledger.participant.state.v2.{
   CompletionInfo,
   DivulgedContract,
   TransactionMeta,
   Update,
 }
-import com.daml.lf.data.{Bytes, ImmArray}
-import com.daml.lf.transaction.{BlindingInfo, CommittedTransaction}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.RequestType
@@ -41,8 +41,8 @@ import io.scalaland.chimney.dsl.*
 
 import scala.collection.immutable.HashMap
 
-/** This a copy of [[com.daml.ledger.participant.state.v2.Update]].
-  * Refer to [[com.daml.ledger.participant.state.v2.Update]] documentation for more information.
+/** This a copy of [[com.digitalasset.canton.ledger.participant.state.v2.Update]].
+  * Refer to [[com.digitalasset.canton.ledger.participant.state.v2.Update]] documentation for more information.
   */
 sealed trait LedgerSyncEvent extends Product with Serializable with PrettyPrinting {
   def description: String

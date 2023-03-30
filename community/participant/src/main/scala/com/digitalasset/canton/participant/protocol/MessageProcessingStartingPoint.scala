@@ -25,7 +25,7 @@ import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
   *                         No request has both a higher timestamp than `prenextTimestamp`
   *                         and a lower request counter than `nextRequestCounter`.
   */
-case class MessageProcessingStartingPoint(
+final case class MessageProcessingStartingPoint(
     nextRequestCounter: RequestCounter,
     nextSequencerCounter: SequencerCounter,
     prenextTimestamp: CantonTimestamp,
@@ -63,7 +63,7 @@ object MessageProcessingStartingPoint {
   *                                       * The clean sequencer counter prehead at the beginning of crash recovery.
   * @throws ProcessingStartingPoints.InvalidStartingPointsException if `cleanReplay` is after (in any component) `processing`
   */
-case class ProcessingStartingPoints private (
+final case class ProcessingStartingPoints private (
     cleanReplay: MessageProcessingStartingPoint,
     processing: MessageProcessingStartingPoint,
     eventPublishingNextLocalOffset: LocalOffset,
@@ -103,7 +103,7 @@ case class ProcessingStartingPoints private (
 }
 
 object ProcessingStartingPoints {
-  case class InvalidStartingPointsException(message: String) extends RuntimeException(message)
+  final case class InvalidStartingPointsException(message: String) extends RuntimeException(message)
 
   def tryCreate(
       cleanReplay: MessageProcessingStartingPoint,

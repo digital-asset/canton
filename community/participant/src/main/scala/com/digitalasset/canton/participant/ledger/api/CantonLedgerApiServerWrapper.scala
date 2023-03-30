@@ -6,17 +6,13 @@ package com.digitalasset.canton.participant.ledger.api
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
-import com.daml.platform.apiserver.*
-import com.daml.platform.apiserver.meteringreport.MeteringReportKey
-import com.daml.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
-import com.daml.platform.store.DbSupport
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, StorageConfig}
+import com.digitalasset.canton.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
@@ -29,6 +25,10 @@ import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.config.{IndexerConfig, LedgerApiServerConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.util.LoggingContextUtil
+import com.digitalasset.canton.platform.apiserver.*
+import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
+import com.digitalasset.canton.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
+import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LedgerParticipantId, checked}
@@ -52,7 +52,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     ).get
   )
 
-  case class IndexerLockIds(mainLockId: Int, workerLockId: Int)
+  final case class IndexerLockIds(mainLockId: Int, workerLockId: Int)
 
   /** Config for ledger API server and indexer
     *
@@ -71,7 +71,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     * @param tracerProvider        tracer provider for open telemetry grpc injection
     * @param metrics               upstream metrics module
     */
-  case class Config(
+  final case class Config(
       serverConfig: LedgerApiServerConfig,
       indexerConfig: IndexerConfig,
       indexerLockIds: Option[IndexerLockIds],
@@ -122,7 +122,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       .flatMap { ledgerApiStorage =>
         val connectionPoolConfig = DbSupport.ConnectionPoolConfig(
           connectionPoolSize = config.storageConfig.maxConnectionsLedgerApiServer,
-          connectionTimeout = config.serverConfig.databaseConnectionTimeout.toScala,
+          connectionTimeout = config.serverConfig.databaseConnectionTimeout.underlying,
         )
 
         val dbConfig = DbSupport.DbConfig(
@@ -188,7 +188,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     * @param dbConfig          canton DB storage config so that indexer can share the participant db
     * @param additionalMigrationPaths optional paths for extra migration files
     */
-  case class MigrateSchemaConfig(
+  final case class MigrateSchemaConfig(
       dbConfig: DbConfig,
       additionalMigrationPaths: Seq[String],
   )
@@ -216,7 +216,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     }
   }
 
-  case class LedgerApiServerState(
+  final case class LedgerApiServerState(
       ledgerApiStorage: LedgerApiStorage,
       startableStoppableLedgerApi: StartableStoppableLedgerApiServer,
       override protected val logger: TracedLogger,
@@ -266,11 +266,11 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     override def cause: Throwable = null
   }
 
-  case class FailedToStartLedgerApiServer(cause: Throwable) extends LedgerApiServerError {
+  final case class FailedToStartLedgerApiServer(cause: Throwable) extends LedgerApiServerError {
     override def pretty: Pretty[FailedToStartLedgerApiServer] = prettyOfClass(unnamedParam(_.cause))
   }
 
-  case class FailedToStopLedgerApiServer(
+  final case class FailedToStopLedgerApiServer(
       override protected val errorMessage: String,
       cause: Throwable,
   ) extends LedgerApiServerError {
@@ -278,7 +278,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       prettyOfClass(param("error", _.errorMessage.unquoted), param("cause", _.cause))
   }
 
-  case class FailedToConfigureLedgerApiStorage(override protected val errorMessage: String)
+  final case class FailedToConfigureLedgerApiStorage(override protected val errorMessage: String)
       extends LedgerApiServerErrorWithoutCause {
     override def pretty: Pretty[FailedToConfigureLedgerApiStorage] =
       prettyOfClass(unnamedParam(_.errorMessage.unquoted))

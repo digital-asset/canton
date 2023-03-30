@@ -572,5 +572,5 @@ class DbContractStore(
 }
 
 object DbContractStore {
-  case class AbortedDueToShutdownException(message: String) extends RuntimeException(message)
+  final case class AbortedDueToShutdownException(message: String) extends RuntimeException(message)
 }

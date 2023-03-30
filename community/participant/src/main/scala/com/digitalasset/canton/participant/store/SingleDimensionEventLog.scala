@@ -157,7 +157,7 @@ object EventLogId {
     } else
       IndexedDomain.fromDbIndexOT(context, indexedStringStore)(index).map(DomainEventLogId)
 
-  case class DomainEventLogId(id: IndexedDomain) extends EventLogId {
+  final case class DomainEventLogId(id: IndexedDomain) extends EventLogId {
     override def pretty: Pretty[DomainEventLogId] = prettyOfParam(_.id.item)
 
     override def index: Int = id.index

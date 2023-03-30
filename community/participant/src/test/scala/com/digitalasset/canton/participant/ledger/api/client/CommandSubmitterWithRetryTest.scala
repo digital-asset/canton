@@ -9,10 +9,10 @@ import akka.stream.scaladsl.Flow
 import com.daml.error.{ErrorCategory, ErrorClass, ErrorCode}
 import com.daml.ledger.api.v1.commands.Commands
 import com.daml.ledger.api.v1.completion.Completion
-import com.daml.ledger.client.services.commands.CommandSubmission
 import com.daml.util.Ctx
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.ledger.client.services.commands.CommandSubmission
 import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.CommandsCtx
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status

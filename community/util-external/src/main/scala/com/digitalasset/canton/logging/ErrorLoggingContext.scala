@@ -22,7 +22,7 @@ import org.slf4j.event.Level
   * @see [[NamedLoggingContext]] for another variant where the logger name is not fixed
   * @see [[NamedLogging.errorLoggingContext]] converts
   */
-case class ErrorLoggingContext(
+final case class ErrorLoggingContext(
     logger: TracedLogger,
     properties: Map[String, String],
     traceContext: TraceContext,

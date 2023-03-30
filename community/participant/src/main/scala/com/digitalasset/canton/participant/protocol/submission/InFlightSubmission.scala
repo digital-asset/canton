@@ -25,9 +25,9 @@ import java.util.UUID
   *
   * @param changeIdHash The identifier for the intended ledger change.
   *                     We only include the hash instead of the
-  *                     [[com.daml.ledger.participant.state.v2.ChangeId]] so that
+  *                     [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]] so that
   *                     we do not need to persist and reconstruct the actual contents
-  *                     of the [[com.daml.ledger.participant.state.v2.ChangeId]] when
+  *                     of the [[com.digitalasset.canton.ledger.participant.state.v2.ChangeId]] when
   *                     we read an [[InFlightSubmission]] from the store.
   * @param submissionId Optional submission id.
   * @param submissionDomain The domain to which the submission is supposed to be/was sent.
@@ -37,7 +37,7 @@ import java.util.UUID
   * @param submissionTraceContext The [[com.digitalasset.canton.tracing.TraceContext]] of the submission.
   */
 // TODO(#7348) Add submission rank
-case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo](
+final case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo](
     changeIdHash: ChangeIdHash,
     submissionId: Option[LedgerSubmissionId],
     submissionDomain: DomainId,
@@ -162,8 +162,10 @@ object SubmissionSequencingInfo {
   *                or the sent request was rejected
   * @param trackingData The information required to produce an appropriate rejection event when the timeout has elapsed.
   */
-case class UnsequencedSubmission(timeout: CantonTimestamp, trackingData: SubmissionTrackingData)
-    extends SubmissionSequencingInfo {
+final case class UnsequencedSubmission(
+    timeout: CantonTimestamp,
+    trackingData: SubmissionTrackingData,
+) extends SubmissionSequencingInfo {
 
   override def asUnsequenced: Some[UnsequencedSubmission] = Some(this)
   override def asSequenced: None.type = None
@@ -190,8 +192,10 @@ object UnsequencedSubmission {
   *                         [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest]]
   * @param sequencingTime The sequencer timestamp assigned to the [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest]]
   */
-case class SequencedSubmission(sequencerCounter: SequencerCounter, sequencingTime: CantonTimestamp)
-    extends SubmissionSequencingInfo {
+final case class SequencedSubmission(
+    sequencerCounter: SequencerCounter,
+    sequencingTime: CantonTimestamp,
+) extends SubmissionSequencingInfo {
 
   override def asUnsequenced: None.type = None
   override def asSequenced: Some[SequencedSubmission] = Some(this)

@@ -11,7 +11,7 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.*
 
-case class TestCase(id: Int, name: String)
+final case class TestCase(id: Int, name: String)
 
 class ConsoleMacrosTest extends AnyWordSpec with BaseTest {
   "ConsoleMacrosTest" should {

@@ -12,7 +12,7 @@ trait HasTraceContext {
 /** Wrapper for items that have a related trace context.
   * Intended for where the TraceContext cannot be passed explicitly (e.g. function types or akka-streams).
   */
-case class Traced[+A](value: A)(implicit override val traceContext: TraceContext)
+final case class Traced[+A](value: A)(implicit override val traceContext: TraceContext)
     extends HasTraceContext {
   def map[B](fn: A => B): Traced[B] = new Traced[B](fn(value))
 

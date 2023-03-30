@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.provider.jce
 
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.CryptoProvider
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.tink.TinkJavaConverter
@@ -15,8 +16,10 @@ import org.bouncycastle.asn1.DEROctetString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.gm.GMObjectIdentifiers
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
+import org.bouncycastle.asn1.sec.SECObjectIdentifiers
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import sun.security.ec.ECPrivateKeyImpl
 
 import java.io.IOException
 import java.security.spec.{InvalidKeySpecException, PKCS8EncodedKeySpec, X509EncodedKeySpec}
@@ -53,6 +56,18 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
           EllipticCurves.getEcPrivateKey(curveType, privateKey.key.toByteArray)
         )
         .leftMap(JavaKeyConversionError.GeneralError)
+      _ =
+        // There exists a race condition in ECPrivateKey before java 15
+        if (Runtime.version.feature < 15)
+          ecPrivateKey match {
+            case pk: ECPrivateKeyImpl =>
+              /* Force the initialization of the private key's internal array data structure.
+               * This prevents concurrency problems later on during decryption, while generating the shared secret,
+               * due to a race condition in getArrayS.
+               */
+              pk.getArrayS.discard
+            case _ => ()
+          }
     } yield ecPrivateKey
 
   private def toJavaEcDsa(
@@ -84,7 +99,7 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
         _ <- ensureFormat(privateKey, format)
         pkcs8KeySpec = new PKCS8EncodedKeySpec(pkcs8PrivateKey)
         keyFactory <- Either
-          .catchOnly[NoSuchAlgorithmException](KeyFactory.getInstance(keyInstance))
+          .catchOnly[NoSuchAlgorithmException](KeyFactory.getInstance(keyInstance, "BC"))
           .leftMap(JavaKeyConversionError.GeneralError)
         javaPrivateKey <- Either
           .catchOnly[InvalidKeySpecException](keyFactory.generatePrivate(pkcs8KeySpec))
@@ -111,6 +126,8 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
         encKey.scheme match {
           case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
             toJavaEcDsa(privateKey, CurveType.NIST_P256)
+          case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+            convert(CryptoKeyFormat.Der, privateKey.key.toByteArray, "EC")
         }
     }
   }
@@ -128,7 +145,7 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
         _ <- ensureFormat(publicKey, format)
         x509KeySpec = new X509EncodedKeySpec(x509PublicKey)
         keyFactory <- Either
-          .catchOnly[NoSuchAlgorithmException](KeyFactory.getInstance(keyInstance))
+          .catchOnly[NoSuchAlgorithmException](KeyFactory.getInstance(keyInstance, "BC"))
           .leftMap(JavaKeyConversionError.GeneralError)
         javaPublicKey <- Either
           .catchOnly[InvalidKeySpecException](keyFactory.generatePublic(x509KeySpec))
@@ -156,6 +173,10 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
         encKey.scheme match {
           case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
             toJavaEcDsa(publicKey, CurveType.NIST_P256)
+          case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
+            val algoId = new AlgorithmIdentifier(SECObjectIdentifiers.secp256r1)
+            convert(CryptoKeyFormat.Der, publicKey.key.toByteArray, "EC").map(pk => (algoId, pk))
+
         }
     }
   }
@@ -195,7 +216,9 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
           )
         } yield publicKey
 
-      case "Ed25519" =>
+      // With support for EdDSA (since Java 15) the more general 'EdDSA' algorithm identifier is also used
+      // See https://bugs.openjdk.org/browse/JDK-8190219
+      case "Ed25519" | "EdDSA" =>
         for {
           scheme <- JavaKeyConverter.toSigningKeyScheme(algorithmIdentifier)
           _ <- Either.cond(
