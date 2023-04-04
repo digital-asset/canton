@@ -64,7 +64,7 @@ sealed trait ActionDescription
   /** The lf transaction version of the node */
   def version: LfTransactionVersion
 
-  override protected def companionObj: ActionDescription.type =
+  @transient override protected lazy val companionObj: ActionDescription.type =
     ActionDescription
 
   protected def toProtoDescriptionV0: v0.ActionDescription.Description
@@ -379,8 +379,11 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
       contractId: LfContractId,
       seed: LfHash,
       override val version: LfTransactionVersion,
-  )(val representativeProtocolVersion: RepresentativeProtocolVersion[ActionDescription])
-      extends ActionDescription {
+  )(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[
+        ActionDescription.type
+      ]
+  ) extends ActionDescription {
     override def byKey: Boolean = false
 
     override def seedOption: Option[LfHash] = Some(seed)
@@ -415,8 +418,11 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
       seed: LfHash,
       override val version: LfTransactionVersion,
       failed: Boolean,
-  )(val representativeProtocolVersion: RepresentativeProtocolVersion[ActionDescription])
-      extends ActionDescription {
+  )(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[
+        ActionDescription.type
+      ]
+  ) extends ActionDescription {
 
     private val serializedChosenValue: ByteString = serializeChosenValue(chosenValue, version)
       .valueOr(err => throw InvalidActionDescription(s"Failed to serialize chosen value: ${err}"))
@@ -475,7 +481,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         seed: LfHash,
         version: LfTransactionVersion,
         failed: Boolean,
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription],
+        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
     ): ExerciseActionDescription = create(
       inputContractId,
       choice,
@@ -499,7 +505,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         seed: LfHash,
         version: LfTransactionVersion,
         failed: Boolean,
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription],
+        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
     ): Either[InvalidActionDescription, ExerciseActionDescription] = {
       val hasInterface = interfaceId.nonEmpty
       val interfaceSupportedSince = ProtocolVersion.v4
@@ -537,8 +543,11 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
       actors: Set[LfPartyId],
       override val byKey: Boolean,
       override val version: LfTransactionVersion,
-  )(val representativeProtocolVersion: RepresentativeProtocolVersion[ActionDescription])
-      extends ActionDescription
+  )(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[
+        ActionDescription.type
+      ]
+  ) extends ActionDescription
       with NoCopy {
 
     override def seedOption: Option[LfHash] = None
@@ -567,8 +576,11 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   final case class LookupByKeyActionDescription private (
       key: LfGlobalKey,
       override val version: LfTransactionVersion,
-  )(val representativeProtocolVersion: RepresentativeProtocolVersion[ActionDescription])
-      extends ActionDescription {
+  )(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[
+        ActionDescription.type
+      ]
+  ) extends ActionDescription {
 
     private val serializedKey =
       GlobalKeySerialization
@@ -599,14 +611,14 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
     def tryCreate(
         key: LfGlobalKey,
         version: LfTransactionVersion,
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription],
+        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
     ): LookupByKeyActionDescription =
       new LookupByKeyActionDescription(key, version)(protocolVersion)
 
     def create(
         key: LfGlobalKey,
         version: LfTransactionVersion,
-        protocolVersion: RepresentativeProtocolVersion[ActionDescription],
+        protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
     ): Either[InvalidActionDescription, LookupByKeyActionDescription] =
       Either.catchOnly[InvalidActionDescription](tryCreate(key, version, protocolVersion))
 

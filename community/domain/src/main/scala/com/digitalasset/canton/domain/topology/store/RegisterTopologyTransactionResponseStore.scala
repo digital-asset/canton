@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.topology.store
 
 import cats.data.OptionT
+import cats.syntax.either.*
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -19,7 +20,6 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
@@ -143,21 +143,13 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val getRegisterTopologyTransactionRequest
       : GetResult[RegisterTopologyTransactionRequest] = GetResult(r =>
     EnvelopeContent
-      .messageFromByteString(protocolVersion, cryptoApi)(
-        ByteString.copyFrom(r.<<[Array[Byte]])
+      .messageFromByteArray[RegisterTopologyTransactionRequest](protocolVersion, cryptoApi)(
+        r.<<[Array[Byte]]
       )
-      .fold[RegisterTopologyTransactionRequest](
-        error =>
-          throw new DbDeserializationException(
-            s"Error deserializing register topology transaction request $error"
-          ),
-        {
-          case request: RegisterTopologyTransactionRequest => request
-          case _ =>
-            sys.error(
-              "Deserialized request was not a RegisterTopologyTransactionRequest!"
-            ) // should never happen
-        },
+      .valueOr(error =>
+        throw new DbDeserializationException(
+          s"Error deserializing register topology transaction request $error"
+        )
       )
   )
   implicit val setParameterRegisterTopologyTransactionRequest
@@ -169,21 +161,14 @@ class DbRegisterTopologyTransactionResponseStore(
       : GetResult[RegisterTopologyTransactionResponse.Result] =
     GetResult(r =>
       EnvelopeContent
-        .messageFromByteString(protocolVersion, cryptoApi)(
-          ByteString.copyFrom(r.<<[Array[Byte]])
-        )
-        .fold[RegisterTopologyTransactionResponse.Result](
-          error =>
-            throw new DbDeserializationException(
-              s"Error deserializing register topology transaction response $error"
-            ),
-          {
-            case request: RegisterTopologyTransactionResponse[_] => request
-            case _ =>
-              sys.error(
-                "Deserialized response was not a RegisterTopologyTransactionResponse!"
-              ) // should never happen
-          },
+        .messageFromByteArray[RegisterTopologyTransactionResponse.Result](
+          protocolVersion,
+          cryptoApi,
+        )(r.<<[Array[Byte]])
+        .valueOr(error =>
+          throw new DbDeserializationException(
+            s"Error deserializing register topology transaction response $error"
+          )
         )
     )
   implicit val getPendingRegisterTopologyTransactionRequestStoreResponse

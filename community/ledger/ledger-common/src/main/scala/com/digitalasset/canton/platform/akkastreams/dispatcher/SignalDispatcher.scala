@@ -106,7 +106,7 @@ class SignalDispatcher private () {
               }
               .map { results =>
                 // Fail if any of the sources failed
-                results.map(_.get)
+                results.map(_.fold(throw _, identity))
               }
               .map(_ => ())
           }

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.{Applicative, Functor}
 import com.daml.metrics.api.MetricHandle.Timer
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -123,9 +124,8 @@ object EitherTUtil {
       eitherT: EitherT[Future, _, _],
       failureMessage: => String,
       level: Level = Level.ERROR,
-  )(implicit executionContext: ExecutionContext, loggingContext: ErrorLoggingContext): Unit = {
-    val _ = logOnError(eitherT, failureMessage, level = level)
-  }
+  )(implicit executionContext: ExecutionContext, loggingContext: ErrorLoggingContext): Unit =
+    logOnError(eitherT, failureMessage, level = level).discard
 
   /** Measure time of EitherT-based calls, inspired by upstream com.daml.metrics.Timed.future */
   def timed[E, R](timerMetric: Timer)(

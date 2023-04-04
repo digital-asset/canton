@@ -299,13 +299,14 @@ class SequencerClient(
       callback: SendCallback = SendCallback.empty,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     withSpan("SequencerClient.sendAsync") { implicit traceContext => span =>
-      val request = SubmissionRequest(
+      val request = SubmissionRequest.tryCreate(
         member,
         messageId,
         sendType.isRequest,
         Batch.closeEnvelopes(batch),
         maxSequencingTime,
         timestampOfSigningKey,
+        aggregationRule = None,
         protocolVersion,
       )
 

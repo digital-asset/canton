@@ -14,7 +14,7 @@ service ParticipantRepairService {
     rpc Download (DownloadRequest) returns (stream AcsSnapshotChunk);
 
     // upload contracts for a party
-    rpc Upload (UploadRequest) returns (UploadResponse);
+    rpc Upload (stream UploadRequest) returns (UploadResponse);
 }
 
 message DownloadRequest {
@@ -27,11 +27,6 @@ message DownloadRequest {
     google.protobuf.UInt32Value chunkSize = 5;
     bool gzip_format = 6;
 
-}
-
-message DownloadAcsSnapshotResponse {
-    map <string, int64> domain_contract_count = 1;
-    bytes acs_snapshot = 2;
 }
 
 message AcsSnapshotChunk {

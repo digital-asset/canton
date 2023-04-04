@@ -136,12 +136,14 @@ final case class TransferInCommonData private (
     with HasProtocolVersionedWrapper[TransferInCommonData]
     with ProtocolVersionedMemoizedEvidence {
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInCommonData] =
+  override val representativeProtocolVersion
+      : RepresentativeProtocolVersion[TransferInCommonData.type] =
     TransferInCommonData.protocolVersionRepresentativeFor(targetProtocolVersion.v)
 
   def confirmingParties: Set[Informee] = stakeholders.map(ConfirmingParty(_, 1))
 
-  override def companionObj = TransferInCommonData
+  @transient override protected lazy val companionObj: TransferInCommonData.type =
+    TransferInCommonData
 
   protected def toProtoV0: v0.TransferInCommonData = v0.TransferInCommonData(
     salt = Some(salt.toProtoV0),
@@ -268,14 +270,14 @@ final case class TransferInView private (
     workflowId: Option[LfWorkflowId],
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInView],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInView.type],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInView](hashOps)
     with HasProtocolVersionedWrapper[TransferInView]
     with ProtocolVersionedMemoizedEvidence {
   override def hashPurpose: HashPurpose = HashPurpose.TransferInView
 
-  override def companionObj = TransferInView
+  @transient override protected lazy val companionObj: TransferInView.type = TransferInView
 
   val submitter: LfPartyId = submitterMetadata.submitter
   val submittingParticipant: LedgerParticipantId = submitterMetadata.submittingParticipant

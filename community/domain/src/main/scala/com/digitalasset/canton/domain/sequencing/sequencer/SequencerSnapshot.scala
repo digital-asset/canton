@@ -24,10 +24,10 @@ final case class SequencerSnapshot(
     heads: Map[Member, SequencerCounter],
     status: SequencerPruningStatus,
     additional: Option[SequencerSnapshot.ImplementationSpecificInfo],
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot])
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot.type])
     extends HasProtocolVersionedWrapper[SequencerSnapshot] {
 
-  override protected def companionObj = SequencerSnapshot
+  @transient override protected lazy val companionObj: SequencerSnapshot.type = SequencerSnapshot
 
   def toProtoV0: v0.SequencerSnapshot = v0.SequencerSnapshot(
     Some(lastTs.toProtoPrimitive),

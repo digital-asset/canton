@@ -22,7 +22,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexParticipantPruningService,
   LedgerEndService,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService

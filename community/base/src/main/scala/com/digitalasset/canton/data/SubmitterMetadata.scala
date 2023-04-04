@@ -30,7 +30,9 @@ final case class SubmitterMetadata private (
     dedupPeriod: DeduplicationPeriod,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[SubmitterMetadata],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SubmitterMetadata.type
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[SubmitterMetadata](hashOps)
     with HasProtocolVersionedWrapper[SubmitterMetadata]
@@ -51,7 +53,7 @@ final case class SubmitterMetadata private (
     param("deduplication period", _.dedupPeriod),
   )
 
-  override def companionObj = SubmitterMetadata
+  @transient override protected lazy val companionObj: SubmitterMetadata.type = SubmitterMetadata
 
   protected def toProtoV0: v0.SubmitterMetadata = v0.SubmitterMetadata(
     actAs = actAs.toSeq,

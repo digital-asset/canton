@@ -30,12 +30,12 @@ final case class TransactionView private (
     subviews: TransactionSubviews,
 )(
     hashOps: HashOps,
-    override val representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView.type],
 ) extends MerkleTreeInnerNode[TransactionView](hashOps)
     with HasProtocolVersionedWrapper[TransactionView]
     with HasLoggerName {
 
-  override val companionObj: TransactionView.type = TransactionView
+  @transient override protected lazy val companionObj: TransactionView.type = TransactionView
 
   if (viewCommonData.unwrap.isRight) {
     subviews.unblindedElementsWithIndex
@@ -433,7 +433,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: TransactionSubviews,
-      representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
+      representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView.type],
   )(hashOps: HashOps): TransactionView = {
     // Check consistency between protocol version and subviews structure
     val isProtoV0 =
@@ -480,7 +480,7 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: TransactionSubviews,
-      representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
+      representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView.type],
   ): Either[String, TransactionView] =
     Either
       .catchOnly[InvalidView](

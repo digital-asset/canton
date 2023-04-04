@@ -21,10 +21,13 @@ import com.digitalasset.canton.version.{
   * @param counter the counter of the first event to receive.
   */
 final case class SubscriptionRequest(member: Member, counter: SequencerCounter)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[SubscriptionRequest]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SubscriptionRequest.type
+    ]
 ) extends HasProtocolVersionedWrapper[SubscriptionRequest] {
 
-  override protected def companionObj = SubscriptionRequest
+  @transient override protected lazy val companionObj: SubscriptionRequest.type =
+    SubscriptionRequest
 
   def toProtoV0: v0.SubscriptionRequest = v0.SubscriptionRequest(member.toProtoPrimitive, counter.v)
 }

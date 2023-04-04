@@ -294,6 +294,7 @@ final class Authorizer(
       Right(_),
     )
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private def assertServerCall[A](observer: StreamObserver[A]): ServerCallStreamObserver[A] =
     observer match {
       case _: ServerCallStreamObserver[_] =>

@@ -28,7 +28,7 @@ sealed trait CausalityUpdate
     extends HasProtocolVersionedWrapper[CausalityUpdate]
     with PrettyPrinting {
 
-  override protected def companionObj = CausalityUpdate
+  @transient override protected lazy val companionObj: CausalityUpdate.type = CausalityUpdate
 
   val ts: CantonTimestamp
   val domain: DomainId
@@ -45,7 +45,7 @@ final case class TransactionUpdate(
     ts: CantonTimestamp,
     domain: DomainId,
     rc: RequestCounter,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate])
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate.type])
     extends CausalityUpdate {
 
   override def pretty: Pretty[TransactionUpdate] =
@@ -85,7 +85,7 @@ final case class TransferOutUpdate(
     ts: CantonTimestamp,
     transferId: TransferId,
     rc: RequestCounter,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate])
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate.type])
     extends CausalityUpdate {
 
   override val domain: DomainId = transferId.sourceDomain
@@ -130,7 +130,7 @@ final case class TransferInUpdate(
     domain: DomainId,
     rc: RequestCounter,
     transferId: TransferId,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate])
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate.type])
     extends CausalityUpdate {
   override def pretty: Pretty[TransferInUpdate] =
     prettyOfClass(

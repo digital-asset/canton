@@ -31,6 +31,7 @@ class PollingChecker(
 
   private val timer = new Timer("ha-polling-checker-timer-thread", true)
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var closed: Boolean = false
 
   timer.schedule(

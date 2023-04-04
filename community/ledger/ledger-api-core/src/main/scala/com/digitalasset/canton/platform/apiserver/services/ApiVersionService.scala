@@ -108,7 +108,8 @@ private[apiserver] final class ApiVersionService private (
         .fromResource(versionFileName)
         .getLines()
         .toList
-        .head
+        .headOption
+        .getOrElse(throw new IllegalStateException("Empty version file"))
     }
 
   override def bindService(): ServerServiceDefinition =

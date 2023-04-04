@@ -5,7 +5,7 @@ package com.digitalasset.canton.caching
 
 import com.daml.metrics.CacheMetrics
 import com.github.benmanes.caffeine.cache.AsyncCacheLoader
-import com.github.benmanes.caffeine.{cache => caffeine}
+import com.github.benmanes.caffeine.{cache as caffeine}
 
 import java.util.concurrent.{CompletableFuture, Executor}
 import scala.concurrent.{ExecutionContext, Future}

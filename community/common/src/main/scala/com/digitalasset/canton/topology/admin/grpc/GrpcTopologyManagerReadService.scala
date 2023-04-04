@@ -10,7 +10,8 @@ import com.digitalasset.canton.crypto.{Crypto, Fingerprint, KeyPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{mapErrNew, wrapErr}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.wrapErr
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.admin.v0 as adminProto
@@ -236,7 +237,7 @@ class GrpcTopologyManagerReadService(
         }
       adminProto.ListPartyToParticipantResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   override def listOwnerToKeyMapping(
@@ -273,7 +274,7 @@ class GrpcTopologyManagerReadService(
         }
       adminProto.ListOwnerToKeyMappingResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   override def listNamespaceDelegation(
@@ -300,7 +301,7 @@ class GrpcTopologyManagerReadService(
 
       adminProto.ListNamespaceDelegationResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   override def listIdentifierDelegation(
@@ -326,7 +327,7 @@ class GrpcTopologyManagerReadService(
         }
       adminProto.ListIdentifierDelegationResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   override def listAvailableStores(
@@ -359,7 +360,7 @@ class GrpcTopologyManagerReadService(
         }
       adminProto.ListParticipantDomainStateResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   override def listSignedLegalIdentityClaim(
@@ -386,7 +387,7 @@ class GrpcTopologyManagerReadService(
         }
       adminProto.ListSignedLegalIdentityClaimResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   /** Access all topology transactions
@@ -424,7 +425,7 @@ class GrpcTopologyManagerReadService(
       }
       adminProto.ListAllResponse(result = Some(res.toProtoV0))
     }
-    EitherTUtil.toFuture(mapErrNew(res))
+    CantonGrpcUtil.mapErrNew(res)
   }
 
   override def listVettedPackages(
@@ -448,7 +449,7 @@ class GrpcTopologyManagerReadService(
         }
       adminProto.ListVettedPackagesResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   override def listDomainParametersChanges(
@@ -488,7 +489,7 @@ class GrpcTopologyManagerReadService(
 
       adminProto.ListDomainParametersChangesResult(results.flatten)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
   override def listMediatorDomainState(
@@ -514,7 +515,7 @@ class GrpcTopologyManagerReadService(
         }
       adminProto.ListMediatorDomainStateResult(results = results)
     }
-    EitherTUtil.toFuture(mapErrNew(ret))
+    CantonGrpcUtil.mapErrNew(ret)
   }
 
 }

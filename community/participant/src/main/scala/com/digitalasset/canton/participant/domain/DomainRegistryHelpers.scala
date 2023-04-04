@@ -15,7 +15,6 @@ import com.digitalasset.canton.crypto.{CryptoHandshakeValidator, SyncCryptoApiPr
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.config.ParticipantProtocolConfig
 import com.digitalasset.canton.participant.domain.DomainRegistryError.HandshakeErrors.DomainIdMismatch
 import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.DomainHandle
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -61,7 +60,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
 
   protected def getDomainHandle(
       config: DomainConnectionConfig,
-      protocolConfig: ParticipantProtocolConfig,
       sequencerConnection: SequencerConnection,
       syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
   )(
@@ -97,7 +95,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         sequencerConnectClient,
         config.domain,
         domainId,
-        protocolConfig,
       ).mapK(FutureUnlessShutdown.outcomeK)
 
       _ = logger.info(
@@ -228,10 +225,8 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           metrics(config.domain).sequencerClient,
           participantNodeParameters.loggingConfig,
           domainLoggerFactory,
-          ProtocolVersionCompatibility.supportedProtocolsParticipant(includeUnstableVersions =
-            protocolConfig.devVersionSupport
-          ),
-          protocolConfig.minimumProtocolVersion,
+          ProtocolVersionCompatibility.supportedProtocolsParticipant(participantNodeParameters),
+          participantNodeParameters.protocolConfig.minimumProtocolVersion,
         )
       }
 
@@ -309,7 +304,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       sequencerConnectClient: SequencerConnectClient,
       alias: DomainAlias,
       domainId: DomainId,
-      protocolConfig: ParticipantProtocolConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, DomainRegistryError, HandshakeResponse.Success] =
@@ -318,12 +312,10 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         .handshake(
           alias,
           HandshakeRequest(
-            ProtocolVersionCompatibility.supportedProtocolsParticipant(includeUnstableVersions =
-              protocolConfig.devVersionSupport
-            ),
-            protocolConfig.minimumProtocolVersion,
+            ProtocolVersionCompatibility.supportedProtocolsParticipant(participantNodeParameters),
+            participantNodeParameters.protocolConfig.minimumProtocolVersion,
           ),
-          protocolConfig.dontWarnOnDeprecatedPV,
+          participantNodeParameters.protocolConfig.dontWarnOnDeprecatedPV,
         )
         .leftMap(DomainRegistryHelpers.toDomainRegistryError(alias))
         .subflatMap {

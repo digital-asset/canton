@@ -15,7 +15,7 @@ import com.daml.logging.LoggingContext
 import com.daml.tracing.{NoOpTelemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.configuration.InitialLedgerConfiguration
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.concurrent.Eventually

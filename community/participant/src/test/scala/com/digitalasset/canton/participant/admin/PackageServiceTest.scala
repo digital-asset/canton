@@ -58,7 +58,8 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
 
   private class Env {
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
-    val engine = DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false)
+    val engine =
+      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false)
     val sut =
       new PackageService(
         engine,

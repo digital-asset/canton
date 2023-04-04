@@ -6,9 +6,9 @@ package com.digitalasset.canton.platform.store.dao.events
 import com.daml.error.DamlContextualizedErrorLogger
 import com.daml.ledger.api.v1.event.{CreatedEvent, ExercisedEvent, InterfaceView}
 import com.daml.ledger.api.v1.value.{
-  Identifier => ApiIdentifier,
-  Record => ApiRecord,
-  Value => ApiValue,
+  Identifier as ApiIdentifier,
+  Record as ApiRecord,
+  Value as ApiValue,
 }
 import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.engine.{Engine, ValueEnricher}
@@ -16,7 +16,7 @@ import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.VersionedValue
-import com.daml.lf.{engine => LfEngine}
+import com.daml.lf.{engine as LfEngine}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.platform.apiserver.services.{ErrorCause, RejectionGenerators}
@@ -26,20 +26,20 @@ import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
 import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation.ApiContractData
 import com.digitalasset.canton.platform.store.serialization.{Compression, ValueSerializer}
 import com.digitalasset.canton.platform.{
-  ChoiceName => LfChoiceName,
+  ChoiceName as LfChoiceName,
   ContractId,
   Create,
-  DottedName => LfDottedName,
+  DottedName as LfDottedName,
   Exercise,
-  Identifier => LfIdentifier,
-  ModuleName => LfModuleName,
-  PackageId => LfPackageId,
-  QualifiedName => LfQualifiedName,
-  Value => LfValue,
+  Identifier as LfIdentifier,
+  ModuleName as LfModuleName,
+  PackageId as LfPackageId,
+  QualifiedName as LfQualifiedName,
+  Value as LfValue,
 }
 import com.google.protobuf
 import com.google.rpc.Status
-import com.google.rpc.status.{Status => ProtoStatus}
+import com.google.rpc.status.{Status as ProtoStatus}
 import io.grpc.Status.Code
 
 import java.io.ByteArrayInputStream
@@ -249,6 +249,7 @@ final class LfValueTranslation(
       ec: ExecutionContext,
       loggingContext: LoggingContext,
   ): Future[CreatedEvent] = {
+    @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     lazy val templateId: LfIdentifier = apiIdentifierToDamlLfIdentifier(raw.partial.templateId.get)
 
     for {
@@ -287,6 +288,7 @@ final class LfValueTranslation(
     val exerciseResult =
       raw.exerciseResult.map(decompressAndDeserialize(raw.exerciseResultCompression, _))
 
+    @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     lazy val temlateId: LfIdentifier = apiIdentifierToDamlLfIdentifier(raw.partial.templateId.get)
     lazy val interfaceId: Option[LfIdentifier] =
       raw.partial.interfaceId.map(apiIdentifierToDamlLfIdentifier)
@@ -341,6 +343,7 @@ final class LfValueTranslation(
       enrichAsync(verbose, value.unversioned, enricher.enrichContract(templateId, _))
         .map(toContractArgumentApi(verbose))
     )
+    @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     val asyncContractKey = condFuture(renderResult.contractArguments && key.isDefined)(
       enrichAsync(verbose, key.get.unversioned, enricher.enrichContractKey(templateId, _))
         .map(toContractKeyApi(verbose))

@@ -5,13 +5,13 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.api.util.TimeProvider
 import com.daml.lf
-import com.daml.lf.command.{ApiCommands => LfCommands, ContractMetadata, DisclosedContract}
+import com.daml.lf.command.{ApiCommands as LfCommands, ContractMetadata, DisclosedContract}
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
-import com.daml.lf.engine.{Error => LfError}
-import com.daml.lf.interpretation.{Error => LfInterpretationError}
+import com.daml.lf.engine.{Error as LfError}
+import com.daml.lf.interpretation.{Error as LfInterpretationError}
 import com.daml.lf.language.{LookupError, Reference}
 import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
@@ -30,7 +30,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   SubmitterInfo,
   TransactionMeta,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscription
 import com.digitalasset.canton.platform.apiserver.execution.{
@@ -38,7 +38,7 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutor,
 }
 import com.digitalasset.canton.platform.services.time.TimeProviderType
-import com.google.rpc.status.{Status => RpcStatus}
+import com.google.rpc.status.{Status as RpcStatus}
 import io.grpc.{Status, StatusRuntimeException}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Inside

@@ -103,6 +103,7 @@ final class DispatcherImpl[Index: Ordering](
         }
     }
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private class ContinuousRangeEmitter(
       private var max: Index
   ) // var doesn't need to be synchronized, it is accessed in a GraphStage.

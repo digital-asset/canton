@@ -15,14 +15,21 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.{MemoryStorage, Storage}
-import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  MessageId,
+  SendAsyncError,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import org.mockito.ArgumentMatchers
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
+import java.util.UUID
 import scala.collection.mutable
 import scala.concurrent.{Future, Promise}
 
@@ -143,6 +150,17 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
     "run recovery and restart" in { env =>
       import env.*
 
+      val mockSubmissionRequest = SubmissionRequest.tryCreate(
+        DefaultTestIdentities.participant1,
+        MessageId.fromUuid(new UUID(1L, 1L)),
+        isRequest = false,
+        Batch.empty(testedProtocolVersion),
+        maxSequencingTime = CantonTimestamp.MaxValue,
+        timestampOfSigningKey = None,
+        aggregationRule = None,
+        testedProtocolVersion,
+      )
+
       for {
         _ <- valueOrFail(writer.start())("Starting writer")
         _ = writer.isRunning shouldBe true
@@ -154,7 +172,7 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
         _ = writer.isRunning shouldBe false
         // attempting to write at this point should return unavailable errors that will eventually be used to signal to the
         // load balancers
-        sendError <- leftOrFail(writer.send(mock[SubmissionRequest]))("send when unavailable")
+        sendError <- leftOrFail(writer.send(mockSubmissionRequest))("send when unavailable")
         _ = sendError shouldBe SendAsyncError.Unavailable("Unavailable")
         // now progress to allow crash recovery to complete
         _ = clock.advanceTo(ts(10))

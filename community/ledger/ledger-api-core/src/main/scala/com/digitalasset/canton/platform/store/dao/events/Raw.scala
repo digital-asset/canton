@@ -4,14 +4,14 @@
 package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.api.util.TimestampConversion
-import com.daml.ledger.api.v1.contract_metadata.{ContractMetadata => PbContractMetadata}
+import com.daml.ledger.api.v1.contract_metadata.{ContractMetadata as PbContractMetadata}
 import com.daml.ledger.api.v1.event.{
-  ArchivedEvent => PbArchivedEvent,
-  CreatedEvent => PbCreatedEvent,
-  Event => PbFlatEvent,
-  ExercisedEvent => PbExercisedEvent,
+  ArchivedEvent as PbArchivedEvent,
+  CreatedEvent as PbCreatedEvent,
+  Event as PbFlatEvent,
+  ExercisedEvent as PbExercisedEvent,
 }
-import com.daml.ledger.api.v1.transaction.{TreeEvent => PbTreeEvent}
+import com.daml.ledger.api.v1.transaction.{TreeEvent as PbTreeEvent}
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
@@ -86,6 +86,7 @@ object Raw {
   }
 
   object Created {
+    @SuppressWarnings(Array("org.wartremover.warts.Null"))
     def apply(
         eventId: String,
         contractId: String,
@@ -303,6 +304,7 @@ object Raw {
     }
 
     object Exercised {
+      @SuppressWarnings(Array("org.wartremover.warts.Null"))
       def apply(
           eventId: String,
           contractId: String,

@@ -33,7 +33,7 @@ import com.digitalasset.canton.ledger.client.services.identity.LedgerIdentityCli
 import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.PackageClient
 import com.digitalasset.canton.ledger.client.services.transactions.withoutledgerid.TransactionClient
 import com.digitalasset.canton.ledger.client.services.version.withoutledgerid.VersionClient
-import com.digitalasset.canton.ledger.client.{GrpcChannel, LedgerClient => ClassicLedgerClient}
+import com.digitalasset.canton.ledger.client.{GrpcChannel, LedgerClient as ClassicLedgerClient}
 import io.grpc.Channel
 import io.grpc.netty.NettyChannelBuilder
 

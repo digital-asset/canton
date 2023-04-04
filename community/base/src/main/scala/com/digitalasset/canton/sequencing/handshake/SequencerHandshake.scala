@@ -55,7 +55,8 @@ class SequencerHandshake(
             Right(())
           case HandshakeResponse.Failure(serverVersion, reason) =>
             logger.warn(
-              s"Sequencer handshake failed: $reason (client versions ${clientVersions.mkString(", ")}, server v$serverVersion)"
+              s"Sequencer handshake failed: $reason (client versions: ${clientVersions
+                  .mkString(", ")}, server: $serverVersion)"
             )
             Left(reason)
         }

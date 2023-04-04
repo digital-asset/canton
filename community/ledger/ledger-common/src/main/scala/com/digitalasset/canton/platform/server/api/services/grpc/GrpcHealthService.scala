@@ -48,7 +48,9 @@ class GrpcHealthService(
       responseObserver: StreamObserver[HealthCheckResponse],
   ): Unit = registerStream(responseObserver) {
     Source
-      .fromIterator(() => Iterator.continually(matchResponse(serviceFrom(request)).get))
+      .fromIterator(() =>
+        Iterator.continually(matchResponse(serviceFrom(request)).fold(throw _, identity))
+      )
       .throttle(1, per = maximumWatchFrequency)
       .via(DropRepeated())
   }

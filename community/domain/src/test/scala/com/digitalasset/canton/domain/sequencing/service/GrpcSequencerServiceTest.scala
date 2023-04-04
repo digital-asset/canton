@@ -174,12 +174,13 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       sender: Member,
   ): SubmissionRequest = {
     val id = MessageId.tryCreate("messageId")
-    SubmissionRequest(
+    SubmissionRequest.tryCreate(
       sender,
       id,
       isRequest = true,
       batch,
       CantonTimestamp.MaxValue,
+      None,
       None,
       testedProtocolVersion,
     )
@@ -199,7 +200,10 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     val recipient = DefaultTestIdentities.participant2
     mkSubmissionRequest(
       Batch(
-        List(ClosedEnvelope(content, Recipients.cc(recipient), Seq.empty, testedProtocolVersion)),
+        List(
+          ClosedEnvelope
+            .tryCreate(content, Recipients.cc(recipient), Seq.empty, testedProtocolVersion)
+        ),
         testedProtocolVersion,
       ),
       sender,
@@ -359,7 +363,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
 
         "reject large messages" in { implicit env =>
           val bigEnvelope =
-            ClosedEnvelope(
+            ClosedEnvelope.tryCreate(
               ByteString.copyFromUtf8(scala.util.Random.nextString(5000)),
               Recipients.cc(participant),
               Seq.empty,
@@ -430,7 +434,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
               .replace(
                 Batch(
                   List(
-                    ClosedEnvelope(
+                    ClosedEnvelope.tryCreate(
                       content,
                       Recipients.cc(unauthenticatedMember),
                       Seq.empty,
@@ -464,7 +468,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             .replace(
               Batch(
                 List(
-                  ClosedEnvelope(
+                  ClosedEnvelope.tryCreate(
                     content,
                     Recipients.cc(unauthenticatedMember),
                     Seq.empty,
@@ -486,7 +490,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             .replace(
               Batch(
                 List(
-                  ClosedEnvelope(
+                  ClosedEnvelope.tryCreate(
                     content,
                     Recipients.cc(DefaultTestIdentities.domainManager),
                     Seq.empty,
@@ -542,13 +546,13 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           val mediator2: Member = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
           val differentEnvelopes = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope(
+            ClosedEnvelope.tryCreate(
               ByteString.copyFromUtf8("message to first mediator"),
               Recipients.cc(mediator1),
               Seq.empty,
               testedProtocolVersion,
             ),
-            ClosedEnvelope(
+            ClosedEnvelope.tryCreate(
               ByteString.copyFromUtf8("message to second mediator"),
               Recipients.cc(mediator2),
               Seq.empty,
@@ -557,7 +561,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           )
           val sameEnvelope = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope(
+            ClosedEnvelope.tryCreate(
               ByteString.copyFromUtf8("message to two mediators and the participant"),
               Recipients(
                 NonEmpty(
@@ -628,7 +632,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
               .replace(
                 Batch(
                   List(
-                    ClosedEnvelope(
+                    ClosedEnvelope.tryCreate(
                       content,
                       Recipients.cc(unauthenticatedMember),
                       Seq.empty,
@@ -715,7 +719,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           .replace(
             Batch(
               List(
-                ClosedEnvelope(
+                ClosedEnvelope.tryCreate(
                   content,
                   Recipients.cc(DefaultTestIdentities.domainManager),
                   Seq.empty,

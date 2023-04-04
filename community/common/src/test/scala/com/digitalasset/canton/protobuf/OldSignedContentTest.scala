@@ -3,20 +3,20 @@
 
 package com.digitalasset.canton.protobuf
 
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{Signature, v0 as cryptoproto}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.messages.LocalVerdict
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
-import com.digitalasset.canton.version.{
-  ProtoVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
+import com.digitalasset.canton.serialization.{
+  BytestringWithCryptographicEvidence,
+  HasCryptographicEvidence,
+  ProtoConverter,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -37,7 +37,7 @@ class OldSignedContentTest extends AnyWordSpec with BaseTest {
       timestampOfSigningKey = None,
     )
 
-  def oldSignedContentParserMethod[A <: ProtocolVersionedMemoizedEvidence](
+  def oldSignedContentParserMethod[A <: HasCryptographicEvidence](
       contentDeserializer: ByteString => ParsingResult[A],
       signedValueP: OldSignedContent,
   ): ParsingResult[SignedContent[A]] =
@@ -57,18 +57,20 @@ class OldSignedContentTest extends AnyWordSpec with BaseTest {
 
   private def parseOld(
       message: OldSignedContent
-  ): ParsingResult[SignedContent[OldSignedContentTest.Empty]] =
-    oldSignedContentParserMethod[OldSignedContentTest.Empty](
-      _ => Right(OldSignedContentTest.Empty),
+  ): ParsingResult[SignedContent[BytestringWithCryptographicEvidence]] =
+    oldSignedContentParserMethod(
+      _ => Either.right(BytestringWithCryptographicEvidence(ByteString.EMPTY)),
       message,
     )
 
   private def parseNew(
       message: v0.SignedContent
-  ): ParsingResult[SignedContent[OldSignedContentTest.Empty]] =
+  ): ParsingResult[SignedContent[BytestringWithCryptographicEvidence]] =
     SignedContent
       .fromProtoV0(message)
-      .flatMap(_.deserializeContent(_ => Right(OldSignedContentTest.Empty)))
+      .flatMap(
+        _.deserializeContent(_ => Right(BytestringWithCryptographicEvidence(ByteString.EMPTY)))
+      )
 
   "Older SignedContent serializer" should {
     "act the same as new and take the last element" in {
@@ -80,14 +82,4 @@ class OldSignedContentTest extends AnyWordSpec with BaseTest {
       parsedOldMessage.signature shouldBe parsedNewMessage.signature
     }
   }
-}
-
-object OldSignedContentTest {
-  class Empty extends ProtocolVersionedMemoizedEvidence {
-    override def deserializedFrom: Option[ByteString] = None
-    override protected[this] def toByteStringUnmemoized: ByteString = ByteString.EMPTY
-    override def representativeProtocolVersion: RepresentativeProtocolVersion[_] =
-      LocalVerdict.protocolVersionRepresentativeFor(ProtoVersion(0))
-  }
-  object Empty extends Empty
 }

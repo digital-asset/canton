@@ -921,6 +921,7 @@ object TestingTimeServiceConfig {
   * @param dontWarnOnDeprecatedPV If true, then this participant will not emit a warning when connecting to a sequencer using a deprecated protocol version (such as 2.0.0).
   * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
   * @param excludeInfrastructureTransactions If set, infrastructure transactions (i.e. ping, bong and dar distribution) will be excluded from participant metering.
+  * @param enableEngineStackTraces If true, DAMLe stack traces will be enabled
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -943,6 +944,7 @@ final case class ParticipantNodeParameterConfig(
     ),
     ledgerApiServerParameters: LedgerApiServerParametersConfig = LedgerApiServerParametersConfig(),
     excludeInfrastructureTransactions: Boolean = true,
+    enableEngineStackTraces: Boolean = false,
 )
 
 /** Parameters for the participant node's stores

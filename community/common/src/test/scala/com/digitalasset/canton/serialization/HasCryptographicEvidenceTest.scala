@@ -90,7 +90,9 @@ class MemoizedEvidenceTest extends AnyWordSpec with BaseTest with HasCryptograph
 }
 
 sealed case class MemoizedEvidenceSUT(b: Byte)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[MemoizedEvidenceSUT],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      MemoizedEvidenceSUT.type
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence {
 
@@ -101,6 +103,8 @@ sealed case class MemoizedEvidenceSUT(b: Byte)(
     counter = (counter + 1).toByte
     ByteString.copyFrom(Array(counter, b))
   }
+
+  override protected val companionObj: MemoizedEvidenceSUT.type = MemoizedEvidenceSUT
 }
 
 object MemoizedEvidenceSUT

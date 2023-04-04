@@ -28,7 +28,7 @@ final case class CommonMetadata private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[CommonMetadata],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[CommonMetadata.type],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[CommonMetadata](hashOps)
     with HasProtocolVersionedWrapper[CommonMetadata]
@@ -47,7 +47,7 @@ final case class CommonMetadata private (
     param("salt", _.salt),
   )
 
-  override def companionObj = CommonMetadata
+  @transient override protected lazy val companionObj: CommonMetadata.type = CommonMetadata
 
   private[CommonMetadata] def toProtoV0: v0.CommonMetadata = v0.CommonMetadata(
     confirmationPolicy = confirmationPolicy.toProtoPrimitive,

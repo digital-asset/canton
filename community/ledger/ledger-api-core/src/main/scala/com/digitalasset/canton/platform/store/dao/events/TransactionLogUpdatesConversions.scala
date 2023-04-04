@@ -7,7 +7,7 @@ import com.daml.api.util.TimestampConversion
 import com.daml.api.util.TimestampConversion.fromInstant
 import com.daml.ledger.api.v1.contract_metadata.ContractMetadata
 import com.daml.ledger.api.v1.transaction.{
-  Transaction => FlatTransaction,
+  Transaction as FlatTransaction,
   TransactionTree,
   TreeEvent,
 }
@@ -17,7 +17,7 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionTreesResponse,
   GetTransactionsResponse,
 }
-import com.daml.ledger.api.v1.{event => apiEvent}
+import com.daml.ledger.api.v1.{event as apiEvent}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.value.Value.ContractId

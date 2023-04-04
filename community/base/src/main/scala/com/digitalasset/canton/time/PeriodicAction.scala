@@ -24,12 +24,8 @@ class PeriodicAction(
   TraceContext.withNewTraceContext(setupNextCheck()(_))
 
   private def runCheck()(implicit traceContext: TraceContext): Unit =
-    performUnlessClosing(s"run-$description") {
-      val status = check(traceContext)
-      status onComplete { _ =>
-        setupNextCheck()
-      }
-    }.discard
+    performUnlessClosingF(s"run-$description")(check(traceContext))
+      .onComplete(_ => setupNextCheck())
 
   private def setupNextCheck()(implicit traceContext: TraceContext): Unit =
     performUnlessClosing(s"setup-$description") {

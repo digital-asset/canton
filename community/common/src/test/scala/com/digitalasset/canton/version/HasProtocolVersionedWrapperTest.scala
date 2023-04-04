@@ -23,7 +23,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
    */
   "HasVersionedWrapperV2" should {
     "use correct proto version depending on the protocol version for serialization" in {
-      def message(i: Int): Message = Message("Hey", 1, 2.0, protocolVersionRepresentative(i))(None)
+      def message(i: Int): Message = Message("Hey", 1, 2.0)(protocolVersionRepresentative(i), None)
       message(3).toProtoVersioned.version shouldBe 0
       message(4).toProtoVersioned.version shouldBe 0
       message(5).toProtoVersioned.version shouldBe 1
@@ -39,7 +39,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         .value
 
       val messageV0 = VersionedMessageV0("Hey").toByteString
-      val expectedV0Deserialization = Message("Hey", 0, 0, protocolVersionRepresentative(3))(None)
+      val expectedV0Deserialization = Message("Hey", 0, 0)(protocolVersionRepresentative(3), None)
       Message
         .fromByteString(ProtoVersion(0))(
           messageV0
@@ -55,7 +55,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       val messageV1 = VersionedMessageV1("Hey", 42).toByteString
       val expectedV1Deserialization =
-        Message("Hey", 42, 1.0, protocolVersionRepresentative(5))(None)
+        Message("Hey", 42, 1.0)(protocolVersionRepresentative(5), None)
       fromByteString(messageV1, 1) shouldBe expectedV1Deserialization
 
       // Round trip serialization
@@ -67,7 +67,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       val messageV2 = VersionedMessageV2("Hey", 42, 43.0).toByteString
       val expectedV2Deserialization =
-        Message("Hey", 42, 43.0, protocolVersionRepresentative(6))(None)
+        Message("Hey", 42, 43.0)(protocolVersionRepresentative(6), None)
       fromByteString(messageV2, 2) shouldBe expectedV2Deserialization
 
       // Round trip serialization
@@ -143,19 +143,19 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 }
 
 object HasProtocolVersionedWrapperTest {
-  private def protocolVersionRepresentative(i: Int): RepresentativeProtocolVersion[Message] =
+  private def protocolVersionRepresentative(i: Int): RepresentativeProtocolVersion[Message.type] =
     Message.protocolVersionRepresentativeFor(ProtocolVersion(i))
 
   final case class Message(
       msg: String,
       iValue: Int,
       dValue: Double,
-      representativeProtocolVersion: RepresentativeProtocolVersion[Message],
   )(
-      val deserializedFrom: Option[ByteString] = None
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[Message.type],
+      val deserializedFrom: Option[ByteString] = None,
   ) extends HasProtocolVersionedWrapper[Message] {
 
-    override def companionObj = Message
+    @transient override protected lazy val companionObj: Message.type = Message
 
     def toProtoV0 = VersionedMessageV0(msg)
     def toProtoV1 = VersionedMessageV1(msg, iValue)
@@ -169,7 +169,7 @@ object HasProtocolVersionedWrapperTest {
       proto               0         1    2
       protocolVersion     3    4    5    6    7  ...
      */
-    val supportedProtoVersions = SupportedProtoVersions(
+    override val supportedProtoVersions = SupportedProtoVersions(
       ProtoVersion(1) -> VersionedProtoConverter
         .mk(ProtocolVersion.unstable(5))(VersionedMessageV1)(
           supportedProtoVersionMemoized(_)(fromProtoV1),
@@ -194,9 +194,9 @@ object HasProtocolVersionedWrapperTest {
         message.msg,
         0,
         0,
-        supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(0)),
       )(
-        Some(bytes)
+        protocolVersionRepresentativeFor(ProtoVersion(0)),
+        Some(bytes),
       ).asRight
 
     def fromProtoV1(message: VersionedMessageV1)(bytes: ByteString): ParsingResult[Message] =
@@ -204,9 +204,9 @@ object HasProtocolVersionedWrapperTest {
         message.msg,
         message.value,
         1,
-        supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(1)),
       )(
-        Some(bytes)
+        protocolVersionRepresentativeFor(ProtoVersion(1)),
+        Some(bytes),
       ).asRight
 
     def fromProtoV2(message: VersionedMessageV2)(bytes: ByteString): ParsingResult[Message] =
@@ -214,9 +214,9 @@ object HasProtocolVersionedWrapperTest {
         message.msg,
         message.iValue,
         message.dValue,
-        supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(2)),
       )(
-        Some(bytes)
+        protocolVersionRepresentativeFor(ProtoVersion(2)),
+        Some(bytes),
       ).asRight
   }
 }

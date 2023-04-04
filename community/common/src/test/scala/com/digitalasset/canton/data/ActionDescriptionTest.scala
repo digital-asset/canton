@@ -21,7 +21,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
   private val choiceName: LfChoiceName = LfChoiceName.assertFromString("choice")
   private val dummyVersion: LfTransactionVersion = ExampleTransactionFactory.transactionVersion
 
-  private val representativePV: RepresentativeProtocolVersion[ActionDescription] =
+  private val representativePV: RepresentativeProtocolVersion[ActionDescription.type] =
     ActionDescription.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   "An action description" should {

@@ -687,7 +687,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
   // produce more or less the same data.  If we aren't interested in testing
   // the latter at any point, we can remove most of this.
   private val getFlatTransactionCodePaths: Seq[FlatTransactionCodePath] = {
-    import JdbcLedgerDaoTransactionsSpec.{FlatTransactionCodePath => Mk}
+    import JdbcLedgerDaoTransactionsSpec.{FlatTransactionCodePath as Mk}
     Seq(
       Mk(
         "singleWildcardParty",

@@ -90,7 +90,9 @@ final case class ViewParticipantData private (
     salt: Salt,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[ViewParticipantData],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      ViewParticipantData.type
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewParticipantData](hashOps)
     with HasProtocolVersionedWrapper[ViewParticipantData]
@@ -254,7 +256,8 @@ final case class ViewParticipantData private (
         )
     }
 
-  override protected def companionObj: ViewParticipantData.type = ViewParticipantData
+  @transient override protected lazy val companionObj: ViewParticipantData.type =
+    ViewParticipantData
 
   private[ViewParticipantData] def toProtoV1: v0.ViewParticipantData = v0.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV0).toSeq,

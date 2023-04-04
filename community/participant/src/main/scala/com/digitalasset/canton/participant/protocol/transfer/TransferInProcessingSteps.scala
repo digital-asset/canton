@@ -574,7 +574,7 @@ private[transfer] class TransferInProcessingSteps(
         contract.contractId,
         contractInst.template,
         contractInst.arg,
-        contract.rawContractInstance.agreementText.v,
+        "", // TODO(i12451): get the right agreement text from `contractInst`
         contract.metadata.signatories,
         contract.metadata.stakeholders,
         keyOpt = contract.metadata.maybeKeyWithMaintainers,

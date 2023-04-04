@@ -47,7 +47,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
     with ProtocolMessageV1
     with UnsignedProtocolMessageV2 {
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage] =
+  override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage.type] =
     InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
 
   def copy(fullInformeeTree: FullInformeeTree = this.fullInformeeTree): InformeeMessage =
@@ -126,6 +126,8 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
   override def viewType: ViewType = ViewType.TransactionViewType
 
   override def pretty: Pretty[InformeeMessage] = prettyOfClass(unnamedParam(_.fullInformeeTree))
+
+  @transient override protected lazy val companionObj: InformeeMessage.type = InformeeMessage
 }
 
 object InformeeMessage extends HasProtocolVersionedWithContextCompanion[InformeeMessage, HashOps] {
@@ -186,10 +188,11 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
     } yield new InformeeMessage(fullInformeeTree)(protocolVersion)
   }
 
-  implicit val informeeMessageCast: ProtocolMessageContentCast[InformeeMessage] = {
-    case im: InformeeMessage => Some(im)
-    case _ => None
-  }
+  implicit val informeeMessageCast: ProtocolMessageContentCast[InformeeMessage] =
+    ProtocolMessageContentCast.create[InformeeMessage]("InformeeMessage") {
+      case im: InformeeMessage => Some(im)
+      case _ => None
+    }
 
   override protected def name: String = "InformeeMessage"
 }

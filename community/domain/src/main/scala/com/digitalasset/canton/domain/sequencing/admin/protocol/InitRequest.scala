@@ -27,10 +27,10 @@ final case class InitRequest(
     sequencerSnapshot: Option[SequencerSnapshot] = None,
 ) extends HasProtocolVersionedWrapper[InitRequest] {
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[InitRequest] =
+  override val representativeProtocolVersion: RepresentativeProtocolVersion[InitRequest.type] =
     InitRequest.protocolVersionRepresentativeFor(domainParameters.protocolVersion)
 
-  override protected def companionObj = InitRequest
+  @transient override protected lazy val companionObj: InitRequest.type = InitRequest
 
   def toProtoV0: v0.InitRequest = v0.InitRequest(
     domainId.toProtoPrimitive,

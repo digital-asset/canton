@@ -125,9 +125,7 @@ class DomainNodeSequencerClientFactory(
       cantonNodeParameters.loggingConfig,
       clientLoggerFactory,
       supportedProtocolVersions = ProtocolVersionCompatibility
-        .trySupportedProtocolsDomain(includeUnstableVersions =
-          cantonNodeParameters.devVersionSupport
-        ),
+        .trySupportedProtocolsDomain(cantonNodeParameters),
       minimumProtocolVersion = None,
     )
   }

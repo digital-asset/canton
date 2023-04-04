@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.runner.common
 
-import com.typesafe.config.{Config => TypesafeConfig, ConfigFactory}
+import com.typesafe.config.{Config as TypesafeConfig, ConfigFactory}
 import pureconfig.error.ConfigReaderFailures
 import pureconfig.{ConfigReader, ConfigSource, Derivation}
 
@@ -15,6 +15,7 @@ trait ConfigLoader {
     s"Failed to load configuration: ${System.lineSeparator()}${failures.prettyPrint()}"
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.Null")) // interfacing with java
   private def configFromMap(configMap: Map[String, String]): TypesafeConfig = {
     import scala.jdk.CollectionConverters.*
     val map = configMap.map {

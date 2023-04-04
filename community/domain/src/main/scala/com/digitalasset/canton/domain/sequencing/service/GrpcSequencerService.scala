@@ -501,6 +501,13 @@ class GrpcSequencerService(
         ),
         "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key",
       )
+      _ <- refuseUnless(sender)(
+        request.aggregationRule.isEmpty,
+        // TODO(#12364) Support aggregatable submissions in block sequencers.
+        //  Validate the aggregation rule (threshold can be exceeded, all eligible members are known, sender is eligible)
+        // TODO(#12405) Support aggregatable submissions in the DB sequencer
+        "Aggregatable submissions are not yet supported",
+      )
     } yield {
       // TODO(M40) requestSize might be misleading under faulty participants.
       // A faulty submitter may include irrelevant fields / repeated fields in the sent message

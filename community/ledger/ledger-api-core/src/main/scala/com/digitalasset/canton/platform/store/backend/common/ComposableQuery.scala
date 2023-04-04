@@ -37,6 +37,7 @@ object ComposableQuery {
     def cSQL(args: QueryPart*): CompositeSql = CompositeSql(sc.parts, args)
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   private[common] def flattenComposite(
       stringContextParts: Iterable[String],
       values: Iterable[QueryPart],

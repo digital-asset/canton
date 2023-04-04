@@ -217,7 +217,8 @@ sealed trait TopologyTransaction[+Op <: TopologyChangeOp]
 
   def reverse: TopologyTransaction[TopologyChangeOp]
 
-  override def companionObj = TopologyTransaction
+  @transient override protected lazy val companionObj: TopologyTransaction.type =
+    TopologyTransaction
 
   // calculate hash for signature
   def hashToSign(hashOps: HashOps): Hash =
@@ -288,8 +289,8 @@ final case class TopologyStateUpdate[+Op <: AddRemoveChangeOp] private (
     op: Op,
     element: TopologyStateUpdateElement,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      TopologyTransaction[TopologyChangeOp]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TopologyTransaction.type
     ],
     val deserializedFrom: Option[ByteString] = None,
 ) extends TopologyTransaction[Op] {
@@ -498,7 +499,7 @@ object TopologyStateUpdate {
 
   def createAdd(
       mapping: TopologyStateUpdateMapping,
-      protocolVersion: RepresentativeProtocolVersion[TopologyTransaction[TopologyChangeOp]],
+      protocolVersion: RepresentativeProtocolVersion[TopologyTransaction.type],
   ): TopologyStateUpdate[TopologyChangeOp.Add] =
     TopologyStateUpdate(
       TopologyChangeOp.Add,
@@ -511,10 +512,10 @@ object TopologyStateUpdate {
 final case class DomainGovernanceTransaction private (
     element: DomainGovernanceElement
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      TopologyTransaction[TopologyChangeOp]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TopologyTransaction.type
     ],
-    val deserializedFrom: Option[ByteString] = None,
+    override val deserializedFrom: Option[ByteString] = None,
 ) extends TopologyTransaction[TopologyChangeOp.Replace] {
   val op = TopologyChangeOp.Replace
 

@@ -256,6 +256,7 @@ final case class RetentionPeriodDefaults(
   * @param enableAdditionalConsistencyChecks if true, run additional consistency checks. This will degrade performance.
   * @param manualStart  If set to true, the nodes have to be manually started via console (default false)
   * @param nonStandardConfig don't fail config validation on non-standard configuration settings
+  * @param devVersionSupport If true, allow domain nodes to use unstable protocol versions and participant nodes to connect to such domains
   * @param timeouts Sets the timeouts used for processing and console
   * @param portsFile A ports file name, where the ports of all participants will be written to after startup
   */
@@ -264,6 +265,7 @@ final case class CantonParameters(
     enableAdditionalConsistencyChecks: Boolean = false,
     manualStart: Boolean = false,
     nonStandardConfig: Boolean = false,
+    devVersionSupport: Boolean = false,
     portsFile: Option[String] = None,
     timeouts: TimeoutSettings = TimeoutSettings(),
     retentionPeriodDefaults: RetentionPeriodDefaults = RetentionPeriodDefaults(),
@@ -392,6 +394,7 @@ trait CantonConfig {
         participantParameters.ledgerApiServerParameters,
         maxDbConnections = participantConfig.storage.maxConnectionsCanton(true, false, false).value,
         participantParameters.excludeInfrastructureTransactions,
+        participantParameters.enableEngineStackTraces,
       )
     }
 
@@ -478,13 +481,12 @@ private[config] object CantonNodeParameterConverter {
     )
   }
 
-  def protocol(parent: CantonConfig, config: ProtocolConfig): CantonNodeParameters.Protocol = {
+  def protocol(parent: CantonConfig, config: ProtocolConfig): CantonNodeParameters.Protocol =
     CantonNodeParameters.Protocol.Impl(
-      devVersionSupport = parent.parameters.nonStandardConfig,
+      devVersionSupport = parent.parameters.devVersionSupport || config.devVersionSupport,
       dontWarnOnDeprecatedPV = config.dontWarnOnDeprecatedPV,
       initialProtocolVersion = config.initialProtocolVersion,
     )
-  }
 
 }
 

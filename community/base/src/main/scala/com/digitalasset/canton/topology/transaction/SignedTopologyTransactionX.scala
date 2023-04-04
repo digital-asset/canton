@@ -16,7 +16,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
@@ -36,8 +35,8 @@ final case class SignedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
     signatures: NonEmpty[Set[Signature]],
     isProposal: Boolean,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      GenericSignedTopologyTransactionX
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SignedTopologyTransactionX.type
     ]
 ) extends HasProtocolVersionedWrapper[
       SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]
@@ -55,7 +54,8 @@ final case class SignedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
 
   def operation: TopologyChangeOpX = transaction.op
 
-  override def companionObj = SignedTopologyTransactionX
+  @transient override protected lazy val companionObj: SignedTopologyTransactionX.type =
+    SignedTopologyTransactionX
 
   def toProtoV2: v2.SignedTopologyTransactionX =
     v2.SignedTopologyTransactionX(

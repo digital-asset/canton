@@ -22,6 +22,7 @@ private[backend] class ConfigurationStorageBackendTemplate(
     ledgerEndCache: LedgerEndCache,
 ) extends ConfigurationStorageBackend {
 
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private val configurationEntryParser: RowParser[(Offset, ConfigurationEntry)] =
     (offset("ledger_offset") ~
       str("typ") ~

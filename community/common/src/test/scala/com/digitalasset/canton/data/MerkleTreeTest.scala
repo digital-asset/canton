@@ -261,29 +261,23 @@ object MerkleTreeTest {
     } yield mkLeaf(index)
 
   final case class Leaf1(override val index: Int)(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        VersionedAbstractLeaf
-      ]
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[AbstractLeaf.type]
   ) extends AbstractLeaf[Leaf1](index) {
-    override def companionObj: AbstractLeaf.type =
+    override protected lazy val companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 
   final case class Leaf2(override val index: Int)(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        VersionedAbstractLeaf
-      ]
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[AbstractLeaf.type]
   ) extends AbstractLeaf[Leaf2](index) {
-    override def companionObj: AbstractLeaf.type =
+    override protected lazy val companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 
   final case class Leaf3(override val index: Int)(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        VersionedAbstractLeaf
-      ]
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[AbstractLeaf.type]
   ) extends AbstractLeaf[Leaf3](index) {
-    override def companionObj: AbstractLeaf.type =
+    override protected lazy val companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 

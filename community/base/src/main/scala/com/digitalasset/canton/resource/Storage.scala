@@ -435,7 +435,6 @@ object DbStorage {
     type ReadOnly[+A] = DBIOAction[A, NoStream, Effect.Read]
     type ReadTransactional[+A] = DBIOAction[A, NoStream, Effect.Read with Effect.Transactional]
     type WriteOnly[+A] = DBIOAction[A, NoStream, Effect.Write]
-    type WriteTransactional[+A] = DBIOAction[A, NoStream, Effect.Write with Effect.Transactional]
     type All[+A] = DBIOAction[A, NoStream, Effect.All]
 
     /** Use `.andThen(unit)` instead of `.map(_ => ())` for DBIOActions

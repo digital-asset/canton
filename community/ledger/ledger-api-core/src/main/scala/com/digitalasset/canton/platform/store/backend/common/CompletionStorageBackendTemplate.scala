@@ -17,7 +17,7 @@ import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.Sql
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ApplicationId, Party}
 import com.google.protobuf.any
-import com.google.rpc.status.{Status => StatusProto}
+import com.google.rpc.status.{Status as StatusProto}
 
 import java.sql.Connection
 

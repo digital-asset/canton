@@ -9,6 +9,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.client.{
@@ -21,7 +22,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, KeyOwnerCode, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, OptionUtil}
+import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -140,7 +141,7 @@ class GrpcTopologyAggregationService(
         }
       )
     }
-    EitherTUtil.toFuture(mapErrNew(res))
+    CantonGrpcUtil.mapErrNew(res)
   }
 
   override def listKeyOwners(request: v0.ListKeyOwnersRequest): Future[v0.ListKeyOwnersResponse] = {
@@ -176,6 +177,6 @@ class GrpcTopologyAggregationService(
         }
       )
     }
-    EitherTUtil.toFuture(mapErrNew(res))
+    CantonGrpcUtil.mapErrNew(res)
   }
 }

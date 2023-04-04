@@ -321,7 +321,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
 
   private val requestId = RequestId(CantonTimestamp.Epoch)
   private val testMediatorResult =
-    SignedProtocolMessage.from(
+    SignedProtocolMessage.tryFrom(
       TestRegularMediatorResult(
         TestViewType,
         domainId,
@@ -332,7 +332,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
       dummySignature,
     )
   private val otherTestMediatorResult =
-    SignedProtocolMessage.from(
+    SignedProtocolMessage.tryFrom(
       TestRegularMediatorResult(
         OtherTestViewType,
         domainId,
@@ -404,11 +404,11 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
     )
 
     val commitment =
-      SignedProtocolMessage.from(rawCommitment, testedProtocolVersion, dummySignature)
+      SignedProtocolMessage.tryFrom(rawCommitment, testedProtocolVersion, dummySignature)
 
     val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
     val malformedMediatorRequestResult =
-      SignedProtocolMessage.from(
+      SignedProtocolMessage.tryFrom(
         MalformedMediatorRequestResult(
           RequestId(CantonTimestamp.MinValue),
           domainId,
@@ -734,7 +734,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
     "complain about unknown view types in a result" in {
       val sut = mk(initRc = RequestCounter(-11))
       val unknownTestMediatorResult =
-        SignedProtocolMessage.from(
+        SignedProtocolMessage.tryFrom(
           TestRegularMediatorResult(
             UnknownTestViewType,
             domainId,
@@ -1151,7 +1151,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
           val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
 
           val result =
-            SignedProtocolMessage.from(
+            SignedProtocolMessage.tryFrom(
               MalformedMediatorRequestResult(
                 RequestId(CantonTimestamp.MinValue),
                 domainId,
@@ -1272,7 +1272,8 @@ private[protocol] object MessageDispatcherTest {
       override val verdict: Verdict,
       override val requestId: RequestId,
   ) extends RegularMediatorResult {
-    def representativeProtocolVersion: RepresentativeProtocolVersion[TestRegularMediatorResult] =
+    def representativeProtocolVersion
+        : RepresentativeProtocolVersion[TestRegularMediatorResult.type] =
       TestRegularMediatorResult.protocolVersionRepresentativeFor(
         BaseTest.testedProtocolVersion
       )
@@ -1291,6 +1292,8 @@ private[protocol] object MessageDispatcherTest {
     override def hashPurpose: HashPurpose = TestHash.testHashPurpose
     override def deserializedFrom: Option[ByteString] = None
     override protected[this] def toByteStringUnmemoized: ByteString = ByteString.EMPTY
+
+    override protected val companionObj: TestRegularMediatorResult.type = TestRegularMediatorResult
   }
 
   object TestRegularMediatorResult
@@ -1299,11 +1302,7 @@ private[protocol] object MessageDispatcherTest {
     val name: String = "TestRegularMediatorResult"
 
     val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-      ProtoVersion(0) -> VersionedProtoConverter(
-        ProtocolVersion.v3,
-        (),
-        _ => throw new NotImplementedError("Serialization is not implemented"),
-      )
+      ProtoVersion(0) -> UnsupportedProtoCodec(ProtocolVersion.v3)
     )
 
     override protected def deserializationErrorK(error: ProtoDeserializationError): Unit = ()

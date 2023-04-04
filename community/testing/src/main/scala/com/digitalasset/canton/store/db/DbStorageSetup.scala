@@ -176,7 +176,7 @@ class PostgresCISetup(
                 // it has already been created and a duplicate database error is thrown.
                 // We can safely ignore this error.
                 case ex: PSQLException
-                    if ex.getSQLState == "42P04" => // 42P04 means "duplicate_database" (source: https://www.postgresql.org/docs/current/errcodes-appendix.html)
+                    if ex.getSQLState == "23505" => // 23505 means "unique_violation" (source: https://www.postgresql.org/docs/current/errcodes-appendix.html)
                   ()
               }
           } else Future.unit

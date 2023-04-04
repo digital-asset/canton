@@ -29,7 +29,6 @@ import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.HealthReporting.{
   BaseMutableHealthComponent,
   ComponentStatus,
-  HealthService,
   MutableHealthComponent,
 }
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
@@ -716,7 +715,6 @@ class ParticipantNodeBootstrap(
         replaySequencerConfig,
         schedulers,
         loggerFactory,
-        nodeHealthService,
         nodeHealthService.dependencies.map(_.toComponentStatus),
       )
 
@@ -779,6 +777,7 @@ object ParticipantNodeBootstrap {
             DAMLe.newEngine(
               arguments.parameterConfig.uniqueContractKeys,
               arguments.parameterConfig.devVersionSupport,
+              arguments.parameterConfig.enableEngineStackTrace,
             ),
             testingTimeService,
             CantonSyncService.DefaultFactory,
@@ -847,7 +846,6 @@ class ParticipantNode(
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
-    val serviceHealth: HealthService,
     healthData: => Seq[ComponentStatus],
 ) extends CantonNode
     with NamedLogging

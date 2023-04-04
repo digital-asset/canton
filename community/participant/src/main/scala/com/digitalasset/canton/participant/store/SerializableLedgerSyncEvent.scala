@@ -62,10 +62,13 @@ import com.google.rpc.status.Status as RpcStatus
   * @throws canton.store.db.DbDeserializationException if transactions or contracts fail to deserialize
   */
 private[store] final case class SerializableLedgerSyncEvent(event: LedgerSyncEvent)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[SerializableLedgerSyncEvent]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SerializableLedgerSyncEvent.type
+    ]
 ) extends HasProtocolVersionedWrapper[SerializableLedgerSyncEvent] {
 
-  override protected def companionObj = SerializableLedgerSyncEvent
+  @transient override protected lazy val companionObj: SerializableLedgerSyncEvent.type =
+    SerializableLedgerSyncEvent
 
   def toProtoV0: v0.LedgerSyncEvent = {
     val SyncEventP = v0.LedgerSyncEvent.Value

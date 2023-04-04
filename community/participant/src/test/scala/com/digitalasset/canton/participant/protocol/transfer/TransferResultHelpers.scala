@@ -43,7 +43,7 @@ private[transfer] object TransferResultHelpers {
       )
     val signedResult: SignedProtocolMessage[TransferOutResult] =
       Await.result(
-        SignedProtocolMessage.tryCreate(result, cryptoSnapshot, protocolVersion),
+        SignedProtocolMessage.trySignAndCreate(result, cryptoSnapshot, protocolVersion),
         10.seconds,
       )
     val batch: Batch[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =

@@ -129,6 +129,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     ledgerApiServerParameters = LedgerApiServerParametersConfig(),
     maxDbConnections = 10,
     excludeInfrastructureTransactions = true,
+    enableEngineStackTrace = false,
   )
 
   case class Fixture() {
@@ -218,7 +219,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       syncCrypto,
       pruningProcessor,
       ledgerId,
-      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false),
+      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false),
       syncDomainStateFactory,
       new SimClock(loggerFactory = loggerFactory),
       new ResourceManagementService.CommunityResourceManagementService(

@@ -582,7 +582,6 @@ object BuildCommon {
           akka_http_testkit % Test,
           cats,
           better_files,
-          toxiproxy_java % Test,
           dropwizard_metrics_jvm, // not used at compile time, but required at runtime to report jvm metrics
           dropwizard_metrics_jmx,
           dropwizard_metrics_graphite,
@@ -650,10 +649,12 @@ object BuildCommon {
           chimney,
           circe_core,
           circe_generic,
+          flyway.excludeAll(ExclusionRule("org.apache.logging.log4j")),
           postgres,
           pprint,
           scaffeine,
           slick_hikaricp,
+          scalatest % "test",
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
@@ -697,11 +698,11 @@ object BuildCommon {
         blake2b,
         `akka-fork`,
         `community-base`,
-        `community-testing` % Test,
         `wartremover-extension` % "compile->compile;test->test",
-        `ledger-common`,
-        `util-external` % "compile->compile;test->test",
+        `ledger-common` % "compile->compile;test->test",
+        `util-external`,
         `util-internal` % "compile->compile;test->test",
+        `community-testing` % Test,
       )
       .settings(
         sharedCantonSettings,
@@ -728,12 +729,9 @@ object BuildCommon {
           scalapb_runtime,
           log4j_core,
           log4j_api,
-          flyway excludeAll (ExclusionRule("org.apache.logging.log4j")),
           h2,
           tink,
           slick,
-          testcontainers % Test,
-          testcontainers_postgresql % Test,
           sttp,
           sttp_okhttp,
           sttp_circe,
@@ -890,6 +888,8 @@ object BuildCommon {
           opentelemetry_api,
           scalatest,
           scalatestScalacheck,
+          testcontainers,
+          testcontainers_postgresql,
         ),
 
         // This library contains a lot of testing helpers that previously existing in testing scope
@@ -1140,7 +1140,6 @@ object BuildCommon {
         DamlProjects.`daml-copy-common`,
         DamlProjects.`daml-copy-testing` % "test",
       )
-      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
       .settings(
         sharedSettings,
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
@@ -1174,6 +1173,8 @@ object BuildCommon {
         ),
         Test / fork := true,
         Test / testForkedParallel := true,
+        // TODO(#12133) remove when this issue is closed
+        Test / javaOptions += s"-Dlogback.configurationFile=${(Test / resourceDirectory).value.getAbsolutePath}/logback-test-ledger-common.xml",
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -1183,16 +1184,24 @@ object BuildCommon {
     // realized. This happens since java.sun.security.validator.PKIXValidator uses a static variable that is initialized
     // by the system variable "com.sun.net.ssl.checkRevocation". To ensure that the test runs correctly it needs to be
     // executed in its own JVM instance that is isolated from other tests.
-    def separateRevocationTest(tests: Seq[TestDefinition]): Seq[Group] =
+    def separateRevocationTest(
+        tests: Seq[TestDefinition],
+        logbackFileJVMOption: String,
+    ): Seq[Group] = {
+      val options = ForkOptions().withRunJVMOptions(
+        Vector(
+          // TODO(#12133) remove setting the logback configuration when this issue is closed
+          logbackFileJVMOption
+          // "-Djava.security.debug=certpath ocsp" // enable when debugging ocsp tests
+        )
+      )
       tests groupBy (_.name.contains("TlsCertificateRevocationCheckingSpec")) map {
         case (true, tests) =>
-          // enable when debugging ocsp tests
-          // val debugOptions = ForkOptions().withRunJVMOptions(Vector("-Djava.security.debug=certpath ocsp"))
-          val options = ForkOptions()
           new Group("TlsCertificateRevocationCheckingSpec", tests, SubProcess(options))
         case (false, tests) =>
-          new Group("rest", tests, SubProcess(ForkOptions()))
+          new Group("rest", tests, SubProcess(options))
       } toSeq
+    }
 
     lazy val `ledger-api-core` = project
       .in(file("community/ledger/ledger-api-core"))
@@ -1235,7 +1244,11 @@ object BuildCommon {
         ),
         Test / parallelExecution := true,
         Test / fork := false,
-        Test / testGrouping := separateRevocationTest((Test / definedTests).value),
+        Test / testGrouping := separateRevocationTest(
+          (Test / definedTests).value,
+          // TODO(#12133) remove setting the logback configuration when this issue is closed
+          s"-Dlogback.configurationFile=${(`ledger-common` / Test / resourceDirectory).value.getAbsolutePath}/logback-test-ledger-common.xml",
+        ),
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -1273,6 +1286,8 @@ object BuildCommon {
         ),
         Test / parallelExecution := true,
         Test / fork := true,
+        // TODO(#12133) remove setting the logback configuration when this issue is closed
+        Test / javaOptions += s"-Dlogback.configurationFile=${(`ledger-common` / Test / resourceDirectory).value.getAbsolutePath}/logback-test-ledger-common.xml",
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )

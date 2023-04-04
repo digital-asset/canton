@@ -69,7 +69,7 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
          INSERT INTO participant_users (user_id, primary_party, identity_provider_id, is_deactivated, resource_version, created_at)
          VALUES ($id, $primaryParty, $identityProviderId, $isDeactivated, $resourceVersion, $createdAt)
        """.executeInsert1("internal_id")(SqlParser.scalar[Int].single)(connection)
-    internalId.get
+    internalId.fold(throw _, identity)
   }
 
   override def addUserAnnotation(internalId: Int, key: String, value: String, updatedAt: Long)(

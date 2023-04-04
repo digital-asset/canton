@@ -30,7 +30,7 @@ sealed trait Verdict
     with PrettyPrinting
     with HasProtocolVersionedWrapper[Verdict] {
 
-  override protected def companionObj: Verdict.type = Verdict
+  @transient override protected lazy val companionObj: Verdict.type = Verdict
 
   def toProtoV0: v0.Verdict
 
@@ -52,8 +52,9 @@ object Verdict
     ),
   )
 
-  final case class Approve(representativeProtocolVersion: RepresentativeProtocolVersion[Verdict])
-      extends Verdict {
+  final case class Approve()(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
+  ) extends Verdict {
     override def toProtoV0: v0.Verdict =
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.Approve(empty.Empty()))
 
@@ -64,7 +65,7 @@ object Verdict
   }
 
   object Approve {
-    def apply(protocolVersion: ProtocolVersion): Approve = Approve(
+    def apply(protocolVersion: ProtocolVersion): Approve = Approve()(
       Verdict.protocolVersionRepresentativeFor(protocolVersion)
     )
   }
@@ -153,7 +154,7 @@ object Verdict
     *                to the rejection reason from the [[com.digitalasset.canton.protocol.messages.MediatorResponse]]
     */
   final case class ParticipantReject(reasons: NonEmpty[List[(Set[LfPartyId], LocalReject)]])(
-      val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict]
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
   ) extends Verdict {
 
     override def toProtoV0: v0.Verdict = {
@@ -235,7 +236,7 @@ object Verdict
     val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0))
 
     someVerdictP match {
-      case V.Approve(empty.Empty(_)) => Right(Approve(representativeProtocolVersion))
+      case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
       case V.Timeout(empty.Empty(_)) =>
         Right(MediatorError.Timeout.Reject()(representativeProtocolVersion))
       case V.MediatorReject(mediatorRejectionP) => MediatorReject.fromProtoV0(mediatorRejectionP)
@@ -251,7 +252,7 @@ object Verdict
     val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
 
     someVerdictP match {
-      case V.Approve(empty.Empty(_)) => Right(Approve(representativeProtocolVersion))
+      case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
       case V.MediatorReject(mediatorRejectP) => MediatorReject.fromProtoV1(mediatorRejectP)
       case V.ParticipantReject(participantRejectP) =>
         ParticipantReject.fromProtoV1(participantRejectP)

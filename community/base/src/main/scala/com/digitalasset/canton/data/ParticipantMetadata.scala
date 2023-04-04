@@ -26,7 +26,9 @@ final case class ParticipantMetadata private (
     salt: Salt,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[ParticipantMetadata],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      ParticipantMetadata.type
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ParticipantMetadata](hashOps)
     with HasProtocolVersionedWrapper[ParticipantMetadata]
@@ -44,7 +46,8 @@ final case class ParticipantMetadata private (
     param("salt", _.salt),
   )
 
-  override def companionObj = ParticipantMetadata
+  @transient override protected lazy val companionObj: ParticipantMetadata.type =
+    ParticipantMetadata
 
   protected def toProtoV0: v0.ParticipantMetadata = v0.ParticipantMetadata(
     ledgerTime = Some(ledgerTime.toProtoPrimitive),

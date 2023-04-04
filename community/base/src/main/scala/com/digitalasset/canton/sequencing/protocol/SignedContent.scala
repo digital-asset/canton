@@ -43,13 +43,11 @@ final case class SignedContent[+A <: HasCryptographicEvidence](
     signatures: NonEmpty[Seq[Signature]],
     timestampOfSigningKey: Option[CantonTimestamp],
 )(
-    override val representativeProtocolVersion: RepresentativeProtocolVersion[
-      SignedContent[HasCryptographicEvidence]
-    ]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[SignedContent.type]
 ) extends HasProtocolVersionedWrapper[SignedContent[HasCryptographicEvidence]]
     with Serializable
     with Product {
-  override def companionObj = SignedContent
+  @transient override protected lazy val companionObj: SignedContent.type = SignedContent
 
   def toProtoV0: v0.SignedContent =
     v0.SignedContent(

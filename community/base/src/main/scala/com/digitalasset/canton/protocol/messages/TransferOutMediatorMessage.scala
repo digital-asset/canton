@@ -41,7 +41,8 @@ final case class TransferOutMediatorMessage(
 
   val protocolVersion = commonData.protocolVersion
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutMediatorMessage] =
+  override val representativeProtocolVersion
+      : RepresentativeProtocolVersion[TransferOutMediatorMessage.type] =
     TransferOutMediatorMessage.protocolVersionRepresentativeFor(protocolVersion.v)
 
   override def domainId: DomainId = commonData.sourceDomain
@@ -97,6 +98,9 @@ final case class TransferOutMediatorMessage(
   override def viewType: ViewType = ViewType.TransferOutViewType
 
   override def pretty: Pretty[TransferOutMediatorMessage] = prettyOfClass(unnamedParam(_.tree))
+
+  @transient override protected lazy val companionObj: TransferOutMediatorMessage.type =
+    TransferOutMediatorMessage
 }
 
 object TransferOutMediatorMessage

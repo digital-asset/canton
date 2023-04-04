@@ -8,7 +8,7 @@ import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,

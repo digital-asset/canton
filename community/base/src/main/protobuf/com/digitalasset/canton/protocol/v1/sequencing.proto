@@ -86,4 +86,5 @@ message SubmissionRequest {
   CompressedBatch batch = 4;
   google.protobuf.Timestamp max_sequencing_time = 5;
   google.protobuf.Timestamp timestamp_of_signing_key = 6;
+  v0.AggregationRule aggregation_rule = 7; // optional
 }

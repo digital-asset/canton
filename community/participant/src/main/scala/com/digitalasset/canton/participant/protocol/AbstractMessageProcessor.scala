@@ -82,7 +82,7 @@ abstract class AbstractMessageProcessor(
   protected def signResponse(ips: DomainSnapshotSyncCryptoApi, response: MediatorResponse)(implicit
       traceContext: TraceContext
   ): Future[SignedProtocolMessage[MediatorResponse]] =
-    SignedProtocolMessage.tryCreate(response, ips, protocolVersion)
+    SignedProtocolMessage.trySignAndCreate(response, ips, protocolVersion)
 
   // Assumes that we are not closing (i.e., that this is synchronized with shutdown somewhere higher up the call stack)
   protected def sendResponses(

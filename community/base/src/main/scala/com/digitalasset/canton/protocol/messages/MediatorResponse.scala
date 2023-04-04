@@ -59,7 +59,9 @@ case class MediatorResponse private (
     confirmingParties: Set[LfPartyId],
     override val domainId: DomainId,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[MediatorResponse],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      MediatorResponse.type
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[MediatorResponse]
@@ -107,7 +109,7 @@ case class MediatorResponse private (
   protected override def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override def companionObj = MediatorResponse
+  @transient override protected lazy val companionObj: MediatorResponse.type = MediatorResponse
 
   protected def toProtoV0: v0.MediatorResponse =
     v0.MediatorResponse(
@@ -354,8 +356,9 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
   }
 
   implicit val mediatorResponseSignedMessageContentCast
-      : SignedMessageContentCast[MediatorResponse] = {
-    case response: MediatorResponse => Some(response)
-    case _ => None
-  }
+      : SignedMessageContentCast[MediatorResponse] =
+    SignedMessageContentCast.create[MediatorResponse]("MediatorResponse") {
+      case response: MediatorResponse => Some(response)
+      case _ => None
+    }
 }

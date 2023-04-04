@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.sandbox.bridge.validate
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.engine.Blinding
-import com.daml.lf.transaction.{Transaction => LfTransaction}
+import com.daml.lf.transaction.{Transaction as LfTransaction}
 import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.Timed
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo

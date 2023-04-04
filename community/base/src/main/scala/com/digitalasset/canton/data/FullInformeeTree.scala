@@ -24,7 +24,7 @@ import java.util.UUID
   */
 // private constructor, because object invariants are checked by factory methods
 final case class FullInformeeTree private (tree: GenTransactionTree)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree.type]
 ) extends HasProtocolVersionedWrapper[FullInformeeTree]
     with PrettyPrinting {
 
@@ -33,7 +33,7 @@ final case class FullInformeeTree private (tree: GenTransactionTree)(
     _ <- InformeeTree.checkViews(tree.rootViews, assertFull = true)
   } yield this
 
-  override protected def companionObj = FullInformeeTree
+  @transient override protected lazy val companionObj: FullInformeeTree.type = FullInformeeTree
 
   lazy val transactionId: TransactionId = TransactionId.fromRootHash(tree.rootHash)
 
@@ -117,7 +117,7 @@ object FullInformeeTree
 
   private[data] def create(
       tree: GenTransactionTree,
-      representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree],
+      representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree.type],
   ): Either[String, FullInformeeTree] =
     FullInformeeTree(tree)(representativeProtocolVersion).validated
 

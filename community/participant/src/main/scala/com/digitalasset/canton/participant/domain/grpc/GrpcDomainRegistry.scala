@@ -132,7 +132,6 @@ class GrpcDomainRegistry(
 
       domainHandle <- getDomainHandle(
         config,
-        participantNodeParameters.protocolConfig,
         sequencerConnection,
         syncDomainPersistentStateFactory,
       )(

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.sandbox.services
 
-import com.daml.ledger.api.testing.utils.{MockMessages => M}
+import com.daml.ledger.api.testing.utils.{MockMessages as M}
 import com.daml.ledger.api.v1.command_service.SubmitAndWaitRequest
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.ledger.api.v1.commands.Command.Command.{Create, Exercise}

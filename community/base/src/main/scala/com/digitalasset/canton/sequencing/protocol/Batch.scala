@@ -32,11 +32,11 @@ import com.google.protobuf.ByteString
   *  for `0 <= i < n`.
   */
 final case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[Batch[Envelope[_]]]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[Batch.type]
 ) extends HasProtocolVersionedWrapper[Batch[Envelope[_]]]
     with PrettyPrinting {
 
-  override val companionObj = Batch
+  @transient override protected lazy val companionObj: Batch.type = Batch
 
   /** builds a set of recipients from all messages in this message batch
     */

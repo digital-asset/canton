@@ -24,7 +24,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, GrpcDomainTimeService}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
+import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -79,7 +79,7 @@ trait MediatorRuntimeFactory {
       sequencerClient: SequencerClient,
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
-      topologyTransactionProcessor: TopologyTransactionProcessor,
+      topologyTransactionProcessor: TopologyTransactionProcessorCommon,
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
@@ -104,7 +104,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       sequencerClient: SequencerClient,
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
-      topologyTransactionProcessor: TopologyTransactionProcessor,
+      topologyTransactionProcessor: TopologyTransactionProcessorCommon,
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,

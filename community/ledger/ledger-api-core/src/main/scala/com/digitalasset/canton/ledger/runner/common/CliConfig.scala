@@ -410,8 +410,7 @@ object CliConfig {
       checkConfig(c =>
         c.tlsConfig.fold(success) { tlsConfig =>
           if (
-            tlsConfig.privateKeyFile.isDefined
-            && tlsConfig.privateKeyFile.get.getName.endsWith(".enc")
+            tlsConfig.privateKeyFile.exists(_.getName.endsWith(".enc"))
             && tlsConfig.secretsUrl.isEmpty
           ) {
             failure(

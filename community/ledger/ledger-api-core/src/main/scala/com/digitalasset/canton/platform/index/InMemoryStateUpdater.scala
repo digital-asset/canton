@@ -138,7 +138,7 @@ private[platform] object InMemoryStateUpdater {
         case (offset, u: Update.TransactionAccepted) => convertTransactionAccepted(offset, u)
         case (offset, u: Update.CommandRejected) => convertTransactionRejected(offset, u)
       },
-      lastOffset = batch.last._1,
+      lastOffset = batch.lastOption.fold(throw new NoSuchElementException("empty batch"))(_._1),
       lastEventSequentialId = lastEventSequentialId,
       packageMetadata = extractMetadataFromUploadedPackages(archiveToMetadata)(batch),
     )

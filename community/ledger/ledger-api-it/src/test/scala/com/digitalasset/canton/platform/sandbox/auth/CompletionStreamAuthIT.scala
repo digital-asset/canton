@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.sandbox.auth
 
-import com.daml.ledger.api.v1.admin.{user_management_service => proto}
+import com.daml.ledger.api.v1.admin.{user_management_service as proto}
 import com.daml.ledger.api.v1.command_completion_service.{
   CommandCompletionServiceGrpc,
   CompletionStreamRequest,

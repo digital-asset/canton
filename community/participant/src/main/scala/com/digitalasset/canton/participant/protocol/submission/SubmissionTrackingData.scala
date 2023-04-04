@@ -42,7 +42,8 @@ trait SubmissionTrackingData
     with HasProtocolVersionedWrapper[SubmissionTrackingData]
     with PrettyPrinting {
 
-  override protected def companionObj = SubmissionTrackingData
+  @transient override protected lazy val companionObj: SubmissionTrackingData.type =
+    SubmissionTrackingData
 
   protected def toProtoV0: v0.SubmissionTrackingData
 
@@ -92,8 +93,11 @@ object SubmissionTrackingData
 final case class TransactionSubmissionTrackingData(
     completionInfo: CompletionInfo,
     rejectionCause: TransactionSubmissionTrackingData.RejectionCause,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionTrackingData])
-    extends SubmissionTrackingData
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SubmissionTrackingData.type
+    ]
+) extends SubmissionTrackingData
     with HasLoggerName {
 
   override def rejectionEvent(

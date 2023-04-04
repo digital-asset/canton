@@ -143,8 +143,10 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       )
     override def domainId: DomainId = ???
 
-    override def representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage] =
+    override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type] =
       ???
+
+    override protected val companionObj: AnyRef = TestProtocolMessage
 
     override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
       v0.EnvelopeContent(
@@ -161,6 +163,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
     override def productArity: Int = ???
     override def canEqual(that: Any): Boolean = ???
   }
+  object TestProtocolMessage
 
   "send" should {
     "correctly deliver event to each recipient" in { env =>
@@ -170,7 +173,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       val message1 = new TestProtocolMessage("message1")
       val message2 = new TestProtocolMessage("message2")
 
-      val submission = SubmissionRequest(
+      val submission = SubmissionRequest.tryCreate(
         alice,
         messageId,
         true,
@@ -182,6 +185,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
           )
         ),
         clock.now.plusSeconds(10),
+        None,
         None,
         testedProtocolVersion,
       )

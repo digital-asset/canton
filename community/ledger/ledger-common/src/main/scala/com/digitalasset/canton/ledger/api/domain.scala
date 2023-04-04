@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.ledger.api
 
-import com.daml.lf.command.{ApiCommands => LfCommands, DisclosedContract}
+import com.daml.lf.command.{ApiCommands as LfCommands, DisclosedContract}
 import com.daml.lf.data.Ref.LedgerString.ordering
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.logging.*
 import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.value.{Value => Lf}
+import com.daml.lf.value.{Value as Lf}
 import com.daml.logging.entries.LoggingValue.OfString
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.ledger.api.domain.Event.{CreateOrArchiveEvent, CreateOrExerciseEvent}

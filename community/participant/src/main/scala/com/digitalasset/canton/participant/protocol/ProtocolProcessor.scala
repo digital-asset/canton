@@ -786,7 +786,8 @@ abstract class ProtocolProcessor[
       signedResponsesTo <- EitherT.right(responsesTo.parTraverse { case (response, recipients) =>
         signResponse(snapshot, response).map(_ -> recipients)
       })
-      messages: Seq[(ProtocolMessage, Recipients)] = signedResponsesTo ++ causalityMsgs
+      messages = (signedResponsesTo: Seq[(ProtocolMessage, Recipients)]) ++
+        (causalityMsgs: Seq[(ProtocolMessage, Recipients)])
       _ <- sendResponses(requestId, rc, messages)
         .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
     } yield ()

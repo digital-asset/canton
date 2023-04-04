@@ -38,10 +38,10 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     key: SigningPublicKey,
     signature: Signature,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      SignedTopologyTransaction[TopologyChangeOp]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SignedTopologyTransaction.type
     ],
-    val deserializedFrom: Option[ByteString] = None,
+    override val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[SignedTopologyTransaction[TopologyChangeOp]]
     with ProtocolVersionedMemoizedEvidence
     with Product
@@ -51,7 +51,8 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
   override protected def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override def companionObj = SignedTopologyTransaction
+  @transient override protected lazy val companionObj: SignedTopologyTransaction.type =
+    SignedTopologyTransaction
 
   private def toProtoV0: v0.SignedTopologyTransaction =
     v0.SignedTopologyTransaction(

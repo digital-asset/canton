@@ -76,10 +76,14 @@ final case class StaticDomainParameters(
     requiredHashAlgorithms: NonEmpty[Set[HashAlgorithm]],
     requiredCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]],
     protocolVersion: ProtocolVersion,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[StaticDomainParameters])
-    extends HasProtocolVersionedWrapper[StaticDomainParameters] {
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      StaticDomainParameters.type
+    ]
+) extends HasProtocolVersionedWrapper[StaticDomainParameters] {
 
-  val companionObj = StaticDomainParameters
+  @transient override protected lazy val companionObj: StaticDomainParameters.type =
+    StaticDomainParameters
 
   @nowarn("msg=deprecated")
   def toProtoV0: protoV0.StaticDomainParameters =
@@ -351,11 +355,15 @@ final case class DynamicDomainParameters(
     reconciliationInterval: PositiveSeconds,
     maxRatePerParticipant: NonNegativeInt,
     maxRequestSize: MaxRequestSize,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters])
-    extends HasProtocolVersionedWrapper[DynamicDomainParameters]
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      DynamicDomainParameters.type
+    ]
+) extends HasProtocolVersionedWrapper[DynamicDomainParameters]
     with PrettyPrinting {
 
-  val companionObj = DynamicDomainParameters
+  @transient override protected lazy val companionObj: DynamicDomainParameters.type =
+    DynamicDomainParameters
 
   // https://docs.google.com/document/d/1tpPbzv2s6bjbekVGBn6X5VZuw0oOTHek5c30CBo4UkI/edit#bookmark=id.jtqcu52qpf82
   if (ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2) > mediatorDeduplicationTimeout)
@@ -492,7 +500,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant: NonNegativeInt,
       maxRequestSize: MaxRequestSize,
   )(
-      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters]
+      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
   ): Either[InvalidDomainParameters, DynamicDomainParameters] =
     Either.catchOnly[InvalidDomainParameters](
       tryCreate(
@@ -522,7 +530,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant: NonNegativeInt,
       maxRequestSize: MaxRequestSize,
   )(
-      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters]
+      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters.type]
   ): DynamicDomainParameters = DynamicDomainParameters(
     participantResponseTimeout,
     mediatorReactionTimeout,

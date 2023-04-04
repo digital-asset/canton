@@ -100,7 +100,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
 
   lazy val response: DefaultOpenEnvelope = {
     val message =
-      SignedProtocolMessage(
+      SignedProtocolMessage.tryCreate(
         mock[TypedSignedProtocolMessageContent[MediatorResponse]],
         NonEmpty(Seq, SymbolicCrypto.emptySignature),
         testedProtocolVersion,

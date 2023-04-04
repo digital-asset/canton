@@ -42,6 +42,7 @@ import com.digitalasset.canton.participant.sync.TransactionRoutingError.{
   UnableToQueryTopologySnapshot,
 }
 import com.digitalasset.canton.participant.sync.{
+  ConnectedDomainsLookup,
   SyncDomain,
   TransactionRoutingError,
   TransactionRoutingErrorWithDomain,
@@ -56,7 +57,6 @@ import com.digitalasset.canton.util.{EitherTUtil, LfTransactionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId}
 
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 /** The domain router routes transaction submissions from upstream to the right domain.
@@ -277,7 +277,7 @@ class DomainRouter(
 object DomainRouter {
   def apply(
       packageService: PackageService,
-      connectedDomainsMap: TrieMap[DomainId, SyncDomain],
+      connectedDomains: ConnectedDomainsLookup,
       domainConnectionConfigStore: DomainConnectionConfigStore,
       domainAliasManager: DomainAliasManager,
       cryptoPureApi: CryptoPureApi,
@@ -289,15 +289,15 @@ object DomainRouter {
 
     val transfer =
       new ContractsTransfer(
-        connectedDomainsMap,
+        connectedDomains,
         submittingParticipant = participantId,
         loggerFactory,
       )
 
-    val domainIdResolver = recoveredDomainOfAlias(connectedDomainsMap, domainAliasManager) _
-    val stateProviderWithProtocolVersion = domainStateProvider(connectedDomainsMap) _
+    val domainIdResolver = recoveredDomainOfAlias(connectedDomains, domainAliasManager) _
+    val stateProviderWithProtocolVersion = domainStateProvider(connectedDomains) _
     val stateProvider = (domainId: DomainId) =>
-      domainStateProvider(connectedDomainsMap)(domainId).map(_._1)
+      domainStateProvider(connectedDomains)(domainId).map(_._1)
 
     val domainRankComputation = new DomainRankComputation(
       participantId = participantId,
@@ -308,7 +308,7 @@ object DomainRouter {
 
     val domainSelectorFactory = new DomainSelectorFactory(
       participantId = participantId,
-      admissibleDomains = new AdmissibleDomains(participantId, connectedDomainsMap, loggerFactory),
+      admissibleDomains = new AdmissibleDomains(participantId, connectedDomains, loggerFactory),
       priorityOfDomain = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
       domainRankComputation = domainRankComputation,
       domainStateProvider = stateProviderWithProtocolVersion,
@@ -323,9 +323,9 @@ object DomainRouter {
     )
 
     new DomainRouter(
-      domainOfContract(connectedDomainsMap),
+      domainOfContract(connectedDomains),
       domainIdResolver,
-      submit(connectedDomainsMap),
+      submit(connectedDomains),
       transfer,
       stateProvider,
       serializableContractAuthenticator,
@@ -336,14 +336,14 @@ object DomainRouter {
     )
   }
 
-  private def domainOfContract(connectedDomains: collection.Map[DomainId, SyncDomain])(
+  private def domainOfContract(connectedDomains: ConnectedDomainsLookup)(
       coids: Seq[LfContractId]
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Future[Map[LfContractId, DomainId]] = {
     type Acc = (Seq[LfContractId], Map[LfContractId, DomainId])
-    connectedDomains
+    connectedDomains.snapshot
       .collect {
         // only look at domains that are ready for submission
         case (_, syncDomain: SyncDomain) if syncDomain.readyForSubmission => syncDomain
@@ -365,7 +365,7 @@ object DomainRouter {
   }
 
   private def recoveredDomainOfAlias(
-      connectedDomains: TrieMap[DomainId, SyncDomain],
+      connectedDomains: ConnectedDomainsLookup,
       domainAliasManager: DomainAliasManager,
   )(domainAlias: DomainAlias): Option[DomainId] = {
     domainAliasManager
@@ -373,12 +373,8 @@ object DomainRouter {
       .filter(domainId => connectedDomains.get(domainId).exists(_.ready))
   }
 
-  private def domainStateProvider(
-      connectedDomains: TrieMap[DomainId, SyncDomain]
-  )(
-      domain: DomainId
-  )(implicit
-      traceContext: TraceContext
+  private def domainStateProvider(connectedDomains: ConnectedDomainsLookup)(domain: DomainId)(
+      implicit traceContext: TraceContext
   ): Either[TransactionRoutingErrorWithDomain, (TopologySnapshot, ProtocolVersion)] =
     connectedDomains
       .get(domain)
@@ -409,7 +405,7 @@ object DomainRouter {
     * because we do not (yet) need to deal with merging the mappings
     * in [[com.digitalasset.canton.protocol.WellFormedTransaction.merge]].
     */
-  private def submit(connectedDomains: TrieMap[DomainId, SyncDomain])(domainId: DomainId)(
+  private def submit(connectedDomains: ConnectedDomainsLookup)(domainId: DomainId)(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,

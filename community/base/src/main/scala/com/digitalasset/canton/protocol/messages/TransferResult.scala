@@ -35,9 +35,7 @@ case class TransferResult[+Domain <: TransferDomainId] private (
     domain: Domain, // For transfer-out, this is the source domain. For transfer-in, this is the target domain.
     override val verdict: Verdict,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      TransferResult[TransferDomainId]
-    ],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[TransferResult.type],
     override val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
     with HasProtocolVersionedWrapper[TransferResult[TransferDomainId]]
@@ -57,7 +55,7 @@ case class TransferResult[+Domain <: TransferDomainId] private (
       getCryptographicEvidence
     )
 
-  override def companionObj = TransferResult
+  @transient override protected lazy val companionObj: TransferResult.type = TransferResult
 
   def toProtoV0: v0.TransferResult = {
     val domainP = (domain: @unchecked) match {
@@ -212,10 +210,11 @@ object TransferResult
 
   implicit def transferResultCast[Kind <: TransferDomainId](implicit
       cast: TransferDomainIdCast[Kind]
-  ): SignedMessageContentCast[TransferResult[Kind]] = {
-    case result: TransferResult[TransferDomainId] => result.traverse(cast.toKind)
-    case _ => None
-  }
+  ): SignedMessageContentCast[TransferResult[Kind]] =
+    SignedMessageContentCast.create[TransferResult[Kind]]("TransferResult") {
+      case result: TransferResult[TransferDomainId] => result.traverse(cast.toKind)
+      case _ => None
+    }
 }
 
 final case class DeliveredTransferOutResult(result: SignedContent[Deliver[DefaultOpenEnvelope]])

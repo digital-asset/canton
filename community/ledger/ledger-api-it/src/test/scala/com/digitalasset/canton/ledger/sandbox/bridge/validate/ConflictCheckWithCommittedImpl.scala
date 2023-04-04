@@ -9,8 +9,8 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.{
-  ProcessedDisclosedContract => LfProcessedDisclosedContract,
-  Transaction => LfTransaction,
+  ProcessedDisclosedContract as LfProcessedDisclosedContract,
+  Transaction as LfTransaction,
 }
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId

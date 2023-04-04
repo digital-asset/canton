@@ -27,9 +27,9 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   WriteConfigService,
   WriteService,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiConfigManagementServiceSpec.*
-import com.google.protobuf.duration.{Duration => DurationProto}
+import com.google.protobuf.duration.{Duration as DurationProto}
 import com.google.protobuf.timestamp.Timestamp
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
@@ -42,7 +42,7 @@ import java.util.concurrent.CompletableFuture.completedFuture
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.collection.immutable
-import scala.concurrent.duration.{Duration => ScalaDuration}
+import scala.concurrent.duration.{Duration as ScalaDuration}
 import scala.concurrent.{Await, Future, Promise}
 import scala.util.{Failure, Success}
 

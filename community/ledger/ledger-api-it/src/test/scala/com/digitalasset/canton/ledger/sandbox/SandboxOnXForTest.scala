@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.sandbox
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.ParticipantId
-import com.daml.lf.engine.{EngineConfig => _EngineConfig}
+import com.daml.lf.engine.{EngineConfig as _EngineConfig}
 import com.daml.lf.language.LanguageVersion
 import com.daml.metrics.Metrics
 import com.daml.ports.Port
@@ -14,16 +14,16 @@ import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.runner.common.Config
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.{
-  ApiServerConfig => _ApiServerConfig,
+  ApiServerConfig as _ApiServerConfig,
   AuthServiceConfig,
 }
 import com.digitalasset.canton.platform.config.MetricsConfig.MetricRegistryType
 import com.digitalasset.canton.platform.config.{
   MetricsConfig,
-  ParticipantConfig => _ParticipantConfig,
+  ParticipantConfig as _ParticipantConfig,
 }
 import com.digitalasset.canton.platform.configuration.InitialLedgerConfiguration
-import com.digitalasset.canton.platform.indexer.{IndexerConfig => _IndexerConfig}
+import com.digitalasset.canton.platform.indexer.{IndexerConfig as _IndexerConfig}
 import com.digitalasset.canton.platform.localstore.UserManagementConfig
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 

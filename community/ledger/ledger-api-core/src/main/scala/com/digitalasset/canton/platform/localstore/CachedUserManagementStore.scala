@@ -14,7 +14,7 @@ import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User}
 import com.digitalasset.canton.platform.localstore.CachedUserManagementStore.CacheKey
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.{Result, UserInfo}
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}
-import com.github.benmanes.caffeine.{cache => caffeine}
+import com.github.benmanes.caffeine.{cache as caffeine}
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}

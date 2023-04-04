@@ -15,6 +15,7 @@ import com.digitalasset.canton.crypto.{Crypto, Fingerprint, Hash}
 import com.digitalasset.canton.environment.CantonNodeBootstrapX
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.protocol.v2.TopologyMappingX.Mapping
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -49,8 +50,6 @@ class GrpcTopologyManagerWriteServiceX(
 )(implicit val ec: ExecutionContext)
     extends v1.TopologyManagerWriteServiceXGrpc.TopologyManagerWriteServiceX
     with NamedLogging {
-
-  import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 
   override def authorize(request: v1.AuthorizeRequest): Future[v1.AuthorizeResponse] = {
     implicit val traceContext: TraceContext = TraceContext.todo
@@ -88,11 +87,8 @@ class GrpcTopologyManagerWriteServiceX(
 
       case Type.Proposal(Proposal(op, serial, mapping)) =>
         val validatedMappingE = for {
-          serial <- PositiveInt
-            .create(serial)
-            .leftMap(ProtoDeserializationError.InvariantViolation(_))
-          op <-
-            TopologyChangeOpX.fromProtoV2(op)
+          serial <- ProtoConverter.parsePositiveInt(serial)
+          op <- TopologyChangeOpX.fromProtoV2(op)
           mapping <- ProtoConverter.required("AuthorizeRequest.mapping", mapping)
           signingKeys <-
             request.signedBy.traverse(Fingerprint.fromProtoPrimitive)
@@ -128,7 +124,7 @@ class GrpcTopologyManagerWriteServiceX(
           signedTopoTx
         }
     }
-    EitherTUtil.toFuture(mapErrNew(result)).map(tx => v1.AuthorizeResponse(Some(tx.toProtoV2)))
+    CantonGrpcUtil.mapErrNew(result).map(tx => v1.AuthorizeResponse(Some(tx.toProtoV2)))
   }
 
   override def addTransactions(
@@ -146,11 +142,7 @@ class GrpcTopologyManagerWriteServiceX(
         .add(signedTxs, force = request.forceChange, expectFullAuthorization = false)
         .leftWiden[CantonError]
     } yield v1.AddTransactionsResponse()
-    EitherTUtil
-      .toFuture(mapErrNew(res))
-      .andThen({ case _ =>
-        topologyStoreX.dumpStoreContent()
-      })
+    CantonGrpcUtil.mapErrNew(res).andThen(_ => topologyStoreX.dumpStoreContent())
   }
 
   override def generateGenesisTopologyTransactions(

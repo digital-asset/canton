@@ -31,7 +31,7 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.{
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
 import com.google.rpc.code.*
-import com.google.rpc.status.{Status => StatusProto}
+import com.google.rpc.status.{Status as StatusProto}
 import io.grpc.StatusRuntimeException
 import org.scalatest.OptionValues
 import org.scalatest.concurrent.ScalaFutures

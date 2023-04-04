@@ -49,7 +49,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
     SignedContent(event, sign(s"deliver signature ${event.counter}"), None, testedProtocolVersion)
 
   lazy val closedEnvelope =
-    ClosedEnvelope(
+    ClosedEnvelope.tryCreate(
       ByteString.copyFromUtf8("message"),
       RecipientsTest.testInstance,
       Seq.empty,

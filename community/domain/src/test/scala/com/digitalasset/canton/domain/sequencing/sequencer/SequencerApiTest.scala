@@ -240,13 +240,14 @@ abstract class SequencerApiTest
     val envelope1 = TestingEnvelope(messageContent, recipients)
     val batch = Batch(List(envelope1.closeEnvelope), testedProtocolVersion)
     val messageId = MessageId.tryCreate(s"thisisamessage: $messageContent")
-    val request = SubmissionRequest(
+    val request = SubmissionRequest.tryCreate(
       sender,
       messageId,
       isRequest = false,
       batch,
       maxSequencingTime,
       timestampOfSigningKey = None,
+      aggregationRule = None,
       testedProtocolVersion,
     )
     request
@@ -294,7 +295,7 @@ abstract class SequencerApiTest
 
     /** Closes the envelope by serializing the contents */
     def closeEnvelope: ClosedEnvelope =
-      ClosedEnvelope(
+      ClosedEnvelope.tryCreate(
         DeterministicEncoding.encodeString(content),
         recipients,
         Seq.empty,

@@ -777,7 +777,10 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         subscriberRef.get() match {
           case Some(value) => Some(value)
           case None if retry >= 0 =>
-            Threading.sleep(1)
+            logger.debug(
+              s"Subscriber reference is not defined, will retry after sleeping. Retry: $retry"
+            )
+            Threading.sleep(2)
             subscriber(retry - 1)
           case None => None
         }

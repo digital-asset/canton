@@ -239,7 +239,8 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
         LoggingConfig(),
         loggerFactory,
         ProtocolVersionCompatibility.supportedProtocolsParticipant(
-          includeUnstableVersions = BaseTest.testedProtocolVersion.isUnstable
+          includeUnstableVersions = BaseTest.testedProtocolVersion.isUnstable,
+          release = ReleaseVersion.current,
         ),
         Some(BaseTest.testedProtocolVersion),
       ).create(
@@ -394,8 +395,10 @@ class GrpcSequencerIntegrationTest
         protocolV0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
       )
 
-    override def representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage] =
+    override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type] =
       ???
+
+    override protected lazy val companionObj = MockProtocolMessage
 
     override def domainId: DomainId = DefaultTestIdentities.domainId
     override def toProtoEnvelopeContentV0: protocolV0.EnvelopeContent =

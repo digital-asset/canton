@@ -21,6 +21,7 @@ import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.ledger.client.binding.{Contract, TemplateCompanion}
+import com.daml.lf.data.Ref
 import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
 import com.daml.metrics.api.{MetricHandle, MetricName, MetricsContext}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
@@ -29,17 +30,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   ParticipantAdminCommands,
 }
 import com.digitalasset.canton.admin.api.client.data.TemplateId.templateIds
-import com.digitalasset.canton.admin.api.client.data.{
-  LedgerApiUser,
-  ListLedgerApiUsersResult,
-  ModifyingNonModifiablePartyDetailsPropertiesError,
-  ModifyingNonModifiableUserPropertiesError,
-  PartyDetails,
-  TemplateId,
-  User,
-  UserRights,
-  UsersPage,
-}
+import com.digitalasset.canton.admin.api.client.data.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
@@ -59,7 +50,13 @@ import com.digitalasset.canton.console.{
   RemoteParticipantReference,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.api.DeduplicationPeriod
+import com.digitalasset.canton.ledger.api.domain.{
+  IdentityProviderConfig,
+  IdentityProviderId,
+  JwksUrl,
+}
+import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, domain}
+import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserver}
 import com.digitalasset.canton.participant.ledger.api.client.DecodeUtil
@@ -68,6 +65,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.{LedgerTransactionId, LfPartyId}
+import com.google.protobuf.field_mask.FieldMask
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
 
@@ -661,7 +659,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           modifier: a function to modify the party details, e.g.: `partyDetails => { partyDetails.copy(annotations = partyDetails.annotations.updated("a", "b").removed("c")) }`"""
       )
       def update(
-          party: String,
+          party: PartyId,
           modifier: PartyDetails => PartyDetails,
       ): PartyDetails = {
         val rawDetails = get(party = party)
@@ -694,7 +692,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
         }
       }
 
-      private def get(party: String): ProtoPartyDetails = {
+      private def get(party: PartyId): ProtoPartyDetails = {
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(LedgerApiCommands.PartyManagementService.GetParty(party = party))
         })
@@ -841,6 +839,99 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )(consoleEnvironment.environment.scheduler)
           )
         })
+    }
+
+    @Help.Summary("Identity Provider Configuration Management", FeatureFlag.Testing)
+    @Help.Group("Ledger Api Identity Provider Configuration Management")
+    object identity_provider_config extends Helpful {
+      @Help.Summary("Create a new identity provider configuration", FeatureFlag.Testing)
+      @Help.Description(
+        """Create an identity provider configuration. The request will fail if the maximum allowed number of separate configurations is reached."""
+      )
+      def create(
+          identityProviderId: String,
+          isDeactivated: Boolean = false,
+          jwksUrl: String,
+          issuer: String,
+          audience: Option[String],
+      ): IdentityProviderConfig = {
+        val config = check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.IdentityProviderConfigs.Create(
+              identityProviderId =
+                IdentityProviderId.Id(Ref.LedgerString.assertFromString(identityProviderId)),
+              isDeactivated = isDeactivated,
+              jwksUrl = JwksUrl.assertFromString(jwksUrl),
+              issuer = issuer,
+              audience = audience,
+            )
+          )
+        })
+        IdentityProviderConfigClient.fromProtoConfig(config)
+      }
+
+      @Help.Summary("Update an identity provider", FeatureFlag.Testing)
+      @Help.Description("""Update identity provider""")
+      def update(
+          identityProviderId: String,
+          isDeactivated: Boolean = false,
+          jwksUrl: String,
+          issuer: String,
+          audience: Option[String],
+          updateMask: FieldMask,
+      ): IdentityProviderConfig = {
+        val config = check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.IdentityProviderConfigs.Update(
+              domain.IdentityProviderConfig(
+                IdentityProviderId.Id(Ref.LedgerString.assertFromString(identityProviderId)),
+                isDeactivated,
+                JwksUrl(jwksUrl),
+                issuer,
+                audience,
+              ),
+              updateMask,
+            )
+          )
+        })
+        IdentityProviderConfigClient.fromProtoConfig(config)
+      }
+
+      @Help.Summary("Delete an identity provider configuration", FeatureFlag.Testing)
+      @Help.Description("""Delete an existing identity provider configuration""")
+      def delete(identityProviderId: String): Unit = {
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.IdentityProviderConfigs.Delete(
+              IdentityProviderId.Id(Ref.LedgerString.assertFromString(identityProviderId))
+            )
+          )
+        })
+      }
+
+      @Help.Summary("Get an identity provider configuration", FeatureFlag.Testing)
+      @Help.Description("""Get identity provider configuration by id""")
+      def get(identityProviderId: String): IdentityProviderConfig = {
+        val config = check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.IdentityProviderConfigs.Get(
+              IdentityProviderId.Id(Ref.LedgerString.assertFromString(identityProviderId))
+            )
+          )
+        })
+        IdentityProviderConfigClient.fromProtoConfig(config)
+      }
+
+      @Help.Summary("List identity provider configurations", FeatureFlag.Testing)
+      @Help.Description("""List all existing identity provider configurations""")
+      def list(): Seq[IdentityProviderConfig] = {
+        val configs = check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.IdentityProviderConfigs.List()
+          )
+        })
+        configs.map(IdentityProviderConfigClient.fromProtoConfig)
+      }
     }
 
     @Help.Summary("Manage Ledger Api Users", FeatureFlag.Testing)

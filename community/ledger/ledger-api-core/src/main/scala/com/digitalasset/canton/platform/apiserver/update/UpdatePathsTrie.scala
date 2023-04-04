@@ -58,6 +58,7 @@ object UpdatePathsTrie {
     )
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private case class Builder(
       nodes: mutable.SortedMap[String, Builder],
       var exists: Boolean = false,

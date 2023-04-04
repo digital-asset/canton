@@ -6,7 +6,7 @@ package com.digitalasset.canton.ledger.api.validation
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.command_completion_service.{
   CompletionEndRequest,
-  CompletionStreamRequest => GrpcCompletionStreamRequest,
+  CompletionStreamRequest as GrpcCompletionStreamRequest,
 }
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, LedgerOffset, optionalLedgerId}
 import com.digitalasset.canton.ledger.api.messages.command.completion

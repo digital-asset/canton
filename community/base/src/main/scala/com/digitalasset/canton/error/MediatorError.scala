@@ -29,7 +29,7 @@ object MediatorError extends MediatorErrorGroup {
         override val cause: String =
           "Rejected transaction as the mediator did not receive sufficient confirmations within the expected timeframe."
     )(
-        val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict]
+        override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
     ) extends BaseCantonError.Impl(cause)
         with MediatorReject {
 
@@ -59,7 +59,7 @@ object MediatorError extends MediatorErrorGroup {
     final case class Reject(
         override val cause: String,
         override val _v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
-    )(val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict])
+    )(override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type])
         extends BaseCantonError.Impl(cause)
         with MediatorReject
 
@@ -81,7 +81,7 @@ object MediatorError extends MediatorErrorGroup {
       id: String,
       category: ErrorCategory,
       override val _v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
-  )(val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict])
+  )(override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type])
       extends BaseCantonError
       with MediatorReject {
     override def code: ErrorCode =
@@ -99,7 +99,7 @@ object MediatorError extends MediatorErrorGroup {
     final case class Reject(
         override val cause: String,
         override val _v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
-    )(val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict])
+    )(override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type])
         extends Alarm(cause)
         with MediatorReject
 

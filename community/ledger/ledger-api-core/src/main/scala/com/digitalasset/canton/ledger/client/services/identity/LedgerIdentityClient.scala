@@ -23,10 +23,10 @@ final class LedgerIdentityClient(service: LedgerIdentityServiceStub) {
     for {
       ledgerId <- getLedgerId(token)
     } yield {
-      val requirement = ledgerIdRequirement
+      val printable = ledgerIdRequirement.optionalLedgerId.getOrElse("<empty-ledger-id>")
       require(
-        requirement.isAccepted(ledgerId),
-        s"Required Ledger ID ${requirement.optionalLedgerId.get} does not match received Ledger ID $ledgerId",
+        ledgerIdRequirement.isAccepted(ledgerId),
+        s"Received Ledger ID $ledgerId does not match the expected value $printable",
       )
       LedgerId(ledgerId)
     }

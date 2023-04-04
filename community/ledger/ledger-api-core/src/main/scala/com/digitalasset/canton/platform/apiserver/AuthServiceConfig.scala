@@ -61,6 +61,7 @@ object AuthServiceConfig {
   /** "Enables JWT-based authorization, where the JWT is signed by ECDSA256 with the verifying public key loaded from the given X509 certificate file (.crt)" */
   final case class JwtEs256(certificate: String, targetAudience: Option[String])
       extends AuthServiceConfig {
+    @SuppressWarnings(Array("org.wartremover.warts.Null")) // interfacing with java
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) = ECDSAVerifier
       .fromCrtFile(certificate, Algorithm.ECDSA256(_, null), jwtTimestampLeeway)
       .valueOr(err =>
@@ -75,6 +76,7 @@ object AuthServiceConfig {
   /** Enables JWT-based authorization, where the JWT is signed by ECDSA512 with the verifying public key loaded from the given X509 certificate file (.crt) */
   final case class JwtEs512(certificate: String, targetAudience: Option[String])
       extends AuthServiceConfig {
+    @SuppressWarnings(Array("org.wartremover.warts.Null")) // interfacing with java
     private def verifier(jwtTimestampLeeway: Option[JwtTimestampLeeway]) = ECDSAVerifier
       .fromCrtFile(certificate, Algorithm.ECDSA512(_, null), jwtTimestampLeeway)
       .valueOr(err =>

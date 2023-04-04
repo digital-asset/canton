@@ -154,7 +154,6 @@ sealed trait AcsCommitmentProcessorBaseTest
       timeProofs: List[CantonTimestamp],
       contractSetup: Map[LfContractId, (Set[LfPartyId], TimeOfChange, TimeOfChange)],
       topology: Map[ParticipantId, Set[LfPartyId]],
-      killSwitch: => Unit = (),
       optCommitmentStore: Option[AcsCommitmentStore] = None,
       overrideDefaultSortedReconciliationIntervalsProvider: Option[
         SortedReconciliationIntervalsProvider
@@ -201,7 +200,6 @@ sealed trait AcsCommitmentProcessorBaseTest
       sortedReconciliationIntervalsProvider,
       store,
       (_, _) => FutureUnlessShutdown.unit,
-      killSwitch,
       ParticipantTestMetrics.pruning,
       testedProtocolVersion,
       DefaultProcessingTimeouts.testing
@@ -216,7 +214,6 @@ sealed trait AcsCommitmentProcessorBaseTest
       timeProofs: List[CantonTimestamp],
       contractSetup: Map[LfContractId, (Set[LfPartyId], TimeOfChange, TimeOfChange)],
       topology: Map[ParticipantId, Set[LfPartyId]],
-      killSwitch: => Unit = (),
       optCommitmentStore: Option[AcsCommitmentStore] = None,
       overrideDefaultSortedReconciliationIntervalsProvider: Option[
         SortedReconciliationIntervalsProvider
@@ -230,7 +227,6 @@ sealed trait AcsCommitmentProcessorBaseTest
         timeProofs,
         contractSetup,
         topology,
-        killSwitch,
         optCommitmentStore,
         overrideDefaultSortedReconciliationIntervalsProvider,
       )
@@ -285,7 +281,7 @@ class AcsCommitmentProcessorTest
       AcsCommitment.create(domainId, remote, localId, period, cmt, testedProtocolVersion)
 
     snapshotF.flatMap { snapshot =>
-      SignedProtocolMessage.tryCreate(payload, snapshot, testedProtocolVersion)
+      SignedProtocolMessage.trySignAndCreate(payload, snapshot, testedProtocolVersion)
     }
   }
 
@@ -358,7 +354,7 @@ class AcsCommitmentProcessorTest
     }
   }
 
-  val parallelism = PositiveNumeric.tryCreate(2)
+  private val parallelism = PositiveNumeric.tryCreate(2)
 
   "AcsCommitmentProcessor" must {
     "compute commitments as expected" in {
@@ -384,16 +380,15 @@ class AcsCommitmentProcessorTest
           at: CantonTimestampSecond,
       ): Future[Map[ParticipantId, AcsCommitment.CommitmentType]] =
         for {
-          snapshotOrErr <- acs.snapshot(at.forgetRefinement)
-          snapshot <- snapshotOrErr.fold(
-            _ => Future.failed(new RuntimeException(s"Failed to get snapshot at timestamp $at")),
-            sn => Future.successful(sn.map { case (cid, _ts) => cid -> stakeholderLookup(cid) }),
-          )
-          byStkhSet = snapshot.groupBy(_._2).map { case (stkhs, m) =>
-            val h = LtHash16()
-            m.keySet.foreach(cid => h.add(cid.encodeDeterministically.toByteArray))
-            SortedSet(stkhs.toList: _*) -> h.getByteString()
-          }
+          snapshot <- acs.snapshot(at.forgetRefinement)
+          byStkhSet = snapshot
+            .map { case (cid, _ts) => cid -> stakeholderLookup(cid) }
+            .groupBy { case (_, stakeholder) => stakeholder }
+            .map { case (stkhs, m) =>
+              val h = LtHash16()
+              m.keySet.foreach(cid => h.add(cid.encodeDeterministically.toByteArray))
+              SortedSet(stkhs.toList: _*) -> h.getByteString()
+            }
           res <- AcsCommitmentProcessor.commitments(
             localId,
             byStkhSet,

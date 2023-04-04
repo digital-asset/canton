@@ -21,10 +21,12 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
 
+import java.io.ByteArrayOutputStream
 import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 object GrpcParticipantRepairService {
-  private val defaultChunkSize: Int =
+  val defaultChunkSize: Int =
     1024 * 1024 * 2 // 2MB - This is half of the default max message size of gRPC
 
   private val groupBy = 1000
@@ -122,11 +124,44 @@ class GrpcParticipantRepairService(
   /** upload contracts for a party
     */
   override def upload(
-      request: UploadRequest
-  ): Future[UploadResponse] = {
+      responseObserver: StreamObserver[UploadResponse]
+  ): StreamObserver[UploadRequest] = {
+    // TODO(i12481): This buffer will contain the whole ACS snapshot.
+    val outputStream = new ByteArrayOutputStream()
+
+    new StreamObserver[UploadRequest] {
+      override def onNext(value: UploadRequest): Unit = {
+        Try(outputStream.write(value.acsSnapshot.toByteArray)) match {
+          case Failure(exception) =>
+            outputStream.close()
+            responseObserver.onError(exception)
+          case Success(_) =>
+        }
+      }
+
+      override def onError(t: Throwable): Unit = {
+        responseObserver.onError(t)
+        outputStream.close()
+      }
+
+      // TODO(i12481): implement a solution to prevent the client from sending infinite streams
+      override def onCompleted(): Unit = {
+        val res = convertAndAddContractsToStore(ByteString.copyFrom(outputStream.toByteArray))
+        Try(Await.result(res, processingTimeout.unbounded.duration)) match {
+          case Failure(exception) => responseObserver.onError(exception)
+          case Success(_) =>
+            responseObserver.onNext(UploadResponse())
+            responseObserver.onCompleted()
+        }
+        outputStream.close()
+      }
+    }
+  }
+
+  private def convertAndAddContractsToStore(content: ByteString): Future[UploadResponse] = {
     TraceContext.withNewTraceContext { implicit traceContext =>
       val resultE = for {
-        lazyContracts <- AcsUtil.loadFromByteString(request.acsSnapshot)
+        lazyContracts <- AcsUtil.loadFromByteString(content)
         grouped = lazyContracts
           .grouped(GrpcParticipantRepairService.groupBy)
           .map(_.groupMap(_.domainId)(_.contract))

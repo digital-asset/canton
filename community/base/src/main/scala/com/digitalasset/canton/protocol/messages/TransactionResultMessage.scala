@@ -32,8 +32,10 @@ case class TransactionResultMessage private (
     override val domainId: DomainId,
     notificationTree: Option[InformeeTree], // TODO(i12171): remove in 3.0
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransactionResultMessage],
-    val deserializedFrom: Option[ByteString],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TransactionResultMessage.type
+    ],
+    override val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
     with HasProtocolVersionedWrapper[TransactionResultMessage]
     with PrettyPrinting {
@@ -60,7 +62,8 @@ case class TransactionResultMessage private (
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override def companionObj = TransactionResultMessage
+  @transient override protected lazy val companionObj: TransactionResultMessage.type =
+    TransactionResultMessage
 
   protected def toProtoV0: v0.TransactionResultMessage = {
     require(isEquivalentTo(ProtocolVersion.v3))
@@ -235,8 +238,9 @@ object TransactionResultMessage
     )
   }
 
-  implicit val transactionResultMessageCast: SignedMessageContentCast[TransactionResultMessage] = {
-    case m: TransactionResultMessage => Some(m)
-    case _ => None
-  }
+  implicit val transactionResultMessageCast: SignedMessageContentCast[TransactionResultMessage] =
+    SignedMessageContentCast.create[TransactionResultMessage]("TransactionResultMessage") {
+      case m: TransactionResultMessage => Some(m)
+      case _ => None
+    }
 }

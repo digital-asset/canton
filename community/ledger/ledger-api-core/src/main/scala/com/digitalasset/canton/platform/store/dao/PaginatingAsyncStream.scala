@@ -97,14 +97,14 @@ private[platform] object PaginatingAsyncStream {
     )
     Source
       .unfoldAsync[IdPaginationState, Vector[Long]](initialState) { state =>
-        fetchPage(state).map {
-          case empty if empty.isEmpty => None
-          case ids =>
+        fetchPage(state).map { ids =>
+          ids.lastOption.map(last => {
             val nextState = IdPaginationState(
-              fromIdExclusive = ids.last,
+              fromIdExclusive = last,
               pageSize = Math.min(state.pageSize * 4, idPageSizing.maxPageSize),
             )
-            Some(nextState -> ids)
+            nextState -> ids
+          })
         }(ExecutionContext.parasitic)
       }
       .buffer(idPageBufferSize, OverflowStrategy.backpressure)

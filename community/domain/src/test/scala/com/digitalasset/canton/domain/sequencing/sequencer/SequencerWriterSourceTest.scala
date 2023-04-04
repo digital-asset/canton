@@ -319,13 +319,13 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         aliceId <- store.registerMember(alice, CantonTimestamp.Epoch)
         _ <- valueOrFail(
           writer.send(
-            SubmissionRequest(
+            SubmissionRequest.tryCreate(
               alice,
               MessageId.tryCreate("test-unknown-recipients"),
               isRequest = true,
               batch = Batch.fromClosed(
                 testedProtocolVersion,
-                ClosedEnvelope(
+                ClosedEnvelope.tryCreate(
                   ByteString.EMPTY,
                   Recipients.cc(bob),
                   Seq.empty,
@@ -334,6 +334,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
               ),
               maxSequencingTime = CantonTimestamp.MaxValue,
               timestampOfSigningKey = None,
+              aggregationRule = None,
               protocolVersion = testedProtocolVersion,
             )
           )

@@ -9,7 +9,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update.TransactionAccepted
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 
 object UpdateToMeteringDbDto {
 
@@ -24,6 +24,8 @@ object UpdateToMeteringDbDto {
 
     if (input.nonEmpty) {
 
+      // TODO(i11665): Replace with NonEmpty after sorting out the dependencies
+      @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
       val ledgerOffset = input.last._1.toHexString
 
       (for {

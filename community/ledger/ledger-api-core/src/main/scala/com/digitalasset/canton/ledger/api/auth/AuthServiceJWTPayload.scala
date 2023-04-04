@@ -228,7 +228,7 @@ object AuthServiceJWTCodec {
             StandardJWTPayload(
               issuer = readOptionalString(propIss, fields),
               participantId = Some(participantId),
-              userId = readOptionalString(propSub, fields).get, // guarded by if-clause above
+              userId = readString(propSub, fields), // guarded by if-clause above
               exp = readInstant(propExp, fields),
               format = StandardJWTTokenFormat.ParticipantId,
               audiences =
@@ -265,10 +265,11 @@ object AuthServiceJWTCodec {
           audiences = List.empty, // we do not read or extract audience claims for Scope-based tokens
         )
       } else {
-        if (scope.nonEmpty)
+        scope.foreach(s =>
           logger.warn(
-            s"Access token with unknown scope \"${scope.get}\" is being parsed as a custom claims token. Issue tokens with adjusted or no scope to get rid of this warning."
+            s"Access token with unknown scope \"$s\" is being parsed as a custom claims token. Issue tokens with adjusted or no scope to get rid of this warning."
           )
+        )
         if (!fields.contains(oidcNamespace)) {
           // Legacy format
           logger.warn(s"Token ${value.compactPrint} is using a deprecated JWT payload format")

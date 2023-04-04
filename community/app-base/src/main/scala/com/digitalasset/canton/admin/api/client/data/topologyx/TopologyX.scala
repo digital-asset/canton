@@ -3,8 +3,11 @@
 
 package com.digitalasset.canton.admin.api.client.data.topologyx
 
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.ProtoDeserializationError.RefinedDurationConversionError
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -35,7 +38,8 @@ final case class BaseResult(
     validFrom: Instant,
     validUntil: Option[Instant],
     operation: TopologyChangeOpX,
-    serialized: ByteString,
+    transactionHash: ByteString,
+    serial: PositiveInt,
     signedBy: NonEmpty[Seq[Fingerprint]],
 )
 
@@ -46,13 +50,24 @@ object BaseResult {
       validFrom <- ProtoConverter.InstantConverter.fromProtoPrimitive(protoValidFrom)
       validUntil <- value.validUntil.traverse(ProtoConverter.InstantConverter.fromProtoPrimitive)
       operation <- TopologyChangeOpX.fromProtoV2(value.operation)
+      serial <- PositiveInt
+        .create(value.serial)
+        .leftMap(e => RefinedDurationConversionError("serial", e.message))
       signedBy <-
         ProtoConverter.parseRequiredNonEmpty(
           Fingerprint.fromProtoPrimitive,
           "signed_by_fingerprints",
           value.signedByFingerprints,
         )
-    } yield BaseResult(value.store, validFrom, validUntil, operation, value.serialized, signedBy)
+    } yield BaseResult(
+      value.store,
+      validFrom,
+      validUntil,
+      operation,
+      value.transactionHash,
+      serial,
+      signedBy,
+    )
 }
 
 final case class ListNamespaceDelegationResult(

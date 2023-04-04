@@ -18,7 +18,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
 import com.digitalasset.canton.platform.store.dao.events.*

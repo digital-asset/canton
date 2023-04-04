@@ -8,7 +8,7 @@ import akka.stream.scaladsl.Flow
 import com.daml.api.util.TimeProvider
 import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
 import com.daml.lf.data.Ref
-import com.daml.lf.transaction.{GlobalKey => LfGlobalKey, Transaction => LfTransaction}
+import com.daml.lf.transaction.{GlobalKey as LfGlobalKey, Transaction as LfTransaction}
 import com.daml.lf.value.Value.ContractId
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.InstrumentedGraph.*

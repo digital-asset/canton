@@ -43,7 +43,9 @@ final case class TransferOutViewTree private (
     commonData: MerkleTree[TransferOutCommonData],
     view: MerkleTree[TransferOutView],
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutViewTree],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TransferOutViewTree.type
+    ],
     hashOps: HashOps,
 ) extends GenTransferViewTree[
       TransferOutCommonData,
@@ -70,6 +72,9 @@ final case class TransferOutViewTree private (
     param("common data", _.commonData),
     param("view", _.view),
   )
+
+  @transient override protected lazy val companionObj: TransferOutViewTree.type =
+    TransferOutViewTree
 }
 
 object TransferOutViewTree
@@ -150,9 +155,11 @@ final case class TransferOutCommonData private (
     with HasProtocolVersionedWrapper[TransferOutCommonData]
     with ProtocolVersionedMemoizedEvidence {
 
-  override def companionObj = TransferOutCommonData
+  @transient override protected lazy val companionObj: TransferOutCommonData.type =
+    TransferOutCommonData
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutCommonData] =
+  override val representativeProtocolVersion
+      : RepresentativeProtocolVersion[TransferOutCommonData.type] =
     TransferOutCommonData.protocolVersionRepresentativeFor(protocolVersion.v)
 
   protected def toProtoV0: v0.TransferOutCommonData =
@@ -313,7 +320,7 @@ final case class TransferOutView private (
     workflowId: Option[LfWorkflowId],
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutView],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutView.type],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferOutView](hashOps)
     with HasProtocolVersionedWrapper[TransferOutView]
@@ -327,7 +334,7 @@ final case class TransferOutView private (
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferOutView
 
-  override def companionObj = TransferOutView
+  @transient override protected lazy val companionObj: TransferOutView.type = TransferOutView
 
   protected def toProtoV0: v0.TransferOutView =
     v0.TransferOutView(

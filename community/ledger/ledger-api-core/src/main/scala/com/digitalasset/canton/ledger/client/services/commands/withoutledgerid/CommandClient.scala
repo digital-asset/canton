@@ -6,7 +6,7 @@ package com.digitalasset.canton.ledger.client.services.commands.withoutledgerid
 import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
-import com.codahale.{metrics => codahale}
+import com.codahale.{metrics as codahale}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.command_completion_service.CommandCompletionServiceGrpc.CommandCompletionServiceStub
 import com.daml.ledger.api.v1.command_completion_service.{

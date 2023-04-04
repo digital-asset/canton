@@ -43,7 +43,8 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
   // Align the protocol version with the common data's protocol version
   lazy val protocolVersion: TargetProtocolVersion = commonData.targetProtocolVersion
 
-  lazy val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInMediatorMessage] =
+  override lazy val representativeProtocolVersion
+      : RepresentativeProtocolVersion[TransferInMediatorMessage.type] =
     TransferInMediatorMessage.protocolVersionRepresentativeFor(protocolVersion.v)
 
   override def domainId: DomainId = commonData.targetDomain
@@ -105,6 +106,9 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
   override def viewType: ViewType = ViewType.TransferInViewType
 
   override def pretty: Pretty[TransferInMediatorMessage] = prettyOfClass(unnamedParam(_.tree))
+
+  @transient override protected lazy val companionObj: TransferInMediatorMessage.type =
+    TransferInMediatorMessage
 }
 
 object TransferInMediatorMessage

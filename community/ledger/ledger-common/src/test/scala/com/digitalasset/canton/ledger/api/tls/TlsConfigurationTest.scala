@@ -8,6 +8,7 @@ import com.digitalasset.canton.ledger.api.tls.TlsVersion.TlsVersion
 import io.netty.handler.ssl.{OpenSslServerContext, SslContext}
 import org.apache.commons.io.IOUtils
 import org.scalatest.BeforeAndAfterEach
+import org.scalatest.Inside.inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -174,8 +175,10 @@ class TlsConfigurationTest extends AnyWordSpec with Matchers with BeforeAndAfter
   private def getServerEnabledProtocols(minTls: Option[TlsVersion]): Seq[String] = {
     val sslContext: Option[SslContext] = configWithProtocols(minTls).flatMap(_.server)
     assume(sslContext.isDefined)
-    assume(sslContext.get.isInstanceOf[OpenSslServerContext])
-    TlsInfo.fromSslContext(sslContext.get).enabledProtocols
+    inside(sslContext) { case Some(theContext) =>
+      assume(theContext.isInstanceOf[OpenSslServerContext])
+      TlsInfo.fromSslContext(theContext).enabledProtocols
+    }
   }
 
   private def disableChecks(): Unit = {

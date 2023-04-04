@@ -22,6 +22,7 @@ private[postgresql] trait PGStringArrayBase[FROM, TO] extends Field[FROM, TO, St
 private[postgresql] case class PGStringArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[String]]
 ) extends PGStringArrayBase[FROM, Option[Iterable[String]]] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Iterable[String]] => String = _.map(convertBase).orNull
 }
 
@@ -42,6 +43,7 @@ private[postgresql] case class PGIntArray[FROM](extract: StringInterning => FROM
 private[postgresql] case class PGIntArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[Int]]
 ) extends PGIntArrayBase[FROM, Option[Iterable[Int]]] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Iterable[Int]] => String = _.map(convertBase).orNull
 }
 
@@ -51,5 +53,6 @@ private[postgresql] case class PGSmallintOptional[FROM](
   override def selectFieldExpression(inputFieldName: String): String =
     s"$inputFieldName::smallint"
 
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Int] => Integer = _.map(Int.box).orNull
 }

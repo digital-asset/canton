@@ -12,6 +12,7 @@ trait ConcurrencyLimiter {
   def execute[T](task: => Future[T]): Future[T]
 }
 
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
 class QueueBasedConcurrencyLimiter(
     parallelism: Int,
     executionContext: ExecutionContext,
@@ -41,6 +42,7 @@ class QueueBasedConcurrencyLimiter(
     promise.future
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.While"))
   private def startTasks(): Unit = synchronized {
     while (running < parallelism && waiting.nonEmpty) {
       val head = waiting.dequeue()

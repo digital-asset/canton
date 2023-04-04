@@ -15,10 +15,10 @@ import com.daml.scalautil.future.FutureConversion.CompletionStageConversionOps
 import com.daml.timer.Delayed
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
-import com.digitalasset.canton.ledger.api.domain.{Commands => ApiCommands, LedgerId, SubmissionId}
+import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, LedgerId, SubmissionId}
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscription

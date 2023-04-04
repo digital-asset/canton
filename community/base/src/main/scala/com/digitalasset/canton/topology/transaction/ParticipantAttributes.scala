@@ -52,6 +52,8 @@ object ParticipantPermission {
     val level = 3
     val toProtoEnum: v0.ParticipantPermission = v0.ParticipantPermission.Observation
   }
+  // in 3.0, participants can't be disabled anymore. they can be purged for good
+  @Deprecated(since = "2.7.0")
   case object Disabled extends ParticipantPermission {
     override def isActive = false
     val level = 4

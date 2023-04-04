@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import cats.syntax.either.*
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
@@ -111,10 +109,10 @@ final case class TopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMa
     serial: PositiveInt,
     mapping: M,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TopologyTransactionX.type
     ],
-    val deserializedFrom: Option[ByteString] = None,
+    override val deserializedFrom: Option[ByteString] = None,
 ) extends ProtocolVersionedMemoizedEvidence
     with PrettyPrinting
     with HasProtocolVersionedWrapper[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] {
@@ -173,7 +171,8 @@ final case class TopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMa
       unnamedParam(_.mapping),
     )
 
-  override protected def companionObj: TopologyTransactionX.type = TopologyTransactionX
+  @transient override protected lazy val companionObj: TopologyTransactionX.type =
+    TopologyTransactionX
 }
 
 object TopologyTransactionX
@@ -211,7 +210,7 @@ object TopologyTransactionX
     val v2.TopologyTransactionX(opP, serialP, mappingP) = transactionP
     for {
       mapping <- ProtoConverter.parseRequired(TopologyMappingX.fromProtoV2, "mapping", mappingP)
-      serial <- PositiveInt.create(serialP).leftMap(ProtoDeserializationError.InvariantViolation(_))
+      serial <- ProtoConverter.parsePositiveInt(serialP)
       op <- TopologyChangeOpX.fromProtoV2(opP)
     } yield TopologyTransactionX(op, serial, mapping)(
       protocolVersionRepresentativeFor(ProtoVersion(2)),

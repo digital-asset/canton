@@ -25,8 +25,9 @@ private[dao] final class CommandCompletionsReader(
     pageSize: Int,
 ) extends LedgerDaoCommandCompletionsReader {
 
+  @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   private def offsetFor(response: CompletionStreamResponse): Offset = {
-    // It would nice to obtain the offset such that it's obvious that it always exists (rather then relaying on calling .get)
+    // It would be nice to obtain the offset such that it's obvious that it always exists (rather then relaying on calling .get)
     ApiOffset.assertFromString(response.checkpoint.get.offset.get.getAbsolute)
   }
 

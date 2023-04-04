@@ -62,6 +62,8 @@ class ContractStateCaches(
       val keyMappings = keyMappingsBuilder.result()
       val contractMappings = contractMappingsBuilder.result()
 
+      // TODO(i11665): Replace with NonEmpty after sorting out the dependencies
+      @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
       val validAt = eventsBatch.last.eventOffset
       if (keyMappings.nonEmpty) {
         keyState.putBatch(validAt, keyMappings)
