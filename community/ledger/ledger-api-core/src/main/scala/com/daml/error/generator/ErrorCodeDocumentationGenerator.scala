@@ -8,7 +8,7 @@ import org.reflections.Reflections
 
 import scala.jdk.CollectionConverters.*
 import scala.reflect.runtime.universe.*
-import scala.reflect.runtime.{universe => ru}
+import scala.reflect.runtime.{universe as ru}
 
 /** Utility that indexes all error code implementations.
   */
@@ -150,17 +150,20 @@ object ErrorCodeDocumentationGenerator {
   private[generator] def parseScalaDeprecatedAnnotation(
       annotation: ru.Annotation
   ): DeprecatedItem = {
-    val args: Map[String, String] = annotation.tree.children.tail.map { x: ru.Tree =>
-      x match {
-        case ru.NamedArg(
-              ru.Ident(ru.TermName(argName)),
-              ru.Literal(ru.Constant(text: String)),
-            ) =>
-          argName -> text.stripMargin
-        case other =>
-          sys.error(s"Unexpected tree: $other")
+    val args: Map[String, String] = annotation.tree.children
+      .drop(1)
+      .map { x: ru.Tree =>
+        x match {
+          case ru.NamedArg(
+                ru.Ident(ru.TermName(argName)),
+                ru.Literal(ru.Constant(text: String)),
+              ) =>
+            argName -> text.stripMargin
+          case other =>
+            sys.error(s"Unexpected tree: $other")
+        }
       }
-    }.toMap
+      .toMap
     DeprecatedItem(message = args.getOrElse("message", ""), since = args.get("since"))
   }
 
@@ -183,6 +186,7 @@ object ErrorCodeDocumentationGenerator {
     )
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private def findInstancesOf[T: ru.TypeTag](packagePrefixes: Array[String]): Seq[T] =
     new Reflections(packagePrefixes)
       .getSubTypesOf(runtimeMirror.runtimeClass(ru.typeOf[T]))
@@ -196,7 +200,7 @@ object ErrorCodeDocumentationGenerator {
     any.getClass.getSimpleName.replace("$", "")
 
   private def parseAnnotationValue(tree: ru.Tree): String = {
-    tree.children.tail match {
+    tree.children.drop(1) match {
       case ru.Literal(ru.Constant(text: String)) :: Nil => text.stripMargin
       case other =>
         sys.error(
@@ -208,6 +212,7 @@ object ErrorCodeDocumentationGenerator {
   private def getAnnotationTypeName(annotation: ru.Annotation): String =
     annotation.tree.tpe.toString
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private class SettableOnce[T >: Null <: AnyRef] {
     private var v: Option[T] = None
 

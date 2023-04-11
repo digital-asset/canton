@@ -70,8 +70,9 @@ message BaseResult {
   google.protobuf.Timestamp valid_from = 3;
   google.protobuf.Timestamp valid_until = 4;
   com.digitalasset.canton.protocol.v2.TopologyChangeOpX operation = 5;
-  bytes serialized = 6;
-  repeated string signed_by_fingerprints = 7;
+  bytes transaction_hash = 6;
+  int32 serial = 7;
+  repeated string signed_by_fingerprints = 8;
 }
 
 message ListNamespaceDelegationRequest {

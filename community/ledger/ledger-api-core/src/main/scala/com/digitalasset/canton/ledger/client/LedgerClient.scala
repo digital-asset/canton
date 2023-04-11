@@ -5,6 +5,7 @@ package com.digitalasset.canton.ledger.client
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.active_contracts_service.ActiveContractsServiceGrpc
+import com.daml.ledger.api.v1.admin.identity_provider_config_service.IdentityProviderConfigServiceGrpc
 import com.daml.ledger.api.v1.admin.package_management_service.PackageManagementServiceGrpc
 import com.daml.ledger.api.v1.admin.participant_pruning_service.ParticipantPruningServiceGrpc
 import com.daml.ledger.api.v1.admin.party_management_service.PartyManagementServiceGrpc
@@ -24,6 +25,7 @@ import com.digitalasset.canton.ledger.client.configuration.{
 }
 import com.digitalasset.canton.ledger.client.services.acs.ActiveContractSetClient
 import com.digitalasset.canton.ledger.client.services.admin.{
+  IdentityProviderConfigClient,
   PackageManagementClient,
   ParticipantPruningManagementClient,
   PartyManagementClient,
@@ -69,6 +71,11 @@ final class LedgerClient private (
 
   val commandServiceClient: SynchronousCommandClient =
     new SynchronousCommandClient(LedgerClient.stub(CommandServiceGrpc.stub(channel), config.token))
+
+  val identityProviderConfigClient: IdentityProviderConfigClient =
+    new IdentityProviderConfigClient(
+      LedgerClient.stub(IdentityProviderConfigServiceGrpc.stub(channel), config.token)
+    )
 
   val packageClient: PackageClient =
     new PackageClient(ledgerId, LedgerClient.stub(PackageServiceGrpc.stub(channel), config.token))

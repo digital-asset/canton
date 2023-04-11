@@ -4,7 +4,7 @@
 package com.digitalasset.canton.ledger.grpc
 
 import com.google.rpc.error_details.ErrorInfo
-import com.google.rpc.status.{Status => StatusProto}
+import com.google.rpc.status.{Status as StatusProto}
 
 import scala.util.Try
 

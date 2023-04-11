@@ -121,7 +121,7 @@ object CommunityConfigValidations
     }
 
     withStorageConfigs
-      .groupBy(_._1)
+      .groupBy { case (dbAccess, _, _) => dbAccess }
       .fmap(_.map { case (_, name, config) =>
         (name, config)
       })

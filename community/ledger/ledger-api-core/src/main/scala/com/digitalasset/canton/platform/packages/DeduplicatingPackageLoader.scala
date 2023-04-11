@@ -28,6 +28,7 @@ private[platform] class DeduplicatingPackageLoader() {
       delegate: PackageId => Future[Option[DamlLf.Archive]],
       metric: Timer,
   )(implicit ec: ExecutionContext): Future[Option[Package]] = {
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var gettingPackage = false
 
     val promise = packagePromises.computeIfAbsent(

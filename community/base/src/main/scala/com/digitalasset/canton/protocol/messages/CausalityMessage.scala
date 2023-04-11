@@ -31,8 +31,8 @@ final case class CausalityMessage(
     domainId: DomainId,
     transferId: TransferId,
     clock: VectorClock,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage])
-    extends ProtocolMessage
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityMessage.type])
+    extends UnsignedProtocolMessage
     with PrettyPrinting
     with ProtocolMessageV0
     with ProtocolMessageV1
@@ -59,21 +59,24 @@ final case class CausalityMessage(
       param("Transfer ID ", _.transferId),
       param("Vector clock", _.clock),
     )
+
+  @transient override protected lazy val companionObj: CausalityMessage.type = CausalityMessage
 }
 
 object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.CausalityMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.CausalityMessage)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
   )
 
-  implicit val causalityMessageCast: ProtocolMessageContentCast[CausalityMessage] = {
-    case cm: CausalityMessage => Some(cm)
-    case _ => None
-  }
+  implicit val causalityMessageCast: ProtocolMessageContentCast[CausalityMessage] =
+    ProtocolMessageContentCast.create[CausalityMessage]("CausalityMessage") {
+      case cm: CausalityMessage => Some(cm)
+      case _ => None
+    }
 
   def apply(
       domainId: DomainId,

@@ -15,7 +15,6 @@ import com.daml.tracing
 import com.daml.tracing.Spans
 import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.configuration.TransactionTreeStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
@@ -35,6 +34,7 @@ import com.digitalasset.canton.platform.store.utils.{
   QueueBasedConcurrencyLimiter,
   Telemetry,
 }
+import com.digitalasset.canton.platform.{ApiOffset, Party}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.mutable.ArrayBuffer
@@ -268,8 +268,8 @@ class TransactionsTreeStreamReader(
         deserializeLfValues(_, eventProjectionProperties)
       )
       .mapConcat { events =>
-        val response = TransactionConversions.toGetTransactionTreesResponse(events)
-        response.map(r => offsetFor(r) -> r)
+        val responses = TransactionConversions.toGetTransactionTreesResponse(events)
+        responses.map { case (offset, response) => ApiOffset.assertFromString(offset) -> response }
       }
     sourceOfTreeTransactions
   }

@@ -29,6 +29,9 @@ class MaxInFlight[I, O](maxInFlight: Int, capacityCounter: Counter, lengthCounte
   val in2: Inlet[O] = Inlet[O]("in2")
   val out2: Outlet[O] = Outlet[O]("out2")
 
+  @SuppressWarnings(
+    Array("org.wartremover.warts.Var")
+  ) // Ok to keep mutable state in GraphStageLogic
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) {
 

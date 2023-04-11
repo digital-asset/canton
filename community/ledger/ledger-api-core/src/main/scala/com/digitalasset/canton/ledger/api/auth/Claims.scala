@@ -86,21 +86,22 @@ object ClaimSet {
   ) extends ClaimSet {
 
     def validForLedger(id: String): Either[AuthorizationError, Unit] =
-      Either.cond(ledgerId.forall(_ == id), (), AuthorizationError.InvalidLedger(ledgerId.get, id))
+      ledgerId match {
+        case Some(l) if l != id => Left(AuthorizationError.InvalidLedger(l, id))
+        case _ => Right(())
+      }
 
     def validForParticipant(id: String): Either[AuthorizationError, Unit] =
-      Either.cond(
-        participantId.forall(_ == id),
-        (),
-        AuthorizationError.InvalidParticipant(participantId.get, id),
-      )
+      participantId match {
+        case Some(p) if p != id => Left(AuthorizationError.InvalidParticipant(p, id))
+        case _ => Right(())
+      }
 
     def validForApplication(id: String): Either[AuthorizationError, Unit] =
-      Either.cond(
-        applicationId.forall(_ == id),
-        (),
-        AuthorizationError.InvalidApplication(applicationId.get, id),
-      )
+      applicationId match {
+        case Some(a) if a != id => Left(AuthorizationError.InvalidApplication(a, id))
+        case _ => Right(())
+      }
 
     /** Returns false if the expiration timestamp exists and is greater than or equal to the current time */
     def notExpired(
@@ -112,11 +113,10 @@ object ClaimSet {
           .flatMap(l => l.expiresAt.orElse(l.default))
           .map(leeway => now.minus(Duration.ofSeconds(leeway)))
           .getOrElse(now)
-      Either.cond(
-        expiration.forall(relaxedNow.isBefore),
-        (),
-        AuthorizationError.Expired(expiration.get, now),
-      )
+      expiration match {
+        case Some(e) if !relaxedNow.isBefore(e) => Left(AuthorizationError.Expired(e, now))
+        case _ => Right(())
+      }
     }
 
     /** Returns true if the set of claims authorizes the user to use admin services, unless the claims expired */

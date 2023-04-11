@@ -18,6 +18,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   NaiveRequestTracker,
   RequestTracker,
 }
+import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   WatermarkLookup,
@@ -161,6 +162,9 @@ class SyncDomainEphemeralState(
       ),
     )(logger)
   }
+
+  lazy val inFlightSubmissionTrackerDomainState: InFlightSubmissionTrackerDomainState =
+    InFlightSubmissionTrackerDomainState.fromSyncDomainState(persistentState, this)
 
 }
 

@@ -87,10 +87,7 @@ class SyncStateInspection(
           .semiflatMap(cleanRequest =>
             state.activeContractStore
               .contractSnapshot(contractIds, cleanRequest.timestamp)
-              .fold(
-                err => sys.error(s"acs snapshot failed for $alias: $err"),
-                _.keySet.map(_ -> alias),
-              )
+              .map(_.keySet.map(_ -> alias))
           )
           .getOrElse(List.empty[(LfContractId, DomainAlias)])
       }
@@ -110,12 +107,12 @@ class SyncStateInspection(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] = {
-    val persistentState = syncDomainPersistentStateManager.getByAlias(domain)
-    EitherT(
-      persistentState
-        .map(currentAcsSnapshot)
-        .getOrElse(Future.successful(Left(SyncStateInspection.NoSuchDomain(domain))))
-    )
+    syncDomainPersistentStateManager.getByAlias(domain) match {
+      case Some(persistentState) =>
+        EitherT.liftF(currentAcsSnapshot(persistentState))
+      case None =>
+        EitherT.leftT(SyncStateInspection.NoSuchDomain(domain))
+    }
   }
 
   /** searches the pcs and returns the contract and activeness flag */
@@ -132,12 +129,8 @@ class SyncStateInspection(
         // not failing on unknown domain to allow inspection of unconnected domains
         persistentState
           .map(currentAcsSnapshot)
-          .getOrElse(Future.successful(Right(Map.empty[LfContractId, CantonTimestamp])))
-      ) match {
-        case Left(err) =>
-          throw new IllegalArgumentException(s"failed to load ACS for ${domain} due to error $err")
-        case Right(map) => map
-      }
+          .getOrElse(Future.successful(Map.empty[LfContractId, CantonTimestamp]))
+      )
 
     timeouts.inspection.await("finding contracts in the persistent state")(
       getOrFail(persistentState, domain).contractStore
@@ -221,10 +214,10 @@ class SyncStateInspection(
     if (filterDomain(domainId)) {
       for {
         // fetch acs
-        acs <- EitherT(timestamp match {
+        acs <- EitherT.liftF(timestamp match {
           case Some(value) => state.activeContractStore.snapshot(value)
           case None => currentAcsSnapshot(state)
-        }).leftMap(_.toString)
+        })
         useProtocolVersion <- protocolVersion match {
           case Some(pv) if pv.isSupported => EitherT.right(Future.successful(pv))
           case Some(pv) =>
@@ -238,7 +231,9 @@ class SyncStateInspection(
             )
         }
         // sort acs by coid (for easier comparison ...)
-        grouped = acs.toList.sortBy(_._1.coid).grouped(batchSize.value)
+        grouped = acs.toList
+          .sortBy { case (contractId, _) => contractId.coid }
+          .grouped(batchSize.value)
         // fetch contracts
         numberOfContracts <- EitherT.right(MonadUtil.sequentialTraverse(grouped.toSeq) { batch =>
           state.contractStore
@@ -300,11 +295,11 @@ class SyncStateInspection(
 
   def currentAcsSnapshot(persistentState: SyncDomainPersistentState)(implicit
       traceContext: TraceContext
-  ): Future[Either[AcsError, Map[LfContractId, CantonTimestamp]]] =
+  ): Future[Map[LfContractId, CantonTimestamp]] =
     for {
       cursorHeadO <- persistentState.requestJournalStore.preheadClean
       snapshot <- cursorHeadO.fold(
-        Future.successful(Either.right[AcsError, Map[LfContractId, CantonTimestamp]](Map.empty))
+        Future.successful(Map.empty[LfContractId, CantonTimestamp])
       )(cursorHead => persistentState.activeContractStore.snapshot(cursorHead.timestamp))
     } yield snapshot
 

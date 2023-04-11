@@ -8,6 +8,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.PositiveStoredTopologyTransactionsX
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactionsX,
@@ -23,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMappingX,
   TopologyTransactionX,
 }
+import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -72,4 +74,13 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]] = ???
+
+  override def findPositiveTransactions(
+      asOf: CantonTimestamp,
+      asOfInclusive: Boolean,
+      isProposal: Boolean,
+      types: Seq[TopologyMappingX.Code],
+      filterUid: Option[Seq[UniqueIdentifier]],
+      filterNamespace: Option[Seq[Namespace]],
+  )(implicit traceContext: TraceContext): Future[PositiveStoredTopologyTransactionsX] = ???
 }

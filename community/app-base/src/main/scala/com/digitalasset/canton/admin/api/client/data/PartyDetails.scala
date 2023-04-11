@@ -5,14 +5,14 @@ package com.digitalasset.canton.admin.api.client.data
 
 import com.daml.ledger.api.v1.admin.object_meta.ObjectMeta as ProtoObjectMeta
 import com.daml.ledger.api.v1.admin.party_management_service.PartyDetails as ProtoPartyDetails
-import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.PartyId
 
 import scala.util.control.NoStackTrace
 
 /** Represents a party details value exposed in the Canton console
   */
 final case class PartyDetails(
-    party: LfPartyId,
+    party: PartyId,
     displayName: String,
     isLocal: Boolean,
     annotations: Map[String, String],
@@ -20,7 +20,7 @@ final case class PartyDetails(
 
 object PartyDetails {
   def fromProtoPartyDetails(details: ProtoPartyDetails): PartyDetails = PartyDetails(
-    party = LfPartyId.assertFromString(details.party),
+    party = PartyId.tryFromProtoPrimitive(details.party),
     displayName = details.displayName,
     isLocal = details.isLocal,
     annotations = details.localMetadata.fold(Map.empty[String, String])(_.annotations),

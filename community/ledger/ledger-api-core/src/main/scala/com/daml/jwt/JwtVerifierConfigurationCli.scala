@@ -14,6 +14,7 @@ import scala.util.Try
 //              Therefore not moving this package and file.
 //              Consider moving this file closer to triggers as it is moving over as a next step of repo consolidation.
 //              Note: there is a JwtVerifierConfigurationCliSpec too.
+@SuppressWarnings(Array("org.wartremover.warts.Null")) // interfacing with java
 object JwtVerifierConfigurationCli {
   def parse[C](parser: scopt.OptionParser[C])(setter: (JwtVerifierBase, C) => C): Unit = {
     def setJwtVerifier(jwtVerifier: JwtVerifierBase, c: C): C = setter(jwtVerifier, c)

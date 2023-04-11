@@ -43,7 +43,8 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
   // Align the protocol version with the common data's protocol version
   lazy val protocolVersion: TargetProtocolVersion = commonData.targetProtocolVersion
 
-  lazy val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInMediatorMessage] =
+  override lazy val representativeProtocolVersion
+      : RepresentativeProtocolVersion[TransferInMediatorMessage.type] =
     TransferInMediatorMessage.protocolVersionRepresentativeFor(protocolVersion.v)
 
   override def domainId: DomainId = commonData.targetDomain
@@ -105,17 +106,20 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
   override def viewType: ViewType = ViewType.TransferInViewType
 
   override def pretty: Pretty[TransferInMediatorMessage] = prettyOfClass(unnamedParam(_.tree))
+
+  @transient override protected lazy val companionObj: TransferInMediatorMessage.type =
+    TransferInMediatorMessage
 }
 
 object TransferInMediatorMessage
     extends HasProtocolVersionedWithContextCompanion[TransferInMediatorMessage, HashOps] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.TransferInMediatorMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransferInMediatorMessage)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.TransferInMediatorMessage)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferInMediatorMessage)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
       _.toProtoV1.toByteString,
     ),

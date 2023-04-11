@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol
 import cats.data.{EitherT, NonEmptyChain}
 import cats.implicits.catsStdInstancesForFuture
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
@@ -475,13 +474,107 @@ abstract class ProtocolProcessor[
     FutureUtil.doNotAwait(removeF, s"Failed to remove the pending submission $submissionId")
   }
 
+  private def toHandlerRequest(
+      ts: CantonTimestamp,
+      result: EitherT[
+        FutureUnlessShutdown,
+        steps.RequestError,
+        EitherT[FutureUnlessShutdown, steps.RequestError, Unit],
+      ],
+  )(implicit traceContext: TraceContext): HandlerResult = {
+    // We discard the lefts because they are logged by `logRequestWarnings`
+    logRequestWarnings(ts, result)
+      .map(innerAsync => AsyncResult(innerAsync.getOrElse(())))
+      .getOrElse(AsyncResult.immediate)
+  }
+
+  private[this] def logRequestWarnings(
+      resultTimestamp: CantonTimestamp,
+      result: EitherT[
+        FutureUnlessShutdown,
+        steps.RequestError,
+        EitherT[FutureUnlessShutdown, steps.RequestError, Unit],
+      ],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, steps.RequestError, EitherT[
+    FutureUnlessShutdown,
+    steps.RequestError,
+    Unit,
+  ]] = {
+
+    def logRequestWarnings[T](
+        result: EitherT[FutureUnlessShutdown, steps.RequestError, T],
+        default: T,
+    ): EitherT[FutureUnlessShutdown, steps.RequestError, T] = {
+      val warningsLogged = EitherTUtil.leftSubflatMap(result) { processorError =>
+        processorError.underlyingProcessorError() match {
+          case err => Left(processorError)
+        }
+      }
+      EitherTUtil.logOnErrorU(
+        warningsLogged,
+        s"${steps.requestKind} ${RequestId(resultTimestamp)}: Failed to process request",
+      )
+    }
+
+    logRequestWarnings(
+      result.map(logRequestWarnings(_, ())),
+      EitherT.pure[FutureUnlessShutdown, steps.RequestError](()),
+    )
+  }
+
   override def processRequest(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
       batch: steps.RequestBatch,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): HandlerResult = {
 
+    val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediatorId) = batch
+    val requestId = RequestId(ts)
+
+    if (precedesCleanReplay(requestId)) {
+      // The `MessageDispatcher` should not call this method for requests before the clean replay starting point
+      HandlerResult.synchronous(
+        ErrorUtil.internalErrorAsyncShutdown(
+          new IllegalArgumentException(
+            s"Request with timestamp $ts precedes the clean replay starting point"
+          )
+        )
+      )
+    } else {
+      logger.info(show"Processing ${steps.requestKind.unquoted} request at $requestId.")
+      val processedET = performUnlessClosingEitherU(
+        s"ProtocolProcess.processRequest(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
+      ) {
+        // registering the request has to be done synchronously
+        EitherT
+          .rightT[Future, ProtocolProcessor.this.steps.RequestError](
+            ephemeral.phase37Synchronizer
+              .registerRequest(steps.requestType)(RequestId(ts))
+          )
+          .map { handleRequestData =>
+            performRequestProcessing(ts, rc, sc, handleRequestData, batch)
+          }
+      }
+      toHandlerRequest(ts, processedET)
+    }
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  @VisibleForTesting
+  private[protocol] def performRequestProcessing(
+      ts: CantonTimestamp,
+      rc: RequestCounter,
+      sc: SequencerCounter,
+      handleRequestData: Phase37Synchronizer.PendingRequestDataHandle[
+        steps.requestType.PendingRequestData
+      ],
+      batch: steps.RequestBatch,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
     val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediatorId) = batch
     val requestId = RequestId(ts)
 
@@ -501,94 +594,85 @@ abstract class ProtocolProcessor[
       (malformedPayloads, viewsWithCorrectRootHash)
     }
 
-    if (precedesCleanReplay(requestId)) {
-      // The `MessageDispatcher` should not call this method for requests before the clean replay starting point
-      ErrorUtil.internalErrorAsyncShutdown(
-        new IllegalArgumentException(
-          s"Request with timestamp $ts precedes the clean replay starting point"
+    performUnlessClosingEitherU(
+      s"ProtocolProcess.processRequest(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
+    ) {
+      for {
+        snapshot <- EitherT.right(
+          crypto.awaitSnapshotSupervised(s"await crypto snapshot $ts")(ts)
         )
-      )
-    } else {
-      logger.info(show"Processing ${steps.requestKind.unquoted} request at $requestId.")
-      performUnlessClosingF(
-        s"ProtocolProcess.processRequest(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
-      ) {
-        val resultF = for {
-          snapshot <- EitherT.right(
-            crypto.awaitSnapshotSupervised(s"await crypto snapshot $ts")(ts)
-          )
-          domainParameters <- EitherT(
-            snapshot.ipsSnapshot
-              .findDynamicDomainParameters()
-              .map(
-                _.leftMap(_ =>
-                  steps.embedRequestError(
-                    UnableToGetDynamicDomainParameters(
-                      snapshot.domainId,
-                      snapshot.ipsSnapshot.timestamp,
-                    )
+        domainParameters <- EitherT(
+          snapshot.ipsSnapshot
+            .findDynamicDomainParameters()
+            .map(
+              _.leftMap(_ =>
+                steps.embedRequestError(
+                  UnableToGetDynamicDomainParameters(
+                    snapshot.domainId,
+                    snapshot.ipsSnapshot.timestamp,
                   )
                 )
               )
-          )
-          decisionTime <- EitherT.fromEither[Future](steps.decisionTimeFor(domainParameters, ts))
+            )
+        )
+        decisionTime <- EitherT.fromEither[Future](
+          steps.decisionTimeFor(domainParameters, ts)
+        )
 
-          decryptedViews <- steps.decryptViews(viewMessages, snapshot)
+        decryptedViews <- steps.decryptViews(viewMessages, snapshot)
 
-          (malformedPayloads, viewsWithCorrectRootHash) = checkRootHash(decryptedViews)
-          _ = malformedPayloads.foreach { mp =>
-            logger.warn(s"Request $rc: Found malformed payload: $mp")
-          }
+        (malformedPayloads, viewsWithCorrectRootHash) = checkRootHash(decryptedViews)
+        _ = malformedPayloads.foreach { mp =>
+          logger.warn(s"Request $rc: Found malformed payload: $mp")
+        }
 
-          _ <- EitherT.right(
-            checkRecipients(requestId, viewsWithCorrectRootHash, snapshot.ipsSnapshot)
-          )
+        _ <- EitherT.right(
+          checkRecipients(requestId, viewsWithCorrectRootHash, snapshot.ipsSnapshot)
+        )
 
-          _ <- NonEmpty.from(viewsWithCorrectRootHash) match {
-            case None =>
-              trackAndSendResponsesMalformed(
+        _ <- NonEmpty.from(viewsWithCorrectRootHash) match {
+          case None =>
+            trackAndSendResponsesMalformed(
+              rc,
+              sc,
+              ts,
+              handleRequestData,
+              decisionTime,
+              mediatorId,
+              snapshot,
+              malformedPayloads,
+            )
+
+          case Some(goodViewsWithSignatures) =>
+            // All views with the same correct root hash declare the same mediator, so it's enough to look at the head
+            val (firstView, _) = goodViewsWithSignatures.head1
+            val declaredMediator = firstView.unwrap.mediatorId
+            if (declaredMediator == mediatorId) {
+              processRequestWithGoodViews(
+                ts,
                 rc,
                 sc,
-                ts,
+                handleRequestData,
                 decisionTime,
-                mediatorId,
                 snapshot,
+                mediatorId,
+                goodViewsWithSignatures,
                 malformedPayloads,
               )
-
-            case Some(goodViewsWithSignatures) =>
-              // All views with the same correct root hash declare the same mediator, so it's enough to look at the head
-              val (firstView, _) = goodViewsWithSignatures.head1
-              val declaredMediator = firstView.unwrap.mediatorId
-              if (declaredMediator == mediatorId) {
-                processRequestWithGoodViews(
-                  ts,
-                  rc,
-                  sc,
-                  decisionTime,
-                  snapshot,
-                  mediatorId,
-                  goodViewsWithSignatures,
-                  malformedPayloads,
-                )
-              } else {
-                // When the mediator `mediatorId` receives the root hash message,
-                // it will either lack the informee tree or find the wrong mediator ID in it.
-                // The submitting participant is malicious (unless the sequencer is), so it is not this participant
-                // and therefore we don't have to output a completion event
-                logger.error(
-                  s"Mediator $declaredMediator declared in views is not the recipient $mediatorId of the root hash message"
-                )
-                EitherT.right[steps.RequestError](prepareForMediatorResultOfBadRequest(rc, sc, ts))
-              }
-          }
-        } yield ()
-
-        EitherTUtil
-          .logOnError(resultF, s"${steps.requestKind} $requestId: Failed to process request")
-          .value
-          .void
-      }
+            } else {
+              // When the mediator `mediatorId` receives the root hash message,
+              // it will either lack the informee tree or find the wrong mediator ID in it.
+              // The submitting participant is malicious (unless the sequencer is), so it is not this participant
+              // and therefore we don't have to output a completion event
+              logger.error(
+                s"Mediator $declaredMediator declared in views is not the recipient $mediatorId of the root hash message"
+              )
+              EitherT.right[steps.RequestError](
+                prepareForMediatorResultOfBadRequest(rc, sc, ts)
+              )
+            }
+        }
+      } yield ()
     }
   }
 
@@ -596,6 +680,9 @@ abstract class ProtocolProcessor[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
+      handleRequestData: Phase37Synchronizer.PendingRequestDataHandle[
+        steps.requestType.PendingRequestData
+      ],
       decisionTime: CantonTimestamp,
       snapshot: DomainSnapshotSyncCryptoApi,
       mediatorId: MediatorId,
@@ -622,7 +709,16 @@ abstract class ProtocolProcessor[
             mediatorId,
           )
           .flatMap(
-            trackAndSendResponses(rc, sc, ts, mediatorId, snapshot, decisionTime, _)
+            trackAndSendResponses(
+              rc,
+              sc,
+              ts,
+              handleRequestData,
+              mediatorId,
+              snapshot,
+              decisionTime,
+              _,
+            )
           )
       case false =>
         SyncServiceAlarm
@@ -655,7 +751,10 @@ abstract class ProtocolProcessor[
           _ = submissionDataO.foreach(
             steps.postProcessSubmissionForInactiveMediator(mediatorId, ts, _)
           )
-          _ <- EitherT.right[steps.RequestError](invalidRequest(rc, sc, ts))
+          _ <- EitherT.right[steps.RequestError] {
+            handleRequestData.complete(None)
+            invalidRequest(rc, sc, ts)
+          }
         } yield ()
     }
   }
@@ -664,6 +763,9 @@ abstract class ProtocolProcessor[
       rc: RequestCounter,
       sc: SequencerCounter,
       ts: CantonTimestamp,
+      handleRequestData: Phase37Synchronizer.PendingRequestDataHandle[
+        steps.requestType.PendingRequestData
+      ],
       mediatorId: MediatorId,
       snapshot: DomainSnapshotSyncCryptoApi,
       decisionTime: CantonTimestamp,
@@ -766,9 +868,7 @@ abstract class ProtocolProcessor[
         )
       )
 
-      _ = ephemeral.phase37Synchronizer
-        .markConfirmed(steps.requestType)(rc, requestId, decisionTime, pendingData)
-
+      _ = handleRequestData.complete(Some(pendingData))
       timeoutET = EitherT
         .right(requestFutures.timeoutResult)
         .flatMap(
@@ -786,7 +886,8 @@ abstract class ProtocolProcessor[
       signedResponsesTo <- EitherT.right(responsesTo.parTraverse { case (response, recipients) =>
         signResponse(snapshot, response).map(_ -> recipients)
       })
-      messages: Seq[(ProtocolMessage, Recipients)] = signedResponsesTo ++ causalityMsgs
+      messages = (signedResponsesTo: Seq[(ProtocolMessage, Recipients)]) ++
+        (causalityMsgs: Seq[(ProtocolMessage, Recipients)])
       _ <- sendResponses(requestId, rc, messages)
         .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
     } yield ()
@@ -797,6 +898,9 @@ abstract class ProtocolProcessor[
       rc: RequestCounter,
       sc: SequencerCounter,
       ts: CantonTimestamp,
+      handleRequestData: Phase37Synchronizer.PendingRequestDataHandle[
+        steps.requestType.PendingRequestData
+      ],
       decisionTime: CantonTimestamp,
       mediatorId: MediatorId,
       snapshot: DomainSnapshotSyncCryptoApi,
@@ -828,8 +932,7 @@ abstract class ProtocolProcessor[
         _ <- sendResponses(requestId, rc, messages)
           .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
 
-        _ = ephemeral.phase37Synchronizer.markTimeout(rc, requestId, decisionTime)
-        _ = ephemeral.phase37Synchronizer.cleanOnTimeout(requestId)
+        _ = handleRequestData.complete(None)
 
         _ <- EitherT.right[steps.RequestError](terminateRequest(rc, sc, ts, ts))
       } yield ()
@@ -1218,12 +1321,13 @@ abstract class ProtocolProcessor[
      *
      * Some more synchronization is done in the Phase37Synchronizer.
      */
+
     val res = performUnlessClosingF(
       s"ProtocolProcess.processResult2(sc=$sc, traceId=${traceContext.traceId}"
     )(
       EitherT(
         ephemeral.phase37Synchronizer
-          .awaitConfirmed[steps.requestType.PendingRequestData](requestId, combinedFilter)
+          .awaitConfirmed(steps.requestType)(requestId, combinedFilter)
           .map(_.toRight {
             ephemeral.requestTracker.tick(sc, resultTs)
             steps.embedResultError(UnknownPendingRequest(requestId))
@@ -1531,7 +1635,7 @@ abstract class ProtocolProcessor[
       for {
         pendingRequestDataOrReplayData <- EitherT.liftF(
           ephemeral.phase37Synchronizer
-            .awaitConfirmed[steps.requestType.PendingRequestData](requestId)
+            .awaitConfirmed(steps.requestType)(requestId)
             .map {
               _.getOrElse(
                 throw new IllegalStateException(s"Unknown pending request $requestId at timeout.")

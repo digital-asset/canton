@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.sandbox.auth
 import com.daml.grpc.{GrpcException, GrpcStatus}
 import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.admin.object_meta.ObjectMeta
-import com.daml.ledger.api.v1.admin.{user_management_service => proto}
+import com.daml.ledger.api.v1.admin.{user_management_service as proto}
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization

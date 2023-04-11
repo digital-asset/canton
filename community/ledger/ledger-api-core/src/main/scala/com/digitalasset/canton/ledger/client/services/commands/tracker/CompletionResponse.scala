@@ -9,8 +9,8 @@ import com.daml.grpc.GrpcStatus
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint
 import com.daml.ledger.api.v1.completion.Completion
 import com.digitalasset.canton.ledger.grpc.GrpcStatuses
-import com.google.rpc.status.{Status => StatusProto}
-import com.google.rpc.{Status => StatusJavaProto}
+import com.google.rpc.status.{Status as StatusProto}
+import com.google.rpc.{Status as StatusJavaProto}
 import io.grpc.Status.Code
 import io.grpc.{StatusRuntimeException, protobuf}
 

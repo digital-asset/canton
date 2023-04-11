@@ -151,15 +151,19 @@ trait LoggingAssertions extends OptionValues with AppendedClues {
     val cp = new Checkpoint
     cp { Statement.discard { actual.level shouldBe expectedLogLevel } }
     cp { Statement.discard { actual.msg shouldBe expectedMsg } }
-    if (expectedMarkerRegex.isDefined) {
-      cp { Statement.discard { actual.marker shouldBe defined } }
-      cp {
-        Statement.discard {
-          actual.marker.get.toString should fullyMatch regex expectedMarkerRegex.get
+    expectedMarkerRegex match {
+      case Some(markerRegex) =>
+        cp {
+          Statement.discard {
+            actual.marker.value.toString should fullyMatch regex markerRegex
+          }
         }
-      }
-    } else {
-      cp { Statement.discard { actual.marker shouldBe None } }
+      case None =>
+        cp {
+          Statement.discard {
+            actual.marker shouldBe None
+          }
+        }
     }
     cp.reportAll()
   }

@@ -102,12 +102,17 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Either[AcsError, SortedMap[LfContractId, CantonTimestamp]]] =
+  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
     acs.snapshot(timestamp)
+
+  override def snapshot(rc: RequestCounter)(implicit
+      traceContext: TraceContext
+  ): Future[SortedMap[LfContractId, RequestCounter]] =
+    acs.snapshot(rc)
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] =
+  ): Future[Map[LfContractId, CantonTimestamp]] =
     acs.contractSnapshot(contractIds, timestamp)
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit

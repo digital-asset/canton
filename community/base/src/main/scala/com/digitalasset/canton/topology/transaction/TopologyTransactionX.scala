@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import cats.syntax.either.*
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
@@ -13,16 +11,20 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v2
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
-import com.digitalasset.canton.topology.store.StoredTopologyTransactionX
-import com.digitalasset.canton.topology.transaction.TopologyChangeOpX.{Remove, Replace}
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 import slick.jdbc.SetParameter
 
+import scala.reflect.ClassTag
+
 /** Replace or Remove */
 sealed trait TopologyChangeOpX extends TopologyChangeOpCommon {
   def toProto: v2.TopologyChangeOpX
+
+  final def select[TargetOp <: TopologyChangeOpX](implicit
+      O: ClassTag[TargetOp]
+  ): Option[TargetOp] = O.unapply(this)
 }
 
 object TopologyChangeOpX {
@@ -37,44 +39,6 @@ object TopologyChangeOpX {
 
   type Remove = Remove.type
   type Replace = Replace.type
-
-  trait OpTypeCheckerX[A <: TopologyChangeOpX] {
-    def isOfType(op: TopologyChangeOpX): Boolean
-  }
-
-  implicit val topologyRemoveChecker = new OpTypeCheckerX[Remove] {
-    override def isOfType(op: TopologyChangeOpX): Boolean = op match {
-      case _: Remove => true
-      case _ => false
-    }
-  }
-
-  implicit val topologyReplaceChecker = new OpTypeCheckerX[Replace] {
-    override def isOfType(op: TopologyChangeOpX): Boolean = op match {
-      case _: Replace => true
-      case _ => false
-    }
-  }
-
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def select[Op <: TopologyChangeOpX, M <: TopologyMappingX](
-      transaction: SignedTopologyTransactionX[TopologyChangeOpX, M]
-  )(implicit
-      checker: OpTypeCheckerX[Op]
-  ): Option[SignedTopologyTransactionX[Op, M]] = if (checker.isOfType(transaction.operation))
-    Some(transaction.asInstanceOf[SignedTopologyTransactionX[Op, M]])
-  else None
-
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def select[Op <: TopologyChangeOpX, M <: TopologyMappingX](
-      storedTransaction: StoredTopologyTransactionX[TopologyChangeOpX, M]
-  )(implicit
-      checker: OpTypeCheckerX[Op]
-  ): Option[StoredTopologyTransactionX[Op, M]] = if (
-    checker.isOfType(storedTransaction.transaction.operation)
-  )
-    Some(storedTransaction.asInstanceOf[StoredTopologyTransactionX[Op, M]])
-  else None
 
   def fromProtoV2(
       protoOp: v2.TopologyChangeOpX
@@ -111,24 +75,34 @@ final case class TopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMa
     serial: PositiveInt,
     mapping: M,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TopologyTransactionX.type
     ],
-    val deserializedFrom: Option[ByteString] = None,
+    override val deserializedFrom: Option[ByteString] = None,
 ) extends ProtocolVersionedMemoizedEvidence
     with PrettyPrinting
     with HasProtocolVersionedWrapper[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] {
 
   def reverse: TopologyTransactionX[TopologyChangeOpX, M] = {
     val next = (op: TopologyChangeOpX) match {
-      case Replace => TopologyChangeOpX.Remove
-      case Remove => TopologyChangeOpX.Replace
+      case TopologyChangeOpX.Replace => TopologyChangeOpX.Remove
+      case TopologyChangeOpX.Remove => TopologyChangeOpX.Replace
     }
     TopologyTransactionX(next, serial = serial + PositiveInt.one, mapping = mapping)(
       representativeProtocolVersion,
       None,
     )
   }
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def selectMapping[TargetMapping <: TopologyMappingX: ClassTag]
+      : Option[TopologyTransactionX[Op, TargetMapping]] =
+    mapping
+      .select[TargetMapping]
+      .map(_ => this.asInstanceOf[TopologyTransactionX[Op, TargetMapping]])
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def selectOp[TargetOp <: TopologyChangeOpX: ClassTag]: Option[TopologyTransactionX[TargetOp, M]] =
+    op.select[TargetOp].map(_ => this.asInstanceOf[TopologyTransactionX[TargetOp, M]])
 
   /** returns hash of the given transaction */
   lazy val hash: TxHash = {
@@ -173,7 +147,8 @@ final case class TopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMa
       unnamedParam(_.mapping),
     )
 
-  override protected def companionObj: TopologyTransactionX.type = TopologyTransactionX
+  @transient override protected lazy val companionObj: TopologyTransactionX.type =
+    TopologyTransactionX
 }
 
 object TopologyTransactionX
@@ -189,7 +164,7 @@ object TopologyTransactionX
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    ProtoVersion(2) -> VersionedProtoConverter.mk(ProtocolVersion.dev)(v2.TopologyTransactionX)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v2.TopologyTransactionX)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),
@@ -211,7 +186,7 @@ object TopologyTransactionX
     val v2.TopologyTransactionX(opP, serialP, mappingP) = transactionP
     for {
       mapping <- ProtoConverter.parseRequired(TopologyMappingX.fromProtoV2, "mapping", mappingP)
-      serial <- PositiveInt.create(serialP).leftMap(ProtoDeserializationError.InvariantViolation(_))
+      serial <- ProtoConverter.parsePositiveInt(serialP)
       op <- TopologyChangeOpX.fromProtoV2(opP)
     } yield TopologyTransactionX(op, serial, mapping)(
       protocolVersionRepresentativeFor(ProtoVersion(2)),

@@ -169,21 +169,11 @@ abstract class ParticipantRepairAdministration(
       source: DomainAlias,
       target: DomainConnectionConfig,
   ): Unit = {
-    implicit val ec = consoleEnvironment.environment.executionContext
-    runRepairCommand(tc =>
-      consoleEnvironment.commandTimeouts.unbounded
-        .await(s"running command to migrate from domain $source to domain $target")(
-          access(
-            _.sync
-              .migrateDomain(source, target)(tc)
-              .leftMap(_.asGrpcError.getStatus.getDescription)
-              .value
-              .onShutdown {
-                Left(("Aborted due to shutdown. Please restart me."))
-              }
-          )
-        )
-    )
+    consoleEnvironment.run {
+      runner.adminCommand(
+        ParticipantAdminCommands.ParticipantRepairManagement.MigrateDomain(source, target)
+      )
+    }
   }
 
   @Help.Summary("Mark sequenced events as ignored.")

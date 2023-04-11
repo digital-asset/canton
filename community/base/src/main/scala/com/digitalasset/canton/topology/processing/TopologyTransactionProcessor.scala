@@ -13,8 +13,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   DomainTopologyTransactionMessage,
@@ -52,6 +52,7 @@ final case class EffectiveTime(value: CantonTimestamp) {
 }
 object EffectiveTime {
   val MinValue: EffectiveTime = EffectiveTime(CantonTimestamp.MinValue)
+  val MaxValue: EffectiveTime = EffectiveTime(CantonTimestamp.MaxValue)
   def max(ts: EffectiveTime, other: EffectiveTime*): EffectiveTime =
     EffectiveTime(CantonTimestamp.max(ts.value, other.map(_.value): _*))
   implicit val orderingEffectiveTime: Ordering[EffectiveTime] =
@@ -104,11 +105,10 @@ class TopologyTransactionProcessor(
     store: TopologyStore[TopologyStoreId.DomainStore],
     acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit,
     futureSupervisor: FutureSupervisor,
-    override protected val timeouts: ProcessingTimeout,
-    val loggerFactory: NamedLoggerFactory,
+    timeouts: ProcessingTimeout,
+    loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends NamedLogging
-    with FlagCloseable {
+    extends TopologyTransactionProcessorCommon(timeouts, loggerFactory) {
 
   private val authValidator =
     new IncomingTopologyTransactionAuthorizationValidator(
@@ -517,9 +517,8 @@ class TopologyTransactionProcessor(
       .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
       .map(_.protocolMessage)
 
-  /** Inform the topology manager where the subscription starts when using [[processEnvelopes]] rather than [[createHandler]] */
-  def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(implicit
-      traceContext: TraceContext
+  override def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(
+      implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = initialise(start, domainTimeTracker)
 
   /** process envelopes mostly asynchronously
@@ -527,7 +526,7 @@ class TopologyTransactionProcessor(
     * Here, we return a Future[Future[Unit]]. We need to ensure the outer future finishes processing
     * before we tick the record order publisher.
     */
-  def processEnvelopes(
+  override def processEnvelopes(
       sc: SequencerCounter,
       ts: CantonTimestamp,
       envelopes: Traced[List[DefaultOpenEnvelope]],
@@ -596,7 +595,7 @@ class TopologyTransactionProcessor(
     }
   }
 
-  def createHandler(domainId: DomainId): UnsignedProtocolEventHandler =
+  override def createHandler(domainId: DomainId): UnsignedProtocolEventHandler =
     new UnsignedProtocolEventHandler {
 
       override def name: String = s"topology-processor-$domainId"

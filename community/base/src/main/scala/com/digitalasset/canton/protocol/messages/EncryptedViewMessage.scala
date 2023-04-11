@@ -19,7 +19,6 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifi
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
-  HasRepresentativeProtocolVersion,
   HasVersionedToByteString,
   ProtoVersion,
   ProtocolVersion,
@@ -141,9 +140,7 @@ object EncryptedView {
   *
   * See [[https://engineering.da-int.net/docs/platform-architecture-handbook/arch/canton/tx-data-structures.html#transaction-hashes-and-views]]
   */
-sealed trait EncryptedViewMessage[+VT <: ViewType]
-    extends ProtocolMessage
-    with HasRepresentativeProtocolVersion {
+sealed trait EncryptedViewMessage[+VT <: ViewType] extends UnsignedProtocolMessage {
 
   protected[messages] def participants: Option[Set[ParticipantId]]
 
@@ -183,6 +180,9 @@ sealed trait EncryptedViewMessage[+VT <: ViewType]
   )
 
   def toByteString: ByteString
+
+  @transient override protected lazy val companionObj: EncryptedViewMessage.type =
+    EncryptedViewMessage
 }
 
 final case class EncryptedViewMessageV0[+VT <: ViewType](
@@ -196,7 +196,8 @@ final case class EncryptedViewMessageV0[+VT <: ViewType](
 
   protected[messages] def participants: Option[Set[ParticipantId]] = Some(randomnessMap.keySet)
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[EncryptedViewMessage[_]] =
+  override val representativeProtocolVersion
+      : RepresentativeProtocolVersion[EncryptedViewMessage.type] =
     EncryptedViewMessage.protocolVersionRepresentativeFor(ProtoVersion(0))
 
   def toProtoV0: v0.EncryptedViewMessage =
@@ -253,7 +254,8 @@ final case class EncryptedViewMessageV1[+VT <: ViewType](
   protected[messages] def participants: Option[Set[ParticipantId]] =
     informeeParticipants
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[EncryptedViewMessage[_]] =
+  override val representativeProtocolVersion
+      : RepresentativeProtocolVersion[EncryptedViewMessage.type] =
     EncryptedViewMessage.protocolVersionRepresentativeFor(ProtoVersion(1))
 
   def toProtoV1: v1.EncryptedViewMessage = v1.EncryptedViewMessage(
@@ -451,11 +453,11 @@ object EncryptedViewMessageV1 {
 object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewMessage[_]] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.EncryptedViewMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.EncryptedViewMessage)(
       supportedProtoVersion(_)(EncryptedViewMessageV0.fromProto),
       _.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.EncryptedViewMessage)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.EncryptedViewMessage)(
       supportedProtoVersion(_)(EncryptedViewMessageV1.fromProto),
       _.toByteString,
     ),
@@ -563,10 +565,11 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
   }
 
   implicit val encryptedViewMessageCast
-      : ProtocolMessageContentCast[EncryptedViewMessage[ViewType]] = {
-    case evm: EncryptedViewMessage[_] => Some(evm)
-    case _ => None
-  }
+      : ProtocolMessageContentCast[EncryptedViewMessage[ViewType]] =
+    ProtocolMessageContentCast.create[EncryptedViewMessage[ViewType]]("EncryptedViewMessage") {
+      case evm: EncryptedViewMessage[_] => Some(evm)
+      case _ => None
+    }
 
   override protected def name: String = "EncryptedViewMessage"
 }

@@ -312,12 +312,11 @@ object TlsServerConfig {
         .size() + io.netty.handler.ssl.OpenSsl
         .availableJavaCipherSuites()
         .size()
-      // TODO(#11866) Consider using warn again
-      logger.info(
+      logger.warn(
         s"All of Canton's default TLS ciphers are unsupported by your JVM (netty reports $len ciphers). Defaulting to JVM settings."
       )
       if (!io.netty.handler.ssl.OpenSsl.isAvailable) {
-        logger.debug(
+        logger.info(
           "Netty OpenSSL is not available because of an issue",
           io.netty.handler.ssl.OpenSsl.unavailabilityCause(),
         )

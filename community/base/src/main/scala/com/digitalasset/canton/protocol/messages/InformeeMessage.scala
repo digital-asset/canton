@@ -47,7 +47,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
     with ProtocolMessageV1
     with UnsignedProtocolMessageV2 {
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage] =
+  override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage.type] =
     InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
 
   def copy(fullInformeeTree: FullInformeeTree = this.fullInformeeTree): InformeeMessage =
@@ -126,16 +126,18 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
   override def viewType: ViewType = ViewType.TransactionViewType
 
   override def pretty: Pretty[InformeeMessage] = prettyOfClass(unnamedParam(_.fullInformeeTree))
+
+  @transient override protected lazy val companionObj: InformeeMessage.type = InformeeMessage
 }
 
 object InformeeMessage extends HasProtocolVersionedWithContextCompanion[InformeeMessage, HashOps] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.InformeeMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.InformeeMessage)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.InformeeMessage)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.InformeeMessage)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
       _.toProtoV1.toByteString,
     ),
@@ -186,10 +188,11 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
     } yield new InformeeMessage(fullInformeeTree)(protocolVersion)
   }
 
-  implicit val informeeMessageCast: ProtocolMessageContentCast[InformeeMessage] = {
-    case im: InformeeMessage => Some(im)
-    case _ => None
-  }
+  implicit val informeeMessageCast: ProtocolMessageContentCast[InformeeMessage] =
+    ProtocolMessageContentCast.create[InformeeMessage]("InformeeMessage") {
+      case im: InformeeMessage => Some(im)
+      case _ => None
+    }
 
   override protected def name: String = "InformeeMessage"
 }

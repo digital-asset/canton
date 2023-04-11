@@ -32,11 +32,11 @@ import com.google.protobuf.ByteString
   *  for `0 <= i < n`.
   */
 final case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[Batch[Envelope[_]]]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[Batch.type]
 ) extends HasProtocolVersionedWrapper[Batch[Envelope[_]]]
     with PrettyPrinting {
 
-  override val companionObj = Batch
+  @transient override protected lazy val companionObj: Batch.type = Batch
 
   /** builds a set of recipients from all messages in this message batch
     */
@@ -82,14 +82,14 @@ object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[_]], Batch[Cl
   override protected def name: String = "Batch"
 
   override val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.CompressedBatch)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.CompressedBatch)(
       supportedProtoVersion(_)(
         // TODO(i10428) Prevent zip bombing when decompressing the request
         Batch.fromProtoV0(_, maxRequestSize = MaxRequestSizeToDeserialize.NoLimit)
       ),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(
+    ProtoVersion(1) -> VersionedProtoConverter(
       // TODO(#12373) Adapt when releasing BFT
       ProtocolVersion.dev
     )(v1.CompressedBatch)(

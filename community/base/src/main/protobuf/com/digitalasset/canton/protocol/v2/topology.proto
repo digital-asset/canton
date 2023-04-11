@@ -39,7 +39,7 @@ enum ParticipantPermissionX {
 // authorization: a namespace delegation is either signed by the root key, or is signed by
 //   a key for which there exists a series of properly authorized namespace delegations
 //   that are ultimately signed by the root key
-// UNIQUE(all fields)
+// UNIQUE(namespace, target_key)
 message NamespaceDelegationX {
   // fingerprint of the root key defining the namespace
   string namespace = 1;

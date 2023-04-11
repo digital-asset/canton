@@ -9,7 +9,7 @@ import com.digitalasset.canton.ledger.runner.common.ConfigLoaderSpec.{
   InnerObject,
   TestScope,
 }
-import com.typesafe.config.{Config => TypesafeConfig, ConfigFactory, ConfigValueFactory}
+import com.typesafe.config.{Config as TypesafeConfig, ConfigFactory, ConfigValueFactory}
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

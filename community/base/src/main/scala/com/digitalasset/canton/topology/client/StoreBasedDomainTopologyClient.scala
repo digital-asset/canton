@@ -268,6 +268,11 @@ abstract class BaseDomainTopologyClient
     super.onClosed()
   }
 
+  override def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] =
+    scheduleAwait(condition(currentSnapshotApproximation), timeout)
+
 }
 
 /** The domain topology client that reads data from a topology store
@@ -310,24 +315,6 @@ class StoreBasedDomainTopologyClient(
     )
   }
 
-  /** returns the snapshot of the current member topology as of the most recently observed timestamp
-    */
-  override def currentSnapshotApproximation(implicit
-      traceContext: TraceContext
-  ): StoreBasedTopologySnapshot =
-    new StoreBasedTopologySnapshot(
-      approximateTimestamp,
-      store,
-      initKeys,
-      useStateTxs = useStateTxs,
-      packageDependencies,
-      loggerFactory,
-    )
-
-  override def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean] =
-    scheduleAwait(condition(currentSnapshotApproximation), timeout)
 }
 
 object StoreBasedDomainTopologyClient {

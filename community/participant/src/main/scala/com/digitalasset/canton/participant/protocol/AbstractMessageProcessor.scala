@@ -82,7 +82,7 @@ abstract class AbstractMessageProcessor(
   protected def signResponse(ips: DomainSnapshotSyncCryptoApi, response: MediatorResponse)(implicit
       traceContext: TraceContext
   ): Future[SignedProtocolMessage[MediatorResponse]] =
-    SignedProtocolMessage.tryCreate(response, ips, protocolVersion)
+    SignedProtocolMessage.trySignAndCreate(response, ips, protocolVersion)
 
   // Assumes that we are not closing (i.e., that this is synchronized with shutdown somewhere higher up the call stack)
   protected def sendResponses(
@@ -184,23 +184,15 @@ abstract class AbstractMessageProcessor(
         )
       )
 
-      _ = ephemeral.phase37Synchronizer.markTimeout(
-        requestCounter,
-        RequestId(timestamp),
-        decisionTime,
-      )
       _ =
         if (!isCleanReplay(requestCounter)) {
           val timeoutF =
             requestFutures.timeoutResult.flatMap { timeoutResult =>
-              if (timeoutResult.timedOut)
-                onTimeout.thereafter(_ =>
-                  ephemeral.phase37Synchronizer.cleanOnTimeout(RequestId(timestamp))
-                )
+              if (timeoutResult.timedOut) onTimeout
               else Future.unit
             }
           FutureUtil.doNotAwait(timeoutF, "Handling timeout failed")
-        } else ephemeral.phase37Synchronizer.cleanOnTimeout(RequestId(timestamp))
+        }
     } yield ()
 
   /** Transition the request to Clean without doing anything */

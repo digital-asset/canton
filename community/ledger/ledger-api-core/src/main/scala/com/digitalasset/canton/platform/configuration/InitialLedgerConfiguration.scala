@@ -30,7 +30,8 @@ final case class InitialLedgerConfiguration(
 ) {
   def toConfiguration = Configuration(
     generation = 1L,
-    timeModel = LedgerTimeModel.apply(avgTransactionLatency, minSkew, maxSkew).get,
+    timeModel =
+      LedgerTimeModel.apply(avgTransactionLatency, minSkew, maxSkew).fold(throw _, identity),
     maxDeduplicationDuration = maxDeduplicationDuration,
   )
 }

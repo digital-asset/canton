@@ -42,6 +42,7 @@ private[services] final class TrackerMap[Key](
 
   private val lock = new Object()
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private var trackerBySubmitter =
     HashMap.empty[Key, TrackerMap.AsyncResource[TrackerWithLastSubmission]]
 
@@ -206,6 +207,7 @@ private[services] object TrackerMap {
   }
 
   private final class TrackerWithLastSubmission(delegate: Tracker) extends Tracker {
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
     @volatile private var lastSubmission = System.nanoTime()
 
     def getLastSubmission: Long = lastSubmission

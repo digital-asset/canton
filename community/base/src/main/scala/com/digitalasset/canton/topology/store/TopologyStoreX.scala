@@ -13,15 +13,18 @@ import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.admin.v1 as topoV1
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.PositiveStoredTopologyTransactionsX
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreX
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect.ClassTag
 
 final case class StoredTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMappingX](
     sequenced: SequencedTime,
@@ -38,6 +41,16 @@ final case class StoredTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
       param("serial", _.transaction.transaction.serial),
       param("mapping", _.transaction.transaction.mapping),
     )
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def selectMapping[TargetMapping <: TopologyMappingX: ClassTag] = transaction
+    .selectMapping[TargetMapping]
+    .map(_ => this.asInstanceOf[StoredTopologyTransactionX[Op, TargetMapping]])
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def selectOp[TargetOp <: TopologyChangeOpX: ClassTag] = transaction
+    .selectOp[TargetOp]
+    .map(_ => this.asInstanceOf[StoredTopologyTransactionX[TargetOp, M]])
 }
 
 object StoredTopologyTransactionX {
@@ -73,6 +86,25 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
       asOfExclusive: EffectiveTime,
       filter: GenericSignedTopologyTransactionX => Boolean,
   ): Future[Seq[GenericSignedTopologyTransactionX]]
+
+  /** returns the set of positive transactions
+    *
+    * this function is used by the topology processor to determine the set of transaction, such that
+    * we can perform cascading updates if there was a certificate revocation
+    *
+    * @param asOfInclusive whether the search interval should include the current timepoint or not. the state at t is
+    *                      defined as "exclusive" of t, whereas for updating the state, we need to be able to query inclusive.
+    */
+  def findPositiveTransactions(
+      asOf: CantonTimestamp,
+      asOfInclusive: Boolean,
+      isProposal: Boolean,
+      types: Seq[TopologyMappingX.Code],
+      filterUid: Option[Seq[UniqueIdentifier]],
+      filterNamespace: Option[Seq[Namespace]],
+  )(implicit
+      traceContext: TraceContext
+  ): Future[PositiveStoredTopologyTransactionsX]
 
   /** add validated topology transaction as is to the topology transaction table */
   def update(

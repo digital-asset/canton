@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
@@ -37,10 +36,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.Submiss
   DomainWithoutMediatorError,
   SequencerRequest,
 }
-import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
-  TransactionProcessorError,
-  *,
-}
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.*
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.*
@@ -62,10 +58,10 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlar
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.{EncryptedViewMessage, *}
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
-import com.digitalasset.canton.sequencing.protocol.{WithRecipients, *}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -356,9 +352,16 @@ class TransactionProcessingSteps(
             disclosedContracts
               .get(contractId)
               .map(contract =>
-                EitherT.rightT[Future, TransactionTreeFactory.ContractLookupError](contract)
+                EitherT.rightT[Future, TransactionTreeFactory.ContractLookupError](
+                  (contract.rawContractInstance, contract.ledgerCreateTime, contract.contractSalt)
+                )
               )
-              .getOrElse(TransactionTreeFactory.contractInstanceLookup(contractLookup)(contractId))
+              .getOrElse(
+                TransactionTreeFactory
+                  .contractInstanceLookup(contractLookup)(implicitly, implicitly)(
+                    contractId
+                  )
+              )
 
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
         // Perform phase 1 of the protocol that produces a confirmation request

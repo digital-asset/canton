@@ -7,7 +7,12 @@ import cats.data.EitherT
 import com.daml.lf.transaction.Transaction.KeyInputError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{Salt, SaltSeed}
-import com.digitalasset.canton.data.{GenTransactionTree, TransactionView, ViewPosition}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  GenTransactionTree,
+  TransactionView,
+  ViewPosition,
+}
 import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
@@ -79,12 +84,21 @@ trait TransactionTreeFactory {
 object TransactionTreeFactory {
 
   type SerializableContractOfId =
-    LfContractId => EitherT[Future, ContractLookupError, SerializableContract]
-  def contractInstanceLookup(contractStore: ContractLookup)(id: LfContractId)(implicit
+    LfContractId => EitherT[
+      Future,
+      ContractLookupError,
+      (SerializableRawContractInstance, CantonTimestamp, Option[Salt]),
+    ]
+
+  def contractInstanceLookup(contractStore: ContractLookup)(implicit
       ex: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[Future, ContractLookupError, SerializableContract] =
-    contractStore.lookupContract(id).toRight(ContractLookupError(id, "Unknown contract"))
+  ): SerializableContractOfId = id =>
+    for {
+      contract <- contractStore
+        .lookupContract(id)
+        .toRight(ContractLookupError(id, "Unknown contract"))
+    } yield (contract.rawContractInstance, contract.ledgerCreateTime, contract.contractSalt)
 
   /** Supertype for all errors than may arise during the conversion. */
   sealed trait TransactionTreeConversionError extends Product with Serializable with PrettyPrinting

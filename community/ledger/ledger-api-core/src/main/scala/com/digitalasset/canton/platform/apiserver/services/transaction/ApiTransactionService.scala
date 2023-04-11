@@ -18,7 +18,7 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionsResponse,
 }
 import com.daml.lf.data.Ref.Party
-import com.daml.lf.ledger.{EventId => LfEventId}
+import com.daml.lf.ledger.{EventId as LfEventId}
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.entries.{LoggingEntries, LoggingValue}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}

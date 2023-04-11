@@ -13,7 +13,6 @@ sealed trait SequencerClientSubscriptionError extends Product with Serializable 
 object SequencerClientSubscriptionError {
   final case class EventValidationError(error: SequencedEventValidationError)
       extends SequencerClientSubscriptionError
-  trait SendTrackerUpdateError extends SequencerClientSubscriptionError
 
   sealed trait ApplicationHandlerFailure
       extends SequencerClientSubscriptionError

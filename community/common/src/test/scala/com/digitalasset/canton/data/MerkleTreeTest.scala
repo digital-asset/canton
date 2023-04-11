@@ -208,12 +208,12 @@ object MerkleTreeTest {
     override protected def name: String = "AbstractLeaf"
     override def supportedProtoVersions: data.MerkleTreeTest.AbstractLeaf.SupportedProtoVersions =
       SupportedProtoVersions(
-        ProtoVersion(0) -> LegacyProtoConverter(
+        ProtoVersion(0) -> LegacyProtoConverter.raw(
           ProtocolVersion.v3,
           fromProto(0),
           _.getCryptographicEvidence,
         ),
-        ProtoVersion(1) -> VersionedProtoConverter(
+        ProtoVersion(1) -> VersionedProtoConverter.raw(
           ProtocolVersion.v4,
           fromProto(1),
           _.getCryptographicEvidence,
@@ -261,29 +261,23 @@ object MerkleTreeTest {
     } yield mkLeaf(index)
 
   final case class Leaf1(override val index: Int)(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        VersionedAbstractLeaf
-      ]
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[AbstractLeaf.type]
   ) extends AbstractLeaf[Leaf1](index) {
-    override def companionObj: AbstractLeaf.type =
+    override protected lazy val companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 
   final case class Leaf2(override val index: Int)(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        VersionedAbstractLeaf
-      ]
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[AbstractLeaf.type]
   ) extends AbstractLeaf[Leaf2](index) {
-    override def companionObj: AbstractLeaf.type =
+    override protected lazy val companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 
   final case class Leaf3(override val index: Int)(
-      override val representativeProtocolVersion: RepresentativeProtocolVersion[
-        VersionedAbstractLeaf
-      ]
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[AbstractLeaf.type]
   ) extends AbstractLeaf[Leaf3](index) {
-    override def companionObj: AbstractLeaf.type =
+    override protected lazy val companionObj: AbstractLeaf.type =
       AbstractLeaf
   }
 

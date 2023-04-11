@@ -6,7 +6,7 @@ package com.daml.error.definitions
 import com.daml.error.*
 import com.daml.error.definitions.ErrorGroups.ParticipantErrorGroup.LedgerApiErrorGroup
 import com.daml.lf.engine.Error.Validation.ReplayMismatch
-import com.daml.lf.engine.{Error => LfError}
+import com.daml.lf.engine.{Error as LfError}
 import com.daml.metrics.ExecutorServiceMetrics
 import org.slf4j.event.Level
 

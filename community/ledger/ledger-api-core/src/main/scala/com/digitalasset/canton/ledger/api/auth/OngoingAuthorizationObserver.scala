@@ -35,6 +35,7 @@ private[auth] final class OngoingAuthorizationObserver[A](
   // We need this because [[onError]] can be invoked two concurrent sources:
   // 1) scheduled user rights state change task (see [[cancellableO]]),
   // 2) upstream component that is translating upstream Akka stream into [[onNext]] and other signals.
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var afterCompletionOrError = false
 
   private val cancelUserRightsChecksO =

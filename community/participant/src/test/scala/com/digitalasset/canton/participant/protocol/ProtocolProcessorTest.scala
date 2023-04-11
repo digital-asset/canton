@@ -53,6 +53,7 @@ import com.digitalasset.canton.protocol.{
   ViewHash,
 }
 import com.digitalasset.canton.resource.MemoryStorage
+import com.digitalasset.canton.sequencing.AsyncResult
 import com.digitalasset.canton.sequencing.client.SendResult.Success
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -70,13 +71,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   TrustLevel,
 }
-import com.digitalasset.canton.{
-  BaseTest,
-  DiscardOps,
-  HasExecutionContext,
-  RequestCounter,
-  SequencerCounter,
-}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -170,6 +165,8 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       TransactionResultMessage,
       TestProcessingSteps.TestProcessingError,
     ]
+
+  private def waitForAsyncResult(asyncResult: AsyncResult) = asyncResult.unwrap.unwrap.futureValue
 
   private def testProcessingSteps(
       overrideConstructedPendingRequestData: Option[TestPendingRequestData] = None,
@@ -388,11 +385,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         .futureValue shouldBe (())
       submissionMap.get(1) shouldBe Some(())
       val afterDecisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
-      val () =
-        sut
-          .processRequest(afterDecisionTime, rc, requestSc, someRequestBatch)
-          .onShutdown(fail())
-          .futureValue
+      val asyncRes = sut
+        .processRequest(afterDecisionTime, rc, requestSc, someRequestBatch)
+        .onShutdown(fail())
+        .futureValue
+      waitForAsyncResult(asyncRes)
       eventually() {
         submissionMap.get(1) shouldBe None
       }
@@ -414,11 +411,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
 
     "succeed without errors" in {
       val (sut, _persistent, _ephemeral) = testProcessingSteps()
-      val () =
-        sut
-          .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
-          .onShutdown(fail())
-          .futureValue
+      val asyncRes = sut
+        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
+        .onShutdown(fail())
+        .futureValue
+      waitForAsyncResult(asyncRes)
       succeed
     }
 
@@ -434,11 +431,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val before = ephemeral.requestJournal.query(rc).value.futureValue
       before shouldEqual None
 
-      val () =
-        sut
-          .processRequest(CantonTimestamp.Epoch, rc, requestSc, someRequestBatch)
-          .onShutdown(fail())
-          .futureValue
+      val asyncRes = sut
+        .processRequest(CantonTimestamp.Epoch, rc, requestSc, someRequestBatch)
+        .onShutdown(fail())
+        .futureValue
+      waitForAsyncResult(asyncRes)
       val requestState = ephemeral.requestJournal.query(rc).value.futureValue
       requestState.value.state shouldEqual RequestState.Confirmed
     }
@@ -468,11 +465,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val before = ephemeral.requestJournal.query(rc).value.futureValue
       before shouldEqual None
 
-      sut
+      val asyncRes = sut
         .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
         .onShutdown(fail())
         .futureValue
-        .discard[Unit]
+      waitForAsyncResult(asyncRes)
       val requestState = ephemeral.requestJournal.query(rc).value.futureValue
       requestState shouldEqual None
     }
@@ -493,11 +490,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       initialSTate shouldEqual None
 
       // Process a request but never a corresponding response
-      val () =
-        sut
-          .processRequest(CantonTimestamp.Epoch, rc, requestSc, someRequestBatch)
-          .onShutdown(fail())
-          .futureValue
+      val asyncRes = sut
+        .processRequest(CantonTimestamp.Epoch, rc, requestSc, someRequestBatch)
+        .onShutdown(fail())
+        .futureValue
+      waitForAsyncResult(asyncRes)
 
       ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
         requestSc
@@ -543,17 +540,17 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       )
 
       val (sut, _persistent, _ephemeral) = testProcessingSteps()
-      val () =
-        loggerFactory
-          .assertLogs(
-            sut
-              .processRequest(requestId.unwrap, rc, requestSc, requestBatchWrongRH)
-              .onShutdown(fail()),
-            _.warningMessage should include(
-              s"Request ${rc}: Found malformed payload: WrongRootHash"
-            ),
-          )
-          .futureValue
+      val asyncRes = loggerFactory
+        .assertLogs(
+          sut
+            .processRequest(requestId.unwrap, rc, requestSc, requestBatchWrongRH)
+            .onShutdown(fail()),
+          _.warningMessage should include(
+            s"Request ${rc}: Found malformed payload: WrongRootHash"
+          ),
+        )
+        .futureValue
+      waitForAsyncResult(asyncRes)
     }
 
     "log decryption errors" in {
@@ -575,17 +572,17 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       )
 
       val (sut, _persistent, _ephemeral) = testProcessingSteps()
-      val () =
-        loggerFactory
-          .assertLogs(
-            sut
-              .processRequest(requestId.unwrap, rc, requestSc, requestBatchDecryptError)
-              .onShutdown(fail()),
-            _.warningMessage should include(
-              s"Request ${rc}: Found malformed payload: SyncCryptoDecryptError("
-            ),
-          )
-          .futureValue
+      val asyncRes = loggerFactory
+        .assertLogs(
+          sut
+            .processRequest(requestId.unwrap, rc, requestSc, requestBatchDecryptError)
+            .onShutdown(fail()),
+          _.warningMessage should include(
+            s"Request ${rc}: Found malformed payload: SyncCryptoDecryptError("
+          ),
+        )
+        .futureValue
+      waitForAsyncResult(asyncRes)
       succeed
     }
 
@@ -637,7 +634,6 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     def setUpOrFail(
         persistent: SyncDomainPersistentState,
         ephemeral: SyncDomainEphemeralState,
-        decisionTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(60),
     ): Unit = {
 
       val setupF = for {
@@ -645,19 +641,20 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
 
         _ <- ephemeral.requestJournal.insert(rc, CantonTimestamp.Epoch)
         _ <- ephemeral.requestJournal.transit(rc, CantonTimestamp.Epoch, Pending, Confirmed)
-      } yield ephemeral.phase37Synchronizer.markConfirmed(TestPendingRequestDataType)(
-        rc,
-        requestId,
-        decisionTime,
-        WrappedPendingRequestData(
-          TestPendingRequestData(
-            rc,
-            requestSc,
-            Set.empty,
-            MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+      } yield ephemeral.phase37Synchronizer
+        .registerRequest(TestPendingRequestDataType)(requestId)
+        .complete(
+          Some(
+            WrappedPendingRequestData(
+              TestPendingRequestData(
+                rc,
+                requestSc,
+                Set.empty,
+                MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+              )
+            )
           )
-        ),
-      )
+        )
       setupF.futureValue
     }
 
@@ -712,6 +709,13 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val taskScheduler = ephemeral.requestTracker.taskScheduler
       val requestJournal = ephemeral.requestJournal
 
+      // Register request is called before request processing is triggered
+      val handle =
+        ephemeral.phase37Synchronizer
+          .registerRequest(sut.steps.requestType)(
+            requestId
+          )
+
       // Process the result message before the request
       val processF = performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut)
 
@@ -724,7 +728,13 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
 
       // Now process the request message. This should trigger the completion of the result processing.
       sut
-        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
+        .performRequestProcessing(
+          requestId.unwrap,
+          rc,
+          requestSc,
+          handle,
+          someRequestBatch,
+        )
         .onShutdown(fail())
         .futureValue
 
@@ -751,17 +761,18 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       )
 
       addRequestState(ephemeral)
-      ephemeral.phase37Synchronizer.markConfirmed(TestPendingRequestDataType)(
-        rc,
-        requestId,
-        CantonTimestamp.Epoch.plusSeconds(60),
-        CleanReplayData(
-          rc,
-          requestSc,
-          Set.empty,
-          MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
-        ),
-      )
+      ephemeral.phase37Synchronizer
+        .registerRequest(TestPendingRequestDataType)(requestId)
+        .complete(
+          Some(
+            CleanReplayData(
+              rc,
+              requestSc,
+              Set.empty,
+              MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+            )
+          )
+        )
 
       val before = ephemeral.requestJournal.query(rc).value.futureValue
       before shouldEqual None

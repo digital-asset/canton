@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
@@ -18,15 +18,20 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.version.HasTestCloseContext
-import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
-class MediatorStateTest extends AsyncWordSpec with BaseTest with HasTestCloseContext { self =>
+class MediatorStateTest
+    extends AsyncWordSpec
+    with BaseTest
+    with HasTestCloseContext
+    with HasExecutionContext { self =>
 
   "MediatorState" when {
     val requestId = RequestId(CantonTimestamp.Epoch)
@@ -71,10 +76,16 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest with HasTestCloseCon
       )
     }
     val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
+    val mockTopologySnapshot = mock[TopologySnapshot]
+    when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])).thenAnswer {
+      parties: Set[LfPartyId] => Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+    }
     val currentVersion =
-      ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
-        loggerFactory
-      )
+      ResponseAggregation
+        .fromRequest(requestId, informeeMessage, testedProtocolVersion, mockTopologySnapshot)(
+          loggerFactory
+        )(anyTraceContext, executorService)
+        .futureValue // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
 
     def mediatorState: MediatorState = {
       val sut =

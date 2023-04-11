@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.client
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.metrics.Timed
@@ -299,13 +298,14 @@ class SequencerClient(
       callback: SendCallback = SendCallback.empty,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     withSpan("SequencerClient.sendAsync") { implicit traceContext => span =>
-      val request = SubmissionRequest(
+      val request = SubmissionRequest.tryCreate(
         member,
         messageId,
         sendType.isRequest,
         Batch.closeEnvelopes(batch),
         maxSequencingTime,
         timestampOfSigningKey,
+        aggregationRule = None,
         protocolVersion,
       )
 
@@ -721,7 +721,7 @@ class SequencerClient(
   private val loggingTimeoutHandler: SendTimeoutHandler = msgId => {
     // logged at debug as this is likely logged at the caller using a send callback at a higher level
     logger.debug(s"Send with message id [$msgId] has timed out")(TraceContext.empty)
-    EitherT.rightT(())
+    Future.unit
   }
 
   private class SubscriptionHandler(
@@ -749,7 +749,9 @@ class SequencerClient(
         def notifySendTracker(
             event: OrdinarySequencedEvent[_]
         ): EitherT[Future, SequencerClientSubscriptionError, Unit] =
-          sendTracker.update(timeoutHandler)(event).leftWiden[SequencerClientSubscriptionError]
+          EitherT.liftF[Future, SequencerClientSubscriptionError, Unit](
+            sendTracker.update(timeoutHandler)(event)
+          )
 
         def batchAndCallHandler(): Unit = {
           logger.debug(

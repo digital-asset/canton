@@ -645,7 +645,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
 
       for {
-        signedResult <- SignedProtocolMessage.tryCreate(
+        signedResult <- SignedProtocolMessage.trySignAndCreate(
           transferResult,
           cryptoSnapshot,
           testedProtocolVersion,

@@ -44,6 +44,7 @@ import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
   ProtocolVersionedCompanionDbHelpers,
+  ReleaseProtocolVersion,
   RepresentativeProtocolVersion,
 }
 import com.digitalasset.canton.{
@@ -62,10 +63,13 @@ import com.google.rpc.status.Status as RpcStatus
   * @throws canton.store.db.DbDeserializationException if transactions or contracts fail to deserialize
   */
 private[store] final case class SerializableLedgerSyncEvent(event: LedgerSyncEvent)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[SerializableLedgerSyncEvent]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SerializableLedgerSyncEvent.type
+    ]
 ) extends HasProtocolVersionedWrapper[SerializableLedgerSyncEvent] {
 
-  override protected def companionObj = SerializableLedgerSyncEvent
+  @transient override protected lazy val companionObj: SerializableLedgerSyncEvent.type =
+    SerializableLedgerSyncEvent
 
   def toProtoV0: v0.LedgerSyncEvent = {
     val SyncEventP = v0.LedgerSyncEvent.Value
@@ -119,11 +123,11 @@ private[store] object SerializableLedgerSyncEvent
   override val name: String = "SerializableLedgerSyncEvent"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v3,
-      supportedProtoVersion(v0.LedgerSyncEvent)(fromProtoV0),
-      _.toProtoV0.toByteString,
-    )
+    ProtoVersion(0) -> VersionedProtoConverter
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v3), v0.LedgerSyncEvent)(
+        supportedProtoVersion(_)(fromProtoV0),
+        _.toProtoV0.toByteString,
+      )
   )
 
   def apply(

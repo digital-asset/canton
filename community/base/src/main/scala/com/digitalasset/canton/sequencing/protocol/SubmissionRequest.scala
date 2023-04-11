@@ -3,12 +3,18 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
+import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{InvariantViolation, NonNegativeInt}
+import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.serialization.{
+  DeterministicEncoding,
+  ProtoConverter,
+  ProtocolVersionedMemoizedEvidence,
+}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
@@ -17,24 +23,34 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
-@SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
-case class SubmissionRequest private (
+import scala.math.Ordered.orderingToOrdered
+
+/** @param aggregationRule If [[scala.Some$]], this submission request is aggregatable.
+  *                        Its envelopes will be delivered only when the rule's conditions are met.
+  *                        The receipt of delivery for an aggregatable submission will be delivered immediately to the sender
+  *                        even if the rule's conditions are not met.
+  */
+final case class SubmissionRequest private (
     sender: Member,
     messageId: MessageId,
     isRequest: Boolean,
     batch: Batch[ClosedEnvelope],
     maxSequencingTime: CantonTimestamp,
     timestampOfSigningKey: Option[CantonTimestamp],
+    aggregationRule: Option[AggregationRule],
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SubmissionRequest.type
+    ],
     override val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[SubmissionRequest]
     with ProtocolVersionedMemoizedEvidence {
   private lazy val batchProtoV0: v0.CompressedBatch = batch.toProtoV0
 
-  override val companionObj: SubmissionRequest.type = SubmissionRequest
+  @transient override protected lazy val companionObj: SubmissionRequest.type = SubmissionRequest
 
   // Caches the serialized request to be able to do checks on its size without re-serializing
   lazy val toProtoV0: v0.SubmissionRequest = v0.SubmissionRequest(
@@ -54,23 +70,30 @@ case class SubmissionRequest private (
     batch = Some(batch.toProtoV1),
     maxSequencingTime = Some(maxSequencingTime.toProtoPrimitive),
     timestampOfSigningKey = timestampOfSigningKey.map(_.toProtoPrimitive),
+    aggregationRule = aggregationRule.map(_.toProtoV0),
   )
 
+  @VisibleForTesting
   def copy(
-      sender: Member = sender,
-      messageId: MessageId = messageId,
-      isRequest: Boolean = isRequest,
-      batch: Batch[ClosedEnvelope] = batch,
-      maxSequencingTime: CantonTimestamp = maxSequencingTime,
-      timestampOfSigningKey: Option[CantonTimestamp] = timestampOfSigningKey,
-  ) = SubmissionRequest(
-    sender,
-    messageId,
-    isRequest,
-    batch,
-    maxSequencingTime,
-    timestampOfSigningKey,
-  )(representativeProtocolVersion)
+      sender: Member = this.sender,
+      messageId: MessageId = this.messageId,
+      isRequest: Boolean = this.isRequest,
+      batch: Batch[ClosedEnvelope] = this.batch,
+      maxSequencingTime: CantonTimestamp = this.maxSequencingTime,
+      timestampOfSigningKey: Option[CantonTimestamp] = this.timestampOfSigningKey,
+      aggregationRule: Option[AggregationRule] = this.aggregationRule,
+  ) = SubmissionRequest
+    .create(
+      sender,
+      messageId,
+      isRequest,
+      batch,
+      maxSequencingTime,
+      timestampOfSigningKey,
+      aggregationRule,
+      representativeProtocolVersion,
+    )
+    .valueOr(err => throw new IllegalArgumentException(err.message))
 
   def isConfirmationRequest(mediator: Member): Boolean =
     batch.envelopes.exists(_.recipients.allRecipients == Set(mediator)) && batch.envelopes.exists(
@@ -84,6 +107,52 @@ case class SubmissionRequest private (
 
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
+
+  /** Returns the [[AggregationId]] for grouping if this is an aggregatable submission.
+    * The aggregation ID computationally authenticates the relevant contents of the submission request, namely,
+    * <ul>
+    *   <li>Envelope contents [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.bytes]],
+    *     the recipients [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.recipients]] of the [[batch]],
+    *     and whether there are signatures.
+    *   <li>The [[maxSequencingTime]]</li>
+    *   <li>The [[timestampOfSigningKey]]</li>
+    *   <li>The [[aggregationRule]]</li>
+    * </ul>
+    *
+    * The [[AggregationId]] does not authenticate the following pieces of a submission request:
+    * <ul>
+    *   <li>The signatures [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.signatures]] on the closed envelopes
+    *     because the signatures differ for each sender. Aggregating the signatures is the whole point of an aggregatable submission.
+    *     In contrast, the presence of signatures is relevant for the ID because it determines how the
+    *     [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.bytes]] are interpreted.
+    *     </li>
+    *   <li>The [[sender]] and the [[messageId]], as they are specific to the sender of a particular submission request</li>
+    *   <li>The [[isRequest]] flag because it is irrelevant for delivery or aggregation</li>
+    * </ul>
+    */
+  def aggregationId(hashOps: HashOps): Option[AggregationId] = aggregationRule.map { rule =>
+    val builder = hashOps.build(HashPurpose.AggregationId)
+    builder.add(batch.envelopes.length)
+    batch.envelopes.foreach { envelope =>
+      val ClosedEnvelope(content, recipients, signatures) = envelope
+      builder.add(DeterministicEncoding.encodeBytes(content))
+      builder.add(
+        DeterministicEncoding.encodeBytes(
+          // TODO(#12075) Use a deterministic serialization scheme for the recipients
+          recipients.toProtoV0.toByteString
+        )
+      )
+      builder.add(DeterministicEncoding.encodeByte(if (signatures.isEmpty) 0x00 else 0x01))
+    }
+    builder.add(maxSequencingTime.underlying.micros)
+    // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MaxValue as the default.
+    builder.add(timestampOfSigningKey.fold(Long.MinValue)(_.underlying.micros))
+    builder.add(rule.eligibleMembers.size)
+    rule.eligibleMembers.foreach(member => builder.add(member.toProtoPrimitive))
+    builder.add(rule.threshold.value)
+    val hash = builder.finish()
+    AggregationId(hash)
+  }
 }
 sealed trait MaxRequestSizeToDeserialize {
   val toOption: Option[NonNegativeInt] = this match {
@@ -102,13 +171,13 @@ object SubmissionRequest
       MaxRequestSizeToDeserialize,
     ] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.SubmissionRequest)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SubmissionRequest)(
       supportedProtoVersionMemoized(_) { (maxRequestSize, req) => bytes =>
         fromProtoV0(maxRequestSize)(req, Some(bytes))
       },
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(
+    ProtoVersion(1) -> VersionedProtoConverter(
       // TODO(#12373) Adapt when releasing BFT
       ProtocolVersion.dev
     )(v1.SubmissionRequest)(
@@ -119,23 +188,55 @@ object SubmissionRequest
 
   override protected def name: String = "submission request"
 
-  def apply(
+  val aggregationRuleSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
+
+  def create(
       sender: Member,
       messageId: MessageId,
       isRequest: Boolean,
       batch: Batch[ClosedEnvelope],
       maxSequencingTime: CantonTimestamp,
       timestampOfSigningKey: Option[CantonTimestamp],
+      aggregationRule: Option[AggregationRule],
+      representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest.type],
+  ): Either[InvariantViolation, SubmissionRequest] = {
+    Either.cond(
+      representativeProtocolVersion >= aggregationRuleSupportedSince || aggregationRule.isEmpty,
+      new SubmissionRequest(
+        sender,
+        messageId,
+        isRequest,
+        batch,
+        maxSequencingTime,
+        timestampOfSigningKey,
+        aggregationRule,
+      )(representativeProtocolVersion, deserializedFrom = None),
+      InvariantViolation(
+        s"Aggregation rules are not supported in protocol version equivalent to ${representativeProtocolVersion.representative}"
+      ),
+    )
+  }
+
+  def tryCreate(
+      sender: Member,
+      messageId: MessageId,
+      isRequest: Boolean,
+      batch: Batch[ClosedEnvelope],
+      maxSequencingTime: CantonTimestamp,
+      timestampOfSigningKey: Option[CantonTimestamp],
+      aggregationRule: Option[AggregationRule],
       protocolVersion: ProtocolVersion,
   ): SubmissionRequest =
-    SubmissionRequest(
+    create(
       sender,
       messageId,
       isRequest,
       batch,
       maxSequencingTime,
       timestampOfSigningKey,
-    )(protocolVersionRepresentativeFor(protocolVersion))
+      aggregationRule,
+      protocolVersionRepresentativeFor(protocolVersion),
+    ).valueOr(err => throw new IllegalArgumentException(err.message))
 
   def fromProtoV0(
       requestP: v0.SubmissionRequest,
@@ -173,10 +274,8 @@ object SubmissionRequest
       batch,
       maxSequencingTime,
       ts,
-    )(
-      protocolVersionRepresentativeFor(ProtoVersion(0)),
-      bytes,
-    )
+      None,
+    )(protocolVersionRepresentativeFor(ProtoVersion(0)), bytes)
   }
 
   private def fromProtoV1(
@@ -190,6 +289,7 @@ object SubmissionRequest
       batchP,
       maxSequencingTimeP,
       timestampOfSigningKey,
+      aggregationRuleP,
     ) = requestP
 
     for {
@@ -206,6 +306,7 @@ object SubmissionRequest
         batchP,
       )
       ts <- timestampOfSigningKey.traverse(CantonTimestamp.fromProtoPrimitive)
+      aggregationRule <- aggregationRuleP.traverse(AggregationRule.fromProtoV0)
     } yield new SubmissionRequest(
       sender,
       messageId,
@@ -213,10 +314,8 @@ object SubmissionRequest
       batch,
       maxSequencingTime,
       ts,
-    )(
-      protocolVersionRepresentativeFor(ProtoVersion(1)),
-      Some(bytes),
-    )
+      aggregationRule,
+    )(protocolVersionRepresentativeFor(ProtoVersion(1)), Some(bytes))
   }
 
   def usingSignedSubmissionRequest(protocolVersion: ProtocolVersion): Boolean =

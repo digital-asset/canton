@@ -35,7 +35,7 @@ final case class ViewCommonData private (
     salt: Salt,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[ViewCommonData],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[ViewCommonData.type],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewCommonData](hashOps)
     // The class needs to implement ProtocolVersionedMemoizedEvidence, because we want that serialize always yields the same ByteString.
@@ -51,7 +51,7 @@ final case class ViewCommonData private (
   // If another serializable class contains a ViewCommonData, it has to include it as a ByteString
   // (and not as "message ViewCommonData") in its ProtoBuf representation.
 
-  override def companionObj: ViewCommonData.type = ViewCommonData
+  @transient override protected lazy val companionObj: ViewCommonData.type = ViewCommonData
 
   // We use named parameters, because then the code remains correct even when the ProtoBuf code generator
   // changes the order of parameters.
@@ -88,7 +88,7 @@ object ViewCommonData
   override val name: String = "ViewCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.ViewCommonData)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.ViewCommonData)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

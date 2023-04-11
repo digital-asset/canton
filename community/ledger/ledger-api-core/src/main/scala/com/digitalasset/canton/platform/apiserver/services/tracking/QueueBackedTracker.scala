@@ -137,26 +137,27 @@ private[services] object QueueBackedTracker {
       .run()
 
     done.onComplete { success =>
-      val (promiseCancellationDescription, _) = success match {
-        case Success(_) => "Unknown" -> null // in this case, there should be no promises cancelled
+      val promiseCancellationDescription = success match {
+        case Success(_) => "Unknown" // in this case, there should be no promises cancelled
         case Failure(t: Exception) =>
           logger.error("Error in tracker", t)
-          "Cancelled due to previous internal error" -> t
+          "Cancelled due to previous internal error"
         case Failure(t: Throwable) =>
           logger.error("Error in tracker", t)
           throw t // TODO(i12290): we should shut down the server on internal errors.
       }
 
       mat.trackingMat.onComplete((aTry: Try[Map[_, Promise[_]]]) => {
+        val errorLogger = new DamlContextualizedErrorLogger(logger, loggingContext, None)
         // no error expected here -- if there is one, we're at a total loss.
         // TODO(i12290): we should shut down everything in this case.
-        val promises: Iterable[Promise[_]] = aTry.get.values
-        val errorLogger = new DamlContextualizedErrorLogger(logger, loggingContext, None)
-        promises.foreach(p =>
-          p.failure(
-            LedgerApiErrors.InternalError
-              .Generic(promiseCancellationDescription)(errorLogger)
-              .asGrpcError
+        aTry.foreach(trackedCommands =>
+          trackedCommands.values.foreach(p =>
+            p.failure(
+              LedgerApiErrors.InternalError
+                .Generic(promiseCancellationDescription)(errorLogger)
+                .asGrpcError
+            )
           )
         )
       })(ExecutionContext.parasitic)

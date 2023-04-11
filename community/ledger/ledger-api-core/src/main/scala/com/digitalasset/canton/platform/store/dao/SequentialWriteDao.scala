@@ -8,7 +8,7 @@ import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   DbDtoToStringsForInterning,
@@ -80,9 +80,13 @@ private[dao] case class SequentialWriteDaoImpl[DB_BATCH](
     dbDtosToStringsForInterning: Iterable[DbDto] => DomainStringIterators,
 ) extends SequentialWriteDao {
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var lastEventSeqId: Long = _
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var lastStringInterningId: Int = _
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var lastEventSeqIdInitialized = false
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var previousTransactionMetaToEventSeqId: Long = _
 
   private def lazyInit(connection: Connection): Unit =
@@ -137,12 +141,14 @@ private[dao] case class SequentialWriteDaoImpl[DB_BATCH](
         dbDtos
           .pipe(dbDtosToStringsForInterning)
           .pipe(stringInterningView.internize)
-          .map(DbDto.StringInterningDto.from) match {
-          case noNewEntries if noNewEntries.isEmpty => dbDtos
-          case newEntries =>
-            lastStringInterningId = newEntries.last.internalId
-            dbDtos ++ newEntries
-        }
+          .map(DbDto.StringInterningDto.from)
+          .pipe(newEntries =>
+            newEntries.lastOption
+              .fold(dbDtos)(last => {
+                lastStringInterningId = last.internalId
+                dbDtos ++ newEntries
+              })
+          )
 
       dbDtosWithStringInterning
         .pipe(ingestionStorageBackend.batch(_, stringInterningView))

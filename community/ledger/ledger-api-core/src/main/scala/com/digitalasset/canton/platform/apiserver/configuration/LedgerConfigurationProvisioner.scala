@@ -12,11 +12,11 @@ import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.{SpanKind, SpanName, Telemetry}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.configuration.InitialLedgerConfiguration
 
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{Duration => ScalaDuration}
+import scala.concurrent.duration.{Duration as ScalaDuration}
 import scala.jdk.FutureConverters.CompletionStageOps
 import scala.util.{Failure, Success}
 

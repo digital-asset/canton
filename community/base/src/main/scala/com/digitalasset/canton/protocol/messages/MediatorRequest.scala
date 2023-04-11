@@ -12,7 +12,7 @@ import com.digitalasset.canton.topology.MediatorId
 
 import java.util.UUID
 
-trait MediatorRequest extends ProtocolMessage {
+trait MediatorRequest extends ProtocolMessage with UnsignedProtocolMessage {
   def requestUuid: UUID
 
   def mediatorId: MediatorId
@@ -45,8 +45,9 @@ trait MediatorRequest extends ProtocolMessage {
 
 object MediatorRequest {
   implicit val mediatorRequestProtocolMessageContentCast
-      : ProtocolMessageContentCast[MediatorRequest] = {
-    case m: MediatorRequest => Some(m)
-    case _ => None
-  }
+      : ProtocolMessageContentCast[MediatorRequest] =
+    ProtocolMessageContentCast.create[MediatorRequest]("MediatorRequest") {
+      case m: MediatorRequest => Some(m)
+      case _ => None
+    }
 }

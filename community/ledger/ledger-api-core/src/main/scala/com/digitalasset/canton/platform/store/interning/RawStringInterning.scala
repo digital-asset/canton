@@ -20,7 +20,9 @@ private[interning] object RawStringInterning {
       RawStringInterning(
         map = rawStringInterning.map ++ entries.view.map(_.swap),
         idMap = rawStringInterning.idMap ++ entries,
-        lastId = entries.view.map(_._1).max,
+        lastId = entries.view.foldLeft(rawStringInterning.lastId)((lastId, entry) =>
+          Math.max(lastId, entry._1)
+        ),
       )
 
   def newEntries(

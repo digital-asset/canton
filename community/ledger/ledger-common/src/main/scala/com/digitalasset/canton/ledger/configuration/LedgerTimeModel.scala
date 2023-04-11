@@ -62,11 +62,11 @@ object LedgerTimeModel {
     * Serious applications (viz. ledger) should probably specify their own TimeModel.
     */
   val reasonableDefault: LedgerTimeModel =
-    LedgerTimeModel(
+    new LedgerTimeModel(
       avgTransactionLatency = Duration.ofSeconds(0L),
       minSkew = Duration.ofSeconds(30L),
       maxSkew = Duration.ofSeconds(30L),
-    ).get
+    )
 
   def apply(
       avgTransactionLatency: Duration,

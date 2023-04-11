@@ -9,7 +9,7 @@ import com.daml.lf.data.Bytes
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.ledger.EventId
-import com.daml.lf.value.{Value => LfValue}
+import com.daml.lf.value.{Value as LfValue}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.EventSequentialId
 import com.digitalasset.canton.platform.{ContractId, Identifier}

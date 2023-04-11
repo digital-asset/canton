@@ -16,7 +16,7 @@ import com.daml.metrics.IndexedUpdatesMetrics
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import org.scalatest.wordspec.AnyWordSpec
 
 class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {

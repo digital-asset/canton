@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.config
 import com.daml.metrics.api.reporters.MetricsReporter
 import com.digitalasset.canton.platform.config.MetricsConfig.MetricRegistryType
 
-import scala.concurrent.duration.{Duration, _}
+import scala.concurrent.duration.{Duration, *}
 
 final case class MetricsConfig(
     enabled: Boolean = false,

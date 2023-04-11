@@ -166,7 +166,7 @@ private[mediator] class DefaultVerdictSender(
               )
 
           SignedProtocolMessage
-            .create(result, snapshot, protocolVersion)
+            .signAndCreate(result, snapshot, protocolVersion)
             .map(signedResult => List(OpenEnvelope(signedResult, recipients)(protocolVersion)))
         } else {
           // TODO(i12171): Remove this block in 3.0
@@ -174,7 +174,7 @@ private[mediator] class DefaultVerdictSender(
             .parTraverse { case (participantId, informees) =>
               val result = request.createMediatorResult(requestId, verdict, informees)
               SignedProtocolMessage
-                .create(result, snapshot, protocolVersion)
+                .signAndCreate(result, snapshot, protocolVersion)
                 .map(signedResult =>
                   OpenEnvelope(signedResult, Recipients.cc(participantId))(protocolVersion)
                 )

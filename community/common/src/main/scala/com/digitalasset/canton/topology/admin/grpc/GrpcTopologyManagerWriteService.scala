@@ -65,7 +65,7 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
         .leftWiden[CantonError]
     } yield new AuthorizationSuccess(success.getCryptographicEvidence)
 
-    EitherTUtil.toFuture(mapErrNew(authorizationSuccess))
+    CantonGrpcUtil.mapErrNew(authorizationSuccess)
   }
 
   override def authorizePartyToParticipant(
@@ -164,7 +164,7 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
       request: SignedTopologyTransactionAddition
   ): Future[AdditionSuccess] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val item = for {
+    for {
       parsed <- mapErrNew(
         EitherT
           .fromEither[Future](SignedTopologyTransaction.fromByteString(request.serialized))
@@ -174,7 +174,6 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
         manager.add(parsed, force = true, replaceExisting = true, allowDuplicateMappings = true)
       )
     } yield AdditionSuccess()
-    EitherTUtil.toFuture(item)
   }
 
   /** Authorizes a new signed legal identity
@@ -203,13 +202,15 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     request.request match {
       case Request.LegalIdentityClaim(bytes) =>
-        val result = for {
-          parsed <- mapErrNew(
-            LegalIdentityClaim.fromByteString(bytes).leftMap(ProtoDeserializationFailure.Wrap(_))
+        for {
+          parsed <- EitherTUtil.toFuture(
+            mapErrNew(
+              LegalIdentityClaim.fromByteString(bytes).leftMap(ProtoDeserializationFailure.Wrap(_))
+            )
           )
           generated <- mapErrNew(manager.generate(parsed))
         } yield generated.toProtoV0
-        EitherTUtil.toFuture(result)
+
       case Request.Certificate(X509CertificateClaim(uniqueIdentifier, certificateIdProto)) =>
         val result = for {
           uid <- mapErr(UniqueIdentifier.fromProtoPrimitive(uniqueIdentifier, "unique_identifier"))

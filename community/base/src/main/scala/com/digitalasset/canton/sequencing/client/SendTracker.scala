@@ -18,7 +18,6 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
-import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.SendTrackerUpdateError
 import com.digitalasset.canton.sequencing.protocol.{
   Deliver,
   DeliverError,
@@ -35,16 +34,13 @@ import java.time.Instant
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
-object SendTrackerUpdateError {
-  final case class DatabaseError(exception: Throwable) extends SendTrackerUpdateError
-
-  /** Intentionally open as we currently don't have a plan for what handlers will be doing */
-  trait TimeoutHandlerError extends SendTrackerUpdateError
-}
-
 /** When a we make a send request to the sequencer it will not be sequenced until some point in the future and may not
   * be sequenced at all. To track a request call `send` with the messageId and max-sequencing-time of the request,
-  * the tracker then observes sequenced events and will notify the provided handler if the send times out.
+  * the tracker then observes sequenced events and will notify the provided handler whether the send times out.
+  * For aggregatable submission requests, the send tracker notifies the handler of successful sequencing of the submission request,
+  * not of successful delivery of the envelopes when the
+  * [[com.digitalasset.canton.sequencing.protocol.AggregationRule.threshold]] has been reached.
+  * In fact, there is no notification of whether the threshold was reached before the max sequencing time.
   */
 class SendTracker(
     initialPendingSends: Map[MessageId, CantonTimestamp],
@@ -130,17 +126,17 @@ class SendTracker(
     */
   def update(
       timeoutHandler: SendTimeoutHandler
-  )(event: OrdinarySequencedEvent[_]): EitherT[Future, SendTrackerUpdateError, Unit] = {
+  )(event: OrdinarySequencedEvent[_]): Future[Unit] = {
     implicit val traceContext: TraceContext = event.traceContext
     for {
-      _ <- EitherT.right(removePendingSend(event.signedEvent.content))
+      _ <- removePendingSend(event.signedEvent.content)
       _ <- processTimeouts(timeoutHandler)(event.timestamp)
     } yield ()
   }
 
   private def processTimeouts(timeoutHandler: SendTimeoutHandler)(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, SendTrackerUpdateError, Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] = {
     val timedOut = timedOutSends(timestamp)
 
     sequentialTraverse_(timedOut)(handleTimeout(timeoutHandler, timestamp))
@@ -148,13 +144,11 @@ class SendTracker(
 
   private def handleTimeout(handler: SendTimeoutHandler, timestamp: CantonTimestamp)(
       messageId: MessageId
-  )(implicit traceContext: TraceContext): EitherT[Future, SendTrackerUpdateError, Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] = {
     logger.debug(s"Sequencer send [$messageId] has timed out at $timestamp")
     for {
       _ <- handler(messageId)
-      _ <- EitherT.right(
-        removePendingSend(messageId, UnlessShutdown.Outcome(SendResult.Timeout(timestamp)).some)
-      )
+      _ <- removePendingSend(messageId, UnlessShutdown.Outcome(SendResult.Timeout(timestamp)).some)
     } yield ()
   }
 

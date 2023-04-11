@@ -16,7 +16,6 @@ lazy val functionmeta = CommunityProjects.functionmeta
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
 lazy val `akka-fork` = CommunityProjects.`akka-fork`
 lazy val `util-external` = CommunityProjects.`util-external`
-lazy val `util-internal` = CommunityProjects.`util-internal`
 lazy val `sequencer-driver-api` = CommunityProjects.`sequencer-driver-api`
 lazy val `sequencer-driver-lib` = CommunityProjects.`sequencer-driver-lib`
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`

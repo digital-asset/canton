@@ -16,6 +16,7 @@ private[h2] case class IntArray[FROM](extract: StringInterning => FROM => Iterab
 private[h2] case class IntArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[Int]]
 ) extends Field[FROM, Option[Iterable[Int]], Array[java.lang.Integer]] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Iterable[Int]] => Array[java.lang.Integer] =
     _.map(_.view.map(Int.box).toArray).orNull
 }
@@ -28,6 +29,7 @@ private[h2] case class H2Bytea[FROM](extract: StringInterning => FROM => Array[B
 private[h2] case class H2ByteaOptional[FROM](
     extract: StringInterning => FROM => Option[Array[Byte]]
 ) extends Field[FROM, Option[Array[Byte]], InputStream] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Array[Byte]] => InputStream =
     _.map(new ByteArrayInputStream(_)).orNull
 }

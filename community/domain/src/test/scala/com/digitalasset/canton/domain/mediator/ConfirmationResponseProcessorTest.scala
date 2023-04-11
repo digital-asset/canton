@@ -10,11 +10,12 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CachingConfigs
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.{TransactionViewType, TransferInViewType}
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.domain.mediator.ResponseAggregation.ConsortiumVotingState
 import com.digitalasset.canton.domain.mediator.store.{
   InMemoryFinalizedResponseStore,
   InMemoryMediatorDeduplicationStore,
@@ -196,7 +197,7 @@ class ConfirmationResponseProcessorTest
         testedProtocolVersion,
       )
       val participantCrypto = identityFactory.forOwner(participant)
-      SignedProtocolMessage.tryCreate(
+      SignedProtocolMessage.trySignAndCreate(
         response,
         participantCrypto.tryForDomain(domainId).currentSnapshotApproximation,
         testedProtocolVersion,
@@ -292,6 +293,9 @@ class ConfirmationResponseProcessorTest
         .thenReturn(Future.successful(initialDomainParameters))
       when(mockTopologySnapshot.canConfirm(any[ParticipantId], any[LfPartyId], any[TrustLevel]))
         .thenReturn(Future.successful(true))
+      when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])).thenAnswer {
+        parties: Set[LfPartyId] => Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+      }
       when(mockSnapshot.ipsSnapshot).thenReturn(mockTopologySnapshot)
       when(mockSnapshot.verifySignatures(any[Hash], any[KeyOwner], any[NonEmpty[Seq[Signature]]]))
         .thenReturn(EitherT.rightT(()))
@@ -600,10 +604,10 @@ class ConfirmationResponseProcessorTest
           List(Set[Member](participant) -> correctViewType, Set[Member](otherParticipant) -> wrongViewType),
 
         (batchWithRootHashMessageWithTooManyRecipients ->
-          show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = Seq($mediatorId, $participant, $otherParticipant), children = Seq())") ->
+          show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = Seq($mediatorId, $participant, $otherParticipant))") ->
           List(Set[Member](participant, otherParticipant) -> correctViewType),
 
-        (batchWithRootHashMessageWithTooFewRecipients -> show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = $mediatorId, children = Seq())") -> List.empty,
+        (batchWithRootHashMessageWithTooFewRecipients -> show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = $mediatorId)") -> List.empty,
 
         (batchWithRepeatedRootHashMessage             -> show"Several root hash messages for members: $participant") ->
           List(Set[Member](participant) -> correctViewType),
@@ -725,6 +729,12 @@ class ConfirmationResponseProcessorTest
         ViewType.TransactionViewType,
         SerializedRootHashMessagePayload.empty,
       )
+      val mockTopologySnapshot = mock[TopologySnapshot]
+      when(mockTopologySnapshot.canConfirm(any[ParticipantId], any[LfPartyId], any[TrustLevel]))
+        .thenReturn(Future.successful(true))
+      when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])).thenAnswer {
+        parties: Set[LfPartyId] => Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+      }
 
       for {
         _ <- sut.processor.processRequest(
@@ -741,12 +751,18 @@ class ConfirmationResponseProcessorTest
         )
         // should record the request
         requestState <- sut.mediatorState.fetch(requestId).value.map(_.value)
-        _ = {
-          val responseAggregation =
-            ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
-              loggerFactory
-            )
-          assert(requestState === responseAggregation)
+        responseAggregation <- {
+          ResponseAggregation.fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            mockTopologySnapshot,
+          )(
+            loggerFactory
+          )
+        }
+        _ <- {
+          requestState shouldBe responseAggregation
         }
         // receiving the confirmation response
         ts1 = CantonTimestamp.Epoch.plusMillis(1L)
@@ -786,16 +802,59 @@ class ConfirmationResponseProcessorTest
             updatedState.value
           assert(
             states === Map(
-              ViewHash.fromRootHash(view.rootHash) ->
-                ResponseAggregation.ViewState(Set.empty, 0, List()),
-              ViewHash.fromRootHash(factory.MultipleRootsAndViewNestings.view1.rootHash) ->
-                ResponseAggregation.ViewState(Set(ConfirmingParty(signatory, 1)), 1, List()),
-              ViewHash.fromRootHash(factory.MultipleRootsAndViewNestings.view10.rootHash) ->
-                ResponseAggregation.ViewState(Set(ConfirmingParty(signatory, 1)), 1, List()),
-              ViewHash.fromRootHash(factory.MultipleRootsAndViewNestings.view11.rootHash) ->
-                ResponseAggregation.ViewState(Set(ConfirmingParty(signatory, 1)), 1, List()),
-              ViewHash.fromRootHash(factory.MultipleRootsAndViewNestings.view110.rootHash) ->
-                ResponseAggregation.ViewState(Set.empty, 0, List()),
+              view.viewHash ->
+                ResponseAggregation.ViewState(
+                  Set.empty,
+                  Map(
+                    submitter -> ConsortiumVotingState(approvals =
+                      Set(ExampleTransactionFactory.submitterParticipant)
+                    )
+                  ),
+                  0,
+                  Nil,
+                ),
+              factory.MultipleRootsAndViewNestings.view1.viewHash ->
+                ResponseAggregation.ViewState(
+                  Set(ConfirmingParty(signatory, 1)),
+                  Map(
+                    submitter -> ConsortiumVotingState(approvals =
+                      Set(ExampleTransactionFactory.submitterParticipant)
+                    ),
+                    signatory -> ConsortiumVotingState(),
+                  ),
+                  1,
+                  Nil,
+                ),
+              factory.MultipleRootsAndViewNestings.view10.viewHash ->
+                ResponseAggregation.ViewState(
+                  Set(ConfirmingParty(signatory, 1)),
+                  Map(signatory -> ConsortiumVotingState()),
+                  1,
+                  Nil,
+                ),
+              factory.MultipleRootsAndViewNestings.view11.viewHash ->
+                ResponseAggregation.ViewState(
+                  Set(ConfirmingParty(signatory, 1)),
+                  Map(
+                    submitter -> ConsortiumVotingState(approvals =
+                      Set(ExampleTransactionFactory.submitterParticipant)
+                    ),
+                    signatory -> ConsortiumVotingState(),
+                  ),
+                  1,
+                  Nil,
+                ),
+              factory.MultipleRootsAndViewNestings.view110.viewHash ->
+                ResponseAggregation.ViewState(
+                  Set.empty,
+                  Map(
+                    submitter -> ConsortiumVotingState(approvals =
+                      Set(ExampleTransactionFactory.submitterParticipant)
+                    )
+                  ),
+                  0,
+                  Nil,
+                ),
             )
           )
         }
@@ -891,7 +950,7 @@ class ConfirmationResponseProcessorTest
           testedProtocolVersion,
         )
         val participantCrypto = identityFactory2.forOwner(participant)
-        SignedProtocolMessage.tryCreate(
+        SignedProtocolMessage.trySignAndCreate(
           response,
           participantCrypto.tryForDomain(domainId).currentSnapshotApproximation,
           testedProtocolVersion,

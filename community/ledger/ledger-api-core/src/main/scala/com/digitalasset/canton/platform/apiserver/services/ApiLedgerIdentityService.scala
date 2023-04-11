@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services
 import com.daml.error.definitions.CommonErrors
 import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
 import com.daml.ledger.api.v1.ledger_identity_service.LedgerIdentityServiceGrpc.{
-  LedgerIdentityService => GrpcLedgerIdentityService
+  LedgerIdentityService as GrpcLedgerIdentityService
 }
 import com.daml.ledger.api.v1.ledger_identity_service.{
   GetLedgerIdentityRequest,
@@ -19,6 +19,7 @@ import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import io.grpc.{BindableService, ServerServiceDefinition}
 import scalaz.syntax.tag.*
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -31,14 +32,14 @@ private[apiserver] final class ApiLedgerIdentityService private (
   private implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
     new DamlContextualizedErrorLogger(logger, loggingContext, None)
 
-  @volatile var closed = false
+  val closed: AtomicBoolean = new AtomicBoolean(false)
 
   @nowarn("cat=deprecation&origin=com\\.daml\\.ledger\\.api\\.v1\\.ledger_identity_service\\..*")
   override def getLedgerIdentity(
       request: GetLedgerIdentityRequest
   ): Future[GetLedgerIdentityResponse] = {
     logger.info(s"Received request for ledger identity: $request")
-    if (closed)
+    if (closed.get())
       Future.failed(CommonErrors.ServiceNotRunning.Reject("Ledger Identity Service").asGrpcError)
     else
       getLedgerId()
@@ -46,7 +47,7 @@ private[apiserver] final class ApiLedgerIdentityService private (
         .andThen(logger.logErrorsOnCall[GetLedgerIdentityResponse])
   }
 
-  override def close(): Unit = closed = true
+  override def close(): Unit = closed.set(true)
 
   override def bindService(): ServerServiceDefinition =
     LedgerIdentityServiceGrpc.bindService(this, executionContext): @nowarn(

@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.apiserver.execution
 import com.daml.lf.data.ImmArray
 import com.daml.lf.transaction.{GlobalKey, ProcessedDisclosedContract, SubmittedTransaction}
 import com.daml.lf.value.Value
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 
 /** The result of command execution.
   *

@@ -14,13 +14,9 @@ import "com/digitalasset/canton/protocol/v2/topology.proto";
  */
 service TopologyManagerWriteServiceX {
 
-
   rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
 
   rpc AddTransactions(AddTransactionsRequest) returns (AddTransactionsResponse);
-
-  // TODO(#11255) remove once read service is ready with Namespace and OTK queries
-  rpc GenerateGenesisTopologyTransactions(GenerateGenesisTopologyTransactionsRequest) returns (GenerateGenesisTopologyTransactionsResponse);
 
 }
 
@@ -82,15 +78,3 @@ message AddTransactionsRequest {
 message AddTransactionsResponse {
 
 }
-
-// TODO(#11255) remove once read service is ready with Namespace and OTK queries
-message GenerateGenesisTopologyTransactionsRequest {
-  string domain_name = 1;
-  repeated string founding_members = 2;
-}
-
-// TODO(#11255) remove once read service is ready with Namespace and OTK queries
-message GenerateGenesisTopologyTransactionsResponse {
-  repeated com.digitalasset.canton.protocol.v2.SignedTopologyTransactionX transactions = 1;
-}
-

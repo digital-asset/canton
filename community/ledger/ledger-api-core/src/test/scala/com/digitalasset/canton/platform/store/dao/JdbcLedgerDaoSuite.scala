@@ -13,13 +13,13 @@ import com.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
 import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.{ContractId, ContractInstance, ValueText, VersionedContractInstance}
-import com.daml.lf.value.{Value => LfValue}
+import com.daml.lf.value.{Value as LfValue}
 import com.daml.logging.LoggingContext
 import com.daml.testing.utils.{TestModels, TestResourceUtils}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoSuite.*
 import com.digitalasset.canton.platform.store.dao.PersistenceResponse
 import com.digitalasset.canton.platform.store.entries.LedgerEntry

@@ -6,14 +6,14 @@ package com.digitalasset.canton.platform.sandbox.auth
 import com.daml.error.ErrorsAssertions
 import com.daml.error.utils.ErrorDetails
 import com.daml.ledger.api.v1.admin.user_management_service.{Right, UpdateUserRequest}
-import com.daml.ledger.api.v1.admin.{user_management_service => user_management_service_proto}
+import com.daml.ledger.api.v1.admin.{user_management_service as user_management_service_proto}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionsRequest,
   GetTransactionsResponse,
   TransactionServiceGrpc,
 }
-import com.daml.ledger.api.v1.{admin => admin_proto}
+import com.daml.ledger.api.v1.{admin as admin_proto}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.timer.Delayed
 import com.digitalasset.canton.ledger.runner.common.Config

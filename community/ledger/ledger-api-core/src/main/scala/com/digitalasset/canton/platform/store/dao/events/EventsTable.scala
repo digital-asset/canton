@@ -9,8 +9,8 @@ import com.daml.error.definitions.IndexErrors
 import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
 import com.daml.ledger.api.v1.event.Event
 import com.daml.ledger.api.v1.transaction.{
-  Transaction => ApiTransaction,
-  TransactionTree => ApiTransactionTree,
+  Transaction as ApiTransaction,
+  TransactionTree as ApiTransactionTree,
   TreeEvent,
 }
 import com.daml.ledger.api.v1.transaction_service.{
@@ -51,9 +51,9 @@ object EventsTable {
 
     def toGetTransactionsResponse(
         events: Vector[Entry[Event]]
-    ): List[GetTransactionsResponse] =
+    ): List[(String, GetTransactionsResponse)] =
       flatTransaction(events).toList.map(tx =>
-        GetTransactionsResponse(Seq(tx)).withPrecomputedSerializedSize()
+        tx.offset -> GetTransactionsResponse(Seq(tx)).withPrecomputedSerializedSize()
       )
 
     def toGetFlatTransactionResponse(
@@ -135,9 +135,9 @@ object EventsTable {
 
     def toGetTransactionTreesResponse(
         events: Vector[Entry[TreeEvent]]
-    ): List[GetTransactionTreesResponse] =
+    ): List[(String, GetTransactionTreesResponse)] =
       transactionTree(events).toList.map(tx =>
-        GetTransactionTreesResponse(Seq(tx)).withPrecomputedSerializedSize()
+        tx.offset -> GetTransactionTreesResponse(Seq(tx)).withPrecomputedSerializedSize()
       )
 
     def toGetTransactionResponse(

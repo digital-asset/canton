@@ -5,9 +5,12 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
+import com.digitalasset.canton.config.RequireTypes.InvariantViolation
 import com.digitalasset.canton.crypto.{
   HashOps,
   HashPurpose,
@@ -20,6 +23,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.{v0, v1}
+import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, Member}
@@ -44,54 +48,54 @@ import scala.math.Ordered.orderingToOrdered
   * [[com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent.content]].
   */
 // TODO(#12373) Adapt comment regarding PV=dev when releasing BFT
-@SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
-case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
+// sealed because this class is mocked in tests
+sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] private (
     typedMessage: TypedSignedProtocolMessageContent[M],
     signatures: NonEmpty[Seq[Signature]],
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      SignedProtocolMessage[SignedProtocolMessageContent]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SignedProtocolMessage.type
     ]
 ) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtocolVersionedWrapper[SignedProtocolMessage[SignedProtocolMessageContent]] {
 
-  // TODO(#11862) proper factory APIs
-  require(
-    representativeProtocolVersion >=
-      // TODO(#12373) Adapt when releasing BFT
-      companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev) ||
-      signatures.sizeCompare(1) == 0,
-    s"SignedProtocolMessage supports only a single signatures in protocol versions below ${ProtocolVersion.dev}. Got ${signatures.size} signatures",
-  )
+  @transient override protected lazy val companionObj: SignedProtocolMessage.type =
+    SignedProtocolMessage
 
   def message: M = typedMessage.content
 
   def verifySignature(
       snapshot: SyncCryptoApi,
       member: Member,
-  ): EitherT[Future, SignatureCheckError, Unit] = {
-    val (hashPurpose, signedBytes) =
-      if (
-        representativeProtocolVersion >=
-          // TODO(#12373) Adapt when releasing BFT
-          companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev)
-      ) (HashPurpose.SignedProtocolMessageSignature, typedMessage.getCryptographicEvidence)
-      else (message.hashPurpose, message.getCryptographicEvidence)
-    val hash = snapshot.pureCrypto.digest(hashPurpose, signedBytes)
-    snapshot.verifySignatures(hash, member, signatures)
-  }
+  ): EitherT[Future, SignatureCheckError, Unit] =
+    if (
+      representativeProtocolVersion >=
+        // TODO(#12373) Adapt when releasing BFT
+        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev)
+    ) {
+      ClosedEnvelope.verifySignatures(
+        snapshot,
+        member,
+        typedMessage.getCryptographicEvidence,
+        signatures,
+      )
+    } else {
+      val hashPurpose = message.hashPurpose
+      val hash = snapshot.pureCrypto.digest(hashPurpose, message.getCryptographicEvidence)
+      snapshot.verifySignatures(hash, member, signatures)
+    }
 
   def copy[MM <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[MM] = this.typedMessage,
       signatures: NonEmpty[Seq[Signature]] = this.signatures,
   ): SignedProtocolMessage[MM] =
-    SignedProtocolMessage(typedMessage, signatures)(representativeProtocolVersion)
+    SignedProtocolMessage
+      .create(typedMessage, signatures, representativeProtocolVersion)
+      .valueOr(err => throw new IllegalArgumentException(err.message))
 
   override def domainId: DomainId = message.domainId
-
-  override def companionObj = SignedProtocolMessage
 
   protected def toProtoV0: v0.SignedProtocolMessage = {
     val content = typedMessage.content.toProtoSomeSignedProtocolMessage
@@ -135,11 +139,11 @@ object SignedProtocolMessage
   override val name: String = "SignedProtocolMessage"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.SignedProtocolMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SignedProtocolMessage)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(
+    ProtoVersion(1) -> VersionedProtoConverter(
       // TODO(#12373) Adapt when releasing BFT
       ProtocolVersion.dev
     )(v1.SignedProtocolMessage)(
@@ -148,35 +152,52 @@ object SignedProtocolMessage
     ),
   )
 
-  def apply[M <: SignedProtocolMessageContent](
+  // TODO(#12373) Adapt when releasing BFT
+  val multipleSignaturesSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
+
+  def create[M <: SignedProtocolMessageContent](
+      typedMessage: TypedSignedProtocolMessageContent[M],
+      signatures: NonEmpty[Seq[Signature]],
+      representativeProtocolVersion: RepresentativeProtocolVersion[SignedProtocolMessage.type],
+  ): Either[InvariantViolation, SignedProtocolMessage[M]] =
+    Either.cond(
+      representativeProtocolVersion >= multipleSignaturesSupportedSince ||
+        signatures.sizeCompare(1) == 0,
+      new SignedProtocolMessage(typedMessage, signatures)(representativeProtocolVersion),
+      InvariantViolation(
+        s"SignedProtocolMessage supports only a single signatures in protocol versions below ${multipleSignaturesSupportedSince.representative}. Got ${signatures.size} signatures)"
+      ),
+    )
+
+  def create[M <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[M],
       signatures: NonEmpty[Seq[Signature]],
       protocolVersion: ProtocolVersion,
-  ): SignedProtocolMessage[M] = SignedProtocolMessage(typedMessage, signatures)(
-    protocolVersionRepresentativeFor(protocolVersion)
-  )
+  ): Either[InvariantViolation, SignedProtocolMessage[M]] =
+    create(typedMessage, signatures, protocolVersionRepresentativeFor(protocolVersion))
 
-  def apply[M <: SignedProtocolMessageContent](
+  def tryCreate[M <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[M],
       signatures: NonEmpty[Seq[Signature]],
-      protoVersion: ProtoVersion,
-  ): SignedProtocolMessage[M] = SignedProtocolMessage(typedMessage, signatures)(
-    protocolVersionRepresentativeFor(protoVersion)
-  )
+      protocolVersion: ProtocolVersion,
+  ): SignedProtocolMessage[M] =
+    create(typedMessage, signatures, protocolVersion).valueOr(err =>
+      throw new IllegalArgumentException(err.message)
+    )
 
   @VisibleForTesting
-  def from[M <: SignedProtocolMessageContent](
+  def tryFrom[M <: SignedProtocolMessageContent](
       message: M,
       protocolVersion: ProtocolVersion,
       signature: Signature,
       moreSignatures: Signature*
-  ): SignedProtocolMessage[M] = SignedProtocolMessage(
+  ): SignedProtocolMessage[M] = SignedProtocolMessage.tryCreate(
     TypedSignedProtocolMessageContent(message, protocolVersion),
     NonEmpty(Seq, signature, moreSignatures: _*),
     protocolVersion,
   )
 
-  def create[M <: SignedProtocolMessageContent](
+  def signAndCreate[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
       protocolVersion: ProtocolVersion,
@@ -187,10 +208,10 @@ object SignedProtocolMessage
     val typedMessage = TypedSignedProtocolMessageContent(message, protocolVersion)
     for {
       signature <- mkSignature(typedMessage, cryptoApi, protocolVersion)
-    } yield SignedProtocolMessage(typedMessage, NonEmpty(Seq, signature), protocolVersion)
+    } yield SignedProtocolMessage.tryCreate(typedMessage, NonEmpty(Seq, signature), protocolVersion)
   }
 
-  def mkSignature[M <: SignedProtocolMessageContent](
+  private def mkSignature[M <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[M],
       cryptoApi: SyncCryptoApi,
       protocolVersion: ProtocolVersion,
@@ -203,7 +224,7 @@ object SignedProtocolMessage
   private[canton] def mkSignature[M <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[M],
       cryptoApi: SyncCryptoApi,
-      protocolVersion: RepresentativeProtocolVersion[SignedProtocolMessage[M]],
+      protocolVersion: RepresentativeProtocolVersion[SignedProtocolMessage.type],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SyncCryptoError, Signature] = {
@@ -217,17 +238,17 @@ object SignedProtocolMessage
     cryptoApi.sign(hash)
   }
 
-  def tryCreate[M <: SignedProtocolMessageContent](
+  def trySignAndCreate[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
       protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext, ec: ExecutionContext): Future[SignedProtocolMessage[M]] =
-    create(message, cryptoApi, protocolVersion)
+    signAndCreate(message, cryptoApi, protocolVersion)
       .valueOr(err =>
         throw new IllegalStateException(s"Failed to create signed protocol message: $err")
       )
 
-  def fromProtoV0(
+  private[messages] def fromProtoV0(
       hashOps: HashOps,
       signedMessageP: v0.SignedProtocolMessage,
   ): ParsingResult[SignedProtocolMessage[SignedProtocolMessageContent]] = {
@@ -249,14 +270,15 @@ object SignedProtocolMessage
           Left(OtherError("Deserialization of a SignedMessage failed due to a missing message"))
       }): ParsingResult[SignedProtocolMessageContent]
       signature <- ProtoConverter.parseRequired(Signature.fromProtoV0, "signature", maybeSignatureP)
-    } yield SignedProtocolMessage(
-      TypedSignedProtocolMessageContent(message, ProtoVersion(0)),
-      NonEmpty(Seq, signature),
-      ProtoVersion(0),
-    )
+      signedMessage <- create(
+        TypedSignedProtocolMessageContent(message, ProtoVersion(-1)),
+        NonEmpty(Seq, signature),
+        protocolVersionRepresentativeFor(ProtoVersion(0)),
+      ).leftMap(ProtoDeserializationError.InvariantViolation.toProtoDeserializationError)
+    } yield signedMessage
   }
 
-  def fromProtoV1(
+  private def fromProtoV1(
       hashOps: HashOps,
       signedMessageP: v1.SignedProtocolMessage,
   ): ParsingResult[SignedProtocolMessage[SignedProtocolMessageContent]] = {
@@ -268,13 +290,19 @@ object SignedProtocolMessage
         "signatures",
         signaturesP,
       )
-    } yield SignedProtocolMessage(typedMessage, signatures, ProtoVersion(1))
+      signedMessage <- create(
+        typedMessage,
+        signatures,
+        protocolVersionRepresentativeFor(ProtoVersion(1)),
+      ).leftMap(ProtoDeserializationError.InvariantViolation.toProtoDeserializationError)
+    } yield signedMessage
   }
 
   implicit def signedMessageCast[M <: SignedProtocolMessageContent](implicit
       cast: SignedMessageContentCast[M]
-  ): ProtocolMessageContentCast[SignedProtocolMessage[M]] = {
-    case sm: SignedProtocolMessage[SignedProtocolMessageContent] => sm.traverse(cast.toKind)
-    case _ => None
-  }
+  ): ProtocolMessageContentCast[SignedProtocolMessage[M]] =
+    ProtocolMessageContentCast.create[SignedProtocolMessage[M]](cast.targetKind) {
+      case sm: SignedProtocolMessage[SignedProtocolMessageContent] => sm.traverse(cast.toKind)
+      case _ => None
+    }
 }

@@ -4,8 +4,8 @@
 package com.digitalasset.canton.ledger.client.services.admin
 
 import com.daml.ledger.api.v1.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
-import com.daml.ledger.api.v1.admin.{user_management_service => proto}
-import com.daml.ledger.api.v1.{admin => admin_proto}
+import com.daml.ledger.api.v1.admin.{user_management_service as proto}
+import com.daml.ledger.api.v1.{admin as admin_proto}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Party, UserId}
 import com.digitalasset.canton.ledger.api.domain
@@ -31,21 +31,21 @@ final class UserManagementClient(service: UserManagementServiceStub)(implicit
     LedgerClient
       .stub(service, token)
       .createUser(request)
-      .map(res => fromProtoUser(res.user.get))
+      .flatMap(res => fromOptionalProtoUser(res.user))
   }
 
   def getUser(userId: UserId, token: Option[String] = None): Future[User] =
     LedgerClient
       .stub(service, token)
       .getUser(proto.GetUserRequest(userId.toString))
-      .map(res => fromProtoUser(res.user.get))
+      .flatMap(res => fromOptionalProtoUser(res.user))
 
   /** Retrieve the User information for the user authenticated by the token(s) on the call . */
   def getAuthenticatedUser(token: Option[String] = None): Future[User] =
     LedgerClient
       .stub(service, token)
       .getUser(proto.GetUserRequest())
-      .map(res => fromProtoUser(res.user.get))
+      .flatMap(res => fromOptionalProtoUser(res.user))
 
   def deleteUser(userId: UserId, token: Option[String] = None): Future[Unit] =
     LedgerClient
@@ -103,6 +103,12 @@ final class UserManagementClient(service: UserManagementServiceStub)(implicit
 }
 
 object UserManagementClient {
+
+  private def fromOptionalProtoUser(userO: Option[proto.User]): Future[User] =
+    userO.fold(Future.failed[User](new IllegalStateException("empty user")))(u =>
+      Future.successful(fromProtoUser(u))
+    )
+
   private def fromProtoUser(user: proto.User): User =
     User(
       id = Ref.UserId.assertFromString(user.id),

@@ -35,10 +35,10 @@ case class MalformedMediatorRequestResult private (
     override val viewType: ViewType,
     override val verdict: Verdict.MediatorReject,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      MalformedMediatorRequestResult
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      MalformedMediatorRequestResult.type
     ],
-    val deserializedFrom: Option[ByteString],
+    override val deserializedFrom: Option[ByteString],
 ) extends MediatorResult
     with SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[MalformedMediatorRequestResult]
@@ -58,7 +58,8 @@ case class MalformedMediatorRequestResult private (
       getCryptographicEvidence
     )
 
-  override def companionObj = MalformedMediatorRequestResult
+  @transient override protected lazy val companionObj: MalformedMediatorRequestResult.type =
+    MalformedMediatorRequestResult
 
   protected def toProtoV0: v0.MalformedMediatorRequestResult =
     v0.MalformedMediatorRequestResult(
@@ -92,13 +93,13 @@ object MalformedMediatorRequestResult
   override val name: String = "MalformedMediatorRequestResult"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(
       v0.MalformedMediatorRequestResult
     )(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(
       v1.MalformedMediatorRequestResult
     )(
       supportedProtoVersionMemoized(_)(fromProtoV1),
@@ -158,8 +159,9 @@ object MalformedMediatorRequestResult
   }
 
   implicit val malformedMediatorRequestResultCast
-      : SignedMessageContentCast[MalformedMediatorRequestResult] = {
-    case m: MalformedMediatorRequestResult => Some(m)
-    case _ => None
-  }
+      : SignedMessageContentCast[MalformedMediatorRequestResult] = SignedMessageContentCast
+    .create[MalformedMediatorRequestResult]("MalformedMediatorRequestResult") {
+      case m: MalformedMediatorRequestResult => Some(m)
+      case _ => None
+    }
 }

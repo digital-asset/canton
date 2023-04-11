@@ -16,18 +16,26 @@ object EventIdsUtils {
   @tailrec
   protected[events] def mergeSort[T: Ordering](
       sources: Vector[Source[T, NotUsed]]
-  ): Source[T, NotUsed] =
-    if (sources.isEmpty) Source.empty
-    else if (sources.size == 1) sources.head
-    else
-      mergeSort(
-        sources
-          .drop(2)
-          .appended(
-            sources.take(2).reduce(_ mergeSorted _)
-          )
-      )
+  ): Source[T, NotUsed] = {
+    sources match {
+      case Vector(first, second, _*) =>
+        mergeSort(
+          sources
+            .drop(2)
+            .appended(first.mergeSorted(second))
+        )
+      case Vector(head) => head
+      case _ => Source.empty
+    }
+  }
 
+  @SuppressWarnings(
+    Array(
+      "org.wartremover.warts.Null",
+      "org.wartremover.warts.AsInstanceOf",
+      "org.wartremover.warts.Var",
+    )
+  )
   protected[events] def statefulDeduplicate[T]: () => T => List[T] =
     () => {
       var last = null.asInstanceOf[T]

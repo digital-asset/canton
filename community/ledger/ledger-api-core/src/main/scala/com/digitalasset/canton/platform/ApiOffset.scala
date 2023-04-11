@@ -25,7 +25,7 @@ object ApiOffset {
       .fromString(s)
       .map(Offset.fromHexString)
 
-  def assertFromString(s: String): Offset = tryFromString(s).get
+  def assertFromString(s: String): Offset = tryFromString(s).fold(throw _, identity)
 
   def toApiString(offset: Offset): Ref.LedgerString =
     offset.toHexString

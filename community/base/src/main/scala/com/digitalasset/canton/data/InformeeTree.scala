@@ -19,7 +19,7 @@ import monocle.Lens
   */
 // private constructor, because object invariants are checked by factory methods
 final case class InformeeTree private (tree: GenTransactionTree)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree]
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree.type]
 ) extends HasProtocolVersionedWrapper[InformeeTree] {
 
   def validated: Either[String, this.type] = for {
@@ -27,7 +27,7 @@ final case class InformeeTree private (tree: GenTransactionTree)(
     _ <- InformeeTree.checkViews(tree.rootViews, assertFull = false)
   } yield this
 
-  override protected def companionObj = InformeeTree
+  @transient override protected lazy val companionObj: InformeeTree.type = InformeeTree
 
   lazy val transactionId: TransactionId = TransactionId.fromRootHash(tree.rootHash)
 
@@ -51,11 +51,11 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
   override val name: String = "InformeeTree"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.InformeeTree)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.InformeeTree)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.InformeeTree)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.InformeeTree)(
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -76,7 +76,7 @@ object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTre
     */
   private[data] def create(
       tree: GenTransactionTree,
-      representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree],
+      representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree.type],
   ): Either[String, InformeeTree] = InformeeTree(tree)(representativeProtocolVersion).validated
 
   /** Creates an [[InformeeTree]] from a [[GenTransactionTree]].

@@ -50,6 +50,7 @@ object PackageMetadataView {
 }
 
 private[packagemeta] class PackageMetaDataViewImpl extends PackageMetadataView {
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private var packageMetadata = PackageMetadata()
 
   override def update(packageMetadata: PackageMetadata): Unit =

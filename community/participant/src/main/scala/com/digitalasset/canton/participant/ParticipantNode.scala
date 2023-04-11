@@ -22,6 +22,7 @@ import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
 import com.digitalasset.canton.environment.{
   CantonNode,
   CantonNodeBootstrapBase,
+  CantonNodeBootstrapCommon,
   CantonNodeBootstrapCommonArguments,
   NodeFactoryArguments,
 }
@@ -29,7 +30,6 @@ import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.HealthReporting.{
   BaseMutableHealthComponent,
   ComponentStatus,
-  HealthService,
   MutableHealthComponent,
 }
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
@@ -130,7 +130,7 @@ class ParticipantNodeBootstrap(
     ](arguments) {
 
   /** per session created admin token for in-process connections to ledger-api */
-  val adminToken: CantonAdminToken = CantonAdminToken.create(crypto.pureCrypto)
+  val adminToken: CantonAdminToken = CantonAdminToken.create(crypto.value.pureCrypto)
 
   override def config: LocalParticipantConfig = arguments.config
 
@@ -163,7 +163,7 @@ class ParticipantNodeBootstrap(
       timeouts,
     )
 
-  override protected lazy val nodeHealthService: HealthReporting.HealthService =
+  override protected def mkNodeHealthService(storage: Storage): HealthReporting.HealthService =
     HealthReporting.HealthService(
       "participant",
       criticalDependencies = Seq(storage),
@@ -177,7 +177,7 @@ class ParticipantNodeBootstrap(
     new ParticipantTopologyManager(
       clock,
       authorizedTopologyStore,
-      crypto,
+      crypto.value,
       parameterConfig.processingTimeouts,
       config.parameters.initialProtocolVersion.unwrap,
       loggerFactory,
@@ -268,9 +268,15 @@ class ParticipantNodeBootstrap(
 
       for {
         // create keys
-        namespaceKey <- getOrCreateSigningKey(s"$name-namespace")
-        signingKey <- getOrCreateSigningKey(s"$name-signing")
-        encryptionKey <- getOrCreateEncryptionKey(s"$name-encryption")
+        namespaceKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
+          s"$name-namespace"
+        )
+        signingKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
+          s"$name-signing"
+        )
+        encryptionKey <- CantonNodeBootstrapCommon.getOrCreateEncryptionKey(crypto.value)(
+          s"$name-encryption"
+        )
 
         // create id
         identifierName = initConfigBase.identity
@@ -316,12 +322,13 @@ class ParticipantNodeBootstrap(
         // initialize certificate if enabled
         _ <-
           if (config.init.identity.exists(_.generateLegalIdentityCertificate)) {
-            (new LegalIdentityInit(certificateGenerator, crypto)).checkOrInitializeCertificate(
-              uid,
-              Seq(participantId),
-              namespaceKey,
-              protocolVersion,
-            )(topologyManager, authorizedTopologyStore)
+            (new LegalIdentityInit(certificateGenerator, crypto.value))
+              .checkOrInitializeCertificate(
+                uid,
+                Seq(participantId),
+                namespaceKey,
+                protocolVersion,
+              )(topologyManager, authorizedTopologyStore)
           } else {
             EitherT.rightT[Future, String](())
           }
@@ -349,7 +356,7 @@ class ParticipantNodeBootstrap(
     val syncCrypto = new SyncCryptoApiProvider(
       participantId,
       ips,
-      crypto,
+      crypto.value,
       config.caching,
       timeouts,
       futureSupervisor,
@@ -509,7 +516,7 @@ class ParticipantNodeBootstrap(
         syncDomainPersistentStateManager,
         persistentState.map(_.settingsStore),
         storage,
-        crypto.pureCrypto,
+        crypto.value.pureCrypto,
         indexedStringStore,
         parameterConfig,
         loggerFactory,
@@ -703,7 +710,7 @@ class ParticipantNodeBootstrap(
         storage,
         clock,
         topologyManager,
-        crypto.pureCrypto,
+        crypto.value.pureCrypto,
         identityPusher,
         partyNotifier,
         ips,
@@ -716,7 +723,6 @@ class ParticipantNodeBootstrap(
         replaySequencerConfig,
         schedulers,
         loggerFactory,
-        nodeHealthService,
         nodeHealthService.dependencies.map(_.toComponentStatus),
       )
 
@@ -779,6 +785,7 @@ object ParticipantNodeBootstrap {
             DAMLe.newEngine(
               arguments.parameterConfig.uniqueContractKeys,
               arguments.parameterConfig.devVersionSupport,
+              arguments.parameterConfig.enableEngineStackTrace,
             ),
             testingTimeService,
             CantonSyncService.DefaultFactory,
@@ -847,7 +854,6 @@ class ParticipantNode(
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
-    val serviceHealth: HealthService,
     healthData: => Seq[ComponentStatus],
 ) extends CantonNode
     with NamedLogging

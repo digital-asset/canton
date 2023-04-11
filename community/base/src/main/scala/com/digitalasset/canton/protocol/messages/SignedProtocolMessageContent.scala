@@ -41,5 +41,17 @@ trait SignedProtocolMessageContent
 object SignedProtocolMessageContent {
   trait SignedMessageContentCast[A] {
     def toKind(content: SignedProtocolMessageContent): Option[A]
+
+    def targetKind: String
+  }
+
+  object SignedMessageContentCast {
+    def create[A](name: String)(
+        cast: SignedProtocolMessageContent => Option[A]
+    ): SignedMessageContentCast[A] = new SignedMessageContentCast[A] {
+      override def toKind(content: SignedProtocolMessageContent): Option[A] = cast(content)
+
+      override def targetKind: String = name
+    }
   }
 }

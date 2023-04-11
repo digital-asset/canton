@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
 import com.digitalasset.canton.protocol.DynamicDomainParameters
@@ -14,7 +15,9 @@ import com.digitalasset.canton.topology.*
 
 class DatabaseSequencerApiTest extends SequencerApiTest {
 
-  def createSequencer(implicit materializer: Materializer): CantonSequencer = {
+  def createSequencer(
+      crypto: DomainSyncCryptoClient
+  )(implicit materializer: Materializer): CantonSequencer = {
     val clock = new SimClock(loggerFactory = loggerFactory)
     val crypto = TestingIdentityFactory(
       TestingTopology(),
@@ -41,4 +44,7 @@ class DatabaseSequencerApiTest extends SequencerApiTest {
       loggerFactory,
     )(executorService, tracer, materializer)
   }
+
+  // TODO(#12405) Set to true
+  override protected def supportAggregation: Boolean = false
 }

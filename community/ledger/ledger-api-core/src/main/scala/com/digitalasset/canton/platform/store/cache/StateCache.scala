@@ -31,6 +31,7 @@ private[platform] case class StateCache[K, V](
 )(implicit ec: ExecutionContext) {
   private val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
   private[cache] val pendingUpdates = mutable.Map.empty[K, PendingUpdatesState]
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private[cache] var cacheIndex = initialCacheIndex
 
   /** Fetch the corresponding value for an input key, if present.
@@ -198,6 +199,7 @@ object StateCache {
     * @param pendingCount The number of in-progress updates.
     * @param latestValidAt Highest version of any pending update.
     */
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private[cache] case class PendingUpdatesState(
       var pendingCount: Long,
       var latestValidAt: Offset,

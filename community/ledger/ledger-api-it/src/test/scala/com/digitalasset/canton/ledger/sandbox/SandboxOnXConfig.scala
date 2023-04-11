@@ -10,7 +10,7 @@ import com.digitalasset.canton.ledger.runner.common.{
   LegacyCliConfigConverter,
   PureConfigReaderWriter,
 }
-import com.typesafe.config.{Config => TypesafeConfig, ConfigFactory}
+import com.typesafe.config.{Config as TypesafeConfig, ConfigFactory}
 import pureconfig.ConfigConvert
 import pureconfig.generic.semiauto.deriveConvert
 

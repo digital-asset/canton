@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import com.daml.lf.crypto
 import com.daml.logging.LoggingContext
-import com.digitalasset.canton.ledger.api.domain.{Commands => ApiCommands}
+import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands}
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 

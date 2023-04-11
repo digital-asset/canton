@@ -7,13 +7,7 @@ import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.*
 import com.digitalasset.canton.data.GenTransactionTree
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
-  ContractLookupError,
-  SerializableContractOfId,
-  SubmitterMetadataError,
-  TransactionTreeConversionError,
-  UnknownPackageError,
-}
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.defaultTestingIdentityFactory
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
@@ -30,19 +24,20 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
 
   def successfulLookup(
       example: ExampleTransaction
-  )(id: LfContractId): EitherT[Future, ContractLookupError, SerializableContract] = {
+  ): SerializableContractOfId = id => {
     EitherT.fromEither(
       example.inputContracts
         .get(id)
+        .map(contract =>
+          (contract.rawContractInstance, contract.ledgerCreateTime, contract.contractSalt)
+        )
         .toRight(ContractLookupError(id, "Unable to lookup input contract from test data"))
     )
   }
 
   def failedLookup(
       testErrorMessage: String
-  )(id: LfContractId): EitherT[Future, ContractLookupError, SerializableContract] = {
-    EitherT.leftT[Future, SerializableContract](ContractLookupError(id, testErrorMessage))
-  }
+  ): SerializableContractOfId = id => EitherT.leftT(ContractLookupError(id, testErrorMessage))
 
   def createTransactionTreeFactory(version: ProtocolVersion): TransactionTreeFactoryImpl =
     TransactionTreeFactoryImpl(

@@ -7,13 +7,13 @@ import cats.data.EitherT
 import cats.implicits.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.error.{BaseCantonError, CantonError}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.{DelayUtil, EitherTUtil}
 import io.grpc.*
 import io.grpc.stub.AbstractStub
 
@@ -23,10 +23,6 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 object CantonGrpcUtil {
-
-  /** A retry policy for never retrying */
-  def neverRetry(_error: GrpcError): Boolean = false
-
   def wrapErr[T](value: ParsingResult[T])(implicit
       loggingContext: ErrorLoggingContext,
       ec: ExecutionContext,
@@ -55,12 +51,23 @@ object CantonGrpcUtil {
   def mapErrNew[T <: CantonError, C](value: Either[T, C])(implicit
       ec: ExecutionContext
   ): EitherT[Future, StatusRuntimeException, C] =
-    mapErrNew(EitherT.fromEither[Future](value))
+    EitherT.fromEither[Future](value).leftMap(_.asGrpcError)
 
-  def mapErrNew[T <: CantonError, C](value: EitherT[Future, T, C])(implicit
+  def mapErrNewET[T <: CantonError, C](value: EitherT[Future, T, C])(implicit
       ec: ExecutionContext
   ): EitherT[Future, StatusRuntimeException, C] =
     value.leftMap(_.asGrpcError)
+
+  def mapErrNew[T <: BaseCantonError, C](value: EitherT[Future, T, C])(implicit
+      executionContext: ExecutionContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Future[C] =
+    EitherTUtil.toFuture(value.leftMap(_.asGrpcError))
+
+  def mapErrNew[T <: CantonError, C](value: EitherT[Future, T, C])(implicit
+      ec: ExecutionContext
+  ): Future[C] =
+    EitherTUtil.toFuture(value.leftMap(_.asGrpcError))
 
   @Deprecated
   def invalidArgument(err: String): StatusRuntimeException =

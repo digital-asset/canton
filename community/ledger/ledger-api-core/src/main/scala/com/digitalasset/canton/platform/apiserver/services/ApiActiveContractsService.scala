@@ -17,7 +17,7 @@ import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.validation.TransactionFilterValidator
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
-  IndexActiveContractsService => ACSBackend
+  IndexActiveContractsService as ACSBackend
 }
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService

@@ -9,7 +9,7 @@ import com.daml.ledger.api.v1.admin.party_management_service.{
   GetParticipantIdRequest,
   GetPartiesRequest,
   ListKnownPartiesRequest,
-  PartyDetails => ApiPartyDetails,
+  PartyDetails as ApiPartyDetails,
 }
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party

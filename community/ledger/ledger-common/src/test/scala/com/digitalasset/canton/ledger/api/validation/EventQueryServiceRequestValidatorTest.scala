@@ -5,8 +5,8 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
 import com.daml.ledger.api.v1.value.Value
-import com.daml.ledger.api.v1.{event_query_service, value => api}
-import com.daml.lf.value.{Value => Lf}
+import com.daml.ledger.api.v1.{event_query_service, value as api}
+import com.daml.lf.value.{Value as Lf}
 import com.digitalasset.canton.ledger.api.messages.event
 import io.grpc.Status.Code.*
 import org.mockito.MockitoSugar

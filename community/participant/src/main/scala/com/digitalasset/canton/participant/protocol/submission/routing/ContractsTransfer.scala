@@ -12,18 +12,17 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.routing.ContractsTransfer.TransferArgs
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
-import com.digitalasset.canton.participant.sync.{SyncDomain, TransactionRoutingError}
+import com.digitalasset.canton.participant.sync.{ConnectedDomainsLookup, TransactionRoutingError}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 private[routing] class ContractsTransfer(
-    connectedDomains: TrieMap[DomainId, SyncDomain],
+    connectedDomains: ConnectedDomainsLookup,
     submittingParticipant: ParticipantId,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)

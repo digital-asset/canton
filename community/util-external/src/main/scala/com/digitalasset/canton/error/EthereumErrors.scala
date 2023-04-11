@@ -112,10 +112,9 @@ object EthereumErrors extends EthereumErrorGroup {
         |"""
     )
     @Resolution(
-      """Deploy a new instance of the sequencer contract (Console command `ethereum.deploy_sequencer_contract`) and configure
-        | the Ethereum sequencer to use that instance. If the errors occur because an Ethereum sequencer process is
-        | restarted without persistence, deploy a fresh instance of the sequencer contract and configure persistence
-        | for restarts.
+      """Deploy a new instance of the sequencer contract and configure the Ethereum sequencer to use that instance.
+        | If the errors occur because an Ethereum sequencer process is restarted without persistence, deploy a fresh
+        | instance of the sequencer contract and configure persistence for restarts.
         |"""
     )
     object AttemptToChangeImmutableValue
@@ -136,8 +135,8 @@ object EthereumErrors extends EthereumErrorGroup {
       |"""
     )
     @Resolution("""This frequently error occurs when updating the Canton system without updating the sequencer
-      |contract deployed on the blockchain. Validate that the sequencer contract corresponding to the current Canton release
-      | is deployed in the latest blockchain blocks on the configured address (see also `ethereum.deploy_sequencer_contract`).
+      | contract deployed on the blockchain. Validate that the sequencer contract corresponding to the current Canton release
+      | is deployed in the latest blockchain blocks on the configured address.
       | Another common reason for this error is that the wrong contract address was configured.
       |""")
     object WrongEVMBytecode

@@ -97,7 +97,7 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
       testedProtocolVersion,
     )
   val dummySigned =
-    SignedProtocolMessage.from(dummyCommitmentMsg, testedProtocolVersion, dummySignature)
+    SignedProtocolMessage.tryFrom(dummyCommitmentMsg, testedProtocolVersion, dummySignature)
 
   val alice: LfPartyId = LfPartyId.assertFromString("Alice")
   val bob: LfPartyId = LfPartyId.assertFromString("bob")
@@ -352,7 +352,7 @@ trait AcsCommitmentStoreTest
         testedProtocolVersion,
       )
       val dummySigned2 =
-        SignedProtocolMessage.from(dummyMsg2, testedProtocolVersion, dummySignature)
+        SignedProtocolMessage.tryFrom(dummyMsg2, testedProtocolVersion, dummySignature)
       val dummyMsg3 = AcsCommitment.create(
         domainId,
         remoteId2,
@@ -362,7 +362,7 @@ trait AcsCommitmentStoreTest
         testedProtocolVersion,
       )
       val dummySigned3 =
-        SignedProtocolMessage.from(dummyMsg3, testedProtocolVersion, dummySignature)
+        SignedProtocolMessage.tryFrom(dummyMsg3, testedProtocolVersion, dummySignature)
 
       for {
         _ <- store.storeReceived(dummySigned)
@@ -388,7 +388,7 @@ trait AcsCommitmentStoreTest
         testedProtocolVersion,
       )
       val dummySigned2 =
-        SignedProtocolMessage.from(dummyMsg2, testedProtocolVersion, dummySignature)
+        SignedProtocolMessage.tryFrom(dummyMsg2, testedProtocolVersion, dummySignature)
 
       for {
         _ <- store.storeReceived(dummySigned)

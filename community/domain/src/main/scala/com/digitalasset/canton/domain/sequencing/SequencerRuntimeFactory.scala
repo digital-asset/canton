@@ -13,8 +13,8 @@ import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministration
 import com.digitalasset.canton.domain.config.DomainConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.{
+  CommunityDatabaseSequencerFactory,
   CommunitySequencerConfig,
-  SequencerFactory,
 }
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.environment.CantonNodeParameters
@@ -101,7 +101,15 @@ object SequencerRuntimeFactory {
         system: ActorSystem,
     ): SequencerRuntime =
       new SequencerRuntime(
-        SequencerFactory.database(sequencerConfig, metrics, loggerFactory),
+        new CommunityDatabaseSequencerFactory(
+          sequencerConfig,
+          metrics,
+          storage,
+          staticDomainParameters.protocolVersion,
+          topologyClientMember,
+          localParameters,
+          loggerFactory,
+        ),
         staticDomainParameters,
         localParameters,
         domainConfig.publicApi,
@@ -111,14 +119,12 @@ object SequencerRuntimeFactory {
         domainId,
         crypto,
         sequencedTopologyStore,
-        topologyClientMember,
         topologyClient,
         topologyProcessor,
         sharedTopologyProcessor = true,
         storage,
         clock,
         auditLogger,
-        initialState = None,
         SequencerAuthenticationConfig(
           agreementManager,
           domainConfig.publicApi.nonceExpirationTime,

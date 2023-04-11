@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.OptionT
+import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -18,7 +19,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Stor
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
@@ -169,15 +169,9 @@ private[mediator] class DbFinalizedResponseStore(
 
   implicit val getResultMediatorRequest: GetResult[MediatorRequest] = GetResult(r =>
     EnvelopeContent
-      .messageFromByteString(protocolVersion, cryptoApi)(ByteString.copyFrom(r.<<[Array[Byte]]))
-      .fold[MediatorRequest](
-        error =>
-          throw new DbDeserializationException(s"Error deserializing mediator request $error"),
-        {
-          case mediatorRequest: MediatorRequest => mediatorRequest
-          case _ =>
-            sys.error("Deserialized request was not a MediatorRequest!") // should never happen
-        },
+      .messageFromByteArray[MediatorRequest](protocolVersion, cryptoApi)(r.<<[Array[Byte]])
+      .valueOr(error =>
+        throw new DbDeserializationException(s"Error deserializing mediator request $error")
       )
   )
   implicit val setParameterMediatorRequest: SetParameter[MediatorRequest] =

@@ -906,7 +906,7 @@ object TransferStoreTest {
         mediatorMessage.allInformees,
       )
       val signedResult =
-        SignedProtocolMessage.from(result, protocolVersion, sign("TransferOutResult-mediator"))
+        SignedProtocolMessage.tryFrom(result, protocolVersion, sign("TransferOutResult-mediator"))
       val batch = Batch.of(protocolVersion, signedResult -> RecipientsTest.testInstance)
       val deliver =
         Deliver.create(

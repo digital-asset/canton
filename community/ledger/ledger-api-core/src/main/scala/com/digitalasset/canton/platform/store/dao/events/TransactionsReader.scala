@@ -22,7 +22,7 @@ import com.digitalasset.canton.platform.store.dao.{
   EventProjectionProperties,
   LedgerDaoTransactionsReader,
 }
-import com.digitalasset.canton.platform.{ApiOffset, _}
+import com.digitalasset.canton.platform.{Identifier, Party, TemplatePartiesFilter}
 import io.opentelemetry.api.trace.Span
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -182,12 +182,6 @@ private[dao] final class TransactionsReader(
 
 private[dao] object TransactionsReader {
 
-  def offsetFor(response: GetTransactionsResponse): Offset =
-    ApiOffset.assertFromString(response.transactions.head.offset)
-
-  def offsetFor(response: GetTransactionTreesResponse): Offset =
-    ApiOffset.assertFromString(response.transactions.head.offset)
-
   def endSpanOnTermination[Mat](
       span: Span
   )(mat: Mat, done: Future[Done])(implicit ec: ExecutionContext): Mat = {
@@ -239,6 +233,7 @@ private[dao] object TransactionsReader {
   )(by: A => K): Source[Vector[A], Mat] =
     source
       .statefulMapConcat(() => {
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
         var previousSegmentKey: Option[K] = None
         entry => {
           val keyForEntry = by(entry)

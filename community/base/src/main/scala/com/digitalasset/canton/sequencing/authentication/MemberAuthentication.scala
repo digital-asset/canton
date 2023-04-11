@@ -128,6 +128,10 @@ object MemberAuthentication {
       )
   final case class ParticipantDisabled(participantId: ParticipantId)
       extends AuthenticationError(s"Participant $participantId is disabled", "ParticipantDisabled")
+
+  final case class MediatorDisabled(mediator: MediatorId)
+      extends AuthenticationError(s"Mediator $mediator is disabled", "MediatorDisabled")
+
   final case class TokenVerificationException(member: String)
       extends AuthenticationError(
         s"Due to an internal error, the server side token lookup for member $member failed",

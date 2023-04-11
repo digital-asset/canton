@@ -62,9 +62,7 @@ class LedgerServerPartyNotifier(
         logger.debug(s"Resuming party notification with ${todo.size} pending notifications")
       todo.foreach { partyMetadata =>
         val participantIdO = partyMetadata.participantId
-        participantIdO.foreach(
-          scheduleUpdate(partyMetadata, _, SequencedTime(clock.now))
-        )
+        participantIdO.foreach(_ => scheduleUpdate(partyMetadata, SequencedTime(clock.now)))
       }
     }
   }
@@ -157,7 +155,8 @@ class LedgerServerPartyNotifier(
         displayName = desiredDisplayName(current.displayName, displayName),
         participantId = desiredParticipantId(current.participantId, targetParticipantId),
       )(
-        effectiveTimestamp = effectiveTimestamp.value,
+        effectiveTimestamp =
+          CantonTimestamp.max(effectiveTimestamp.value, current.effectiveTimestamp),
         submissionId = submissionIdRaw,
       )
 
@@ -181,9 +180,9 @@ class LedgerServerPartyNotifier(
       submissionId = metadata.submissionId,
     )
     metadata.participantId match {
-      case Some(desiredParticipantId) =>
-        scheduleUpdate(metadata, desiredParticipantId, sequencerTimestamp)
-        Future.unit
+      case Some(_) =>
+        scheduleUpdate(metadata, sequencerTimestamp)
+        storedF
       case None =>
         storedF.flatMap { _ =>
           store.markNotified(metadata)
@@ -193,7 +192,6 @@ class LedgerServerPartyNotifier(
 
   private def scheduleUpdate(
       metadata: PartyMetadata,
-      desiredParticipantId: ParticipantId,
       sequencerTimestamp: SequencedTime,
   )(implicit
       traceContext: TraceContext
@@ -202,30 +200,55 @@ class LedgerServerPartyNotifier(
     if (metadata.effectiveTimestamp > sequencerTimestamp.value) {
       // we don't await on this future
       val _ = clock.scheduleAfter(
-        _ => notifyLedgerServer(metadata, desiredParticipantId),
+        _ => notifyLedgerServer(metadata, scheduled = true),
         metadata.effectiveTimestamp - sequencerTimestamp.value,
       )
-    } else notifyLedgerServer(metadata, desiredParticipantId)
+    } else notifyLedgerServer(metadata, scheduled = false)
   }
 
   private def notifyLedgerServer(
       metadata: PartyMetadata,
-      targetParticipantId: ParticipantId,
+      scheduled: Boolean,
   )(implicit traceContext: TraceContext): Unit = {
     val notifyF = sequentialQueue.execute(
       performUnlessClosingF(functionFullName) {
-        logger.debug(show"Pushing ${metadata.partyId} on ${targetParticipantId} to ledger server")
-        val event = LedgerSyncEvent.PartyAddedToParticipant(
-          metadata.partyId.toLf,
-          metadata.displayName.map(_.unwrap).getOrElse(""),
-          targetParticipantId.toLf,
-          ParticipantEventPublisher.now.toLf,
-          LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
-        )
-        for {
-          _ <- eventPublisher.publish(event)
-          _ <- store.markNotified(metadata)
-        } yield ()
+        val metadataF = if (scheduled) {
+          store
+            .metadataForParty(metadata.partyId)
+            .map(_.flatMap(m => m.participantId.map(pid => (m, pid))))
+            .map {
+              case Some((stored, pid)) =>
+                if (stored.effectiveTimestamp == metadata.effectiveTimestamp) {
+                  Some((stored, pid))
+                } else {
+                  logger.debug(
+                    s"Skipping metadata update ${metadata} as it has changed in the meantime to ${stored}"
+                  )
+                  None
+                }
+              case None =>
+                logger.debug(s"Skipping metadata update as participant-id is missing ${metadata}")
+                None
+            }
+        } else Future.successful(metadata.participantId.map(p => (metadata, p)))
+        metadataF.flatMap {
+          case Some((update, targetParticipantId)) =>
+            logger.debug(
+              show"Pushing ${metadata.partyId} on ${targetParticipantId} to ledger server"
+            )
+            val event = LedgerSyncEvent.PartyAddedToParticipant(
+              update.partyId.toLf,
+              update.displayName.map(_.unwrap).getOrElse(""),
+              targetParticipantId.toLf,
+              ParticipantEventPublisher.now.toLf,
+              LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
+            )
+            for {
+              _ <- eventPublisher.publish(event)
+              _ <- store.markNotified(metadata)
+            } yield ()
+          case None => Future.unit
+        }
       }.unwrap,
       s"notifying ledger server about ${metadata}",
     )

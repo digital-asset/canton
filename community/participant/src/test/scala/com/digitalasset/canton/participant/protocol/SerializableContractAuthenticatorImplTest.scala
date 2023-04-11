@@ -48,7 +48,7 @@ class SerializableContractAuthenticatorImplTest extends AnyWordSpec with BaseTes
       metadata = ContractMetadata.tryCreate(Set.empty, Set.empty, None), // Not used
       ledgerTime = ledgerTime,
       contractSalt = Some(contractSalt.unwrap),
-      agreementText = AgreementText.empty,
+      unvalidatedAgreementText = AgreementText.empty,
     ).valueOrFail("Failed creating serializable contract instance")
 
   classOf[SerializableContractAuthenticatorImpl].getSimpleName when {

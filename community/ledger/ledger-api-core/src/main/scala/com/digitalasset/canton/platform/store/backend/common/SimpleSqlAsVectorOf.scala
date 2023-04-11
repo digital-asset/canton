@@ -40,7 +40,10 @@ private[backend] object SimpleSqlAsVectorOf {
 
       sql
         .withResult(go(Vector.empty))
-        .fold(es => throw es.head, _.fold(throw _, identity))
+        .fold(
+          _.headOption.fold(throw new NoSuchElementException("empty list of errors"))(throw _),
+          _.fold(throw _, identity),
+        )
     }
 
   }

@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver.meteringreport
 
 import com.daml.lf.data.Ref.{ApplicationId, ParticipantId}
 import com.daml.lf.data.Time.Timestamp
-import spray.json.{DefaultJsonProtocol, RootJsonFormat, _}
+import spray.json.{DefaultJsonProtocol, RootJsonFormat, *}
 
 import DefaultJsonProtocol.*
 

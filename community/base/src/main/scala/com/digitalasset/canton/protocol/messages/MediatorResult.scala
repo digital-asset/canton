@@ -26,8 +26,9 @@ trait MediatorResult
 trait RegularMediatorResult extends MediatorResult
 
 object RegularMediatorResult {
-  implicit val regularMediatorResultMessageCast: SignedMessageContentCast[RegularMediatorResult] = {
-    case m: RegularMediatorResult => Some(m)
-    case _ => None
-  }
+  implicit val regularMediatorResultMessageCast: SignedMessageContentCast[RegularMediatorResult] =
+    SignedMessageContentCast.create[RegularMediatorResult]("RegularMediatorResult") {
+      case m: RegularMediatorResult => Some(m)
+      case _ => None
+    }
 }

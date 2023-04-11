@@ -7,7 +7,7 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   GrantUserRightsRequest,
   RevokeUserRightsRequest,
 }
-import com.daml.ledger.api.v1.admin.{user_management_service => ums}
+import com.daml.ledger.api.v1.admin.{user_management_service as ums}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 
 import java.util.UUID

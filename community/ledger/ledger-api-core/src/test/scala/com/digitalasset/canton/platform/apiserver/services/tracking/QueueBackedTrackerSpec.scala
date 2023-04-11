@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.client.services.commands.CommandSubmission
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse
 import com.digitalasset.canton.platform.apiserver.services.tracking.QueueBackedTracker.QueueInput
 import com.digitalasset.canton.platform.apiserver.services.tracking.QueueBackedTrackerSpec.*
-import com.google.rpc.status.{Status => StatusProto}
+import com.google.rpc.status.{Status as StatusProto}
 import org.mockito.MockitoSugar
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec

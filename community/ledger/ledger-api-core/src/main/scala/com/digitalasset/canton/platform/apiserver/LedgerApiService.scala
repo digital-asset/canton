@@ -11,7 +11,6 @@ import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import io.grpc.ServerInterceptor
 
 import java.util.concurrent.Executor
-import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
 final class LedgerApiService(
@@ -28,12 +27,9 @@ final class LedgerApiService(
 
   private val logger = ContextualizedLogger.get(this.getClass)
 
-  override def acquire()(implicit context: ResourceContext): Resource[ApiService] = {
-    val servicesClosedPromise = Promise[Unit]()
-
-    val apiServicesResource = apiServicesOwner.acquire()
+  override def acquire()(implicit context: ResourceContext): Resource[ApiService] =
     (for {
-      apiServices <- apiServicesResource
+      apiServices <- apiServicesOwner.acquire()
       _ = tlsConfiguration.map(_.setJvmTlsProperties())
       sslContext = tlsConfiguration.flatMap(_.server)
       server <- GrpcServer
@@ -48,11 +44,6 @@ final class LedgerApiService(
           apiServices.services,
         )
         .acquire()
-      // Notify the caller that the services have been closed, so a reset request can complete
-      // without blocking on the server terminating.
-      _ <- Resource(Future.unit)(_ =>
-        apiServicesResource.release().map(_ => servicesClosedPromise.success(()))
-      )
     } yield {
       val host = address.getOrElse("localhost")
       val actualPort = server.getPort
@@ -61,9 +52,6 @@ final class LedgerApiService(
       new ApiService {
         override val port: Port =
           Port(server.getPort)
-
-        override def servicesClosed(): Future[Unit] =
-          servicesClosedPromise.future
       }
     }).transformWith {
       case Failure(ex) =>
@@ -71,5 +59,4 @@ final class LedgerApiService(
         Resource.failed(ex)
       case Success(s) => Resource.successful(s)
     }
-  }
 }

@@ -12,8 +12,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.SequencerConnectClient.Error
 import com.digitalasset.canton.participant.domain.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
+import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 
@@ -59,7 +59,7 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 object SequencerConnectClient {
 
   type Builder =
-    DomainConnectionConfig => EitherT[Future, Error, SequencerConnectClient]
+    SequencerConnection => EitherT[Future, Error, SequencerConnectClient]
 
   sealed trait Error {
     def message: String
@@ -74,7 +74,7 @@ object SequencerConnectClient {
   }
 
   def apply(
-      config: DomainConnectionConfig,
+      sequencerConnection: SequencerConnection,
       timeouts: ProcessingTimeout,
       traceContextPropagation: TracingConfig.Propagation,
       loggerFactory: NamedLoggerFactory,
@@ -82,7 +82,7 @@ object SequencerConnectClient {
       ec: ExecutionContextExecutor
   ): EitherT[Future, Error, SequencerConnectClient] = {
     for {
-      client <- config.sequencerConnection match {
+      client <- sequencerConnection match {
         case connection: GrpcSequencerConnection =>
           EitherT.rightT[Future, Error](
             new GrpcSequencerConnectClient(

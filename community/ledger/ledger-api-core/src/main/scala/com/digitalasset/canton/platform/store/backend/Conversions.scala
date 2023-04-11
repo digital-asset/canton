@@ -55,6 +55,7 @@ private[backend] object Conversions {
   }
 
   object ArrayColumnToIntArray {
+    @SuppressWarnings(Array("org.wartremover.warts.Null"))
     implicit val arrayColumnToIntArray: Column[Array[Int]] = nonNull { (value, meta) =>
       DefaultImplicitArrayColumn.defaultInt(value, meta) match {
         case Right(value) => Right(value)

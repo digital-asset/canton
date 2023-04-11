@@ -17,7 +17,7 @@ object ProtocolDisabler {
       .appendToProperty(disabledAlgorithmsProperty, sslV2Protocol)
 }
 
-private[tls] case class PropertiesUpdater(
+private[tls] final case class PropertiesUpdater(
     getter: String => String,
     setter: (String, String) => Unit,
 ) {

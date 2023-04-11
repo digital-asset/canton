@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.execution
 
-import com.daml.lf.command.{ApiCommands => LfCommands, DisclosedContract}
+import com.daml.lf.command.{ApiCommands as LfCommands, DisclosedContract}
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.{Identifier, ParticipantId}
 import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}

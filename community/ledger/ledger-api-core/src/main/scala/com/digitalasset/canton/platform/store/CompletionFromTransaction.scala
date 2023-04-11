@@ -11,7 +11,7 @@ import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.google.protobuf.duration.Duration
-import com.google.rpc.status.{Status => StatusProto}
+import com.google.rpc.status.{Status as StatusProto}
 import io.grpc.Status
 
 // Turn a stream of transactions into a stream of completions for a given application and set of parties

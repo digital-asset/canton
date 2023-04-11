@@ -16,6 +16,7 @@ final class DropRepeated[T] extends GraphStage[FlowShape[T, T]] {
 
   override def shape: FlowShape[T, T] = FlowShape(in, out)
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) {
       private var currentValue: Option[T] = None

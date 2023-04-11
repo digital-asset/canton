@@ -11,7 +11,7 @@ import com.digitalasset.canton.ledger.grpc.GrpcStatuses
 import com.google.protobuf.any.Any
 import com.google.rpc.error_details.{ErrorInfo, RequestInfo}
 import com.google.rpc.status.Status
-import com.google.rpc.{ErrorInfo => JavaErrorInfo, RequestInfo => JavaRequestInfo}
+import com.google.rpc.{ErrorInfo as JavaErrorInfo, RequestInfo as JavaRequestInfo}
 import io.grpc
 import io.grpc.Status.Code
 import io.grpc.Status.Code.OK

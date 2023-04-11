@@ -7,8 +7,8 @@ import com.daml.ledger.api.v1.event.Event.Event.{Archived, Created, Empty}
 import com.daml.ledger.api.v1.event.{CreatedEvent, Event, ExercisedEvent}
 import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v1.transaction.TreeEvent.Kind.{
-  Created => TreeCreated,
-  Exercised => TreeExercised,
+  Created as TreeCreated,
+  Exercised as TreeExercised,
 }
 import com.daml.ledger.api.v1.value.Identifier
 
@@ -59,9 +59,14 @@ object EventOps {
       case Empty => Empty
     }
 
+    private def inspectTemplateId(templateId: Option[Identifier]): Identifier =
+      templateId.fold(
+        throw new IllegalArgumentException("Missing template id.")
+      )(identity)
+
     def templateId: Identifier = event match {
-      case Archived(value) => value.templateId.get
-      case Created(value) => value.templateId.get
+      case Archived(value) => inspectTemplateId(value.templateId)
+      case Created(value) => inspectTemplateId(value.templateId)
       case Empty =>
         throw new IllegalArgumentException("Cannot extract Template ID from Empty event.")
     }

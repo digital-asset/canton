@@ -75,6 +75,15 @@ message SequencedEvent {
   v0.DeliverErrorReason deliver_error_reason = 6; // Optional: Present for DeliverError, absent for other events
 }
 
+message SignedContent {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
+  google.protobuf.BytesValue content = 1;
+  // now repeated, was not repeated in v0
+  repeated com.digitalasset.canton.crypto.v0.Signature signatures = 2;
+  google.protobuf.Timestamp timestamp_of_signing_key = 3;
+}
+
 // Messages used for synchronization between sequencer nodes
 message SubmissionRequest {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
@@ -86,4 +95,5 @@ message SubmissionRequest {
   CompressedBatch batch = 4;
   google.protobuf.Timestamp max_sequencing_time = 5;
   google.protobuf.Timestamp timestamp_of_signing_key = 6;
+  v0.AggregationRule aggregation_rule = 7; // optional
 }

@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.sync.TransactionRoutingError.{
   TopologyErrors,
   UnableToQueryTopologySnapshot,
 }
-import com.digitalasset.canton.participant.sync.{SyncDomain, TransactionRoutingError}
+import com.digitalasset.canton.participant.sync.{ConnectedDomainsLookup, TransactionRoutingError}
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
@@ -21,13 +21,12 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordered.orderingToOrdered
 
 private[routing] final class AdmissibleDomains(
     localParticipantId: ParticipantId,
-    connectedDomains: TrieMap[DomainId, SyncDomain],
+    connectedDomains: ConnectedDomainsLookup,
     protected val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
@@ -67,7 +66,7 @@ private[routing] final class AdmissibleDomains(
     }
 
     def queryTopology(): EitherT[Future, TransactionRoutingError, Map[DomainId, PartyTopology]] =
-      connectedDomains.view
+      connectedDomains.snapshot.view
         .mapValues(_.topologyClient.currentSnapshotApproximation)
         .toVector
         .parTraverseFilter(queryPartyTopologySnapshotClient)

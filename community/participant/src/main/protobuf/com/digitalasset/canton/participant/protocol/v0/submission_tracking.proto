@@ -7,8 +7,11 @@ package com.digitalasset.canton.participant.protocol.v0;
 
 import "google/protobuf/empty.proto";
 import "com/digitalasset/canton/participant/protocol/v0/ledger_sync_event.proto";
+import "scalapb/scalapb.proto";
 
 message SubmissionTrackingData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
   // using a oneof as an extension point for other tracking types in the future
   oneof tracking {
     TransactionSubmissionTrackingData transaction = 1;

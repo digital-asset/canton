@@ -13,7 +13,10 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
+import com.digitalasset.canton.participant.admin.grpc.{
+  GrpcParticipantRepairService,
+  TransferSearchResult,
+}
 import com.digitalasset.canton.participant.admin.v0.DomainConnectivityServiceGrpc.DomainConnectivityServiceStub
 import com.digitalasset.canton.participant.admin.v0.EnterpriseParticipantReplicationServiceGrpc.EnterpriseParticipantReplicationServiceStub
 import com.digitalasset.canton.participant.admin.v0.InspectionServiceGrpc.InspectionServiceStub
@@ -44,8 +47,9 @@ import io.grpc.{Context, ManagedChannel}
 import java.io.IOException
 import java.nio.file.{Files, Path, Paths}
 import java.time.Instant
-import scala.concurrent.Future
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.{Duration, MILLISECONDS}
+import scala.concurrent.{Future, Promise, blocking}
 
 object ParticipantAdminCommands {
 
@@ -452,24 +456,81 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class Upload(acsSnapshot: ByteString)
+    final case class Upload(acsChunk: ByteString)
         extends GrpcAdminCommand[UploadRequest, UploadResponse, Unit] {
 
       override type Svc = ParticipantRepairServiceStub
       override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
         ParticipantRepairServiceGrpc.stub(channel)
       override def createRequest(): Either[String, UploadRequest] = {
-        Right(UploadRequest(acsSnapshot))
+        Right(UploadRequest(acsChunk))
       }
       override def submitRequest(
           service: ParticipantRepairServiceStub,
           request: UploadRequest,
       ): Future[UploadResponse] = {
-        service.upload(request)
+        val requestComplete = Promise[UploadResponse]()
+        val ref = new AtomicReference[Option[UploadResponse]](None)
+
+        val responseObserver = new StreamObserver[UploadResponse] {
+          override def onNext(value: UploadResponse): Unit = {
+            ref.set(Some(value))
+          }
+
+          override def onError(t: Throwable): Unit = requestComplete.failure(t)
+
+          override def onCompleted(): Unit = {
+            ref.get() match {
+              case Some(response) => requestComplete.success(response)
+              case None =>
+                requestComplete.failure(
+                  io.grpc.Status.CANCELLED
+                    .withDescription("Server completed the request before providing a response")
+                    .asRuntimeException()
+                )
+            }
+
+          }
+        }
+        val requestObserver = service.upload(responseObserver)
+
+        request.acsSnapshot.toByteArray
+          .grouped(GrpcParticipantRepairService.defaultChunkSize)
+          .foreach { bytes =>
+            blocking {
+              requestObserver.onNext(UploadRequest(ByteString.copyFrom(bytes)))
+            }
+          }
+        requestObserver.onCompleted()
+        requestComplete.future
       }
       override def handleResponse(response: UploadResponse): Either[String, Unit] = {
         Right(())
       }
+    }
+
+    final case class MigrateDomain(
+        sourceDomainAlias: DomainAlias,
+        targetDomainConfig: CDomainConnectionConfig,
+    ) extends GrpcAdminCommand[MigrateDomainRequest, MigrateDomainResponse, Unit] {
+      override type Svc = ParticipantRepairServiceStub
+      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        ParticipantRepairServiceGrpc.stub(channel)
+
+      override def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: MigrateDomainRequest,
+      ): Future[MigrateDomainResponse] = service.migrateDomain(request)
+
+      override def createRequest(): Either[String, MigrateDomainRequest] =
+        Right(
+          MigrateDomainRequest(
+            sourceDomainAlias.toProtoPrimitive,
+            Some(targetDomainConfig.toProtoV0),
+          )
+        )
+
+      override def handleResponse(response: MigrateDomainResponse): Either[String, Unit] = Right(())
     }
   }
 

@@ -184,7 +184,7 @@ object OracleAround {
   private object Config {
     val xeDockerImage: String = "digitalasset/oracle:xe-18.4.0-preloaded-20210325-22-be14fb7"
     val enterpriseDockerImage: String =
-      "digitalasset/oracle:enterprise-19.15.0-preloaded-20220524-28-4ac7634"
+      "digitalasset/oracle:enterprise-19.18.0-preloaded-20230403-35-6f80341"
     val xeDbName: String = "XEPDB1"
     val enterpriseDbName: String = "ORCLPDB1"
     val defaultPort: Int = 1521
