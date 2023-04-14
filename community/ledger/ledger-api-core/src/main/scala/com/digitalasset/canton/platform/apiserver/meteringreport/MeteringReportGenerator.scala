@@ -11,7 +11,7 @@ import com.daml.struct.spray.StructJsonFormat
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReport.*
 import com.google.protobuf.struct.Struct
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 import spray.json.enrichAny
 
 import HmacSha256.Key

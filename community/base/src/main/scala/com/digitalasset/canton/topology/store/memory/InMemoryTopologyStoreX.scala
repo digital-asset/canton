@@ -5,8 +5,11 @@ package com.digitalasset.canton.topology.store.memory
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.topology.SafeSimpleString
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
+  GenericStoredTopologyTransactionsX,
+  PositiveStoredTopologyTransactionsX,
+}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactionX,
@@ -19,10 +22,12 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.G
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.{
+  TopologyChangeOp,
   TopologyChangeOpX,
   TopologyMappingX,
   TopologyTransactionX,
 }
+import com.digitalasset.canton.topology.{Namespace, SafeSimpleString, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
@@ -229,4 +234,45 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
         ) && filter3(entry),
     )
   }
+
+  override def findPositiveTransactions(
+      asOf: CantonTimestamp,
+      asOfInclusive: Boolean,
+      isProposal: Boolean,
+      types: Seq[TopologyMappingX.Code],
+      filterUid: Option[Seq[UniqueIdentifier]],
+      filterNamespace: Option[Seq[Namespace]],
+  )(implicit traceContext: TraceContext): Future[PositiveStoredTopologyTransactionsX] =
+    findTransactionsInStore(asOf, asOfInclusive, isProposal, types, filterUid, filterNamespace).map(
+      _.collectOfType[TopologyChangeOpX.Replace]
+    )
+
+  private def findTransactionsInStore[Op <: TopologyChangeOp](
+      asOf: CantonTimestamp,
+      asOfInclusive: Boolean,
+      isProposal: Boolean,
+      types: Seq[TopologyMappingX.Code],
+      filterUid: Option[Seq[UniqueIdentifier]],
+      filterNamespace: Option[Seq[Namespace]],
+  ): Future[GenericStoredTopologyTransactionsX] = {
+    val timeFilter = asOfFilter(asOf, asOfInclusive)
+    def pathFilter(mapping: TopologyMappingX): Boolean = {
+      if (filterUid.isEmpty && filterNamespace.isEmpty)
+        true
+      else {
+        mapping.maybeUid.exists(uid => filterUid.exists(_.contains(uid))) ||
+        filterNamespace.exists(_.contains(mapping.namespace))
+      }
+    }
+    filteredState(
+      blocking(synchronized { topologyTransactionStore.toSeq }),
+      entry => {
+        timeFilter(entry.from.value, entry.until.get().map(_.value)) &&
+        types.contains(entry.transaction.transaction.mapping.code) &&
+        (pathFilter(entry.transaction.transaction.mapping)) &&
+        entry.transaction.isProposal == isProposal
+      },
+    )
+  }
+
 }

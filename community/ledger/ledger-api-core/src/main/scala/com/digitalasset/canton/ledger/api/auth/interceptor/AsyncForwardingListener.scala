@@ -13,6 +13,7 @@ import scala.collection.mutable
   *
   * The target listener is usually created through `Contexts.interceptCall` or `ServerCallHandler.startCall`.
   */
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
 private[auth] abstract class AsyncForwardingListener[ReqT] extends ServerCall.Listener[ReqT] {
   protected type Listener = ServerCall.Listener[ReqT]
   private[this] val lock = new Object
@@ -20,12 +21,10 @@ private[auth] abstract class AsyncForwardingListener[ReqT] extends ServerCall.Li
   private[this] var nextListener: Option[Listener] = None
 
   private[this] def enqueueOrProcess(msg: Listener => Unit): Unit = lock.synchronized {
-    if (nextListener.isDefined) {
-      msg(nextListener.get)
-    } else {
-      stash.append(msg)
+    val _ = nextListener.fold {
+      val _ = stash.append(msg)
       ()
-    }
+    }(msg)
   }
 
   protected def setNextListener(listener: Listener): Unit = lock.synchronized {

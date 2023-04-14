@@ -27,7 +27,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SimpleExecutionQueue
 import io.functionmeta.functionFullName
-import slick.jdbc.TransactionIsolation.Serializable
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -45,7 +44,8 @@ class DbDamlPackageStore(
   import storage.converters.*
   import DbStorage.Implicits.*
 
-  // Execution queue for serializable writes (i.e. append)
+  // writeQueue is used to protect against concurrent insertions and deletions to/from the `dars` or `daml_packages` tables,
+  // which might otherwise data corruption or constraint violations.
   private val writeQueue = new SimpleExecutionQueue()
 
   private val processingTime: TimedLoadGauge =
@@ -166,15 +166,10 @@ class DbDamlPackageStore(
 
     val writeDar: List[WriteOnly[Int]] = dar.map(dar => appendToDarStore(dar)).toList
 
-    // Combine all the operations into a single transaction.
-    // Use Serializable isolation to protect against concurrent deletions from the `dars` or `daml_packages` tables,
-    // which might otherwise cause a constraint violation exception.
-    // This is not a performance-critical operation, and happens rarely, so the isolation level should not be a
-    // performance concern.
+    // Combine all the operations into a single transaction to avoid partial insertions.
     val writeDarAndPackages = DBIO
       .seq(writeDar :+ insertPkgs: _*)
       .transactionally
-      .withTransactionIsolation(Serializable)
 
     val desc = "append Daml LF archive"
     writeQueue.execute(
@@ -229,8 +224,11 @@ class DbDamlPackageStore(
   )(implicit traceContext: TraceContext): Future[Unit] = {
     logger.debug(s"Removing package $packageId")
 
-    storage.update_(
-      sqlu"""delete from daml_packages where package_id = $packageId """,
+    writeQueue.execute(
+      storage.update_(
+        sqlu"""delete from daml_packages where package_id = $packageId """,
+        functionFullName,
+      ),
       functionFullName,
     )
   }
@@ -324,8 +322,11 @@ class DbDamlPackageStore(
     }
 
   override def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit] = {
-    storage.update_(
-      sqlu"""delete from dars where hash_hex = ${hash.toLengthLimitedHexString}""",
+    writeQueue.execute(
+      storage.update_(
+        sqlu"""delete from dars where hash_hex = ${hash.toLengthLimitedHexString}""",
+        functionFullName,
+      ),
       functionFullName,
     )
   }

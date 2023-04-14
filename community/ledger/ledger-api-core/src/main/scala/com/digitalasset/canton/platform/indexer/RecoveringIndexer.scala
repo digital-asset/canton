@@ -39,6 +39,7 @@ private[indexer] final class RecoveringIndexer(
     * @param indexer A ResourceOwner for indexing
     * @return A future that completes with [[akka.Done]] when the indexer finishes processing all read service updates.
     */
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   def start(indexer: Indexer): Resource[(ReportsHealth, Future[Unit])] = {
     val complete = Promise[Unit]()
 

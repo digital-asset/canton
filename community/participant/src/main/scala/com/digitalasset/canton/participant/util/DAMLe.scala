@@ -33,6 +33,7 @@ object DAMLe {
   def newEngine(
       uniqueContractKeys: Boolean,
       enableLfDev: Boolean,
+      enableStackTraces: Boolean,
       profileDir: Option[Path] = None,
   ): Engine =
     new Engine(
@@ -43,6 +44,7 @@ object DAMLe {
         ),
         // The package store contains only validated packages, so we can skip validation upon loading
         packageValidation = false,
+        stackTraceMode = enableStackTraces,
         profileDir = profileDir,
         forbidV0ContractId = true,
         requireSuffixedGlobalContractId = true,

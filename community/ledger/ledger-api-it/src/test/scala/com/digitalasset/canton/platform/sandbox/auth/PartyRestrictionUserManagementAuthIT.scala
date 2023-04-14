@@ -6,8 +6,8 @@ package com.digitalasset.canton.platform.sandbox.auth
 import com.daml.error.ErrorsAssertions
 import com.daml.ledger.api.v1.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v1.admin.{
-  party_management_service => pproto,
-  user_management_service => uproto,
+  party_management_service as pproto,
+  user_management_service as uproto,
 }
 import com.digitalasset.canton.ledger.runner.common.Config
 import com.digitalasset.canton.ledger.sandbox.SandboxOnXForTest.{ApiServerConfig, singleParticipant}

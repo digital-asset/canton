@@ -7,7 +7,7 @@ import akka.stream.scaladsl.Source
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.v1.admin.party_management_service.{
   AllocatePartyRequest,
-  PartyDetails => ProtoPartyDetails,
+  PartyDetails as ProtoPartyDetails,
 }
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
@@ -21,7 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexerPartyDetails,
   PartyEntry,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementService.blindAndConvertToProto
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementServiceSpec.*
 import com.digitalasset.canton.platform.localstore.api.{PartyRecord, PartyRecordStore}

@@ -166,7 +166,14 @@ object BaseCantonError {
       extends BaseCantonError {}
 
   private val ignoreFields =
-    Set("cause", "throwable", "loggingContext", "definiteAnswer", "representativeProtocolVersion")
+    Set(
+      "cause",
+      "throwable",
+      "loggingContext",
+      "definiteAnswer",
+      "representativeProtocolVersion",
+      "companionObj",
+    )
 
   private[error] def extractContext[D](obj: D): Map[String, String] = {
     obj.getClass.getDeclaredFields

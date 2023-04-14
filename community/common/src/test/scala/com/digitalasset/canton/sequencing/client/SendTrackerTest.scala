@@ -3,14 +3,12 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import cats.data.EitherT
 import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.metrics.MetricHandle.NoOpMetricsFactory
 import com.digitalasset.canton.metrics.SequencerClientMetrics
-import com.digitalasset.canton.sequencing.client.SendTrackerUpdateError.TimeoutHandlerError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   OrdinaryProtocolEvent,
@@ -96,7 +94,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
 
     val handler: SendTimeoutHandler = _ => {
       calls.incrementAndGet()
-      EitherT.rightT[Future, SendTrackerUpdateError.TimeoutHandlerError](())
+      Future.unit
     }
   }
 
@@ -116,9 +114,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
 
       for {
         _ <- valueOrFail(tracker.track(msgId1, CantonTimestamp.MinValue))("track first")
-        _ <- valueOrFail(
-          tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
-        )("update tracker")
+        _ <- tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
         _ <- valueOrFail(tracker.track(msgId1, CantonTimestamp.MinValue))(
           "track same msgId after receipt"
         )
@@ -139,7 +135,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           msgId1 -> CantonTimestamp.MinValue,
           msgId2 -> CantonTimestamp.MinValue,
         )
-        _ <- valueOrFail(tracker.update(timeoutHandler.handler)(event))("update sendTracker")
+        _ <- tracker.update(timeoutHandler.handler)(event)
         pendingSends2 <- store.fetchPendingSends
         _ = pendingSends2 shouldBe Map(
           msgId2 -> CantonTimestamp.MinValue
@@ -164,17 +160,14 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
         _ <- valueOrFail(tracker.track(msgId2, CantonTimestamp.MinValue.plusSeconds(2)))(
           "track msgId2"
         )
-        _ <- valueOrFail(
+        _ <-
           tracker.update(timeoutHandler.handler)(
             deliverDefault(CantonTimestamp.MinValue.plusSeconds(1))
           )
-        )("update1")
         _ = timeoutHandler.callCount shouldBe 1
-        _ <- valueOrFail(
-          tracker.update(timeoutHandler.handler)(
-            deliverDefault(CantonTimestamp.MinValue.plusSeconds(3))
-          )
-        )("update2")
+        _ <- tracker.update(timeoutHandler.handler)(
+          deliverDefault(CantonTimestamp.MinValue.plusSeconds(3))
+        )
       } yield timeoutHandler.callCount shouldBe 2
     }
 
@@ -185,12 +178,8 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
 
       for {
         _ <- valueOrFail(tracker.track(msgId1, CantonTimestamp.MinValue))("track msgId1")
-        _ <- valueOrFail(
-          tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
-        )("update sendTracker with msgId1")
-        _ <- valueOrFail(
-          tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
-        )("update sendTracker with msgId1 again")
+        _ <- tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
+        _ <- tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
       } yield succeed
     }
 
@@ -205,19 +194,17 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           fail("timeout handler was called concurrently")
         }
 
-        EitherT.right[TimeoutHandlerError](Future {
+        Future {
           if (!concurrentCalls.compareAndSet(1, 0)) {
             fail("timeout handler was called concurrently")
           }
-        })
+        }
       }
 
       for {
         _ <- valueOrFail(tracker.track(msgId1, CantonTimestamp.MinValue))("track msgId1")
         _ <- valueOrFail(tracker.track(msgId2, CantonTimestamp.MinValue))("track msgId2")
-        _ <- valueOrFail(
-          tracker.update(timeoutHandler)(deliverDefault(CantonTimestamp.MinValue.plusSeconds(1)))
-        )("update")
+        _ <- tracker.update(timeoutHandler)(deliverDefault(CantonTimestamp.MinValue.plusSeconds(1)))
       } yield totalCalls.get() shouldBe 2
     }
 
@@ -241,9 +228,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
             tracker
               .track(msgId1, CantonTimestamp.MinValue, sendResultHandler.handler)
           )("track msgId1")
-          _ <- valueOrFail(
-            tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
-          )("update with msgId1")
+          _ <- tracker.update(timeoutHandler.handler)(deliver(msgId1, CantonTimestamp.MinValue))
           calledWith <- sendResultHandler.result.failOnShutdown
         } yield calledWith should matchPattern { case SendResult.Success(_) =>
         }
@@ -259,9 +244,9 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
             tracker
               .track(msgId1, CantonTimestamp.MinValue, sendResultHandler.handler)
           )("track msgId1")
-          _ <- valueOrFail(
-            tracker.update(timeoutHandler.handler)(deliverError(msgId1, CantonTimestamp.MinValue))
-          )("update with msgId1")
+          _ <- tracker.update(timeoutHandler.handler)(
+            deliverError(msgId1, CantonTimestamp.MinValue)
+          )
           calledWith <- sendResultHandler.result.failOnShutdown
         } yield calledWith should matchPattern { case SendResult.Error(_) =>
         }
@@ -279,11 +264,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
             tracker
               .track(msgId1, sendMaxSequencingTime, sendResultHandler.handler)
           )("track msgId1")
-          _ <- valueOrFail(
-            tracker.update(timeoutHandler.handler)(deliverDefault(deliverEventTime))
-          )(
-            "update with deliver event"
-          )
+          _ <- tracker.update(timeoutHandler.handler)(deliverDefault(deliverEventTime))
           calledWith <- sendResultHandler.result.failOnShutdown
         } yield calledWith should matchPattern { case SendResult.Timeout(deliverEventTime) =>
         }

@@ -27,6 +27,7 @@ final case class ParticipantNodeParameters(
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
     maxDbConnections: Int,
     excludeInfrastructureTransactions: Boolean,
+    enableEngineStackTrace: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV

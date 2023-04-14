@@ -63,7 +63,7 @@ object PartyRecordStorageBackendImpl extends PartyRecordStorageBackend {
          INSERT INTO participant_party_records (party, identity_provider_id, resource_version, created_at)
          VALUES ($party, $identityProviderId, $resourceVersion, $createdAt)
        """.executeInsert1("internal_id")(SqlParser.scalar[Int].single)(connection)
-    internalId.get
+    internalId.fold(throw _, identity)
   }
 
   override def getPartyAnnotations(internalId: Int)(connection: Connection): Map[String, String] = {

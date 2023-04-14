@@ -31,7 +31,8 @@ import slick.jdbc.{GetResult, SetParameter}
 final case class SerializableRawContractInstance private (
     contractInstance: LfContractInst,
     // Keeping this in the serializable instance for historical reasons
-    agreementText: AgreementText,
+    // The agreement text may come from an untrusted node.
+    private val unvalidatedAgreementText: AgreementText,
 )(
     override val deserializedFrom: Option[ByteString]
 ) extends MemoizedEvidenceWithFailure[ValueCoder.EncodeError] {
@@ -43,7 +44,7 @@ final case class SerializableRawContractInstance private (
     TransactionCoder
       .encodeContractInstance(
         ValueCoder.CidEncoder,
-        contractInstance.map(ContractInstanceWithAgreement(_, agreementText.v)),
+        contractInstance.map(ContractInstanceWithAgreement(_, unvalidatedAgreementText.v)),
       )
       .map(_.toByteString)
 
@@ -55,9 +56,9 @@ final case class SerializableRawContractInstance private (
 
   private def copy(
       contractInstance: LfContractInst = this.contractInstance,
-      agreementText: AgreementText = this.agreementText,
+      unvalidatedAgreementText: AgreementText = this.unvalidatedAgreementText,
   ): SerializableRawContractInstance =
-    SerializableRawContractInstance(contractInstance, agreementText)(None)
+    SerializableRawContractInstance(contractInstance, unvalidatedAgreementText)(None)
 }
 
 object SerializableRawContractInstance {
@@ -65,10 +66,6 @@ object SerializableRawContractInstance {
   @VisibleForTesting
   lazy val contractInstanceUnsafe: Lens[SerializableRawContractInstance, LfContractInst] =
     GenLens[SerializableRawContractInstance](_.contractInstance)
-
-  @VisibleForTesting
-  lazy val agreementTextUnsafe: Lens[SerializableRawContractInstance, AgreementText] =
-    GenLens[SerializableRawContractInstance](_.agreementText)
 
   implicit def contractGetResult(implicit
       getResultByteArray: GetResult[Array[Byte]]

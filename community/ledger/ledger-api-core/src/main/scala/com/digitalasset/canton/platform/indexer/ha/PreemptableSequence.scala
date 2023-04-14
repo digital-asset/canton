@@ -96,6 +96,7 @@ object PreemptableSequence {
     val resultCompleted = Promise[Unit]()
     val killSwitchCaptor = new KillSwitchCaptor
     val resultHandle = Handle(resultCompleted.future, killSwitchCaptor)
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var releaseStack: List[() => Future[Unit]] = Nil
 
     val helper: SequenceHelper = new SequenceHelper {

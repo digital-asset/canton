@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManagerError,
 }
 import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
@@ -101,7 +102,7 @@ class GrpcDomainRegistry(
   }
 
   def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
-    (config: DomainConnectionConfig) =>
+    (config: SequencerConnection) =>
       SequencerConnectClient(
         config,
         participantNodeParameters.processingTimeouts,
@@ -120,7 +121,7 @@ class GrpcDomainRegistry(
     val sequencerConnection = config.sequencerConnection
 
     val runE = for {
-      sequencerConnectClient <- sequencerConnectClientBuilder(config)
+      sequencerConnectClient <- sequencerConnectClientBuilder(sequencerConnection)
         .leftMap(err =>
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message)
         )
@@ -132,7 +133,6 @@ class GrpcDomainRegistry(
 
       domainHandle <- getDomainHandle(
         config,
-        participantNodeParameters.protocolConfig,
         sequencerConnection,
         syncDomainPersistentStateFactory,
       )(

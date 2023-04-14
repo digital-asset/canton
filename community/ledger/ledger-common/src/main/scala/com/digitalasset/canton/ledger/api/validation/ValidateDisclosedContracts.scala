@@ -6,8 +6,8 @@ package com.digitalasset.canton.ledger.api.validation
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.api.v1.commands.{
-  Commands => ProtoCommands,
-  DisclosedContract => ProtoDisclosedContract,
+  Commands as ProtoCommands,
+  DisclosedContract as ProtoDisclosedContract,
 }
 import com.daml.lf.command.{ContractMetadata, DisclosedContract}
 import com.daml.lf.data.{Bytes, ImmArray}

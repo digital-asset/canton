@@ -6,25 +6,29 @@ package com.digitalasset.canton.participant.admin.grpc
 import better.files.*
 import cats.data.EitherT
 import cats.syntax.all.*
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.grpc.util.AcsUtil
 import com.digitalasset.canton.participant.admin.v0.*
-import com.digitalasset.canton.participant.domain.DomainAliasManager
+import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainConnectionConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.protocol.{SerializableContract, SerializableContractWithWitnesses}
 import com.digitalasset.canton.topology.{DomainId, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
 
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 object GrpcParticipantRepairService {
-  private val defaultChunkSize: Int =
+  val defaultChunkSize: Int =
     1024 * 1024 * 2 // 2MB - This is half of the default max message size of gRPC
 
   private val groupBy = 1000
@@ -38,6 +42,8 @@ class GrpcParticipantRepairService(
 )(implicit ec: ExecutionContext)
     extends ParticipantRepairServiceGrpc.ParticipantRepairService
     with NamedLogging {
+
+  private val domainMigrationInProgress = new AtomicReference[Boolean](false)
 
   /** get contracts for a party
     */
@@ -122,11 +128,87 @@ class GrpcParticipantRepairService(
   /** upload contracts for a party
     */
   override def upload(
-      request: UploadRequest
-  ): Future[UploadResponse] = {
+      responseObserver: StreamObserver[UploadResponse]
+  ): StreamObserver[UploadRequest] = {
+    // TODO(i12481): This buffer will contain the whole ACS snapshot.
+    val outputStream = new ByteArrayOutputStream()
+
+    new StreamObserver[UploadRequest] {
+      override def onNext(value: UploadRequest): Unit = {
+        Try(outputStream.write(value.acsSnapshot.toByteArray)) match {
+          case Failure(exception) =>
+            outputStream.close()
+            responseObserver.onError(exception)
+          case Success(_) =>
+        }
+      }
+
+      override def onError(t: Throwable): Unit = {
+        responseObserver.onError(t)
+        outputStream.close()
+      }
+
+      // TODO(i12481): implement a solution to prevent the client from sending infinite streams
+      override def onCompleted(): Unit = {
+        val res = convertAndAddContractsToStore(ByteString.copyFrom(outputStream.toByteArray))
+        Try(Await.result(res, processingTimeout.unbounded.duration)) match {
+          case Failure(exception) => responseObserver.onError(exception)
+          case Success(_) =>
+            responseObserver.onNext(UploadResponse())
+            responseObserver.onCompleted()
+        }
+        outputStream.close()
+      }
+    }
+  }
+
+  override def migrateDomain(request: MigrateDomainRequest): Future[MigrateDomainResponse] = {
+    TraceContext.withNewTraceContext { implicit traceContext =>
+      // ensure here we don't process migration requests concurrently
+      if (!domainMigrationInProgress.getAndSet(true)) {
+        val ret = for {
+          sourceDomainAlias <- EitherT.fromEither[Future](DomainAlias.create(request.sourceAlias))
+          conf <- EitherT
+            .fromEither[Future](
+              request.targetDomainConnectionConfig
+                .toRight("The target domain connection configuration is required")
+                .flatMap(
+                  DomainConnectionConfig.fromProtoV0(_).leftMap(_.toString)
+                )
+            )
+          _ <- EitherT(
+            sync
+              .migrateDomain(sourceDomainAlias, conf)
+              .leftMap(_.asGrpcError.getStatus.getDescription)
+              .value
+              .onShutdown {
+                Left(("Aborted due to shutdown."))
+              }
+          )
+        } yield MigrateDomainResponse()
+
+        EitherTUtil
+          .toFuture(
+            ret.leftMap(err => io.grpc.Status.CANCELLED.withDescription(err).asRuntimeException())
+          )
+          .andThen { _ =>
+            domainMigrationInProgress.set(false)
+          }
+      } else
+        Future.failed(
+          io.grpc.Status.ABORTED
+            .withDescription(
+              s"migrate_domain for participant: ${sync.participantId} is already in progress"
+            )
+            .asRuntimeException()
+        )
+    }
+  }
+
+  private def convertAndAddContractsToStore(content: ByteString): Future[UploadResponse] = {
     TraceContext.withNewTraceContext { implicit traceContext =>
       val resultE = for {
-        lazyContracts <- AcsUtil.loadFromByteString(request.acsSnapshot)
+        lazyContracts <- AcsUtil.loadFromByteString(content)
         grouped = lazyContracts
           .grouped(GrpcParticipantRepairService.groupBy)
           .map(_.groupMap(_.domainId)(_.contract))

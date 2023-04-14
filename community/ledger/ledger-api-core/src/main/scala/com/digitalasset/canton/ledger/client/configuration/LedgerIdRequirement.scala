@@ -9,8 +9,6 @@ package com.digitalasset.canton.ledger.client.configuration
   *                         ID on the server is checked.
   */
 final case class LedgerIdRequirement(optionalLedgerId: Option[String]) {
-  @deprecated("This function will return `Option[String]` in a future release.", "1.3.0")
-  def ledgerId: String = optionalLedgerId.get
 
   def enabled: Boolean = optionalLedgerId.isDefined
 

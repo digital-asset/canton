@@ -6,6 +6,7 @@ package com.digitalasset.canton.ledger.client
 import com.daml.ledger.api.testing.utils.{AkkaBeforeAndAfterAll, SuiteResourceManagementAroundEach}
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.api.domain
+import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, JwksUrl}
 import com.digitalasset.canton.ledger.client.configuration.{
   CommandClientConfiguration,
   LedgerClientConfiguration,
@@ -13,6 +14,7 @@ import com.digitalasset.canton.ledger.client.configuration.{
 }
 import com.digitalasset.canton.ledger.runner.common.Config
 import com.digitalasset.canton.platform.sandbox.fixture.SandboxFixture
+import com.google.protobuf.field_mask.FieldMask
 import io.grpc.ManagedChannel
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
@@ -89,6 +91,90 @@ final class LedgerClientIT
           channel.isTerminated should be(true)
         }
       }
+    }
+    "identity provider config" should {
+      val config = domain.IdentityProviderConfig(
+        IdentityProviderId.Id(Ref.LedgerString.assertFromString("abcd")),
+        isDeactivated = false,
+        JwksUrl.assertFromString("http://jwks.some.domain:9999/jwks"),
+        "SomeUser",
+        Some("SomeAudience"),
+      )
+
+      val updatedConfig = config.copy(
+        isDeactivated = true,
+        jwksUrl = JwksUrl("http://someotherurl"),
+        issuer = "ANewIssuer",
+        audience = Some("UpdatedAudience"),
+      ) // updating audience value does not appear to work
+
+      "create an identity provider" in {
+        for {
+          client <- LedgerClient(channel, ClientConfiguration)
+          createdConfig <- client.identityProviderConfigClient.createIdentityProviderConfig(
+            config,
+            None,
+          )
+        } yield {
+          createdConfig should be(config)
+        }
+      }
+      "get an identity provider" in {
+        for {
+          client <- LedgerClient(channel, ClientConfiguration)
+          _ <- client.identityProviderConfigClient.createIdentityProviderConfig(config, None)
+          respConfig <- client.identityProviderConfigClient.getIdentityProviderConfig(
+            config.identityProviderId,
+            None,
+          )
+        } yield {
+          respConfig should be(config)
+        }
+      }
+      "update an identity provider" in {
+        for {
+          client <- LedgerClient(channel, ClientConfiguration)
+          _ <- client.identityProviderConfigClient.createIdentityProviderConfig(config, None)
+          respConfig <- client.identityProviderConfigClient.updateIdentityProviderConfig(
+            updatedConfig,
+            FieldMask(Seq("is_deactivated", "jwks_url", "issuer", "audience")),
+            None,
+          )
+        } yield {
+          respConfig should be(updatedConfig)
+        }
+      }
+
+      "list identity providers" in {
+        for {
+          client <- LedgerClient(channel, ClientConfiguration)
+          config1 <- client.identityProviderConfigClient.createIdentityProviderConfig(config, None)
+          config2 <- client.identityProviderConfigClient.createIdentityProviderConfig(
+            updatedConfig.copy(identityProviderId =
+              IdentityProviderId.Id(Ref.LedgerString.assertFromString("AnotherIdentityProvider"))
+            ),
+            None,
+          )
+          respConfig <- client.identityProviderConfigClient.listIdentityProviderConfigs(None)
+        } yield {
+          respConfig.toSet should contain theSameElementsAs Set(config2, config1)
+        }
+      }
+
+      "delete identity provider" in {
+        for {
+          client <- LedgerClient(channel, ClientConfiguration)
+          config1 <- client.identityProviderConfigClient.createIdentityProviderConfig(config, None)
+          _ <- client.identityProviderConfigClient.deleteIdentityProviderConfig(
+            config1.identityProviderId,
+            None,
+          )
+          respConfig <- client.identityProviderConfigClient.listIdentityProviderConfigs(None)
+        } yield {
+          respConfig.toSet should be(Set.empty)
+        }
+      }
+
     }
   }
 }

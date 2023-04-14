@@ -47,6 +47,10 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
       extends ProtoDeserializationError {
     override val message = s"Unable to convert field `$field`: $error"
   }
+  final case class RefinedDurationConversionError(field: String, error: String)
+      extends ProtoDeserializationError {
+    override val message = s"Unable to convert numeric field `$field`: $error"
+  }
   final case class InvariantViolation(error: String) extends ProtoDeserializationError {
     override def message = error
   }

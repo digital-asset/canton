@@ -662,7 +662,7 @@ private[participant] object MessageDispatcher {
   }
 
   case object TopologyTransaction extends MessageKind[AsyncResult]
-  final case class RequestKind(viewType: ViewType) extends MessageKind[Unit] {
+  final case class RequestKind(viewType: ViewType) extends MessageKind[AsyncResult] {
     override def pretty: Pretty[RequestKind] = prettyOfParam(unnamedParam(_.viewType))
   }
   final case class ResultKind(viewType: ViewType) extends MessageKind[AsyncResult] {

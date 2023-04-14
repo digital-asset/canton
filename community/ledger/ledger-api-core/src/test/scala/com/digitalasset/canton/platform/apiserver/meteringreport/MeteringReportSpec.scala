@@ -8,7 +8,7 @@ import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReport.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
-import spray.json.{enrichAny, _}
+import spray.json.{enrichAny, *}
 
 import java.time.Duration
 import java.time.temporal.ChronoUnit

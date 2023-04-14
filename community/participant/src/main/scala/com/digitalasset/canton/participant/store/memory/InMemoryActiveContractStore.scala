@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{Chain, EitherT}
 import cats.kernel.Order
-import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
@@ -16,7 +15,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
-import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
@@ -81,30 +80,40 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Either[AcsError, SortedMap[LfContractId, CantonTimestamp]]] =
+  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
     Future.successful {
       val snapshot = SortedMap.newBuilder[LfContractId, CantonTimestamp]
-      table.foreach { case (contractId, entry) =>
-        entry.activatedBy(timestamp).foreach { activationTimestamp =>
+      table.foreach { case (contractId, contractStatus) =>
+        contractStatus.activeBy(timestamp).foreach { activationTimestamp =>
           snapshot += (contractId -> activationTimestamp)
         }
       }
-      Right(snapshot.result())
+      snapshot.result()
     }
+
+  override def snapshot(rc: RequestCounter)(implicit
+      traceContext: TraceContext
+  ): Future[SortedMap[LfContractId, RequestCounter]] = Future.successful {
+    val snapshot = SortedMap.newBuilder[LfContractId, RequestCounter]
+    table.foreach { case (contractId, contractStatus) =>
+      contractStatus.activeBy(rc).foreach { activationRc =>
+        snapshot += (contractId -> activationRc)
+      }
+    }
+    snapshot.result()
+  }
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] =
-    EitherT(Future.successful {
-      Either.right(
-        contractIds
-          .to(LazyList)
-          .mapFilter(contractId =>
-            table.get(contractId).flatMap(_.activatedBy(timestamp)).map(contractId -> _)
-          )
-          .toMap
-      )
-    })
+  ): Future[Map[LfContractId, CantonTimestamp]] =
+    Future.successful {
+      contractIds
+        .to(LazyList)
+        .mapFilter(contractId =>
+          table.get(contractId).flatMap(_.activeBy(timestamp)).map(contractId -> _)
+        )
+        .toMap
+    }
 
   override def transferInContracts(transferIns: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(
       implicit traceContext: TraceContext
@@ -226,11 +235,9 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
       cids = contracts.map(_.contractId)
       states <- fetchStates(cids)
     } yield {
-      states.collectFirst({ s =>
-        s._2.status match {
-          case ActiveContractStore.Active => s._1
-        }
-      })
+      states.collectFirst { case (cid, StateChange(ActiveContractStore.Active, _)) =>
+        cid
+      }
     }
   }
 }
@@ -451,9 +458,9 @@ object InMemoryActiveContractStore {
     }
 
     /** If the contract is active right after the given `timestamp`,
-      * returns the [[com.digitalasset.canton.participant.util.TimeOfChange]] of the latest creation or latest transfer-in.
+      * returns the [[com.digitalasset.canton.data.CantonTimestamp]] of the latest creation or latest transfer-in.
       */
-    def activatedBy(timestamp: CantonTimestamp): Option[CantonTimestamp] = {
+    def activeBy(timestamp: CantonTimestamp): Option[CantonTimestamp] = {
       val iter = changes.iteratorFrom(ContractStatus.searchByTimestamp(timestamp))
       if (!iter.hasNext) { None }
       else {
@@ -461,6 +468,18 @@ object InMemoryActiveContractStore {
         if (change.isActivation) Some(change.toc.timestamp) else None
       }
     }
+
+    /** If the contract is active right after the given `rc`,
+      * returns the [[com.digitalasset.canton.RequestCounter]] of the latest creation or latest transfer-in.
+      */
+    def activeBy(rc: RequestCounter): Option[RequestCounter] =
+      changes
+        .collect {
+          case (activenessChange, _) if activenessChange.toc.rc <= rc => activenessChange
+        }
+        .toSeq
+        .maxByOption(activenessChange => (activenessChange.toc, !activenessChange.isActivation))
+        .flatMap(change => Option.when(change.isActivation)(change.toc.rc))
 
     /** Returns the latest [[ActiveContractStore.ContractState]] if any */
     def latestState: Option[ContractState] = {
@@ -530,7 +549,7 @@ object InMemoryActiveContractStore {
 
     val Nonexistent = new ContractStatus(SortedMap.empty, None, None)
 
-    private def searchByTimestamp(timestamp: CantonTimestamp) =
+    private def searchByTimestamp(timestamp: CantonTimestamp): ActivenessChange =
       Deactivation(TimeOfChange(RequestCounter.MaxValue, timestamp))
   }
 

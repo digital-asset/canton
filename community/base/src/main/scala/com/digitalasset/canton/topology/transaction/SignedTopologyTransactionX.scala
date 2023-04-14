@@ -16,13 +16,13 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect.ClassTag
 
 /** A signed topology transaction
   *
@@ -36,8 +36,8 @@ final case class SignedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
     signatures: NonEmpty[Set[Signature]],
     isProposal: Boolean,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      GenericSignedTopologyTransactionX
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SignedTopologyTransactionX.type
     ]
 ) extends HasProtocolVersionedWrapper[
       SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]
@@ -55,7 +55,28 @@ final case class SignedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
 
   def operation: TopologyChangeOpX = transaction.op
 
-  override def companionObj = SignedTopologyTransactionX
+  @transient override protected lazy val companionObj: SignedTopologyTransactionX.type =
+    SignedTopologyTransactionX
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def selectMapping[TargetMapping <: TopologyMappingX: ClassTag]
+      : Option[SignedTopologyTransactionX[Op, TargetMapping]] = {
+    transaction
+      .selectMapping[TargetMapping]
+      .map(_ => this.asInstanceOf[SignedTopologyTransactionX[Op, TargetMapping]])
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def selectOp[TargetOp <: TopologyChangeOpX: ClassTag]
+      : Option[SignedTopologyTransactionX[TargetOp, M]] =
+    transaction
+      .selectOp[TargetOp]
+      .map(_ => this.asInstanceOf[SignedTopologyTransactionX[TargetOp, M]])
+
+  def select[TargetOp <: TopologyChangeOpX: ClassTag, TargetMapping <: TopologyMappingX: ClassTag]
+      : Option[SignedTopologyTransactionX[TargetOp, TargetMapping]] = {
+    selectMapping[TargetMapping].flatMap(_.selectOp[TargetOp])
+  }
 
   def toProtoV2: v2.SignedTopologyTransactionX =
     v2.SignedTopologyTransactionX(
@@ -85,7 +106,7 @@ object SignedTopologyTransactionX
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
-    ProtoVersion(2) -> VersionedProtoConverter.mk(ProtocolVersion.dev)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(
       v2.SignedTopologyTransactionX
     )(
       supportedProtoVersion(_)(fromProtoV2),

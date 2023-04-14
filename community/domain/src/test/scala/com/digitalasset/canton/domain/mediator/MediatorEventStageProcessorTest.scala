@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.{
@@ -19,10 +20,11 @@ import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
 import com.digitalasset.canton.version.HasTestCloseContext
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, LfPartyId, SequencerCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -143,7 +145,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
     )
 
     val signedConfirmationResponse =
-      SignedProtocolMessage.from(mediatorResponse, testedProtocolVersion, Signature.noSignature)
+      SignedProtocolMessage.tryFrom(mediatorResponse, testedProtocolVersion, Signature.noSignature)
     when(signedConfirmationResponse.message.domainId).thenReturn(domainId)
     val informeeMessageWithWrongDomainId = mock[InformeeMessage]
     when(informeeMessageWithWrongDomainId.domainId)
@@ -199,10 +201,11 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
     "be raised if a pending event timeouts" in {
       val pendingRequestTs = CantonTimestamp.Epoch.plusMillis(1)
       val pendingRequestId = RequestId(pendingRequestTs)
-      val pendingRequest = responseAggregation(pendingRequestId)
+      val pendingRequestF = responseAggregation(pendingRequestId)
       val env = new Env
 
       for {
+        pendingRequest <- pendingRequestF
         _ <- env.state.add(pendingRequest)
         deliverTs = pendingRequestTs.add(participantResponseTimeout.unwrap).addMicros(1)
         _ <- env.handle(env.deliver(deliverTs)).onShutdown(fail())
@@ -239,7 +242,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
 
       val pendingRequest1Ts = CantonTimestamp.Epoch.plusSeconds(2)
       val pendingRequest1Id = RequestId(pendingRequest1Ts)
-      val pendingRequest1 = getRequest(pendingRequest1Ts) // times out at (2 + 4) = 6
+      val pendingRequest1F = getRequest(pendingRequest1Ts) // times out at (2 + 4) = 6
 
       val pendingRequest2Ts = CantonTimestamp.Epoch.plusSeconds(6)
       val pendingRequest2Id = RequestId(pendingRequest2Ts)
@@ -249,7 +252,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
         If dynamic domain parameters are not taken into account, it would be
         incorrectly marked as timed out at 11
        */
-      val pendingRequest2 = getRequest(pendingRequest2Ts)
+      val pendingRequest2F = getRequest(pendingRequest2Ts)
 
       val deliver1Ts = CantonTimestamp.Epoch.plusSeconds(11)
       val deliver2Ts = CantonTimestamp.Epoch.plusSeconds(12).addMicros(1)
@@ -261,6 +264,8 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
         val env = new Env(domainParameters)
 
         for {
+          pendingRequest1 <- pendingRequest1F
+          pendingRequest2 <- pendingRequest2F
           _ <- env.state.add(pendingRequest1)
           _ <- env.state.add(pendingRequest2)
           _ <- env.handle(env.deliver(deliverTs)).onShutdown(fail())
@@ -306,10 +311,17 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
     }
   }
 
-  private def responseAggregation(requestId: RequestId): ResponseAggregation =
-    ResponseAggregation.fromRequest(
-      requestId,
-      InformeeMessage(fullInformeeTree)(testedProtocolVersion),
-      testedProtocolVersion,
-    )(loggerFactory)
+  private def responseAggregation(requestId: RequestId): Future[ResponseAggregation] = {
+    val mockTopologySnapshot = mock[TopologySnapshot]
+    when(mockTopologySnapshot.consortiumThresholds(any[Set[LfPartyId]])).thenAnswer {
+      parties: Set[LfPartyId] => Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+    }
+    ResponseAggregation
+      .fromRequest(
+        requestId,
+        InformeeMessage(fullInformeeTree)(testedProtocolVersion),
+        testedProtocolVersion,
+        mockTopologySnapshot,
+      )(loggerFactory) // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
+  }
 }

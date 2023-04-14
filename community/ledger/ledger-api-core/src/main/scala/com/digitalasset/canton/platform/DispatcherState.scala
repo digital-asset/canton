@@ -27,6 +27,7 @@ class DispatcherState(dispatcherShutdownTimeout: Duration)(implicit
 ) {
   private val ServiceName = "Ledger API offset dispatcher"
   private val logger = ContextualizedLogger.get(getClass)
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var dispatcherStateRef: DispatcherState.State = DispatcherNotRunning
 
   def isRunning: Boolean = synchronized {

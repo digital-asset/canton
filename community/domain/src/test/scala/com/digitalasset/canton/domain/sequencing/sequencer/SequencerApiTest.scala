@@ -9,27 +9,33 @@ import akka.stream.scaladsl.Sink
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer as CantonSequencer
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
+import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason.BatchRefused
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 
+import java.util.UUID
 import scala.concurrent.Future
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 abstract class SequencerApiTest
     extends FixtureAsyncWordSpec
     with HasExecutionContext
-    with BaseTest {
+    with BaseTest
+    with ProtocolVersionChecksFixtureAsyncWordSpec {
 
   import RecipientsTest.*
 
@@ -39,7 +45,15 @@ abstract class SequencerApiTest
     implicit val actorSystem: ActorSystem =
       AkkaUtil.createActorSystem(loggerFactory.threadName)(parallelExecutionContext)
 
-    val sequencer: CantonSequencer = SequencerApiTest.this.createSequencer
+    val topologyFactory =
+      new TestingIdentityFactory(
+        topology = TestingTopology(additionalParticipants = Set(p1, p2, p3)),
+        loggerFactory,
+        List.empty,
+      )
+    val sequencer: CantonSequencer = SequencerApiTest.this.createSequencer(
+      topologyFactory.forOwnerAndDomain(owner = mediatorId, domainId)
+    )
 
     override def close(): Unit = {
       sequencer.close()
@@ -62,7 +76,11 @@ abstract class SequencerApiTest
   def mediatorId: MediatorId = DefaultTestIdentities.mediator
   def topologyClientMember: Member = DefaultTestIdentities.sequencer
 
-  def createSequencer(implicit materializer: Materializer): CantonSequencer
+  def createSequencer(crypto: DomainSyncCryptoClient)(implicit
+      materializer: Materializer
+  ): CantonSequencer
+
+  protected def supportAggregation: Boolean
 
   "The sequencers should" should {
     "send a batch to one recipient" in { env =>
@@ -79,8 +97,12 @@ abstract class SequencerApiTest
         _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
         messages <- readForMembers(List(sender), sequencer)
       } yield {
-        val details =
-          EventDetails(SequencerCounter(0), sender, EnvelopeDetails(messageContent, recipients))
+        val details = EventDetails(
+          SequencerCounter(0),
+          sender,
+          Some(request.messageId),
+          EnvelopeDetails(messageContent, recipients),
+        )
         checkMessages(List(details), messages)
       }
     }
@@ -159,8 +181,9 @@ abstract class SequencerApiTest
         )
       } yield {
         val details = EventDetails(
-          SequencerCounter(0),
+          SequencerCounter.Genesis,
           sender,
+          Some(request1.messageId),
           EnvelopeDetails(normalMessageContent, recipients),
         )
         checkMessages(List(details), messages)
@@ -178,32 +201,289 @@ abstract class SequencerApiTest
 
       val expectedDetailsForMembers = readFor.map { member =>
         EventDetails(
-          SequencerCounter(0),
+          SequencerCounter.Genesis,
           member,
+          Option.when(member == sender)(request.messageId),
           EnvelopeDetails(messageContent, recipients.forMember(member).value),
         )
       }
 
       for {
         _ <- registerMembers(recipients.allRecipients + sender + topologyClientMember, sequencer)
-        _ <- valueOrFail(sequencer.sendAsync(request))(s"Sent async")
+        _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
         reads <- readForMembers(readFor, sequencer)
       } yield {
         checkMessages(expectedDetailsForMembers, reads)
       }
     }
+
+    def testAggregation: Boolean =
+      // TODO(#12373) Adapt when releasing BFT
+      testedProtocolVersion >= ProtocolVersion.dev && supportAggregation
+
+    "aggregate submission requests" onlyRunWhen testAggregation in { env =>
+      import env.*
+
+      val messageContent = "aggregatable-message"
+      val aggregationRule =
+        AggregationRule(NonEmpty(Seq, p1, p2), PositiveInt.tryCreate(2), testedProtocolVersion)
+      val request1 = createSendRequest(
+        p1,
+        messageContent,
+        Recipients.cc(p3),
+        aggregationRule = Some(aggregationRule),
+      )
+      val request2 = request1.copy(sender = p2, messageId = MessageId.fromUuid(new UUID(1, 2)))
+
+      for {
+        _ <- registerMembers(Set(p1, p2, p3, topologyClientMember), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant1")
+        reads1 <- readForMembers(Seq(p1), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async for participant2")
+        reads2 <- readForMembers(Seq(p2), sequencer)
+        reads3 <- readForMembers(Seq(p3), sequencer)
+      } yield {
+        // p1 gets the receipt immediately
+        checkMessages(
+          Seq(EventDetails(SequencerCounter.Genesis, p1, Some(request1.messageId))),
+          reads1,
+        )
+        // p2 gets the receipt only
+        checkMessages(
+          Seq(EventDetails(SequencerCounter.Genesis, p2, Some(request2.messageId))),
+          reads2,
+        )
+        // p3 gets the message
+        checkMessages(
+          Seq(
+            EventDetails(
+              SequencerCounter.Genesis,
+              p3,
+              None,
+              EnvelopeDetails(messageContent, Recipients.cc(p3)),
+            )
+          ),
+          reads3,
+        )
+      }
+    }
+
+    "aggregate signatures" onlyRunWhen testAggregation in { env =>
+      import env.*
+
+      val aggregationRule =
+        AggregationRule(NonEmpty(Seq, p1, p2, p3), PositiveInt.tryCreate(2), testedProtocolVersion)
+
+      val content1 = "message1-to-sign"
+      val content2 = "message2-to-sign"
+      val recipients1 = Recipients.cc(p1, p3)
+      val envelope1 = ClosedEnvelope.tryCreate(
+        ByteString.copyFromUtf8(content1),
+        recipients1,
+        Seq.empty,
+        testedProtocolVersion,
+      )
+      val recipients2 = Recipients.cc(p2, p3)
+      val envelope2 = ClosedEnvelope.tryCreate(
+        ByteString.copyFromUtf8(content2),
+        recipients2,
+        Seq.empty,
+        testedProtocolVersion,
+      )
+      val envelopes = List(envelope1, envelope2)
+      val messageId1 = MessageId.tryCreate(s"request1")
+      val messageId2 = MessageId.tryCreate(s"request2")
+      val messageId3 = MessageId.tryCreate(s"request3")
+      val p1Crypto = topologyFactory.forOwnerAndDomain(p1, domainId)
+      val p2Crypto = topologyFactory.forOwnerAndDomain(p2, domainId)
+      val p3Crypto = topologyFactory.forOwnerAndDomain(p3, domainId)
+
+      def mkRequest(
+          sender: Member,
+          messageId: MessageId,
+          envelopes: List[ClosedEnvelope],
+      ): SubmissionRequest =
+        SubmissionRequest.tryCreate(
+          sender,
+          messageId,
+          isRequest = false,
+          Batch(envelopes, testedProtocolVersion),
+          CantonTimestamp.MaxValue,
+          timestampOfSigningKey = None,
+          Some(aggregationRule),
+          testedProtocolVersion,
+        )
+
+      for {
+        _ <- registerMembers(Set(p1, p2, p3, topologyClientMember), sequencer)
+        envs1 <- envelopes.parTraverse(signEnvelope(p1Crypto, _))
+        request1 = mkRequest(p1, messageId1, envs1)
+        envs2 <- envelopes.parTraverse(signEnvelope(p2Crypto, _))
+        request2 = mkRequest(p2, messageId2, envs2)
+        _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant1")
+        reads1 <- readForMembers(Seq(p1), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async for participant3")
+        reads2 <- readForMembers(Seq(p2, p3), sequencer)
+        reads2a <- readForMembers(
+          Seq(p1),
+          sequencer,
+          firstSequencerCounter = SequencerCounter.Genesis + 1,
+        )
+
+        // participant3 is late to the party and its request is refused
+        envs3 <- envelopes.parTraverse(signEnvelope(p3Crypto, _))
+        request3 = mkRequest(p3, messageId3, envs3)
+        _ <- valueOrFail(sequencer.sendAsync(request3))("Sent async for participant3")
+        reads3 <- readForMembers(
+          Seq(p3),
+          sequencer,
+          firstSequencerCounter = SequencerCounter.Genesis + 1,
+        )
+      } yield {
+        checkMessages(
+          Seq(EventDetails(SequencerCounter.Genesis, p1, Some(request1.messageId))),
+          reads1,
+        )
+        checkMessages(
+          Seq(
+            EventDetails(
+              SequencerCounter.Genesis,
+              p2,
+              Some(request1.messageId),
+              EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
+            ),
+            EventDetails(
+              SequencerCounter.Genesis,
+              p3,
+              None,
+              EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
+              EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
+            ),
+          ),
+          reads2,
+        )
+        checkMessages(
+          Seq(
+            EventDetails(
+              SequencerCounter.Genesis + 1,
+              p1,
+              None,
+              EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
+            )
+          ),
+          reads2a,
+        )
+
+        checkRejection(reads3, p3, messageId3) { case BatchRefused(reason) =>
+          reason should (
+            include(s"The aggregatable request with aggregation ID") and
+              include("was previously delivered at")
+          )
+        }
+      }
+    }
+
+    "prevent aggregation stuffing" onlyRunWhen testAggregation in { env =>
+      import env.*
+
+      val messageContent = "aggregatable-message-stuffing"
+      val aggregationRule =
+        AggregationRule(NonEmpty(Seq, p1, p3), PositiveInt.tryCreate(2), testedProtocolVersion)
+      val recipients = Recipients.cc(p1, p3)
+      val envelope = ClosedEnvelope.tryCreate(
+        ByteString.copyFromUtf8(messageContent),
+        recipients,
+        Seq.empty,
+        testedProtocolVersion,
+      )
+      val messageId1 = MessageId.tryCreate(s"request1")
+      val messageId2 = MessageId.tryCreate(s"request2")
+      val messageId3 = MessageId.tryCreate(s"request3")
+      val p1Crypto = topologyFactory.forOwnerAndDomain(p1, domainId)
+      val p3Crypto = topologyFactory.forOwnerAndDomain(p3, domainId)
+
+      def mkRequest(
+          sender: Member,
+          messageId: MessageId,
+          envelope: ClosedEnvelope,
+      ): SubmissionRequest =
+        SubmissionRequest.tryCreate(
+          sender,
+          messageId,
+          isRequest = false,
+          Batch(List(envelope), testedProtocolVersion),
+          CantonTimestamp.MaxValue,
+          timestampOfSigningKey = None,
+          Some(aggregationRule),
+          testedProtocolVersion,
+        )
+
+      for {
+        _ <- registerMembers(Set(p1, p3, topologyClientMember), sequencer)
+        env1 <- signEnvelope(p1Crypto, envelope)
+        request1 = mkRequest(p1, messageId1, env1)
+        env2 <- signEnvelope(p1Crypto, envelope)
+        request2 = mkRequest(p1, messageId2, env2)
+        env3 <- signEnvelope(p3Crypto, envelope)
+        request3 = mkRequest(p3, messageId3, env3)
+        _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant1")
+        reads1 <- readForMembers(Seq(p1), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async stuffing for participant1")
+        reads2 <- readForMembers(
+          Seq(p1),
+          sequencer,
+          firstSequencerCounter = SequencerCounter.Genesis + 1,
+        )
+        // p2 can still continue and finish the aggregation
+        _ <- valueOrFail(sequencer.sendAsync(request3))("Sent async for participant3")
+        reads3a <- readForMembers(
+          Seq(p1),
+          sequencer,
+          firstSequencerCounter = SequencerCounter.Genesis + 2,
+        )
+        reads3b <- readForMembers(Seq(p3), sequencer)
+      } yield {
+        checkMessages(
+          Seq(EventDetails(SequencerCounter.Genesis, p1, Some(request1.messageId))),
+          reads1,
+        )
+        checkRejection(reads2, p1, messageId2) { case BatchRefused(reason) =>
+          reason should include(
+            s"The sender ${p1} previously contributed to the aggregatable submission with ID"
+          )
+        }
+        val deliveredEnvelopeDetails = EnvelopeDetails(
+          messageContent,
+          recipients,
+          // Only the first signature from p1 is included
+          env1.signatures ++ env3.signatures,
+        )
+
+        checkMessages(
+          Seq(EventDetails(SequencerCounter.Genesis + 2, p1, None, deliveredEnvelopeDetails)),
+          reads3a,
+        )
+        checkMessages(
+          Seq(
+            EventDetails(SequencerCounter.Genesis, p3, Some(messageId3), deliveredEnvelopeDetails)
+          ),
+          reads3b,
+        )
+      }
+    }
   }
 
   private def readForMembers(
-      members: List[Member],
+      members: Seq[Member],
       sequencer: CantonSequencer,
       // up to 60 seconds needed because Besu is very slow on CI
       timeout: FiniteDuration = 60.seconds,
-  )(implicit materializer: Materializer): Future[List[(Member, OrdinarySerializedEvent)]] = {
+      firstSequencerCounter: SequencerCounter = SequencerCounter.Genesis,
+  )(implicit materializer: Materializer): Future[Seq[(Member, OrdinarySerializedEvent)]] = {
     members
       .parTraverseFilter { member =>
         for {
-          source <- valueOrFail(sequencer.read(member, SequencerCounter(0)))(
+          source <- valueOrFail(sequencer.read(member, firstSequencerCounter))(
             s"Read for $member"
           )
           events <- source
@@ -221,9 +501,18 @@ abstract class SequencerApiTest
       }
   }
 
-  case class EnvelopeDetails(content: String, recipients: Recipients)
+  case class EnvelopeDetails(
+      content: String,
+      recipients: Recipients,
+      signatures: Seq[Signature] = Seq.empty,
+  )
 
-  case class EventDetails(counter: SequencerCounter, to: Member, envs: EnvelopeDetails*)
+  case class EventDetails(
+      counter: SequencerCounter,
+      to: Member,
+      messageId: Option[MessageId],
+      envs: EnvelopeDetails*
+  )
 
   private def registerMembers(members: Set[Member], sequencer: CantonSequencer): Future[Unit] =
     members.toList.parTraverse_ { member =>
@@ -236,25 +525,26 @@ abstract class SequencerApiTest
       messageContent: String,
       recipients: Recipients,
       maxSequencingTime: CantonTimestamp = CantonTimestamp.MaxValue,
-  ) = {
+      aggregationRule: Option[AggregationRule] = None,
+  ): SubmissionRequest = {
     val envelope1 = TestingEnvelope(messageContent, recipients)
     val batch = Batch(List(envelope1.closeEnvelope), testedProtocolVersion)
     val messageId = MessageId.tryCreate(s"thisisamessage: $messageContent")
-    val request = SubmissionRequest(
+    SubmissionRequest.tryCreate(
       sender,
       messageId,
       isRequest = false,
       batch,
       maxSequencingTime,
       timestampOfSigningKey = None,
+      aggregationRule,
       testedProtocolVersion,
     )
-    request
   }
 
   private def checkMessages(
-      expectedMessages: List[EventDetails],
-      receivedMessages: List[(Member, OrdinarySerializedEvent)],
+      expectedMessages: Seq[EventDetails],
+      receivedMessages: Seq[(Member, OrdinarySerializedEvent)],
   ): Assertion = {
 
     receivedMessages.length shouldBe expectedMessages.length
@@ -281,7 +571,8 @@ abstract class SequencerApiTest
 
           forAll(batch.envelopes.zip(expectedMessage.envs)) { case (got, wanted) =>
             got.recipients shouldBe wanted.recipients
-            got.bytes shouldBe DeterministicEncoding.encodeString(wanted.content)
+            got.bytes shouldBe ByteString.copyFromUtf8(wanted.content)
+            got.signatures shouldBe wanted.signatures
           }
 
         case _ => fail(s"Event $event is not a deliver")
@@ -289,13 +580,42 @@ abstract class SequencerApiTest
     }
   }
 
+  def checkRejection(
+      got: Seq[(Member, OrdinarySerializedEvent)],
+      sender: Member,
+      expectedMessageId: MessageId,
+  )(assertReason: PartialFunction[DeliverErrorReason, Assertion]): Assertion = {
+    got match {
+      case Seq((`sender`, event)) =>
+        event.signedEvent.content match {
+          case DeliverError(_counter, _timestamp, _domainId, messageId, reason) =>
+            messageId shouldBe expectedMessageId
+            assertReason(reason)
+
+          case _ => fail(s"Expected a deliver error, but got $event")
+        }
+      case _ => fail(s"Read wrong events for $sender: $got")
+    }
+  }
+
+  def signEnvelope(
+      crypto: DomainSyncCryptoClient,
+      envelope: ClosedEnvelope,
+  ): Future[ClosedEnvelope] = {
+    val hash = crypto.pureCrypto.digest(HashPurpose.SignedProtocolMessageSignature, envelope.bytes)
+    crypto.currentSnapshotApproximation
+      .sign(hash)
+      .valueOrFail(s"Failed to sign $envelope")
+      .map(sig => envelope.copy(signatures = Seq(sig)))
+  }
+
   case class TestingEnvelope(content: String, override val recipients: Recipients)
       extends Envelope[String] {
 
     /** Closes the envelope by serializing the contents */
     def closeEnvelope: ClosedEnvelope =
-      ClosedEnvelope(
-        DeterministicEncoding.encodeString(content),
+      ClosedEnvelope.tryCreate(
+        ByteString.copyFromUtf8(content),
         recipients,
         Seq.empty,
         testedProtocolVersion,

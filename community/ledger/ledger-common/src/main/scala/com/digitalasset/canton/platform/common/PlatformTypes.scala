@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.common
 
 import com.daml.lf.data.Ref
 import com.daml.lf.transaction.Node
-import com.daml.lf.{engine => E}
+import com.daml.lf.{engine as E}
 
 object PlatformTypes {
 

@@ -247,10 +247,13 @@ class CantonSyncService(
   private def syncDomainForAlias(alias: DomainAlias): Option[SyncDomain] =
     aliasManager.domainIdForAlias(alias).flatMap(connectedDomainsMap.get)
 
+  private val connectedDomainsLookup: ConnectedDomainsLookup =
+    ConnectedDomainsLookup.create(connectedDomainsMap)
+
   private val globalTracker =
     new GlobalCausalOrderer(
       participantId,
-      connectedDomainsMap.contains,
+      connectedDomainsLookup.isConnected,
       parameters.processingTimeouts,
       domainCausalityStore,
       loggerFactory,
@@ -259,7 +262,7 @@ class CantonSyncService(
   private val domainRouter =
     DomainRouter(
       packageService,
-      connectedDomainsMap,
+      connectedDomainsLookup,
       domainConnectionConfigStore,
       aliasManager,
       syncCrypto.pureCrypto,
@@ -273,7 +276,7 @@ class CantonSyncService(
     TransferCoordination(
       parameters.transferTimeProofFreshnessProportion,
       syncDomainPersistentStateManager,
-      connectedDomainsMap.get,
+      connectedDomainsLookup.get,
       syncCrypto,
       loggerFactory,
     )(ec, TraceContext.empty)
@@ -302,12 +305,8 @@ class CantonSyncService(
   )
 
   private val inFlightSubmissionTracker = {
-    def domainStateFor(domainId: DomainId): Option[InFlightSubmissionTrackerDomainState] = {
-      connectedDomainsMap.get(domainId).map { syncDomain =>
-        InFlightSubmissionTrackerDomainState
-          .fromSyncDomainState(syncDomain.persistent, syncDomain.ephemeral)
-      }
-    }
+    def domainStateFor(domainId: DomainId): Option[InFlightSubmissionTrackerDomainState] =
+      connectedDomainsMap.get(domainId).map(_.ephemeral.inFlightSubmissionTrackerDomainState)
 
     new InFlightSubmissionTracker(
       participantNodePersistentState.map(_.inFlightSubmissionStore),
@@ -355,7 +354,7 @@ class CantonSyncService(
     aliasManager,
     parameters,
     indexedStringStore,
-    connectedDomainsMap.contains,
+    connectedDomainsLookup.isConnected,
     loggerFactory,
   )
 
@@ -1119,12 +1118,6 @@ class CantonSyncService(
       EitherT.rightT(())
     } else {
 
-      // Lazy val to ensure we disconnect only once, even if several parts of the system trigger the switch
-      lazy val killSwitch: Unit = {
-        parameters.processingTimeouts.unbounded
-          .await_("disconnecting domain")(checked(tryDisconnectDomain(domainAlias)))
-      }
-
       logger.debug(s"Connecting to domain: ${domainAlias.unwrap}")
       val domainMetrics = metrics.domainMetrics(domainAlias)
 
@@ -1186,7 +1179,6 @@ class CantonSyncService(
           transferCoordination,
           inFlightSubmissionTracker,
           clock,
-          killSwitch,
           metrics.pruning,
           domainMetrics,
           futureSupervisor,
@@ -1353,19 +1345,11 @@ class CantonSyncService(
   )(implicit traceContext: TraceContext): Future[Boolean] = {
     for {
       acs <- stateInspection.currentAcsSnapshot(domainStore)
-      res <- acs match {
-        case Right(x) =>
-          domainStore.contractStore
-            .hasActiveContracts(
-              partyId,
-              x.keys.toVector,
-            )
-        case Left(err) =>
-          logger.error(
-            s"Error fetching current acs snapshot: $err."
-          )
-          Future.successful(false)
-      }
+      res <- domainStore.contractStore
+        .hasActiveContracts(
+          partyId,
+          acs.keys.toVector,
+        )
     } yield res
   }
 

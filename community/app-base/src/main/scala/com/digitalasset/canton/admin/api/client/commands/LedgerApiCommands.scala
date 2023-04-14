@@ -11,6 +11,21 @@ import com.daml.ledger.api.v1.active_contracts_service.{
   GetActiveContractsRequest,
   GetActiveContractsResponse,
 }
+import com.daml.ledger.api.v1.admin.identity_provider_config_service.IdentityProviderConfigServiceGrpc.IdentityProviderConfigServiceStub
+import com.daml.ledger.api.v1.admin.identity_provider_config_service.{
+  CreateIdentityProviderConfigRequest,
+  CreateIdentityProviderConfigResponse,
+  DeleteIdentityProviderConfigRequest,
+  DeleteIdentityProviderConfigResponse,
+  GetIdentityProviderConfigRequest,
+  GetIdentityProviderConfigResponse,
+  IdentityProviderConfig,
+  IdentityProviderConfigServiceGrpc,
+  ListIdentityProviderConfigsRequest,
+  ListIdentityProviderConfigsResponse,
+  UpdateIdentityProviderConfigRequest,
+  UpdateIdentityProviderConfigResponse,
+}
 import com.daml.ledger.api.v1.admin.metering_report_service.MeteringReportServiceGrpc.MeteringReportServiceStub
 import com.daml.ledger.api.v1.admin.metering_report_service.{
   GetMeteringReportRequest,
@@ -100,11 +115,14 @@ import com.digitalasset.canton.admin.api.client.data.{
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.api.DeduplicationPeriod
+import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, JwksUrl}
+import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, domain}
+import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.ForwardingStreamObserver
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.field_mask.FieldMask
@@ -303,7 +321,7 @@ object LedgerApiCommands {
     }
 
     final case class Update(
-        party: String,
+        party: PartyId,
         annotationsUpdate: Option[Map[String, String]],
         resourceVersionO: Option[String],
     ) extends BaseCommand[UpdatePartyDetailsRequest, UpdatePartyDetailsResponse, PartyDetails] {
@@ -319,7 +337,8 @@ object LedgerApiCommands {
           annotations = annotationsUpdate.getOrElse(Map.empty),
           resourceVersion = resourceVersionO.getOrElse(""),
         )
-        val partyDetails = PartyDetails(party = party, localMetadata = Some(metadata))
+        val partyDetails =
+          PartyDetails(party = party.toProtoPrimitive, localMetadata = Some(metadata))
         val updatePaths =
           annotationsUpdate.fold(Seq.empty[String])(_ => Seq("local_metadata.annotations"))
         val req = UpdatePartyDetailsRequest(
@@ -353,11 +372,11 @@ object LedgerApiCommands {
         Right(response.partyDetails)
     }
 
-    final case class GetParty(party: String)
+    final case class GetParty(party: PartyId)
         extends BaseCommand[GetPartiesRequest, GetPartiesResponse, PartyDetails] {
 
       override def createRequest(): Either[String, GetPartiesRequest] =
-        Right(GetPartiesRequest(parties = Seq(party)))
+        Right(GetPartiesRequest(parties = Seq(party.toProtoPrimitive)))
 
       override def submitRequest(
           service: PartyManagementServiceStub,
@@ -938,7 +957,7 @@ object LedgerApiCommands {
 
     final case class Update(
         id: String,
-        primaryPartyUpdate: Option[Option[LfPartyId]],
+        primaryPartyUpdate: Option[Option[PartyId]],
         isDeactivatedUpdate: Option[Boolean],
         annotationsUpdate: Option[Map[String, String]],
         resourceVersionO: Option[String],
@@ -953,7 +972,7 @@ object LedgerApiCommands {
       override def createRequest(): Either[String, UpdateUserRequest] = {
         val user = User(
           id = id,
-          primaryParty = primaryPartyUpdate.fold("")(_.getOrElse("")),
+          primaryParty = primaryPartyUpdate.fold("")(_.fold("")(_.toProtoPrimitive)),
           isDeactivated = isDeactivatedUpdate.getOrElse(false),
           metadata = Some(
             ObjectMeta(
@@ -1115,6 +1134,159 @@ object LedgerApiCommands {
 
       }
 
+    }
+
+  }
+
+  object IdentityProviderConfigs {
+    abstract class BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
+      override type Svc = IdentityProviderConfigServiceStub
+
+      override def createService(channel: ManagedChannel): IdentityProviderConfigServiceStub =
+        IdentityProviderConfigServiceGrpc.stub(channel)
+    }
+
+    final case class Create(
+        identityProviderId: IdentityProviderId.Id,
+        isDeactivated: Boolean = false,
+        jwksUrl: JwksUrl,
+        issuer: String,
+        audience: Option[String],
+    ) extends BaseCommand[
+          CreateIdentityProviderConfigRequest,
+          CreateIdentityProviderConfigResponse,
+          IdentityProviderConfig,
+        ] {
+
+      override def submitRequest(
+          service: IdentityProviderConfigServiceStub,
+          request: CreateIdentityProviderConfigRequest,
+      ): Future[CreateIdentityProviderConfigResponse] =
+        service.createIdentityProviderConfig(request)
+
+      override def createRequest(): Either[String, CreateIdentityProviderConfigRequest] =
+        Right(
+          CreateIdentityProviderConfigRequest(
+            Some(
+              IdentityProviderConfig(
+                identityProviderId = identityProviderId.value,
+                isDeactivated = isDeactivated,
+                issuer = issuer,
+                jwksUrl = jwksUrl.value,
+                audience = audience.getOrElse(""),
+              )
+            )
+          )
+        )
+
+      override def handleResponse(
+          response: CreateIdentityProviderConfigResponse
+      ): Either[String, IdentityProviderConfig] =
+        response.identityProviderConfig.toRight("config could not be created")
+    }
+
+    final case class Update(
+        identityProviderConfig: domain.IdentityProviderConfig,
+        updateMask: FieldMask,
+    ) extends BaseCommand[
+          UpdateIdentityProviderConfigRequest,
+          UpdateIdentityProviderConfigResponse,
+          IdentityProviderConfig,
+        ] {
+
+      override def submitRequest(
+          service: IdentityProviderConfigServiceStub,
+          request: UpdateIdentityProviderConfigRequest,
+      ): Future[UpdateIdentityProviderConfigResponse] =
+        service.updateIdentityProviderConfig(request)
+
+      override def createRequest(): Either[String, UpdateIdentityProviderConfigRequest] =
+        Right(
+          UpdateIdentityProviderConfigRequest(
+            identityProviderConfig =
+              Some(IdentityProviderConfigClient.toProtoConfig(identityProviderConfig)),
+            Some(updateMask),
+          )
+        )
+
+      override def handleResponse(
+          response: UpdateIdentityProviderConfigResponse
+      ): Either[String, IdentityProviderConfig] =
+        response.identityProviderConfig.toRight("config could not be updated")
+    }
+
+    final case class Delete(identityProviderId: IdentityProviderId)
+        extends BaseCommand[
+          DeleteIdentityProviderConfigRequest,
+          DeleteIdentityProviderConfigResponse,
+          Unit,
+        ] {
+
+      override def submitRequest(
+          service: IdentityProviderConfigServiceStub,
+          request: DeleteIdentityProviderConfigRequest,
+      ): Future[DeleteIdentityProviderConfigResponse] =
+        service.deleteIdentityProviderConfig(request)
+
+      override def createRequest(): Either[String, DeleteIdentityProviderConfigRequest] =
+        Right(
+          DeleteIdentityProviderConfigRequest(identityProviderId =
+            identityProviderId.toRequestString
+          )
+        )
+
+      override def handleResponse(
+          response: DeleteIdentityProviderConfigResponse
+      ): Either[String, Unit] =
+        Right(())
+    }
+
+    final case class Get(identityProviderId: IdentityProviderId)
+        extends BaseCommand[
+          GetIdentityProviderConfigRequest,
+          GetIdentityProviderConfigResponse,
+          IdentityProviderConfig,
+        ] {
+
+      override def submitRequest(
+          service: IdentityProviderConfigServiceStub,
+          request: GetIdentityProviderConfigRequest,
+      ): Future[GetIdentityProviderConfigResponse] =
+        service.getIdentityProviderConfig(request)
+
+      override def createRequest(): Either[String, GetIdentityProviderConfigRequest] =
+        Right(
+          GetIdentityProviderConfigRequest(identityProviderId.toRequestString)
+        )
+
+      override def handleResponse(
+          response: GetIdentityProviderConfigResponse
+      ): Either[String, IdentityProviderConfig] =
+        Right(response.getIdentityProviderConfig)
+    }
+
+    final case class List()
+        extends BaseCommand[
+          ListIdentityProviderConfigsRequest,
+          ListIdentityProviderConfigsResponse,
+          Seq[IdentityProviderConfig],
+        ] {
+
+      override def submitRequest(
+          service: IdentityProviderConfigServiceStub,
+          request: ListIdentityProviderConfigsRequest,
+      ): Future[ListIdentityProviderConfigsResponse] =
+        service.listIdentityProviderConfigs(request)
+
+      override def createRequest(): Either[String, ListIdentityProviderConfigsRequest] =
+        Right(
+          ListIdentityProviderConfigsRequest()
+        )
+
+      override def handleResponse(
+          response: ListIdentityProviderConfigsResponse
+      ): Either[String, Seq[IdentityProviderConfig]] =
+        Right(response.identityProviderConfigs)
     }
 
   }

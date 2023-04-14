@@ -124,10 +124,10 @@ object SerializableContract
       metadata: ContractMetadata,
       ledgerTime: CantonTimestamp,
       contractSalt: Option[Salt],
-      agreementText: AgreementText,
+      unvalidatedAgreementText: AgreementText,
   ): Either[ValueCoder.EncodeError, SerializableContract] =
     SerializableRawContractInstance
-      .create(contractInstance, agreementText)
+      .create(contractInstance, unvalidatedAgreementText)
       .map(SerializableContract(contractId, _, metadata, ledgerTime, contractSalt))
 
   def fromDisclosedContract(
@@ -171,7 +171,7 @@ object SerializableContract
         metadata = cantonContractMetadata,
         ledgerTime = ledgerTime,
         contractSalt = salt,
-        agreementText = AgreementText(create.agreementText),
+        unvalidatedAgreementText = AgreementText(create.agreementText),
       ).leftMap(err => s"Failed creating serializable contract from disclosed contract: $err")
     } yield contract
   }

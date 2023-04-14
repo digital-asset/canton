@@ -63,7 +63,7 @@ object Dependencies {
   lazy val h2 = "com.h2database" % "h2" % "2.1.210"
   lazy val postgres = "org.postgresql" % "postgresql" % "42.3.8"
   lazy val flyway = "org.flywaydb" % "flyway-core" % "9.15.2"
-  lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % "19.13.0.0.1"
+  lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % "19.18.0.0"
 
   // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
   lazy val scalapb_runtime =

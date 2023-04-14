@@ -14,7 +14,7 @@ import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.ContractState
-import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.{cId_5, _}
+import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.{cId_5, *}
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{

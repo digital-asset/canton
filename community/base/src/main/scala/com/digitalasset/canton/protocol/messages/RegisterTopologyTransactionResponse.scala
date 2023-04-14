@@ -8,6 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.State as ProtoStateV0
 import com.digitalasset.canton.protocol.v1.RegisterTopologyTransactionResponse.Result.State as ProtoStateV1
 import com.digitalasset.canton.protocol.{v0, v1, v2}
@@ -29,10 +30,10 @@ final case class RegisterTopologyTransactionResponse[
     results: Seq[Res],
     override val domainId: DomainId,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      RegisterTopologyTransactionResponse.Result
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      RegisterTopologyTransactionResponse.type
     ]
-) extends ProtocolMessage
+) extends UnsignedProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with UnsignedProtocolMessageV2 {
@@ -67,6 +68,9 @@ final case class RegisterTopologyTransactionResponse[
       results = results.map(_.toProtoV1),
       domainId = domainId.unwrap.toProtoPrimitive,
     )
+
+  @transient override protected lazy val companionObj: RegisterTopologyTransactionResponse.type =
+    RegisterTopologyTransactionResponse
 }
 
 object RegisterTopologyTransactionResponse
@@ -78,13 +82,13 @@ object RegisterTopologyTransactionResponse
   type Result = RegisterTopologyTransactionResponse[RegisterTopologyTransactionResponseResult]
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(
       v0.RegisterTopologyTransactionResponse
     )(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(
       v1.RegisterTopologyTransactionResponse
     )(
       supportedProtoVersion(_)(fromProtoV1),
@@ -196,6 +200,17 @@ object RegisterTopologyTransactionResponse
       case _ => Left(ResultVersionsMixture)
     }
   }
+
+  implicit val registerTopologyTransactionResponseCast: ProtocolMessageContentCast[
+    RegisterTopologyTransactionResponse[RegisterTopologyTransactionResponseResult]
+  ] =
+    ProtocolMessageContentCast
+      .create[RegisterTopologyTransactionResponse[RegisterTopologyTransactionResponseResult]](
+        "RegisterTopologyTransactionResponse"
+      ) {
+        case rttr: RegisterTopologyTransactionResponse[_] => Some(rttr)
+        case _ => None
+      }
 }
 
 sealed trait RegisterTopologyTransactionResponseResult {

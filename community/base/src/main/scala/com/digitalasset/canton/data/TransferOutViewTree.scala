@@ -43,7 +43,9 @@ final case class TransferOutViewTree private (
     commonData: MerkleTree[TransferOutCommonData],
     view: MerkleTree[TransferOutView],
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutViewTree],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TransferOutViewTree.type
+    ],
     hashOps: HashOps,
 ) extends GenTransferViewTree[
       TransferOutCommonData,
@@ -70,6 +72,9 @@ final case class TransferOutViewTree private (
     param("common data", _.commonData),
     param("view", _.view),
   )
+
+  @transient override protected lazy val companionObj: TransferOutViewTree.type =
+    TransferOutViewTree
 }
 
 object TransferOutViewTree
@@ -78,11 +83,11 @@ object TransferOutViewTree
   override val name: String = "TransferOutViewTree"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.TransferViewTree)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransferViewTree)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.TransferViewTree)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferViewTree)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
       _.toProtoV1.toByteString,
     ),
@@ -150,9 +155,11 @@ final case class TransferOutCommonData private (
     with HasProtocolVersionedWrapper[TransferOutCommonData]
     with ProtocolVersionedMemoizedEvidence {
 
-  override def companionObj = TransferOutCommonData
+  @transient override protected lazy val companionObj: TransferOutCommonData.type =
+    TransferOutCommonData
 
-  val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutCommonData] =
+  override val representativeProtocolVersion
+      : RepresentativeProtocolVersion[TransferOutCommonData.type] =
     TransferOutCommonData.protocolVersionRepresentativeFor(protocolVersion.v)
 
   protected def toProtoV0: v0.TransferOutCommonData =
@@ -201,11 +208,11 @@ object TransferOutCommonData
   override val name: String = "TransferOutCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.TransferOutCommonData)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransferOutCommonData)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.TransferOutCommonData)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferOutCommonData)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -313,7 +320,7 @@ final case class TransferOutView private (
     workflowId: Option[LfWorkflowId],
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutView],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutView.type],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferOutView](hashOps)
     with HasProtocolVersionedWrapper[TransferOutView]
@@ -327,7 +334,7 @@ final case class TransferOutView private (
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferOutView
 
-  override def companionObj = TransferOutView
+  @transient override protected lazy val companionObj: TransferOutView.type = TransferOutView
 
   protected def toProtoV0: v0.TransferOutView =
     v0.TransferOutView(
@@ -425,15 +432,15 @@ object TransferOutView
   }
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.TransferOutView)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.TransferOutView)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v1.TransferOutView)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v4)(v1.TransferOutView)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter.mk(ProtocolVersion.v5)(v2.TransferOutView)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.TransferOutView)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),

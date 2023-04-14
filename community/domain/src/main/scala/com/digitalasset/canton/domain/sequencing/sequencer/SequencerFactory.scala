@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
+import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -12,61 +13,77 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{DomainId, Member}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 trait SequencerFactory {
+
+  def initialize(
+      initialState: SequencerInitialState
+  )(implicit ex: ExecutionContext, traceContext: TraceContext): EitherT[Future, String, Unit]
+
   def create(
       domainId: DomainId,
-      storage: Storage,
       clock: Clock,
-      topologyClientMember: Member,
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
-      initialState: Option[SequencerInitialState],
-      localNodeParameters: CantonNodeParameters,
-      protocolVersion: ProtocolVersion,
-  )(implicit ec: ExecutionContext, tracer: Tracer, actorMaterializer: Materializer): Sequencer
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      tracer: Tracer,
+      actorMaterializer: Materializer,
+  ): Sequencer
 }
 
-object SequencerFactory {
-  def database(
-      config: DatabaseSequencerConfig,
-      metrics: SequencerMetrics,
-      loggerFactory: NamedLoggerFactory,
-  ): SequencerFactory =
-    new SequencerFactory {
-      override def create(
-          domainId: DomainId,
-          storage: Storage,
-          clock: Clock,
-          topologyClientMember: Member,
-          domainSyncCryptoApi: DomainSyncCryptoClient,
-          futureSupervisor: FutureSupervisor,
-          initialState: Option[SequencerInitialState],
-          localNodeParameters: CantonNodeParameters,
-          sequencerProtocolVersion: ProtocolVersion,
-      )(implicit
-          ec: ExecutionContext,
-          tracer: Tracer,
-          actorMaterializer: Materializer,
-      ): Sequencer = {
-        val sequencer = DatabaseSequencer.single(
-          config,
-          localNodeParameters.processingTimeouts,
-          storage,
-          clock,
-          domainId,
-          topologyClientMember,
-          sequencerProtocolVersion,
-          domainSyncCryptoApi,
-          metrics,
-          loggerFactory,
-        )
+abstract class DatabaseSequencerFactory extends SequencerFactory {
 
-        config.testingInterceptor.map(_(clock)(sequencer)(ec)).getOrElse(sequencer)
-      }
-    }
+  override def initialize(
+      initialState: SequencerInitialState
+  )(implicit ex: ExecutionContext, traceContext: TraceContext): EitherT[Future, String, Unit] =
+    EitherT.leftT(
+      "Database sequencer does not support dynamically bootstrapping from a snapshot. " +
+        "Database sequencers from the same domain should share the same database with no need for extra initialization steps once one of the sequencer has been initialized."
+    )
+
+}
+
+class CommunityDatabaseSequencerFactory(
+    config: DatabaseSequencerConfig,
+    metrics: SequencerMetrics,
+    storage: Storage,
+    sequencerProtocolVersion: ProtocolVersion,
+    topologyClientMember: Member,
+    nodeParameters: CantonNodeParameters,
+    val loggerFactory: NamedLoggerFactory,
+) extends DatabaseSequencerFactory {
+
+  override def create(
+      domainId: DomainId,
+      clock: Clock,
+      domainSyncCryptoApi: DomainSyncCryptoClient,
+      futureSupervisor: FutureSupervisor,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      tracer: Tracer,
+      actorMaterializer: Materializer,
+  ): Sequencer = {
+    val sequencer = DatabaseSequencer.single(
+      config,
+      nodeParameters.processingTimeouts,
+      storage,
+      clock,
+      domainId,
+      topologyClientMember,
+      sequencerProtocolVersion,
+      domainSyncCryptoApi,
+      metrics,
+      loggerFactory,
+    )
+    config.testingInterceptor.map(_(clock)(sequencer)(ec)).getOrElse(sequencer)
+  }
+
 }

@@ -13,7 +13,7 @@ import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.indexer.ha.Handle
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*
@@ -156,17 +156,22 @@ object ParallelIndexerSubscription {
 
     val batch = mainBatch ++ meteringBatch
 
+    // TODO(i11665): Replace with NonEmpty after sorting out the dependencies
+    @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
+    val last = input.last
+
     Batch(
-      lastOffset = input.last._1,
+      lastOffset = last._1,
       lastSeqEventId = 0, // will be filled later in the sequential step
       lastStringInterningId = 0, // will be filled later in the sequential step
-      lastRecordTime = input.last._2.recordTime.toInstant.toEpochMilli,
+      lastRecordTime = last._2.recordTime.toInstant.toEpochMilli,
       batch = batch,
       batchSize = input.size,
       offsetsUpdates = input.toVector,
     )
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   def seqMapperZero(
       initialSeqId: Long,
       initialStringInterningId: Int,
@@ -191,7 +196,9 @@ object ParallelIndexerSubscription {
   ): Batch[Vector[DbDto]] = {
     Timed.value(
       metrics.daml.parallelIndexer.seqMapping.duration, {
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
         var eventSeqId = previous.lastSeqEventId
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
         var lastTransactionMetaEventSeqId = eventSeqId
         val batchWithSeqIds = current.batch.map {
           case dbDto: DbDto.EventCreate =>
@@ -229,11 +236,12 @@ object ParallelIndexerSubscription {
 
         val (newLastStringInterningId, dbDtosWithStringInterning) =
           internize(batchWithSeqIds)
-            .map(DbDto.StringInterningDto.from) match {
-            case noNewEntries if noNewEntries.isEmpty =>
-              previous.lastStringInterningId -> batchWithSeqIds
-            case newEntries => newEntries.last.internalId -> (batchWithSeqIds ++ newEntries)
-          }
+            .map(DbDto.StringInterningDto.from)
+            .pipe(newEntries =>
+              newEntries.lastOption.fold(previous.lastStringInterningId -> batchWithSeqIds)(last =>
+                last.internalId -> (batchWithSeqIds ++ newEntries)
+              )
+            )
 
         current.copy(
           lastSeqEventId = eventSeqId,

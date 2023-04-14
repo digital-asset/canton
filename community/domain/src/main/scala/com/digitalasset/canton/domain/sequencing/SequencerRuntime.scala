@@ -104,14 +104,12 @@ class SequencerRuntime(
     val domainId: DomainId,
     crypto: Crypto,
     val sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
-    topologyClientMember: Member,
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessor,
     sharedTopologyProcessor: Boolean, // means we are running in embedded mode
     storage: Storage,
     clock: Clock,
     auditLogger: TracedLogger,
-    initialState: Option[SequencerInitialState],
     authenticationConfig: SequencerAuthenticationConfig,
     additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
     registerSequencerMember: Boolean,
@@ -119,8 +117,11 @@ class SequencerRuntime(
     futureSupervisor: FutureSupervisor,
     agreementManager: Option[ServiceAgreementManager],
     protected val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext, tracer: Tracer, actorSystem: ActorSystem)
-    extends FlagCloseable
+)(implicit
+    executionContext: ExecutionContext,
+    tracer: Tracer,
+    actorSystem: ActorSystem,
+) extends FlagCloseable
     with HasCloseContext
     with NamedLogging {
 
@@ -139,18 +140,16 @@ class SequencerRuntime(
       loggerFactory,
     )
 
-  private[domain] val sequencer: Sequencer = sequencerFactory
-    .create(
-      domainId,
-      storage,
-      clock,
-      topologyClientMember,
-      syncCrypto,
-      futureSupervisor,
-      initialState,
-      localNodeParameters,
-      staticDomainParameters.protocolVersion,
-    )
+  private[domain] val sequencer: Sequencer = {
+    import TraceContext.Implicits.Empty.*
+    sequencerFactory
+      .create(
+        domainId,
+        clock,
+        syncCrypto,
+        futureSupervisor,
+      )
+  }
 
   private val keyCheckF =
     syncCrypto

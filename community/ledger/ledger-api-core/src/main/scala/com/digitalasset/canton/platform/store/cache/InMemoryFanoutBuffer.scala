@@ -25,6 +25,7 @@ import scala.collection.View
   * @param metrics The Daml metrics.
   * @param maxBufferedChunkSize The maximum size of buffered chunks returned by `slice`.
   */
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
 class InMemoryFanoutBuffer(
     maxBufferSize: Int,
     metrics: Metrics,
@@ -220,6 +221,7 @@ private[platform] object InMemoryFanoutBuffer {
       .take(maxChunkSize)
       .toVector
 
+  @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   private[cache] def lastFilteredChunk[FILTER_RESULT](
       bufferSlice: Vector[(Offset, TransactionLogUpdate)],
       filter: TransactionLogUpdate => Option[FILTER_RESULT],

@@ -7,23 +7,8 @@ import com.digitalasset.canton.admin.api.client.commands.{
   TopologyAdminCommands,
   TopologyAdminCommandsX,
 }
-import com.digitalasset.canton.admin.api.client.data.topologyx.{
-  ListAuthorityOfResult,
-  ListDomainParametersStateResult,
-  ListDomainTrustCertificateResult,
-  ListIdentifierDelegationResult,
-  ListMediatorDomainStateResult,
-  ListNamespaceDelegationResult,
-  ListOwnerToKeyMappingResult,
-  ListParticipantDomainPermissionResult,
-  ListPartyHostingLimitsResult,
-  ListPartyToParticipantResult,
-  ListPurgeTopologyTransactionXResult,
-  ListSequencerDomainStateResult,
-  ListUnionspaceDefinitionResult,
-  ListVettedPackagesResult,
-}
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.admin.api.client.data.topologyx.*
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   FeatureFlag,
@@ -35,13 +20,14 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.BaseQueryX
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactionsX, TimeQueryX}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
-import com.digitalasset.canton.topology.transaction.{TopologyChangeOpX, TopologyMappingX}
-import com.digitalasset.canton.topology.{Identifier, KeyOwner, KeyOwnerCode, UniqueIdentifier, *}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -171,62 +157,57 @@ class TopologyAdministrationGroupX(
 
   object domain_bootstrap {
 
-    // TODO(#11255) remove once all admin commands are available. for now doing everything inside the write service
-    def generate_genesis_topology_remote(name: String, owners: Seq[String]) = {
-      consoleEnvironment.run {
-        adminCommand(
-          TopologyAdminCommandsX.Write.GenerateGenesisTopologyState(name, owners)
-        )
-      }
-    }
-
     // TODO(#11255) break individual bits out into separate admin functions, and have this only be the default wrapper
     def generate_genesis_topology(name: String, owners: Seq[Member]) = {
-      // provide the root namespace delegation and owner to key mapping
-      val namespace = instance.topology.namespace_delegations
-        .list(
-          filterNamespace = instance.id.uid.namespace.fingerprint.unwrap,
-          filterTargetKey = Some(instance.id.uid.namespace.fingerprint),
-        )
-        .map(_.item.toProtoV2.toByteString)
 
-      val ownerToKey = instance.topology.owner_to_key_mappings
-        .list("Authorized", filterKeyOwnerUid = instance.id.uid.toString)
-        .map(_.item.toProtoV2.toByteString)
+      val thisNodeRootKey = Some(instance.id.uid.namespace.fingerprint)
+
+      // provide the root namespace delegation and owner to key mapping
+      val namespace = instance.topology.transactions
+        .list(filterAuthorizedKey = thisNodeRootKey)
+        .result
+        .map(_.transaction)
+        .filter(_.transaction.mapping.code == NamespaceDelegationX.code)
 
       // create and sign the unionspace for the domain
       val unionspaceTransaction = instance.topology.unionspaces.propose(
         serial = PositiveInt.one,
         owners.map(_.uid.namespace.fingerprint).toSet,
         threshold = PositiveInt.tryCreate(owners.size - 1),
+        signedBy = thisNodeRootKey,
       )
 
-      // TODO(#11255) get the unionspace name from the previously created transaction
       val domainId = DomainId(
-        UniqueIdentifier(Identifier.tryCreate(name), Namespace(Fingerprint.tryCreate("unionspace")))
+        UniqueIdentifier(
+          Identifier.tryCreate(name),
+          unionspaceTransaction.transaction.mapping.unionspace,
+        )
       )
 
       // create and sign the initial domain parameters
       val domainParameterState = instance.topology.domain_parameters.propose(
         serial = PositiveInt.one,
         domainId,
+        signedBy = thisNodeRootKey,
       )
 
       val mediatorState = instance.topology.mediators.propose(
         serial = PositiveInt.one,
         domainId,
-        threshold = PositiveInt.tryCreate(1),
-        active = owners.collect { case MediatorId(uid) => uid },
+        threshold = PositiveInt.one,
+        active = owners.collect { case id @ MediatorId(_) => id },
+        signedBy = thisNodeRootKey,
       )
 
       val sequencerState = instance.topology.sequencers.propose(
         serial = PositiveInt.one,
         domainId,
-        threshold = PositiveInt.tryCreate(1),
-        active = owners.collect { case SequencerId(uid) => uid },
+        threshold = PositiveInt.one,
+        active = owners.collect { case id @ SequencerId(_) => id },
+        signedBy = thisNodeRootKey,
       )
 
-      namespace ++ ownerToKey ++ Seq(
+      namespace ++ Seq(
         unionspaceTransaction,
         domainParameterState,
         sequencerState,
@@ -266,15 +247,28 @@ class TopologyAdministrationGroupX(
         serial: PositiveInt,
         members: Set[Fingerprint],
         threshold: PositiveInt,
-    ): ByteString = {
-      ByteString.EMPTY
-    }
+        signedBy: Option[Fingerprint] = None,
+    ): SignedTopologyTransactionX[TopologyChangeOpX, UnionspaceDefinitionX] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommandsX.Write.Propose(
+            serial,
+            UnionspaceDefinitionX
+              .create(
+                UnionspaceDefinitionX.computeNamespace(members.map(Namespace(_))),
+                threshold,
+                members.map(Namespace(_)).toSeq,
+              ),
+            signedBy = signedBy.toList,
+          )
+        )
+      }
 
     def join(
         unionspace: Fingerprint,
         owner: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
-    ): ByteString = {
-      ByteString.EMPTY
+    ): GenericSignedTopologyTransactionX = {
+      ???
     }
 
     def leave(
@@ -600,17 +594,25 @@ class TopologyAdministrationGroupX(
       )
     }
 
-    // TODO(#11255): implement write service
     def propose(
         serial: PositiveInt,
         domainId: DomainId,
         threshold: PositiveInt,
-        active: Seq[UniqueIdentifier],
-        passive: Seq[UniqueIdentifier] = Seq.empty,
-        signedby: Option[Fingerprint] = None,
-    ): ByteString = {
-      ByteString.EMPTY
-    }
+        active: Seq[MediatorId],
+        passive: Seq[MediatorId] = Seq.empty,
+        group: NonNegativeInt = NonNegativeInt.zero,
+        signedBy: Option[Fingerprint] = None,
+    ): SignedTopologyTransactionX[TopologyChangeOpX, MediatorDomainStateX] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommandsX.Write.Propose(
+            serial,
+            MediatorDomainStateX
+              .create(domainId, group, threshold, active, passive),
+            signedBy.toList,
+          )
+        )
+      }
   }
 
   @Help.Summary("Inspect sequencer domain state")
@@ -640,17 +642,24 @@ class TopologyAdministrationGroupX(
       )
     }
 
-    // TODO(#11255): implement write service
     def propose(
         serial: PositiveInt,
         domainId: DomainId,
         threshold: PositiveInt,
-        active: Seq[UniqueIdentifier],
-        passive: Seq[UniqueIdentifier] = Seq.empty,
-        signedby: Option[Fingerprint] = None,
-    ): ByteString = {
-      ByteString.EMPTY
-    }
+        active: Seq[SequencerId],
+        passive: Seq[SequencerId] = Seq.empty,
+        signedBy: Option[Fingerprint] = None,
+    ): SignedTopologyTransactionX[TopologyChangeOpX, SequencerDomainStateX] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommandsX.Write.Propose(
+            serial,
+            SequencerDomainStateX
+              .create(domainId, threshold, active, passive),
+            signedBy.toList,
+          )
+        )
+      }
   }
 
   @Help.Summary("Manage domain parameters state", FeatureFlag.Preview)
@@ -680,14 +689,23 @@ class TopologyAdministrationGroupX(
       )
     }
 
-    // TODO(#11255): implement write service
     def propose(
         serial: PositiveInt,
         domain: DomainId,
         signedBy: Option[Fingerprint] = None,
-    ): ByteString = {
-      ByteString.EMPTY
-    }
+    ): SignedTopologyTransactionX[TopologyChangeOpX, DomainParametersStateX] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommandsX.Write.Propose(
+            serial,
+            // TODO(#11255) maybe don't just take default values for dynamic parameters
+            DomainParametersStateX(domain)(
+              DynamicDomainParameters.defaultValues(ProtocolVersion.dev)
+            ),
+            signedBy.toList,
+          )
+        )
+      }
   }
 
   @Help.Summary("Inspect topology stores")

@@ -16,10 +16,12 @@ trait MutableLedgerEndCache extends LedgerEndCache {
 object MutableLedgerEndCache {
   def apply(): MutableLedgerEndCache =
     new MutableLedgerEndCache {
+      @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
       @volatile private var ledgerEnd: (Offset, Long) = _
 
       override def set(ledgerEnd: (Offset, Long)): Unit = this.ledgerEnd = ledgerEnd
 
+      @SuppressWarnings(Array("org.wartremover.warts.Null"))
       override def apply(): (Offset, Long) =
         if (ledgerEnd == null) throw new IllegalStateException("uninitialized")
         else ledgerEnd

@@ -5,7 +5,6 @@ package com.digitalasset.canton.protocol
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.{Deliver, EventWithErrors, SignedContent}
@@ -32,7 +31,7 @@ trait Phase37Processor[RequestBatch] {
       batch: RequestBatch,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
+  ): HandlerResult
 
   def processMalformedMediatorRequestResult(
       timestamp: CantonTimestamp,

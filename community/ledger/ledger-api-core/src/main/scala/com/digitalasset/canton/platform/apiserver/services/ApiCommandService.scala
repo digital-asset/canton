@@ -56,6 +56,7 @@ import io.grpc.Context
 
 import java.time.{Duration, Instant}
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Try
@@ -71,11 +72,11 @@ private[apiserver] final class ApiCommandService private[services] (
 
   private val logger = ContextualizedLogger.get(this.getClass)
 
-  @volatile private var running = true
+  private val running = new AtomicBoolean(true)
 
   override def close(): Unit = {
     logger.info("Shutting down Command Service")
-    running = false
+    running.set(false)
     submissionTracker.close()
   }
 
@@ -161,7 +162,7 @@ private[apiserver] final class ApiCommandService private[services] (
       loggingContext: LoggingContext,
       errorLogger: ContextualizedErrorLogger,
   ): Future[Either[TrackedCompletionFailure, CompletionSuccess]] =
-    if (running) {
+    if (running.get) {
       val timeout = Option(Context.current().getDeadline)
         .map(deadline => Duration.ofNanos(deadline.timeRemaining(TimeUnit.NANOSECONDS)))
       submissionTracker.track(CommandSubmission(request.getCommands, timeout))

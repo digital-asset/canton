@@ -5,24 +5,24 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
 import com.daml.ledger.api.v1.commands.{
-  Commands => ProtoCommands,
-  DisclosedContract => ProtoDisclosedContract,
+  Commands as ProtoCommands,
+  DisclosedContract as ProtoDisclosedContract,
 }
-import com.daml.ledger.api.v1.contract_metadata.{ContractMetadata => ProtoContractMetadata}
+import com.daml.ledger.api.v1.contract_metadata.{ContractMetadata as ProtoContractMetadata}
 import com.daml.ledger.api.v1.value.{
-  Identifier => ProtoIdentifier,
-  Record => ProtoRecord,
-  RecordField => ProtoRecordField,
-  Value => ProtoValue,
+  Identifier as ProtoIdentifier,
+  Record as ProtoRecord,
+  RecordField as ProtoRecordField,
+  Value as ProtoValue,
 }
 import com.daml.lf.command.{
-  ContractMetadata => LfContractMetadata,
-  DisclosedContract => LfDisclosedContract,
+  ContractMetadata as LfContractMetadata,
+  DisclosedContract as LfDisclosedContract,
 }
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.daml.lf.value.Value.ValueRecord
-import com.daml.lf.value.{Value => Lf}
+import com.daml.lf.value.{Value as Lf}
 import com.digitalasset.canton.ledger.api.validation.ValidateDisclosedContractsTest.{
   api,
   disabledValidateDisclosedContracts,
@@ -30,12 +30,12 @@ import com.digitalasset.canton.ledger.api.validation.ValidateDisclosedContractsT
   validateDisclosedContracts,
 }
 import com.google.protobuf.ByteString
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 import io.grpc.Status
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import ProtoDisclosedContract.{Arguments => ProtoArguments}
+import ProtoDisclosedContract.{Arguments as ProtoArguments}
 
 class ValidateDisclosedContractsTest extends AnyFlatSpec with Matchers with ValidatorTestUtils {
   private implicit val contextualizedErrorLogger: ContextualizedErrorLogger = NoLogging
@@ -135,9 +135,9 @@ class ValidateDisclosedContractsTest extends AnyFlatSpec with Matchers with Vali
   }
 
   it should "fail validation on invalid create arguments record field" in {
-    def invalidArguments(arguments: ProtoArguments): ProtoArguments =
+    def invalidArguments: ProtoArguments =
       ProtoArguments.CreateArguments(
-        arguments.createArguments.get.update(
+        api.contractArgumentsRecord.update(
           _.fields.set(scala.Seq(ProtoRecordField("something", None)))
         )
       )
@@ -145,7 +145,7 @@ class ValidateDisclosedContractsTest extends AnyFlatSpec with Matchers with Vali
       ProtoCommands(disclosedContracts =
         scala.Seq(
           api.protoDisclosedContract.update(
-            _.arguments.modify(invalidArguments)
+            _.arguments.set(invalidArguments)
           )
         )
       )

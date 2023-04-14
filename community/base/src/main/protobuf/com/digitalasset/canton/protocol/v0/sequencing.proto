@@ -71,7 +71,7 @@ message SignedContent {
     option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
     google.protobuf.BytesValue content = 1;
-    repeated com.digitalasset.canton.crypto.v0.Signature signatures = 2;
+    com.digitalasset.canton.crypto.v0.Signature signatures = 2;
     google.protobuf.Timestamp timestamp_of_signing_key = 3;
 }
 
@@ -151,4 +151,11 @@ message SubmissionRequest {
   com.digitalasset.canton.protocol.v0.CompressedBatch batch = 4;
   google.protobuf.Timestamp max_sequencing_time = 5;
   google.protobuf.Timestamp timestamp_of_signing_key = 6;
+}
+
+message AggregationRule {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
+  repeated string eligible_members = 1;
+  int32 threshold = 2;
 }

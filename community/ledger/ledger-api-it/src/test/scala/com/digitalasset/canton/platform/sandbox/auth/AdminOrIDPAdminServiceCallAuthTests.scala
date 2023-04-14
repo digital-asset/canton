@@ -8,7 +8,7 @@ import com.daml.ledger.api.v1.admin.identity_provider_config_service.{
   IdentityProviderConfig,
   UpdateIdentityProviderConfigRequest,
 }
-import com.daml.ledger.api.v1.admin.{user_management_service => proto}
+import com.daml.ledger.api.v1.admin.{user_management_service as proto}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.canton.ledger.api.auth.StandardJWTTokenFormat
 import com.digitalasset.canton.platform.sandbox.TestJwtVerifierLoader

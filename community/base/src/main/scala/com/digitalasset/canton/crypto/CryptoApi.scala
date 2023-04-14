@@ -159,7 +159,7 @@ trait SyncCryptoApi {
       signer: KeyOwner,
       signatures: NonEmpty[Seq[Signature]],
   ): EitherT[Future, SignatureCheckError, Unit] =
-    // TODO(#11862) Properly check all signatures.
+    // TODO(#11255) Properly check all signatures.
     verifySignature(hash, signer, signatures.head1)
 
   /** Encrypts a message for the given key owner

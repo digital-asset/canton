@@ -467,11 +467,13 @@ abstract class TransactionTreeFactoryImpl(
     val createdInSubviews = createdInSubviewsSeq.toSet
     val createdInSameViewOrSubviews = createdInSubviewsSeq ++ created.map(_.contract.contractId)
 
-    val usedCore = SortedSet(
-      coreOtherNodes
-        .mapFilter { case (node, _) => LfTransactionUtil.usedContractIdWithMetadata(node) }
-        .map(contractIdWithMetadata => contractIdWithMetadata.unwrap): _*
-    )
+    val usedCoreWithMetadata = coreOtherNodes
+      .mapFilter { case (node, _) =>
+        LfTransactionUtil.usedContractIdWithMetadata(node)
+      }
+      .map(idWithMetadata => idWithMetadata.unwrap -> idWithMetadata.metadata)
+      .toMap
+    val usedCore = SortedSet(usedCoreWithMetadata.keys.toSeq *)
     val coreInputs = usedCore -- createdInSameViewOrSubviews
     val createdInSubviewArchivedInCore = consumedInCore intersect createdInSubviews
 
@@ -483,9 +485,17 @@ abstract class TransactionTreeFactoryImpl(
         case Some(info) =>
           EitherT.pure(InputContract(info, cons))
         case None =>
-          contractOfId(contractId).map(serializableContract =>
+          val metadata = usedCoreWithMetadata(contractId)
+          contractOfId(contractId).map { case (contractInstance, ledgerTime, contractSalt) =>
+            val serializableContract = SerializableContract(
+              contractId,
+              contractInstance,
+              metadata,
+              ledgerTime,
+              contractSalt,
+            )
             InputContract(serializableContract, cons)
-          )
+          }
       }
     }
 

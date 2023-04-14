@@ -120,7 +120,7 @@ class ErrorCodeDocumentationGeneratorSpec extends AnyFlatSpec with Matchers {
   @deprecated("message 123", "since 123") object Foo4
 
   it should "parse annotations" in {
-    import scala.reflect.runtime.{universe => ru}
+    import scala.reflect.runtime.{universe as ru}
 
     def getFirstAnnotation[T: ClassTag](obj: T): ru.Annotation = {
       ru.runtimeMirror(getClass.getClassLoader).reflect(obj).symbol.annotations.head

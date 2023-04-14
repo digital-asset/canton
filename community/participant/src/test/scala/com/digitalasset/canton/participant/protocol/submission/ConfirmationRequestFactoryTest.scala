@@ -26,14 +26,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.{
-  ConfirmationRequest,
-  EncryptedView,
-  EncryptedViewMessage,
-  EncryptedViewMessageV0,
-  EncryptedViewMessageV1,
-  InformeeMessage,
-}
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -172,12 +165,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
     )
   }
 
-  private val contractInstanceOfId = { id: LfContractId =>
-    EitherT(
-      Future.successful[Either[ContractLookupError, SerializableContract]](
-        Left(ContractLookupError(id, "Error in test: argument should not be used"))
-      )
-    )
+  private val contractInstanceOfId: SerializableContractOfId = { id: LfContractId =>
+    EitherT.leftT(ContractLookupError(id, "Error in test: argument should not be used"))
   }
   // This isn't used because the transaction tree factory is mocked
 

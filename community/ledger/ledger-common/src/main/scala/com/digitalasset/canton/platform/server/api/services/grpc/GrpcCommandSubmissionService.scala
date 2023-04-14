@@ -5,11 +5,11 @@ package com.digitalasset.canton.platform.server.api.services.grpc
 
 import com.daml.error.DamlContextualizedErrorLogger
 import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc.{
-  CommandSubmissionService => ApiCommandSubmissionService
+  CommandSubmissionService as ApiCommandSubmissionService
 }
 import com.daml.ledger.api.v1.command_submission_service.{
   CommandSubmissionServiceGrpc,
-  SubmitRequest => ApiSubmitRequest,
+  SubmitRequest as ApiSubmitRequest,
 }
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}

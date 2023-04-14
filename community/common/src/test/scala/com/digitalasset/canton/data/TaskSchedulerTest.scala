@@ -381,7 +381,7 @@ object TaskSchedulerTest {
   val Timeout: Int = 1
   val Activeness: Int = 2
 
-  private case class TestTask(
+  private final case class TestTask(
       queue: mutable.Queue[Int],
       seqNo: Int,
       override val timestamp: CantonTimestamp,

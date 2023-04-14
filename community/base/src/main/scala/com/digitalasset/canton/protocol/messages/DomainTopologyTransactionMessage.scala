@@ -27,10 +27,10 @@ final case class DomainTopologyTransactionMessage private (
     transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     override val domainId: DomainId,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      DomainTopologyTransactionMessage
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      DomainTopologyTransactionMessage.type
     ]
-) extends ProtocolMessage
+) extends UnsignedProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with UnsignedProtocolMessageV2 {
@@ -57,19 +57,25 @@ final case class DomainTopologyTransactionMessage private (
 
   override def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent =
     v2.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV0)
+
+  @transient override protected lazy val companionObj: DomainTopologyTransactionMessage.type =
+    DomainTopologyTransactionMessage
 }
 
 object DomainTopologyTransactionMessage
     extends HasProtocolVersionedCompanion[DomainTopologyTransactionMessage] {
 
   implicit val domainIdentityTransactionMessageCast
-      : ProtocolMessageContentCast[DomainTopologyTransactionMessage] = {
-    case ditm: DomainTopologyTransactionMessage => Some(ditm)
-    case _ => None
-  }
+      : ProtocolMessageContentCast[DomainTopologyTransactionMessage] =
+    ProtocolMessageContentCast.create[DomainTopologyTransactionMessage](
+      "DomainTopologyTransactionMessage"
+    ) {
+      case ditm: DomainTopologyTransactionMessage => Some(ditm)
+      case _ => None
+    }
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(
       v0.DomainTopologyTransactionMessage
     )(
       supportedProtoVersion(_)(fromProtoV0),

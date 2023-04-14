@@ -11,7 +11,7 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   UpdateUserRequest,
   UpdateUserResponse,
 }
-import com.daml.ledger.api.v1.admin.{user_management_service => proto}
+import com.daml.ledger.api.v1.admin.{user_management_service as proto}
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
@@ -27,7 +27,6 @@ import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.UserUpdateMapper
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import com.digitalasset.canton.platform.server.api.validation.FieldValidations
-import com.google.protobuf.InvalidProtocolBufferException
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import scalaz.std.either.*
 import scalaz.std.list.*
@@ -594,19 +593,12 @@ object ApiUserManagementService {
     } else {
       val bytes = pageToken.getBytes(StandardCharsets.UTF_8)
       for {
-        decodedBytes <- Try[Array[Byte]](Base64.getUrlDecoder.decode(bytes))
-          .map(Right(_))
-          .recover { case _: IllegalArgumentException =>
-            Left(invalidPageToken)
-          }
-          .get
+        decodedBytes <- Try[Array[Byte]](Base64.getUrlDecoder.decode(bytes)).toEither.left
+          .map(_ => invalidPageToken)
         tokenPayload <- Try[ListUsersPageTokenPayload] {
           ListUsersPageTokenPayload.parseFrom(decodedBytes)
-        }.map(Right(_))
-          .recover { case _: InvalidProtocolBufferException =>
-            Left(invalidPageToken)
-          }
-          .get
+        }.toEither.left
+          .map(_ => invalidPageToken)
         userId <- Ref.UserId
           .fromString(tokenPayload.userIdLowerBoundExcl)
           .map(Some(_))

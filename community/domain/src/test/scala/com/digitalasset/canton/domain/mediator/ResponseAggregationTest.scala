@@ -4,11 +4,14 @@
 package com.digitalasset.canton.domain.mediator
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
+import com.digitalasset.canton.domain.mediator.ResponseAggregation.{
+  ConsortiumVotingState,
+  ViewState,
+}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.ParticipantReject
@@ -44,6 +47,9 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val charlie = PlainInformee(LfPartyId.assertFromString("charlie"))
     val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1)
     val solo = ParticipantId("solo")
+    val uno = ParticipantId("uno")
+    val duo = ParticipantId("duo")
+    val tre = ParticipantId("tre")
 
     val emptySubviews = TransactionSubviews.empty(testedProtocolVersion, hashOps)
 
@@ -92,10 +98,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         verdict: LocalVerdict,
         confirmingParties: Set[LfPartyId],
         rootHashO: Option[RootHash],
+        sender: ParticipantId = solo,
     ): MediatorResponse =
       MediatorResponse.tryCreate(
         requestId,
-        solo,
+        sender,
         Some(viewHash),
         verdict,
         rootHashO,
@@ -123,16 +130,36 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       val someOtherRootHash = Some(RootHash(TestHash.digest(12345)))
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
-      val sut =
-        ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
-          loggerFactory
+      when(topologySnapshot.consortiumThresholds(any[Set[LfPartyId]]))
+        .thenAnswer((parties: Set[LfPartyId]) =>
+          Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
         )
+
+      val sut =
+        ResponseAggregation
+          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshot)(
+            loggerFactory
+          )
+          .futureValue
 
       it("should have initially all pending confirming parties listed") {
         sut.state shouldBe Right(
           Map(
-            view1.viewHash -> ViewState(Set(alice, bob), 3, Nil),
-            view2.viewHash -> ViewState(Set(bob), 2, Nil),
+            view1.viewHash -> ViewState(
+              Set(alice, bob),
+              Map(
+                alice.party -> ConsortiumVotingState(),
+                bob.party -> ConsortiumVotingState(),
+              ),
+              3,
+              Nil,
+            ),
+            view2.viewHash -> ViewState(
+              Set(bob),
+              Map(bob.party -> ConsortiumVotingState()),
+              2,
+              Nil,
+            ),
           )
         )
       }
@@ -206,8 +233,21 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             rejected1.state shouldBe
               Right(
                 Map(
-                  view1.viewHash -> ViewState(Set(alice), 3, List(Set(bob.party) -> testReject())),
-                  view2.viewHash -> ViewState(Set(bob), 2, Nil),
+                  view1.viewHash -> ViewState(
+                    Set(alice),
+                    Map(
+                      alice.party -> ConsortiumVotingState(),
+                      bob.party -> ConsortiumVotingState(rejections = Set(solo)),
+                    ),
+                    3,
+                    List(Set(bob.party) -> testReject()),
+                  ),
+                  view2.viewHash -> ViewState(
+                    Set(bob),
+                    Map(bob.party -> ConsortiumVotingState()),
+                    2,
+                    Nil,
+                  ),
                 )
               )
           }
@@ -281,8 +321,21 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           result.state shouldBe
             Right(
               Map(
-                view1.viewHash -> ViewState(Set(alice), 1, Nil),
-                view2.viewHash -> ViewState(Set(bob), 2, Nil),
+                view1.viewHash -> ViewState(
+                  Set(alice),
+                  Map(
+                    alice.party -> ConsortiumVotingState(),
+                    bob.party -> ConsortiumVotingState(approvals = Set(solo)),
+                  ),
+                  1,
+                  Nil,
+                ),
+                view2.viewHash -> ViewState(
+                  Set(bob),
+                  Map(bob.party -> ConsortiumVotingState()),
+                  2,
+                  Nil,
+                ),
               )
             )
         }
@@ -401,6 +454,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       )(testedProtocolVersion)
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
+      when(topologySnapshot.consortiumThresholds(any[Set[LfPartyId]]))
+        .thenAnswer((parties: Set[LfPartyId]) =>
+          Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+        )
       when(topologySnapshot.canConfirm(eqTo(solo), eqTo(bob.party), any[TrustLevel]))
         .thenReturn(Future.successful(true))
       when(topologySnapshot.canConfirm(eqTo(solo), eqTo(dave.party), any[TrustLevel]))
@@ -409,9 +466,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .thenReturn(Future.successful(false))
 
       val sut =
-        ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
-          loggerFactory
-        )
+        ResponseAggregation
+          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshot)(
+            loggerFactory
+          )
+          .futureValue
       lazy val changeTs = requestId.unwrap.plusSeconds(1)
       def testReject(reason: String) =
         LocalReject.MalformedRejects.Payloads.Reject(reason)(localVerdictProtocolVersion)
@@ -434,10 +493,23 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             Map(
               view1.viewHash -> ViewState(
                 Set(alice),
+                Map(
+                  alice.party -> ConsortiumVotingState(),
+                  bob.party -> ConsortiumVotingState(rejections = Set(solo)),
+                ),
                 3,
                 List(Set(bob.party) -> testReject("malformed view")),
               ),
-              view2.viewHash -> ViewState(Set(alice, bob, dave), 3, Nil),
+              view2.viewHash -> ViewState(
+                Set(alice, bob, dave),
+                Map(
+                  alice.party -> ConsortiumVotingState(),
+                  bob.party -> ConsortiumVotingState(),
+                  dave.party -> ConsortiumVotingState(),
+                ),
+                3,
+                Nil,
+              ),
             )
           )
         }
@@ -474,11 +546,20 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             Map(
               view1.viewHash -> ViewState(
                 Set(alice),
+                Map(
+                  alice.party -> ConsortiumVotingState(),
+                  bob.party -> ConsortiumVotingState(rejections = Set(solo)),
+                ),
                 3,
                 List(Set(bob.party) -> testReject(rejectMsg)),
               ),
               view2.viewHash -> ViewState(
                 Set(alice),
+                Map(
+                  alice.party -> ConsortiumVotingState(),
+                  bob.party -> ConsortiumVotingState(rejections = Set(solo)),
+                  dave.party -> ConsortiumVotingState(rejections = Set(solo)),
+                ),
                 3,
                 List(Set(bob.party, dave.party) -> testReject(rejectMsg)),
               ),
@@ -511,6 +592,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       val nonVip = ParticipantId("notAVip")
 
       val topologySnapshotVip: TopologySnapshot = mock[TopologySnapshot]
+      when(topologySnapshotVip.consortiumThresholds(any[Set[LfPartyId]]))
+        .thenAnswer((parties: Set[LfPartyId]) =>
+          Future.successful(parties.map(x => x -> PositiveInt.one).toMap)
+        )
       when(topologySnapshotVip.canConfirm(eqTo(solo), eqTo(alice.party), eqTo(TrustLevel.Vip)))
         .thenReturn(Future.successful(true))
       when(topologySnapshotVip.canConfirm(eqTo(solo), eqTo(bob.party), eqTo(TrustLevel.Vip)))
@@ -521,13 +606,28 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .thenReturn(Future.successful(true))
 
       val sut =
-        ResponseAggregation.fromRequest(requestId, informeeMessage, testedProtocolVersion)(
-          loggerFactory
-        )
+        ResponseAggregation
+          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshotVip)(
+            loggerFactory
+          )
+          .futureValue
       val initialState =
         Map(
-          view1.viewHash -> ViewState(Set(alice, bob), 3, Nil),
-          view2.viewHash -> ViewState(Set(bob), 2, Nil),
+          view1.viewHash -> ViewState(
+            Set(alice, bob),
+            Map(
+              alice.party -> ConsortiumVotingState(),
+              bob.party -> ConsortiumVotingState(),
+            ),
+            3,
+            Nil,
+          ),
+          view2.viewHash -> ViewState(
+            Set(bob),
+            Map(bob.party -> ConsortiumVotingState()),
+            2,
+            Nil,
+          ),
         )
 
       it("should have all pending confirming parties listed") {
@@ -605,10 +705,590 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         result.state shouldBe
           Right(
             Map(
-              view1.viewHash -> ViewState(Set(bob), 0, Nil),
-              view2.viewHash -> ViewState(Set(bob), 2, Nil),
+              view1.viewHash -> ViewState(
+                Set(bob),
+                Map(
+                  alice.party -> ConsortiumVotingState(approvals = Set(solo)),
+                  bob.party -> ConsortiumVotingState(),
+                ),
+                0,
+                Nil,
+              ),
+              view2.viewHash -> ViewState(
+                Set(bob),
+                Map(bob.party -> ConsortiumVotingState()),
+                2,
+                Nil,
+              ),
             )
           )
+      }
+    }
+
+    describe("consortium state") {
+      it("should work for threshold = 1") {
+        ConsortiumVotingState(approvals = Set(solo)).isApproved shouldBe (true)
+        ConsortiumVotingState(approvals = Set(solo)).isRejected shouldBe (false)
+        ConsortiumVotingState(rejections = Set(solo)).isApproved shouldBe (false)
+        ConsortiumVotingState(rejections = Set(solo)).isRejected shouldBe (true)
+      }
+
+      it("should work for threshold >= 2") {
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(2),
+          approvals = Set(uno),
+        ).isApproved shouldBe (false)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(2),
+          approvals = Set(uno),
+        ).isRejected shouldBe (false)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(2),
+          approvals = Set(uno, duo),
+        ).isApproved shouldBe (true)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(2),
+          approvals = Set(uno, duo),
+          rejections = Set(tre),
+        ).isApproved shouldBe (true)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(2),
+          approvals = Set(uno),
+          rejections = Set(duo, tre),
+        ).isApproved shouldBe (false)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(2),
+          approvals = Set(uno),
+          rejections = Set(duo, tre),
+        ).isRejected shouldBe (true)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(3),
+          approvals = Set(uno),
+          rejections = Set(duo, tre),
+        ).isApproved shouldBe (false)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(3),
+          approvals = Set(uno),
+          rejections = Set(duo, tre),
+        ).isRejected shouldBe (false)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(3),
+          approvals = Set(uno, duo, tre),
+        ).isApproved shouldBe (true)
+        ConsortiumVotingState(
+          PositiveInt.tryCreate(3),
+          rejections = Set(uno, duo, tre),
+        ).isRejected shouldBe (true)
+      }
+    }
+
+    describe("consortium voting") {
+      def testReject() =
+        LocalReject.ConsistencyRejections.LockedContracts.Reject(Seq())(localVerdictProtocolVersion)
+
+      val fullInformeeTree =
+        FullInformeeTree.tryCreate(
+          GenTransactionTree.tryCreate(hashOps)(
+            b(0),
+            commonMetadataSignatory,
+            b(2),
+            MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(view1 :: Nil),
+          ),
+          testedProtocolVersion,
+        )
+      val requestId = RequestId(CantonTimestamp.Epoch)
+      val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
+      val rootHash = informeeMessage.rootHash
+
+      val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
+      when(topologySnapshot.consortiumThresholds(any[Set[LfPartyId]]))
+        .thenAnswer((parties: Set[LfPartyId]) =>
+          Future.successful(
+            Map(
+              alice.party -> PositiveInt.tryCreate(2),
+              bob.party -> PositiveInt.tryCreate(3),
+            ).view.filterKeys(parties.contains).toMap
+          )
+        )
+
+      val sut =
+        ResponseAggregation
+          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshot)(
+            loggerFactory
+          )
+          .futureValue
+
+      it("should correctly initialize the state") {
+        sut.state shouldBe Right(
+          Map(
+            view1.viewHash -> ViewState(
+              Set(alice, bob),
+              Map(
+                alice.party -> ConsortiumVotingState(PositiveInt.tryCreate(2)),
+                bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3)),
+              ),
+              3,
+              Nil,
+            ),
+            view2.viewHash -> ViewState(
+              Set(bob),
+              Map(bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3))),
+              2,
+              Nil,
+            ),
+          )
+        )
+      }
+
+      when(topologySnapshot.canConfirm(any[ParticipantId], any[LfPartyId], any[TrustLevel]))
+        .thenReturn(Future.successful(true))
+
+      describe("should prevent response stuffing") {
+        describe("for reject by Bob with 3 votes from the same participant") {
+
+          val changeTs1 = requestId.unwrap.plusSeconds(1)
+          val changeTs2 = requestId.unwrap.plusSeconds(2)
+          val changeTs3 = requestId.unwrap.plusSeconds(3)
+
+          val response1a = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash, uno)
+          val response1b = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash, uno)
+          val response1c = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash, uno)
+          lazy val rejected1 = loggerFactory.suppressWarningsAndErrors {
+            valueOrFail(
+              for {
+                p1 <- sut.progress(changeTs1, response1a, topologySnapshot).value.futureValue
+                p2 <- p1.progress(changeTs2, response1b, topologySnapshot).value.futureValue
+                p3 <- p2.progress(changeTs3, response1c, topologySnapshot).value.futureValue
+              } yield p3
+            )(
+              "Bob's rejections"
+            )
+          }
+
+          it("should count Bob's vote only once") {
+            rejected1.version shouldBe changeTs3
+            rejected1.state shouldBe
+              Right(
+                Map(
+                  view1.viewHash -> ViewState(
+                    Set(alice, bob),
+                    Map(
+                      alice.party -> ConsortiumVotingState(PositiveInt.tryCreate(2)),
+                      bob.party -> ConsortiumVotingState(
+                        PositiveInt.tryCreate(3),
+                        rejections = Set(uno),
+                      ),
+                    ),
+                    3,
+                    Nil,
+                  ),
+                  view2.viewHash -> ViewState(
+                    Set(bob),
+                    Map(bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3))),
+                    2,
+                    Nil,
+                  ),
+                )
+              )
+          }
+        }
+
+        describe("for accept by Bob with 3 votes from the same participant") {
+          lazy val changeTs1 = requestId.unwrap.plusSeconds(1)
+          lazy val changeTs2 = requestId.unwrap.plusSeconds(2)
+          lazy val changeTs3 = requestId.unwrap.plusSeconds(3)
+          val response1a = mkResponse(
+            view1.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(bob.party),
+            rootHash,
+            uno,
+          )
+          val response1b = mkResponse(
+            view1.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(bob.party),
+            rootHash,
+            uno,
+          )
+          val response1c = mkResponse(
+            view1.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(bob.party),
+            rootHash,
+            uno,
+          )
+          lazy val result =
+            valueOrFail(
+              for {
+                p1 <- sut.progress(changeTs1, response1a, topologySnapshot).value.futureValue
+                p2 <- p1.progress(changeTs2, response1b, topologySnapshot).value.futureValue
+                p3 <- p2.progress(changeTs3, response1c, topologySnapshot).value.futureValue
+              } yield p3
+            )(
+              "Bob's approval"
+            )
+          it("should count Bob's vote only once") {
+            result.version shouldBe changeTs3
+            result.state shouldBe
+              Right(
+                Map(
+                  view1.viewHash -> ViewState(
+                    Set(alice, bob),
+                    Map(
+                      alice.party -> ConsortiumVotingState(PositiveInt.tryCreate(2)),
+                      bob.party -> ConsortiumVotingState(
+                        PositiveInt.tryCreate(3),
+                        approvals = Set(uno),
+                      ),
+                    ),
+                    3,
+                    Nil,
+                  ),
+                  view2.viewHash -> ViewState(
+                    Set(bob),
+                    Map(bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3))),
+                    2,
+                    Nil,
+                  ),
+                )
+              )
+          }
+        }
+      }
+
+      describe("rejection") {
+        val changeTs1 = requestId.unwrap.plusSeconds(1)
+        val changeTs2 = requestId.unwrap.plusSeconds(2)
+        val changeTs3 = requestId.unwrap.plusSeconds(3)
+
+        describe("by Alice with 2 votes") {
+          it("rejects the transaction") {
+            val response1a =
+              mkResponse(view1.viewHash, testReject(), Set(alice.party), rootHash, uno)
+            val response1b =
+              mkResponse(view1.viewHash, testReject(), Set(alice.party), rootHash, duo)
+            val rejected1a =
+              valueOrFail(sut.progress(changeTs1, response1a, topologySnapshot).value.futureValue)(
+                "Alice's rejection (uno)"
+              )
+            val rejected1b =
+              valueOrFail(
+                rejected1a.progress(changeTs2, response1b, topologySnapshot).value.futureValue
+              )(
+                "Alice's rejection (duo)"
+              )
+
+            rejected1a.state shouldBe Right(
+              Map(
+                view1.viewHash -> ViewState(
+                  Set(alice, bob),
+                  Map(
+                    alice.party -> ConsortiumVotingState(
+                      PositiveInt.tryCreate(2),
+                      rejections = Set(uno),
+                    ),
+                    bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3)),
+                  ),
+                  3,
+                  Nil,
+                ),
+                view2.viewHash -> ViewState(
+                  Set(bob),
+                  Map(bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3))),
+                  2,
+                  Nil,
+                ),
+              )
+            )
+
+            rejected1b shouldBe ResponseAggregation(
+              requestId,
+              informeeMessage,
+              changeTs2,
+              Left(
+                ParticipantReject(
+                  NonEmpty(List, Set(alice.party) -> testReject()),
+                  testedProtocolVersion,
+                )
+              ),
+            )(
+              testedProtocolVersion,
+              TraceContext.empty,
+            )(loggerFactory)
+          }
+        }
+
+        describe("by Bob with 3 votes") {
+          val response1a = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash, uno)
+          val response1b = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash, duo)
+          val response1c = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash, tre)
+          lazy val rejected1 = loggerFactory.suppressWarningsAndErrors {
+            valueOrFail(
+              for {
+                p1 <- sut.progress(changeTs1, response1a, topologySnapshot).value.futureValue
+                p2 <- p1.progress(changeTs2, response1b, topologySnapshot).value.futureValue
+                p3 <- p2.progress(changeTs3, response1c, topologySnapshot).value.futureValue
+              } yield p3
+            )(
+              "Bob's rejections"
+            )
+          }
+
+          it("not rejected due to Alice's heavier weight") {
+            rejected1.version shouldBe changeTs3
+            rejected1.state shouldBe
+              Right(
+                Map(
+                  view1.viewHash -> ViewState(
+                    Set(alice),
+                    Map(
+                      alice.party -> ConsortiumVotingState(PositiveInt.tryCreate(2)),
+                      bob.party -> ConsortiumVotingState(
+                        PositiveInt.tryCreate(3),
+                        rejections = Set(uno, duo, tre),
+                      ),
+                    ),
+                    3,
+                    List(Set(bob.party) -> testReject()),
+                  ),
+                  view2.viewHash -> ViewState(
+                    Set(bob),
+                    Map(bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3))),
+                    2,
+                    Nil,
+                  ),
+                )
+              )
+          }
+
+          describe("rejected fully with Alice's 2 votes") {
+            val changeTs4 = changeTs1.plusSeconds(4)
+            val changeTs5 = changeTs1.plusSeconds(5)
+            val response2a =
+              mkResponse(view1.viewHash, testReject(), Set(alice.party), rootHash, uno)
+            val response2b =
+              mkResponse(view1.viewHash, testReject(), Set(alice.party), rootHash, duo)
+            lazy val rejected2 =
+              valueOrFail(
+                for {
+                  p1 <- rejected1
+                    .progress(changeTs4, response2a, topologySnapshot)
+                    .value
+                    .futureValue
+                  p2 <- p1.progress(changeTs5, response2b, topologySnapshot).value.futureValue
+                } yield p2
+              )("Alice's second rejection")
+            val rejection =
+              ParticipantReject(
+                NonEmpty(List, Set(alice.party) -> testReject(), Set(bob.party) -> testReject()),
+                testedProtocolVersion,
+              )
+            it("rejects the transaction") {
+              rejected2 shouldBe ResponseAggregation(
+                requestId,
+                informeeMessage,
+                changeTs5,
+                Left(rejection),
+              )(
+                testedProtocolVersion,
+                TraceContext.empty,
+              )(loggerFactory)
+            }
+
+            describe("further rejection") {
+              val changeTs6 = changeTs5.plusSeconds(1)
+              val response3 = mkResponse(view1.viewHash, testReject(), Set(bob.party), rootHash)
+              lazy val rejected3 =
+                rejected2.progress(changeTs6, response3, topologySnapshot).value.futureValue
+              it("should not rejection after finalization") {
+                rejected3 shouldBe None
+              }
+            }
+
+            describe("further approval") {
+              val changeTs6 = changeTs5.plusSeconds(1)
+              val response3 = mkResponse(
+                view1.viewHash,
+                LocalApprove(testedProtocolVersion),
+                Set(alice.party),
+                rootHash,
+              )
+              lazy val rejected3 =
+                rejected2.progress(changeTs6, response3, topologySnapshot).value.futureValue
+              it("should not allow approval after finalization") {
+                rejected3 shouldBe None
+              }
+            }
+          }
+        }
+      }
+
+      describe("approval") {
+        lazy val changeTs1 = requestId.unwrap.plusSeconds(1)
+        lazy val changeTs2 = requestId.unwrap.plusSeconds(2)
+        lazy val changeTs3 = requestId.unwrap.plusSeconds(3)
+        val response1a = mkResponse(
+          view1.viewHash,
+          LocalApprove(testedProtocolVersion),
+          Set(bob.party),
+          rootHash,
+          uno,
+        )
+        val response1b = mkResponse(
+          view1.viewHash,
+          LocalApprove(testedProtocolVersion),
+          Set(bob.party),
+          rootHash,
+          duo,
+        )
+        val response1c = mkResponse(
+          view1.viewHash,
+          LocalApprove(testedProtocolVersion),
+          Set(bob.party),
+          rootHash,
+          tre,
+        )
+        lazy val result =
+          valueOrFail(
+            for {
+              p1 <- sut.progress(changeTs1, response1a, topologySnapshot).value.futureValue
+              p2 <- p1.progress(changeTs2, response1b, topologySnapshot).value.futureValue
+              p3 <- p2.progress(changeTs3, response1c, topologySnapshot).value.futureValue
+            } yield p3
+          )(
+            "Bob's approval"
+          )
+        it("should update the pending confirming parties set") {
+          result.version shouldBe changeTs3
+          result.state shouldBe
+            Right(
+              Map(
+                view1.viewHash -> ViewState(
+                  Set(alice),
+                  Map(
+                    alice.party -> ConsortiumVotingState(PositiveInt.tryCreate(2)),
+                    bob.party -> ConsortiumVotingState(
+                      PositiveInt.tryCreate(3),
+                      approvals = Set(uno, duo, tre),
+                    ),
+                  ),
+                  1,
+                  Nil,
+                ),
+                view2.viewHash -> ViewState(
+                  Set(bob),
+                  Map(bob.party -> ConsortiumVotingState(PositiveInt.tryCreate(3))),
+                  2,
+                  Nil,
+                ),
+              )
+            )
+        }
+        describe("if approvals meet the threshold") {
+          val response2a = mkResponse(
+            view1.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(alice.party),
+            rootHash,
+            uno,
+          )
+          val response2b = mkResponse(
+            view1.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(alice.party),
+            rootHash,
+            duo,
+          )
+          lazy val step2 =
+            valueOrFail(
+              for {
+                p1 <- result.progress(changeTs2, response2a, topologySnapshot).value.futureValue
+                p2 <- p1.progress(changeTs2, response2b, topologySnapshot).value.futureValue
+              } yield p2
+            )(
+              "Alice's approval"
+            )
+          val response3a = mkResponse(
+            view2.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(bob.party),
+            rootHash,
+            uno,
+          )
+          val response3b = mkResponse(
+            view2.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(bob.party),
+            rootHash,
+            duo,
+          )
+          val response3c = mkResponse(
+            view2.viewHash,
+            LocalApprove(testedProtocolVersion),
+            Set(bob.party),
+            rootHash,
+            tre,
+          )
+          lazy val step3 =
+            valueOrFail(
+              for {
+                p1 <- step2.progress(changeTs2, response3a, topologySnapshot).value.futureValue
+                p2 <- p1.progress(changeTs2, response3b, topologySnapshot).value.futureValue
+                p3 <- p2.progress(changeTs2, response3c, topologySnapshot).value.futureValue
+              } yield p3
+            )(
+              "Bob's approval for view 2"
+            )
+          it("should get an approved verdict") {
+            step3 shouldBe ResponseAggregation(
+              requestId,
+              informeeMessage,
+              changeTs2,
+              Left(Verdict.Approve(testedProtocolVersion)),
+            )(
+              testedProtocolVersion,
+              TraceContext.empty,
+            )(loggerFactory)
+          }
+
+          describe("further rejection") {
+            val response4 =
+              mkResponse(
+                view1.viewHash,
+                LocalReject.MalformedRejects.Payloads.Reject("test4")(localVerdictProtocolVersion),
+                Set.empty,
+                rootHash,
+              )
+            lazy val result = loggerFactory.assertLogs(
+              step3
+                .progress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
+                .value
+                .futureValue,
+              _.shouldBeCantonErrorCode(LocalReject.MalformedRejects.Payloads),
+            )
+            it("should not allow repeated rejection") {
+              result shouldBe None
+            }
+          }
+
+          describe("further redundant approval") {
+            val response4 = mkResponse(
+              view1.viewHash,
+              LocalApprove(testedProtocolVersion),
+              Set(alice.party),
+              rootHash,
+            )
+            lazy val result =
+              step3
+                .progress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
+                .value
+                .futureValue
+            it("should not allow repeated rejection") {
+              result shouldBe None
+            }
+          }
+        }
       }
     }
   }

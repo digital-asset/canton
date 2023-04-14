@@ -147,8 +147,9 @@ object SimpleExecutionQueue {
         loggingContext: ErrorLoggingContext,
     ): Future[A] = {
       val succeed = predecessorCell.compareAndSet(null, Some(pred))
-      if (!succeed)
-        throw new IllegalStateException(s"Attempt to chain task $description several times.")
+      ErrorUtil.requireState(succeed, s"Attempt to chain task $description several times.")(
+        loggingContext
+      )
 
       def runTask(propagatedException: Option[Throwable]): Future[(Option[Throwable], A)] = {
         if (logTaskTiming && loggingContext.logger.underlying.isDebugEnabled) {

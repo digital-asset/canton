@@ -356,7 +356,29 @@ trait ActiveContractSnapshot {
     */
   def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Either[AcsError, SortedMap[LfContractId, CantonTimestamp]]]
+  ): Future[SortedMap[LfContractId, CantonTimestamp]]
+
+  /** Returns all contracts that were active right after the given request counter,
+    * and when the contract became active for the last time before or at the given request counter.
+    *
+    * @param rc The request counter at which the snapshot shall be taken.
+    *           Must be before the request counter that corresponds to the head cursor in the
+    *           [[com.digitalasset.canton.participant.protocol.RequestJournal]] for the state
+    *           [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Clean]].
+    *           If this precondition is violated, the returned snapshot may be inconsistent, i.e.,
+    *           it may omit some contracts that were [[ActiveContractStore.Active]] at the given counter
+    *           and it may include contracts that were actually [[ActiveContractStore.Archived]] or
+    *           [[ActiveContractStore.TransferredAway]].
+    * @return A map from contracts to the latest request counter (no later than the given `rc`)
+    *         when they became active again.
+    *         It contains exactly those contracts that were active right after the given request counter.
+    *         If a contract is created or transferred-in and archived or transferred-out at the same request counter,
+    *         it does not show up in any snapshot.
+    *         The map is sorted by [[cats.kernel.Order]]`[`[[com.digitalasset.canton.protocol.LfContractId]]`]`.
+    */
+  def snapshot(rc: RequestCounter)(implicit
+      traceContext: TraceContext
+  ): Future[SortedMap[LfContractId, RequestCounter]]
 
   /** Returns Some(contractId) if an active contract belonging to package `pkg` exists, otherwise returns None.
     * The returned contractId may be any active contract from package `pkg`.
@@ -380,7 +402,7 @@ trait ActiveContractSnapshot {
     */
   def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]]
+  ): Future[Map[LfContractId, CantonTimestamp]]
 
   /** Returns all changes to the active contract set between the two timestamps (both inclusive)
     * in the order of their changes.

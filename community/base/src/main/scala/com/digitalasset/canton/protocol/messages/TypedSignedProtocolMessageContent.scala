@@ -18,7 +18,7 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
     content: M
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
-      TypedSignedProtocolMessageContent[SignedProtocolMessageContent]
+      TypedSignedProtocolMessageContent.type
     ],
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[
@@ -26,7 +26,7 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
     ]
     with ProtocolVersionedMemoizedEvidence {
 
-  override protected def companionObj: TypedSignedProtocolMessageContent.type =
+  @transient override protected lazy val companionObj: TypedSignedProtocolMessageContent.type =
     TypedSignedProtocolMessageContent
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -67,7 +67,7 @@ object TypedSignedProtocolMessageContent
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),
-    ProtoVersion(0) -> VersionedProtoConverter.mk(
+    ProtoVersion(0) -> VersionedProtoConverter(
       // TODO(#12373) Adapt when releasing BFT
       ProtocolVersion.dev
     )(v0.TypedSignedProtocolMessageContent)(

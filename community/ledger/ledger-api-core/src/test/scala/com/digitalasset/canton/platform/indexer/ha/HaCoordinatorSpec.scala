@@ -42,6 +42,11 @@ class HaCoordinatorSpec
   private val workerLockId = 20
   private val worker = TestLockId(workerLockId)
 
+  implicit class LockPicker(dbLock: Option[DBLockStorageBackend.Lock]) {
+    @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
+    def pick: DBLockStorageBackend.Lock = dbLock.get
+  }
+
   behavior of "databaseLockBasedHaCoordinator graceful shutdown"
 
   it should "successfully propagate successful end of execution" in {
@@ -235,7 +240,7 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     val blockingLock =
-      dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).get
+      dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
     info("As acquiring the main lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
@@ -264,7 +269,7 @@ class HaCoordinatorSpec
   it should "wait for main lock can be interrupted by graceful shutdown" in {
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
-    dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).get
+    dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
     info("As acquiring the main lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
@@ -287,7 +292,7 @@ class HaCoordinatorSpec
   it should "wait for main lock can be interrupted by exception thrown during tryAcquire" in {
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
-    dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).get
+    dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
     info("As acquiring the main lock from the outside")
     val mainConnection = new TestConnection
     val protectedSetup = setup(
@@ -316,7 +321,7 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     val blockingLock =
-      dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).get
+      dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
     info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
@@ -345,7 +350,7 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     val blockingLock =
-      dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).get
+      dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
     info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
@@ -374,7 +379,7 @@ class HaCoordinatorSpec
   it should "wait for worker lock can be interrupted by graceful shutdown" in {
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
-    dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).get
+    dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
     info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
@@ -398,7 +403,7 @@ class HaCoordinatorSpec
   it should "wait for worker lock can be interrupted by exception thrown during tryAcquire" in {
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
-    dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).get
+    dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
     info("As acquiring the worker lock from the outside")
     val mainConnection = new TestConnection
     val protectedSetup = setup(
@@ -427,7 +432,7 @@ class HaCoordinatorSpec
   it should "fail if worker lock cannot be acquired in time due to shared blocking" in {
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
-    dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).get
+    dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
     info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(
       dbLock = dbLock,
@@ -612,9 +617,10 @@ class HaCoordinatorSpec
         nodes.size shouldBe expectedNumberOfNodes
         nodes.exists(_.protectedHandle.completed.isCompleted) shouldBe false
         nodes.count(_.connectionInitializerFuture.isCompleted) shouldBe 1
-        val activeNode = nodes.find(_.connectionInitializerFuture.isCompleted).get
-        activeNode.executionAbortedFuture.isCompleted shouldBe false
-        activeNode.executionShutdownFuture.isCompleted shouldBe false
+        nodes.find(_.connectionInitializerFuture.isCompleted).foreach { activeNode =>
+          activeNode.executionAbortedFuture.isCompleted shouldBe false
+          activeNode.executionShutdownFuture.isCompleted shouldBe false
+        }
       }
       nodeStartedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeStoppedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
@@ -755,9 +761,10 @@ class HaCoordinatorSpec
         nodes.size shouldBe expectedNumberOfNodes
         nodes.exists(_.protectedHandle.completed.isCompleted) shouldBe false
         nodes.count(_.connectionInitializerFuture.isCompleted) shouldBe 1
-        val activeNode = nodes.find(_.connectionInitializerFuture.isCompleted).get
-        activeNode.executionAbortedFuture.isCompleted shouldBe false
-        activeNode.executionShutdownFuture.isCompleted shouldBe false
+        nodes.find(_.connectionInitializerFuture.isCompleted).foreach { activeNode =>
+          activeNode.executionAbortedFuture.isCompleted shouldBe false
+          activeNode.executionShutdownFuture.isCompleted shouldBe false
+        }
       }
       nodeStartedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeStoppedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))

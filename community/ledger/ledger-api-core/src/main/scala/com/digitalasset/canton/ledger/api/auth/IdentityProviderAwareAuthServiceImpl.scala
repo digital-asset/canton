@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.auth
 
 import com.auth0.jwt.JWT
 import com.daml.jwt.domain.DecodedJwt
-import com.daml.jwt.{Error => JwtError, JwtFromBearerHeader, JwtVerifier}
+import com.daml.jwt.{Error as JwtError, JwtFromBearerHeader, JwtVerifier}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.auth.interceptor.IdentityProviderAwareAuthService
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId

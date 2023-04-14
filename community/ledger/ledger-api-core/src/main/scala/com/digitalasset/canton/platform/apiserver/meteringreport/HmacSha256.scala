@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.meteringreport
 
 import com.daml.crypto.MacPrototype
-import spray.json.DefaultJsonProtocol.{jsonFormat3, _}
+import spray.json.DefaultJsonProtocol.{jsonFormat3, *}
 import spray.json.{JsValue, JsonFormat, RootJsonFormat, deserializationError}
 
 import java.util.Base64

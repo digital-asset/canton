@@ -7,6 +7,7 @@ package com.digitalasset.canton.participant.admin.v0;
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
+import "com/digitalasset/canton/participant/admin/v0/domain_connectivity.proto";
 
 // Moving ACS from one participant to another
 service ParticipantRepairService {
@@ -14,7 +15,9 @@ service ParticipantRepairService {
     rpc Download (DownloadRequest) returns (stream AcsSnapshotChunk);
 
     // upload contracts for a party
-    rpc Upload (UploadRequest) returns (UploadResponse);
+    rpc Upload (stream UploadRequest) returns (UploadResponse);
+
+    rpc MigrateDomain (MigrateDomainRequest) returns (MigrateDomainResponse);
 }
 
 message DownloadRequest {
@@ -29,11 +32,6 @@ message DownloadRequest {
 
 }
 
-message DownloadAcsSnapshotResponse {
-    map <string, int64> domain_contract_count = 1;
-    bytes acs_snapshot = 2;
-}
-
 message AcsSnapshotChunk {
   bytes chunk = 1; // a chunk of the acs snapshot download
 }
@@ -43,5 +41,14 @@ message UploadRequest {
 }
 
 message UploadResponse {
-
 }
+
+message MigrateDomainRequest {
+  // the alias of the source domain
+  // Required
+  string source_alias = 1;
+  // the target domain connection configuration
+  // Required
+  DomainConnectionConfig target_domain_connection_config = 2;
+}
+message MigrateDomainResponse {}

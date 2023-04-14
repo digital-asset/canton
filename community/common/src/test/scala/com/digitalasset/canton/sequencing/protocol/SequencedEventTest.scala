@@ -22,7 +22,7 @@ class SequencedEventTest extends BaseTestWordSpec {
     "correctly serialize and deserialize a deliver event" in {
       // there's no significance to this choice of message beyond it being easy to construct
       val message =
-        SignedProtocolMessage.from(
+        SignedProtocolMessage.tryFrom(
           TransferResult.create(
             RequestId(CantonTimestamp.now()),
             Set.empty,

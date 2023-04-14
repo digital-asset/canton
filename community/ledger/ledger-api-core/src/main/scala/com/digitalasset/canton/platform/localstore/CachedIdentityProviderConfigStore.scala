@@ -13,7 +13,7 @@ import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,
   IdentityProviderConfigUpdate,
 }
-import com.github.benmanes.caffeine.{cache => caffeine}
+import com.github.benmanes.caffeine.{cache as caffeine}
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}

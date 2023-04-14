@@ -21,6 +21,7 @@ import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationToke
 import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
@@ -195,10 +196,13 @@ class MemberAuthenticationService(
         EitherT(isParticipantActive(participant).map {
           if (_) Right(()) else Left(ParticipantDisabled(participant))
         })
-      // consider all types of members always active
+      case mediator: MediatorId =>
+        EitherT(isMediatorActive(mediator).map {
+          if (_) Right(()) else Left(MediatorDisabled(mediator))
+        })
       case _ =>
-        // TODO(#4933) check that mediator state is active
-        EitherT.pure[Future, AuthenticationError](())
+        // TODO(#4933) check if sequencer is active
+        EitherT.rightT(())
     }
 
   private def storeAcceptedAgreement(
@@ -222,16 +226,24 @@ class MemberAuthenticationService(
   ): Either[AuthenticationError, Unit] =
     Either.cond(intendedDomain == domain, (), NonMatchingDomainId(member, intendedDomain))
 
-  protected def isParticipantActive(participant: ParticipantId)(implicit
+  protected def isMemberActive(check: TopologySnapshot => Future[Boolean])(implicit
       traceContext: TraceContext
   ): Future[Boolean] = {
     cryptoApi.snapshot(cryptoApi.topologyKnownUntilTimestamp).flatMap { snapshot =>
-      // we are a bit more conservative here. a participant needs to be active NOW and the head state (i.e. effective in the future)
+      // we are a bit more conservative here. a member needs to be active NOW and the head state (i.e. effective in the future)
       Seq(snapshot.ipsSnapshot, cryptoApi.currentSnapshotApproximation.ipsSnapshot)
-        .parTraverse(_.isParticipantActive(participant))
+        .parTraverse(check(_))
         .map(_.forall(identity))
     }
   }
+
+  protected def isParticipantActive(participant: ParticipantId)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean] = isMemberActive(_.isParticipantActive(participant))
+
+  protected def isMediatorActive(mediator: MediatorId)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean] = isMemberActive(_.isMediatorActive(mediator))
 
   /** domain topology client subscriber used to remove member tokens if they get disabled */
   override def observed(

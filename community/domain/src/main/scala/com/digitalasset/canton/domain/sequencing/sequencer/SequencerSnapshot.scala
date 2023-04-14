@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
@@ -24,10 +24,10 @@ final case class SequencerSnapshot(
     heads: Map[Member, SequencerCounter],
     status: SequencerPruningStatus,
     additional: Option[SequencerSnapshot.ImplementationSpecificInfo],
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot])
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot.type])
     extends HasProtocolVersionedWrapper[SequencerSnapshot] {
 
-  override protected def companionObj = SequencerSnapshot
+  @transient override protected lazy val companionObj: SequencerSnapshot.type = SequencerSnapshot
 
   def toProtoV0: v0.SequencerSnapshot = v0.SequencerSnapshot(
     Some(lastTs.toProtoPrimitive),
@@ -40,7 +40,7 @@ final case class SequencerSnapshot(
 }
 object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.SequencerSnapshot)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -97,6 +97,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
 }
 
 final case class SequencerInitialState(
+    domainId: DomainId,
     snapshot: SequencerSnapshot,
     latestTopologyClientTimestamp: Option[CantonTimestamp],
 )

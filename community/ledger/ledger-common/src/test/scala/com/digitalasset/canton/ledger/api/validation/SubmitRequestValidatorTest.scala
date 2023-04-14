@@ -6,26 +6,26 @@ package com.digitalasset.canton.ledger.api.validation
 import com.daml.api.util.{DurationConversion, TimestampConversion}
 import com.daml.error.definitions.LedgerApiErrors
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
-import com.daml.ledger.api.v1.commands.Commands.{DeduplicationPeriod => DeduplicationPeriodProto}
+import com.daml.ledger.api.v1.commands.Commands.{DeduplicationPeriod as DeduplicationPeriodProto}
 import com.daml.ledger.api.v1.commands.{Command, Commands, CreateCommand}
 import com.daml.ledger.api.v1.value.Value.Sum
-import com.daml.ledger.api.v1.value.{List => ApiList, Map => ApiMap, Optional => ApiOptional, _}
+import com.daml.ledger.api.v1.value.{List as ApiList, Map as ApiMap, Optional as ApiOptional, *}
 import com.daml.lf.command.{
-  ApiCommand => LfCommand,
-  ApiCommands => LfCommands,
+  ApiCommand as LfCommand,
+  ApiCommands as LfCommands,
   ContractMetadata,
   DisclosedContract,
 }
 import com.daml.lf.data.*
 import com.daml.lf.value.Value.ValueRecord
-import com.daml.lf.value.{Value => Lf}
+import com.daml.lf.value.{Value as Lf}
 import com.digitalasset.canton.ledger.api.DomainMocks.{
   applicationId,
   commandId,
   submissionId,
   workflowId,
 }
-import com.digitalasset.canton.ledger.api.domain.{Commands => ApiCommands, LedgerId}
+import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, LedgerId}
 import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, DomainMocks}
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.empty.Empty
@@ -35,7 +35,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 import scalaz.syntax.tag.*
 
-import java.time.{Duration => JDuration, Instant}
+import java.time.{Duration as JDuration, Instant}
 import scala.annotation.nowarn
 
 @nowarn("msg=deprecated")

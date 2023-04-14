@@ -20,7 +20,8 @@ trait ProtocolMessage
     with HasDomainId
     with PrettyPrinting
     with HasRepresentativeProtocolVersion {
-  def representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage]
+
+  override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type]
 
   /** The ID of the domain over which this message is supposed to be sent. */
   def domainId: DomainId
@@ -31,16 +32,22 @@ trait ProtocolMessage
   override def pretty: Pretty[this.type] = prettyOfObject[ProtocolMessage]
 }
 
+/** Marker trait for [[ProtocolMessage]]s that are not a [[SignedProtocolMessage]] */
+trait UnsignedProtocolMessage extends ProtocolMessage
+
+/** Trait for [[ProtocolMessage]]s that can be serialized as a v0 [[EnvelopeContent]] */
 trait ProtocolMessageV0 extends ProtocolMessage {
   protected[messages] def toProtoEnvelopeContentV0: v0.EnvelopeContent
 }
 
+/** Trait for [[ProtocolMessage]]s that can be serialized as a v1 [[EnvelopeContent]] */
 trait ProtocolMessageV1 extends ProtocolMessage {
   protected[messages] def toProtoEnvelopeContentV1: v1.EnvelopeContent
 }
 
+/** Trait for [[ProtocolMessage]]s that can be serialized as a v2 [[EnvelopeContent]] */
 trait UnsignedProtocolMessageV2 extends ProtocolMessage {
-  def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent
+  protected[messages] def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent
 }
 
 object ProtocolMessage {
@@ -62,6 +69,17 @@ object ProtocolMessage {
 
   trait ProtocolMessageContentCast[A <: ProtocolMessage] {
     def toKind(message: ProtocolMessage): Option[A]
+    def targetKind: String
+  }
+
+  object ProtocolMessageContentCast {
+    def create[A <: ProtocolMessage](name: String)(
+        cast: ProtocolMessage => Option[A]
+    ): ProtocolMessageContentCast[A] = new ProtocolMessageContentCast[A] {
+      override def toKind(message: ProtocolMessage): Option[A] = cast(message)
+
+      override def targetKind: String = name
+    }
   }
 
   def toKind[M <: ProtocolMessage](envelope: DefaultOpenEnvelope)(implicit

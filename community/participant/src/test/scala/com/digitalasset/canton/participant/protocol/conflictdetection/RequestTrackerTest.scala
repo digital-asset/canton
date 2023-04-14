@@ -1175,7 +1175,7 @@ private[conflictdetection] trait RequestTrackerTest {
   ): Future[Assertion] =
     acs
       .snapshot(ts)
-      .map(snapshot => assert(snapshot == Right(expected), s"ACS snapshot at time $ts correct"))
+      .map(snapshot => assert(snapshot == expected, s"ACS snapshot at time $ts correct"))
 
   def singleCRwithTR(
       rt: RequestTracker,

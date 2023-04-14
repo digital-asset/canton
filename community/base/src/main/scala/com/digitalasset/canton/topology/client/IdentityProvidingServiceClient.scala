@@ -10,6 +10,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.concurrent.HasFutureSupervision
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -216,6 +217,14 @@ trait PartyTopologySnapshotClient {
       check: (ParticipantPermission => Boolean) = _.isActive,
   ): EitherT[Future, Set[LfPartyId], Unit]
 
+  /** Returns the consortium thresholds (how many votes from different participants that host the consortium party
+    * are required for the confirmation to become valid). For normal parties returns 1.
+    */
+  def consortiumThresholds(parties: Set[LfPartyId]): Future[Map[LfPartyId, PositiveInt]] = {
+    // TODO(i11255): this is a stub implementation for non-consortium parties
+    Future.successful(parties.map(party => party -> PositiveInt.one).toMap)
+  }
+
   /** Returns true if there is at least one participant that satisfies the predicate */
   def isHostedByAtLeastOneParticipantF(
       party: LfPartyId,
@@ -291,8 +300,7 @@ trait ParticipantTopologySnapshotClient {
   this: BaseTopologySnapshotClient =>
 
   // used by domain to fetch all participants
-  // used by participant to know to which participant to send a use package contract (will be removed)
-  @Deprecated
+  @Deprecated(since = "2.7")
   def participants(): Future[Seq[(ParticipantId, ParticipantPermission)]]
 
   /** Checks whether the provided participant exists and is active */
@@ -311,15 +319,19 @@ trait MediatorDomainStateClient {
     mediators().map(_.contains(mediatorId))
 }
 
+// this can be removed with 3.0
+@Deprecated(since = "2.7")
 trait CertificateSnapshotClient {
 
   this: BaseTopologySnapshotClient =>
 
+  @Deprecated(since = "2.7.0")
   def hasParticipantCertificate(participantId: ParticipantId)(implicit
       traceContext: TraceContext
   ): Future[Boolean] =
     findParticipantCertificate(participantId).map(_.isDefined)
 
+  @Deprecated(since = "2.7.0")
   def findParticipantCertificate(participantId: ParticipantId)(implicit
       traceContext: TraceContext
   ): Future[Option[X509Cert]]
@@ -424,7 +436,7 @@ trait DomainTopologyClientWithInit
   /** Overloaded recent snapshot returning derived type */
   override def currentSnapshotApproximation(implicit
       traceContext: TraceContext
-  ): TopologySnapshotLoader
+  ): TopologySnapshotLoader = trySnapshot(approximateTimestamp)
 
   override def trySnapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

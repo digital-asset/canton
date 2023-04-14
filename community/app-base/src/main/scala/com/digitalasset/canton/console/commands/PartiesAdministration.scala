@@ -257,7 +257,7 @@ class ParticipantPartiesAdministrationGroup(
             // sync with ledger-api server if this node is connected to at least one domain
             if (syncLedgerApi && primaryConnected.exists(_.nonEmpty))
               retryE(
-                runner.ledger_api.parties.list().map(_.party).contains(partyId.toLf),
+                runner.ledger_api.parties.list().map(_.party).contains(partyId),
                 show"The party ${partyId} never appeared on the ledger API server",
               )
             else Right(())
@@ -316,7 +316,7 @@ class ParticipantPartiesAdministrationGroup(
           modifier: a function to modify the party details, e.g.: `partyDetails => { partyDetails.copy(annotations = partyDetails.annotations.updated("a", "b").removed("c")) }`"""
   )
   def update(
-      party: String,
+      party: PartyId,
       modifier: PartyDetails => PartyDetails,
   ): PartyDetails = {
     runner.ledger_api.parties.update(

@@ -22,7 +22,7 @@ import com.digitalasset.canton.ledger.client.services.commands.{
   tracker,
 }
 import com.google.protobuf.empty.Empty
-import com.google.rpc.status.{Status => StatusProto}
+import com.google.rpc.status.{Status as StatusProto}
 import io.grpc.Status
 import org.slf4j.LoggerFactory
 

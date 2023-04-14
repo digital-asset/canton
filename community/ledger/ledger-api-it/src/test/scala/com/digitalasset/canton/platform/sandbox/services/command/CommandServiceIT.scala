@@ -20,7 +20,7 @@ import com.digitalasset.canton.platform.sandbox.SandboxBackend
 import com.digitalasset.canton.platform.sandbox.fixture.{CreatesParties, SandboxFixture}
 import com.digitalasset.canton.platform.sandbox.services.TestCommands
 import com.digitalasset.canton.platform.services.time.TimeProviderType
-import com.google.protobuf.duration.{Duration => ProtoDuration}
+import com.google.protobuf.duration.{Duration as ProtoDuration}
 import org.scalatest.Inspectors
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec

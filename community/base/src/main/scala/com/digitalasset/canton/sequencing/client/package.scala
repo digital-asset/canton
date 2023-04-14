@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing
 
-import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.sequencing.protocol.MessageId
 
@@ -18,7 +17,7 @@ package object client {
     * intentionally undefined.
     */
   type SendTimeoutHandler =
-    MessageId => EitherT[Future, SendTrackerUpdateError.TimeoutHandlerError, Unit]
+    MessageId => Future[Unit]
 
   /** Signature for callbacks provided to the send operation to take advantage of the SendTracker to provide
     * tracking of the eventual send result. Callback is ephemeral and will be lost if the SequencerClient is recreated

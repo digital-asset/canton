@@ -37,7 +37,7 @@ sealed trait SequencedEvent[+Env <: Envelope[_]]
     with PrettyPrinting
     with HasProtocolVersionedWrapper[SequencedEvent[Envelope[_]]] {
 
-  override def companionObj = SequencedEvent
+  @transient override protected lazy val companionObj: SequencedEvent.type = SequencedEvent
 
   protected def toProtoV0: v0.SequencedEvent
   protected def toProtoV1: v1.SequencedEvent
@@ -78,11 +78,11 @@ object SequencedEvent
   override protected def name: String = "SequencedEvent"
 
   override val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.SequencedEvent)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SequencedEvent)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtoVersion(1) -> VersionedProtoConverter.mk(
+    ProtoVersion(1) -> VersionedProtoConverter(
       // TODO(#12373) Adapt when releasing BFT
       ProtocolVersion.dev
     )(v1.SequencedEvent)(
@@ -241,8 +241,8 @@ sealed abstract case class DeliverError private[sequencing] (
     messageId: MessageId,
     reason: DeliverErrorReason,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent[Envelope[_]]],
-    val deserializedFrom: Option[ByteString],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type],
+    override val deserializedFrom: Option[ByteString],
 ) extends SequencedEvent[Nothing]
     with NoCopy {
   def toProtoV0: v0.SequencedEvent = v0.SequencedEvent(
@@ -310,7 +310,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     messageId: Option[MessageId],
     batch: Batch[Env],
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent[Envelope[_]]],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type],
     val deserializedFrom: Option[ByteString],
 ) extends SequencedEvent[Env] {
 

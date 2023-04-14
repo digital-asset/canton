@@ -8,16 +8,16 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.api.v1.commands
 import com.daml.ledger.api.v1.commands.Command.Command.{
-  Create => ProtoCreate,
-  CreateAndExercise => ProtoCreateAndExercise,
-  Empty => ProtoEmpty,
-  Exercise => ProtoExercise,
-  ExerciseByKey => ProtoExerciseByKey,
+  Create as ProtoCreate,
+  CreateAndExercise as ProtoCreateAndExercise,
+  Empty as ProtoEmpty,
+  Exercise as ProtoExercise,
+  ExerciseByKey as ProtoExerciseByKey,
 }
-import com.daml.ledger.api.v1.commands.{Command => ProtoCommand, Commands => ProtoCommands}
+import com.daml.ledger.api.v1.commands.{Command as ProtoCommand, Commands as ProtoCommands}
 import com.daml.lf.command.*
 import com.daml.lf.data.*
-import com.daml.lf.value.{Value => Lf}
+import com.daml.lf.value.{Value as Lf}
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, optionalLedgerId}
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
   Submitters,

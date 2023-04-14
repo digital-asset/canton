@@ -24,7 +24,10 @@ final case class RecipientsTree(
 ) extends PrettyPrinting {
 
   override def pretty: Pretty[RecipientsTree] =
-    prettyOfClass(param("recipient group", _.recipientGroup.toList), param("children", _.children))
+    prettyOfClass(
+      param("recipient group", _.recipientGroup.toList),
+      paramIfNonEmpty("children", _.children),
+    )
 
   lazy val allRecipients: NonEmpty[Set[Member]] = {
     val tail: Set[Member] = children.flatMap(t => t.allRecipients).toSet
@@ -54,7 +57,7 @@ final case class RecipientsTree(
   }
 
   def toProtoV0: v0.RecipientsTree = {
-    val recipientsP = recipientGroup.toSeq.map(member => member.toProtoPrimitive)
+    val recipientsP = recipientGroup.toSeq.map(member => member.toProtoPrimitive).sorted
     val childrenP = children.map(_.toProtoV0)
     new v0.RecipientsTree(recipientsP, childrenP)
   }

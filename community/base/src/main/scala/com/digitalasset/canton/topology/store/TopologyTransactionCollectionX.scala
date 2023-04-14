@@ -15,6 +15,8 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactionX.Generic
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.*
 
+import scala.reflect.ClassTag
+
 final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: TopologyMappingX](
     result: Seq[StoredTopologyTransactionX[Op, M]]
 ) extends HasVersionedWrapper[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]]
@@ -42,11 +44,10 @@ final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: Top
     }
   )
 
-  def collectOfType[T <: TopologyChangeOpX](implicit
-      checker: TopologyChangeOpX.OpTypeCheckerX[T]
-  ): StoredTopologyTransactionsX[T, M] = StoredTopologyTransactionsX(
-    result.mapFilter(TopologyChangeOpX.select[T, M])
-  )
+  def collectOfType[T <: TopologyChangeOpX: ClassTag]: StoredTopologyTransactionsX[T, M] =
+    StoredTopologyTransactionsX(
+      result.mapFilter(_.selectOp[T])
+    )
 
   /** Split transactions into certificates and everything else (used when uploading to a participant) */
   def splitCertsAndRest: StoredTopologyTransactionsX.CertsAndRest = {
@@ -90,11 +91,13 @@ object StoredTopologyTransactionsX
 
   type GenericStoredTopologyTransactionsX =
     StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]
+  type PositiveStoredTopologyTransactionsX =
+    StoredTopologyTransactionsX[TopologyChangeOpX.Replace, TopologyMappingX]
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> ProtoCodec(
       // TODO(#12373) Adapt when releasing BFT
-      ProtocolVersion.dev,
+      ProtocolVersion.v3,
       supportedProtoVersion(v0.TopologyTransactions)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

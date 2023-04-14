@@ -116,13 +116,13 @@ abstract sealed case class AcsCommitment private (
     period: CommitmentPeriod,
     commitment: AcsCommitment.CommitmentType,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[AcsCommitment],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[AcsCommitment.type],
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[AcsCommitment]
     with SignedProtocolMessageContent
     with NoCopy {
 
-  override def companionObj = AcsCommitment
+  @transient override protected lazy val companionObj: AcsCommitment.type = AcsCommitment
 
   override def signingTimestamp: CantonTimestamp = period.toInclusive.forgetRefinement
 
@@ -167,7 +167,7 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
   override val name: String = "AcsCommitment"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.AcsCommitment)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.AcsCommitment)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -232,10 +232,11 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
     ) {}
   }
 
-  implicit val acsCommitmentCast: SignedMessageContentCast[AcsCommitment] = {
-    case m: AcsCommitment => Some(m)
-    case _ => None
-  }
+  implicit val acsCommitmentCast: SignedMessageContentCast[AcsCommitment] =
+    SignedMessageContentCast.create[AcsCommitment]("AcsCommitment") {
+      case m: AcsCommitment => Some(m)
+      case _ => None
+    }
 
   def getAcsCommitmentResultReader(
       domainId: DomainId,

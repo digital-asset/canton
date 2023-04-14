@@ -12,7 +12,7 @@ import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
-import com.digitalasset.canton.ledger.participant.state.{v2 => state}
+import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.apiserver.services.admin.SynchronousResponse.{
   Accepted,
   Rejected,

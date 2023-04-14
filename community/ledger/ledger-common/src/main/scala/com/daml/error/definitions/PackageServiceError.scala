@@ -4,7 +4,7 @@
 package com.daml.error.definitions
 
 import com.daml.error.*
-import com.daml.lf.archive.{Error => LfArchiveError}
+import com.daml.lf.archive.{Error as LfArchiveError}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Error

@@ -138,6 +138,7 @@ object JvmRulesPlugin extends AutoPlugin {
       Wart.Return,
       Wart.Serializable,
       Wart.While,
+      Wart.FinalCaseClass,
       ContribWart.UnintendedLaziness,
     )
 

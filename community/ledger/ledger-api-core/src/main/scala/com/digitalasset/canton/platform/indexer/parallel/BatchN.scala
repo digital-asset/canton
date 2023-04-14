@@ -22,6 +22,7 @@ object BatchN {
         (maxBatchSize * maxBatchCount).toLong,
         in => Vector(newBatch(maxBatchSize, in)),
       ) { case (batches, in) =>
+        @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
         val lastBatch = batches.last
         if (lastBatch.size < maxBatchSize) {
           lastBatch.addOne(in)

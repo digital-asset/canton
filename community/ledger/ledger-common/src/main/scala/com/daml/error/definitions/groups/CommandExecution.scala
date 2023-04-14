@@ -15,8 +15,8 @@ import com.daml.error.{
 }
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.PackageId
-import com.daml.lf.engine.{Error => LfError}
-import com.daml.lf.interpretation.{Error => LfInterpretationError}
+import com.daml.lf.engine.{Error as LfError}
+import com.daml.lf.interpretation.{Error as LfInterpretationError}
 import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.{VersionRange, language}

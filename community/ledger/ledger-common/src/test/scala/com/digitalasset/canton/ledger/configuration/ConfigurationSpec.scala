@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.configuration
 
-import com.daml.ledger.configuration.protobuf.{ledger_configuration => proto}
+import com.daml.ledger.configuration.protobuf.{ledger_configuration as proto}
 import com.digitalasset.canton.ledger.configuration.ConfigurationSpec.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks.*

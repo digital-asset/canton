@@ -137,7 +137,6 @@ class AcsCommitmentProcessor(
     sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
     store: AcsCommitmentStore,
     commitmentPeriodObserver: (ExecutionContext, TraceContext) => FutureUnlessShutdown[Unit],
-    killSwitch: => Unit,
     metrics: PruningMetrics,
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
@@ -461,11 +460,10 @@ class AcsCommitmentProcessor(
 
     FutureUtil.logOnFailureUnlessShutdown(
       future,
-      failureMessage = s"Failed to process incoming commitment. Halting SyncDomain $domainId",
+      failureMessage = s"Failed to process incoming commitment.",
       onFailure = _ => {
-        // First close ourselves so that we don't process any more messages
+        // Close ourselves so that we don't process any more messages
         close()
-        killSwitch
       },
     )
   }
@@ -692,7 +690,7 @@ class AcsCommitmentProcessor(
       cmt,
       protocolVersion,
     )
-    SignedProtocolMessage.tryCreate(payload, crypto, protocolVersion)
+    SignedProtocolMessage.trySignAndCreate(payload, crypto, protocolVersion)
   }
 
   /* Compute commitment messages to be sent for the ACS at the given timestamp. The snapshot is assumed to be ordered

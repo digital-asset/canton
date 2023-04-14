@@ -14,6 +14,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   StringConversionError,
   TimestampConversionError,
 }
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.{
   LedgerApplicationId,
@@ -101,6 +102,9 @@ object ProtoConverter {
         .toRight(ProtoDeserializationError.FieldNotSet(s"Sequence $field not set or empty"))
       parsed <- contentNE.toNEF.traverse(fromProto)
     } yield parsed
+
+  def parsePositiveInt(i: Int): ParsingResult[PositiveInt] =
+    PositiveInt.create(i).leftMap(ProtoDeserializationError.InvariantViolation(_))
 
   def parseLfPartyId(party: String): ParsingResult[LfPartyId] =
     parseString(party)(LfPartyId.fromString)

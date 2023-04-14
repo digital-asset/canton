@@ -41,7 +41,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
   val messageId = MessageId.tryCreate("test-message-id")
   def mkBatch(recipients: Set[Member]): Batch[ClosedEnvelope] =
     Batch[ClosedEnvelope](
-      ClosedEnvelope(
+      ClosedEnvelope.tryCreate(
         ByteString.EMPTY,
         Recipients.ofSet(recipients).value,
         Seq.empty,
@@ -50,12 +50,13 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
       testedProtocolVersion,
     )
   def submission(from: Member, to: Set[Member]) =
-    SubmissionRequest(
+    SubmissionRequest.tryCreate(
       from,
       messageId,
       isRequest = true,
       mkBatch(to),
       CantonTimestamp.MaxValue,
+      None,
       None,
       testedProtocolVersion,
     )

@@ -17,6 +17,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
+import com.digitalasset.canton.participant.store.db.DbActiveContractStore.*
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
@@ -34,6 +35,7 @@ import slick.jdbc.*
 import slick.jdbc.canton.SQLActionBuilder
 
 import scala.Ordered.orderingToOrdered
+import scala.annotation.nowarn
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -323,66 +325,92 @@ class DbActiveContractStore(
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Either[AcsError, SortedMap[LfContractId, CantonTimestamp]]] =
+  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
     processingTime.event {
       logger.debug(s"Obtaining ACS snapshot at $timestamp")
       storage
-        .query(snapshotQuery(timestamp, None), functionFullName)
-        .map(snapshot => Right(SortedMap(snapshot: _*)))
+        .query(
+          snapshotQuery(SnapshotQueryParameter.Ts(timestamp), None),
+          functionFullName,
+        )
+        .map(snapshot => SortedMap(snapshot *))
     }
+
+  override def snapshot(rc: RequestCounter)(implicit
+      traceContext: TraceContext
+  ): Future[SortedMap[LfContractId, RequestCounter]] = processingTime.event {
+    logger.debug(s"Obtaining ACS snapshot at $rc")
+    storage
+      .query(
+        snapshotQuery(SnapshotQueryParameter.Rc(rc), None),
+        functionFullName,
+      )
+      .map(snapshot => SortedMap(snapshot *))
+  }
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] =
-    processingTime.eitherTEvent {
-      if (contractIds.isEmpty) EitherT.pure(Map.empty)
+  ): Future[Map[LfContractId, CantonTimestamp]] = {
+    processingTime.event {
+      if (contractIds.isEmpty) Future.successful(Map.empty)
       else
-        EitherT
-          .right(storage.query(snapshotQuery(timestamp, Some(contractIds)), functionFullName))
+        storage
+          .query(
+            snapshotQuery(SnapshotQueryParameter.Ts(timestamp), Some(contractIds)),
+            functionFullName,
+          )
           .map(_.toMap)
     }
+  }
 
-  private[this] def snapshotQuery(
-      timestamp: CantonTimestamp,
+  private[this] def snapshotQuery[T](
+      p: SnapshotQueryParameter[T],
       contractIds: Option[Set[LfContractId]],
-  ): DbAction.ReadOnly[Seq[(LfContractId, CantonTimestamp)]] = {
+  ): DbAction.ReadOnly[Seq[(LfContractId, T)]] = {
     import DbStorage.Implicits.BuilderChain.*
 
     val idsO = contractIds.map { ids =>
       sql"(" ++ ids.toList.map(id => sql"$id").intercalate(sql", ") ++ sql")"
     }
 
+    implicit val getResultT: GetResult[T] = p.getResult
+
+    // somehow, the compiler complains if it is not defined but indicates it as being unused
+    @nowarn("cat=unused") implicit val setParameterT: SetParameter[T] = p.setParameter
+
+    val ordering = sql" order by #${p.attribute} asc"
+
     storage.profile match {
       case _: DbStorage.Profile.H2 =>
         (sql"""
-          select distinct(contract_id), ts
+          select distinct(contract_id), #${p.attribute}
           from active_contracts AC
           where not exists(select * from active_contracts AC2 where domain_id = $domainId and AC.contract_id = AC2.contract_id
-            and AC2.ts <= $timestamp
+            and AC2.#${p.attribute} <= ${p.bound}
             and ((AC.ts, AC.request_counter) < (AC2.ts, AC2.request_counter)
               or (AC.ts = AC2.ts and AC.request_counter = AC2.request_counter and AC2.change = ${ChangeType.Deactivation})))
-           and AC.ts <= $timestamp and domain_id = $domainId""" ++
-          idsO.fold(sql"")(ids => sql" and AC.contract_id in " ++ ids))
-          .as[(LfContractId, CantonTimestamp)]
+           and AC.#${p.attribute} <= ${p.bound} and domain_id = $domainId""" ++
+          idsO.fold(sql"")(ids => sql" and AC.contract_id in " ++ ids) ++ ordering)
+          .as[(LfContractId, T)]
       case _: DbStorage.Profile.Postgres =>
         (sql"""
-          select distinct(contract_id), AC3.ts from active_contracts AC1
+          select distinct(contract_id), AC3.#${p.attribute} from active_contracts AC1
           join lateral
-            (select ts, change from active_contracts AC2 where domain_id = $domainId
-             and AC2.contract_id = AC1.contract_id and ts <= $timestamp order by ts desc, request_counter desc, change asc #${storage
+            (select #${p.attribute}, change from active_contracts AC2 where domain_id = $domainId
+             and AC2.contract_id = AC1.contract_id and #${p.attribute} <= ${p.bound} order by ts desc, request_counter desc, change asc #${storage
             .limit(1)}) as AC3 on true
           where AC1.domain_id = $domainId and AC3.change = CAST(${ChangeType.Activation} as change_type)""" ++
-          idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids))
-          .as[(LfContractId, CantonTimestamp)]
+          idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids) ++ ordering)
+          .as[(LfContractId, T)]
       case _: DbStorage.Profile.Oracle =>
-        (sql"""select distinct(contract_id), AC3.ts from active_contracts AC1, lateral
-          (select ts, change from active_contracts AC2 where domain_id = $domainId
-             and AC2.contract_id = AC1.contract_id and ts <= $timestamp
+        (sql"""select distinct(contract_id), AC3.#${p.attribute} from active_contracts AC1, lateral
+          (select #${p.attribute}, change from active_contracts AC2 where domain_id = $domainId
+             and AC2.contract_id = AC1.contract_id and #${p.attribute} <= ${p.bound}
              order by ts desc, request_counter desc, change desc
              fetch first 1 row only) AC3
           where AC1.domain_id = $domainId and AC3.change = 'activation'""" ++
-          idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids))
-          .as[(LfContractId, CantonTimestamp)]
+          idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids) ++ ordering)
+          .as[(LfContractId, T)]
     }
   }
 
@@ -810,65 +838,95 @@ class DbActiveContractStore(
   }
 }
 
-sealed trait ChangeType {
-  def name: String
+private object DbActiveContractStore {
+  sealed trait SnapshotQueryParameter[T] {
+    def attribute: String
 
-  // lazy val so that `kind` is initialized first in the subclasses
-  final lazy val toDbPrimitive: String100 =
-    // The Oracle DB schema allows up to 100 chars; Postgres, H2 map this to an enum
-    String100.tryCreate(name)
-}
+    def bound: T
 
-object ChangeType {
-  case object Activation extends ChangeType {
-    override val name = "activation"
-  }
-  case object Deactivation extends ChangeType {
-    override val name = "deactivation"
+    def getResult: GetResult[T]
+    def setParameter: SetParameter[T]
   }
 
-  implicit val setParameterChangeType: SetParameter[ChangeType] = (v, pp) => pp >> v.toDbPrimitive
-  implicit val getResultChangeType: GetResult[ChangeType] = GetResult(r =>
-    r.nextString() match {
-      case ChangeType.Activation.name => ChangeType.Activation
-      case ChangeType.Deactivation.name => ChangeType.Deactivation
-      case unknown => throw new DbDeserializationException(s"Unknown change type [$unknown]")
+  object SnapshotQueryParameter {
+    final case class Ts(bound: CantonTimestamp) extends SnapshotQueryParameter[CantonTimestamp] {
+      val attribute = "ts"
+      val getResult: GetResult[CantonTimestamp] = implicitly[GetResult[CantonTimestamp]]
+      val setParameter: SetParameter[CantonTimestamp] = implicitly[SetParameter[CantonTimestamp]]
     }
-  )
-}
 
-sealed trait OperationType extends Product with Serializable {
-  val name: String
-
-  // lazy val so that `kind` is initialized first in the subclasses
-  final lazy val toDbPrimitive: String100 =
-    // The Oracle DB schema allows up to 100 chars; Postgres, H2 map this to an enum
-    String100.tryCreate(name)
-}
-
-object OperationType {
-  case object Create extends OperationType {
-    override val name = "create"
-  }
-  case object Archive extends OperationType {
-    override val name = "archive"
-  }
-  case object TransferIn extends OperationType {
-    override val name = "transfer-in"
-  }
-  case object TransferOut extends OperationType {
-    override val name = "transfer-out"
-  }
-
-  implicit val setParameterOperationType: SetParameter[OperationType] = (v, pp) =>
-    pp >> v.toDbPrimitive
-  implicit val getResultChangeType: GetResult[OperationType] = GetResult(r =>
-    r.nextString() match {
-      case OperationType.Create.name => OperationType.Create
-      case OperationType.Archive.name => OperationType.Archive
-      case OperationType.TransferIn.name => OperationType.TransferIn
-      case OperationType.TransferOut.name => OperationType.TransferOut
-      case unknown => throw new DbDeserializationException(s"Unknown operation type [$unknown]")
+    final case class Rc(bound: RequestCounter) extends SnapshotQueryParameter[RequestCounter] {
+      val attribute = "request_counter"
+      val getResult: GetResult[RequestCounter] = implicitly[GetResult[RequestCounter]]
+      val setParameter: SetParameter[RequestCounter] = implicitly[SetParameter[RequestCounter]]
     }
-  )
+  }
+
+  sealed trait ChangeType {
+    def name: String
+
+    // lazy val so that `kind` is initialized first in the subclasses
+    final lazy val toDbPrimitive: String100 =
+      // The Oracle DB schema allows up to 100 chars; Postgres, H2 map this to an enum
+      String100.tryCreate(name)
+  }
+
+  object ChangeType {
+    case object Activation extends ChangeType {
+      override val name = "activation"
+    }
+
+    case object Deactivation extends ChangeType {
+      override val name = "deactivation"
+    }
+
+    implicit val setParameterChangeType: SetParameter[ChangeType] = (v, pp) => pp >> v.toDbPrimitive
+    implicit val getResultChangeType: GetResult[ChangeType] = GetResult(r =>
+      r.nextString() match {
+        case ChangeType.Activation.name => ChangeType.Activation
+        case ChangeType.Deactivation.name => ChangeType.Deactivation
+        case unknown => throw new DbDeserializationException(s"Unknown change type [$unknown]")
+      }
+    )
+  }
+
+  sealed trait OperationType extends Product with Serializable {
+    val name: String
+
+    // lazy val so that `kind` is initialized first in the subclasses
+    final lazy val toDbPrimitive: String100 =
+      // The Oracle DB schema allows up to 100 chars; Postgres, H2 map this to an enum
+      String100.tryCreate(name)
+  }
+
+  object OperationType {
+    case object Create extends OperationType {
+      override val name = "create"
+    }
+
+    case object Archive extends OperationType {
+      override val name = "archive"
+    }
+
+    case object TransferIn extends OperationType {
+      override val name = "transfer-in"
+    }
+
+    case object TransferOut extends OperationType {
+      override val name = "transfer-out"
+    }
+
+    implicit val setParameterOperationType: SetParameter[OperationType] = (v, pp) =>
+      pp >> v.toDbPrimitive
+    implicit val getResultChangeType: GetResult[OperationType] = GetResult(r =>
+      r.nextString() match {
+        case OperationType.Create.name => OperationType.Create
+        case OperationType.Archive.name => OperationType.Archive
+        case OperationType.TransferIn.name => OperationType.TransferIn
+        case OperationType.TransferOut.name => OperationType.TransferOut
+        case unknown => throw new DbDeserializationException(s"Unknown operation type [$unknown]")
+      }
+    )
+  }
+
 }

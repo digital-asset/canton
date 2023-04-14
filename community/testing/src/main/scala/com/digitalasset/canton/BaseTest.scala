@@ -15,7 +15,7 @@ import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
 import com.digitalasset.canton.util.FutureInstances.*
@@ -72,7 +72,7 @@ trait TestEssentials
     BaseTest.defaultStaticDomainParameters
 
   protected def signedTransactionProtocolVersionRepresentative
-      : RepresentativeProtocolVersion[SignedTopologyTransaction[TopologyChangeOp]] =
+      : RepresentativeProtocolVersion[SignedTopologyTransaction.type] =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   // default to providing an empty trace context to all tests

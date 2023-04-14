@@ -107,7 +107,7 @@ class ErrorCodeSpec
       )
       assertError(
         actual = testedErrorCode.asGrpcError(testedError)(errorLoggerSmall),
-        expectedStatusCode = testedErrorCode.category.grpcCode.get,
+        expectedStatusCode = testedErrorCode.category.grpcCode.value,
         expectedMessage = "FOO_ERROR_CODE(8,0): cause123",
         expectedDetails = details,
       )
@@ -178,7 +178,7 @@ class ErrorCodeSpec
         val expectedStatus = Status
           .newBuilder()
           .setMessage("FOO_ERROR_CODE(8,123corre): cause123")
-          .setCode(testedErrorCode.category.grpcCode.get.value())
+          .setCode(testedErrorCode.category.grpcCode.value.value())
           .addAllDetails(details.map(_.toRpcAny).asJava)
           .build()
         val testedError = TestedError()
@@ -189,7 +189,7 @@ class ErrorCodeSpec
         )
         assertError(
           actual = testedErrorCode.asGrpcError(testedError)(errorLoggerBig),
-          expectedStatusCode = testedErrorCode.category.grpcCode.get,
+          expectedStatusCode = testedErrorCode.category.grpcCode.value,
           expectedMessage = "FOO_ERROR_CODE(8,123corre): cause123",
           expectedDetails = details,
         )
@@ -203,7 +203,7 @@ class ErrorCodeSpec
           .setMessage(
             "An error occurred. Please contact the operator and inquire about the request 123correlationId"
           )
-          .setCode(testedErrorCode.category.grpcCode.get.value())
+          .setCode(testedErrorCode.category.grpcCode.value.value())
           .addDetails(requestInfo.toRpcAny)
           .addDetails(retryInfo.toRpcAny)
           .build()
@@ -228,7 +228,7 @@ class ErrorCodeSpec
         )
         assertError(
           actual = testedErrorCode.asGrpcError(testedError)(errorLoggerBig),
-          expectedStatusCode = testedErrorCode.category.grpcCode.get,
+          expectedStatusCode = testedErrorCode.category.grpcCode.value,
           expectedMessage =
             "An error occurred. Please contact the operator and inquire about the request 123correlationId",
           expectedDetails = Seq(requestInfo, retryInfo),
@@ -300,7 +300,7 @@ class ErrorCodeSpec
       val expectedStatus = Status
         .newBuilder()
         .setMessage(expectedMessage)
-        .setCode(testedErrorCode.category.grpcCode.get.value())
+        .setCode(testedErrorCode.category.grpcCode.value.value())
         .addAllDetails(expectedDetails.map(_.toRpcAny).asJava)
         .build()
 
@@ -310,7 +310,7 @@ class ErrorCodeSpec
       )
       assertError(
         actual = testedErrorCode.asGrpcError(testedError)(errorLoggerOversized),
-        expectedStatusCode = testedErrorCode.category.grpcCode.get,
+        expectedStatusCode = testedErrorCode.category.grpcCode.value,
         expectedMessage = expectedMessage,
         expectedDetails = expectedDetails,
       )

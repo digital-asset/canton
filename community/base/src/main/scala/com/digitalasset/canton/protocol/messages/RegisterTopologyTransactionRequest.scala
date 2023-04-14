@@ -6,6 +6,7 @@ package com.digitalasset.canton.protocol.messages
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.CantonRequireTypes.String255
+import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{v0, v1, v2}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
@@ -27,10 +28,10 @@ final case class RegisterTopologyTransactionRequest private (
     transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     override val domainId: DomainId,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[
-      RegisterTopologyTransactionRequest
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      RegisterTopologyTransactionRequest.type
     ]
-) extends ProtocolMessage
+) extends UnsignedProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with UnsignedProtocolMessageV2 {
@@ -56,13 +57,16 @@ final case class RegisterTopologyTransactionRequest private (
       signedTopologyTransactions = transactions.map(_.getCryptographicEvidence),
       domainId = domainId.unwrap.toProtoPrimitive,
     )
+
+  @transient override protected lazy val companionObj: RegisterTopologyTransactionRequest.type =
+    RegisterTopologyTransactionRequest
 }
 
 object RegisterTopologyTransactionRequest
     extends HasProtocolVersionedCompanion[RegisterTopologyTransactionRequest] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(
       v0.RegisterTopologyTransactionRequest
     )(
       supportedProtoVersion(_)(fromProtoV0),
@@ -110,4 +114,13 @@ object RegisterTopologyTransactionRequest
   }
 
   override protected def name: String = "RegisterTopologyTransactionRequest"
+
+  implicit val registerTopologyTransactionRequestCast
+      : ProtocolMessageContentCast[RegisterTopologyTransactionRequest] =
+    ProtocolMessageContentCast.create[RegisterTopologyTransactionRequest](
+      "RegisterTopologyTransactionRequest"
+    ) {
+      case rttr: RegisterTopologyTransactionRequest => Some(rttr)
+      case _ => None
+    }
 }

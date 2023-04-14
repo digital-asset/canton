@@ -14,6 +14,8 @@ import java.nio.file.Files
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
+// Interacting with java libraries makes null a necessity
+@SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.AsInstanceOf"))
 final case class TlsConfiguration(
     enabled: Boolean,
     certChainFile: Option[File] = None, // mutual auth is disabled if null

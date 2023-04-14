@@ -24,7 +24,7 @@ import com.digitalasset.canton.platform.apiserver.meteringreport.{
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiMeteringReportService.*
 import com.digitalasset.canton.platform.server.api.ValidationLogger
 import com.digitalasset.canton.platform.server.api.services.grpc.Logging.traceId
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import java.time.temporal.ChronoUnit

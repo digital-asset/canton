@@ -12,13 +12,14 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   User as ProtoLedgerApiUser,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 import scala.util.control.NoStackTrace
 
 final case class LedgerApiUser(
     id: String,
-    primaryParty: Option[LfPartyId],
+    primaryParty: Option[PartyId],
     isDeactivated: Boolean,
     metadata: LedgerApiObjectMeta,
 )
@@ -30,7 +31,7 @@ object LedgerApiUser {
     val ProtoLedgerApiUser(id, primaryParty, isDeactivated, metadataO, identityProviderId) = value
     Option
       .when(primaryParty.nonEmpty)(primaryParty)
-      .traverse(LfPartyId.fromString)
+      .traverse(LfPartyId.fromString(_).flatMap(PartyId.fromLfParty(_)))
       .leftMap { err =>
         ProtoDeserializationError.ValueConversionError("primaryParty", err)
       }
@@ -49,8 +50,8 @@ object LedgerApiUser {
 }
 
 final case class UserRights(
-    actAs: Set[LfPartyId],
-    readAs: Set[LfPartyId],
+    actAs: Set[PartyId],
+    readAs: Set[PartyId],
     participantAdmin: Boolean,
     identityProviderAdmin: Boolean,
 )
@@ -62,9 +63,9 @@ object UserRights {
       case (acc, Kind.Empty) => acc
       case (acc, Kind.ParticipantAdmin(value)) => acc.copy(participantAdmin = true)
       case (acc, Kind.CanActAs(value)) =>
-        acc.copy(actAs = acc.actAs + LfPartyId.assertFromString(value.party))
+        acc.copy(actAs = acc.actAs + PartyId.tryFromProtoPrimitive(value.party))
       case (acc, Kind.CanReadAs(value)) =>
-        acc.copy(readAs = acc.readAs + LfPartyId.assertFromString(value.party))
+        acc.copy(readAs = acc.readAs + PartyId.tryFromProtoPrimitive(value.party))
       case (acc, Kind.IdentityProviderAdmin(value)) =>
         acc.copy(identityProviderAdmin = true)
     })
@@ -89,7 +90,7 @@ object ListLedgerApiUsersResult {
   */
 final case class User(
     id: String,
-    primaryParty: Option[LfPartyId],
+    primaryParty: Option[PartyId],
     isActive: Boolean,
     annotations: Map[String, String],
 )

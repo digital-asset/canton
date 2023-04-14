@@ -227,6 +227,7 @@ class ServicesMetrics(
                       |exposes the total number of the sumbitted transactions.""",
       qualification = Traffic,
     )
+    @SuppressWarnings(Array("org.wartremover.warts.Null"))
     val submitOperationForDocs: Timer =
       DropwizardTimer(prefix :+ "submit_transaction" :+ "count", null)
 

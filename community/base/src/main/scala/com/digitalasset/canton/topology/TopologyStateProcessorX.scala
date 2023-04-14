@@ -306,6 +306,9 @@ class TopologyStateProcessorX(
         )
       // TODO(#11255) if this is a removal of a certificate, compute cascading deletes
       //   if boolean flag is set, then abort, otherwise notify
+      //   rules: if a namespace delegation is a root delegation, it won't be affected by the
+      //          cascading deletion of its authorizer. this will allow us to roll namespace certs
+      //          also, root cert authorization is only valid if serial == 1
       (removeMappings + mappingHash, removeTxs)
     }
   }

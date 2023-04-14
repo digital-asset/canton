@@ -9,6 +9,7 @@ import com.daml.error.{ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -22,8 +23,27 @@ object ProtocolVersionCompatibility {
   /** Returns the protocol versions supported by the participant of the current release.
     */
   def supportedProtocolsParticipant(
+      cantonNodeParameters: CantonNodeParameters,
       release: ReleaseVersion = ReleaseVersion.current,
+  ): NonEmpty[List[ProtocolVersion]] = {
+    val unstable =
+      if (cantonNodeParameters.devVersionSupport && cantonNodeParameters.nonStandardConfig)
+        ProtocolVersion.unstable.forgetNE
+      else List.empty
+
+    ReleaseVersionToProtocolVersions.getOrElse(
+      release,
+      sys.error(
+        s"Please add the supported protocol versions of a participant of release version $release to `majorMinorToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
+      ),
+    ) ++ unstable
+  }
+
+  /** Returns the protocol versions supported by the participant of the current release.
+    */
+  def supportedProtocolsParticipant(
       includeUnstableVersions: Boolean,
+      release: ReleaseVersion,
   ): NonEmpty[List[ProtocolVersion]] = {
     val unstable =
       if (includeUnstableVersions)
@@ -42,8 +62,28 @@ object ProtocolVersionCompatibility {
     * Fails if no stable protocol versions are found
     */
   def trySupportedProtocolsDomain(
+      cantonNodeParameters: CantonNodeParameters,
       release: ReleaseVersion = ReleaseVersion.current,
+  ): NonEmpty[List[ProtocolVersion]] = {
+    val unstable =
+      if (cantonNodeParameters.devVersionSupport && cantonNodeParameters.nonStandardConfig)
+        ProtocolVersion.unstable.forgetNE
+      else List.empty
+
+    ReleaseVersionToProtocolVersions.getOrElse(
+      release,
+      sys.error(
+        s"Please add the supported protocol versions of domain nodes of release version $release to `majorMinorToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
+      ),
+    ) ++ unstable
+  }
+
+  /** Returns the protocol versions supported by the domain of the current release.
+    * Fails if no stable protocol versions are found
+    */
+  def trySupportedProtocolsDomain(
       includeUnstableVersions: Boolean,
+      release: ReleaseVersion,
   ): NonEmpty[List[ProtocolVersion]] = {
     val unstable =
       if (includeUnstableVersions)
@@ -100,10 +140,10 @@ object ProtocolVersionCompatibility {
 
   /** Check used by domain nodes (mediator / sequencer) to verify whether they are able to join a domain using a specific protocol */
   def isSupportedByDomainNode(
-      haveDevVersionSupport: Boolean,
+      cantonNodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
   ): Either[String, Unit] = {
-    val supported = trySupportedProtocolsDomain(includeUnstableVersions = haveDevVersionSupport)
+    val supported = trySupportedProtocolsDomain(cantonNodeParameters)
     ProtocolVersionCompatibility
       .canClientConnectToServer(supported, protocolVersion, None)
       .leftMap(_.description)
@@ -189,13 +229,17 @@ object DomainProtocolVersion {
           // we support development versions when parsing, but catch dev versions without
           // the safety flag during config validation
           ProtocolVersionCompatibility
-            .trySupportedProtocolsDomain(includeUnstableVersions = true)
+            .trySupportedProtocolsDomain(
+              includeUnstableVersions = true,
+              release = ReleaseVersion.current,
+            )
             .contains(version),
           (),
           UnsupportedVersion(
             version,
-            ProtocolVersionCompatibility.trySupportedProtocolsDomain(includeUnstableVersions =
-              false
+            ProtocolVersionCompatibility.trySupportedProtocolsDomain(
+              includeUnstableVersions = false,
+              release = ReleaseVersion.current,
             ),
           ),
         )
@@ -222,13 +266,17 @@ object ParticipantProtocolVersion {
         _ <- Either.cond(
           // same as domain: support parsing of dev
           ProtocolVersionCompatibility
-            .supportedProtocolsParticipant(includeUnstableVersions = true)
+            .supportedProtocolsParticipant(
+              includeUnstableVersions = true,
+              release = ReleaseVersion.current,
+            )
             .contains(version),
           (),
           UnsupportedVersion(
             version,
-            ProtocolVersionCompatibility.supportedProtocolsParticipant(includeUnstableVersions =
-              false
+            ProtocolVersionCompatibility.supportedProtocolsParticipant(
+              includeUnstableVersions = false,
+              release = ReleaseVersion.current,
             ),
           ),
         )

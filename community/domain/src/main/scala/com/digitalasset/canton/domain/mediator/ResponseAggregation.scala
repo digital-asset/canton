@@ -4,11 +4,13 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.OptionT
+import cats.instances.future.catsStdInstancesForFuture
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
 import com.digitalasset.canton.error.MediatorError
@@ -17,6 +19,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, ViewHash}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -26,8 +29,35 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.{ExecutionContext, Future}
 
 private[mediator] object ResponseAggregation {
+  final case class ConsortiumVotingState(
+      threshold: PositiveInt = PositiveInt.one,
+      approvals: Set[ParticipantId] = Set.empty,
+      rejections: Set[ParticipantId] = Set.empty,
+  ) extends PrettyPrinting {
+    def approveBy(participant: ParticipantId): ConsortiumVotingState = {
+      this.copy(approvals = this.approvals + participant)
+    }
+    def rejectBy(participant: ParticipantId): ConsortiumVotingState = {
+      this.copy(rejections = this.rejections + participant)
+    }
+    def isApproved: Boolean = approvals.size >= threshold.value
+    def isRejected: Boolean = rejections.size >= threshold.value
+    override def pretty: Pretty[ConsortiumVotingState] = {
+      prettyOfClass(
+        paramIfTrue("consortium party", _.threshold.value > 1),
+        paramIfTrue("non-consortium party", _.threshold.value == 1),
+        param("threshold", _.threshold, _.threshold.value > 1),
+        param("approved by participants", _.approvals),
+        param("rejected by participants", _.rejections),
+      )
+    }
+  }
   final case class ViewState(
       pendingConfirmingParties: Set[ConfirmingParty],
+      consortiumVoting: Map[
+        LfPartyId,
+        ConsortiumVotingState,
+      ], // pendingConfirmingParties is always a subset of consortiumVoting.keys()
       distanceToThreshold: Int,
       rejections: List[(Set[LfPartyId], LocalReject)],
   ) extends PrettyPrinting {
@@ -38,6 +68,7 @@ private[mediator] object ResponseAggregation {
       prettyOfClass(
         param("distanceToThreshold", _.distanceToThreshold),
         param("pendingConfirmingParties", _.pendingConfirmingParties),
+        param("consortiumVoting", _.consortiumVoting),
         param("rejections", _.rejections),
       )
     }
@@ -49,19 +80,38 @@ private[mediator] object ResponseAggregation {
       requestId: RequestId,
       request: MediatorRequest,
       protocolVersion: ProtocolVersion,
+      topologySnapshot: TopologySnapshot,
   )(loggerFactory: NamedLoggerFactory)(implicit
-      requestTraceContext: TraceContext
-  ): ResponseAggregation = {
-    val initialState = request.informeesAndThresholdByView.map {
-      case (viewHash, (informees, threshold)) =>
+      requestTraceContext: TraceContext,
+      ec: ExecutionContext,
+  ): Future[ResponseAggregation] = {
+    val initialStateF = request.informeesAndThresholdByView.toSeq
+      .parTraverse { case (viewHash, (informees, threshold)) =>
         val confirmingParties = informees.collect { case cp: ConfirmingParty => cp }
-        viewHash -> ViewState(confirmingParties, threshold.unwrap, rejections = Nil)
-    }
+        for {
+          votingThresholds <- topologySnapshot.consortiumThresholds(confirmingParties.map(_.party))
+        } yield {
+          val consortiumVotingState = votingThresholds.map { case (party, threshold) =>
+            (party -> ConsortiumVotingState(threshold))
+          }
+          viewHash -> ViewState(
+            confirmingParties,
+            consortiumVotingState,
+            threshold.unwrap,
+            rejections = Nil,
+          )
+        }
+      }
+      .map(_.toMap)
 
-    ResponseAggregation(requestId, request, requestId.unwrap, Right(initialState))(
-      protocolVersion = protocolVersion,
-      requestTraceContext = requestTraceContext,
-    )(loggerFactory)
+    for {
+      initialState <- initialStateF
+    } yield {
+      ResponseAggregation(requestId, request, requestId.unwrap, Right(initialState))(
+        protocolVersion = protocolVersion,
+        requestTraceContext = requestTraceContext,
+      )(loggerFactory)
+    }
   }
 
   /** Creates a finalized response aggregation from a verdict.
@@ -192,13 +242,13 @@ private[mediator] final case class ResponseAggregation(
           s"The transaction view hash $viewHashO is not covered by the request"
         ),
       )
-      val ViewState(pendingConfirmingParties, distanceToThreshold, rejections) = stateOfView
-      val (newlyResponded, stillPending) =
+      val ViewState(pendingConfirmingParties, consortiumVoting, distanceToThreshold, rejections) =
+        stateOfView
+      val (newlyResponded, _) =
         pendingConfirmingParties.partition(cp => authorizedParties.contains(cp.party))
 
       logger.debug(
-        show"$requestId(view hash $viewHash): Received verdict $localVerdict for pending parties $newlyResponded by participant $sender. " +
-          show"Still waiting for $stillPending."
+        show"$requestId(view hash $viewHash): Received verdict $localVerdict for pending parties $newlyResponded by participant $sender. "
       )
       val alreadyResponded = authorizedParties -- newlyResponded.map(_.party)
       // Because some of the responders might have had some other participant already confirmed on their behalf
@@ -213,9 +263,30 @@ private[mediator] final case class ResponseAggregation(
       } else {
         localVerdict match {
           case LocalApprove() =>
-            val contribution = newlyResponded.foldLeft(0)(_ + _.weight)
+            val consortiumVotingUpdated =
+              newlyResponded.foldLeft(consortiumVoting)((votes, confirmingParty) => {
+                votes + (confirmingParty.party -> votes(confirmingParty.party).approveBy(sender))
+              })
+            val newlyRespondedFullVotes = newlyResponded.filter { case ConfirmingParty(party, _) =>
+              consortiumVotingUpdated(party).isApproved
+            }
+            logger.debug(
+              show"$requestId(view hash $viewHash): Received an approval (or reached consortium thresholds) for parties: $newlyRespondedFullVotes"
+            )
+            val contribution = newlyRespondedFullVotes.foldLeft(0)(_ + _.weight)
+            val stillPending = pendingConfirmingParties -- newlyRespondedFullVotes
+            if (newlyRespondedFullVotes.isEmpty) {
+              logger.debug(
+                show"$requestId(view hash $viewHash): Awaiting approvals or additional votes for consortiums for $stillPending"
+              )
+            }
             val nextViewState =
-              ViewState(stillPending, distanceToThreshold - contribution, rejections)
+              ViewState(
+                stillPending,
+                consortiumVotingUpdated,
+                distanceToThreshold - contribution,
+                rejections,
+              )
             val nextStatesOfViews = statesOfViews + (viewHash -> nextViewState)
             Either.cond(
               nextStatesOfViews.values.exists(_.distanceToThreshold > 0),
@@ -224,18 +295,46 @@ private[mediator] final case class ResponseAggregation(
             )
 
           case rejection: LocalReject =>
-            val nextRejections = NonEmpty(List, (authorizedParties -> rejection), rejections: _*)
-            val nextViewState = ViewState(
-              stillPending,
-              distanceToThreshold,
-              nextRejections,
-            )
-            Either.cond(
-              nextViewState.distanceToThreshold <= nextViewState.totalAvailableWeight,
-              statesOfViews + (viewHash -> nextViewState),
-              // TODO(#5337): Don't discard the rejection reasons of the other views.
-              ParticipantReject(nextRejections, protocolVersion),
-            )
+            val consortiumVotingUpdated =
+              authorizedParties.foldLeft(consortiumVoting)((votes, party) => {
+                votes + (party -> votes(party).rejectBy(sender))
+              })
+            val newRejectionsFullVotes = authorizedParties.filter(party => {
+              consortiumVotingUpdated(party).isRejected
+            })
+            if (newRejectionsFullVotes.nonEmpty) {
+              logger.debug(
+                show"$requestId(view hash $viewHash): Received a rejection (or reached consortium thresholds) for parties: $newRejectionsFullVotes"
+              )
+              val nextRejections =
+                NonEmpty(List, (newRejectionsFullVotes -> rejection), rejections *)
+              val stillPending =
+                pendingConfirmingParties.filterNot(cp => newRejectionsFullVotes.contains(cp.party))
+              val nextViewState = ViewState(
+                stillPending,
+                consortiumVotingUpdated,
+                distanceToThreshold,
+                nextRejections,
+              )
+              Either.cond(
+                nextViewState.distanceToThreshold <= nextViewState.totalAvailableWeight,
+                statesOfViews + (viewHash -> nextViewState),
+                // TODO(#5337): Don't discard the rejection reasons of the other views.
+                ParticipantReject(nextRejections, protocolVersion),
+              )
+            } else {
+              // no full votes, need more confirmations (only in consortium case)
+              logger.debug(
+                show"$requestId(view hash $viewHash): Received a rejection, but awaiting more consortium votes for: $pendingConfirmingParties"
+              )
+              val nextViewState = ViewState(
+                pendingConfirmingParties,
+                consortiumVotingUpdated,
+                distanceToThreshold,
+                rejections,
+              )
+              Right(statesOfViews + (viewHash -> nextViewState))
+            }
         }
       }
     }

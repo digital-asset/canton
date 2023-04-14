@@ -33,7 +33,7 @@ final case class RootHashMessage[+Payload <: RootHashMessagePayload](
     override val domainId: DomainId,
     viewType: ViewType,
     payload: Payload,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage])
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[RootHashMessage.type])
     extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
@@ -89,6 +89,8 @@ final case class RootHashMessage[+Payload <: RootHashMessagePayload](
       viewType,
       payload,
     )(representativeProtocolVersion)
+
+  @transient override protected lazy val companionObj: RootHashMessage.type = RootHashMessage
 }
 
 object RootHashMessage
@@ -97,7 +99,7 @@ object RootHashMessage
     ], ByteString => ParsingResult[RootHashMessagePayload]] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.RootHashMessage)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.RootHashMessage)(
       supportedProtoVersion(_)((deserializer, proto) => fromProtoV0(deserializer)(proto)),
       _.toProtoV0.toByteString,
     )
@@ -137,10 +139,11 @@ object RootHashMessage
 
   implicit def rootHashMessageProtocolMessageContentCast[Payload <: RootHashMessagePayload](implicit
       cast: RootHashMessagePayloadCast[Payload]
-  ): ProtocolMessageContentCast[RootHashMessage[Payload]] = {
-    case rhm: RootHashMessage[_] => rhm.traverse(cast.toKind)
-    case _ => None
-  }
+  ): ProtocolMessageContentCast[RootHashMessage[Payload]] =
+    ProtocolMessageContentCast.create[RootHashMessage[Payload]]("RootHashMessage") {
+      case rhm: RootHashMessage[_] => rhm.traverse(cast.toKind)
+      case _ => None
+    }
 
   trait RootHashMessagePayloadCast[+Payload <: RootHashMessagePayload] {
     def toKind(payload: RootHashMessagePayload): Option[Payload]

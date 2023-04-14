@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.Completio
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandServiceSpec.*
 import com.digitalasset.canton.platform.apiserver.services.tracking.Tracker
 import com.google.rpc.Code
-import com.google.rpc.status.{Status => StatusProto}
+import com.google.rpc.status.{Status as StatusProto}
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.{Deadline, Status}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}

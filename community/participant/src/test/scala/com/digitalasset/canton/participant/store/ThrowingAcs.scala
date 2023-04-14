@@ -61,16 +61,19 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Either[AcsError, SortedMap[LfContractId, CantonTimestamp]]] =
+  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
     Future.failed(mk(s"snapshot at $timestamp"))
+
+  override def snapshot(rc: RequestCounter)(implicit
+      traceContext: TraceContext
+  ): Future[SortedMap[LfContractId, RequestCounter]] =
+    Future.failed(mk(s"snapshot at $rc"))
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] =
-    EitherT(
-      Future.failed[Either[AcsError, Map[LfContractId, CantonTimestamp]]](
-        mk(s"contractSnapshot for $contractIds at $timestamp")
-      )
+  ): Future[Map[LfContractId, CantonTimestamp]] =
+    Future.failed[Map[LfContractId, CantonTimestamp]](
+      mk(s"contractSnapshot for $contractIds at $timestamp")
     )
 
   override protected[canton] def doPrune(beforeAndIncluding: CantonTimestamp)(implicit

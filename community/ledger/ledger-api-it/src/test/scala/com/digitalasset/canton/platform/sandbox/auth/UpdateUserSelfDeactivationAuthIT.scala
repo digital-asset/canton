@@ -37,7 +37,7 @@ final class UpdateUserSelfDeactivationAuthIT extends ServiceCallAuthTests with E
   private val testId = UUID.randomUUID().toString
 
   it should "bar the user's self-deactivation" in {
-    import com.daml.ledger.api.v1.admin.{user_management_service => proto}
+    import com.daml.ledger.api.v1.admin.{user_management_service as proto}
 
     val userIdAlice = testId + "-alice-3"
     for {

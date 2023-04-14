@@ -78,7 +78,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       MessageId.tryCreate("test").some,
       Batch(
         List(
-          ClosedEnvelope(
+          ClosedEnvelope.tryCreate(
             serializedOverride.getOrElse(
               EnvelopeContent.tryCreate(message, testedProtocolVersion).toByteString
             ),

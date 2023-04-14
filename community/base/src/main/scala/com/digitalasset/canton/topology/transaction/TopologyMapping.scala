@@ -234,12 +234,14 @@ final case class LegalIdentityClaim private (
     uid: UniqueIdentifier,
     evidence: LegalIdentityClaimEvidence,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[LegalIdentityClaim],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      LegalIdentityClaim.type
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence
     with HasProtocolVersionedWrapper[LegalIdentityClaim] {
 
-  override def companionObj = LegalIdentityClaim
+  @transient override protected lazy val companionObj: LegalIdentityClaim.type = LegalIdentityClaim
 
   protected def toProtoV0: v0.LegalIdentityClaim =
     v0.LegalIdentityClaim(
@@ -258,7 +260,7 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
   override val name: String = "LegalIdentityClaim"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(0) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.LegalIdentityClaim)(
+    ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.LegalIdentityClaim)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

@@ -171,13 +171,15 @@ private[mediator] class ConfirmationResponseProcessor(
         _ <- unitOrVerdictO match {
           // Request is well-formed, but not yet finalized
           case Right(()) =>
-            val aggregation = ResponseAggregation.fromRequest(
+            val aggregationF = ResponseAggregation.fromRequest(
               requestId,
               request,
               protocolVersion,
+              topologySnapshot,
             )(loggerFactory)
 
             for {
+              aggregation <- aggregationF
               _ <- mediatorState.add(aggregation)
             } yield {
               timeTracker.requestTick(participantResponseDeadline)
@@ -517,7 +519,7 @@ private[mediator] class ConfirmationResponseProcessor(
             // However, in some cases, the required information is not available, so we fall back to MalformedMediatorRequestResult.
             // TODO(i11326): Remove unnecessary fields from the result message types, so we can get rid of MalformedMediatorRequestResult and simplify this code.
             //  Afterwards, consider to unify this with the code in DefaultVerdictSender.
-            val rejection = viewType match {
+            val rejection = (viewType match {
               case ViewType.TransactionViewType =>
                 requestO match {
                   case Some(request @ InformeeMessage(_)) =>
@@ -561,12 +563,12 @@ private[mediator] class ConfirmationResponseProcessor(
                   rejectionReason,
                   protocolVersion,
                 )
-            }
+            }): MediatorResult
 
             val recipients = Recipients.groups(flatRecipients.map(r => NonEmpty(Set, r)))
 
             SignedProtocolMessage
-              .tryCreate(rejection, snapshot, protocolVersion)
+              .trySignAndCreate(rejection, snapshot, protocolVersion)
               .map(_ -> recipients)
           }
         batch = Batch.of(protocolVersion, envs *)

@@ -10,7 +10,7 @@ import com.digitalasset.canton.platform.indexer.PackageMetadataViewConfig.{
   DefaultInitTakesTooLongInterval,
 }
 
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{FiniteDuration, *}
 
 final case class PackageMetadataViewConfig(
     initLoadParallelism: Int = DefaultInitLoadParallelism,

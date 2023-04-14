@@ -28,7 +28,8 @@ object DAMLeTestInstance {
       loggerFactory: SuppressingLogger
   )(implicit ec: ExecutionContext): DAMLe = {
     val pureCrypto = new SymbolicPureCrypto
-    val engine = DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false)
+    val engine =
+      DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false)
     val mockPackageService =
       new PackageService(
         engine,

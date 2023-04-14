@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.InitConfigBase
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
-import com.digitalasset.canton.environment.CantonNodeBootstrapBase
+import com.digitalasset.canton.environment.{CantonNodeBootstrapBase, CantonNodeBootstrapCommon}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
 import com.digitalasset.canton.topology.*
@@ -52,9 +52,13 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
     for {
       id <- Identifier.create(idName).toEitherT[Future]
       // first, we create the namespace key for this node
-      namespaceKey <- getOrCreateSigningKey(s"$name-namespace")
+      namespaceKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
+        s"$name-namespace"
+      )
       // then, we create the topology manager signing key
-      topologyManagerSigningKey <- getOrCreateSigningKey(s"$name-topology-manager-signing")
+      topologyManagerSigningKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
+        s"$name-topology-manager-signing"
+      )
       // using the namespace key and the identifier, we create the uid of this node
       uid = UniqueIdentifier(id, Namespace(namespaceKey.fingerprint))
       nodeId = NodeId(uid)
@@ -87,7 +91,7 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
       domainTopologyManagerId = DomainTopologyManagerId(uid)
       _ <-
         if (initConfig.identity.exists(_.generateLegalIdentityCertificate)) {
-          (new LegalIdentityInit(certificateGenerator, crypto))
+          (new LegalIdentityInit(certificateGenerator, crypto.value))
             .getOrGenerateCertificate(
               uid,
               Seq(MediatorId(uid), domainTopologyManagerId),

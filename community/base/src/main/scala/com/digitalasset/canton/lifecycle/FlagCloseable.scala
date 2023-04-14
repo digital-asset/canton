@@ -83,7 +83,9 @@ trait FlagCloseable extends AutoCloseable {
 
   private def runOnShutdownTasks()(implicit traceContext: TraceContext): Unit = {
     val tasks = onShutdownTasks.getAndSet(List())
-    tasks.foreach { task =>
+    // We reverse here to not pay the costs of the linear append
+    // on each call to runOnShutdown, while still running the tasks in the order they were added.
+    tasks.reverse.foreach { task =>
       if (!task.done) {
         Try { task.run() }.fold(
           t => logger.warn(s"Task ${task.name} failed on shutdown!", t),

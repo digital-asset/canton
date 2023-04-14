@@ -19,7 +19,9 @@ import com.digitalasset.canton.version.{
 import com.google.protobuf.ByteString
 
 final case class AcknowledgeRequest private (member: Member, timestamp: CantonTimestamp)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion[AcknowledgeRequest],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      AcknowledgeRequest.type
+    ],
     override val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[AcknowledgeRequest]
     with ProtocolVersionedMemoizedEvidence {
@@ -29,7 +31,7 @@ final case class AcknowledgeRequest private (member: Member, timestamp: CantonTi
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override protected def companionObj: AcknowledgeRequest.type = AcknowledgeRequest
+  @transient override protected lazy val companionObj: AcknowledgeRequest.type = AcknowledgeRequest
 }
 
 object AcknowledgeRequest extends HasMemoizedProtocolVersionedWrapperCompanion[AcknowledgeRequest] {
@@ -44,9 +46,8 @@ object AcknowledgeRequest extends HasMemoizedProtocolVersionedWrapperCompanion[A
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(0) -> VersionedProtoConverter(
-        ProtocolVersion.v3,
-        supportedProtoVersionMemoized(v0.AcknowledgeRequest) { req => bytes =>
+      ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.AcknowledgeRequest)(
+        supportedProtoVersionMemoized(_) { req => bytes =>
           fromProtoV0(req)(Some(bytes))
         },
         _.toProtoV0.toByteString,

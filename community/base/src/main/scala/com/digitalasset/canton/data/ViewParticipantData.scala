@@ -90,7 +90,9 @@ final case class ViewParticipantData private (
     salt: Salt,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[ViewParticipantData],
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      ViewParticipantData.type
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewParticipantData](hashOps)
     with HasProtocolVersionedWrapper[ViewParticipantData]
@@ -254,7 +256,8 @@ final case class ViewParticipantData private (
         )
     }
 
-  override protected def companionObj: ViewParticipantData.type = ViewParticipantData
+  @transient override protected lazy val companionObj: ViewParticipantData.type =
+    ViewParticipantData
 
   private[ViewParticipantData] def toProtoV1: v0.ViewParticipantData = v0.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV0).toSeq,
@@ -337,11 +340,11 @@ object ViewParticipantData
   val supportedProtoVersions = SupportedProtoVersions(
     // Proto version 1 uses the same message format as version 0,
     // but interprets resolvedKeys differently. See ViewParticipantData's scaladoc for details
-    ProtoVersion(1) -> VersionedProtoConverter.mk(ProtocolVersion.v3)(v0.ViewParticipantData)(
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.ViewParticipantData)(
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter.mk(ProtocolVersion.v4)(v2.ViewParticipantData)(
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v4)(v2.ViewParticipantData)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),

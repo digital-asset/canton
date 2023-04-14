@@ -15,7 +15,6 @@ import com.daml.tracing
 import com.daml.tracing.Spans
 import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.configuration.TransactionFlatStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
@@ -35,6 +34,7 @@ import com.digitalasset.canton.platform.store.utils.{
   QueueBasedConcurrencyLimiter,
   Telemetry,
 }
+import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.mutable.ArrayBuffer
@@ -221,8 +221,8 @@ class TransactionsFlatStreamReader(
         deserializeLfValues(_, eventProjectionProperties)
       )
       .mapConcat { groupOfPayloads: Vector[EventStorageBackend.Entry[Event]] =>
-        val response = TransactionConversions.toGetTransactionsResponse(groupOfPayloads)
-        response.map(r => offsetFor(r) -> r)
+        val responses = TransactionConversions.toGetTransactionsResponse(groupOfPayloads)
+        responses.map { case (offset, response) => ApiOffset.assertFromString(offset) -> response }
       }
   }
 

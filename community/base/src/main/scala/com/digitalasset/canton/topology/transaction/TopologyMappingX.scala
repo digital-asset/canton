@@ -80,7 +80,9 @@ sealed trait TopologyMappingX extends Product with Serializable with PrettyPrint
     )
   }
 
-  def as[M <: TopologyMappingX](implicit M: ClassTag[M]): Option[M] = M.unapply(this)
+  final def select[TargetMapping <: TopologyMappingX](implicit
+      M: ClassTag[TargetMapping]
+  ): Option[TargetMapping] = M.unapply(this)
 
   protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder
 
@@ -286,7 +288,6 @@ final case class NamespaceDelegationX private (
     builder
       .add(namespace.fingerprint.unwrap)
       .add(target.fingerprint.unwrap)
-      .add(if (isRootDelegation) 1 else 0)
 }
 
 object NamespaceDelegationX {
@@ -310,7 +311,9 @@ object NamespaceDelegationX {
     sit.signatures.head1.signedBy == sit.transaction.mapping.namespace.fingerprint &&
     sit.signatures.size == 1 &&
     sit.transaction.mapping.isRootDelegation &&
-    sit.transaction.mapping.target.fingerprint == sit.transaction.mapping.namespace.fingerprint
+    sit.transaction.mapping.target.fingerprint == sit.transaction.mapping.namespace.fingerprint &&
+    // a root cert must be at serial 1
+    sit.transaction.serial == PositiveInt.one
   }
 
   def fromProtoV2(
@@ -413,9 +416,7 @@ object UnionspaceDefinitionX {
     val v2.UnionspaceDefinitionX(unionspaceP, thresholdP, ownersP) = value
     for {
       unionspace <- Fingerprint.fromProtoPrimitive(unionspaceP).map(Namespace(_))
-      threshold <- PositiveInt
-        .create(thresholdP)
-        .leftMap(ProtoDeserializationError.InvariantViolation(_))
+      threshold <- ProtoConverter.parsePositiveInt(thresholdP)
       owners <- ownersP.traverse(Fingerprint.fromProtoPrimitive)
       item <- create(unionspace, threshold, owners.map(Namespace(_)))
         .leftMap(ProtoDeserializationError.OtherError)
@@ -423,11 +424,10 @@ object UnionspaceDefinitionX {
   }
 
   def computeNamespace(
-      cryptoPureApi: CryptoPureApi,
-      owners: NonEmpty[Set[Namespace]],
+      owners: Set[Namespace]
   ): Namespace = {
-    val builder = cryptoPureApi.build(HashPurpose.UnionspaceNamespace)
-    owners.forgetNE.toSeq
+    val builder = Hash.build(HashPurpose.UnionspaceNamespace, HashAlgorithm.Sha256)
+    owners.toSeq
       .sorted(Namespace.namespaceOrder.toOrdering)
       .foreach(ns => builder.add(ns.fingerprint.unwrap))
     Namespace(Fingerprint(builder.finish().toLengthLimitedHexString))
@@ -497,7 +497,7 @@ object IdentifierDelegationX {
 final case class OwnerToKeyMappingX(
     member: Member,
     domain: Option[DomainId],
-)(keys: NonEmpty[Seq[PublicKey]])
+)(val keys: NonEmpty[Seq[PublicKey]])
     extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -520,8 +520,6 @@ final case class OwnerToKeyMappingX(
 
   override def namespace: Namespace = member.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(member.uid)
-
-  def publicKeys: Seq[PublicKey] = keys
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
@@ -560,8 +558,8 @@ final case class DomainTrustCertificateX(
     participantId: UniqueIdentifier,
     domainId: UniqueIdentifier,
 )(
-    transferOnlyToGivenTargetDomains: Boolean,
-    targetDomains: Seq[UniqueIdentifier],
+    val transferOnlyToGivenTargetDomains: Boolean,
+    val targetDomains: Seq[UniqueIdentifier],
 ) extends TopologyMappingX {
 
   def toProto: v2.DomainTrustCertificateX =
@@ -680,10 +678,10 @@ final case class ParticipantDomainPermissionX(
     domainId: UniqueIdentifier,
     participantId: UniqueIdentifier,
 )(
-    permission: ParticipantPermissionX,
-    trustLevel: TrustLevelX,
-    limits: Option[ParticipantDomainLimits],
-    loginAfter: Option[CantonTimestamp],
+    val permission: ParticipantPermissionX,
+    val trustLevel: TrustLevelX,
+    val limits: Option[ParticipantDomainLimits],
+    val loginAfter: Option[CantonTimestamp],
 ) extends TopologyMappingX {
 
   def toProto: v2.ParticipantDomainPermissionX =
@@ -748,7 +746,7 @@ final case class PartyHostingLimitsX(
     domainId: UniqueIdentifier,
     partyId: UniqueIdentifier,
 )(
-    quota: Int
+    val quota: Int
 ) extends TopologyMappingX {
 
   def toProto: v2.PartyHostingLimitsX =
@@ -800,7 +798,7 @@ final case class VettedPackagesX(
     participantId: UniqueIdentifier,
     domainId: Option[UniqueIdentifier],
 )(
-    packageIds: Seq[LfPackageId]
+    val packageIds: Seq[LfPackageId]
 ) extends TopologyMappingX {
 
   def toProto: v2.VettedPackagesX =
@@ -877,9 +875,9 @@ final case class PartyToParticipantX(
     partyId: UniqueIdentifier,
     domainId: Option[UniqueIdentifier],
 )(
-    threshold: Int,
-    participants: Seq[HostingParticipant],
-    groupAddressing: Boolean,
+    val threshold: Int,
+    val participants: Seq[HostingParticipant],
+    val groupAddressing: Boolean,
 ) extends TopologyMappingX {
 
   def toProto: v2.PartyToParticipantX =
@@ -943,8 +941,8 @@ final case class AuthorityOfX(
     partyId: UniqueIdentifier,
     domainId: Option[UniqueIdentifier],
 )(
-    threshold: Int,
-    parties: Seq[UniqueIdentifier],
+    val threshold: Int,
+    val parties: Seq[UniqueIdentifier],
 ) extends TopologyMappingX {
 
   def toProto: v2.AuthorityOfX =
@@ -1164,9 +1162,7 @@ object MediatorDomainStateX {
       group <- NonNegativeInt
         .create(groupP)
         .leftMap(ProtoDeserializationError.InvariantViolation(_))
-      threshold <- PositiveInt
-        .create(thresholdP)
-        .leftMap(ProtoDeserializationError.InvariantViolation(_))
+      threshold <- ProtoConverter.parsePositiveInt(thresholdP)
       active <- activeP.traverse(
         UniqueIdentifier.fromProtoPrimitive(_, "active").map(MediatorId(_))
       )
@@ -1190,9 +1186,9 @@ object MediatorDomainStateX {
   * UNIQUE(domain)
   */
 final case class SequencerDomainStateX private (domain: DomainId)(
-    threshold: PositiveInt,
-    active: NonEmpty[Seq[SequencerId]],
-    observers: Seq[SequencerId],
+    val threshold: PositiveInt,
+    val active: NonEmpty[Seq[SequencerId]],
+    val observers: Seq[SequencerId],
 ) extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -1250,9 +1246,7 @@ object SequencerDomainStateX {
     val v2.SequencerDomainStateX(domainIdP, thresholdP, activeP, observersP) = value
     for {
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain")
-      threshold <- PositiveInt
-        .create(thresholdP)
-        .leftMap(ProtoDeserializationError.InvariantViolation(_))
+      threshold <- ProtoConverter.parsePositiveInt(thresholdP)
       active <- activeP.traverse(
         UniqueIdentifier.fromProtoPrimitive(_, "active").map(SequencerId(_))
       )
@@ -1269,7 +1263,7 @@ object SequencerDomainStateX {
 
 // Purge topology transaction-x
 final case class PurgeTopologyTransactionX private (domain: DomainId)(
-    mappings: NonEmpty[Seq[TopologyMappingX]]
+    val mappings: NonEmpty[Seq[TopologyMappingX]]
 ) extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =

@@ -12,7 +12,7 @@ import com.daml.logging.entries.{LoggingEntry, LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.grpc.GrpcStatuses
-import com.google.rpc.status.{Status => RpcStatus}
+import com.google.rpc.status.{Status as RpcStatus}
 
 import java.time.Duration
 

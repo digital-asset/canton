@@ -7,7 +7,7 @@ import cats.instances.future.*
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.crypto.store.CryptoPublicStore
-import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrap}
+import com.digitalasset.canton.environment.CantonNodeBootstrapBase
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
@@ -19,9 +19,9 @@ import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class GrpcInitializationService[T <: CantonNode](
+class GrpcInitializationService(
     clock: Clock,
-    bootstrap: CantonNodeBootstrap[T],
+    bootstrap: CantonNodeBootstrapBase[_, _, _, _],
     cryptoPublicStore: CryptoPublicStore,
 )(implicit ec: ExecutionContext)
     extends InitializationServiceGrpc.InitializationService {

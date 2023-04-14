@@ -32,6 +32,7 @@ private[backend] abstract class Field[FROM, TO, CONVERTED](implicit
       .map(extract(stringInterning) andThen convert)
       .toArray(classTag)
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   final def prepareData(preparedStatement: PreparedStatement, index: Int, value: Any): Unit =
     prepareDataTemplate(
       preparedStatement,
@@ -54,6 +55,7 @@ private[backend] abstract class TrivialField[FROM, TO](implicit classTag: ClassT
 
 private[backend] trait TrivialOptionalField[FROM, TO >: Null <: AnyRef]
     extends Field[FROM, Option[TO], TO] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[TO] => TO = _.orNull
 }
 
@@ -75,6 +77,7 @@ private[backend] case class Integer[FROM](extract: StringInterning => FROM => In
 
 private[backend] case class IntOptional[FROM](extract: StringInterning => FROM => Option[Int])
     extends Field[FROM, Option[Int], java.lang.Integer] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Int] => java.lang.Integer = _.map(Int.box).orNull
 }
 
@@ -83,23 +86,27 @@ private[backend] case class Bigint[FROM](extract: StringInterning => FROM => Lon
 
 private[backend] case class BigintOptional[FROM](extract: StringInterning => FROM => Option[Long])
     extends Field[FROM, Option[Long], java.lang.Long] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Long] => java.lang.Long = _.map(Long.box).orNull
 }
 
 private[backend] case class SmallintOptional[FROM](extract: StringInterning => FROM => Option[Int])
     extends Field[FROM, Option[Int], java.lang.Integer] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Int] => java.lang.Integer = _.map(Int.box).orNull
 }
 
 private[backend] case class BooleanOptional[FROM](
     extract: StringInterning => FROM => Option[Boolean]
 ) extends Field[FROM, Option[Boolean], java.lang.Boolean] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Boolean] => lang.Boolean = _.map(Boolean.box).orNull
 }
 
 private[backend] case class StringArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[String]]
 ) extends Field[FROM, Option[Iterable[String]], Array[String]] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Iterable[String]] => Array[String] = _.map(_.toArray).orNull
 }
 
@@ -111,5 +118,6 @@ private[backend] case class IntArray[FROM](extract: StringInterning => FROM => I
 private[backend] case class IntArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[Int]]
 ) extends Field[FROM, Option[Iterable[Int]], Array[Int]] {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Iterable[Int]] => Array[Int] = _.map(_.toArray).orNull
 }

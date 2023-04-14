@@ -30,6 +30,7 @@ private[apiserver] object GrpcServer {
   // allow for extra information such as the exception stack trace.
   private val MaximumStatusDescriptionLength = 4 * 1024 // 4 KB
 
+  @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.IsInstanceOf"))
   def owner(
       address: Option[String],
       desiredPort: Port,
@@ -76,6 +77,7 @@ private[apiserver] object GrpcServer {
   // to still work.
   // The "proxy" services will not show up on the reflection service, because of the way it
   // processes service definitions via protobuf file descriptors.
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private def toLegacyService(service: BindableService): Option[ServerServiceDefinition] = {
     val `com.daml` = "com.daml"
     val `com.digitalasset` = "com.digitalasset"

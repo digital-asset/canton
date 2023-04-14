@@ -75,7 +75,7 @@ class DomainConnectivityService(
   ): Future[v0.ConnectDomainResponse] = {
     val resp = for {
       alias <- mapErr(DomainAlias.create(domainAlias))
-      success <- mapErrNew(sync.connectDomain(alias, keepRetrying))
+      success <- mapErrNewET(sync.connectDomain(alias, keepRetrying))
       _ <- waitUntilActiveIfSuccess(success, alias)
     } yield v0.ConnectDomainResponse(connectedSuccessfully = success)
     EitherTUtil.toFuture(resp)
@@ -86,7 +86,7 @@ class DomainConnectivityService(
   )(implicit traceContext: TraceContext): Future[v0.DisconnectDomainResponse] = {
     val res = for {
       alias <- mapErr(DomainAlias.create(domainAlias))
-      disconnect <- mapErrNew(sync.disconnectDomain(alias))
+      disconnect <- mapErrNewET(sync.disconnectDomain(alias))
     } yield disconnect
     EitherTUtil
       .toFuture(res)
@@ -127,10 +127,10 @@ class DomainConnectivityService(
     logger.info(show"Registering ${request.domainAlias}")
     val resp = for {
       conf <- mapErr(DomainConnectionConfig.fromProtoV0(request))
-      _ <- mapErrNew(sync.addDomain(conf))
+      _ <- mapErrNewET(sync.addDomain(conf))
       _ <-
         if (!conf.manualConnect) for {
-          success <- mapErrNew(sync.connectDomain(conf.domain, keepRetrying = false))
+          success <- mapErrNewET(sync.connectDomain(conf.domain, keepRetrying = false))
           _ <- waitUntilActiveIfSuccess(success, conf.domain)
         } yield ()
         else EitherT.rightT[Future, StatusRuntimeException](())
@@ -143,7 +143,7 @@ class DomainConnectivityService(
   )(implicit traceContext: TraceContext): Future[v0.ModifyDomainResponse] = {
     val resp = for {
       conf <- mapErr(DomainConnectionConfig.fromProtoV0(request))
-      _ <- mapErrNew(sync.modifyDomain(conf))
+      _ <- mapErrNewET(sync.modifyDomain(conf))
     } yield v0.ModifyDomainResponse()
     EitherTUtil.toFuture(resp)
   }
@@ -165,7 +165,7 @@ class DomainConnectivityService(
           )
       })
       accepted <- optAgreement.fold(EitherT.rightT[Future, StatusRuntimeException](false))(ag =>
-        mapErrNew(EitherT.right(agreementService.hasAcceptedAgreement(domainId, ag.id)))
+        mapErrNewET(EitherT.right(agreementService.hasAcceptedAgreement(domainId, ag.id)))
       )
       agreement = optAgreement.map(ag =>
         v0.Agreement(ag.id.toProtoPrimitive, ag.text.toProtoPrimitive)
@@ -179,7 +179,7 @@ class DomainConnectivityService(
   ): EitherT[Future, StatusRuntimeException, DomainConnectionInfo] = {
     for {
       alias <- mapErr(DomainAlias.create(domainAlias))
-      connectionConfig <- mapErrNew(
+      connectionConfig <- mapErrNewET(
         sync
           .domainConnectionConfigByAlias(alias)
           .leftMap(_ => SyncServiceUnknownDomain.Error(alias))
@@ -210,7 +210,7 @@ class DomainConnectivityService(
   def reconnectDomains(ignoreFailures: Boolean): Future[Unit] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      aliases <- mapErrNew(sync.reconnectDomains(ignoreFailures = ignoreFailures))
+      aliases <- mapErrNewET(sync.reconnectDomains(ignoreFailures = ignoreFailures))
       _ <- aliases.parTraverse(waitUntilActive)
     } yield ()
     EitherTUtil.toFuture(ret)

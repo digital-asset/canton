@@ -61,6 +61,7 @@ class StringInterningView()
     extends StringInterning
     with InternizingStringInterningView
     with UpdatingStringInterningView {
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private var raw: RawStringInterning = RawStringInterning.from(Nil)
 
   private def rawAccessor: StringInterningAccessor[String] = new StringInterningAccessor[String] {

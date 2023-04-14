@@ -25,24 +25,28 @@ package object logging {
   private[services] def parties(partyNames: Iterable[Party]): LoggingEntry =
     "parties" -> partyNames
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private[services] def partyStrings(partyNames: Iterable[String]): LoggingEntry =
     parties(partyNames.asInstanceOf[Iterable[Party]])
 
   private[services] def party(partyName: Party): LoggingEntry =
     "parties" -> Seq(partyName)
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private[services] def partyString(partyName: String): LoggingEntry =
     party(partyName.asInstanceOf[Party])
 
   private[services] def actAs(partyNames: Iterable[Party]): LoggingEntry =
     "actAs" -> partyNames
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private[services] def actAsStrings(partyNames: Iterable[String]): LoggingEntry =
     actAs(partyNames.asInstanceOf[Iterable[Party]])
 
   private[services] def readAs(partyNames: Iterable[Party]): LoggingEntry =
     "readAs" -> partyNames
 
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private[services] def readAsStrings(partyNames: Iterable[String]): LoggingEntry =
     readAs(partyNames.asInstanceOf[Iterable[Party]])
 
