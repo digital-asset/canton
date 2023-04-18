@@ -22,7 +22,7 @@ import com.digitalasset.canton.platform.store.dao.DbDispatcher
 
 import scala.concurrent.{ExecutionContext, Future}
 
-private[platform] case class InitializeParallelIngestion(
+private[platform] final case class InitializeParallelIngestion(
     providedParticipantId: Ref.ParticipantId,
     ingestionStorageBackend: IngestionStorageBackend[_],
     parameterStorageBackend: ParameterStorageBackend,

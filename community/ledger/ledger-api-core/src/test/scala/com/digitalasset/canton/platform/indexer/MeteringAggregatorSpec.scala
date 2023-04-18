@@ -8,6 +8,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.daml.metrics.{DatabaseMetrics, Metrics}
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.{
   ParticipantMetering,
@@ -128,7 +129,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
         transactionMetering.last.ledgerOffset,
       )
 
-      runUnderTest(transactionMetering)
+      runUnderTest(transactionMetering).discard
 
       verify(meteringStore).insertParticipantMetering(Vector(expected))(conn)
       verify(meteringParameterStore).updateLedgerMeteringEnd(
@@ -145,7 +146,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
       override val timeNow = lastAggEndTime.plusHours(1).plusMinutes(-5)
       when(meteringParameterStore.assertLedgerMeteringEnd(conn))
         .thenReturn(LedgerMeteringEnd(lastAggOffset, toTS(lastAggEndTime)))
-      runUnderTest(Vector.empty)
+      runUnderTest(Vector.empty).discard
       verifyNoMoreInteractions(meteringStore)
     }
 
@@ -162,7 +163,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
         )
       }
 
-      runUnderTest(transactionMetering)
+      runUnderTest(transactionMetering).discard
 
       val participantMeteringCaptor = ArgCaptor[Vector[ParticipantMetering]]
       verify(meteringStore).insertParticipantMetering(participantMeteringCaptor)(any[Connection])
@@ -172,7 +173,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
 
     "increase ledger metering end even if there are not transaction metering records" in new TestSetup {
 
-      runUnderTest(Vector.empty[TransactionMetering])
+      runUnderTest(Vector.empty[TransactionMetering]).discard
 
       verify(meteringParameterStore).updateLedgerMeteringEnd(
         LedgerMeteringEnd(lastAggOffset, toTS(lastAggEndTime.plusHours(1)))
@@ -194,7 +195,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
       runUnderTest(
         transactionMetering,
         maybeLedgerEnd = Some(Offset.fromHexString(Ref.HexString.assertFromString("02"))),
-      )
+      ).discard
 
       verify(meteringParameterStore, never).updateLedgerMeteringEnd(any[LedgerMeteringEnd])(
         any[Connection]
@@ -230,7 +231,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
           dispatcher,
           () => toTS(timeNow),
         )
-      underTest.initialize()
+      underTest.initialize().discard
       val expected = LedgerMeteringEnd(
         Offset.beforeBegin,
         toTS(timeNow.truncatedTo(ChronoUnit.HOURS).minusHours(1)),

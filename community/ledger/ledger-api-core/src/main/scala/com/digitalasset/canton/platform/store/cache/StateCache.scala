@@ -13,7 +13,7 @@ import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractSt
 import com.digitalasset.canton.platform.store.cache.StateCache.PendingUpdatesState
 
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 /** This class is a wrapper around a Caffeine cache designed to handle correct resolution of
   * concurrent updates for the same key.
@@ -24,6 +24,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * The cache's logical time (i.e. the `cacheIndex`) is used for establishing precedence of cache updates
   * stemming from read-throughs triggered from command interpretation on cache misses.
   */
+@SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
 private[platform] case class StateCache[K, V](
     initialCacheIndex: Offset,
     cache: Cache[K, V],
@@ -58,7 +59,7 @@ private[platform] case class StateCache[K, V](
   def putBatch(validAt: Offset, batch: Map[K, V])(implicit loggingContext: LoggingContext): Unit =
     Timed.value(
       registerUpdateTimer, {
-        pendingUpdates.synchronized {
+        blocking(pendingUpdates.synchronized {
           // The mutable contract state cache update stream should generally increase the cacheIndex strictly monotonically.
           // However, the most recent updates can be replayed in case of failure of the mutable contract state cache update stream.
           // In this case, we must ignore the already seen updates (i.e. that have `validAt` before or at the cacheIndex).
@@ -79,7 +80,7 @@ private[platform] case class StateCache[K, V](
             logger.warn(
               s"Ignoring incoming synchronous update at an index ($validAt) equal to or before the cache index ($cacheIndex)"
             )
-        }
+        })
       },
     )
 
@@ -97,7 +98,7 @@ private[platform] case class StateCache[K, V](
       loggingContext: LoggingContext
   ): Future[V] = Timed.value(
     registerUpdateTimer,
-    pendingUpdates.synchronized {
+    blocking(pendingUpdates.synchronized {
       val validAt = cacheIndex
       val eventualValue = Future.delegate(fetchAsync(validAt))
       val pendingUpdatesForKey = pendingUpdates.getOrElseUpdate(key, PendingUpdatesState.empty)
@@ -107,7 +108,7 @@ private[platform] case class StateCache[K, V](
         registerEventualCacheUpdate(key, eventualValue, validAt)
           .flatMap(_ => eventualValue)
       } else eventualValue
-    },
+    }),
   )
 
   /** Resets the cache and cancels are pending asynchronous updates.
@@ -115,11 +116,11 @@ private[platform] case class StateCache[K, V](
     * @param resetAtOffset The cache re-initialization offset
     */
   def reset(resetAtOffset: Offset): Unit =
-    pendingUpdates.synchronized {
+    blocking(pendingUpdates.synchronized {
       cacheIndex = resetAtOffset
       pendingUpdates.clear()
       cache.invalidateAll()
-    }
+    })
 
   private def registerEventualCacheUpdate(
       key: K,
@@ -130,7 +131,7 @@ private[platform] case class StateCache[K, V](
       .map { (value: V) =>
         Timed.value(
           registerUpdateTimer,
-          pendingUpdates.synchronized {
+          blocking(pendingUpdates.synchronized {
             pendingUpdates.get(key) match {
               case Some(pendingForKey) =>
                 // Only update the cache if the current update is targeting the cacheIndex
@@ -149,7 +150,7 @@ private[platform] case class StateCache[K, V](
                   s"Pending updates tracker for $key not registered. This could be due to a transient error causing a restart in the index service."
                 )
             }
-          },
+          }),
         )
       }
       .recover {
@@ -158,14 +159,18 @@ private[platform] case class StateCache[K, V](
         // Hence, this scenario is not considered an error condition and should not be logged as such.
         // TODO(i12293) Remove this type-check when properly caching divulgence lookups
         case contractNotFound: ContractReadThroughNotFound =>
-          pendingUpdates.synchronized {
-            removeFromPending(key)
-          }
+          blocking(
+            pendingUpdates.synchronized(
+              removeFromPending(key)
+            )
+          )
           logger.debug(s"Not caching negative lookup for contract at key $key", contractNotFound)
         case err =>
-          pendingUpdates.synchronized {
-            removeFromPending(key)
-          }
+          blocking(
+            pendingUpdates.synchronized(
+              removeFromPending(key)
+            )
+          )
           logger.warn(s"Failure in pending cache update for key $key", err)
       }
 
@@ -200,7 +205,7 @@ object StateCache {
     * @param latestValidAt Highest version of any pending update.
     */
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  private[cache] case class PendingUpdatesState(
+  private[cache] final case class PendingUpdatesState(
       var pendingCount: Long,
       var latestValidAt: Offset,
   )

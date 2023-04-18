@@ -12,6 +12,7 @@ import io.grpc.reflection.v1alpha.{
   ServerReflectionResponse,
 }
 import org.scalatest.Inspectors.*
+import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -22,7 +23,8 @@ final class ReflectionIT
     extends AsyncWordSpec
     with Matchers
     with SandboxFixture
-    with SuiteResourceManagementAroundAll {
+    with SuiteResourceManagementAroundAll
+    with OptionValues {
 
   private val listServices: ServerReflectionRequest =
     ServerReflectionRequest.newBuilder().setHost("127.0.0.1").setListServices("").build()
@@ -77,6 +79,6 @@ final class ReflectionIT
         .newStub(channel)
         .serverReflectionInfo(_)
         .onNext(request)
-    ).first().map(_.get)
+    ).first().map(_.value)
 
 }

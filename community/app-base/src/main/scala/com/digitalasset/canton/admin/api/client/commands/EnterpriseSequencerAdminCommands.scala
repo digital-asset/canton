@@ -12,11 +12,18 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.admin.{v0, v1}
-import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
+import com.digitalasset.canton.domain.admin.v2.SequencerInitializationServiceGrpc
+import com.digitalasset.canton.domain.admin.{v0, v1, v2}
+import com.digitalasset.canton.domain.sequencing.admin.grpc.{
+  InitializeSequencerRequest,
+  InitializeSequencerRequestX,
+  InitializeSequencerResponse,
+  InitializeSequencerResponseX,
+}
 import com.digitalasset.canton.domain.sequencing.sequencer.{LedgerIdentity, SequencerSnapshot}
 import com.digitalasset.canton.pruning.admin.v0.LocatePruningTimestamp
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.GenericStoredTopologyTransactionsX
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -55,7 +62,11 @@ object EnterpriseSequencerAdminCommands {
   }
 
   sealed trait Initialize[ProtoRequest]
-      extends BaseSequencerInitializationCommand[ProtoRequest, v0.InitResponse, InitResponse] {
+      extends BaseSequencerInitializationCommand[
+        ProtoRequest,
+        v0.InitResponse,
+        InitializeSequencerResponse,
+      ] {
     protected def domainId: DomainId
     protected def topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive]
 
@@ -63,15 +74,22 @@ object EnterpriseSequencerAdminCommands {
 
     protected def snapshotO: Option[SequencerSnapshot]
 
-    protected def serializer: InitRequest => ProtoRequest
+    protected def serializer: InitializeSequencerRequest => ProtoRequest
 
     override def createRequest(): Either[String, ProtoRequest] = {
-      val request = InitRequest(domainId, topologySnapshot, domainParameters.toInternal, snapshotO)
+      val request = InitializeSequencerRequest(
+        domainId,
+        topologySnapshot,
+        domainParameters.toInternal,
+        snapshotO,
+      )
       Right(serializer(request))
     }
 
-    override def handleResponse(response: v0.InitResponse): Either[String, InitResponse] =
-      InitResponse
+    override def handleResponse(
+        response: v0.InitResponse
+    ): Either[String, InitializeSequencerResponse] =
+      InitializeSequencerResponse
         .fromProtoV0(response)
         .leftMap(err => s"Failed to deserialize response: $err")
 
@@ -86,7 +104,7 @@ object EnterpriseSequencerAdminCommands {
         snapshotO: Option[SequencerSnapshot],
     ) extends Initialize[v0.InitRequest] {
 
-      override protected def serializer: InitRequest => v0.InitRequest = _.toProtoV0
+      override protected def serializer: InitializeSequencerRequest => v0.InitRequest = _.toProtoV0
 
       override def submitRequest(
           service: v0.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
@@ -102,7 +120,7 @@ object EnterpriseSequencerAdminCommands {
         snapshotO: Option[SequencerSnapshot],
     ) extends Initialize[v1.InitRequest] {
 
-      override protected def serializer: InitRequest => v1.InitRequest = _.toProtoV1
+      override protected def serializer: InitializeSequencerRequest => v1.InitRequest = _.toProtoV1
 
       override def submitRequest(
           service: v0.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
@@ -120,6 +138,43 @@ object EnterpriseSequencerAdminCommands {
         V1(domainId, topologySnapshot, domainParameters, snapshotO)
       else V0(domainId, topologySnapshot, domainParameters, snapshotO)
     }
+  }
+
+  final case class InitializeX(
+      topologySnapshot: GenericStoredTopologyTransactionsX,
+      domainParameters: com.digitalasset.canton.protocol.StaticDomainParameters,
+      sequencerSnapshot: Option[SequencerSnapshot],
+  ) extends GrpcAdminCommand[
+        v2.InitializeSequencerRequest,
+        v2.InitializeSequencerResponse,
+        InitializeSequencerResponseX,
+      ] {
+    override type Svc = v2.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub
+
+    override def createService(
+        channel: ManagedChannel
+    ): SequencerInitializationServiceGrpc.SequencerInitializationServiceStub =
+      v2.SequencerInitializationServiceGrpc.stub(channel)
+
+    override def submitRequest(
+        service: SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
+        request: v2.InitializeSequencerRequest,
+    ): Future[v2.InitializeSequencerResponse] =
+      service.initialize(request)
+
+    override def createRequest(): Either[String, v2.InitializeSequencerRequest] =
+      Right(
+        InitializeSequencerRequestX(
+          topologySnapshot,
+          domainParameters,
+          sequencerSnapshot,
+        ).toProtoV2
+      )
+
+    override def handleResponse(
+        response: v2.InitializeSequencerResponse
+    ): Either[String, InitializeSequencerResponseX] =
+      InitializeSequencerResponseX.fromProtoV2(response).leftMap(_.toString)
   }
 
   final case class Snapshot(timestamp: CantonTimestamp)

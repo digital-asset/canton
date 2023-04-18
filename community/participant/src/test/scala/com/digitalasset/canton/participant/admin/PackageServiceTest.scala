@@ -100,6 +100,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
           )
           .value
           .map(_.valueOrFail("append dar"))
+          .failOnShutdown
         packages <- packageStore.listPackages()
         dar <- packageStore.getDar(hash)
       } yield {
@@ -125,6 +126,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
           )
           .value
           .map(_.valueOrFail("should be right"))
+          .failOnShutdown
         packages <- packageStore.listPackages()
         dar <- packageStore.getDar(hash)
       } yield {
@@ -148,6 +150,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
             false,
           )
           .valueOrFail("appending dar")
+          .failOnShutdown
         deps <- sut.packageDependencies(List(mainPackageId)).value
       } yield {
         // test for explict dependencies
@@ -175,7 +178,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
             vetAllPackages = false,
             synchronizeVetting = false,
           )
-        )("append illformed.dar")
+        )("append illformed.dar").failOnShutdown
       } yield {
         error match {
           case validation: PackageServiceError.Validation.ValidationError.Error =>

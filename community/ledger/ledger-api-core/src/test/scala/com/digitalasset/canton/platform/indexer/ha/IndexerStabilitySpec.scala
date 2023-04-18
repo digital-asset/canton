@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.indexer.ha
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.ResourceContext
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.store.DbType
 import com.digitalasset.canton.platform.store.backend.{
   DataSourceStorageBackend,
@@ -102,7 +103,7 @@ trait IndexerStabilitySpec
         // as the only externally visible signal is the health status of the indexer,
         // which is only "unhealthy" while RecoveringIndexer is waiting to restart.
         // Instead, we just wait a short time.
-        Thread.sleep(1000L)
+        Threading.sleep(1000L)
 
         // Verify the integrity of the index database
         integrityStorageBackend.verifyIntegrity()(connection)

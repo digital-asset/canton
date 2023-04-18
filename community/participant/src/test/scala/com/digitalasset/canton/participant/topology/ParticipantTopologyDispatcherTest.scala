@@ -65,10 +65,17 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
   val slice2 = transactions.slice(slice1.length, transactions.length)
 
   private def mk(expect: Int) = {
-    val source = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    val source = new InMemoryTopologyStore(
+      TopologyStoreId.AuthorizedStore,
+      loggerFactory,
+      timeouts,
+      futureSupervisor,
+    )
     val target = new InMemoryTopologyStore(
       TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
       loggerFactory,
+      timeouts,
+      futureSupervisor,
     )
     val manager = new ParticipantTopologyManager(
       clock,
@@ -77,6 +84,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       timeouts,
       testedProtocolVersion,
       loggerFactory,
+      futureSupervisor,
     )
     val dispatcher =
       new ParticipantTopologyDispatcher(manager, timeouts, loggerFactory)
@@ -149,6 +157,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         manager.authorize(x, Some(publicKey.fingerprint), testedProtocolVersion)
       )
       .value
+      .failOnShutdown
 
   private def dispatcherConnected(
       dispatcher: ParticipantTopologyDispatcher,

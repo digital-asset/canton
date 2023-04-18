@@ -11,6 +11,7 @@ import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFai
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, CryptoPublicStoreError}
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
@@ -54,18 +55,21 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
     } yield (change, fingerprint, replaceExistingP, forceChangeP)
 
     val authorizationSuccess = for {
-      authData <- EitherT.fromEither[Future](
+      authData <- EitherT.fromEither[FutureUnlessShutdown](
         authDataE.leftMap(ProtoDeserializationFailure.Wrap(_))
       )
-      element <- EitherT.fromEither[Future](elementE)
+      element <- EitherT.fromEither[FutureUnlessShutdown](elementE)
       (op, fingerprint, replace, force) = authData
-      tx <- manager.genTransaction(op, element, protocolVersion).leftWiden[CantonError]
+      tx <- manager
+        .genTransaction(op, element, protocolVersion)
+        .leftWiden[CantonError]
+        .mapK(FutureUnlessShutdown.outcomeK)
       success <- manager
         .authorize(tx, fingerprint, protocolVersion, force = force, replaceExisting = replace)
         .leftWiden[CantonError]
     } yield new AuthorizationSuccess(success.getCryptographicEvidence)
 
-    CantonGrpcUtil.mapErrNew(authorizationSuccess)
+    CantonGrpcUtil.mapErrNewEUS(authorizationSuccess)
   }
 
   override def authorizePartyToParticipant(
@@ -170,7 +174,7 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
           .fromEither[Future](SignedTopologyTransaction.fromByteString(request.serialized))
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
-      _ <- mapErrNew(
+      _ <- mapErrNewEUS(
         manager.add(parsed, force = true, replaceExisting = true, allowDuplicateMappings = true)
       )
     } yield AdditionSuccess()

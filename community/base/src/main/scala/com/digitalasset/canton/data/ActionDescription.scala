@@ -142,6 +142,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
             _stakeholders,
             _signatories,
             _choiceObservers,
+            _choiceAuthorizers,
             _children,
             exerciseResult,
             _key,

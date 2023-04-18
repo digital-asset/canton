@@ -29,8 +29,7 @@ object JvmRulesPlugin extends AutoPlugin {
     headerLicense := Some(
       HeaderLicense
         .Custom( // When updating the year here, also update .circleci/enterpriseAppHeaderCheck.sh and damlRepoHeaderSettings below
-          """|Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates
-             |
+          """|Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates.
              |Proprietary code. All rights reserved.
              |""".stripMargin
         )
@@ -65,8 +64,8 @@ object JvmRulesPlugin extends AutoPlugin {
   )
 
   lazy val dotCommentStyle = HeaderCommentStyle(
-    new LineCommentCreator(s"..${System.lineSeparator()}    "),
-    HeaderPattern.commentStartingWith(s"..${System.lineSeparator()}    "),
+    new LineCommentCreator(s"..${System.lineSeparator()}  "),
+    HeaderPattern.commentStartingWith(s"..${System.lineSeparator()}  "),
   )
 
   lazy val wartsDisabledWithSystemProperty = System.getProperty("canton-disable-warts") == "true"

@@ -798,10 +798,10 @@ trait TopologyStoreTest
           )
           val snd = List[ValidatedTopologyTransaction](
             factory.mkAdd(OwnerToKeyMapping(ParticipantId(uid), factory.SigningKeys.key7)),
-            factory.mkAdd(OwnerToKeyMapping(sequencer, factory.SigningKeys.key3)),
-            factory.mkAdd(OwnerToKeyMapping(sequencer, factory.SigningKeys.key4)),
+            factory.mkAdd(OwnerToKeyMapping(sequencerId, factory.SigningKeys.key3)),
+            factory.mkAdd(OwnerToKeyMapping(sequencerId, factory.SigningKeys.key4)),
             factory.mkAdd(OwnerToKeyMapping(ParticipantId(uid2), factory.SigningKeys.key5)),
-            factory.mkAdd(OwnerToKeyMapping(sequencer, factory.SigningKeys.key5)),
+            factory.mkAdd(OwnerToKeyMapping(sequencerId, factory.SigningKeys.key5)),
           )
           val dummy = (1 to 110)
             .map { x =>
@@ -818,7 +818,7 @@ trait TopologyStoreTest
           } yield {
             initial shouldBe Map[KeyOwner, Seq[PublicKey]](
               domainManager -> Seq(factory.SigningKeys.key1),
-              sequencer -> Seq(factory.SigningKeys.key3, factory.SigningKeys.key4),
+              sequencerId -> Seq(factory.SigningKeys.key3, factory.SigningKeys.key4),
             )
           }
         }
@@ -846,8 +846,12 @@ trait TopologyStoreTest
           val first = List[ValidatedTopologyTransaction](ns1k1, p2p1, p2p2, okmS, okmE, crtE)
           for {
             _ <- append(store, ts, first)
-            bootstrap <- store.findParticipantOnboardingTransactions(participant1, domainId)
-            empty1 <- store.findParticipantOnboardingTransactions(participant2, domainId)
+            bootstrap <- store
+              .findParticipantOnboardingTransactions(participant1, domainId)
+              .failOnShutdown
+            empty1 <- store
+              .findParticipantOnboardingTransactions(participant2, domainId)
+              .failOnShutdown
           } yield {
             empty1 shouldBe empty
             bootstrap shouldBe List(ns1k1, okmS, okmE, crtE)

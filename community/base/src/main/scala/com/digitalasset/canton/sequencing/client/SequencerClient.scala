@@ -13,7 +13,13 @@ import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.crypto.{Crypto, HashPurpose, SyncCryptoApi, SyncCryptoClient}
+import com.digitalasset.canton.crypto.{
+  Crypto,
+  CryptoPureApi,
+  HashPurpose,
+  SyncCryptoApi,
+  SyncCryptoClient,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.HealthReporting.MutableHealthComponent
@@ -52,10 +58,7 @@ import com.digitalasset.canton.sequencing.handshake.SequencerHandshake
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequest.usingSignedSubmissionRequest
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
-import com.digitalasset.canton.store.SequencedEventStore.{
-  OrdinarySequencedEvent,
-  PossiblyIgnoredSequencedEvent,
-}
+import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -75,7 +78,7 @@ import io.opentelemetry.api.trace.Tracer
 import java.nio.file.Path
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{ArrayBlockingQueue, BlockingQueue, LinkedBlockingQueue}
+import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
 import scala.concurrent.*
 import scala.concurrent.duration.*
 import scala.util.{Failure, Success, Try}
@@ -167,6 +170,7 @@ class SequencerClient(
     metrics: SequencerClientMetrics,
     recorderO: Option[SequencerClientRecorder],
     replayEnabled: Boolean,
+    cryptoPureApi: CryptoPureApi,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
     initialCounterLowerBound: SequencerCounter = SequencerCounter.Genesis,
@@ -176,6 +180,10 @@ class SequencerClient(
     with NamedLogging
     with HasFlushFuture
     with Spanning {
+
+  private val sequencerAggregator =
+    new SequencerAggregator(cryptoPureApi, config.eventInboxSize, loggerFactory)
+
   private val currentTransport =
     new AtomicReference[SequencerClientTransport](sequencerClientTransport)
   private def transport: SequencerClientTransport = currentTransport.get
@@ -209,12 +217,6 @@ class SequencerClient(
   private val handlerIdle: AtomicReference[Promise[Unit]] = new AtomicReference(
     Promise.successful(())
   )
-
-  /** Queue containing received and not yet handled events.
-    * Used for batched processing.
-    */
-  private val receivedEvents: BlockingQueue[OrdinarySerializedEvent] =
-    new ArrayBlockingQueue[OrdinarySerializedEvent](config.eventInboxSize.unwrap)
 
   private lazy val printer =
     new CantonPrettyPrinter(loggingConfig.api.maxStringLength, loggingConfig.api.maxMessageLines)
@@ -640,6 +642,8 @@ class SequencerClient(
           }
         }
 
+        val sequencerId = SequencerAggregator.DefaultSequencerId
+
         val subscriptionHandler = new SubscriptionHandler(
           StoreSequencedEvent(sequencedEventStore, domainId, loggerFactory).apply(
             timeTracker.wrapHandler(eventHandler)
@@ -648,6 +652,7 @@ class SequencerClient(
           eventValidator,
           eventDelay,
           preSubscriptionEvent.map(_.counter),
+          sequencerId,
         )
 
         val subscription = ResilientSequencerSubscription[SequencerClientSubscriptionError](
@@ -730,6 +735,7 @@ class SequencerClient(
       eventValidator: SequencedEventValidator,
       processingDelay: DelaySequencedEvent,
       initialPriorEventCounter: Option[SequencerCounter],
+      sequencerId: SequencerAggregator.SequencerId,
   ) {
 
     // keep track of the last event that we processed. In the event the SequencerClient is recreated or that our [[ResilientSequencerSubscription]] reconnects
@@ -745,27 +751,6 @@ class SequencerClient(
       // Process the event only if no failure has been detected
       val futureUS = applicationHandlerFailure.get.fold {
         recorderO.foreach(_.recordEvent(serializedEvent))
-
-        def notifySendTracker(
-            event: OrdinarySequencedEvent[_]
-        ): EitherT[Future, SequencerClientSubscriptionError, Unit] =
-          EitherT.liftF[Future, SequencerClientSubscriptionError, Unit](
-            sendTracker.update(timeoutHandler)(event)
-          )
-
-        def batchAndCallHandler(): Unit = {
-          logger.debug(
-            show"Storing event in the event inbox.\n${serializedEvent.signedEvent.content}"
-          )
-          if (!receivedEvents.offer(serializedEvent)) {
-            logger.debug(
-              s"Event inbox is full. Blocking sequenced event with timestamp ${serializedEvent.timestamp}."
-            )
-            blocking { receivedEvents.put(serializedEvent) }
-            logger.debug(s"Unblocked sequenced event with timestamp ${serializedEvent.timestamp}.")
-          }
-          signalHandler(applicationHandler)
-        }
 
         // to ensure that we haven't forked since we last connected, we actually subscribe from the event we last
         // successfully processed and do another round of validations on it to ensure it's the same event we really
@@ -788,17 +773,27 @@ class SequencerClient(
             s"Validating sequenced event with counter ${serializedEvent.counter} and timestamp ${serializedEvent.timestamp}"
           )
           (for {
-            _unit <- EitherT.liftF(
+            _ <- EitherT.liftF(
               FutureUnlessShutdown.outcomeF(processingDelay.delay(serializedEvent))
             )
             _ <- eventValidator
               .validate(serializedEvent)
               .leftMap[SequencerClientSubscriptionError](EventValidationError)
-            _ <- notifySendTracker(serializedEvent).mapK(FutureUnlessShutdown.outcomeK)
-          } yield {
-            batchAndCallHandler()
-            priorEventCounter.set(Some(serializedEvent.counter))
-          }).value
+            _ = priorEventCounter.set(Some(serializedEvent.counter))
+
+            sequencerIdToSignal <- EitherT(
+              sequencerAggregator
+                .combineAndMergeEvent(
+                  sequencerId,
+                  serializedEvent,
+                )
+            )
+              .leftMap[SequencerClientSubscriptionError](EventAggregationError)
+              .mapK(FutureUnlessShutdown.outcomeK)
+          } yield
+            if (sequencerIdToSignal == sequencerId) {
+              signalHandler(applicationHandler)
+            }).value
         }
       }(err => FutureUnlessShutdown.pure(Left(err)))
 
@@ -843,7 +838,7 @@ class SequencerClient(
     ): Future[Unit] = {
       val inboxSize = config.eventInboxSize.unwrap
       val javaEventList = new java.util.ArrayList[OrdinarySerializedEvent](inboxSize)
-      if (receivedEvents.drainTo(javaEventList, inboxSize) > 0) {
+      if (sequencerAggregator.eventQueue.drainTo(javaEventList, inboxSize) > 0) {
         import scala.jdk.CollectionConverters.*
         val handlerEvents = javaEventList.asScala
 
@@ -851,7 +846,9 @@ class SequencerClient(
           this.synchronized { val _ = handlerIdle.get().success(()) }
         }
 
-        processEventBatch(eventHandler, handlerEvents.toSeq).value
+        MonadUtil
+          .sequentialTraverse_(handlerEvents)(sendTracker.update(timeoutHandler))
+          .flatMap(_ => processEventBatch(eventHandler, handlerEvents.toSeq).value)
           .transformWith {
             case Success(Right(())) => handleReceivedEventsUntilEmpty(eventHandler)
             case Success(Left(_)) | Failure(_) =>
@@ -863,7 +860,7 @@ class SequencerClient(
         val stillBusy = blocking {
           this.synchronized {
             val idlePromise = handlerIdle.get()
-            if (receivedEvents.isEmpty) {
+            if (sequencerAggregator.eventQueue.isEmpty) {
               // signalHandler must not be executed here, because that would lead to lost signals.
               idlePromise.success(())
             }
@@ -926,7 +923,7 @@ class SequencerClient(
             //   the application handler.
             // - Ongoing invocations of this method are not affected by clearing the queue,
             //   because the events processed by the ongoing invocation have been drained from the queue before clearing.
-            receivedEvents.clear()
+            sequencerAggregator.eventQueue.clear()
             failure
           }
 
@@ -1349,6 +1346,7 @@ object SequencerClient {
           metrics,
           recorderO,
           replayConfigForMember(member).isDefined,
+          syncCryptoApi.pureCrypto,
           loggingConfig,
           loggerFactory,
         )

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.migration
 
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.store.DbType
 import com.digitalasset.canton.platform.store.backend.{
   DataSourceStorageBackend,
@@ -55,7 +56,7 @@ trait DbConnectionAndDataSourceAroundEach
     Try(t) match {
       case Success(value) => value
       case Failure(_) if max > 0 =>
-        Thread.sleep(sleep)
+        Threading.sleep(sleep)
         retry(max - 1, sleep)(t)
       case Failure(exception) => throw exception
     }

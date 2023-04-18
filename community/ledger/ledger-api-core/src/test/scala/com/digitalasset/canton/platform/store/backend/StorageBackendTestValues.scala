@@ -23,6 +23,7 @@ import java.util.UUID
 
 /** Except where specified, values should be treated as opaque
   */
+@SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
 private[backend] object StorageBackendTestValues {
 
   def hashCid(key: String): ContractId = ContractId.V1(Hash.hashPrivateKey(key))

@@ -19,6 +19,7 @@ import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary.LEDGER_BEGIN
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.Value.{Absolute, Boundary}
 import com.daml.util.Ctx
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.{
   CompletionFailure,
   CompletionSuccess,
@@ -31,7 +32,7 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.{
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
 import com.google.rpc.code.*
-import com.google.rpc.status.{Status as StatusProto}
+import com.google.rpc.status.Status as StatusProto
 import io.grpc.StatusRuntimeException
 import org.scalatest.OptionValues
 import org.scalatest.concurrent.ScalaFutures
@@ -255,9 +256,11 @@ class CommandTrackerFlowTest
 
         results.expectNoMessage(3.seconds)
 
-        completionStreamMock.send(
-          CompletionStreamElement.CompletionElement(abortedCompletion, None)
-        )
+        completionStreamMock
+          .send(
+            CompletionStreamElement.CompletionElement(abortedCompletion, None)
+          )
+          .discard
         results.requestNext().value shouldEqual Left(
           failureCompletion(Code.ABORTED)
         )
@@ -272,9 +275,11 @@ class CommandTrackerFlowTest
 
         submissions.sendNext(submission)
 
-        completionStreamMock.send(
-          CompletionStreamElement.CompletionElement(abortedCompletion, None)
-        )
+        completionStreamMock
+          .send(
+            CompletionStreamElement.CompletionElement(abortedCompletion, None)
+          )
+          .discard
         results.requestNext().value shouldEqual Left(
           failureCompletion(Code.ABORTED)
         )
@@ -290,9 +295,11 @@ class CommandTrackerFlowTest
 
         submissions.sendNext(submission)
 
-        completionStreamMock.send(
-          CompletionStreamElement.CheckpointElement(Checkpoint(Some(fromInstant(mrt))))
-        )
+        completionStreamMock
+          .send(
+            CompletionStreamElement.CheckpointElement(Checkpoint(Some(fromInstant(mrt))))
+          )
+          .discard
 
         results.expectNoMessage(1.second)
         succeed
@@ -353,7 +360,7 @@ class CommandTrackerFlowTest
 
         submissions.sendNext(submission)
 
-        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId))
+        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId)).discard
 
         results.expectNext(
           Ctx(
@@ -380,9 +387,11 @@ class CommandTrackerFlowTest
         )
 
         // since the command timed out before, the tracker shouldn't send the completion through
-        completionStreamMock.send(
-          successfulStreamCompletion(timedOutSubmissionId, timedOutCommandId)
-        )
+        completionStreamMock
+          .send(
+            successfulStreamCompletion(timedOutSubmissionId, timedOutCommandId)
+          )
+          .discard
         results.request(1)
         results.expectNoMessage()
         succeed
@@ -406,7 +415,7 @@ class CommandTrackerFlowTest
           Ctx(context, Left(CompletionResponse.TimeoutResponse(timedOutCommandId))),
         )
         // we now receive a completion
-        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId))
+        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId)).discard
         // because the out-of-band timeout completion consumed the previous pull on `results`,
         // we don't expect a message until we request one.
         // The order below is important to reproduce the issue described in DPP-285.
@@ -429,8 +438,8 @@ class CommandTrackerFlowTest
 
         submissions.sendNext(submission)
 
-        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId))
-        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId))
+        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId)).discard
+        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId)).discard
 
         results.expectNext(
           Ctx(context, Right(successCompletion()))
@@ -456,7 +465,9 @@ class CommandTrackerFlowTest
             Some(status),
             submissionId = submissionId,
           )
-        completionStreamMock.send(CompletionStreamElement.CompletionElement(failedCompletion, None))
+        completionStreamMock
+          .send(CompletionStreamElement.CompletionElement(failedCompletion, None))
+          .discard
 
         results.expectNext(
           Ctx(
@@ -487,7 +498,7 @@ class CommandTrackerFlowTest
           submissions.sendNext(submission.copy(value = commandWithIds(submissionId, commandId)))
         }
         identifiers.foreach { case (submissionId, commandId) =>
-          completionStreamMock.send(successfulStreamCompletion(submissionId, commandId))
+          completionStreamMock.send(successfulStreamCompletion(submissionId, commandId)).discard
         }
 
         results.expectNextUnorderedN(identifiers.map { case (submissionId, commandId) =>
@@ -520,8 +531,8 @@ class CommandTrackerFlowTest
         submissions.sendNext(newSubmission(submissionId1, commandId))
         submissions.sendNext(newSubmission(submissionId2, commandId))
 
-        completionStreamMock.send(successfulStreamCompletion(submissionId1, commandId))
-        completionStreamMock.send(successfulStreamCompletion(submissionId2, commandId))
+        completionStreamMock.send(successfulStreamCompletion(submissionId1, commandId)).discard
+        completionStreamMock.send(successfulStreamCompletion(submissionId2, commandId)).discard
 
         results.expectNextUnordered(
           Ctx(context, Right(successCompletion(submissionId = submissionId1))),
@@ -541,8 +552,8 @@ class CommandTrackerFlowTest
 
         submissions.sendNext(submission)
 
-        completionStreamMock.send(successfulStreamCompletion("", commandId))
-        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId))
+        completionStreamMock.send(successfulStreamCompletion("", commandId)).discard
+        completionStreamMock.send(successfulStreamCompletion(submissionId, commandId)).discard
 
         results.expectNext(
           Ctx(context, Right(successCompletion(submissionId = submissionId)))

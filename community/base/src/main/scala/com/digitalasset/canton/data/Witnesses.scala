@@ -39,7 +39,10 @@ final case class Witnesses(unwrap: Seq[Set[Informee]]) {
             NonEmpty.from(informeeParticipants.toSet[Member]),
             InvalidWitnesses(s"Empty set of witnesses given"),
           )
-        } yield Seq(RecipientsTree(informeeParticipantSet, children))
+        } yield Seq(
+          // TODO(#12382): support group addressing for informees
+          RecipientsTree(informeeParticipantSet.map(RecipientsTree.MemberRecipient), children)
+        )
       }
       // TODO(error handling) Why is it safe to assume that the recipient list is non-empty?
       //  It will be empty if `unwrap` is empty.

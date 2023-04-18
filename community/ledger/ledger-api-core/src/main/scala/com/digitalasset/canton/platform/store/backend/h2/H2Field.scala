@@ -8,12 +8,12 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 import java.io.{ByteArrayInputStream, InputStream}
 
-private[h2] case class IntArray[FROM](extract: StringInterning => FROM => Iterable[Int])
+private[h2] final case class IntArray[FROM](extract: StringInterning => FROM => Iterable[Int])
     extends Field[FROM, Iterable[Int], Array[java.lang.Integer]] {
   override def convert: Iterable[Int] => Array[java.lang.Integer] = _.view.map(Int.box).toArray
 }
 
-private[h2] case class IntArrayOptional[FROM](
+private[h2] final case class IntArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[Int]]
 ) extends Field[FROM, Option[Iterable[Int]], Array[java.lang.Integer]] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
@@ -21,12 +21,12 @@ private[h2] case class IntArrayOptional[FROM](
     _.map(_.view.map(Int.box).toArray).orNull
 }
 
-private[h2] case class H2Bytea[FROM](extract: StringInterning => FROM => Array[Byte])
+private[h2] final case class H2Bytea[FROM](extract: StringInterning => FROM => Array[Byte])
     extends Field[FROM, Array[Byte], InputStream] {
   override def convert: Array[Byte] => InputStream = new ByteArrayInputStream(_)
 }
 
-private[h2] case class H2ByteaOptional[FROM](
+private[h2] final case class H2ByteaOptional[FROM](
     extract: StringInterning => FROM => Option[Array[Byte]]
 ) extends Field[FROM, Option[Array[Byte]], InputStream] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))

@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
+  ConsoleCommandResult,
   ConsoleEnvironment,
   FeatureFlag,
   FeatureFlagFilter,
@@ -47,23 +48,8 @@ class TopologyAdministrationGroupX(
 
   import runner.*
 
-  override def fetchId(): Option[UniqueIdentifier] =
-    idCache
-      .updateAndGet {
-        case None =>
-          consoleEnvironment.run {
-            adminCommand(TopologyAdminCommandsX.Init.GetId())
-          }
-        case x => x
-      }
-
-  // TODO(#11255) add documentation
-  override def init_id(identifier: Identifier, fingerprint: Fingerprint): UniqueIdentifier = {
-    // TODO(#11255) add X version
-    consoleEnvironment.run {
-      ???
-    }
-  }
+  override protected def getIdCommand(): ConsoleCommandResult[UniqueIdentifier] =
+    runner.adminCommand(TopologyAdminCommandsX.Init.GetId())
 
   @Help.Summary("Inspect all topology transactions at once")
   @Help.Group("All Transactions")
@@ -427,6 +413,7 @@ class TopologyAdministrationGroupX(
         includeProposals: Boolean = false,
         timeQuery: TimeQueryX = TimeQueryX.HeadState,
         operation: Option[TopologyChangeOpX] = None,
+        // TODO(#11255) should be filterDomain and filterParticipant
         filterUid: String = "",
         filterSigningKey: String = "",
         protocolVersion: Option[String] = None,
@@ -445,6 +432,13 @@ class TopologyAdministrationGroupX(
         )
       )
     }
+
+    // TODO(#11255) document console command
+    def active(domainId: DomainId, participantId: ParticipantId): Boolean =
+      list(filterStore = domainId.filterString).exists { x =>
+        x.item.domainId == domainId.uid && x.item.participantId == participantId.uid
+      }
+
   }
 
   @Help.Summary("Inspect participant domain states")

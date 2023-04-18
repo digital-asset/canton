@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.EitherT
 import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashAlgorithm, HashPurpose}
@@ -37,7 +38,7 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueueWithShutdown}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
@@ -53,6 +54,7 @@ class DbAcsCommitmentStore(
     protocolVersion: ProtocolVersion,
     cryptoApi: CryptoPureApi,
     override protected val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends AcsCommitmentStore
@@ -64,7 +66,13 @@ class DbAcsCommitmentStore(
 
   override protected[this] val pruning_status_table = "commitment_pruning"
 
-  private val markSafeQueue = new SimpleExecutionQueue()
+  private val markSafeQueue = new SimpleExecutionQueueWithShutdown(
+    "db-acs-commitment-store-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
+
   implicit val getSignedCommitment: GetResult[SignedProtocolMessage[AcsCommitment]] = GetResult(r =>
     SignedProtocolMessage
       .fromByteString(cryptoApi)(ByteString.copyFrom(r.<<[Array[Byte]]))
@@ -365,29 +373,35 @@ class DbAcsCommitmentStore(
       } yield ()
     }
 
-    markSafeQueue.execute(
-      {
-        for {
-          /*
+    markSafeQueue
+      .execute(
+        {
+          for {
+            /*
           That could be wrong if a period is marked as outstanding between the point where we
           fetch the approximate timestamp of the topology client and the query for the sorted
           reconciliation intervals.
           Such a period would be kept as outstanding even if it contains no tick. On the other
           hand, only commitment periods around restarts could be "empty" (not contain any tick).
-           */
-          sortedReconciliationIntervals <-
-            sortedReconciliationIntervalsProvider.approximateReconciliationIntervals
-          _ <- storage.queryAndUpdate(
-            dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
-              TransactionIsolation.Serializable
-            ),
-            operationName =
-              s"commitments: mark period safe (${period.fromExclusive}, ${period.toInclusive}]",
-          )
-        } yield ()
-      },
-      "Run mark period safe DB query",
-    )
+             */
+            sortedReconciliationIntervals <-
+              sortedReconciliationIntervalsProvider.approximateReconciliationIntervals
+            _ <- storage.queryAndUpdate(
+              dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
+                TransactionIsolation.Serializable
+              ),
+              operationName =
+                s"commitments: mark period safe (${period.fromExclusive}, ${period.toInclusive}]",
+            )
+          } yield ()
+        },
+        "Run mark period safe DB query",
+      )
+      .onShutdown(
+        logger.debug(
+          s"Aborted marking period safe (${period.fromExclusive}, ${period.toInclusive}] due to shutdown"
+        )
+      )
   }
 
   override def doPrune(
@@ -494,12 +508,10 @@ class DbAcsCommitmentStore(
     new DbCommitmentQueue(storage, domainId, protocolVersion, timeouts, loggerFactory)
 
   override def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty.*
-
     Lifecycle.close(
       runningCommitments,
       queue,
-      markSafeQueue.asCloseable("markSafeQueue", timeouts.closing.unwrap),
+      markSafeQueue,
     )(logger)
   }
 }

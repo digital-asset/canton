@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -50,6 +51,7 @@ class ParticipantTopologyManager(
     override protected val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends TopologyManager[ParticipantTopologyManagerError](
       clock,
@@ -58,6 +60,7 @@ class ParticipantTopologyManager(
       timeouts,
       protocolVersion,
       loggerFactory,
+      futureSupervisor,
     )(ec) {
 
   private val observers = mutable.ListBuffer[ParticipantTopologyManagerObserver]()
@@ -87,7 +90,7 @@ class ParticipantTopologyManager(
   // function to support sequential reading from identity store
   def sequentialStoreRead(run: => Future[Unit], description: String)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     sequentialQueue.execute(run, description)
   }
 
@@ -288,7 +291,7 @@ class ParticipantTopologyManager(
           })
       )
 
-    def trustDomain: EitherT[Future, ParticipantTopologyManagerError, Unit] = {
+    def trustDomain: EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
       val transaction = ParticipantState(
         RequestSide.To,
         domainId,
@@ -307,10 +310,12 @@ class ParticipantTopologyManager(
     }
 
     // check if cert already exists
-    performUnlessClosingF(functionFullName) {
+    performUnlessClosingUSF(functionFullName) {
       (for {
-        have <- alreadyTrusted
-        _ <- if (have) EitherT.rightT[Future, ParticipantTopologyManagerError](()) else trustDomain
+        have <- alreadyTrusted.mapK(FutureUnlessShutdown.outcomeK)
+        _ <-
+          if (have) EitherT.rightT[FutureUnlessShutdown, ParticipantTopologyManagerError](())
+          else trustDomain
       } yield ()).value
     }
   }
@@ -339,12 +344,12 @@ class ParticipantTopologyManager(
 
   def vetPackages(packages: Seq[PackageId], syncVetting: Boolean)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ParticipantTopologyManagerError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
     val packageSet = packages.toSet
 
     def authorizeVetting(
         pid: ParticipantId
-    ): EitherT[Future, ParticipantTopologyManagerError, SignedTopologyTransaction[
+    ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, SignedTopologyTransaction[
       TopologyChangeOp
     ]] = {
       authorize(
@@ -376,7 +381,7 @@ class ParticipantTopologyManager(
 
     for {
       // get package service (stored in an atomic reference)
-      participantId <- EitherT.fromEither[Future](
+      participantId <- EitherT.fromEither[FutureUnlessShutdown](
         participantIdO
           .get()
           .toRight(
@@ -384,18 +389,19 @@ class ParticipantTopologyManager(
               .Reject("Participant id is not yet set")
           )
       )
-      callbacks <- packageAndSyncService
-      isVetted <- EitherT.right(unvettedPackages(participantId, packageSet).map(_.isEmpty))
+      callbacks <- packageAndSyncService.mapK(FutureUnlessShutdown.outcomeK)
+      isVetted <- EitherT
+        .right(unvettedPackages(participantId, packageSet).map(_.isEmpty))
+        .mapK(FutureUnlessShutdown.outcomeK)
       _ <-
         if (isVetted) {
           logger.debug(show"The following packages are already vetted: ${packages}")
-          EitherT.rightT[Future, ParticipantTopologyManagerError](())
+          EitherT.rightT[FutureUnlessShutdown, ParticipantTopologyManagerError](())
         } else {
           authorizeVetting(participantId).map(_ => ())
         }
       // register our handle to wait for the packages being vetted
       appeared <- waitForPackagesBeingVetted(participantId, () => callbacks.clients())
-        .onShutdown(Right(false))
     } yield {
       if (appeared) {
         logger.debug("Packages appeared on all connected domains.")

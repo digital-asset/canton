@@ -5,6 +5,7 @@ package com.digitalasset.canton.console.commands
 
 import com.digitalasset.canton.admin.api.client.commands.EnterpriseMediatorAdministrationCommands.{
   Initialize,
+  InitializeX,
   LocatePruningTimestampCommand,
   Prune,
 }
@@ -66,9 +67,7 @@ class MediatorTestingGroup(
     }
 }
 
-@Help.Summary("Manage the mediator component")
-@Help.Group("Mediator")
-class MediatorAdministrationGroup(
+class MediatorPruningAdministrationGroup(
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     loggerFactory: NamedLoggerFactory,
@@ -87,26 +86,6 @@ class MediatorAdministrationGroup(
       loggerFactory,
     )
     with Helpful {
-  @Help.Summary("Initialize a mediator")
-  def initialize(
-      domainId: DomainId,
-      mediatorId: MediatorId,
-      domainParameters: StaticDomainParameters,
-      sequencerConnection: SequencerConnection,
-      topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
-      cryptoType: String = "",
-  ): PublicKey = consoleEnvironment.run {
-    runner.adminCommand(
-      Initialize(
-        domainId,
-        mediatorId,
-        Option(cryptoType).filterNot(_.isEmpty),
-        topologySnapshot,
-        domainParameters.toInternal,
-        sequencerConnection,
-      )
-    )
-  }
 
   @Help.Summary(
     "Prune the mediator of unnecessary data while keeping data for the default retention period"
@@ -150,8 +129,81 @@ class MediatorAdministrationGroup(
       runner.adminCommand(LocatePruningTimestampCommand(index))
     }
 
+}
+
+class MediatorAdministrationGroup(
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+    loggerFactory: NamedLoggerFactory,
+) extends MediatorPruningAdministrationGroup(runner, consoleEnvironment, loggerFactory) {
+
   private lazy val testing_ = new MediatorTestingGroup(runner, consoleEnvironment, loggerFactory)
   @Help.Summary("Testing functionality for the mediator")
   @Help.Group("Testing")
   def testing: MediatorTestingGroup = testing_
+
+}
+
+@Help.Summary("Manage the mediator component")
+@Help.Group("Mediator")
+class MediatorAdministrationGroupWithInit(
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+    loggerFactory: NamedLoggerFactory,
+) extends MediatorAdministrationGroup(runner, consoleEnvironment, loggerFactory) {
+
+  @Help.Summary("Initialize a mediator")
+  def initialize(
+      domainId: DomainId,
+      mediatorId: MediatorId,
+      domainParameters: StaticDomainParameters,
+      sequencerConnection: SequencerConnection,
+      topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
+  ): PublicKey = consoleEnvironment.run {
+    runner.adminCommand(
+      Initialize(
+        domainId,
+        mediatorId,
+        topologySnapshot,
+        domainParameters.toInternal,
+        sequencerConnection,
+      )
+    )
+  }
+
+}
+
+trait MediatorXAdministrationGroupWithInit extends ConsoleCommandGroup {
+
+  @Help.Summary("Methods used to initialize the node")
+  object setup extends ConsoleCommandGroup.Impl(this) with InitNodeId {
+
+    @Help.Summary("Assign a mediator to a domain")
+    def assign(
+        domainId: DomainId,
+        domainParameters: StaticDomainParameters,
+        sequencerConnection: SequencerConnection,
+    ): Unit = consoleEnvironment.run {
+      runner.adminCommand(
+        InitializeX(
+          domainId,
+          domainParameters.toInternal,
+          sequencerConnection,
+        )
+      )
+    }
+
+  }
+
+  private lazy val testing_ = new MediatorTestingGroup(runner, consoleEnvironment, loggerFactory)
+  @Help.Summary("Testing functionality for the mediator")
+  @Help.Group("Testing")
+  def testing: MediatorTestingGroup = testing_
+
+  private lazy val pruning_ =
+    new MediatorPruningAdministrationGroup(runner, consoleEnvironment, loggerFactory)
+  @Help.Summary("Pruning functionality for the mediator")
+  @Help.Group("Testing")
+  def pruning: MediatorPruningAdministrationGroup = pruning_
+
 }

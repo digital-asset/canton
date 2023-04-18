@@ -13,6 +13,7 @@ trait PostgresAroundSuite extends PostgresAround {
 
   protected def jdbcUrl: String = postgresDatabase.url
 
+  @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   protected def postgresDatabase: PostgresDatabase = database.get
 
   protected def lockIdSeed: Int =

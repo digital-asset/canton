@@ -28,7 +28,13 @@ trait DbDamlPackageStoreTest extends DamlPackageStoreTest {
 
   "DbDamlPackagesDarsStore" should {
     behave like damlPackageStore(() =>
-      new DbDamlPackageStore(PositiveNumeric.tryCreate(2), storage, timeouts, loggerFactory)
+      new DbDamlPackageStore(
+        PositiveNumeric.tryCreate(2),
+        storage,
+        timeouts,
+        futureSupervisor,
+        loggerFactory,
+      )
     )
   }
 }

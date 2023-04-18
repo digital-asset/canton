@@ -79,7 +79,7 @@ final class CommandStaticTimeIT
                 RecordField(
                   "operator",
                   Option(
-                    Value(Value.Sum.Party(MockMessages.submitAndWaitRequest.commands.get.party))
+                    Value(Value.Sum.Party(MockMessages.submitAndWaitRequest.commands.value.party))
                   ),
                 )
               ),
@@ -91,7 +91,7 @@ final class CommandStaticTimeIT
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    createPrerequisiteParties(None, List(MockMessages.submitAndWaitRequest.commands.get.party))
+    createPrerequisiteParties(None, List(MockMessages.submitAndWaitRequest.commands.value.party))
   }
 
   "Command and Time Services" when {

@@ -75,7 +75,7 @@ class DomainConnectivityService(
   ): Future[v0.ConnectDomainResponse] = {
     val resp = for {
       alias <- mapErr(DomainAlias.create(domainAlias))
-      success <- mapErrNewET(sync.connectDomain(alias, keepRetrying))
+      success <- mapErrNewETUS(sync.connectDomain(alias, keepRetrying))
       _ <- waitUntilActiveIfSuccess(success, alias)
     } yield v0.ConnectDomainResponse(connectedSuccessfully = success)
     EitherTUtil.toFuture(resp)
@@ -86,7 +86,7 @@ class DomainConnectivityService(
   )(implicit traceContext: TraceContext): Future[v0.DisconnectDomainResponse] = {
     val res = for {
       alias <- mapErr(DomainAlias.create(domainAlias))
-      disconnect <- mapErrNewET(sync.disconnectDomain(alias))
+      disconnect <- mapErrNewETUS(sync.disconnectDomain(alias))
     } yield disconnect
     EitherTUtil
       .toFuture(res)
@@ -130,7 +130,7 @@ class DomainConnectivityService(
       _ <- mapErrNewET(sync.addDomain(conf))
       _ <-
         if (!conf.manualConnect) for {
-          success <- mapErrNewET(sync.connectDomain(conf.domain, keepRetrying = false))
+          success <- mapErrNewETUS(sync.connectDomain(conf.domain, keepRetrying = false))
           _ <- waitUntilActiveIfSuccess(success, conf.domain)
         } yield ()
         else EitherT.rightT[Future, StatusRuntimeException](())
@@ -210,7 +210,7 @@ class DomainConnectivityService(
   def reconnectDomains(ignoreFailures: Boolean): Future[Unit] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      aliases <- mapErrNewET(sync.reconnectDomains(ignoreFailures = ignoreFailures))
+      aliases <- mapErrNewETUS(sync.reconnectDomains(ignoreFailures = ignoreFailures))
       _ <- aliases.parTraverse(waitUntilActive)
     } yield ()
     EitherTUtil.toFuture(ret)

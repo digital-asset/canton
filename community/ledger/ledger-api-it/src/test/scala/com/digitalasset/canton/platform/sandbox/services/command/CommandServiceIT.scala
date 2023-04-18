@@ -20,10 +20,10 @@ import com.digitalasset.canton.platform.sandbox.SandboxBackend
 import com.digitalasset.canton.platform.sandbox.fixture.{CreatesParties, SandboxFixture}
 import com.digitalasset.canton.platform.sandbox.services.TestCommands
 import com.digitalasset.canton.platform.services.time.TimeProviderType
-import com.google.protobuf.duration.{Duration as ProtoDuration}
-import org.scalatest.Inspectors
+import com.google.protobuf.duration.Duration as ProtoDuration
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{Inspectors, OptionValues}
 import scalaz.syntax.tag.*
 
 import java.time.{Duration, Instant}
@@ -36,7 +36,8 @@ sealed trait CommandServiceITBase
     with SandboxFixture
     with CreatesParties
     with TestCommands
-    with SuiteResourceManagementAroundAll {
+    with SuiteResourceManagementAroundAll
+    with OptionValues {
 
   private def command(party: String) =
     CreateCommand(
@@ -71,7 +72,8 @@ sealed trait CommandServiceITBase
       minLedgerTimeRel: ProtoDuration,
       timeModel: GetTimeModelResponse,
   ) = {
-    val avgLatency = DurationConversion.fromProto(timeModel.timeModel.get.avgTransactionLatency.get)
+    val avgLatency =
+      DurationConversion.fromProto(timeModel.timeModel.value.avgTransactionLatency.value)
     val expectedDuration = DurationConversion.fromProto(minLedgerTimeRel).minus(avgLatency)
     val actualDuration = Duration.between(start, end)
     assert(

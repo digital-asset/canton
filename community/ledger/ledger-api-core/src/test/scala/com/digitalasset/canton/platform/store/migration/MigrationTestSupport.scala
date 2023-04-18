@@ -115,6 +115,7 @@ object MigrationTestSupport {
       ()
     }
 
+  @SuppressWarnings(Array("org.wartremover.warts.While"))
   def fetchTable(tableSchema: TableSchema)(implicit connection: Connection): Vector[Row] = {
     val query =
       s"""SELECT ${tableSchema.columnsList.mkString(", ")}

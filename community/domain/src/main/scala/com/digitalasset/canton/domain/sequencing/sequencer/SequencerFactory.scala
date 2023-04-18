@@ -19,7 +19,7 @@ import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait SequencerFactory {
+trait SequencerFactory extends AutoCloseable {
 
   def initialize(
       initialState: SequencerInitialState
@@ -86,4 +86,5 @@ class CommunityDatabaseSequencerFactory(
     config.testingInterceptor.map(_(clock)(sequencer)(ec)).getOrElse(sequencer)
   }
 
+  override def close(): Unit = ()
 }

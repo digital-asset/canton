@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.sandbox.auth
 import com.daml.grpc.{GrpcException, GrpcStatus}
 import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.admin.object_meta.ObjectMeta
-import com.daml.ledger.api.v1.admin.{user_management_service as proto}
+import com.daml.ledger.api.v1.admin.user_management_service as proto
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
@@ -16,9 +16,9 @@ import com.digitalasset.canton.platform.sandbox.SandboxRequiringAuthorization
 import com.digitalasset.canton.platform.sandbox.fixture.{CreatesParties, SandboxFixture}
 import io.grpc.Status
 import io.grpc.stub.AbstractStub
-import org.scalatest.Assertion
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.{Assertion, OptionValues}
 
 import java.time.Duration
 import java.util.UUID
@@ -31,7 +31,8 @@ trait ServiceCallAuthTests
     with CreatesParties
     with SandboxRequiringAuthorization
     with SuiteResourceManagementAroundAll
-    with Matchers {
+    with Matchers
+    with OptionValues {
 
   val securityAsset: SecurityTest =
     SecurityTest(property = Authorization, asset = s"User Endpoint $serviceCallName")
@@ -226,7 +227,7 @@ trait ServiceCallAuthTests
     val req = proto.CreateUserRequest(Some(user), rights)
     stub(proto.UserManagementServiceGrpc.stub(channel), canReadAsAdminStandardJWT.token)
       .createUser(req)
-      .map(res => (res.user.get, ServiceCallContext(userToken, true, identityProviderId)))
+      .map(res => (res.user.value, ServiceCallContext(userToken, true, identityProviderId)))
   }
 
   protected def updateUser(

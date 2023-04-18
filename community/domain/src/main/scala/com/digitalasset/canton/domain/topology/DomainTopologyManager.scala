@@ -6,11 +6,13 @@ package com.digitalasset.canton.domain.topology
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.TopologyManagerParentError
 import com.digitalasset.canton.error.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
@@ -58,11 +60,14 @@ object DomainTopologyManager {
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       mustHaveActiveMediator: Boolean,
       loggerFactory: NamedLoggerFactory,
+      timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): EitherT[Future, String, Unit] = {
-    val store = new InMemoryTopologyStore(AuthorizedStore, loggerFactory)
+    val store =
+      new InMemoryTopologyStore(AuthorizedStore, loggerFactory, timeouts, futureSupervisor)
     val ts = CantonTimestamp.Epoch
     EitherT
       .right(
@@ -154,6 +159,7 @@ class DomainTopologyManager(
     override protected val timeouts: ProcessingTimeout,
     val protocolVersion: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends TopologyManager[DomainTopologyManagerError](
       clock,
@@ -162,6 +168,7 @@ class DomainTopologyManager(
       timeouts,
       protocolVersion,
       loggerFactory,
+      futureSupervisor,
     )(ec)
     with RequestProcessingStrategy.ManagerHooks {
 
@@ -191,7 +198,7 @@ class DomainTopologyManager(
       replaceExisting: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, DomainTopologyManagerError, SignedTopologyTransaction[Op]] =
+  ): EitherT[FutureUnlessShutdown, DomainTopologyManagerError, SignedTopologyTransaction[Op]] =
     authorize(transaction, signingKey, protocolVersion, force, replaceExisting)
 
   override protected def notifyObservers(
@@ -374,7 +381,7 @@ class DomainTopologyManager(
 
   override def issueParticipantStateForDomain(participantId: ParticipantId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, DomainTopologyManagerError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, DomainTopologyManagerError, Unit] = {
     authorize(
       TopologyStateUpdate.createAdd(
         ParticipantState(
@@ -394,7 +401,7 @@ class DomainTopologyManager(
 
   override def addFromRequest(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
-  ): EitherT[Future, DomainTopologyManagerError, Unit] =
+  ): EitherT[FutureUnlessShutdown, DomainTopologyManagerError, Unit] =
     add(transaction, force = true, replaceExisting = false, allowDuplicateMappings = true)
 }
 

@@ -16,6 +16,7 @@ class StringInterningDomainSpec extends AnyFlatSpec with Matchers {
     def to(boxed: StringBox): String = boxed.value
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   class StaticStringInterningAccessor(
       idToString: Map[Int, String],
       stringToId: Map[String, Int],

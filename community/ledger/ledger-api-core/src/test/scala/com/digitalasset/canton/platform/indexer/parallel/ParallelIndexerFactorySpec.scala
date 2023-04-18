@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.indexer.parallel
 import akka.stream.KillSwitch
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.indexer.ha.Handle
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -292,7 +293,7 @@ class ParallelIndexerFactorySpec extends AsyncFlatSpec with Matchers with AkkaBe
   }
 
   // Motivation: if we are expecting a stabilized state of the async system, but it would be not stable yet, then let's wait a little bit, so we give a chance to the system to stabilize, so we can observe our expectations fail
-  private def waitALittle(): Unit = Thread.sleep(10)
+  private def waitALittle(): Unit = Threading.sleep(10)
 
   case class TestHandle(
       resourceInitPromise: Promise[String],

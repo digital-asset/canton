@@ -6,6 +6,7 @@ package com.digitalasset.canton.ledger.api.auth.interceptor
 import io.grpc.ServerCall
 
 import scala.collection.mutable
+import scala.concurrent.blocking
 
 /** This listener buffers all messages until `setNextListener` is called,
   * at which point all buffered messages are sent to the given listener.
@@ -20,17 +21,17 @@ private[auth] abstract class AsyncForwardingListener[ReqT] extends ServerCall.Li
   private[this] val stash: mutable.ListBuffer[Listener => Unit] = new mutable.ListBuffer
   private[this] var nextListener: Option[Listener] = None
 
-  private[this] def enqueueOrProcess(msg: Listener => Unit): Unit = lock.synchronized {
+  private[this] def enqueueOrProcess(msg: Listener => Unit): Unit = blocking(lock.synchronized {
     val _ = nextListener.fold {
       val _ = stash.append(msg)
       ()
     }(msg)
-  }
+  })
 
-  protected def setNextListener(listener: Listener): Unit = lock.synchronized {
+  protected def setNextListener(listener: Listener): Unit = blocking(lock.synchronized {
     nextListener = Some(listener)
     stash.foreach(msg => msg(listener))
-  }
+  })
 
   // All methods that need to be forwarded
   override def onHalfClose(): Unit = enqueueOrProcess(i => i.onHalfClose())

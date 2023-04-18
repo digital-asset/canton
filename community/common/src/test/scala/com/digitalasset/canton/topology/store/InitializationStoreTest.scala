@@ -80,15 +80,7 @@ trait DbInitializationStoreTest extends InitializationStoreTest {
 
 class DbInitializationStoreTestH2 extends DbInitializationStoreTest with H2Test
 
-class DbInitializationStoreDevTestH2 extends DbInitializationStoreTest with H2Test {
-  override val migrationMode: MigrationMode = MigrationMode.DevVersion
-}
-
 class DbInitializationStoreTestPostgres extends DbInitializationStoreTest with PostgresTest
-
-class DbInitializationStoreDevTestPostgres extends DbInitializationStoreTestPostgres {
-  override val migrationMode: MigrationMode = MigrationMode.DevVersion
-}
 
 class InitializationStoreTestInMemory extends InitializationStoreTest {
 

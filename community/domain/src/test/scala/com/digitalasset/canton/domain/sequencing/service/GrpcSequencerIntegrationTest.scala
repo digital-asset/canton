@@ -88,6 +88,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   val sequencer = mock[Sequencer]
   private val participant = ParticipantId("testing")
   private val domainId = DefaultTestIdentities.domainId
+  private val sequencerId = DefaultTestIdentities.sequencerId
   private val cryptoApi =
     TestingTopology().withParticipants(participant).build().forOwnerAndDomain(participant, domainId)
   private val clock = new SimClock(loggerFactory = loggerFactory)
@@ -165,6 +166,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,
+    sequencerId = sequencerId,
     staticDomainParameters = BaseTest.defaultStaticDomainParameters,
     cryptoApi = cryptoApi,
     agreementManager = None,
@@ -221,7 +223,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
     .result(
       SequencerClient(
         domainId,
-        DefaultTestIdentities.sequencer,
+        sequencerId,
         cryptoApi,
         cryptoApi.crypto,
         agreedAgreementId = None,

@@ -153,11 +153,19 @@ class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {
 
   "SimpleExecutionQueue" when {
     "not logging task timing" should {
-      behave like simpleExecutionQueueTests(() => new SimpleExecutionQueue(logTaskTiming = false))
+      behave like simpleExecutionQueueTests(() =>
+        new SimpleExecutionQueue(
+          logTaskTiming = false
+        )
+      )
     }
 
     "logging task timing" should {
-      behave like simpleExecutionQueueTests(() => new SimpleExecutionQueue(logTaskTiming = true))
+      behave like simpleExecutionQueueTests(() =>
+        new SimpleExecutionQueue(
+          logTaskTiming = true
+        )
+      )
     }
   }
 }

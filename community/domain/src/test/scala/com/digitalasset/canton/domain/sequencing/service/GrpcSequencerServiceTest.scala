@@ -566,7 +566,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
               Recipients(
                 NonEmpty(
                   Seq,
-                  RecipientsTree(
+                  RecipientsTree.ofMembers(
                     NonEmpty.mk(Set, participant),
                     Seq(
                       RecipientsTree.leaf(NonEmpty.mk(Set, mediator1)),

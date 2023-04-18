@@ -184,6 +184,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         enableAdditionalConsistencyChecks = true,
         loggerFactory,
         timeouts,
+        futureSupervisor,
       )
     val syncDomainPersistentStates: SyncDomainPersistentStateLookup =
       new SyncDomainPersistentStateLookup {
@@ -295,6 +296,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         sequencerClient,
         loggerFactory,
         FutureSupervisor.Noop,
+        skipRecipientsCheck = false,
       )(
         directExecutionContext: ExecutionContext,
         TransactionResultMessage.transactionResultMessageCast,

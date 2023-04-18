@@ -8,12 +8,13 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DarName
 import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.admin.PackageService
@@ -25,7 +26,7 @@ import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.WriteOnly
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SimpleExecutionQueue
+import com.digitalasset.canton.util.SimpleExecutionQueueWithShutdown
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -34,6 +35,7 @@ class DbDamlPackageStore(
     maxContractIdSqlInListSize: PositiveNumeric[Int],
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends DamlPackageStore
@@ -46,7 +48,12 @@ class DbDamlPackageStore(
 
   // writeQueue is used to protect against concurrent insertions and deletions to/from the `dars` or `daml_packages` tables,
   // which might otherwise data corruption or constraint violations.
-  private val writeQueue = new SimpleExecutionQueue()
+  private val writeQueue = new SimpleExecutionQueueWithShutdown(
+    "db-daml-package-store-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("daml-packages-dars-store")
@@ -156,7 +163,7 @@ class DbDamlPackageStore(
       dar: Option[PackageService.Dar],
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] = processingTime.event {
+  ): FutureUnlessShutdown[Unit] = processingTime.eventUS {
 
     val insertPkgs = insertOrUpdatePackages(
       pkgs.map(pkg => DamlPackage(readPackageId(pkg), pkg.toByteArray)),
@@ -221,7 +228,7 @@ class DbDamlPackageStore(
 
   override def removePackage(
       packageId: PackageId
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Removing package $packageId")
 
     writeQueue.execute(
@@ -321,7 +328,9 @@ class DbDamlPackageStore(
               """
     }
 
-  override def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit] = {
+  override def removeDar(
+      hash: Hash
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     writeQueue.execute(
       storage.update_(
         sqlu"""delete from dars where hash_hex = ${hash.toLengthLimitedHexString}""",
@@ -332,10 +341,7 @@ class DbDamlPackageStore(
   }
 
   override def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty.*
-    Lifecycle.close(
-      writeQueue.asCloseable("write-daml-package-store-queue", timeouts.closing.unwrap)
-    )(logger)
+    Lifecycle.close(writeQueue)(logger)
   }
 
 }

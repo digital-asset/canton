@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.store.db
 
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedString,
@@ -15,6 +16,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.DynamicDomainParameters
@@ -164,6 +166,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     val storeId: StoreId,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
     maxItemsInSqlQuery: Int = 100,
 )(implicit val ec: ExecutionContext)
     extends TopologyStore[StoreId]
@@ -897,21 +900,26 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       domainId: DomainId,
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
+  ): FutureUnlessShutdown[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
     val ns = participantId.uid.namespace
     val subQuery =
       sql"AND valid_until is NULL AND namespace = $ns AND transaction_type IN (" ++ TopologyStore.initialParticipantDispatchingSet.toList
         .map(s => sql"$s")
         .intercalate(sql", ") ++ sql")"
-    queryForTransactions(transactionStoreIdName, subQuery).flatMap(
-      TopologyStore.filterInitialParticipantDispatchingTransactions(
-        participantId,
-        domainId,
-        this,
-        loggerFactory,
-        _,
-      )
+    performUnlessClosingF("query-for-transactions")(
+      queryForTransactions(transactionStoreIdName, subQuery)
     )
+      .flatMap(
+        TopologyStore.filterInitialParticipantDispatchingTransactions(
+          participantId,
+          domainId,
+          this,
+          loggerFactory,
+          _,
+          timeouts,
+          futureSupervisor,
+        )
+      )
   }
 
   override def findTsOfParticipantStateChangesBefore(

@@ -9,6 +9,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{
   DomainTopologyTransactionType,
@@ -84,31 +85,34 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
   )(
       topologyManager: TopologyManager[E],
       store: TopologyStore[TopologyStoreId],
-  ): EitherT[Future, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
-      cert <- getOrGenerateCertificate(uid, alternativeNames)
+      cert <- getOrGenerateCertificate(uid, alternativeNames).mapK(FutureUnlessShutdown.outcomeK)
 
       // check store if there are existing transactions
-      current <- EitherT.right(
-        store.findPositiveTransactions(
-          asOf = CantonTimestamp.MaxValue, // max value will give us the "head state"
-          asOfInclusive = true,
-          includeSecondary = false,
-          types = Seq(DomainTopologyTransactionType.SignedLegalIdentityClaim),
-          filterUid = Some(Seq(uid)),
-          filterNamespace = None,
+      current <- EitherT
+        .right(
+          store.findPositiveTransactions(
+            asOf = CantonTimestamp.MaxValue, // max value will give us the "head state"
+            asOfInclusive = true,
+            includeSecondary = false,
+            types = Seq(DomainTopologyTransactionType.SignedLegalIdentityClaim),
+            filterUid = Some(Seq(uid)),
+            filterNamespace = None,
+          )
         )
-      )
+        .mapK(FutureUnlessShutdown.outcomeK)
 
       _ <-
         if (current.adds.result.exists(_.transaction.key == namespaceKey))
-          EitherT.rightT[Future, String](())
+          EitherT.rightT[FutureUnlessShutdown, String](())
         else
           for {
             evidence <- cert.toPem
               .map(LegalIdentityClaimEvidence.X509Cert)
               .leftMap(err => s"Failed to serialize certificate to PEM: $err")
               .toEitherT
+              .mapK(FutureUnlessShutdown.outcomeK)
             claim = LegalIdentityClaim.create(uid, evidence, protocolVersion)
             claimHash = claim.hash(crypto.pureCrypto)
 
@@ -117,9 +121,11 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
               .publicKey(crypto.javaKeyConverter)
               .leftMap(err => s"Failed to extract public key from certificate: $err")
               .toEitherT
+              .mapK(FutureUnlessShutdown.outcomeK)
             claimSig <- crypto.privateCrypto
               .sign(claimHash, certKey.fingerprint)
               .leftMap(err => s"Failed to sign legal identity claim: $err")
+              .mapK(FutureUnlessShutdown.outcomeK)
 
             // Authorize the legal identity mapping with the namespace key
             _ <- topologyManager

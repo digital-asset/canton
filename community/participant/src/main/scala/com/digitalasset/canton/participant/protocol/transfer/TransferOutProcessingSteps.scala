@@ -124,9 +124,11 @@ class TransferOutProcessingSteps(
         targetDomain != domainId,
         TargetDomainIsSourceDomain(domainId, contractId),
       )
-      stakeholders <- stakeholdersOfContractId(ephemeralState.contractLookup, contractId).mapK(
+      storedContract <- getStoredContract(ephemeralState.contractLookup, contractId).mapK(
         FutureUnlessShutdown.outcomeK
       )
+      stakeholders = storedContract.contract.metadata.stakeholders
+      templateId = storedContract.contract.rawContractInstance.contractInstance.unversioned.template
 
       /*
         In PV=4, we introduced the sourceProtocolVersion in TransferInView, which is needed for
@@ -149,6 +151,7 @@ class TransferOutProcessingSteps(
           participantId,
           timeProof,
           contractId,
+          templateId,
           submitterMetadata,
           stakeholders,
           submittingParticipant,
@@ -233,14 +236,13 @@ class TransferOutProcessingSteps(
     SubmissionResult(transferId, pendingSubmission.transferCompletion.future)
   }
 
-  private[this] def stakeholdersOfContractId(
+  private[this] def getStoredContract(
       contractLookup: ContractLookup,
       contractId: LfContractId,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Set[LfPartyId]] =
+  )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, StoredContract] =
     contractLookup
       .lookup(contractId)
       .toRight[TransferProcessorError](TransferOutRequestValidation.UnknownContract(contractId))
-      .map(storedContract => storedContract.contract.metadata.stakeholders)
 
   override protected def decryptTree(sourceSnapshot: DomainSnapshotSyncCryptoApi)(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferOutViewType]]
@@ -333,9 +335,7 @@ class TransferOutProcessingSteps(
 
       // Since the transfer out request should be sent only to participants that host a stakeholder of the contract,
       // we can expect to find the contract in the contract store.
-      storedContract <- contractLookup
-        .lookupE(fullTree.contractId)
-        .leftMap(ContractStoreFailed(transferId, _))
+      storedContract <- getStoredContract(contractLookup, fullTree.contractId)
 
       sourceIps = sourceSnapshot.ipsSnapshot
       validationRes <- validateTransferOutRequest(
@@ -362,6 +362,7 @@ class TransferOutProcessingSteps(
         sc,
         fullTree.tree.rootHash,
         WithContractHash.fromContract(storedContract.contract, fullTree.contractId),
+        storedContract.contract.rawContractInstance.contractInstance.unversioned.template,
         transferringParticipant,
         fullTree.submitterMetadata,
         fullTree.workflowId,
@@ -499,6 +500,7 @@ class TransferOutProcessingSteps(
       requestSequencerCounter,
       rootHash,
       WithContractHash(contractId, contractHash),
+      templateId,
       transferringParticipant,
       submitterMetadata,
       workflowId,
@@ -544,6 +546,7 @@ class TransferOutProcessingSteps(
           transferOutEvent <- createTransferredOut(
             requestId.unwrap,
             contractId,
+            templateId,
             stakeholders,
             submitterMetadata,
             transferId,
@@ -573,7 +576,20 @@ class TransferOutProcessingSteps(
           ),
         )
 
-      case Verdict.ParticipantReject(_) | (_: MediatorReject) =>
+      case reasons: Verdict.ParticipantReject =>
+        for {
+          _ <- ifThenET(transferringParticipant) {
+            deleteTransfer(targetDomain, requestId)
+          }
+
+          // TODO(M40): Implement checks against malicious rejections and scrutinize the reasons such that an alarm is raised if necessary
+          tsEventO <- EitherT
+            .fromEither[Future](
+              createRejectionEvent(RejectionArgs(pendingRequestData, reasons.keyEvent))
+            )
+        } yield CommitAndStoreContractsAndPublishEvent(None, Set(), tsEventO, None)
+
+      case _: MediatorReject =>
         for {
           _ <- ifThenET(transferringParticipant) {
             deleteTransfer(targetDomain, requestId)
@@ -585,6 +601,7 @@ class TransferOutProcessingSteps(
   private def createTransferredOut(
       recordTime: CantonTimestamp,
       contractId: LfContractId,
+      templateId: LfTemplateId,
       contractStakeholders: Set[LfPartyId],
       submitterMetadata: TransferSubmitterMetadata,
       transferId: TransferId,
@@ -615,6 +632,7 @@ class TransferOutProcessingSteps(
       submitter = submitterMetadata.submitter,
       recordTime = recordTime.toLf,
       contractId = contractId,
+      templateId = Some(templateId),
       contractStakeholders = contractStakeholders,
       sourceDomainId = transferId.sourceDomain,
       targetDomainId = targetDomain,
@@ -821,6 +839,7 @@ object TransferOutProcessingSteps {
       override val requestSequencerCounter: SequencerCounter,
       rootHash: RootHash,
       contractIdAndHash: WithContractHash[LfContractId],
+      templateId: LfTemplateId,
       transferringParticipant: Boolean,
       submitterMetadata: TransferSubmitterMetadata,
       workflowId: Option[LfWorkflowId],
@@ -840,6 +859,7 @@ object TransferOutProcessingSteps {
       participantId: ParticipantId,
       timeProof: TimeProof,
       contractId: LfContractId,
+      templateId: LfTemplateId,
       submitterMetadata: TransferSubmitterMetadata,
       stakeholders: Set[LfPartyId],
       workflowId: Option[LfWorkflowId],
@@ -872,6 +892,7 @@ object TransferOutProcessingSteps {
         adminPartiesAndRecipients.adminParties,
         workflowId,
         contractId,
+        templateId,
         sourceDomain,
         sourceProtocolVersion,
         sourceMediator,

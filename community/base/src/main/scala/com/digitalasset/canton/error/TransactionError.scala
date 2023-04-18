@@ -40,4 +40,9 @@ object TransactionError {
   def internalError(reason: String): SubmissionResult.SynchronousError =
     SubmissionResult.SynchronousError(RpcStatus.of(Code.INTERNAL.value, reason, NoErrorDetails))
 
+  val shutdownError: SubmissionResult.SynchronousError =
+    SubmissionResult.SynchronousError(
+      RpcStatus.of(Code.CANCELLED.value, "Node is shutting down", NoErrorDetails)
+    )
+
 }

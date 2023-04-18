@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.MemoryCheck.*
 import org.mockito.MockitoSugar
@@ -36,7 +37,7 @@ class MemoryCheckSpec extends AnyFlatSpec with Matchers with MockitoSugar {
     underTest.gc()
     underTest.gc()
     verify(delegate, times(1)).gc()
-    Thread.sleep(2 * delayBetweenCalls.toMillis)
+    Threading.sleep(2 * delayBetweenCalls.toMillis)
     underTest.gc()
     verify(delegate, times(2)).gc()
     succeed

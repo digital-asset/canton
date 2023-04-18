@@ -17,8 +17,8 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
   TestingConfigInternal,
 }
-import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{
@@ -861,7 +861,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
   private object Env {
     val eventAlwaysValid: SequencedEventValidator = SequencedEventValidator.noValidation(
       DefaultTestIdentities.domainId,
-      DefaultTestIdentities.sequencer,
+      DefaultTestIdentities.sequencerId,
       timeouts,
       warn = false,
     )
@@ -964,6 +964,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         CommonMockMetrics.sequencerClient,
         None,
         false,
+        mock[CryptoPureApi],
         LoggingConfig(),
         loggerFactory,
       )(executionContext, tracer)

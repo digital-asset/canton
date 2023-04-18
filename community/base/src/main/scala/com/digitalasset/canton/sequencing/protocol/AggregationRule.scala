@@ -15,6 +15,7 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionedCompanionDbHelpers,
   RepresentativeProtocolVersion,
 }
 
@@ -58,7 +59,9 @@ final case class AggregationRule(
     AggregationRule(eligibleMembers, threshold)(representativeProtocolVersion)
 }
 
-object AggregationRule extends HasProtocolVersionedCompanion[AggregationRule] {
+object AggregationRule
+    extends HasProtocolVersionedCompanion[AggregationRule]
+    with ProtocolVersionedCompanionDbHelpers[AggregationRule] {
   def apply(
       eligibleMembers: NonEmpty[Seq[Member]],
       threshold: PositiveInt,

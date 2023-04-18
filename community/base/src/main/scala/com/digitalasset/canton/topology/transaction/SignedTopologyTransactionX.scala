@@ -104,6 +104,9 @@ object SignedTopologyTransactionX
   type GenericSignedTopologyTransactionX =
     SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]
 
+  type PositiveSignedTopologyTransactionX =
+    SignedTopologyTransactionX[TopologyChangeOpX.Replace, TopologyMappingX]
+
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(

@@ -204,6 +204,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       testedProtocolVersion,
       DefaultProcessingTimeouts.testing
         .copy(storageMaxRetryInterval = NonNegativeDuration.tryFromDuration(1.millisecond)),
+      futureSupervisor,
       loggerFactory,
     )
 

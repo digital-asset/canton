@@ -13,7 +13,10 @@ import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.admin.v1 as topoV1
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.PositiveStoredTopologyTransactionsX
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
+  GenericStoredTopologyTransactionsX,
+  PositiveStoredTopologyTransactionsX,
+}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreX
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
@@ -119,6 +122,11 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
 
   // TODO(#11255) only a temporary crutch to inspect the topology state
   def dumpStoreContent()(implicit traceContext: TraceContext): Unit
+
+  /** store an initial set of topology transactions as given into the store */
+  def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
 
   /** query optimized for inspection
     *

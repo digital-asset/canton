@@ -11,6 +11,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.IndexerPartyDet
 import com.digitalasset.canton.platform.store.dao.PersistenceResponse
 import com.digitalasset.canton.platform.store.entries.PartyLedgerEntry
 import com.digitalasset.canton.platform.store.entries.PartyLedgerEntry.AllocationAccepted
+import org.scalatest.OptionValues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -18,7 +19,7 @@ import java.util.UUID
 import scala.concurrent.Future
 
 private[dao] trait JdbcLedgerDaoPartiesSpec {
-  this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
+  this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite with OptionValues =>
 
   behavior of "JdbcLedgerDao (parties)"
 
@@ -61,7 +62,7 @@ private[dao] trait JdbcLedgerDaoPartiesSpec {
     val rejectedRecordTime = Timestamp.now()
     val rejected1 =
       PartyLedgerEntry.AllocationRejected(rejectedSubmissionId, rejectedRecordTime, rejectionReason)
-    val originalOffset = previousOffset.get().get
+    val originalOffset = previousOffset.get().value
     val offset1 = nextOffset()
     for {
       response1 <- storePartyEntry(

@@ -43,7 +43,7 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
   protected val last = new AtomicReference[CantonTimestamp](CantonTimestamp.Epoch)
   private val backwardsClockAlerted = new AtomicReference[CantonTimestamp](CantonTimestamp.Epoch)
 
-  /** Potentially non-monotonistic system clock
+  /** Potentially non-monotonic system clock
     *
     * Never use Instant.now, use the clock (as we also support sim-clock). If you need to ensure
     * that the clock is monotonically increasing, use the [[uniqueTime]] method instead.
@@ -106,9 +106,11 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
       (o1: Queued, o2: Queued) => o1.timestamp.compareTo(o2.timestamp),
     )
 
-  /** thread-safely schedule an action to be executed in the future
+  /** Thread-safely schedule an action to be executed in the future
     *
-    * same as other schedule method, except it expects a differential time amount
+    * If the provided `delta` is not positive the action skips queueing and is executed immediately.
+    *
+    * Same as other schedule method, except it expects a differential time amount
     */
   def scheduleAfter(
       action: CantonTimestamp => Unit,
@@ -116,8 +118,10 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
   ): FutureUnlessShutdown[Unit] =
     scheduleAt(action, now.add(delta))
 
-  /** thread-safely schedule an action to be executed in the future
+  /** Thread-safely schedule an action to be executed in the future
     * actions need not execute in the order of their timestamps.
+    *
+    * If the provided timestamp is before `now`, the action skips queueing and is executed immediately.
     *
     * @param action action to run at the given timestamp (passing in the timestamp for when the task was scheduled)
     * @param timestamp timestamp when to run the task
@@ -337,7 +341,7 @@ class SimClock(
       s"advanceTo failed with time going backwards: current timestamp is $now and request is $timestamp",
     )
     logger.info(s"Advancing sim clock to $timestamp")
-    value.updateAndGet(x => CantonTimestamp.max(x, timestamp))
+    value.updateAndGet(_.max(timestamp))
     if (doFlush) {
       flush().discard[Option[CantonTimestamp]]
     }

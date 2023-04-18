@@ -1110,9 +1110,10 @@ object BuildCommon {
         DamlProjects.`daml-copy-protobuf-java`,
         DamlProjects.`daml-copy-common`,
         DamlProjects.`daml-copy-testing` % "test",
+        `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
-        sharedSettings,
+        sharedSettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
         Compile / PB.targets := Seq(
           PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
@@ -1179,11 +1180,10 @@ object BuildCommon {
       .dependsOn(
         `ledger-common` % "compile->compile;test->test",
         `community-base`,
+        `community-testing` % Test,
       )
-      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
       .settings(
-        sharedSettings,
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        sharedCantonSettings,
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf"
         ),
@@ -1230,9 +1230,8 @@ object BuildCommon {
         `ledger-api-core`,
         DamlProjects.`daml-copy-testing`, // for testing metrics dependency
       )
-      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
       .settings(
-        sharedSettings,
+        sharedCantonSettings,
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -1245,9 +1244,8 @@ object BuildCommon {
     lazy val `ledger-api-it` = project
       .in(file("community/ledger/ledger-api-it"))
       .dependsOn(`ledger-api-core` % "test->test")
-      .disablePlugins(WartRemover) // to accommodate different daml repo coding style
       .settings(
-        sharedSettings,
+        sharedCantonSettings,
         libraryDependencies ++= Seq(
           lihaoyi_sourcecode % Test, // Needed by integration tests in Sandbox-on-X
           better_files % Test, // Needed by integration tests in Sandbox-on-X
@@ -1268,7 +1266,7 @@ object BuildCommon {
       .enablePlugins(JmhPlugin)
       .dependsOn(`ledger-api-core`)
       .settings(
-        sharedSettings,
+        sharedCantonSettings,
         JvmRulesPlugin.damlRepoHeaderSettings,
         Test / parallelExecution := true,
         Test / fork := false,

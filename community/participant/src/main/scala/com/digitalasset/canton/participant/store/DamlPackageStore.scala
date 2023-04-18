@@ -8,6 +8,7 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
@@ -30,13 +31,13 @@ trait DamlPackageStore extends AutoCloseable { this: NamedLogging =>
       dar: Option[PackageService.Dar],
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): FutureUnlessShutdown[Unit]
 
   /** Remove the package from the package store.
     */
   def removePackage(packageId: PackageId)(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): FutureUnlessShutdown[Unit]
 
   /** @param packageId The package id of the Daml package to be retrieved from the store.
     * @return Future that will contain an empty option if the package with the given id
@@ -64,7 +65,7 @@ trait DamlPackageStore extends AutoCloseable { this: NamedLogging =>
   def getDar(hash: Hash)(implicit traceContext: TraceContext): Future[Option[Dar]]
 
   /** Remove the DAR with hash `hash` from the store */
-  def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit]
+  def removeDar(hash: Hash)(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
   /** @return Future with sequence of DAR descriptors (hash and name)
     */

@@ -9,6 +9,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.timestamp.Timestamp
 import com.google.rpc.status.Status
+import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
@@ -18,6 +19,7 @@ import java.time.Instant
 class CompletionFromTransactionSpec
     extends AnyWordSpec
     with Matchers
+    with OptionValues
     with TableDrivenPropertyChecks {
 
   "CompletionFromTransaction" should {
@@ -69,7 +71,7 @@ class CompletionFromTransactionSpec
             deduplicationDurationNanos,
           )
 
-          val checkpoint = completionStream.checkpoint.get
+          val checkpoint = completionStream.checkpoint.value
           checkpoint.recordTime shouldBe Some(Timestamp(Instant.EPOCH))
           checkpoint.offset shouldBe a[Some[_]]
 
@@ -117,7 +119,7 @@ class CompletionFromTransactionSpec
         Some("submissionId"),
       )
 
-      val checkpoint = completionStream.checkpoint.get
+      val checkpoint = completionStream.checkpoint.value
       checkpoint.recordTime shouldBe Some(Timestamp(Instant.EPOCH))
       checkpoint.offset shouldBe a[Some[_]]
 

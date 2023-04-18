@@ -4,10 +4,13 @@
 package com.digitalasset.canton.topology.store.memory
 
 import cats.syntax.functorFilter.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.CantonRequireTypes.String255
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.PublicKey
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -81,6 +84,8 @@ class InMemoryPartyMetadataStore extends PartyMetadataStore {
 class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     val storeId: StoreId,
     val loggerFactory: NamedLoggerFactory,
+    timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
 )(implicit val ec: ExecutionContext)
     extends TopologyStore[StoreId]
     with NamedLogging {
@@ -555,7 +560,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       domainId: DomainId,
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
+  ): FutureUnlessShutdown[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
     val res = blocking(synchronized {
       topologyTransactionStore.filter(x =>
         x.until.isEmpty && TopologyStore.initialParticipantDispatchingSet.contains(
@@ -570,6 +575,8 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       this,
       loggerFactory,
       StoredTopologyTransactions(res.map(_.toStoredTransaction).toSeq),
+      timeouts,
+      futureSupervisor,
     )
   }
 

@@ -14,7 +14,7 @@ object ContractKeyStateCache {
   def apply(initialCacheIndex: Offset, cacheSize: Long, metrics: Metrics)(implicit
       ec: ExecutionContext
   ): StateCache[GlobalKey, ContractKeyStateValue] =
-    new StateCache(
+    StateCache(
       initialCacheIndex = initialCacheIndex,
       cache = SizedCache.from[GlobalKey, ContractKeyStateValue](
         SizedCache.Configuration(cacheSize),

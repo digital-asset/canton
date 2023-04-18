@@ -5,14 +5,15 @@ package com.digitalasset.canton.data
 
 import com.daml.metrics.api.MetricHandle.Counter
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
-import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, SyncCloseable}
+import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, FutureUnlessShutdown, SyncCloseable}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueueWithShutdown}
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, SequencerCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
@@ -20,7 +21,7 @@ import io.functionmeta.functionFullName
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
+import scala.concurrent.{Future, Promise, blocking}
 
 /** The task scheduler manages tasks with associated timestamps and sequencer counters.
   * Tasks may be inserted in any order; they will be executed nevertheless in the correct order
@@ -32,7 +33,6 @@ import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
   * @param initTimestamp Only timestamps after this timestamp can be used
   * @param equalTimestampTaskOrdering The ordering for tasks with the same timestamps;
   *                                   tasks that are smaller w.r.t this order are processed earlier.
-  * @param ecForTaskChaining Execution context used to sequence the task [[scala.concurrent.Future]]s
   */
 class TaskScheduler[Task <: TaskScheduler.TimedTask](
     initSc: SequencerCounter,
@@ -41,8 +41,8 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
     metrics: TaskSchedulerMetrics,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
-)(private val ecForTaskChaining: ExecutionContext)
-    extends NamedLogging
+    futureSupervisor: FutureSupervisor,
+) extends NamedLogging
     with FlagCloseableAsync {
 
   /** Stores the timestamp up to which all tasks are known and can be performed,
@@ -93,8 +93,14 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   /** The [[scala.concurrent.Future]] of the latest task that was executed.
     * The next task's [[TaskScheduler.TimedTask.perform()]] will run after this future completes.
     */
-  private[this] val queue: SimpleExecutionQueue =
-    new SimpleExecutionQueue(logTaskTiming = true)(ecForTaskChaining)
+  private[this] val queue: SimpleExecutionQueueWithShutdown =
+    new SimpleExecutionQueueWithShutdown(
+      "task-scheduler",
+      futureSupervisor,
+      timeouts,
+      loggerFactory,
+      logTaskTiming = true,
+    )
 
   private[this] val lock: Object = new Object
 
@@ -245,10 +251,9 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   def flush(): Future[Unit] = queue.flush()
 
   override def closeAsync() = {
-    import TraceContext.Implicits.Empty.*
     Seq(
       SyncCloseable("unregister-metrics", queueSizeGauge.close()),
-      queue.asCloseable("TaskScheduler.flush", timeouts.shutdownShort.unwrap),
+      SyncCloseable("queue", queue.close()),
     )
   }
 
@@ -296,7 +301,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
       case Some(tracedTask) =>
         tracedTask.withTraceContext { implicit traceContext => task =>
           FutureUtil.doNotAwait(
-            queue.executeUnlessFailed(task.perform(), task.toString),
+            queue.executeUS(task.perform(), task.toString).unwrap,
             show"A task failed with an exception.\n$task",
           )
           taskQueue.dequeue()
@@ -340,6 +345,6 @@ object TaskScheduler {
     def sequencerCounter: SequencerCounter
 
     /** Perform the task. The future completes when the task is completed */
-    def perform(): Future[Unit]
+    def perform(): FutureUnlessShutdown[Unit]
   }
 }

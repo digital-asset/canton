@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.akkastreams.dispatcher
 import akka.stream.DelayOverflowStrategy
 import akka.stream.scaladsl.{Sink, Source}
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.platform.akkastreams.FutureTimeouts
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
 import org.scalatest.concurrent.{AsyncTimeLimitedTests, ScaledTimeSpans}
@@ -21,7 +22,7 @@ import java.util.concurrent.{Executors, TimeUnit}
 import scala.collection.immutable
 import scala.collection.immutable.TreeMap
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.util.{Failure, Success}
 
 class DispatcherSpec
@@ -90,7 +91,7 @@ class DispatcherSpec
         publishTo foreach { d =>
           d.signalNewHead(i)
         }
-        Thread.sleep(r.nextInt(meanDelayMs + 1).toLong * 2)
+        blocking(Thread.sleep(r.nextInt(meanDelayMs + 1).toLong * 2))
         LazyList.cons((i, v), genManyHelper(next, count - 1))
       }
     }
@@ -101,7 +102,9 @@ class DispatcherSpec
   def publish(head: Index, dispatcher: Dispatcher[Index], meanDelayMs: Int = 0): Unit = {
     publishedHead.set(head)
     dispatcher.signalNewHead(head)
-    Thread.sleep(r.nextInt(meanDelayMs + 1).toLong * 2)
+    blocking(
+      Thread.sleep(r.nextInt(meanDelayMs + 1).toLong * 2)
+    )
   }
 
   /** Collect the actual results between start (exclusive) and stop (inclusive) from the given Dispatcher,
@@ -167,7 +170,7 @@ class DispatcherSpec
       forAllSteppingModes() { subSrc =>
         val dispatcher = newDispatcher()
 
-        dispatcher.shutdown()
+        discard(dispatcher.shutdown())
 
         dispatcher.signalNewHead(Index(1)) // should not throw
         dispatcher
@@ -200,7 +203,7 @@ class DispatcherSpec
         val out = collect(i50, i100, dispatcher, subSrc)
         publish(i100, dispatcher)
 
-        dispatcher.shutdown()
+        discard(dispatcher.shutdown())
 
         out.map(_ shouldEqual pairs100)
       }
@@ -288,7 +291,7 @@ class DispatcherSpec
         val out75F = collect(i75, i100, dispatcher, subSrc)
         publish(i100, dispatcher)
 
-        dispatcher.shutdown()
+        discard(dispatcher.shutdown())
 
         validate4Sections(pairs25, pairs50, pairs75, pairs100, outF, out25F, out50F, out75F)
       }
@@ -316,7 +319,7 @@ class DispatcherSpec
         val out75F = collect(i75, i100, dispatcher, subSrc, delayMs = 10)
         publish(i100, dispatcher)
 
-        dispatcher.shutdown()
+        discard(dispatcher.shutdown())
 
         validate4Sections(pairs25, pairs50, pairs75, pairs100, outF, out25F, out50F, out75F)
       }
@@ -335,7 +338,7 @@ class DispatcherSpec
         for {
           results <- resultsF
         } yield {
-          dispatcher.shutdown()
+          discard(dispatcher.shutdown())
           results shouldEqual pairs25
         }
       }

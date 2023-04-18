@@ -1,7 +1,7 @@
 ..
-     Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+   Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 ..
-     SPDX-License-Identifier: Apache-2.0
+   SPDX-License-Identifier: Apache-2.0
 
 Daml Ledger Configuration Specification
 =======================================

@@ -9,6 +9,7 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   PackageInUse,
@@ -53,7 +54,7 @@ trait PackageInspectionOps extends NamedLogging {
 
   def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
       tc: TraceContext
-  ): EitherT[Future, ParticipantTopologyManagerError, Unit]
+  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit]
 
   def genRevokePackagesTx(packages: List[LfPackageId])(implicit
       tc: TraceContext
@@ -152,7 +153,7 @@ class PackageInspectionOpsImpl(
 
   override def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
       tc: TraceContext
-  ): EitherT[Future, ParticipantTopologyManagerError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
     for {
       _signedTx <- topologyManager.authorize(
         tx,

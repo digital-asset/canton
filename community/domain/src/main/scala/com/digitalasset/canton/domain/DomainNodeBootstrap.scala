@@ -8,7 +8,7 @@ import better.files.*
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.error.ErrorGroup
+import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, InitConfigBase}
@@ -44,6 +44,7 @@ import com.digitalasset.canton.environment.{
   CantonNodeBootstrapCommonArguments,
   NodeFactoryArguments,
 }
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.HealthReporting.{
   BaseMutableHealthComponent,
@@ -56,9 +57,9 @@ import com.digitalasset.canton.health.admin.data.{
   SequencerHealthStatus,
   TopologyQueueStatus,
 }
-import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableServer
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{
@@ -125,8 +126,10 @@ class DomainNodeBootstrap(
     timeouts,
     loggerFactory,
   )
-  private val sequencerTopologyStore = new DomainTopologyStore(storage, timeouts, loggerFactory)
-  private val mediatorTopologyStore = new DomainTopologyStore(storage, timeouts, loggerFactory)
+  private val sequencerTopologyStore =
+    new DomainTopologyStore(storage, timeouts, loggerFactory, futureSupervisor)
+  private val mediatorTopologyStore =
+    new DomainTopologyStore(storage, timeouts, loggerFactory, futureSupervisor)
 
   // Mutable health component for the sequencer health, created during initialization
   private lazy val sequencerHealth = new BaseMutableHealthComponent[Sequencer](
@@ -198,7 +201,7 @@ class DomainNodeBootstrap(
 
   override protected def autoInitializeIdentity(
       initConfigBase: InitConfigBase
-  ): EitherT[Future, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
     withNewTraceContext { implicit traceContext =>
       for {
         initialized <- initializeTopologyManagerIdentity(
@@ -216,11 +219,14 @@ class DomainNodeBootstrap(
         _ <- settingsStore
           .saveSettings(StoredDomainNodeSettings(staticDomainParametersFromConfig))
           .leftMap(_.toString)
+          .mapK(FutureUnlessShutdown.outcomeK)
         // finally, store the node id (which means we have completed initialisation)
         // as all methods above are idempotent, if we die during initialisation, we should come back here
         // and resume until we've stored the node id
-        _ <- storeId(nodeId)
-        _ <- startDomain(topologyManager, staticDomainParametersFromConfig)
+        _ <- storeId(nodeId).mapK(FutureUnlessShutdown.outcomeK)
+        _ <- startDomain(topologyManager, staticDomainParametersFromConfig).mapK(
+          FutureUnlessShutdown.outcomeK
+        )
       } yield ()
     }
 
@@ -242,13 +248,15 @@ class DomainNodeBootstrap(
       domainId: DomainId,
       namespaceKey: SigningPublicKey,
       topologyManager: DomainTopologyManager,
-  ): EitherT[Future, String, Unit] = {
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
     // In a domain without a dedicated DomainTopologyManager, the mediator always gets the same ID as the domain.
     val mediatorId = MediatorId(domainId)
     for {
-      mediatorKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
-        s"$name-mediator-signing"
-      )
+      mediatorKey <- CantonNodeBootstrapCommon
+        .getOrCreateSigningKey(crypto.value)(
+          s"$name-mediator-signing"
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
       _ <- authorizeStateUpdate(
         topologyManager,
         namespaceKey,
@@ -268,10 +276,12 @@ class DomainNodeBootstrap(
       domainId: DomainId,
       topologyManager: DomainTopologyManager,
       namespaceKey: SigningPublicKey,
-  ): EitherT[Future, String, PublicKey] = for {
-    sequencerKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
-      s"$name-sequencer-signing"
-    )
+  ): EitherT[FutureUnlessShutdown, String, PublicKey] = for {
+    sequencerKey <- CantonNodeBootstrapCommon
+      .getOrCreateSigningKey(crypto.value)(
+        s"$name-sequencer-signing"
+      )
+      .mapK(FutureUnlessShutdown.outcomeK)
     _ <- authorizeStateUpdate(
       topologyManager,
       namespaceKey,
@@ -296,6 +306,7 @@ class DomainNodeBootstrap(
       parameters.processingTimeouts,
       staticDomainParameters.protocolVersion,
       loggerFactory,
+      futureSupervisor,
     )
     topologyManager = Some(manager)
     startTopologyManagementWriteService(manager, manager.store)
@@ -303,7 +314,7 @@ class DomainNodeBootstrap(
   }
 
   /** If we're running a sequencer within the domain node itself, then locally start some core services */
-  private def initializeSequencerServices: EitherT[Future, String, Unit] = {
+  private def initializeSequencerServices: EitherT[FutureUnlessShutdown, String, Unit] = {
     adminServerRegistry
       .addServiceU(
         SequencerVersionServiceGrpc.bindService(
@@ -486,9 +497,10 @@ class DomainNodeBootstrap(
               )
           }
           .toEitherT[Future]
-        sequencerRuntime = sequencerRuntimeFactory
+        sequencerRuntime <- sequencerRuntimeFactory
           .create(
             domainId,
+            SequencerId(domainId.uid),
             crypto.value,
             sequencedTopologyStore,
             // The sequencer is using the topology manager's topology client
@@ -517,6 +529,7 @@ class DomainNodeBootstrap(
           topologyClient,
           parameters.processingTimeouts,
           loggerFactory,
+          futureSupervisor,
         )
         domainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
           staticDomainParameters,
@@ -784,5 +797,22 @@ object Domain extends DomainErrorGroup {
     config.copy(recordingConfig = setMemberRecordingPath(member)(config.recordingConfig))
 
   abstract class GrpcSequencerAuthenticationErrorGroup extends ErrorGroup
+
+  @Explanation(
+    """This error indicates that the initialisation of a domain node failed due to invalid arguments."""
+  )
+  @Resolution("""Consult the error details.""")
+  object FailedToInitialiseDomainNode
+      extends ErrorCode(
+        id = "DOMAIN_NODE_INITIALISATION_FAILED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Failure(override val cause: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause)
+    final case class Shutdown()(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause = "Node is being shutdown")
+  }
 
 }

@@ -17,6 +17,7 @@ import org.slf4j.Marker
 import scala.beans.BeanProperty
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
+import scala.concurrent.blocking
 import scala.reflect.ClassTag
 
 // An appender and a logger must be defined in the logback.xml or logback-test.xml to capture the log entries.
@@ -76,20 +77,22 @@ final class TestingLogCollector extends AppenderBase[ILoggingEvent] {
       val log = TestingLogCollector.log
         .getOrElseUpdate(test, TrieMap.empty)
         .getOrElseUpdate(e.getLoggerName, Vector.newBuilder)
-      val _ = log.synchronized {
-        val throwableO = Option(e.getThrowableProxy)
-        val causeEntryO = throwableO
-          .flatMap(t => Option(t.getCause))
-          .map(cause => ThrowableCause(cause.getClassName, cause.getMessage))
-        val throwableEntryO =
-          throwableO.map(t => ThrowableEntry(t.getClassName, t.getMessage, causeEntryO))
-        log += Entry(
-          e.getLevel,
-          e.getMessage,
-          Option(e.getMarker),
-          throwableEntryO = throwableEntryO,
-        )
-      }
+      val _ = blocking(
+        log.synchronized {
+          val throwableO = Option(e.getThrowableProxy)
+          val causeEntryO = throwableO
+            .flatMap(t => Option(t.getCause))
+            .map(cause => ThrowableCause(cause.getClassName, cause.getMessage))
+          val throwableEntryO =
+            throwableO.map(t => ThrowableEntry(t.getClassName, t.getMessage, causeEntryO))
+          log += Entry(
+            e.getLevel,
+            e.getMessage,
+            Option(e.getMarker),
+            throwableEntryO = throwableEntryO,
+          )
+        }
+      )
     }
   }
 }

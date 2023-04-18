@@ -238,6 +238,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             stakeholders = Set(ExampleTransactionFactory.submitter),
             signatories = Set(ExampleTransactionFactory.submitter),
             choiceObservers = Set.empty,
+            choiceAuthorizers = None,
             children = ImmArray.empty,
             exerciseResult = None,
             keyOpt = None,

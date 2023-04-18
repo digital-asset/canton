@@ -73,7 +73,7 @@ object DeduplicationState {
     * @param vector An ordered (by insertion) vector of deduplication entries
     * @param mappings Mapping of changeId to recordTime
     */
-  private[validate] case class DeduplicationStateQueueMap(
+  private[validate] final case class DeduplicationStateQueueMap(
       vector: Vector[(ChangeId, Time.Timestamp)],
       mappings: Map[ChangeId, Time.Timestamp],
   ) {

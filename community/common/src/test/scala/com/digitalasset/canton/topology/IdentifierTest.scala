@@ -145,4 +145,13 @@ class IdentifierTest extends AnyWordSpec with BaseTest {
 
   }
 
+  "SequencerId serialization" should {
+    "be able to convert back and forth" in {
+      val sequencerId = DefaultTestIdentities.sequencerId
+      SequencerId
+        .fromProtoPrimitive(sequencerId.toProtoPrimitive, "sequencerId")
+        .value shouldBe sequencerId
+    }
+  }
+
 }

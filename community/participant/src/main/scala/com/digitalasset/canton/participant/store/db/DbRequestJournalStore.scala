@@ -36,6 +36,7 @@ import io.functionmeta.functionFullName
 import slick.jdbc.*
 
 import java.util.ConcurrentModificationException
+import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Success, Try}
 
@@ -145,7 +146,7 @@ class DbRequestJournalStore(
 
       override protected def checkQuery(itemsToCheck: NonEmpty[Seq[ItemIdentifier]])(implicit
           batchTraceContext: TraceContext
-      ): Iterable[ReadOnly[Iterable[CheckData]]] =
+      ): immutable.Iterable[ReadOnly[immutable.Iterable[CheckData]]] =
         bulkQueryDbio(itemsToCheck)
 
       override protected def analyzeFoundData(item: RequestData, foundData: Option[RequestData])(
@@ -185,7 +186,7 @@ class DbRequestJournalStore(
 
   private def bulkQueryDbio(
       rcs: NonEmpty[Seq[RequestCounter]]
-  ): Iterable[DbAction.ReadOnly[Iterable[RequestData]]] =
+  ): immutable.Iterable[DbAction.ReadOnly[immutable.Iterable[RequestData]]] =
     DbStorage.toInClauses_("request_counter", rcs, maxItemsInSqlInClause).map { inClause =>
       import DbStorage.Implicits.BuilderChain.*
       val query =
@@ -273,7 +274,7 @@ class DbRequestJournalStore(
 
       override protected def checkQuery(itemsToCheck: NonEmpty[Seq[RequestCounter]])(implicit
           batchTraceContext: TraceContext
-      ): Iterable[ReadOnly[Iterable[RequestData]]] = bulkQueryDbio(itemsToCheck)
+      ): immutable.Iterable[ReadOnly[immutable.Iterable[RequestData]]] = bulkQueryDbio(itemsToCheck)
 
       override protected def analyzeFoundData(item: ReplaceRequest, foundData: Option[RequestData])(
           implicit traceContext: TraceContext

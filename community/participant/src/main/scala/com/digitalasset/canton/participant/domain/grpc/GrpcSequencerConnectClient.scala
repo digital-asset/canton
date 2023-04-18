@@ -22,7 +22,7 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.Success
@@ -48,13 +48,13 @@ class GrpcSequencerConnectClient(
   private val builder =
     sequencerConnection.mkChannelBuilder(clientChannelBuilder, traceContextPropagation)
 
-  override def getDomainId(
+  override def getDomainIdSequencerId(
       domainAlias: DomainAlias
-  )(implicit traceContext: TraceContext): EitherT[Future, Error, DomainId] = for {
+  )(implicit traceContext: TraceContext): EitherT[Future, Error, (DomainId, SequencerId)] = for {
     response <- CantonGrpcUtil
       .sendSingleGrpcRequest(
         serverName = domainAlias.unwrap,
-        requestDescription = "get domain id",
+        requestDescription = "get domain id and sequencer id",
         channel = builder.build(),
         stubFactory = v0.SequencerConnectServiceGrpc.stub,
         timeout = timeouts.network.unwrap,
@@ -69,7 +69,16 @@ class GrpcSequencerConnectClient(
       .leftMap[Error](err => Error.DeserializationFailure(err.toString))
 
     domainId <- EitherT.fromEither[Future](domainId)
-  } yield domainId
+
+    sequencerId =
+      if (response.sequencerId.isEmpty) Right(SequencerId(domainId.unwrap))
+      else
+        SequencerId
+          .fromProtoPrimitive(response.sequencerId, "sequencerId")
+          .leftMap[Error](err => Error.DeserializationFailure(err.toString))
+
+    sequencerId <- EitherT.fromEither[Future](sequencerId)
+  } yield (domainId, sequencerId)
 
   override def getDomainParameters(
       domainAlias: DomainAlias

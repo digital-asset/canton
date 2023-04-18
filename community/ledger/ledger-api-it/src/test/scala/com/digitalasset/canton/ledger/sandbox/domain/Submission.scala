@@ -25,6 +25,7 @@ private[sandbox] object Submission {
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
   )(implicit val loggingContext: LoggingContext)
       extends Submission {
+    @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     val submissionId: SubmissionId = {
       // If we were to make SoX production-ready we would make the submissionId non-optional.
       // .get deemed safe since no transaction submission should have the submission id empty

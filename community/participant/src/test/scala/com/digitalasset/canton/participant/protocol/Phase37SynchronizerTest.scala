@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.RequestType
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.WrappedPendingRequestData
 import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
@@ -51,8 +52,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
       )
     p37s
       .awaitConfirmed(requestType)(requestId1)
-      .futureValue
-      .value shouldBe pendingRequestData
+      .futureValue shouldBe RequestOutcome.Success(pendingRequestData)
   }
 
   "return after reaching confirmed (for request timeout)" in {
@@ -61,7 +61,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
     p37s.registerRequest(requestType)(requestId1).complete(None)
     p37s
       .awaitConfirmed(requestType)(requestId1)
-      .futureValue shouldBe None
+      .futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout
   }
 
   "return only after reaching confirmed" in {
@@ -75,7 +75,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
     handle.complete(
       Some(pendingRequestData)
     )
-    f.futureValue.value shouldBe pendingRequestData
+    f.futureValue shouldBe RequestOutcome.Success(pendingRequestData)
   }
 
   "return only after reaching confirmed (for request timeout)" in {
@@ -86,7 +86,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
     assert(!f.isCompleted)
 
     handle.complete(None)
-    f.futureValue shouldBe None
+    f.futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout
   }
 
   "return after request is marked as timeout and the memory cleaned" in {
@@ -98,7 +98,9 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
     eventually() {
       p37s.memoryIsCleaned(requestType)(requestId1) shouldBe true
     }
-    p37s.awaitConfirmed(requestType)(requestId1).futureValue shouldBe None
+    p37s
+      .awaitConfirmed(requestType)(requestId1)
+      .futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout
   }
 
   "return value only once after reaching confirmed" in {
@@ -114,8 +116,8 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
 
     val f2 = p37s.awaitConfirmed(requestType)(requestId1)
 
-    f1.futureValue.value shouldBe pendingRequestData
-    f2.futureValue shouldBe None
+    f1.futureValue shouldBe RequestOutcome.Success(pendingRequestData)
+    f2.futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout
   }
 
   "complain if multiple registers have been called for the same requestID" in {
@@ -150,8 +152,8 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
 
     val f3 = p37s.awaitConfirmed(requestType)(requestId1)
 
-    f1.futureValue.value shouldBe pendingRequestData
-    forAll(Seq(f2, f3))(fut => fut.futureValue shouldBe None)
+    f1.futureValue shouldBe RequestOutcome.Success(pendingRequestData)
+    forAll(Seq(f2, f3))(fut => fut.futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout)
   }
 
   "no valid confirms" in {
@@ -182,9 +184,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
 
     handle.complete(Some(pendingRequestData))
 
-    f1.futureValue shouldBe None
-    f2.futureValue shouldBe None
-    f3.futureValue shouldBe None
+    forAll(Seq(f1, f2, f3))(fut => fut.futureValue shouldBe RequestOutcome.Invalid)
   }
 
   "deal with several calls for the same unconfirmed request with different filters" in {
@@ -221,8 +221,8 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
         _ => Future.successful(true),
       )
 
-    f1.futureValue.value shouldBe pendingRequestData
-    forAll(Seq(f2, f3, f4))(fut => fut.futureValue shouldBe None)
+    f1.futureValue shouldBe RequestOutcome.Success(pendingRequestData)
+    forAll(Seq(f2, f3, f4))(fut => fut.futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout)
   }
 
   "deal with several calls for the same confirmed request with different filters" in {
@@ -243,8 +243,8 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
     val f3 = p37s
       .awaitConfirmed(requestType)(requestId1, _ => Future.successful(true))
 
-    f1.futureValue.value shouldBe pendingRequestData0
-    forAll(Seq(f2, f3))(fut => fut.futureValue shouldBe None)
+    f1.futureValue shouldBe RequestOutcome.Success(pendingRequestData0)
+    forAll(Seq(f2, f3))(fut => fut.futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout)
 
     p37s
       .registerRequest(requestType)(requestId2)
@@ -258,9 +258,9 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
     val f6 = p37s
       .awaitConfirmed(requestType)(requestId2, _ => Future.successful(false))
 
-    f4.futureValue shouldBe None
-    f5.futureValue.value shouldBe pendingRequestData1
-    f6.futureValue shouldBe None
+    f4.futureValue shouldBe RequestOutcome.Invalid
+    f5.futureValue shouldBe RequestOutcome.Success(pendingRequestData1)
+    f6.futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout
   }
 
   "memory is cleaned if a request is valid and completed" in {
@@ -274,8 +274,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
       )
     p37s
       .awaitConfirmed(requestType)(requestId1)
-      .futureValue
-      .value shouldBe pendingRequestData
+      .futureValue shouldBe RequestOutcome.Success(pendingRequestData)
 
     p37s
       .registerRequest(requestType)(requestId2)
@@ -295,15 +294,12 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
       .registerRequest(requestType)(requestId1)
       .complete(Some(pendingRequestData))
 
-    var f1
-        : Future[Option[ProtocolProcessor.PendingRequestDataOrReplayData[TestPendingRequestData]]] =
-      Future.successful(None)
-    var f2
-        : Future[Option[ProtocolProcessor.PendingRequestDataOrReplayData[TestPendingRequestData]]] =
-      Future.successful(None)
-    var f4
-        : Future[Option[ProtocolProcessor.PendingRequestDataOrReplayData[TestPendingRequestData]]] =
-      Future.successful(None)
+    var f1: Future[RequestOutcome[TestPendingRequestData]] =
+      Future.successful(RequestOutcome.Invalid)
+    var f2: Future[RequestOutcome[TestPendingRequestData]] =
+      Future.successful(RequestOutcome.Invalid)
+    var f4: Future[RequestOutcome[TestPendingRequestData]] =
+      Future.successful(RequestOutcome.Invalid)
     val f3 = p37s
       .awaitConfirmed(requestType)(
         requestId1,
@@ -337,10 +333,10 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
       )
 
     eventually() {
-      f1.futureValue shouldBe None
-      f2.futureValue.value shouldBe pendingRequestData
-      f3.futureValue shouldBe None
-      f4.futureValue shouldBe None
+      f1.futureValue shouldBe RequestOutcome.Invalid
+      f2.futureValue shouldBe RequestOutcome.Success(pendingRequestData)
+      f3.futureValue shouldBe RequestOutcome.Invalid
+      f4.futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout
     }
   }
 
@@ -357,8 +353,10 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
       .complete(Some(pendingRequestData))
     p37s
       .awaitConfirmed(AnotherTestPendingRequestDataType)(requestId1)
-      .futureValue shouldBe None
-    p37s.awaitConfirmed(requestType)(requestId1).futureValue shouldBe Some(pendingRequestData)
+      .futureValue shouldBe RequestOutcome.AlreadyServedOrTimeout
+    p37s.awaitConfirmed(requestType)(requestId1).futureValue shouldBe RequestOutcome.Success(
+      pendingRequestData
+    )
   }
 
 }

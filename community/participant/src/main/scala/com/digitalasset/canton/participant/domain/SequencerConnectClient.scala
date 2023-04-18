@@ -14,16 +14,16 @@ import com.digitalasset.canton.participant.domain.grpc.GrpcSequencerConnectClien
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
 trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 
-  def getDomainId(domainAlias: DomainAlias)(implicit
+  def getDomainIdSequencerId(domainAlias: DomainAlias)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, Error, DomainId]
+  ): EitherT[Future, Error, (DomainId, SequencerId)]
 
   def getDomainParameters(domainAlias: DomainAlias)(implicit
       traceContext: TraceContext

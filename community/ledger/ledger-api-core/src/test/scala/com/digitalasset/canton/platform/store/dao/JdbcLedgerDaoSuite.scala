@@ -13,17 +13,17 @@ import com.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
 import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.{ContractId, ContractInstance, ValueText, VersionedContractInstance}
-import com.daml.lf.value.{Value as LfValue}
+import com.daml.lf.value.Value as LfValue
 import com.daml.logging.LoggingContext
 import com.daml.testing.utils.{TestModels, TestResourceUtils}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoSuite.*
 import com.digitalasset.canton.platform.store.dao.PersistenceResponse
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
-import org.scalatest.AsyncTestSuite
+import org.scalatest.{AsyncTestSuite, OptionValues}
 
 import java.time.Duration
 import java.util.UUID
@@ -33,7 +33,7 @@ import scala.language.implicitConversions
 import scala.util.Success
 import scala.util.chaining.*
 
-private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend {
+private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionValues {
   this: AsyncTestSuite =>
 
   protected implicit final val loggingContext: LoggingContext = LoggingContext.ForTesting
@@ -240,6 +240,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend {
       stakeholders = Set(alice, bob),
       signatories = Set(alice, bob),
       choiceObservers = Set.empty,
+      choiceAuthorizers = None,
       children = ImmArray.Empty,
       exerciseResult = Some(someChoiceResult),
       keyOpt = key,
@@ -395,6 +396,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend {
         stakeholders = divulgees,
         signatories = divulgees,
         choiceObservers = Set.empty,
+        choiceAuthorizers = None,
         children = ImmArray.Empty,
         exerciseResult = Some(someChoiceResult),
         keyOpt = None,
@@ -772,6 +774,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend {
         stakeholders = Set(party),
         signatories = Set(party),
         choiceObservers = Set.empty,
+        choiceAuthorizers = None,
         children = ImmArray.Empty,
         exerciseResult = Some(LfValue.ValueUnit),
         keyOpt = maybeKey.map(k =>
@@ -881,7 +884,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend {
     ledgerDao.completions
       .getCommandCompletions(startExclusive, endInclusive, applicationId, parties)
       .map(_._2.completions.head)
-      .map(c => c.commandId -> c.status.get.code)
+      .map(c => c.commandId -> c.status.value.code)
       .runWith(Sink.seq)
 
   protected def storeConfigurationEntry(

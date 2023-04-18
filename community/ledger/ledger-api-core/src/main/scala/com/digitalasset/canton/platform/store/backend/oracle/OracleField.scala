@@ -10,7 +10,7 @@ import spray.json.*
 
 import java.sql.PreparedStatement
 
-private[oracle] case class OracleStringArrayOptional[FROM](
+private[oracle] final case class OracleStringArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[String]]
 ) extends Field[FROM, Option[Iterable[String]], String] {
   override def convert: Option[Iterable[String]] => String =
@@ -24,7 +24,7 @@ private[oracle] case class OracleStringArrayOptional[FROM](
   }
 }
 
-private[oracle] case class OracleIntArray[FROM](
+private[oracle] final case class OracleIntArray[FROM](
     extract: StringInterning => FROM => Iterable[Int]
 ) extends Field[FROM, Iterable[Int], String] {
   override def convert: Iterable[Int] => String = _.toList.toJson.compactPrint
@@ -37,7 +37,7 @@ private[oracle] case class OracleIntArray[FROM](
   }
 }
 
-private[oracle] case class OracleIntArrayOptional[FROM](
+private[oracle] final case class OracleIntArrayOptional[FROM](
     extract: StringInterning => FROM => Option[Iterable[Int]]
 ) extends Field[FROM, Option[Iterable[Int]], String] {
   override def convert: Option[Iterable[Int]] => String =

@@ -23,7 +23,7 @@ import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
 import com.digitalasset.canton.platform.server.api.validation.ResourceAnnotationValidation
 
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 object InMemoryPartyRecordStore {
   final case class PartyRecordInfo(
@@ -174,8 +174,10 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
   }
 
   private def withState[T](t: => T): Future[T] =
-    state.synchronized(
-      Future(t)
+    blocking(
+      state.synchronized(
+        Future(t)
+      )
     )
 
   private def withoutPartyRecord[T](party: Ref.Party)(t: => Result[T]): Result[T] =

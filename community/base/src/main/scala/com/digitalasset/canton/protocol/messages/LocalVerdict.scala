@@ -690,7 +690,7 @@ object LocalReject extends LocalRejectionGroup {
           override val representativeProtocolVersion: RepresentativeProtocolVersion[
             LocalVerdict.type
           ]
-      ) extends LocalRejectImpl(_causePrefix = "Activeness check failed. ")
+      ) extends LocalRejectImpl(_causePrefix = "Activeness check failed.")
 
       object Reject {
         def apply(details: String, protocolVersion: ProtocolVersion): Reject =

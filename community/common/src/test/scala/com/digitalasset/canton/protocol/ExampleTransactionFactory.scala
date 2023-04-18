@@ -164,6 +164,7 @@ object ExampleTransactionFactory {
       stakeholders = signatories ++ observers,
       signatories = signatories,
       choiceObservers = choiceObservers,
+      choiceAuthorizers = None,
       children = children.to(ImmArray),
       exerciseResult = exerciseResult,
       keyOpt = key,

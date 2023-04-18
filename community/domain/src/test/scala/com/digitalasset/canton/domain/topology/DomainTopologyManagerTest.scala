@@ -31,6 +31,7 @@ class DomainTopologyManagerTest extends TopologyManagerTest {
           DefaultProcessingTimeouts.testing,
           BaseTest.testedProtocolVersion,
           factory,
+          futureSupervisor,
         )
       }
     }

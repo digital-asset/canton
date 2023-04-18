@@ -10,7 +10,12 @@ class TopologyStoreTestInMemory extends TopologyStoreTest {
   "InMemoryTopologyStore" should {
     behave like partyMetadataStore(() => new InMemoryPartyMetadataStore())
     behave like topologyStore(() =>
-      new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+      new InMemoryTopologyStore(
+        TopologyStoreId.AuthorizedStore,
+        loggerFactory,
+        timeouts,
+        futureSupervisor,
+      )
     )
   }
 }

@@ -23,7 +23,7 @@ private[backend] object InitHookDataSourceProxy {
 
 import com.digitalasset.canton.platform.store.backend.common.InitHookDataSourceProxy.*
 
-private[backend] case class InitHookDataSourceProxy(
+private[backend] final case class InitHookDataSourceProxy(
     delegate: DataSource,
     initHook: Connection => Unit,
 )(implicit loggingContext: LoggingContext)

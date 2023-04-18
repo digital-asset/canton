@@ -9,6 +9,7 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
@@ -44,7 +45,7 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
       dar: Option[PackageService.Dar],
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
 
     val pkgIds = pkgs.map(readPackageId)
 
@@ -71,7 +72,7 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
       darPackages.updateWith(hash)(optSet => Some(optSet.fold(pkgS)(_.union(pkgS))))
     }
 
-    Future.unit
+    FutureUnlessShutdown.unit
   }
 
   override def getPackage(packageId: LfPackageId)(implicit
@@ -100,7 +101,7 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
 
   override def removePackage(
       packageId: PackageId
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     darPackages
       .mapValuesInPlace({ case (_hash, packages) => packages - packageId })
       .filterInPlace({ case (_hash, packages) => packages.nonEmpty })
@@ -108,7 +109,7 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
 
     pkgData.remove(packageId).discard
 
-    Future.unit
+    FutureUnlessShutdown.unit
   }
 
   override def getDar(
@@ -139,10 +140,12 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
     OptionT.fromOption(withoutDar)
   }
 
-  override def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit] = {
+  override def removeDar(
+      hash: Hash
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     darPackages.remove(hash).discard
     darData.remove(hash).discard
-    Future.unit
+    FutureUnlessShutdown.unit
   }
 
   override def close(): Unit = ()

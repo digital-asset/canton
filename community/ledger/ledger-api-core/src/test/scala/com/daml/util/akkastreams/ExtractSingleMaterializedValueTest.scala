@@ -7,6 +7,7 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{Millis, Span}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Random
@@ -16,6 +17,8 @@ class ExtractSingleMaterializedValueTest
     with Matchers
     with ScalaFutures
     with AkkaBeforeAndAfterAll {
+
+  implicit val config: PatienceConfig = PatienceConfig().copy(timeout = scaled(Span(1500, Millis)))
 
   private val discriminator = { i: Int =>
     if (i < 0) Some(i) else None

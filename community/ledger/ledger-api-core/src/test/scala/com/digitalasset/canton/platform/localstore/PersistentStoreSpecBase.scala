@@ -7,6 +7,7 @@ import com.daml.ledger.resources.ResourceContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.daml.resources.Resource
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.platform.configuration.ServerRole
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
@@ -47,7 +48,7 @@ trait PersistentStoreSpecBase extends BeforeAndAfterEach with BeforeAndAfterAll 
     val resetDbF = dbSupport.dbDispatcher.executeSql(dbMetrics) { connection =>
       backend.reset.resetAll(connection)
     }
-    Await.ready(resetDbF, 10.seconds)
+    Await.ready(resetDbF, 10.seconds).discard
     assert(
       runningTests.incrementAndGet() == 1,
       s"$thisSimpleName tests must not run in parallel, as they all run against the same database.",
@@ -64,7 +65,7 @@ trait PersistentStoreSpecBase extends BeforeAndAfterEach with BeforeAndAfterAll 
   }
 
   override protected def afterAll(): Unit = {
-    Await.ready(dbSupportResource.release(), 15.seconds)
+    Await.ready(dbSupportResource.release(), 15.seconds).discard
     super.afterAll()
   }
 

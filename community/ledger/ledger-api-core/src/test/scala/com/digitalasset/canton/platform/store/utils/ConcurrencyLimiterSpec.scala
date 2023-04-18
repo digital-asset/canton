@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.utils
 
+import com.digitalasset.canton.concurrent.Threading
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.{Assertion, Assertions}
 
@@ -101,7 +102,7 @@ object ConcurrencyLimiterSpec extends Assertions {
 
           // Simulate some work
           if (waitTimeMillis > 0) {
-            Thread.sleep(waitTimeMillis)
+            Threading.sleep(waitTimeMillis)
           }
 
           val after = running.decrementAndGet()

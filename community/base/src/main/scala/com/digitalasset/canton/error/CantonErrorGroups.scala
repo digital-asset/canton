@@ -23,6 +23,8 @@ object CantonErrorGroups {
 
   abstract class MediatorErrorGroup extends ErrorGroup()
 
+  abstract class GrpcErrorGroup extends ErrorGroup()
+
   object ParticipantErrorGroup extends ErrorGroup() {
 
     abstract class DomainConnectivityErrorGroup extends ErrorGroup()

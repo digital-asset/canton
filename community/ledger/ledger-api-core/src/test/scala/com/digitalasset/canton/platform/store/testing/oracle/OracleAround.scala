@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.testing.oracle
 
+import com.digitalasset.canton.concurrent.Threading
 import org.slf4j.LoggerFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
@@ -44,7 +45,13 @@ object OracleAround {
     def lockIdSeed: Int = {
       assert(oracleUser.id > 0, "Lock ID seeding is not supported, cannot ensure unique lock-ids")
       assert(oracleUser.id < 10 * 1000 * 1000)
-      oracleUser.id * 10
+      val seed = oracleUser.id * 10
+      val maxLockId = seed + 10
+      assert(
+        maxLockId < (1 << 29),
+        "Lock IDs here have the 30th bit unset",
+      )
+      seed
     }
   }
 
@@ -99,7 +106,7 @@ object OracleAround {
     def retry[T](times: Int, sleepMillisBeforeReTry: Long)(body: => T): T = Try(body) match {
       case Success(t) => t
       case Failure(_) if times > 0 =>
-        if (sleepMillisBeforeReTry > 0) Thread.sleep(sleepMillisBeforeReTry)
+        if (sleepMillisBeforeReTry > 0) Threading.sleep(sleepMillisBeforeReTry)
         retry(times - 1, sleepMillisBeforeReTry)(body)
       case Failure(t) => throw t
     }
@@ -184,7 +191,7 @@ object OracleAround {
   private object Config {
     val xeDockerImage: String = "digitalasset/oracle:xe-18.4.0-preloaded-20210325-22-be14fb7"
     val enterpriseDockerImage: String =
-      "digitalasset/oracle:enterprise-19.18.0-preloaded-20230403-35-6f80341"
+      "digitalasset/oracle:enterprise-19.18.0-preloaded-20230414-36-5f03be2"
     val xeDbName: String = "XEPDB1"
     val enterpriseDbName: String = "ORCLPDB1"
     val defaultPort: Int = 1521

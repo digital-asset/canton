@@ -8,7 +8,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.PositiveStoredTopologyTransactionsX
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
+  GenericStoredTopologyTransactionsX,
+  PositiveStoredTopologyTransactionsX,
+}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactionsX,
@@ -83,4 +86,8 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       filterUid: Option[Seq[UniqueIdentifier]],
       filterNamespace: Option[Seq[Namespace]],
   )(implicit traceContext: TraceContext): Future[PositiveStoredTopologyTransactionsX] = ???
+
+  override def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = ???
 }

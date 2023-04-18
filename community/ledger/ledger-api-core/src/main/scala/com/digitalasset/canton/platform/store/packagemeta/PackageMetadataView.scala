@@ -8,6 +8,8 @@ import com.daml.lf.archive.Decode
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.*
 
+import scala.concurrent.blocking
+
 trait PackageMetadataView {
   def update(packageMetadata: PackageMetadata): Unit
 
@@ -54,9 +56,11 @@ private[packagemeta] class PackageMetaDataViewImpl extends PackageMetadataView {
   @volatile private var packageMetadata = PackageMetadata()
 
   override def update(packageMetadata: PackageMetadata): Unit =
-    synchronized {
-      this.packageMetadata = this.packageMetadata.append(packageMetadata)
-    }
+    blocking(
+      synchronized(
+        this.packageMetadata = this.packageMetadata.append(packageMetadata)
+      )
+    )
 
   override def current(): PackageMetadata = packageMetadata
 }

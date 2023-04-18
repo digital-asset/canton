@@ -5,11 +5,14 @@ package com.digitalasset.canton.networking.grpc
 
 import cats.data.EitherT
 import cats.implicits.*
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.error.CantonErrorGroups.GrpcErrorGroup
 import com.digitalasset.canton.error.{BaseCantonError, CantonError}
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -58,6 +61,12 @@ object CantonGrpcUtil {
   ): EitherT[Future, StatusRuntimeException, C] =
     value.leftMap(_.asGrpcError)
 
+  def mapErrNewETUS[T <: CantonError, C](value: EitherT[FutureUnlessShutdown, T, C])(implicit
+      ec: ExecutionContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): EitherT[Future, StatusRuntimeException, C] =
+    value.onShutdown(Left(AbortedDueToShutdown.Error())).leftMap(_.asGrpcError)
+
   def mapErrNew[T <: BaseCantonError, C](value: EitherT[Future, T, C])(implicit
       executionContext: ExecutionContext,
       errorLoggingContext: ErrorLoggingContext,
@@ -68,6 +77,12 @@ object CantonGrpcUtil {
       ec: ExecutionContext
   ): Future[C] =
     EitherTUtil.toFuture(value.leftMap(_.asGrpcError))
+
+  def mapErrNewEUS[T <: CantonError, C](value: EitherT[FutureUnlessShutdown, T, C])(implicit
+      ec: ExecutionContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Future[C] =
+    EitherTUtil.toFuture(mapErrNewETUS(value))
 
   @Deprecated
   def invalidArgument(err: String): StatusRuntimeException =
@@ -219,4 +234,31 @@ object CantonGrpcUtil {
     * as long as the client and servers use the same value.
     */
   val sequencerHealthCheckServiceName = "sequencer-health-check-service"
+
+  object GrpcErrors extends GrpcErrorGroup {
+
+    /** Canton Error that can be used in Grpc Services to signal that a request could not be processed
+      * successfully due to the node shutting down
+      */
+    @Explanation(
+      "This error is returned when processing of the request was aborted due to the node shutting down."
+    )
+    @Resolution(
+      "Retry the request against an active and available node."
+    )
+    object AbortedDueToShutdown
+        extends ErrorCode(
+          id = "ABORTED_DUE_TO_SHUTDOWN",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Error()(implicit val loggingContext: ErrorLoggingContext)
+          extends CantonError.Impl("request aborted due to shutdown")
+    }
+  }
+
+  implicit class GrpcFUSExtended[A](val f: FutureUnlessShutdown[A]) extends AnyVal {
+    def asGrpcResponse(implicit ec: ExecutionContext, elc: ErrorLoggingContext): Future[A] = {
+      f.failOnShutdownTo(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError)
+    }
+  }
 }

@@ -77,4 +77,6 @@ class TopologyTransactionProcessorX(
       ts: CantonTimestamp,
       envelopes: Traced[List[DefaultOpenEnvelope]],
   ): HandlerResult = ???
+
+  override def subscribe(listener: TopologyTransactionProcessingSubscriber): Unit = ???
 }

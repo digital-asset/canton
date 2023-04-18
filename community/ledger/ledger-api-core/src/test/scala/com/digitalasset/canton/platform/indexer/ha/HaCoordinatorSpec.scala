@@ -7,6 +7,7 @@ import akka.stream.KillSwitch
 import akka.testkit.TestProbe
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AsyncFlatSpec
@@ -16,7 +17,7 @@ import java.sql.Connection
 import java.util.Timer
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.{Random, Try}
 
 class HaCoordinatorSpec
@@ -121,7 +122,7 @@ class HaCoordinatorSpec
         info("Abort is not observed at execution")
         protectedHandle.completed.isCompleted shouldBe false
         info("Protected Handle not completed")
-        Thread.sleep(200)
+        Threading.sleep(200)
         info("As waiting 200 millis")
         protectedHandle.completed.isCompleted shouldBe false
         info(
@@ -245,7 +246,7 @@ class HaCoordinatorSpec
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
     info("As acquiring the main lock from the outside")
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
@@ -273,7 +274,7 @@ class HaCoordinatorSpec
     info("As acquiring the main lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
@@ -300,7 +301,7 @@ class HaCoordinatorSpec
       connectionFactory = () => mainConnection,
     )
     import protectedSetup.*
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
@@ -325,7 +326,7 @@ class HaCoordinatorSpec
     info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
@@ -355,7 +356,7 @@ class HaCoordinatorSpec
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
 
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
@@ -384,7 +385,7 @@ class HaCoordinatorSpec
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
 
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
@@ -412,7 +413,7 @@ class HaCoordinatorSpec
     )
     import protectedSetup.*
 
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
@@ -439,7 +440,7 @@ class HaCoordinatorSpec
       workerLockAcquireMaxRetry = 2,
     )
     import protectedSetup.*
-    Thread.sleep(200)
+    Threading.sleep(200)
     info("And as waiting for 200 millis")
     for {
       failure <- protectedHandle.completed.failed
@@ -483,7 +484,7 @@ class HaCoordinatorSpec
         info("As protected execution initialization is finished")
         connectionInitializer.initialize(new TestConnection)
         info("Connection initializer works")
-        Thread.sleep(200)
+        Threading.sleep(200)
         info("As waiting 200 millis")
         protectedHandle.completed.isCompleted shouldBe false
         info("Protected Handle is still not completed")
@@ -530,7 +531,7 @@ class HaCoordinatorSpec
         info("As protected execution initialization is finished")
         connectionInitializer.initialize(new TestConnection)
         info("Connection initializer works")
-        Thread.sleep(200)
+        Threading.sleep(200)
         info("As waiting 200 millis")
         protectedHandle.completed.isCompleted shouldBe false
         info("Protected Handle is still not completed")
@@ -579,7 +580,7 @@ class HaCoordinatorSpec
     val nodeStoppedExecutionProbe = TestProbe()
     val nodeHaltedProbe = TestProbe()
 
-    def addNode(): Unit = synchronized {
+    def addNode(): Unit = blocking(synchronized {
       val node = setup(dbLock = dbLock)
       node.connectionInitializerFuture
         .foreach { _ =>
@@ -604,13 +605,13 @@ class HaCoordinatorSpec
         }
       nodes = nodes + node
       info("As a node added")
-    }
+    })
 
-    def removeNode(node: ProtectedSetup): Unit = synchronized {
+    def removeNode(node: ProtectedSetup): Unit = blocking(synchronized {
       nodes = nodes - node
-    }
+    })
 
-    def verifyCleanSlate(expectedNumberOfNodes: Int): Unit = synchronized {
+    def verifyCleanSlate(expectedNumberOfNodes: Int): Unit = blocking(synchronized {
       if (expectedNumberOfNodes == 0) {
         nodes.size shouldBe 0
       } else {
@@ -626,11 +627,11 @@ class HaCoordinatorSpec
       nodeStoppedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeHaltedProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       info("Cluster is in expected shape")
-    }
+    })
 
     def wait(): Unit = {
       val waitMillis: Long = Random.nextInt(100).toLong
-      Thread.sleep(waitMillis)
+      Threading.sleep(waitMillis)
       info(s"As waiting $waitMillis millis")
     }
 
@@ -709,7 +710,7 @@ class HaCoordinatorSpec
     val nodeHaltedProbe = TestProbe()
     val concurrentWorkers = new AtomicInteger(0)
 
-    def addNode(): Unit = synchronized {
+    def addNode(): Unit = blocking(synchronized {
       val node = setup(dbLock = dbLock)
       val workerConnection = new TestConnection
       node.connectionInitializerFuture
@@ -722,7 +723,7 @@ class HaCoordinatorSpec
         }
       node.executionShutdownFuture
         .foreach { _ =>
-          Thread.sleep(keepUsingWorkerAfterShutdownMillis)
+          Threading.sleep(keepUsingWorkerAfterShutdownMillis)
           concurrentWorkers.decrementAndGet()
           dbLock.release(DBLockStorageBackend.Lock(worker, DBLockStorageBackend.LockMode.Shared))(
             workerConnection
@@ -732,7 +733,7 @@ class HaCoordinatorSpec
         }
       node.executionAbortedFuture
         .foreach { t =>
-          Thread.sleep(keepUsingWorkerAfterShutdownMillis)
+          Threading.sleep(keepUsingWorkerAfterShutdownMillis)
           concurrentWorkers.decrementAndGet()
           dbLock.release(DBLockStorageBackend.Lock(worker, DBLockStorageBackend.LockMode.Shared))(
             workerConnection
@@ -747,13 +748,13 @@ class HaCoordinatorSpec
         }
       nodes = nodes + node
       info("As a node added")
-    }
+    })
 
-    def removeNode(node: ProtectedSetup): Unit = synchronized {
+    def removeNode(node: ProtectedSetup): Unit = blocking(synchronized {
       nodes = nodes - node
-    }
+    })
 
-    def verifyCleanSlate(expectedNumberOfNodes: Int): Unit = synchronized {
+    def verifyCleanSlate(expectedNumberOfNodes: Int): Unit = blocking(synchronized {
       if (expectedNumberOfNodes == 0) {
         nodes.size shouldBe 0
       } else {
@@ -770,11 +771,11 @@ class HaCoordinatorSpec
       nodeStoppedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeHaltedProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       info("Cluster is in expected shape")
-    }
+    })
 
     def wait(): Unit = {
       val waitMillis: Long = Random.nextInt(100).toLong
-      Thread.sleep(waitMillis)
+      Threading.sleep(waitMillis)
       info(s"As waiting $waitMillis millis")
     }
 

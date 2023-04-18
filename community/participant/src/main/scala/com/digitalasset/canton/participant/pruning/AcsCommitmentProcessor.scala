@@ -12,19 +12,14 @@ import cats.syntax.traverse.*
 import cats.syntax.validated.*
 import com.daml.error.*
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AcsCommitmentErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
-import com.digitalasset.canton.lifecycle.{
-  AsyncOrSyncCloseable,
-  FlagCloseableAsync,
-  FutureUnlessShutdown,
-  SyncCloseable,
-}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.participant.event.{AcsChange, AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.PruningMetrics
@@ -140,10 +135,11 @@ class AcsCommitmentProcessor(
     metrics: PruningMetrics,
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
-    with FlagCloseableAsync
+    with FlagCloseable
     with NamedLogging {
 
   import AcsCommitmentProcessor.*
@@ -196,7 +192,14 @@ class AcsCommitmentProcessor(
   private val timestampsWithPotentialTopologyChanges =
     new AtomicReference[List[Traced[CantonTimestamp]]](List())
 
-  private[pruning] val queue: SimpleExecutionQueue = new SimpleExecutionQueue(logTaskTiming = true)
+  private[pruning] val queue: SimpleExecutionQueueWithShutdown =
+    new SimpleExecutionQueueWithShutdown(
+      "acs-commitment-processor-queue",
+      futureSupervisor,
+      timeouts,
+      loggerFactory,
+      logTaskTiming = true,
+    )
 
   private def getReconciliationIntervals(validAt: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -208,7 +211,7 @@ class AcsCommitmentProcessor(
   // completed by the time we return - only that no other task is queued before initialization.
   private[this] val initFuture: FutureUnlessShutdown[Unit] = {
     import TraceContext.Implicits.Empty.*
-    val executed = queue.executeUnlessFailed(
+    val executed = queue.executeUS(
       performUnlessClosingF("acs-commitment-processor-init") {
         for {
           lastComputed <- store.lastComputedAndSent
@@ -225,15 +228,13 @@ class AcsCommitmentProcessor(
 
           _ = logger.info("Initialized the ACS commitment processor queue")
         } yield ()
-      }.unwrap // TODO(#6175) Try to avoid the unwrapping and rewrapping
-      ,
+      },
       "ACS commitment processor initialization",
     )
-    val loggedFut = FutureUtil.logOnFailure(
+    FutureUtil.logOnFailureUnlessShutdown(
       executed,
       "Failed to initialize the ACS commitment processor.",
     )
-    FutureUnlessShutdown(loggedFut)
   }
 
   @volatile private[this] var lastPublished: Option[RecordTime] = None
@@ -390,20 +391,21 @@ class AcsCommitmentProcessor(
     }
 
     FutureUtil.doNotAwait(
-      queue.executeUnlessFailed(
-        Policy
-          .noisyInfiniteRetry(
-            performPublish(),
-            this,
-            timeouts.storageMaxRetryInterval.asFiniteApproximation,
-            s"publish ACS change at $toc",
-            s"Disconnect and reconnect to the domain $domainId if this error persists.",
-          )
-          .onShutdown(
-            logger.info("Giving up on producing ACS commitment due to shutdown")
-          ),
-        s"publish ACS change at $toc",
-      ),
+      queue
+        .executeUS(
+          Policy
+            .noisyInfiniteRetry(
+              performPublish(),
+              this,
+              timeouts.storageMaxRetryInterval.asFiniteApproximation,
+              s"publish ACS change at $toc",
+              s"Disconnect and reconnect to the domain $domainId if this error persists.",
+            ),
+          s"publish ACS change at $toc",
+        )
+        .onShutdown(
+          logger.info("Giving up on producing ACS commitment due to shutdown")
+        ),
       failureMessage = s"Producing ACS commitments failed.",
       // If this happens, then the failure is fatal or there is some bug in the queuing or retrying.
       // Unfortunately, we can't do anything anymore to reliably prevent corruption of the running snapshot in the DB,
@@ -446,9 +448,7 @@ class AcsCommitmentProcessor(
                 logger.debug(
                   s"Checking commitment (purportedly by) ${payload.sender} for period ${payload.period}"
                 )
-                FutureUnlessShutdown.outcomeF(
-                  checkSignedMessage(timestamp, envelope.protocolMessage)
-                )
+                checkSignedMessage(timestamp, envelope.protocolMessage)
 
               case Left(errors) =>
                 errors.toList.foreach(logger.error(_))
@@ -550,19 +550,19 @@ class AcsCommitmentProcessor(
   private def checkSignedMessage(
       timestamp: CantonTimestamp,
       message: SignedProtocolMessage[AcsCommitment],
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
-      validSig <- checkCommitmentSignature(message)
+      validSig <- FutureUnlessShutdown.outcomeF(checkCommitmentSignature(message))
 
       commitment = message.message
 
       // If signature passes, store such that we can prove Byzantine behavior if necessary
       _ <-
         if (validSig) for {
-          _ <- store.storeReceived(message)
+          _ <- FutureUnlessShutdown.outcomeF(store.storeReceived(message))
           _ <- checkCommitment(commitment)
         } yield ()
-        else Future.unit
+        else FutureUnlessShutdown.unit
     } yield {
       if (!validSig) {
         AcsCommitmentAlarm
@@ -587,9 +587,9 @@ class AcsCommitmentProcessor(
 
   private def checkCommitment(
       commitment: AcsCommitment
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     queue
-      .executeUnlessFailed(
+      .execute(
         // Make sure that the ready-for-remote check is atomic with buffering the commitment
         {
           val readyToCheck = readyForRemote.exists(_ >= commitment.period.toInclusive)
@@ -604,7 +604,7 @@ class AcsCommitmentProcessor(
         },
         s"check commitment readiness at ${commitment.period} by ${commitment.sender}",
       )
-      .flatten
+      .flatMap(FutureUnlessShutdown.outcomeF)
 
   private def indicateReadyForRemote(timestamp: CantonTimestampSecond): Unit = {
     readyForRemote.foreach(oldTs =>
@@ -767,14 +767,9 @@ class AcsCommitmentProcessor(
       s"Request to sequence local commitment messages for period $period sent to sequencer"
     )
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    Seq(
-      queue.asCloseable("acs-commitment-processor-queue", timeouts.shutdownProcessing.unwrap),
-      SyncCloseable("logging", logger.info("Shut down the ACS commitment processor")),
-    )
+  override protected def onClosed(): Unit = {
+    Lifecycle.close(queue)(logger)
   }
-
 }
 
 object AcsCommitmentProcessor extends HasLoggerName {

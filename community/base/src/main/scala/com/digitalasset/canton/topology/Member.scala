@@ -155,10 +155,8 @@ object Member {
         )
     }
 
-  implicit val memberOrdering: Ordering[Member] =
-    Ordering.by(x => (x.code.threeLetterId.unwrap, x.uid.namespace.unwrap, x.uid.id.unwrap))
-
-  implicit val memberOrder: Order[Member] = Order.fromOrdering
+  // Use the same ordering as for what we use in the database
+  implicit val memberOrdering: Ordering[Member] = Ordering.by(_.toLengthLimitedString.unwrap)
 
   /** Instances for slick to set and get members.
     * Not exposed by default as other types derived from [[Member]] have their own persistence schemes ([[ParticipantId]]).
@@ -440,4 +438,17 @@ object SequencerId {
     SequencerId(UniqueIdentifier(identifier, namespace))
 
   def apply(domainId: DomainId): SequencerId = SequencerId(domainId.unwrap)
+
+  def fromProtoPrimitive(
+      proto: String,
+      fieldName: String,
+  ): ParsingResult[SequencerId] =
+    KeyOwner.fromProtoPrimitive(proto, fieldName).flatMap {
+      case x: SequencerId => Right(x)
+      case y =>
+        Left(
+          ProtoDeserializationError
+            .ValueDeserializationError(fieldName, s"Value $y is not of type `SequencerId`")
+        )
+    }
 }

@@ -29,6 +29,10 @@ sealed trait NodeStatus[+S <: NodeStatus.Status]
     with Serializable {
   def trySuccess: S
   def successOption: Option[S]
+
+  /** Return the node activeness if it is known or None otherwise.
+    */
+  def isActive: Option[Boolean]
 }
 
 object NodeStatus {
@@ -39,6 +43,8 @@ object NodeStatus {
     override def trySuccess: Nothing =
       sys.error(s"Status did not complete successfully. Error: $msg")
     override def successOption: Option[Nothing] = None
+
+    override def isActive: Option[Boolean] = None
   }
 
   /** A node is running but not yet initialized. */
@@ -46,12 +52,16 @@ object NodeStatus {
     override def pretty: Pretty[NotInitialized] = prettyOfClass(param("active", _.active))
     override def trySuccess: Nothing = sys.error(s"Node is not yet initialized.")
     override def successOption: Option[Nothing] = None
+
+    override def isActive: Option[Boolean] = Some(active)
   }
 
   final case class Success[S <: Status](status: S) extends NodeStatus[S] {
     override def trySuccess: S = status
     override def pretty: Pretty[Success.this.type] = prettyOfParam(_.status)
     override def successOption: Option[S] = status.some
+
+    override def isActive: Option[Boolean] = Some(status.active)
   }
 
   trait Status extends PrettyPrinting with Product with Serializable {

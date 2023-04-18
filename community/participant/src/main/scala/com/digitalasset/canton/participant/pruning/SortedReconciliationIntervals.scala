@@ -74,7 +74,7 @@ final case class SortedReconciliationIntervals private (
         case interval :: tail =>
           if (interval.validFrom <= ts) {
             // The min allows to project back if there is a gap in the validity intervals
-            val currentTs = interval.validUntil.map(CantonTimestamp.min(_, ts)).getOrElse(ts)
+            val currentTs = interval.validUntil.map(_.min(ts)).getOrElse(ts)
 
             val tick = tickBeforeOrAtForIntervalLength(currentTs, interval.intervalLength)
 

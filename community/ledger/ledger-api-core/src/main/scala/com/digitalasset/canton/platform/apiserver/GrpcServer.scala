@@ -7,6 +7,7 @@ import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.Metrics
 import com.daml.metrics.grpc.GrpcMetricsServerInterceptor
 import com.daml.ports.Port
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.platform.apiserver.error.ErrorInterceptor
 import com.google.protobuf.Message
 import io.grpc.*
@@ -49,7 +50,7 @@ private[apiserver] object GrpcServer {
     builder.executor(servicesExecutor)
     builder.maxInboundMessageSize(maxInboundMessageSize)
     // NOTE: Interceptors run in the reverse order in which they were added.
-    interceptors.foreach(builder.intercept)
+    interceptors.foreach(interceptor => builder.intercept(interceptor).discard)
     builder.intercept(new GrpcMetricsServerInterceptor(metrics.daml.grpc))
     builder.intercept(new TruncatedStatusInterceptor(MaximumStatusDescriptionLength))
     builder.intercept(new ErrorInterceptor)

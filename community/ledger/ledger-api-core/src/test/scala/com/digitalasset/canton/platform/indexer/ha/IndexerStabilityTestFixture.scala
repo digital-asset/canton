@@ -6,8 +6,8 @@ package com.digitalasset.canton.platform.indexer.ha
 import akka.stream.Materializer
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.ContextualizedLogger
 import com.daml.logging.LoggingContext.{newLoggingContext, withEnrichedLoggingContext}
+import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.noop.NoOpMetricsFactory
@@ -74,6 +74,53 @@ object IndexerStabilityTestFixture {
       ),
     )
 
+    def createReaderAndIndexer(
+        i: Int,
+        participantDataSourceConfig: ParticipantDataSourceConfig,
+        executionContext: ExecutionContext,
+    )(implicit loggingContext: LoggingContext): Resource[ReadServiceAndIndexer] =
+      for {
+        // Create a read service
+        readService <- ResourceOwner
+          .forCloseable(() =>
+            withEnrichedLoggingContext("name" -> s"ReadService$i") { readServiceLoggingContext =>
+              EndlessReadService(updatesPerSecond, s"$i")(readServiceLoggingContext)
+            }
+          )
+          .acquire()
+        // create a new MetricRegistry for each indexer, so they don't step on each other toes:
+        // Gauges can only be registered once. A subsequent attempt results in an exception for the
+        // call MetricRegistry#register or MetricRegistry#registerGauge
+        metrics = {
+          val registry = new MetricRegistry
+          new Metrics(
+            new DropwizardMetricsFactory(registry),
+            NoOpMetricsFactory,
+            registry,
+          )
+        }
+        (inMemoryState, inMemoryStateUpdaterFlow) <-
+          LedgerApiServer
+            .createInMemoryStateAndUpdater(
+              IndexServiceConfig(),
+              metrics,
+              executionContext,
+            )
+            .acquire()
+
+        // Create an indexer and immediately start it
+        indexing <- new IndexerServiceOwner(
+          participantId = EndlessReadService.participantId,
+          participantDataSourceConfig = participantDataSourceConfig,
+          readService = readService,
+          config = indexerConfig,
+          metrics = metrics,
+          inMemoryState = inMemoryState,
+          inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
+          executionContext = executionContext,
+        ).acquire()
+      } yield ReadServiceAndIndexer(readService, indexing)
+
     newLoggingContext { implicit loggingContext =>
       val participantDataSourceConfig = ParticipantDataSourceConfig(jdbcUrl)
       for {
@@ -85,55 +132,17 @@ object IndexerStabilityTestFixture {
 
         // Start N indexers that all compete for the same database
         _ = logger.info(s"Starting $indexerCount indexers for database $jdbcUrl")
+        migratingIndexer <- createReaderAndIndexer(
+          0,
+          participantDataSourceConfig,
+          servicesExecutionContext,
+        )
         indexers <- Resource
           .sequence(
-            (1 to indexerCount).toList
-              .map(i =>
-                for {
-                  // Create a read service
-                  readService <- ResourceOwner
-                    .forCloseable(() =>
-                      withEnrichedLoggingContext("name" -> s"ReadService$i") {
-                        readServiceLoggingContext =>
-                          EndlessReadService(updatesPerSecond, s"$i")(readServiceLoggingContext)
-                      }
-                    )
-                    .acquire()
-                  // create a new MetricRegistry for each indexer, so they don't step on each other toes:
-                  // Gauges can only be registered once. A subsequent attempt results in an exception for the
-                  // call MetricRegistry#register or MetricRegistry#registerGauge
-                  metrics = {
-                    val registry = new MetricRegistry
-                    new Metrics(
-                      new DropwizardMetricsFactory(registry),
-                      NoOpMetricsFactory,
-                      registry,
-                    )
-                  }
-                  (inMemoryState, inMemoryStateUpdaterFlow) <-
-                    LedgerApiServer
-                      .createInMemoryStateAndUpdater(
-                        IndexServiceConfig(),
-                        metrics,
-                        servicesExecutionContext,
-                      )
-                      .acquire()
-
-                  // Create an indexer and immediately start it
-                  indexing <- new IndexerServiceOwner(
-                    participantId = EndlessReadService.participantId,
-                    participantDataSourceConfig = participantDataSourceConfig,
-                    readService = readService,
-                    config = indexerConfig,
-                    metrics = metrics,
-                    inMemoryState = inMemoryState,
-                    inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
-                    executionContext = servicesExecutionContext,
-                  ).acquire()
-                } yield ReadServiceAndIndexer(readService, indexing)
-              )
+            (1 until indexerCount).toList
+              .map(createReaderAndIndexer(_, participantDataSourceConfig, servicesExecutionContext))
           )
-          .map(xs => Indexers(xs.toList))
+          .map(xs => Indexers(migratingIndexer +: xs.toList))
       } yield indexers
     }
   }

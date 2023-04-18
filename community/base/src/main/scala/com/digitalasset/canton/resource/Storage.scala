@@ -65,6 +65,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import javax.sql.rowset.serial.SerialBlob
 import scala.annotation.nowarn
+import scala.collection.immutable
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
@@ -332,14 +333,17 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
     runRead(action, operationName, maxRetries)
 
   def sequentialQueryAndCombine[A](
-      actions: Iterable[DbAction.ReadOnly[Iterable[A]]],
+      actions: immutable.Iterable[DbAction.ReadOnly[immutable.Iterable[A]]],
       operationName: String,
-  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Iterable[A]] =
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): Future[immutable.Iterable[A]] =
     if (actions.nonEmpty) {
       MonadUtil.foldLeftM(actions.iterableFactory.empty[A], actions) { case (acc, action) =>
         query(action, operationName)(traceContext, closeContext).map(acc ++ _)
       }
-    } else Future.successful(Iterable.empty[A])
+    } else Future.successful(immutable.Iterable.empty[A])
 
   def querySingle[A](
       action: DBIOAction[Option[A], NoStream, Effect.Read with Effect.Transactional],
@@ -446,18 +450,28 @@ object DbStorage {
 
   object Implicits {
 
-    implicit def functorDBIO(implicit ec: ExecutionContext): Functor[DBIO] = new Functor[DBIO] {
-      def map[A, B](fa: DBIO[A])(f: A => B): DBIO[B] = fa.map(f)
+    implicit def functorDBIO[E <: Effect](implicit
+        ec: ExecutionContext
+    ): Functor[DBIOAction[*, NoStream, E]] = new Functor[DBIOAction[*, NoStream, E]] {
+      def map[A, B](fa: DBIOAction[A, NoStream, E])(f: A => B): DBIOAction[B, NoStream, E] =
+        fa.map(f)
     }
 
-    implicit def monadDBIO(implicit ec: ExecutionContext): Monad[DBIO] = new Monad[DBIO] {
-      def flatMap[A, B](fa: DBIO[A])(f: A => DBIO[B]): DBIO[B] = fa.flatMap(f)
+    implicit def monadDBIO[E <: Effect](implicit
+        ec: ExecutionContext
+    ): Monad[DBIOAction[*, NoStream, E]] =
+      new Monad[DBIOAction[*, NoStream, E]] {
+        def flatMap[A, B](fa: DBIOAction[A, NoStream, E])(
+            f: A => DBIOAction[B, NoStream, E]
+        ): DBIOAction[B, NoStream, E] = fa.flatMap(f)
 
-      def tailRecM[A, B](a: A)(f: A => DBIO[Either[A, B]]): DBIO[B] =
-        f(a).flatMap(_.fold(tailRecM(_)(f), pure))
+        def tailRecM[A, B](a: A)(
+            f: A => DBIOAction[Either[A, B], NoStream, E]
+        ): DBIOAction[B, NoStream, E] =
+          f(a).flatMap(_.fold(tailRecM(_)(f), pure))
 
-      def pure[A](x: A): DBIO[A] = DBIO.successful(x)
-    }
+        def pure[A](x: A): DBIOAction[A, NoStream, E] = DBIOAction.successful(x)
+      }
 
     implicit val getResultUuid: GetResult[UUID] = GetResult(r => UUID.fromString(r.nextString()))
     @SuppressWarnings(Array("com.digitalasset.canton.SlickString")) // UUIDs are length-limited
@@ -755,7 +769,7 @@ object DbStorage {
     */
   def bulkOperation[A](
       statement: String,
-      values: Seq[A],
+      values: immutable.Iterable[A],
       profile: Profile,
   )(
       setParams: PositionedParameters => A => Unit
@@ -783,8 +797,8 @@ object DbStorage {
           }
           val updateCounts = preparedStatement.executeBatch()
           ErrorUtil.requireState(
-            updateCounts.length == values.length,
-            s"executeBatch returned ${updateCounts.length} update counts for ${values.length} rows. " +
+            values.sizeIs == updateCounts.length,
+            s"executeBatch returned ${updateCounts.length} update counts for ${values.size} rows. " +
               s"${updateCounts.mkString("Array(", ", ", ")")}",
           )
           ErrorUtil.requireState(
@@ -818,7 +832,7 @@ object DbStorage {
   /** Same as [[bulkOperation]] except that no update counts are returned. */
   def bulkOperation_[A](
       statement: String,
-      values: Seq[A],
+      values: immutable.Iterable[A],
       profile: Profile,
   )(
       setParams: PositionedParameters => A => Unit
@@ -847,7 +861,7 @@ object DbStorage {
       field: String,
       values: NonEmpty[Seq[T]],
       maxValuesInSqlList: PositiveNumeric[Int],
-  )(implicit f: SetParameter[T]): Iterable[(Seq[T], SQLActionBuilder)] = {
+  )(implicit f: SetParameter[T]): immutable.Iterable[(Seq[T], SQLActionBuilder)] = {
     import DbStorage.Implicits.BuilderChain.*
 
     values
@@ -860,14 +874,14 @@ object DbStorage {
 
         groupedValues -> inClause.toActionBuilder
       }
-      .to(Iterable)
+      .to(immutable.Iterable)
   }
 
   def toInClauses_[T](
       field: String,
       values: NonEmpty[Seq[T]],
       maxValuesSqlInListSize: PositiveNumeric[Int],
-  )(implicit f: SetParameter[T]): Iterable[SQLActionBuilder] =
+  )(implicit f: SetParameter[T]): immutable.Iterable[SQLActionBuilder] =
     toInClauses(field, values, maxValuesSqlInListSize).map { case (_, builder) => builder }
 
   class DbStorageCreationException(message: String) extends RuntimeException(message)

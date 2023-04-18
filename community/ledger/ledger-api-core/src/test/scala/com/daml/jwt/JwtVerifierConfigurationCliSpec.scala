@@ -20,9 +20,9 @@ import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.{JcaX509CertificateConverter, JcaX509v3CertificateBuilder}
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
-import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{Assertion, OptionValues}
 import scopt.OptionParser
 
 import java.math.BigInteger
@@ -34,13 +34,13 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.FutureConverters.*
 
-class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with Matchers {
+class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with OptionValues with Matchers {
   Security.addProvider(new BouncyCastleProvider)
 
   "auth command-line parsers" should {
     "parse and configure the authorisation mechanism correctly when `--auth-jwt-hs256-unsafe <secret>` is passed" in {
       val secret = "someSecret"
-      val authService = parseConfig(Array("--auth-jwt-hs256-unsafe", secret))
+      val authService = parseConfig(Array("--auth-jwt-hs256-unsafe", secret)).value
       val token = JWT.create().sign(Algorithm.HMAC256(secret))
       val metadata = createAuthMetadata(token)
       decodeAndCheckMetadata(authService, metadata)
@@ -52,7 +52,7 @@ class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with Matchers {
         val certificatePath = newCertificate("SHA256WithRSA", directory, publicKey, privateKey)
         val token = JWT.create().sign(Algorithm.RSA256(publicKey, privateKey))
 
-        val authService = parseConfig(Array("--auth-jwt-rs256-crt", certificatePath.toString))
+        val authService = parseConfig(Array("--auth-jwt-rs256-crt", certificatePath.toString)).value
         val metadata = createAuthMetadata(token)
         decodeAndCheckMetadata(authService, metadata)
       }
@@ -63,7 +63,7 @@ class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with Matchers {
         val certificatePath = newCertificate("SHA256WithECDSA", directory, publicKey, privateKey)
         val token = JWT.create().sign(Algorithm.ECDSA256(publicKey, privateKey))
 
-        val authService = parseConfig(Array("--auth-jwt-es256-crt", certificatePath.toString))
+        val authService = parseConfig(Array("--auth-jwt-es256-crt", certificatePath.toString)).value
         val metadata = createAuthMetadata(token)
         decodeAndCheckMetadata(authService, metadata)
       }
@@ -74,7 +74,7 @@ class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with Matchers {
         val certificatePath = newCertificate("SHA512WithECDSA", directory, publicKey, privateKey)
         val token = JWT.create().sign(Algorithm.ECDSA512(publicKey, privateKey))
 
-        val authService = parseConfig(Array("--auth-jwt-es512-crt", certificatePath.toString))
+        val authService = parseConfig(Array("--auth-jwt-es512-crt", certificatePath.toString)).value
         val metadata = createAuthMetadata(token)
         decodeAndCheckMetadata(authService, metadata)
       }
@@ -94,7 +94,7 @@ class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with Matchers {
       val server = SimpleHttpServer.start(jwks)
       Future {
         val url = SimpleHttpServer.responseUrl(server)
-        val authService = parseConfig(Array("--auth-jwt-rs256-jwks", url))
+        val authService = parseConfig(Array("--auth-jwt-rs256-jwks", url)).value
         val metadata = createAuthMetadata(token)
         (authService, metadata)
       }.flatMap { case (authService, metadata) =>
@@ -107,13 +107,13 @@ class JwtVerifierConfigurationCliSpec extends AsyncWordSpec with Matchers {
 }
 
 object JwtVerifierConfigurationCliSpec {
-  private def parseConfig(args: Array[String]): AuthService = {
+  private def parseConfig(args: Array[String]): Option[AuthService] = {
     val parser = new OptionParser[AtomicReference[AuthService]]("test") {}
     JwtVerifierConfigurationCli.parse(parser) { (verifier, config) =>
       config.set(AuthServiceJWT(verifier, targetAudience = None))
       config
     }
-    parser.parse(args, new AtomicReference[AuthService](AuthServiceWildcard)).get.get()
+    parser.parse(args, new AtomicReference[AuthService](AuthServiceWildcard)).map(_.get())
   }
 
   private def createAuthMetadata(token: String) = {

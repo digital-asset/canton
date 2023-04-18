@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -21,6 +22,7 @@ abstract class DomainTopologyStoreBase[ValidTx, T <: BaseTopologyStore[DomainSto
     storage: Storage,
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 ) extends AutoCloseable {
   private val store = new AtomicReference[Option[T]](None)
   def initOrGet(
@@ -59,15 +61,17 @@ class DomainTopologyStore(
     storage: Storage,
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 ) extends DomainTopologyStoreBase[ValidatedTopologyTransaction, TopologyStore[DomainStore]](
       storage,
       timeouts,
       loggerFactory,
+      futureSupervisor,
     ) {
   override protected def createTopologyStore(
       storeId: DomainStore
   )(implicit ec: ExecutionContext): TopologyStore[DomainStore] =
-    TopologyStore(storeId, storage, timeouts, loggerFactory)
+    TopologyStore(storeId, storage, timeouts, loggerFactory, futureSupervisor)
 
 }
 
@@ -75,12 +79,14 @@ class DomainTopologyStoreX(
     storage: Storage,
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 ) extends DomainTopologyStoreBase[GenericValidatedTopologyTransactionX, TopologyStoreX[
       DomainStore
     ]](
       storage,
       timeouts,
       loggerFactory,
+      futureSupervisor,
     ) {
   override protected def createTopologyStore(
       storeId: DomainStore

@@ -13,14 +13,14 @@ import com.daml.ledger.api.v1.event.Event.Event.{Archived, Created}
 import com.daml.ledger.api.v1.event.{ArchivedEvent, CreatedEvent, Event}
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.api.v1.value.Identifier
-import com.daml.ledger.client.binding.{Primitive as P}
+import com.daml.ledger.client.binding.Primitive as P
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
+import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
-import com.digitalasset.canton.participant.admin.workflows.{DarDistribution as M}
+import com.digitalasset.canton.participant.admin.workflows.DarDistribution as M
 import com.digitalasset.canton.participant.ledger.api.client.{
   CommandSubmitterWithRetry,
   LedgerSubmit,
@@ -56,7 +56,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
         offers <- bobs.service.listOffers()
         _ = offers should have size 1
         offer = offers.headOption.getOrElse(fail("expected an offer"))
-        _ <- bobs.service.accept(offer.contractId)
+        _ <- bobs.service.accept(offer.contractId).failOnShutdown
         bobsDars <- bobs.darService.listDars()
       } yield bobsDars.map(_.hash) should contain(SuccessfulSetup.hash)
     }
@@ -115,7 +115,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
         _ <- alices.service.share(FailToAppendSetup.hash, Bob)
         offer <- bobs.service.listOffers().map(_.headOption.getOrElse(fail("expected offer")))
 
-        acceptResult <- bobs.service.accept(offer.contractId)
+        acceptResult <- bobs.service.accept(offer.contractId).failOnShutdown
 
         requests <- alices.service.listRequests()
         offers <- bobs.service.listOffers()
@@ -391,7 +391,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
         name: String,
         vetAllPackages: Boolean,
         synchronizeVetting: Boolean,
-    )(implicit traceContext: TraceContext): EitherT[Future, DamlError, Hash] = {
+    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, DamlError, Hash] = {
 
       name match {
         case SuccessfulSetup.name =>

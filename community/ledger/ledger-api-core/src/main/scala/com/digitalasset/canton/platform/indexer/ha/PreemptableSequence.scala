@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.indexer.ha
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 
 import java.util.{Timer, TimerTask}
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.{Failure, Success}
 
 /** PreemptableSequence is a helper to
@@ -111,10 +111,10 @@ object PreemptableSequence {
         goF(p.future)
       }
 
-      override def registerRelease(release: => Unit): Unit = synchronized {
+      override def registerRelease(release: => Unit): Unit = blocking(synchronized {
         logger.info(s"Registered release function")
         releaseStack = (() => Future(release)) :: releaseStack
-      }
+      })
 
       override def goF[T](f: => Future[T]): Future[T] =
         killSwitchCaptor.state match {
@@ -187,14 +187,14 @@ object PreemptableSequence {
       override def handle: Handle = resultHandle
     }
 
-    def release: Future[Unit] = synchronized {
+    def release: Future[Unit] = blocking(synchronized {
       releaseStack match {
         case Nil => Future.unit
         case x :: xs =>
           releaseStack = xs
           x().transformWith(_ => release)
       }
-    }
+    })
 
     sequence(helper).transformWith(fResult => release.transform(_ => fResult)).onComplete {
       case Success(_) =>

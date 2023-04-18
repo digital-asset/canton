@@ -19,7 +19,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.HashMap
 import scala.concurrent.duration.{DurationLong, FiniteDuration}
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext, Future, blocking}
 import scala.util.{Failure, Success}
 
 /** A map for [[Tracker]]s with thread-safe tracking methods and automatic cleanup.
@@ -67,9 +67,11 @@ private[services] final class TrackerMap[Key](
     trackerBySubmitter
       .getOrElse(
         key,
-        lock.synchronized {
-          trackerBySubmitter.getOrElse(key, registerNewTracker(key))
-        },
+        blocking(
+          lock.synchronized(
+            trackerBySubmitter.getOrElse(key, registerNewTracker(key))
+          )
+        ),
       )
       .withResource(_.track(submission))
   }
@@ -91,7 +93,7 @@ private[services] final class TrackerMap[Key](
     resource
   }
 
-  def cleanup(): Unit = lock.synchronized {
+  def cleanup(): Unit = blocking(lock.synchronized {
     val currentTime = System.nanoTime()
     trackerBySubmitter.foreach { case (submitter, trackerResource) =>
       trackerResource.currentState match {
@@ -110,13 +112,13 @@ private[services] final class TrackerMap[Key](
           trackerBySubmitter -= submitter
       }
     }
-  }
+  })
 
-  def close(): Unit = lock.synchronized {
+  def close(): Unit = blocking(lock.synchronized {
     logger.info(s"Shutting down ${trackerBySubmitter.size} trackers")
     trackerBySubmitter.values.foreach(_.close())
     trackerBySubmitter = HashMap.empty
-  }
+  })
 }
 
 private[services] object TrackerMap {

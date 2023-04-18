@@ -38,14 +38,6 @@
         <appender-ref ref="ApiPackageManagementServiceLoggerCapture"/>
     </logger>
 
-    <appender name="JdbcIndexerSpecAppender" class="com.digitalasset.canton.testing.TestingLogCollector">
-        <test>com.digitalasset.canton.platform.indexer.JdbcIndexerSpec</test>
-    </appender>
-
-    <appender name="IndexerStabilitySpecAppender" class="com.digitalasset.canton.testing.TestingLogCollector">
-        <test>com.digitalasset.canton.platform.indexer.ha.IndexerStabilitySpec</test>
-    </appender>
-
     <appender name="LogOnUnhandledFailureInCloseCapture" class="com.digitalasset.canton.testing.TestingLogCollector">
         <test>com.digitalasset.canton.platform.apiserver.error.ErrorInterceptorSpec</test>
     </appender>
@@ -62,8 +54,11 @@
         <appender-ref ref="ErrorInterceptor"/>
     </logger>
 
+    <appender name="IndexerStabilitySpecAppender" class="com.digitalasset.canton.testing.TestingLogCollector">
+        <test>com.digitalasset.canton.platform.indexer.ha.IndexerStabilitySpec</test>
+    </appender>
+
     <logger name="com.digitalasset.canton.platform.store.dao.HikariConnection" level="INFO">
-        <appender-ref ref="JdbcIndexerSpecAppender"/>
         <appender-ref ref="IndexerStabilitySpecAppender"/>
     </logger>
 

@@ -7,6 +7,7 @@ import cats.syntax.parallel.*
 import cats.{Monad, Monoid, Parallel}
 
 import scala.annotation.tailrec
+import scala.collection.immutable
 
 object MonadUtil {
 
@@ -20,9 +21,8 @@ object MonadUtil {
       } else monad.pure(Right(state))
     }
 
-  /** The caller must ensure that the Iterable is immutable */
-  def foldLeftM[M[_], S, A](initialState: S, xs: Iterable[A])(step: (S, A) => M[S])(implicit
-      monad: Monad[M]
+  def foldLeftM[M[_], S, A](initialState: S, xs: immutable.Iterable[A])(step: (S, A) => M[S])(
+      implicit monad: Monad[M]
   ): M[S] =
     foldLeftM(initialState, xs.iterator)(step)
 
@@ -94,10 +94,9 @@ object MonadUtil {
   }
 
   /** Conceptually equivalent to `sequentialTraverse(xs)(step).map(monoid.combineAll)`.
-    * The caller must ensure that the Iterable is immutable.
     */
   def sequentialTraverseMonoid[M[_], A, B](
-      xs: Iterable[A]
+      xs: immutable.Iterable[A]
   )(step: A => M[B])(implicit monad: Monad[M], monoid: Monoid[B]): M[B] =
     foldLeftM[M, B, A](monoid.empty, xs) { (acc, x) =>
       monad.map(step(x))(monoid.combine(acc, _))

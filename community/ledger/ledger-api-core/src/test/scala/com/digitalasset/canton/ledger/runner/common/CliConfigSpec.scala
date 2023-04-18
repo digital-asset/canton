@@ -39,8 +39,7 @@ final class CliConfigSpec
       )
     )
 
-    actual should not be None
-    actual.get.tlsConfig shouldBe Some(
+    actual.value.tlsConfig shouldBe Some(
       TlsConfiguration(
         enabled = true,
         secretsUrl = Some(SecretsUrl.fromString("http://aaa")),
@@ -83,8 +82,7 @@ final class CliConfigSpec
       )
     )
 
-    actual should not be None
-    actual.get.tlsConfig shouldBe Some(
+    actual.value.tlsConfig shouldBe Some(
       TlsConfiguration(
         enabled = true,
         minimumServerProtocolVersion = Some(TlsVersion.V1_3),
@@ -102,8 +100,7 @@ final class CliConfigSpec
       )
     )
 
-    actual should not be None
-    actual.get.tlsConfig shouldBe Some(
+    actual.value.tlsConfig shouldBe Some(
       TlsConfiguration(
         enabled = true,
         secretsUrl = None,

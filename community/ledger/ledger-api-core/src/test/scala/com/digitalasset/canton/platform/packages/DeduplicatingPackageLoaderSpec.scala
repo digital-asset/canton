@@ -11,6 +11,7 @@ import com.daml.lf.archive.DarParser
 import com.daml.lf.data.Ref.PackageId
 import com.daml.metrics.api.dropwizard.DropwizardTimer
 import com.daml.testing.utils.{TestModels, TestResourceUtils}
+import com.digitalasset.canton.concurrent.Threading
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
@@ -130,7 +131,7 @@ class DeduplicatingPackageLoaderSpec
         _ <- loader.loadPackage(packageId, _ => delayedFail(10.millis), metric).failed
         // Wait for a short time so that the package loader can remove the failed load from the cache.
         // Without the wait, the second call might get the failed result from above
-        _ = Thread.sleep(100, 0)
+        _ = Threading.sleep(100, 0)
         result2 <- loader.loadPackage(packageId, _ => delayedLoad(10.millis), metric)
       } yield {
         result2.isDefined shouldBe true
@@ -145,7 +146,7 @@ class DeduplicatingPackageLoaderSpec
       val packageId = PackageId.assertFromString(UUID.randomUUID().toString)
       for {
         result1 <- loader.loadPackage(packageId, _ => delayedNotFound(10.millis), metric)
-        _ = Thread.sleep(100, 0)
+        _ = Threading.sleep(100, 0)
         result2 <- loader.loadPackage(packageId, _ => delayedLoad(10.millis), metric)
       } yield {
         result1 shouldBe None

@@ -347,7 +347,7 @@ private object MutableCacheBackedContractStoreRaceTests {
   )
 
   // Simplified view of the index which models the evolution of the key and contracts state
-  private case class IndexViewContractsReader()(implicit ec: ExecutionContext)
+  private final case class IndexViewContractsReader()(implicit ec: ExecutionContext)
       extends LedgerDaoContractsReader {
     private type CreatedAt = Offset
     @volatile private[cache] var contractStateStore = Map.empty[ContractId, ContractLifecycle]

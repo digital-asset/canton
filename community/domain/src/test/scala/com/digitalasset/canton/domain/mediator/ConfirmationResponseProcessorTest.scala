@@ -27,6 +27,7 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.RecipientsTree.MemberRecipient
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
@@ -604,10 +605,10 @@ class ConfirmationResponseProcessorTest
           List(Set[Member](participant) -> correctViewType, Set[Member](otherParticipant) -> wrongViewType),
 
         (batchWithRootHashMessageWithTooManyRecipients ->
-          show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = Seq($mediatorId, $participant, $otherParticipant))") ->
+          show"Root hash messages with wrong recipients tree: RecipientsTree(\n  recipient group = Seq(${MemberRecipient(mediatorId)}, ${MemberRecipient(participant)}, ${MemberRecipient(otherParticipant)})\n)") ->
           List(Set[Member](participant, otherParticipant) -> correctViewType),
 
-        (batchWithRootHashMessageWithTooFewRecipients -> show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = $mediatorId)") -> List.empty,
+        (batchWithRootHashMessageWithTooFewRecipients -> show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = ${MemberRecipient(mediatorId)})") -> List.empty,
 
         (batchWithRepeatedRootHashMessage             -> show"Several root hash messages for members: $participant") ->
           List(Set[Member](participant) -> correctViewType),

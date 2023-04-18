@@ -728,10 +728,12 @@ trait MultiDomainEventLogTest
         "yield correct last global offsets" in {
           eventLog.lastGlobalOffset().value.futureValue shouldBe globalOffsets.lastOption
           forEvery(globalOffsets) { globalOffset =>
-            eventLog.lastGlobalOffset(globalOffset).value.futureValue shouldBe Some(globalOffset)
+            eventLog.lastGlobalOffset(Some(globalOffset)).value.futureValue shouldBe Some(
+              globalOffset
+            )
           }
           globalOffsets.headOption.foreach { firstGlobalOffset =>
-            eventLog.lastGlobalOffset(firstGlobalOffset - 1L).value.futureValue shouldBe None
+            eventLog.lastGlobalOffset(Some(firstGlobalOffset - 1L)).value.futureValue shouldBe None
           }
         }
 

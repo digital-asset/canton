@@ -37,6 +37,7 @@ class TransferOutProcessor(
     sourceProtocolVersion: SourceProtocolVersion,
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
+    skipRecipientsCheck: Boolean,
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
       TransferOutProcessingSteps.SubmissionParam,
@@ -60,4 +61,5 @@ class TransferOutProcessor(
       sequencerClient,
       loggerFactory,
       futureSupervisor,
+      skipRecipientsCheck = skipRecipientsCheck,
     )

@@ -263,7 +263,12 @@ class TestingIdentityFactory(
       timestampForDomainParameters: CantonTimestamp = CantonTimestamp.Epoch,
   ): TopologySnapshot = {
 
-    val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    val store = new InMemoryTopologyStore(
+      TopologyStoreId.AuthorizedStore,
+      loggerFactory,
+      DefaultProcessingTimeouts.testing,
+      FutureSupervisor.Noop,
+    )
 
     // Compute participant permissions and trust levels to be the highest granted to an individual party
     val permissions: Map[ParticipantId, ParticipantAttributes] =
@@ -516,7 +521,7 @@ class TestingOwnerWithKeys(
     val id2k2 = mkAdd(IdentifierDelegation(uid2, key2))
     val okm1 = mkAdd(OwnerToKeyMapping(domainManager, namespaceKey))
     val rokm1 = revert(okm1)
-    val okm2 = mkAdd(OwnerToKeyMapping(sequencer, key2))
+    val okm2 = mkAdd(OwnerToKeyMapping(sequencerId, key2))
     val ps1m =
       ParticipantState(
         RequestSide.Both,
@@ -687,10 +692,10 @@ object DefaultTestIdentities {
   val uid = UniqueIdentifier(Identifier.tryCreate("da"), namespace)
   val domainId = DomainId(uid)
   val domainManager = DomainTopologyManagerId(uid)
-  val sequencer = SequencerId(uid)
+  val sequencerId = SequencerId(uid)
   val mediator = MediatorId(uid)
 
-  val domainEntities: Set[KeyOwner] = Set[KeyOwner](domainManager, sequencer, mediator)
+  val domainEntities: Set[KeyOwner] = Set[KeyOwner](domainManager, sequencerId, mediator)
   val (participant1, party1) = createParticipantAndParty(1)
   val (participant2, party2) = createParticipantAndParty(2)
   val (participant3, party3) = createParticipantAndParty(3)

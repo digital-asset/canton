@@ -208,7 +208,9 @@ trait TransferProcessingSteps[
     val mediatorId = someView.unwrap.mediatorId
     val submitterMetadata = someView.unwrap.submitterMetadata
 
-    val completionInfo = CompletionInfo(
+    val isSubmittingParticipant = submitterMetadata.submittingParticipant == participantId.toLf
+
+    lazy val completionInfo = CompletionInfo(
       actAs = List(submitterMetadata.submitter),
       applicationId = submitterMetadata.applicationId,
       commandId = submitterMetadata.commandId,
@@ -217,19 +219,21 @@ trait TransferProcessingSteps[
       statistics = None,
     )
 
-    val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
+    lazy val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
       TransactionProcessor.SubmissionErrors.InactiveMediatorError
         .Error(mediatorId, ts)
         .rpcStatus()
     )
 
-    val tse = TimestampedEvent(
-      LedgerSyncEvent.CommandRejected(ts.toLf, completionInfo, rejection, requestType),
-      rc.asLocalOffset,
-      Some(sc),
+    val tse = Option.when(isSubmittingParticipant)(
+      TimestampedEvent(
+        LedgerSyncEvent.CommandRejected(ts.toLf, completionInfo, rejection, requestType),
+        rc.asLocalOffset,
+        Some(sc),
+      )
     )
 
-    (Some(tse), decryptedViews.head1.unwrap.rootHash.some)
+    (tse, decryptedViews.head1.unwrap.rootHash.some)
   }
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
@@ -237,8 +241,10 @@ trait TransferProcessingSteps[
   ): Either[TransferProcessorError, Option[TimestampedEvent]] = {
 
     val RejectionArgs(pendingTransfer, rejectionReason) = rejectionArgs
+    val isSubmittingParticipant =
+      pendingTransfer.submitterMetadata.submittingParticipant == participantId.toLf
 
-    val completionInfoO = Some(
+    val completionInfoO = Option.when(isSubmittingParticipant)(
       CompletionInfo(
         actAs = List(pendingTransfer.submitterMetadata.submitter),
         applicationId = pendingTransfer.submitterMetadata.applicationId,

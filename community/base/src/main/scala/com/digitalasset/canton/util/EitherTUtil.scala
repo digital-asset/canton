@@ -127,6 +127,20 @@ object EitherTUtil {
   )(implicit executionContext: ExecutionContext, loggingContext: ErrorLoggingContext): Unit =
     logOnError(eitherT, failureMessage, level = level).discard
 
+  def doNotAwaitUS(
+      eitherT: EitherT[FutureUnlessShutdown, _, _],
+      message: => String,
+      failLevel: Level = Level.ERROR,
+      shutdownLevel: Level = Level.DEBUG,
+  )(implicit executionContext: ExecutionContext, loggingContext: ErrorLoggingContext): Unit = {
+    val failureMessage = s"$message failed"
+    val shutdownMessage = s"$message aborted due to shutdown"
+    logOnErrorU(eitherT, failureMessage, level = failLevel).value
+      .map(_ => ())
+      .onShutdown(LoggerUtil.logAtLevel(shutdownLevel, shutdownMessage))
+      .discard
+  }
+
   /** Measure time of EitherT-based calls, inspired by upstream com.daml.metrics.Timed.future */
   def timed[E, R](timerMetric: Timer)(
       code: => EitherT[Future, E, R]
@@ -146,6 +160,15 @@ object EitherTUtil {
   ): Future[R] =
     x.foldF(Future.failed, Future.successful)
 
+  def toFutureUnlessShutdown[L <: Throwable, R](x: EitherT[FutureUnlessShutdown, L, R])(implicit
+      executionContext: ExecutionContext
+  ): FutureUnlessShutdown[R] =
+    x.foldF(FutureUnlessShutdown.failed, FutureUnlessShutdown.pure)
+
   def unit[A]: EitherT[Future, A, Unit] = EitherT(Future.successful(().asRight[A]))
+
+  def unitUS[A]: EitherT[FutureUnlessShutdown, A, Unit] = EitherT(
+    FutureUnlessShutdown.pure(().asRight[A])
+  )
 
 }

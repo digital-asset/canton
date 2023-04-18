@@ -62,7 +62,8 @@ class DomainTopologyManagerRequestServiceTest
   lazy val unauthenticatedMember = UnauthenticatedMemberId(DefaultTestIdentities.uid)
   class Fixture {
 
-    val authorizedStore = new InMemoryTopologyStore(AuthorizedStore, loggerFactory)
+    val authorizedStore =
+      new InMemoryTopologyStore(AuthorizedStore, loggerFactory, timeouts, futureSupervisor)
     val uniqueTs = new AtomicReference[CantonTimestamp](CantonTimestamp.Epoch)
 
     def append(txs: SignedTopologyTransaction[TopologyChangeOp]*): Future[Unit] = {
@@ -84,35 +85,38 @@ class DomainTopologyManagerRequestServiceTest
     val hooks = new RequestProcessingStrategy.ManagerHooks() {
       override def addFromRequest(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
           traceContext: TraceContext
-      ): EitherT[Future, DomainTopologyManagerError, Unit] = blocking {
+      ): EitherT[FutureUnlessShutdown, DomainTopologyManagerError, Unit] = blocking {
         synchronized {
-          (if (fromResponses.nonEmpty) fromResponses.front
-           else EitherT.rightT[Future, DomainTopologyManagerError](())).flatMap(_ =>
+          (if (fromResponses.nonEmpty) fromResponses.front.mapK(FutureUnlessShutdown.outcomeK)
+           else EitherT.rightT[FutureUnlessShutdown, DomainTopologyManagerError](())).flatMap(_ =>
             // if the response is positive, we append the transaction to the authorized store
-            EitherT.right(append(transaction))
+            EitherT.right(append(transaction)).mapK(FutureUnlessShutdown.outcomeK)
           )
         }
       }
 
       override def issueParticipantStateForDomain(participantId: ParticipantId)(implicit
           traceContext: TraceContext
-      ): EitherT[Future, DomainTopologyManagerError, Unit] = blocking {
+      ): EitherT[FutureUnlessShutdown, DomainTopologyManagerError, Unit] = blocking {
         synchronized {
-          (if (trustParticipantResponses.nonEmpty) trustParticipantResponses.front
-           else EitherT.rightT[Future, DomainTopologyManagerError](())).flatMap { _ =>
-            EitherT.right[DomainTopologyManagerError](
-              append(
-                factory.mkAdd(
-                  ParticipantState(
-                    RequestSide.From,
-                    factory.domainId,
-                    participantId,
-                    ParticipantPermission.Submission,
-                    TrustLevel.Ordinary,
+          (if (trustParticipantResponses.nonEmpty)
+             trustParticipantResponses.front.mapK(FutureUnlessShutdown.outcomeK)
+           else EitherT.rightT[FutureUnlessShutdown, DomainTopologyManagerError](())).flatMap { _ =>
+            EitherT
+              .right[DomainTopologyManagerError](
+                append(
+                  factory.mkAdd(
+                    ParticipantState(
+                      RequestSide.From,
+                      factory.domainId,
+                      participantId,
+                      ParticipantPermission.Submission,
+                      TrustLevel.Ordinary,
+                    )
                   )
                 )
               )
-            )
+              .mapK(FutureUnlessShutdown.outcomeK)
           }
         }
       }
@@ -132,6 +136,7 @@ class DomainTopologyManagerRequestServiceTest
           hooks,
           timeouts = DefaultProcessingTimeouts.testing,
           loggerFactory = loggerFactory,
+          futureSupervisor,
         ),
         factory.cryptoApi.crypto.pureCrypto,
         testedProtocolVersion,
@@ -192,11 +197,13 @@ class DomainTopologyManagerRequestServiceTest
         for {
           // store allow list certificate if domain is permissioned
           _ <- if (config.open) Future.unit else f.append(ps1d1F_k1)
-          request <- service.newRequest(
-            unauthenticatedMember,
-            participant1,
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
-          )
+          request <- service
+            .newRequest(
+              unauthenticatedMember,
+              participant1,
+              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
+            )
+            .failOnShutdown
           stored <- f.storedTransactions
         } yield {
           all(request, 6, Accepted)
@@ -223,78 +230,94 @@ class DomainTopologyManagerRequestServiceTest
             ) // add cert so we don't fail at this specific test, as this is tested elsewhere
         // wrong participant id
         request <- expectMalicious(
-          service.newRequest(
-            unauthenticatedMember,
-            participant6,
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
-          )
+          service
+            .newRequest(
+              unauthenticatedMember,
+              participant6,
+              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
+            )
+            .failOnShutdown
         )
         // not as unauthenticated member
         request2 <- expectMalicious(
-          service.newRequest(
-            participant1,
-            participant1,
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
-          )
+          service
+            .newRequest(
+              participant1,
+              participant1,
+              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
+            )
+            .failOnShutdown
         )
         // missing namespace delegations
         request3 <- expectMalicious(
-          service.newRequest(
-            unauthenticatedMember,
-            participant1,
-            List(ns1k1_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
-          )
+          service
+            .newRequest(
+              unauthenticatedMember,
+              participant1,
+              List(ns1k1_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
+            )
+            .failOnShutdown
         )
         // missing signing key
         request4 <- expectMalicious(
-          service.newRequest(
-            unauthenticatedMember,
-            participant1,
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, ps1d1T_k3),
-          )
+          service
+            .newRequest(
+              unauthenticatedMember,
+              participant1,
+              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, ps1d1T_k3),
+            )
+            .failOnShutdown
         )
         // missing encryption key
         request5 <- expectMalicious(
-          service.newRequest(
-            unauthenticatedMember,
-            participant1,
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, ps1d1T_k3),
-          )
+          service
+            .newRequest(
+              unauthenticatedMember,
+              participant1,
+              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, ps1d1T_k3),
+            )
+            .failOnShutdown
         )
         // missing domain trust certificate
         request6 <- expectMalicious(
-          service.newRequest(
-            unauthenticatedMember,
-            participant1,
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, okm1ak5_k3),
-          )
+          service
+            .newRequest(
+              unauthenticatedMember,
+              participant1,
+              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, okm1ak5_k3),
+            )
+            .failOnShutdown
         )
         // excess transactions only rejected since PV=3
         request7 <-
           expectMalicious(
-            service.newRequest(
-              unauthenticatedMember,
-              participant1,
-              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, okm1ak5_k3, ps1d1T_k3, p1p1B_k2),
-            )
+            service
+              .newRequest(
+                unauthenticatedMember,
+                participant1,
+                List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, okm1ak5_k3, ps1d1T_k3, p1p1B_k2),
+              )
+              .failOnShutdown
           )
         // bad signatures
         request8 <- expectMalicious(
-          service.newRequest(
-            unauthenticatedMember,
-            participant1,
-            List(
-              ns1k1_k1,
-              ns1k2_k1,
-              ns1k3_k2,
-              okm1ak1E_k3,
-              okm1ak5_k3,
-              ps1d1T_k3.copy(signature = okm1ak5_k3.signature)(
-                ps1d1T_k3.representativeProtocolVersion,
-                None,
+          service
+            .newRequest(
+              unauthenticatedMember,
+              participant1,
+              List(
+                ns1k1_k1,
+                ns1k2_k1,
+                ns1k3_k2,
+                okm1ak1E_k3,
+                okm1ak5_k3,
+                ps1d1T_k3.copy(signature = okm1ak5_k3.signature)(
+                  ps1d1T_k3.representativeProtocolVersion,
+                  None,
+                ),
               ),
-            ),
-          )
+            )
+            .failOnShutdown
         )
         stored <- f.storedTransactions
       } yield {
@@ -320,7 +343,7 @@ class DomainTopologyManagerRequestServiceTest
       val service = f.service(config)
       for {
         _ <- f.append(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3, ps1d1F_k1)
-        request <- service.newRequest(participant1, participant1, List(p1p1B_k2))
+        request <- service.newRequest(participant1, participant1, List(p1p1B_k2)).failOnShutdown
         stored <- f.storedTransactions
       } yield {
         all(request, 1, Accepted)
@@ -340,7 +363,7 @@ class DomainTopologyManagerRequestServiceTest
       for {
         _ <- f.append(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3)
         request <- loggerFactory.assertLogs(
-          service.newRequest(participant1, participant1, List(p1p1B_k2)),
+          service.newRequest(participant1, participant1, List(p1p1B_k2)).failOnShutdown,
           _.warningMessage should include("not active"),
         )
         stored <- f.storedTransactions
@@ -355,11 +378,13 @@ class DomainTopologyManagerRequestServiceTest
       val service = f.service(config)
       for {
         _ <- f.append(ns1k1_k1, ns1k2_k1, ns1k3_k2, ps1d1F_k1)
-        request <- service.newRequest(
-          unauthenticatedMember,
-          participant1,
-          List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
-        )
+        request <- service
+          .newRequest(
+            unauthenticatedMember,
+            participant1,
+            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
+          )
+          .failOnShutdown
       } yield {
         request.map(_.state) shouldBe Seq(
           Duplicate,
@@ -394,11 +419,13 @@ class DomainTopologyManagerRequestServiceTest
       import factory.*
       val service = f.service(TopologyConfig(open = false))
       for {
-        request <- service.newRequest(
-          unauthenticatedMember,
-          participant1,
-          List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
-        )
+        request <- service
+          .newRequest(
+            unauthenticatedMember,
+            participant1,
+            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3),
+          )
+          .failOnShutdown
       } yield {
         all(request, 6, Rejected)
       }

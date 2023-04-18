@@ -14,7 +14,7 @@ import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
 import com.digitalasset.canton.platform.server.api.validation.ResourceAnnotationValidation
 
 import scala.collection.mutable
-import scala.concurrent.Future
+import scala.concurrent.{Future, blocking}
 
 class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManagementStore {
   import InMemoryUserManagementStore.*
@@ -163,8 +163,10 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
   )
 
   private def withState[T](t: => T): Future[T] =
-    state.synchronized(
-      Future.successful(t)
+    blocking(
+      state.synchronized(
+        Future.successful(t)
+      )
     )
 
   private def withUser[T](id: Ref.UserId, identityProviderId: IdentityProviderId)(
@@ -193,7 +195,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
     )
 
   private def replaceInfo(oldInfo: InMemUserInfo, newInfo: InMemUserInfo): Boolean =
-    state.synchronized {
+    blocking(state.synchronized {
       assert(
         oldInfo.user.id == newInfo.user.id,
         s"Replace info from if ${oldInfo.user.id} to ${newInfo.user.id} -> ${newInfo.rights}",
@@ -202,7 +204,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
         case Some(`oldInfo`) => state.update(newInfo.user.id, newInfo); true
         case _ => false
       }
-    }
+    })
 
   private def validateAnnotationsSize(
       annotations: Map[String, String],

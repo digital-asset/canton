@@ -144,6 +144,13 @@ object FutureUnlessShutdownImpl {
     def onShutdown[B >: A](f: => B)(implicit ec: ExecutionContext): Future[B] =
       unwrap.map(_.onShutdown(f))
 
+    def failOnShutdownTo(t: Throwable)(implicit ec: ExecutionContext): Future[A] = {
+      unwrap.flatMap {
+        case UnlessShutdown.Outcome(result) => Future.successful(result)
+        case UnlessShutdown.AbortedDueToShutdown => Future.failed(t)
+      }
+    }
+
     /** Evaluates `f` on shutdown but retains the result of the future. */
     def tapOnShutdown(f: => Unit)(implicit
         ec: ExecutionContext,

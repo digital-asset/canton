@@ -7,6 +7,7 @@ import cats.Eval
 import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -14,9 +15,15 @@ import com.digitalasset.canton.data.{
   TaskScheduler,
   TaskSchedulerMetrics,
 }
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
+import com.digitalasset.canton.lifecycle.{
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  FutureUnlessShutdown,
+  PromiseUnlessShutdown,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.RequestType
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventClock
@@ -44,7 +51,7 @@ import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Publishes upstream events and active contract set changes in the order of their record time.
   *
@@ -77,13 +84,15 @@ class RecordOrderPublisher(
     override protected val timeouts: ProcessingTimeout,
     useCausalityTracking: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
-)(implicit val executionContextForPublishing: ExecutionContext)
+    futureSupervisor: FutureSupervisor,
+)(implicit val executionContextForPublishing: ExecutionContext, elc: ErrorLoggingContext)
     extends NamedLogging
     with FlagCloseableAsync {
 
   // Synchronization to block publication of new events until preceding events recovered by crash recovery
   // have been published
-  private val recovered: Promise[Unit] = Promise()
+  private val recovered: PromiseUnlessShutdown[Unit] =
+    new PromiseUnlessShutdown[Unit]("recovered", futureSupervisor)
 
   private[this] val taskScheduler: TaskScheduler[PublicationTask] =
     new TaskScheduler(
@@ -93,7 +102,8 @@ class RecordOrderPublisher(
       metrics,
       timeouts,
       loggerFactory.appendUnnamedKey("task scheduler owner", "RecordOrderPublisher"),
-    )(executionContextForPublishing)
+      futureSupervisor,
+    )
 
   private val acsChangeListener = new AtomicReference[Option[AcsChangeListener]](None)
 
@@ -153,24 +163,26 @@ class RecordOrderPublisher(
   )(implicit traceContext: TraceContext): Unit = {
     logger.debug(s"Schedule recovery for ${toRecover.length} pending events.")
 
-    val recoverF = MonadUtil.sequentialTraverse_(toRecover) { pendingPublish =>
-      logger.info(s"Recover pending causality update $pendingPublish")
+    val recoverF = MonadUtil.sequentialTraverse_[FutureUnlessShutdown, PendingPublish](toRecover) {
+      pendingPublish =>
+        logger.info(s"Recover pending causality update $pendingPublish")
 
-      val eventO = pendingPublish match {
-        case RecordOrderPublisher.PendingTransferPublish(rc, updateS, ts, eventLogId) => None
-        case RecordOrderPublisher.PendingEventPublish(update, event, ts, eventLogId) => Some(event)
-      }
+        val eventO = pendingPublish match {
+          case RecordOrderPublisher.PendingTransferPublish(rc, updateS, ts, eventLogId) => None
+          case RecordOrderPublisher.PendingEventPublish(update, event, ts, eventLogId) =>
+            Some(event)
+        }
 
-      val inFlightRef = eventO.flatMap(tse =>
-        tse.requestSequencerCounter.map(sc =>
-          InFlightBySequencingInfo(
-            eventLog.id.domainId,
-            sequenced = SequencedSubmission(sc, tse.timestamp),
+        val inFlightRef = eventO.flatMap(tse =>
+          tse.requestSequencerCounter.map(sc =>
+            InFlightBySequencingInfo(
+              eventLog.id.domainId,
+              sequenced = SequencedSubmission(sc, tse.timestamp),
+            )
           )
         )
-      )
 
-      publishEvent(pendingPublish.update, eventO, pendingPublish.rc, inFlightRef)
+        publishEvent(pendingPublish.update, eventO, pendingPublish.rc, inFlightRef)
     }
 
     recovered.completeWith(recoverF)
@@ -265,15 +277,18 @@ class RecordOrderPublisher(
       override val timestamp: CantonTimestamp,
   )(implicit traceContext: TraceContext)
       extends PublicationTask {
-    override def perform(): Future[Unit] =
-      inFlightSubmissionTracker.observeTimestamp(domainId, timestamp).valueOr {
-        case InFlightSubmissionTracker.UnknownDomain(_domainId) =>
-          // TODO(#6175) Prevent that later tasks get executed if the domain ID is not found,
-          //  which should only happen during shutdown
-          logger.info(
-            s"Skip the synchronization with the in-flight submission tracker for sequencer counter $sequencerCounter at $timestamp due to shutdown."
-          )
+    override def perform(): FutureUnlessShutdown[Unit] = {
+      performUnlessClosingF("observe-timestamp-task") {
+        inFlightSubmissionTracker.observeTimestamp(domainId, timestamp).valueOr {
+          case InFlightSubmissionTracker.UnknownDomain(_domainId) =>
+            // TODO(#6175) Prevent that later tasks get executed if the domain ID is not found,
+            //  which should only happen during shutdown
+            logger.info(
+              s"Skip the synchronization with the in-flight submission tracker for sequencer counter $sequencerCounter at $timestamp due to shutdown."
+            )
+        }
       }
+    }
 
     override def pretty: Pretty[this.type] = prettyOfClass(
       param("timestamp", _.timestamp),
@@ -300,9 +315,9 @@ class RecordOrderPublisher(
     def recordTime: RecordTime = RecordTime(timestamp, tieBreaker = requestCounter.unwrap)
     def tieBreaker: Long = requestCounter.unwrap
 
-    override def perform(): Future[Unit] = {
+    override def perform(): FutureUnlessShutdown[Unit] = {
       for {
-        _recovered <- recovered.future
+        _recovered <- recovered.futureUS
         _unit <- publishEvent(updateO, eventO, requestCounter, inFlightReference)
       } yield ()
     }
@@ -320,18 +335,19 @@ class RecordOrderPublisher(
       eventO: Option[TimestampedEvent],
       requestCounter: RequestCounter,
       inFlightRef: Option[InFlightReference],
-  )(implicit tc: TraceContext): Future[Unit] = {
-    logger.debug(s"Publish event with request counter $requestCounter")
-    for {
-      clockO <- waitPublishableO(updateO)
-      _published <- eventO.fold(Future.unit) { event =>
-        val data = PublicationData(eventLog.id, event, inFlightRef)
-        multiDomainEventLog.value.publish(data)
+  )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] =
+    performUnlessClosingF("publish-event") {
+      logger.debug(s"Publish event with request counter $requestCounter")
+      for {
+        clockO <- waitPublishableO(updateO)
+        _published <- eventO.fold(Future.unit) { event =>
+          val data = PublicationData(eventLog.id, event, inFlightRef)
+          multiDomainEventLog.value.publish(data)
+        }
+      } yield {
+        published(clockO, requestCounter)
       }
-    } yield {
-      published(clockO, requestCounter)
     }
-  }
 
   private def published(clockO: Option[EventClock], requestCounter: RequestCounter)(implicit
       tc: TraceContext
@@ -384,8 +400,8 @@ class RecordOrderPublisher(
     def recordTime: RecordTime =
       RecordTime(timestamp, requestCounterO.map(_.unwrap).getOrElse(RecordTime.lowestTiebreaker))
 
-    override def perform(): Future[Unit] = {
-      Future.successful(acsChangeListener.get.foreach(_.publish(recordTime, acsChange)))
+    override def perform(): FutureUnlessShutdown[Unit] = {
+      FutureUnlessShutdown.pure(acsChangeListener.get.foreach(_.publish(recordTime, acsChange)))
     }
 
     override def pretty: Pretty[this.type] =
@@ -402,7 +418,8 @@ class RecordOrderPublisher(
 
   override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     Seq(
-      SyncCloseable("taskScheduler", taskScheduler.close())
+      SyncCloseable("taskScheduler", taskScheduler.close()),
+      SyncCloseable("recovered-promise", recovered.shutdown()),
     )
   }
 }

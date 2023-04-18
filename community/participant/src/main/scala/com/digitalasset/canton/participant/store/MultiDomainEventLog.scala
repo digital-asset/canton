@@ -244,7 +244,7 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   ): Future[Option[LocalOffset]]
 
   /** Yields the highest global offset up to the given bound, if any. */
-  def lastGlobalOffset(upToInclusive: GlobalOffset = Long.MaxValue)(implicit
+  def lastGlobalOffset(upToInclusive: Option[GlobalOffset] = None)(implicit
       traceContext: TraceContext
   ): OptionT[Future, GlobalOffset]
 

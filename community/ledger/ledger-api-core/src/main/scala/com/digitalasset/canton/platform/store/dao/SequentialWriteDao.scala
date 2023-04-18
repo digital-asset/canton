@@ -8,7 +8,7 @@ import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   DbDtoToStringsForInterning,
@@ -25,7 +25,7 @@ import com.digitalasset.canton.platform.store.interning.{
 }
 
 import java.sql.Connection
-import scala.concurrent.Future
+import scala.concurrent.{Future, blocking}
 import scala.util.chaining.scalaUtilChainingOps
 
 trait SequentialWriteDao {
@@ -71,7 +71,7 @@ private[dao] object NoopSequentialWriteDao extends SequentialWriteDao {
     throw new UnsupportedOperationException
 }
 
-private[dao] case class SequentialWriteDaoImpl[DB_BATCH](
+private[dao] final case class SequentialWriteDaoImpl[DB_BATCH](
     ingestionStorageBackend: IngestionStorageBackend[DB_BATCH],
     parameterStorageBackend: ParameterStorageBackend,
     updateToDbDtos: Offset => state.Update => Iterator[DbDto],
@@ -129,7 +129,7 @@ private[dao] case class SequentialWriteDaoImpl[DB_BATCH](
     }.toVector
 
   override def store(connection: Connection, offset: Offset, update: Option[state.Update]): Unit =
-    synchronized {
+    blocking(synchronized {
       lazyInit(connection)
 
       val dbDtos = update
@@ -163,5 +163,5 @@ private[dao] case class SequentialWriteDaoImpl[DB_BATCH](
       )(connection)
 
       ledgerEndCache.set(offset -> lastEventSeqId)
-    }
+    })
 }

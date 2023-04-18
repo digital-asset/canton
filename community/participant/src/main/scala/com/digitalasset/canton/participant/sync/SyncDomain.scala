@@ -138,6 +138,7 @@ class SyncDomain(
     metrics: SyncDomainMetrics,
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
+    skipRecipientsCheck: Boolean,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with StartAndCloseable[Either[SyncDomainInitializationError, Unit]]
@@ -190,6 +191,7 @@ class SyncDomain(
     timeouts,
     loggerFactory,
     futureSupervisor,
+    skipRecipientsCheck = skipRecipientsCheck,
   )
 
   private val transferOutProcessor: TransferOutProcessor = new TransferOutProcessor(
@@ -206,6 +208,7 @@ class SyncDomain(
     SourceProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
     futureSupervisor,
+    skipRecipientsCheck = skipRecipientsCheck,
   )
 
   private val transferInProcessor: TransferInProcessor = new TransferInProcessor(
@@ -223,6 +226,7 @@ class SyncDomain(
     TargetProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
     futureSupervisor,
+    skipRecipientsCheck = skipRecipientsCheck,
   )
 
   private val sortedReconciliationIntervalsProvider = SortedReconciliationIntervalsProvider(
@@ -259,6 +263,7 @@ class SyncDomain(
       pruningMetrics,
       staticDomainParameters.protocolVersion,
       timeouts,
+      futureSupervisor,
       loggerFactory,
     )
     ephemeral.recordOrderPublisher.setAcsChangeListener(listener)
@@ -987,6 +992,7 @@ object SyncDomain {
         syncDomainMetrics: SyncDomainMetrics,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        skipRecipientsCheck: Boolean,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): T
   }
 
@@ -1013,6 +1019,7 @@ object SyncDomain {
         syncDomainMetrics: SyncDomainMetrics,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        skipRecipientsCheck: Boolean,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): SyncDomain =
       new SyncDomain(
         domainId,
@@ -1037,6 +1044,7 @@ object SyncDomain {
         syncDomainMetrics,
         futureSupervisor,
         loggerFactory,
+        skipRecipientsCheck = skipRecipientsCheck,
       )
   }
 }

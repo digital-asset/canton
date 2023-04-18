@@ -8,6 +8,7 @@ import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
 
 import java.util.{Timer, TimerTask}
+import scala.concurrent.blocking
 import scala.util.{Failure, Success, Try}
 
 /** A simple host of checking.
@@ -48,7 +49,7 @@ class PollingChecker(
   // Current usage of this class does not necessarily motivate further optimizations: used from HaCoordinator
   // to check Indexer Main Lock seems to be sufficiently fast even in peak scenario: the initialization of the
   // complete pool.
-  def check(): Unit = synchronized {
+  def check(): Unit = blocking(synchronized {
     logger.debug(s"Checking...")
     if (closed) {
       val errorMsg =
@@ -58,17 +59,17 @@ class PollingChecker(
     } else {
       checkInternal()
     }
-  }
+  })
 
-  private def scheduledCheck(): Unit = synchronized {
+  private def scheduledCheck(): Unit = blocking(synchronized {
     logger.debug(s"Scheduled checking...")
     // Timer can fire at most one additional TimerTask after being cancelled. This is to safeguard that corner case.
     if (!closed) {
       checkInternal()
     }
-  }
+  })
 
-  private def checkInternal(): Unit = synchronized {
+  private def checkInternal(): Unit = blocking(synchronized {
     Try(checkBody) match {
       case Success(_) =>
         logger.debug(s"Check successful.")
@@ -78,10 +79,10 @@ class PollingChecker(
         killSwitch.abort(new Exception("check failed, killSwitch aborted", ex))
         throw ex
     }
-  }
+  })
 
-  def close(): Unit = synchronized {
+  def close(): Unit = blocking(synchronized {
     closed = true
     timer.cancel()
-  }
+  })
 }

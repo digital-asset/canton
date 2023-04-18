@@ -19,13 +19,7 @@ import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.CommunityGrpcV
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
-import com.digitalasset.canton.environment.{
-  CantonNode,
-  CantonNodeBootstrapBase,
-  CantonNodeBootstrapCommon,
-  CantonNodeBootstrapCommonArguments,
-  NodeFactoryArguments,
-}
+import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.HealthReporting.{
   BaseMutableHealthComponent,
@@ -33,8 +27,8 @@ import com.digitalasset.canton.health.HealthReporting.{
   MutableHealthComponent,
 }
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
-import com.digitalasset.canton.lifecycle.Lifecycle
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.admin.v0.*
@@ -117,6 +111,7 @@ class ParticipantNodeBootstrap(
     createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithPruning] = _ =>
       Future.successful(SchedulersWithPruning.noop),
     private[canton] val persistentStateFactory: ParticipantNodePersistentStateFactory,
+    skipRecipientsCheck: Boolean,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -181,6 +176,7 @@ class ParticipantNodeBootstrap(
       parameterConfig.processingTimeouts,
       config.parameters.initialProtocolVersion.unwrap,
       loggerFactory,
+      futureSupervisor,
     )
   private val partyMetadataStore =
     PartyMetadataStore(storage, parameterConfig.processingTimeouts, loggerFactory)
@@ -262,28 +258,34 @@ class ParticipantNodeBootstrap(
 
   override protected def autoInitializeIdentity(
       initConfigBase: InitConfigBase
-  ): EitherT[Future, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
     withNewTraceContext { implicit traceContext =>
       val protocolVersion = config.parameters.initialProtocolVersion.unwrap
 
       for {
         // create keys
-        namespaceKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
-          s"$name-namespace"
-        )
-        signingKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
-          s"$name-signing"
-        )
-        encryptionKey <- CantonNodeBootstrapCommon.getOrCreateEncryptionKey(crypto.value)(
-          s"$name-encryption"
-        )
+        namespaceKey <- CantonNodeBootstrapCommon
+          .getOrCreateSigningKey(crypto.value)(
+            s"$name-namespace"
+          )
+          .mapK(FutureUnlessShutdown.outcomeK)
+        signingKey <- CantonNodeBootstrapCommon
+          .getOrCreateSigningKey(crypto.value)(
+            s"$name-signing"
+          )
+          .mapK(FutureUnlessShutdown.outcomeK)
+        encryptionKey <- CantonNodeBootstrapCommon
+          .getOrCreateEncryptionKey(crypto.value)(
+            s"$name-encryption"
+          )
+          .mapK(FutureUnlessShutdown.outcomeK)
 
         // create id
         identifierName = initConfigBase.identity
           .flatMap(_.nodeIdentifier.identifierName)
           .getOrElse(name.unwrap)
         identifier <- EitherT
-          .fromEither[Future](Identifier.create(identifierName))
+          .fromEither[FutureUnlessShutdown](Identifier.create(identifierName))
           .leftMap(err => s"Failed to convert participant name to identifier: $err")
         uid = UniqueIdentifier(
           identifier,
@@ -304,7 +306,7 @@ class ParticipantNodeBootstrap(
           protocolVersion,
         )
         // avoid a race condition with admin-workflows and only kick off the start once the namespace certificate is registered
-        _ <- initialize(nodeId)
+        _ <- initialize(nodeId).mapK(FutureUnlessShutdown.outcomeK)
 
         _ <- authorizeStateUpdate(
           topologyManager,
@@ -330,11 +332,11 @@ class ParticipantNodeBootstrap(
                 protocolVersion,
               )(topologyManager, authorizedTopologyStore)
           } else {
-            EitherT.rightT[Future, String](())
+            EitherT.rightT[FutureUnlessShutdown, String](())
           }
 
         // finally, we store the node id, which means that the node will not be auto-initialised next time when we start
-        _ <- storeId(nodeId)
+        _ <- storeId(nodeId).mapK(FutureUnlessShutdown.outcomeK)
       } yield ()
     }
 
@@ -432,6 +434,7 @@ class ParticipantNodeBootstrap(
               parameterConfig.stores.maxItemsInSqlClause,
               pool,
               parameterConfig.processingTimeouts,
+              futureSupervisor,
               loggerFactory,
             )
         }
@@ -501,6 +504,7 @@ class ParticipantNodeBootstrap(
         ephemeralState.participantEventPublisher,
         partyMetadataStore,
         clock,
+        arguments.futureSupervisor,
         parameterConfig.processingTimeouts,
         loggerFactory,
       )
@@ -520,6 +524,7 @@ class ParticipantNodeBootstrap(
         indexedStringStore,
         parameterConfig,
         loggerFactory,
+        futureSupervisor,
       )
       _ <- EitherT.right[String](
         syncDomainPersistentStateFactory.initializePersistentStates(domainAliasManager)
@@ -576,6 +581,7 @@ class ParticipantNodeBootstrap(
         arguments.metrics,
         arguments.futureSupervisor,
         loggerFactory,
+        skipRecipientsCheck = skipRecipientsCheck,
       )
 
       _ = syncDomainHealth.set(sync.syncDomainHealth)
@@ -747,7 +753,16 @@ class ParticipantNodeBootstrap(
 object ParticipantNodeBootstrap {
   val LoggerFactoryKeyName: String = "participant"
 
-  trait Factory[PC <: LocalParticipantConfig] {
+  trait Factory[PC <: LocalParticipantConfig, B <: CantonNodeBootstrap[_]] {
+
+    type Arguments =
+      CantonNodeBootstrapCommonArguments[PC, ParticipantNodeParameters, ParticipantMetrics]
+
+    protected def createEngine(arguments: Arguments): Engine
+    protected def createResourceService(
+        arguments: Arguments
+    )(store: Eval[ParticipantSettingsStore]): ResourceManagementService
+
     def create(
         arguments: NodeFactoryArguments[PC, ParticipantNodeParameters, ParticipantMetrics],
         testingTimeService: TestingTimeService,
@@ -756,10 +771,46 @@ object ParticipantNodeBootstrap {
         scheduler: ScheduledExecutorService,
         actorSystem: ActorSystem,
         executionSequencerFactory: ExecutionSequencerFactory,
-    ): Either[String, ParticipantNodeBootstrap]
+    ): Either[String, B]
   }
 
-  object CommunityParticipantFactory extends Factory[CommunityParticipantConfig] {
+  abstract class CommunityParticipantFactoryCommon[B <: CantonNodeBootstrap[_]]
+      extends Factory[CommunityParticipantConfig, B] {
+
+    override protected def createEngine(arguments: Arguments): Engine =
+      DAMLe.newEngine(
+        arguments.parameterConfig.uniqueContractKeys,
+        arguments.parameterConfig.devVersionSupport,
+        arguments.parameterConfig.enableEngineStackTrace,
+      )
+
+    override protected def createResourceService(
+        arguments: Arguments
+    )(store: Eval[ParticipantSettingsStore]): ResourceManagementService =
+      new ResourceManagementService.CommunityResourceManagementService(
+        arguments.config.parameters.warnIfOverloadedFor.map(_.toInternal),
+        arguments.metrics,
+      )
+
+    protected def createReplicationServiceFactory(
+        arguments: Arguments
+    )(storage: Storage): ServerServiceDefinition =
+      StaticGrpcServices
+        .notSupportedByCommunity(
+          EnterpriseParticipantReplicationServiceGrpc.SERVICE,
+          arguments.loggerFactory,
+        )
+
+    protected def createNode(
+        arguments: Arguments,
+        testingTimeService: TestingTimeService,
+    )(implicit
+        executionContext: ExecutionContextIdlenessExecutorService,
+        scheduler: ScheduledExecutorService,
+        actorSystem: ActorSystem,
+        executionSequencerFactory: ExecutionSequencerFactory,
+    ): B
+
     override def create(
         arguments: NodeFactoryArguments[
           CommunityParticipantConfig,
@@ -772,42 +823,43 @@ object ParticipantNodeBootstrap {
         scheduler: ScheduledExecutorService,
         actorSystem: ActorSystem,
         executionSequencerFactory: ExecutionSequencerFactory,
-    ): Either[String, ParticipantNodeBootstrap] =
+    ): Either[String, B] =
       arguments
         .toCantonNodeBootstrapCommonArguments(
           new CommunityStorageFactory(arguments.config.storage),
           new CommunityCryptoPrivateStoreFactory,
           new CommunityGrpcVaultServiceFactory,
         )
-        .map { arguments =>
-          new ParticipantNodeBootstrap(
-            arguments,
-            DAMLe.newEngine(
-              arguments.parameterConfig.uniqueContractKeys,
-              arguments.parameterConfig.devVersionSupport,
-              arguments.parameterConfig.enableEngineStackTrace,
-            ),
-            testingTimeService,
-            CantonSyncService.DefaultFactory,
-            (_ledgerApi, _ledgerApiDependentServices) => (),
-            _ =>
-              new ResourceManagementService.CommunityResourceManagementService(
-                arguments.config.parameters.warnIfOverloadedFor.map(_.toInternal),
-                arguments.metrics,
-              ),
-            _ =>
-              StaticGrpcServices
-                .notSupportedByCommunity(
-                  EnterpriseParticipantReplicationServiceGrpc.SERVICE,
-                  arguments.loggerFactory,
-                ),
-            _dbConfig => Option.empty[IndexerLockIds].asRight,
-            meteringReportKey = CommunityKey,
-            persistentStateFactory = ParticipantNodePersistentStateFactory,
-          )
-        }
+        .map { arguments => createNode(arguments, testingTimeService) }
 
   }
+
+  object CommunityParticipantFactory
+      extends CommunityParticipantFactoryCommon[ParticipantNodeBootstrap] {
+    override protected def createNode(
+        arguments: Arguments,
+        testingTimeService: TestingTimeService,
+    )(implicit
+        executionContext: ExecutionContextIdlenessExecutorService,
+        scheduler: ScheduledExecutorService,
+        actorSystem: ActorSystem,
+        executionSequencerFactory: ExecutionSequencerFactory,
+    ): ParticipantNodeBootstrap =
+      new ParticipantNodeBootstrap(
+        arguments,
+        createEngine(arguments),
+        testingTimeService,
+        CantonSyncService.DefaultFactory,
+        (_ledgerApi, _ledgerApiDependentServices) => (),
+        createResourceService(arguments),
+        createReplicationServiceFactory(arguments),
+        _dbConfig => Option.empty[IndexerLockIds].asRight,
+        meteringReportKey = CommunityKey,
+        persistentStateFactory = ParticipantNodePersistentStateFactory,
+        skipRecipientsCheck = false,
+      )
+  }
+
 }
 
 /** A participant node in the system.
@@ -855,9 +907,7 @@ class ParticipantNode(
     val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
     healthData: => Seq[ComponentStatus],
-) extends CantonNode
-    with NamedLogging
-    with HasUptime
+) extends ParticipantNodeCommon
     with NoTracing {
 
   override def isActive = sync.isActive()
@@ -865,12 +915,12 @@ class ParticipantNode(
   def reconnectDomainsIgnoreFailures()(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, SyncServiceError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
     if (sync.isActive())
       sync.reconnectDomains(ignoreFailures = true).map(_ => ())
     else {
       logger.info("Not reconnecting to domains as instance is passive")
-      EitherTUtil.unit
+      EitherTUtil.unitUS
     }
   }
 
@@ -882,7 +932,7 @@ class ParticipantNode(
   def autoConnectLocalDomain(config: CantonDomainConnectionConfig)(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, SyncServiceError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
     if (sync.isActive()) {
       // check if we already know this domain
       sync.domainConnectionConfigStore
@@ -890,14 +940,14 @@ class ParticipantNode(
         .fold(
           _ =>
             for {
-              _ <- sync.addDomain(config)
+              _ <- sync.addDomain(config).mapK(FutureUnlessShutdown.outcomeK)
               _ <- sync.connectDomain(config.domain, keepRetrying = true)
             } yield (),
-          _ => EitherTUtil.unit,
+          _ => EitherTUtil.unitUS,
         )
     } else {
       logger.info("Not auto-connecting to local domains as instance is passive")
-      EitherTUtil.unit
+      EitherTUtil.unitUS
     }
 
   }

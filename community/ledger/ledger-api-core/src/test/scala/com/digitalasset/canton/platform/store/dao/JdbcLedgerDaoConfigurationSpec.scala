@@ -6,11 +6,12 @@ package com.digitalasset.canton.platform.store.dao
 import akka.stream.scaladsl.Sink
 import com.digitalasset.canton.platform.store.dao.*
 import com.digitalasset.canton.platform.store.entries.ConfigurationEntry
+import org.scalatest.OptionValues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 trait JdbcLedgerDaoConfigurationSpec {
-  this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
+  this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite with OptionValues =>
 
   behavior of "JdbcLedgerDao (configuration)"
 
@@ -50,7 +51,7 @@ trait JdbcLedgerDaoConfigurationSpec {
         submissionId,
         config0.copy(generation = config0.generation + 1),
       )
-      config1 <- ledgerDao.lookupLedgerConfiguration().map(_.map(_._2).get)
+      config1 <- ledgerDao.lookupLedgerConfiguration().map(_.map(_._2).value)
 
       // Duplicate submission is accepted
       offset1 = nextOffset()
@@ -59,14 +60,14 @@ trait JdbcLedgerDaoConfigurationSpec {
         submissionId,
         config1.copy(generation = config1.generation + 1),
       )
-      config2 <- ledgerDao.lookupLedgerConfiguration().map(_.map(_._2).get)
+      config2 <- ledgerDao.lookupLedgerConfiguration().map(_.map(_._2).value)
 
       // Submission with unique submissionId and correct generation is accepted.
       offset2 = nextOffset()
       offsetString2 = offset2.toLong
       lastConfig = config1.copy(generation = config1.generation + 2)
       resp3 <- storeConfigurationEntry(offset2, s"refuse-config-$offsetString2", lastConfig)
-      lastConfigActual <- ledgerDao.lookupLedgerConfiguration().map(_.map(_._2).get)
+      lastConfigActual <- ledgerDao.lookupLedgerConfiguration().map(_.map(_._2).value)
 
       entries <- ledgerDao.getConfigurationEntries(startExclusive, offset2).runWith(Sink.seq)
     } yield {

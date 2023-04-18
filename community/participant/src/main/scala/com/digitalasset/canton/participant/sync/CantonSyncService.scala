@@ -142,6 +142,7 @@ class CantonSyncService(
     val isActive: () => Boolean,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
+    skipRecipientsCheck: Boolean,
 )(implicit ec: ExecutionContext, mat: Materializer, val tracer: Tracer)
     extends state.v2.WriteService
     with WriteParticipantPruningService
@@ -653,14 +654,16 @@ class CantonSyncService(
               .create(sourceDescription.getOrElse(""), Some("package source description"))
               .leftMap(PackageServiceError.InternalError.Generic.apply)
           )
-          _ <- packageService.storeValidatedPackagesAndSyncEvent(
-            archives,
-            sourceDescriptionLenLimit,
-            submissionId,
-            dar = None,
-            vetAllPackages = true,
-            synchronizeVetting = false,
-          )
+          _ <- packageService
+            .storeValidatedPackagesAndSyncEvent(
+              archives,
+              sourceDescriptionLenLimit,
+              submissionId,
+              dar = None,
+              vetAllPackages = true,
+              synchronizeVetting = false,
+            )
+            .onShutdown(Left(PackageServiceError.ParticipantShuttingDown.Error()))
         } yield SubmissionResult.Acknowledged
         ret.valueOr(err => TransactionError.internalError(CantonError.stringFromContext(err)))
       }
@@ -817,20 +820,15 @@ class CantonSyncService(
       )
       _ <- mustBeOffline(source, sourceDomainId)
       _ <- mustBeOffline(target.domain, targetDomainInfo.domainId)
-      _ <- EitherT(
-        FutureUnlessShutdown(
-          connectQueue.execute(
-            migrationService
-              .migrateDomain(source, target, targetDomainInfo.domainId)
-              .leftMap[SyncServiceError](
-                SyncServiceError.SyncServiceMigrationError(source, target.domain, _)
-              )
-              .value
-              .unwrap,
-            "migrate domain",
-          )
+      _ <-
+        connectQueue.executeEUS(
+          migrationService
+            .migrateDomain(source, target, targetDomainInfo.domainId)
+            .leftMap[SyncServiceError](
+              SyncServiceError.SyncServiceMigrationError(source, target.domain, _)
+            ),
+          "migrate domain",
         )
-      )
     } yield ()
   }
 
@@ -844,13 +842,12 @@ class CantonSyncService(
   /** Reconnect to all configured domains that have autoStart = true */
   def reconnectDomains(
       ignoreFailures: Boolean
-  )(implicit traceContext: TraceContext): EitherT[Future, SyncServiceError, Seq[DomainAlias]] =
-    EitherT(
-      connectQueue.execute(
-        // TODO(#6175) propagate the shutdown into the queue instead of discarding it
-        performReconnectDomains(ignoreFailures).value.onShutdown(Right(Seq())),
-        "reconnect domains",
-      )
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Seq[DomainAlias]] =
+    connectQueue.executeEUS(
+      performReconnectDomains(ignoreFailures),
+      "reconnect domains",
     )
 
   private def performReconnectDomains(ignoreFailures: Boolean)(implicit
@@ -985,8 +982,9 @@ class CantonSyncService(
     */
   def connectDomain(domainAlias: DomainAlias, keepRetrying: Boolean)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, SyncServiceError, Boolean] =
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Boolean] =
     domainConnectionConfigByAlias(domainAlias)
+      .mapK(FutureUnlessShutdown.outcomeK)
       .leftMap(_ => SyncServiceError.SyncServiceUnknownDomain.Error(domainAlias))
       .flatMap { _ =>
         val initial = if (keepRetrying) {
@@ -1010,37 +1008,36 @@ class CantonSyncService(
       domainAlias: DomainAlias,
       keepRetrying: Boolean,
       initial: Boolean,
-  )(implicit traceContext: TraceContext): EitherT[Future, SyncServiceError, Boolean] = {
-    EitherT(
-      // TODO(#6175) propagate the shutdown into the queue
-      connectQueue.execute(
-        (if (keepRetrying && !attemptReconnect.isDefinedAt(domainAlias)) {
-           EitherT.rightT[FutureUnlessShutdown, SyncServiceError](false)
-         } else {
-           performDomainConnection(domainAlias, startSyncDomain = true).transform {
-             case Left(SyncServiceError.SyncServiceFailedDomainConnection(_, err))
-                 if keepRetrying && err.retryable.nonEmpty =>
-               if (initial)
-                 logger.warn(s"Initial connection attempt to ${domainAlias} failed with ${err.code
-                     .toMsg(err.cause, traceContext.traceId)}. Will keep on trying.")
-               else
-                 logger.info(
-                   s"Initial connection attempt to ${domainAlias} failed. Will keep on trying."
-                 )
-               scheduleReconnectAttempt(
-                 clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.asJava)
-               )
-               Right(false)
-             case Right(()) =>
-               resolveReconnectAttempts(domainAlias)
-               Right(true)
-             case Left(x) =>
-               resolveReconnectAttempts(domainAlias)
-               Left(x)
-           }
-         }).value.onShutdown(Right(false)),
-        s"connect to $domainAlias",
-      )
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Boolean] = {
+    connectQueue.executeEUS(
+      if (keepRetrying && !attemptReconnect.isDefinedAt(domainAlias)) {
+        EitherT.rightT[FutureUnlessShutdown, SyncServiceError](false)
+      } else {
+        performDomainConnection(domainAlias, startSyncDomain = true).transform {
+          case Left(SyncServiceError.SyncServiceFailedDomainConnection(_, err))
+              if keepRetrying && err.retryable.nonEmpty =>
+            if (initial)
+              logger.warn(s"Initial connection attempt to ${domainAlias} failed with ${err.code
+                  .toMsg(err.cause, traceContext.traceId)}. Will keep on trying.")
+            else
+              logger.info(
+                s"Initial connection attempt to ${domainAlias} failed. Will keep on trying."
+              )
+            scheduleReconnectAttempt(
+              clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.asJava)
+            )
+            Right(false)
+          case Right(()) =>
+            resolveReconnectAttempts(domainAlias)
+            Right(true)
+          case Left(x) =>
+            resolveReconnectAttempts(domainAlias)
+            Left(x)
+        }
+      },
+      s"connect to $domainAlias",
     )
   }
 
@@ -1048,7 +1045,7 @@ class CantonSyncService(
     def mergeLarger(cur: Option[CantonTimestamp], ts: CantonTimestamp): Option[CantonTimestamp] =
       cur match {
         case None => Some(ts)
-        case Some(old) => Some(CantonTimestamp.max(ts, old))
+        case Some(old) => Some(ts.max(old))
       }
     val _ = clock.scheduleAt(
       ts => {
@@ -1073,10 +1070,11 @@ class CantonSyncService(
         }
         reconnect.foreach { item =>
           implicit val traceContext: TraceContext = item.trace
-          logger.debug(s"Starting background reconnect attempt for ${item.alias}")
-          EitherTUtil.doNotAwait(
+          val domainAlias = item.alias
+          logger.debug(s"Starting background reconnect attempt for $domainAlias")
+          EitherTUtil.doNotAwaitUS(
             attemptDomainConnection(item.alias, keepRetrying = true, initial = false),
-            s"Background reconnect to ${item.alias} failed",
+            s"Background reconnect to $domainAlias",
           )
         }
         nextO.foreach(scheduleReconnectAttempt)
@@ -1090,7 +1088,12 @@ class CantonSyncService(
   ): EitherT[Future, MissingConfigForAlias, StoredDomainConnectionConfig] =
     EitherT.fromEither[Future](domainConnectionConfigStore.get(domainAlias))
 
-  private val connectQueue = new SimpleExecutionQueue()
+  private val connectQueue = new SimpleExecutionQueueWithShutdown(
+    "sync-service-connect-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   /** Connect the sync service to the given domain. */
   private def performDomainConnection(
@@ -1183,6 +1186,7 @@ class CantonSyncService(
           domainMetrics,
           futureSupervisor,
           domainLoggerFactory,
+          skipRecipientsCheck = skipRecipientsCheck,
         )
 
         // update list of connected domains
@@ -1281,7 +1285,7 @@ class CantonSyncService(
   /** Disconnect the given domain from the sync service. */
   def disconnectDomain(
       domain: DomainAlias
-  )(implicit traceContext: TraceContext): EitherT[Future, SyncServiceError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
     resolveReconnectAttempts(domain)
     connectQueue.executeE(
       EitherT.fromEither(performDomainDisconnect(domain)),
@@ -1309,7 +1313,7 @@ class CantonSyncService(
   /** Disconnect knowing that the alias exists */
   private def tryDisconnectDomain(
       domain: DomainAlias
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     disconnectDomain(domain).value.map(
       _.valueOr(err => throw new RuntimeException(s"Error while disconnecting domain: $err"))
     )
@@ -1318,7 +1322,7 @@ class CantonSyncService(
   /** Disconnect from all connected domains. */
   def disconnectDomains()(implicit
       traceContext: TraceContext
-  ): EitherT[Future, SyncServiceError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
     val connectedDomains =
       connectedDomainsMap.keys.toList.mapFilter(aliasManager.aliasForDomainId).distinct
     connectedDomains.parTraverse_(disconnectDomain)
@@ -1424,12 +1428,8 @@ class CantonSyncService(
     } yield ()
 
   override def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty.*
-    val connectQueueFlush =
-      connectQueue.asCloseable("connectQueue", parameters.processingTimeouts.network.unwrap)
-
     val instances = Seq(
-      connectQueueFlush,
+      connectQueue,
       migrationService,
       repairService,
       pruningProcessor,
@@ -1479,6 +1479,7 @@ object CantonSyncService {
         metrics: ParticipantMetrics,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        skipRecipientsCheck: Boolean,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): T
   }
 
@@ -1510,6 +1511,7 @@ object CantonSyncService {
         metrics: ParticipantMetrics,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        skipRecipientsCheck: Boolean,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): CantonSyncService =
       new CantonSyncService(
         participantId,
@@ -1539,6 +1541,7 @@ object CantonSyncService {
         () => storage.isActive,
         futureSupervisor,
         loggerFactory,
+        skipRecipientsCheck = skipRecipientsCheck,
       )
   }
 }

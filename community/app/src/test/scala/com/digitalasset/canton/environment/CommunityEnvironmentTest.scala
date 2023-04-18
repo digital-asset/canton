@@ -14,6 +14,7 @@ import com.digitalasset.canton.domain.config.{
   DomainConfig,
 }
 import com.digitalasset.canton.integration.CommunityConfigTransforms
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.SyncServiceError
@@ -71,7 +72,7 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
       when(bootstrap.start()).thenReturn(EitherT.pure[Future, String](()))
       when(bootstrap.getNode).thenReturn(Some(node))
       when(node.reconnectDomainsIgnoreFailures()(any[TraceContext], any[ExecutionContext]))
-        .thenReturn(EitherT.pure[Future, SyncServiceError](()))
+        .thenReturn(EitherT.pure[FutureUnlessShutdown, SyncServiceError](()))
       when(node.config).thenReturn(participant1Config)
       (bootstrap, node)
     }
@@ -149,7 +150,7 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
             any[TraceContext],
             any[ExecutionContext],
           )
-        ).thenReturn(EitherTUtil.unit)
+        ).thenReturn(EitherTUtil.unitUS)
 
         Seq("p1", "p2").foreach(setupParticipantFactory(_, pp))
         setupDomainFactory("d1", d1)

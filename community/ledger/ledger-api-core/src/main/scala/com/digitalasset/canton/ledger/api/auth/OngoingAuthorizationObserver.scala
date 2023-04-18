@@ -14,7 +14,7 @@ import io.grpc.stub.ServerCallStreamObserver
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, blocking}
 
 private[auth] final class OngoingAuthorizationObserver[A](
     observer: ServerCallStreamObserver[A],
@@ -41,28 +41,36 @@ private[auth] final class OngoingAuthorizationObserver[A](
   private val cancelUserRightsChecksO =
     userRightsCheckerO.map(_.schedule(() => onError(staleStreamAuthError)))
 
-  override def isCancelled: Boolean = synchronized(observer.isCancelled)
+  override def isCancelled: Boolean = blocking(synchronized(observer.isCancelled))
 
-  override def setOnCancelHandler(runnable: Runnable): Unit = synchronized(
-    observer.setOnCancelHandler(runnable)
+  override def setOnCancelHandler(runnable: Runnable): Unit = blocking(
+    synchronized(
+      observer.setOnCancelHandler(runnable)
+    )
   )
 
-  override def setCompression(s: String): Unit = synchronized(observer.setCompression(s))
+  override def setCompression(s: String): Unit = blocking(synchronized(observer.setCompression(s)))
 
-  override def isReady: Boolean = synchronized(observer.isReady)
+  override def isReady: Boolean = blocking(synchronized(observer.isReady))
 
-  override def setOnReadyHandler(runnable: Runnable): Unit = synchronized(
-    observer.setOnReadyHandler(runnable)
+  override def setOnReadyHandler(runnable: Runnable): Unit = blocking(
+    synchronized(
+      observer.setOnReadyHandler(runnable)
+    )
   )
 
-  override def disableAutoInboundFlowControl(): Unit = synchronized(
-    observer.disableAutoInboundFlowControl()
+  override def disableAutoInboundFlowControl(): Unit = blocking(
+    synchronized(
+      observer.disableAutoInboundFlowControl()
+    )
   )
 
-  override def request(i: Int): Unit = synchronized(observer.request(i))
+  override def request(i: Int): Unit = blocking(synchronized(observer.request(i)))
 
-  override def setMessageCompression(b: Boolean): Unit = synchronized(
-    observer.setMessageCompression(b)
+  override def setMessageCompression(b: Boolean): Unit = blocking(
+    synchronized(
+      observer.setMessageCompression(b)
+    )
   )
 
   override def onNext(v: A): Unit = onlyBeforeCompletionOrError {
@@ -89,10 +97,12 @@ private[auth] final class OngoingAuthorizationObserver[A](
   }
 
   private def onlyBeforeCompletionOrError(body: => Unit): Unit =
-    synchronized(
-      if (!afterCompletionOrError) {
-        body
-      }
+    blocking(
+      synchronized(
+        if (!afterCompletionOrError) {
+          body
+        }
+      )
     )
 
   private def checkUserRightsRefreshTimeout(now: Instant): Either[StatusRuntimeException, Unit] = {

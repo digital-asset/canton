@@ -199,13 +199,6 @@ object ProtocolVersion {
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v3
-
-  /** @return Parsed protocol version if found in environment variable `CANTON_PROTOCOL_VERSION`
-    * @throws java.lang.RuntimeException if the given parameter cannot be parsed to a protocol version
-    */
-  def tryGetOptFromEnv: Option[ProtocolVersion] = sys.env
-    .get("CANTON_PROTOCOL_VERSION")
-    .map(ProtocolVersion.tryCreate)
 }
 
 /*

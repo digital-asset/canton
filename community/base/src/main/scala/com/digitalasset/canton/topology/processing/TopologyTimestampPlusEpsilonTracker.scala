@@ -150,8 +150,7 @@ class TopologyTimestampPlusEpsilonTracker(
       FutureUnlessShutdown(
         FutureUtil.logOnFailure(
           {
-            val synchronizeAt =
-              CantonTimestamp.min(previousEffectiveTime.value, sequencingTime.value)
+            val synchronizeAt = previousEffectiveTime.value.min(sequencingTime.value)
             awaitKnownTimestampUS(synchronizeAt) match {
               case None => FutureUnlessShutdown.pure(computeEffective)
               case Some(value) =>
@@ -190,9 +189,7 @@ class TopologyTimestampPlusEpsilonTracker(
   }
 
   def effectiveTimeProcessed(effectiveTime: EffectiveTime): Unit = {
-    // set new effective time
-    val updated =
-      lastEffectiveTimeProcessed.updateAndGet(EffectiveTime.max(_, effectiveTime))
+    val updated = lastEffectiveTimeProcessed.updateAndGet(_.max(effectiveTime))
     notifyAwaitedFutures(updated.value)
   }
 
@@ -202,7 +199,7 @@ class TopologyTimestampPlusEpsilonTracker(
   ): FutureUnlessShutdown[EffectiveTime] = synchronize(
     sequencingTime, {
       val adjusted = adjustByEpsilon(sequencingTime)
-      val monotonic = uniqueUpdateTime.updateAndGet(EffectiveTime.max(_, adjusted))
+      val monotonic = uniqueUpdateTime.updateAndGet(_.max(adjusted))
       effectiveTimeProcessed(monotonic)
       monotonic
     },

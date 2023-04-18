@@ -5,11 +5,11 @@ package com.digitalasset.canton.platform.apiserver
 
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Instant, ZoneOffset, ZonedDateTime}
 
-class SimpleTimeServiceBackendSpec extends AnyWordSpec with Matchers with ScalaFutures {
+class SimpleTimeServiceBackendSpec extends AsyncWordSpec with Matchers with ScalaFutures {
   "a simple time service backend" should {
     "return the time it started with" in {
       val timeService = TimeServiceBackend.simple(instantAt(month = 1))
@@ -18,8 +18,11 @@ class SimpleTimeServiceBackendSpec extends AnyWordSpec with Matchers with ScalaF
 
     "update the time to a new time" in {
       val timeService = TimeServiceBackend.simple(instantAt(month = 1))
-      timeService.setCurrentTime(instantAt(month = 1), instantAt(month = 2))
-      timeService.getCurrentTime should be(instantAt(month = 2))
+      for {
+        _ <- timeService.setCurrentTime(instantAt(month = 1), instantAt(month = 2))
+      } yield {
+        timeService.getCurrentTime should be(instantAt(month = 2))
+      }
     }
 
     "not allow the time to be updated without a correct expected time" in {

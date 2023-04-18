@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.interning
 
-private[interning] case class RawStringInterning(
+private[interning] final case class RawStringInterning(
     map: Map[String, Int],
     idMap: Map[Int, String],
     lastId: Int,

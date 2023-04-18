@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.interning
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.platform.{Identifier, Party}
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 class DomainStringIterators(
     val parties: Iterator[String],
@@ -91,7 +91,7 @@ class StringInterningView()
     )
 
   override def internize(domainStringIterators: DomainStringIterators): Iterable[(Int, String)] =
-    synchronized {
+    blocking(synchronized {
       val allPrefixedStrings =
         domainStringIterators.parties.map(PartyPrefix + _) ++
           domainStringIterators.templateIds.map(TemplatePrefix + _)
@@ -101,7 +101,7 @@ class StringInterningView()
       )
       updateView(newEntries)
       newEntries
-    }
+    })
 
   override def update(lastStringInterningId: Int)(
       loadStringInterningEntries: LoadStringInterningEntries
@@ -114,12 +114,12 @@ class StringInterningView()
         .map(updateView)(ExecutionContext.parasitic)
     }
 
-  private def updateView(newEntries: Iterable[(Int, String)]): Unit = synchronized {
+  private def updateView(newEntries: Iterable[(Int, String)]): Unit = blocking(synchronized {
     if (newEntries.nonEmpty) {
       raw = RawStringInterning.from(
         entries = newEntries,
         rawStringInterning = raw,
       )
     }
-  }
+  })
 }

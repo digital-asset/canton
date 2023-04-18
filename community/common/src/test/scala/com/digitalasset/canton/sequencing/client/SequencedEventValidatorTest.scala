@@ -3,395 +3,311 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.ExampleTransactionFactory
-import com.digitalasset.canton.protocol.messages.{EnvelopeContent, InformeeMessage}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
-import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.{
-  OrdinarySerializedEvent,
-  PossiblyIgnoredSerializedEvent,
-  SequencerTestUtils,
-}
-import com.digitalasset.canton.store.SequencedEventStore.{
-  IgnoredSequencedEvent,
-  OrdinarySequencedEvent,
-}
+import com.digitalasset.canton.store.SequencedEventStore.IgnoredSequencedEvent
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.{BaseTest, HasExecutorService, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import com.google.protobuf.ByteString
-import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.Outcome
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.wordspec.FixtureAnyWordSpec
 
-import scala.concurrent.Future
+class SequencedEventValidatorTest
+    extends FixtureAnyWordSpec
+    with BaseTest
+    with ScalaFutures
+    with HasExecutionContext {
 
-class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasExecutorService {
+  override type FixtureParam = SequencedEventTestFixture
 
-  private lazy val defaultDomainId: DomainId = DefaultTestIdentities.domainId
-  private lazy val subscriberId: ParticipantId = ParticipantId("participant1-id")
-  private lazy val sequencerId: SequencerId = DefaultTestIdentities.sequencer
-  private lazy val subscriberCryptoApi: DomainSyncCryptoClient =
-    TestingIdentityFactory(loggerFactory).forOwnerAndDomain(subscriberId, defaultDomainId)
-  private lazy val sequencerCryptoApi: DomainSyncCryptoClient =
-    TestingIdentityFactory(loggerFactory).forOwnerAndDomain(sequencerId, defaultDomainId)
-  private lazy val updatedCounter: Long = 42L
-
-  private def mkValidator(
-      initialEventMetadata: PossiblyIgnoredSerializedEvent =
-        IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(updatedCounter - 1), None)(
-          traceContext
-        ),
-      syncCryptoApi: DomainSyncCryptoClient = subscriberCryptoApi,
-  ): SequencedEventValidatorImpl = {
-    new SequencedEventValidatorImpl(
-      Some(initialEventMetadata),
-      unauthenticated = false,
-      optimistic = false,
-      defaultDomainId,
-      sequencerId,
-      testedProtocolVersion,
-      syncCryptoApi,
-      loggerFactory,
-      timeouts,
-    )(executorService)
-  }
-
-  private def createEvent(
-      domainId: DomainId = defaultDomainId,
-      signatureOverride: Option[Signature] = None,
-      serializedOverride: Option[ByteString] = None,
-      counter: Long = updatedCounter,
-      timestamp: CantonTimestamp = CantonTimestamp.Epoch,
-  ): Future[OrdinarySerializedEvent] = {
-    import cats.syntax.option.*
-    val message = {
-      val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()(executorService)
-      val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
-      InformeeMessage(fullInformeeTree)(testedProtocolVersion)
-    }
-    val deliver: Deliver[ClosedEnvelope] = Deliver.create[ClosedEnvelope](
-      SequencerCounter(counter),
-      timestamp,
-      domainId,
-      MessageId.tryCreate("test").some,
-      Batch(
-        List(
-          ClosedEnvelope.tryCreate(
-            serializedOverride.getOrElse(
-              EnvelopeContent.tryCreate(message, testedProtocolVersion).toByteString
-            ),
-            Recipients.cc(subscriberId),
-            Seq.empty,
-            testedProtocolVersion,
-          )
-        ),
-        testedProtocolVersion,
-      ),
-      testedProtocolVersion,
-    )
-
-    for {
-      sig <- signatureOverride
-        .map(Future.successful)
-        .getOrElse(sign(deliver.getCryptographicEvidence, deliver.timestamp))
-    } yield OrdinarySequencedEvent(SignedContent(deliver, sig, None, testedProtocolVersion))(
-      traceContext
-    )
-  }
-
-  private def createEventWithCounterAndTs(
-      counter: Long,
-      timestamp: CantonTimestamp,
-      customSerialization: Option[ByteString] = None,
-      messageIdO: Option[MessageId] = None,
-      timestampOfSigningKey: Option[CantonTimestamp] = None,
-  ): Future[OrdinarySerializedEvent] = {
-    val event =
-      SequencerTestUtils.mockDeliverClosedEnvelope(
-        counter = counter,
-        timestamp = timestamp,
-        deserializedFrom = customSerialization,
-        messageId = messageIdO,
-      )
-    for {
-      signature <- sign(
-        customSerialization.getOrElse(event.getCryptographicEvidence),
-        event.timestamp,
-      )
-    } yield OrdinarySequencedEvent(
-      SignedContent(event, signature, timestampOfSigningKey, testedProtocolVersion)
-    )(traceContext)
-  }
-
-  private def ts(offset: Int) = CantonTimestamp.Epoch.plusSeconds(offset.toLong)
-
-  private def sign(bytes: ByteString, timestamp: CantonTimestamp): Future[Signature] = {
-    val hash = sequencerCryptoApi.pureCrypto.digest(HashPurpose.SequencedEventSignature, bytes)
-    for {
-      cryptoApi <- sequencerCryptoApi.snapshot(timestamp)
-      signature <- cryptoApi
-        .sign(hash)
-        .value
-        .map(_.valueOr(err => fail(s"Failed to sign: $err")))(executorService)
-    } yield signature
+  override def withFixture(test: OneArgTest): Outcome = {
+    val env = new SequencedEventTestFixture(loggerFactory, testedProtocolVersion, timeouts)
+    withFixture(test.toNoArgTest(env))
   }
 
   "validate on reconnect" should {
-    "accept the prior event" in {
-      for {
-        priorEvent <- createEvent()
-        validator = mkValidator(priorEvent)
-        _ <- validator
-          .validateOnReconnect(priorEvent)
-          .valueOrFail("successful reconnect")
-          .failOnShutdown
-      } yield succeed
+    "accept the prior event" in { fixture =>
+      import fixture.*
+      val priorEvent = createEvent().futureValue
+      val validator = mkValidator(priorEvent)
+      validator
+        .validateOnReconnect(priorEvent)
+        .valueOrFail("successful reconnect")
+        .failOnShutdown
+        .futureValue
     }
 
-    "accept a new signature on the prior event" in {
-      for {
-        priorEvent <- createEvent()
-        validator = mkValidator(priorEvent)
-        sig <- sign(priorEvent.signedEvent.content.getCryptographicEvidence, CantonTimestamp.Epoch)
-        _ = assert(sig != priorEvent.signedEvent.signature)
-        eventWithNewSig =
-          priorEvent.copy(priorEvent.signedEvent.copy(signatures = NonEmpty(Seq, sig)))(
-            traceContext
-          )
-        _ <- validator
-          .validateOnReconnect(eventWithNewSig)
-          .valueOrFail("event with regenerated signature")
-          .failOnShutdown
-      } yield succeed
+    "accept a new signature on the prior event" in { fixture =>
+      import fixture.*
+      val priorEvent = createEvent().futureValue
+      val validator = mkValidator(priorEvent)
+      val sig = sign(
+        priorEvent.signedEvent.content.getCryptographicEvidence,
+        CantonTimestamp.Epoch,
+      ).futureValue
+      assert(sig != priorEvent.signedEvent.signature)
+      val eventWithNewSig =
+        priorEvent.copy(priorEvent.signedEvent.copy(signatures = NonEmpty(Seq, sig)))(
+          fixture.traceContext
+        )
+      validator
+        .validateOnReconnect(eventWithNewSig)
+        .valueOrFail("event with regenerated signature")
+        .failOnShutdown
+        .futureValue
     }
 
-    "accept a different serialization of the same content" in {
-      for {
-        deliver1 <- createEventWithCounterAndTs(1L, CantonTimestamp.Epoch)
-        deliver2 <- createEventWithCounterAndTs(
-          1L,
-          CantonTimestamp.Epoch,
-          customSerialization = Some(ByteString.copyFromUtf8("Different serialization")),
-        ) // changing serialization, but not the contents
+    "accept a different serialization of the same content" in { fixture =>
+      import fixture.*
+      val deliver1 = createEventWithCounterAndTs(1L, CantonTimestamp.Epoch).futureValue
+      val deliver2 = createEventWithCounterAndTs(
+        1L,
+        CantonTimestamp.Epoch,
+        customSerialization = Some(ByteString.copyFromUtf8("Different serialization")),
+      ).futureValue // changing serialization, but not the contents
 
-        validator = mkValidator(deliver1)
-        _ <- validator
-          .validateOnReconnect(deliver2)
-          .valueOrFail("Different serialization should be accepted")
-          .failOnShutdown
-      } yield succeed
+      val validator = mkValidator(deliver1)
+      validator
+        .validateOnReconnect(deliver2)
+        .valueOrFail("Different serialization should be accepted")
+        .failOnShutdown
+        .futureValue
     }
 
-    "check the domain Id" in {
+    "check the domain Id" in { fixture =>
+      import fixture.*
       val incorrectDomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("wrong-domain::id"))
       val validator = mkValidator(
         IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(updatedCounter), None)(
-          traceContext
+          fixture.traceContext
         )
       )
-      for {
-        wrongDomain <- createEvent(incorrectDomainId)
-        err <- validator
-          .validateOnReconnect(wrongDomain)
-          .leftOrFail("wrong domain ID on reconnect")
-          .failOnShutdown
-      } yield err shouldBe BadDomainId(defaultDomainId, incorrectDomainId)
+      val wrongDomain = createEvent(incorrectDomainId).futureValue
+      val err = validator
+        .validateOnReconnect(wrongDomain)
+        .leftOrFail("wrong domain ID on reconnect")
+        .failOnShutdown
+        .futureValue
+
+      err shouldBe BadDomainId(defaultDomainId, incorrectDomainId)
     }
 
-    "check for a fork" in {
-      for {
-        priorEvent <- createEvent()
-        validator = mkValidator(priorEvent)
-        differentCounter <- createEvent(counter = 43L)
-        errCounter <- validator
-          .validateOnReconnect(differentCounter)
-          .leftOrFail("fork on counter")
-          .failOnShutdown
-        differentTimestamp <- createEvent(timestamp = CantonTimestamp.MaxValue)
-        errTimestamp <- validator
-          .validateOnReconnect(differentTimestamp)
-          .leftOrFail("fork on timestamp")
-          .failOnShutdown
-        differentContent <- createEventWithCounterAndTs(
-          counter = updatedCounter,
-          CantonTimestamp.Epoch,
-        )
-        errContent <- validator
-          .validateOnReconnect(differentContent)
-          .leftOrFail("fork on content")
-          .failOnShutdown
-      } yield {
-        errCounter shouldBe ForkHappened(
-          SequencerCounter(updatedCounter),
-          differentCounter.signedEvent.content,
-          Some(priorEvent.signedEvent.content),
-        )
-        errTimestamp shouldBe ForkHappened(
-          SequencerCounter(updatedCounter),
-          differentTimestamp.signedEvent.content,
-          Some(priorEvent.signedEvent.content),
-        )
-        errContent shouldBe ForkHappened(
-          SequencerCounter(updatedCounter),
-          differentContent.signedEvent.content,
-          Some(priorEvent.signedEvent.content),
-        )
-      }
+    "check for a fork" in { fixture =>
+      import fixture.*
+      val priorEvent = createEvent().futureValue
+      val validator = mkValidator(priorEvent)
+      val differentCounter = createEvent(counter = 43L).futureValue
+      val errCounter = validator
+        .validateOnReconnect(differentCounter)
+        .leftOrFail("fork on counter")
+        .failOnShutdown
+        .futureValue
+      val differentTimestamp = createEvent(timestamp = CantonTimestamp.MaxValue).futureValue
+      val errTimestamp = validator
+        .validateOnReconnect(differentTimestamp)
+        .leftOrFail("fork on timestamp")
+        .failOnShutdown
+        .futureValue
+      val differentContent = createEventWithCounterAndTs(
+        counter = updatedCounter,
+        CantonTimestamp.Epoch,
+      ).futureValue
+
+      val errContent = validator
+        .validateOnReconnect(differentContent)
+        .leftOrFail("fork on content")
+        .failOnShutdown
+        .futureValue
+
+      errCounter shouldBe ForkHappened(
+        SequencerCounter(updatedCounter),
+        differentCounter.signedEvent.content,
+        Some(priorEvent.signedEvent.content),
+      )
+
+      errTimestamp shouldBe ForkHappened(
+        SequencerCounter(updatedCounter),
+        differentTimestamp.signedEvent.content,
+        Some(priorEvent.signedEvent.content),
+      )
+
+      errContent shouldBe ForkHappened(
+        SequencerCounter(updatedCounter),
+        differentContent.signedEvent.content,
+        Some(priorEvent.signedEvent.content),
+      )
     }
 
-    "verify the signature" in {
-      for {
-        priorEvent <- createEvent()
-        badSig <- sign(ByteString.copyFromUtf8("not-the-message"), CantonTimestamp.Epoch)
-        badEvent <- createEvent(signatureOverride = Some(badSig))
-        validator = mkValidator(priorEvent)
-        result <- validator
-          .validateOnReconnect(badEvent)
-          .leftOrFail("invalid signature on reconnect")
-          .failOnShutdown
-      } yield {
-        result shouldBe a[SignatureInvalid]
-      }
+    "verify the signature" in { fixture =>
+      import fixture.*
+      val priorEvent = createEvent().futureValue
+      val badSig =
+        sign(ByteString.copyFromUtf8("not-the-message"), CantonTimestamp.Epoch).futureValue
+      val badEvent = createEvent(signatureOverride = Some(badSig)).futureValue
+      val validator = mkValidator(priorEvent)
+      val result = validator
+        .validateOnReconnect(badEvent)
+        .leftOrFail("invalid signature on reconnect")
+        .failOnShutdown
+        .futureValue
+      result shouldBe a[SignatureInvalid]
     }
   }
 
   "validate" should {
-    "reject messages with unexpected domain ids" in {
+    "reject messages with unexpected domain ids" in { fixture =>
+      import fixture.*
       val incorrectDomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("wrong-domain::id"))
-      for {
-        event <- createEvent(incorrectDomainId)
-        validator = mkValidator()
-        result <- validator
-          .validate(event)
-          .leftOrFail("wrong domain ID")
-          .failOnShutdown
-      } yield result shouldBe BadDomainId(`defaultDomainId`, `incorrectDomainId`)
+      val event = createEvent(incorrectDomainId).futureValue
+      val validator = mkValidator()
+      val result = validator
+        .validate(event)
+        .leftOrFail("wrong domain ID")
+        .failOnShutdown
+        .futureValue
+      result shouldBe BadDomainId(`defaultDomainId`, `incorrectDomainId`)
     }
 
-    "reject messages with invalid signatures" in {
-      for {
-        priorEvent <- createEvent(timestamp = CantonTimestamp.Epoch.immediatePredecessor)
-        badSig <- sign(ByteString.copyFromUtf8("not-the-message"), CantonTimestamp.Epoch)
-        badEvent <- createEvent(
-          signatureOverride = Some(badSig),
-          counter = priorEvent.counter.v + 1L,
-        )
-        validator = mkValidator(priorEvent)
-        result <- validator
-          .validate(badEvent)
-          .leftOrFail("invalid signature")
-          .failOnShutdown
-      } yield {
-        result shouldBe a[SignatureInvalid]
-      }
+    "reject messages with invalid signatures" in { fixture =>
+      import fixture.*
+      val priorEvent =
+        createEvent(timestamp = CantonTimestamp.Epoch.immediatePredecessor).futureValue
+      val badSig =
+        sign(ByteString.copyFromUtf8("not-the-message"), CantonTimestamp.Epoch).futureValue
+      val badEvent = createEvent(
+        signatureOverride = Some(badSig),
+        counter = priorEvent.counter.v + 1L,
+      ).futureValue
+      val validator = mkValidator(priorEvent)
+      val result = validator
+        .validate(badEvent)
+        .leftOrFail("invalid signature")
+        .failOnShutdown
+        .futureValue
+      result shouldBe a[SignatureInvalid]
     }
 
-    "validate correctly with explicit signing timestamp" in {
+    "validate correctly with explicit signing timestamp" in { fixture =>
+      import fixture.*
       val syncCrypto = mock[DomainSyncCryptoClient]
       when(syncCrypto.pureCrypto).thenReturn(subscriberCryptoApi.pureCrypto)
-      when(syncCrypto.snapshotUS(timestamp = ts(1))).thenAnswer[CantonTimestamp](tm =>
-        subscriberCryptoApi.snapshotUS(tm)
-      )
+      when(syncCrypto.snapshotUS(timestamp = ts(1))(fixture.traceContext))
+        .thenAnswer[CantonTimestamp](tm => subscriberCryptoApi.snapshotUS(tm)(fixture.traceContext))
       when(syncCrypto.topologyKnownUntilTimestamp).thenReturn(CantonTimestamp.MaxValue)
       val validator = mkValidator(
-        IgnoredSequencedEvent(ts(0), SequencerCounter(41), None)(traceContext),
+        IgnoredSequencedEvent(ts(0), SequencerCounter(41), None)(fixture.traceContext),
         syncCryptoApi = syncCrypto,
       )
-      for {
-        deliver <- createEventWithCounterAndTs(42, ts(2), timestampOfSigningKey = Some(ts(1)))
-        _ <- valueOrFail(validator.validate(deliver))("validate").failOnShutdown
-      } yield succeed
+      val deliver =
+        createEventWithCounterAndTs(42, ts(2), timestampOfSigningKey = Some(ts(1))).futureValue
+
+      valueOrFail(validator.validate(deliver))("validate").failOnShutdown.futureValue
     }
 
-    "reject the same counter-timestamp if passed in repeatedly" in {
+    "reject the same counter-timestamp if passed in repeatedly" in { fixture =>
+      import fixture.*
       val validator =
         mkValidator(
-          IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(41), None)(traceContext)
+          IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(41), None)(
+            fixture.traceContext
+          )
         )
 
-      for {
-        deliver <- createEventWithCounterAndTs(42, CantonTimestamp.Epoch)
-        _ <- validator
-          .validate(deliver)
-          .valueOrFail("validate1")
-          .failOnShutdown
-        err <- validator
-          .validate(deliver)
-          .leftOrFail("validate2")
-          .failOnShutdown
-      } yield {
-        err shouldBe GapInSequencerCounter(SequencerCounter(42), SequencerCounter(42))
-      }
+      val deliver = createEventWithCounterAndTs(42, CantonTimestamp.Epoch).futureValue
+      validator
+        .validate(deliver)
+        .valueOrFail("validate1")
+        .failOnShutdown
+        .futureValue
+      val err = validator
+        .validate(deliver)
+        .leftOrFail("validate2")
+        .failOnShutdown
+        .futureValue
+
+      err shouldBe GapInSequencerCounter(SequencerCounter(42), SequencerCounter(42))
     }
 
-    "fail if the counter or timestamp do not increase" in {
+    "fail if the counter or timestamp do not increase" in { fixture =>
+      import fixture.*
       val validator =
         mkValidator(
-          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(traceContext)
+          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(
+            fixture.traceContext
+          )
         )
 
-      for {
-        deliver1 <- createEventWithCounterAndTs(42, CantonTimestamp.MinValue)
-        deliver2 <- createEventWithCounterAndTs(0L, CantonTimestamp.MaxValue)
-        deliver3 <- createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2))
+      val deliver1 = createEventWithCounterAndTs(42, CantonTimestamp.MinValue).futureValue
+      val deliver2 = createEventWithCounterAndTs(0L, CantonTimestamp.MaxValue).futureValue
+      val deliver3 = createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2)).futureValue
 
-        error1 <- validator
-          .validate(deliver1)
-          .leftOrFail("deliver1")
-          .failOnShutdown
-        error2 <- validator
-          .validate(deliver2)
-          .leftOrFail("deliver2")
-          .failOnShutdown
-        _ <- validator
-          .validate(deliver3)
-          .valueOrFail("deliver3")
-          .failOnShutdown
-        error3 <- validator
-          .validate(deliver2)
-          .leftOrFail("deliver4")
-          .failOnShutdown
-      } yield {
-        error1 shouldBe NonIncreasingTimestamp(
-          CantonTimestamp.MinValue,
-          SequencerCounter(42),
-          CantonTimestamp.Epoch,
-          SequencerCounter(41),
-        )
-        error2 shouldBe DecreasingSequencerCounter(SequencerCounter(0), SequencerCounter(41))
-        error3 shouldBe DecreasingSequencerCounter(SequencerCounter(0), SequencerCounter(42))
-      }
+      val error1 = validator
+        .validate(deliver1)
+        .leftOrFail("deliver1")
+        .failOnShutdown
+        .futureValue
+      val error2 = validator
+        .validate(deliver2)
+        .leftOrFail("deliver2")
+        .failOnShutdown
+        .futureValue
+      validator
+        .validate(deliver3)
+        .valueOrFail("deliver3")
+        .failOnShutdown
+        .futureValue
+      val error3 = validator
+        .validate(deliver2)
+        .leftOrFail("deliver4")
+        .failOnShutdown
+        .futureValue
+
+      error1 shouldBe NonIncreasingTimestamp(
+        CantonTimestamp.MinValue,
+        SequencerCounter(42),
+        CantonTimestamp.Epoch,
+        SequencerCounter(41),
+      )
+      error2 shouldBe DecreasingSequencerCounter(SequencerCounter(0), SequencerCounter(41))
+      error3 shouldBe DecreasingSequencerCounter(SequencerCounter(0), SequencerCounter(42))
     }
 
-    "fail if there is a counter cap" in {
+    "fail if there is a counter cap" in { fixture =>
+      import fixture.*
       val validator =
         mkValidator(
-          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(traceContext)
+          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(
+            fixture.traceContext
+          )
         )
 
-      for {
-        deliver1 <- createEventWithCounterAndTs(43L, CantonTimestamp.ofEpochSecond(1))
-        deliver2 <- createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2))
-        deliver3 <- createEventWithCounterAndTs(44L, CantonTimestamp.ofEpochSecond(3))
+      val deliver1 = createEventWithCounterAndTs(43L, CantonTimestamp.ofEpochSecond(1)).futureValue
+      val deliver2 = createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2)).futureValue
+      val deliver3 = createEventWithCounterAndTs(44L, CantonTimestamp.ofEpochSecond(3)).futureValue
 
-        result1 <- validator
-          .validate(deliver1)
-          .leftOrFail("deliver1")
-          .failOnShutdown
-        _ <- validator
-          .validate(deliver2)
-          .valueOrFail("deliver2")
-          .failOnShutdown
-        result3 <- validator
-          .validate(deliver3)
-          .leftOrFail("deliver3")
-          .failOnShutdown
-      } yield {
-        result1 shouldBe GapInSequencerCounter(SequencerCounter(43), SequencerCounter(41))
-        result3 shouldBe GapInSequencerCounter(SequencerCounter(44), SequencerCounter(42))
-      }
+      val result1 = validator
+        .validate(deliver1)
+        .leftOrFail("deliver1")
+        .failOnShutdown
+        .futureValue
+
+      validator
+        .validate(deliver2)
+        .valueOrFail("deliver2")
+        .failOnShutdown
+        .futureValue
+
+      val result3 = validator
+        .validate(deliver3)
+        .leftOrFail("deliver3")
+        .failOnShutdown
+        .futureValue
+
+      result1 shouldBe GapInSequencerCounter(SequencerCounter(43), SequencerCounter(41))
+      result3 shouldBe GapInSequencerCounter(SequencerCounter(44), SequencerCounter(42))
     }
   }
 }

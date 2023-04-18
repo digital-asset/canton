@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.InMemoryRegisterTopologyTransactionResponseStore
-import com.digitalasset.canton.lifecycle.UnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
@@ -85,7 +85,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
             any[List[SignedTopologyTransaction[TopologyChangeOp]]],
           )(any[TraceContext])
         )
-          .thenReturn(Future.successful(List(domainIdentityServiceResult)))
+          .thenReturn(FutureUnlessShutdown.pure(List(domainIdentityServiceResult)))
 
         val sequencerSendResponse = mock[
           (

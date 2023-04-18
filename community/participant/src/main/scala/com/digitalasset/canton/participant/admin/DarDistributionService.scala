@@ -9,6 +9,7 @@ import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.AcceptRejectError.OfferNotFound
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
@@ -94,6 +95,10 @@ object AcceptRejectError {
   final case class SubmissionFailed(result: CommandResult) extends AcceptRejectError
 
   final case class InvalidOffer(error: String) extends AcceptRejectError
+
+  case object Shutdown extends AcceptRejectError {
+    val error = "Node is shutting down"
+  }
 }
 
 /** Exception to carry the accept reject error where a `Future[Unit]` return is expected (transaction processing) */
@@ -115,7 +120,7 @@ trait DarDistribution {
   /** Accept a previously received share request */
   def accept(id: P.ContractId[M.ShareDar])(implicit
       traceContext: TraceContext
-  ): Future[Either[AcceptRejectError, Unit]]
+  ): FutureUnlessShutdown[Either[AcceptRejectError, Unit]]
 
   /** Reject a previously received share request */
   def reject(id: P.ContractId[M.ShareDar], reason: String)(implicit
@@ -219,6 +224,7 @@ class DarDistributionService(
       accept(share)
         .leftMap(new AcceptRejectException(_))
         .value
+        .onShutdown(Left(new AcceptRejectException(AcceptRejectError.Shutdown)))
         .transform(_.flatMap(_.toTry))
     }
 
@@ -277,9 +283,11 @@ class DarDistributionService(
 
   override def accept(
       shareId: P.ContractId[M.ShareDar]
-  )(implicit traceContext: TraceContext): Future[Either[AcceptRejectError, Unit]] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Either[AcceptRejectError, Unit]] = {
     (for {
-      offer <- EitherT.fromOptionF(shareOfferStore.get(shareId), OfferNotFound: AcceptRejectError)
+      offer <- EitherT
+        .fromOptionF(shareOfferStore.get(shareId), OfferNotFound: AcceptRejectError)
+        .mapK(FutureUnlessShutdown.outcomeK)
       _ <- accept(offer)
     } yield ()).value
   }
@@ -305,16 +313,17 @@ class DarDistributionService(
 
   private def accept(
       offer: Contract[M.ShareDar]
-  )(implicit traceContext: TraceContext): EitherT[Future, AcceptRejectError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, AcceptRejectError, Unit] = {
     import M.ShareDar.*
     for {
       _hash <- Hash
         .fromHexString(offer.value.hash)
         .leftMap(err => AcceptRejectError.InvalidOffer(err.message))
-        .toEitherT[Future]
+        .toEitherT[FutureUnlessShutdown]
       _ <- appendDar(offer.value.name, decode(offer.value.content))
       acceptCommand = offer.contractId.exerciseAccept().command
       _ <- submit[AcceptRejectError](acceptCommand)(AcceptRejectError.SubmissionFailed)
+        .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
   }
 
@@ -359,7 +368,7 @@ class DarDistributionService(
 
   private def appendDar(name: String, content: ByteString)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcceptRejectError, Unit] =
+  ): EitherT[FutureUnlessShutdown, AcceptRejectError, Unit] =
     darService
       .appendDarFromByteString(content, name, vetAllPackages = true, synchronizeVetting = false)
       .map(_ => ())

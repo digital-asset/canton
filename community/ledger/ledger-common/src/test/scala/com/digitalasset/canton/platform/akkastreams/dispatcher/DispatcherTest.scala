@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.akkastreams.dispatcher
 import akka.NotUsed
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
@@ -13,7 +14,7 @@ import org.scalatest.time.{Milliseconds, Seconds, Span}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future, blocking}
 
 // Consider merging/reviewing the tests we have around the Dispatcher!
 class DispatcherTest
@@ -34,7 +35,9 @@ class DispatcherTest
 
       val elements = new AtomicReference(Map.empty[Int, Int])
       def readElement(i: Int): Future[Int] = Future {
-        Thread.sleep(10) // In a previous version of Dispatcher, this sleep caused a race condition.
+        blocking(
+          Thread.sleep(10)
+        ) // In a previous version of Dispatcher, this sleep caused a race condition.
         elements.get()(i)
       }
       def readSuccessor(i: Int): Int = i + 1
@@ -65,7 +68,7 @@ class DispatcherTest
             .run()
         }
 
-        d.shutdown()
+        discard(d.shutdown())
 
         subscriptions.zip(1 until 10) foreach { case (f, i) =>
           whenReady(f) { vals =>

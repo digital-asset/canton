@@ -6,13 +6,15 @@ package com.digitalasset.canton.platform.sandbox.auth
 import com.daml.ledger.api.v1.admin.user_management_service.*
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import io.grpc.{Status, StatusRuntimeException}
+import org.scalatest.OptionValues
 
 import java.util.UUID
 import scala.concurrent.Future
 
 class GetUserWithGivenUserIdAuthIT
     extends AdminOrIDPAdminServiceCallAuthTests
-    with UserManagementAuth {
+    with UserManagementAuth
+    with OptionValues {
   override def serviceCallName: String = "UserManagementService#GetUser(given-user-id)"
 
   // admin and idp admin users are allowed to specify a user-id other than their own for which to retrieve a user
@@ -22,7 +24,7 @@ class GetUserWithGivenUserIdAuthIT
     def getUser(userId: String): Future[User] =
       stub(UserManagementServiceGrpc.stub(channel), context.token)
         .getUser(GetUserRequest(userId, identityProviderId = context.identityProviderId))
-        .map(_.user.get)
+        .map(_.user.value)
 
     for {
       // create a normal users
@@ -65,7 +67,7 @@ class GetUserWithGivenUserIdAuthIT
           .getUser(
             GetUserRequest(userId, identityProviderId = toIdentityProviderId(idpConfigresponse2))
           )
-          .map(_.user.get)
+          .map(_.user.value)
       } yield ()
     }
   }

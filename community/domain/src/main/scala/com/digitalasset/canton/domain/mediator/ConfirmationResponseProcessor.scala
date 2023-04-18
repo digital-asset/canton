@@ -21,6 +21,7 @@ import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, RootHash, v0}
 import com.digitalasset.canton.sequencing.HandlerResult
+import com.digitalasset.canton.sequencing.protocol.RecipientsTree.MemberRecipient
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.*
@@ -308,11 +309,21 @@ private[mediator] class ConfirmationResponseProcessor(
     val (wrongRecipients, oneMemberRecipients) = rootHashMessages.flatMap { rhm =>
       rhm.recipients.trees.toList.map {
         case tree @ RecipientsTree(group, Seq()) =>
-          Either.cond(group.size == 2 && group.contains(mediatorId), group, tree)
+          Either.cond(
+            group.size == 2 && group.contains(RecipientsTree.MemberRecipient(mediatorId)),
+            group,
+            tree,
+          )
         case badTree => Left(badTree)
       }
     }.separate
-    val members = oneMemberRecipients.mapFilter(recipients => (recipients - mediatorId).headOption)
+    // TODO(#12569): support mediator groups
+    val members = oneMemberRecipients
+      .mapFilter(recipients =>
+        (recipients.collect { case MemberRecipient(member) =>
+          member
+        } - mediatorId).headOption
+      )
 
     def repeatedMembers(members: Seq[Member]): Seq[Member] = {
       val repeatedMembersB = Seq.newBuilder[Member]

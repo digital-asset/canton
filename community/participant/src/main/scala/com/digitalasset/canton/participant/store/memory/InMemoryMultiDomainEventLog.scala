@@ -83,7 +83,7 @@ class InMemoryMultiDomainEventLog(
 
   private case class Entries(
       firstOffset: GlobalOffset,
-      lastOffset: GlobalOffset,
+      lastOffset: Option[GlobalOffset],
       lastLocalOffsets: Map[EventLogId, LocalOffset],
       references: Set[(EventLogId, LocalOffset)],
       referencesByOffset: SortedMap[GlobalOffset, (EventLogId, LocalOffset, CantonTimestamp)],
@@ -93,12 +93,12 @@ class InMemoryMultiDomainEventLog(
   private val entriesRef: AtomicReference[Entries] =
     new AtomicReference(
       Entries(
-        ledgerFirstOffset,
-        ledgerFirstOffset - 1,
-        Map.empty,
-        Set.empty,
-        TreeMap.empty,
-        CantonTimestamp.MinValue,
+        firstOffset = ledgerFirstOffset,
+        lastOffset = None,
+        lastLocalOffsets = Map.empty,
+        references = Set.empty,
+        referencesByOffset = TreeMap.empty,
+        publicationTimeUpperBound = CantonTimestamp.MinValue,
       )
     )
 
@@ -123,7 +123,7 @@ class InMemoryMultiDomainEventLog(
           // Since we're in an execution queue, we don't need the compare-and-set operations
           val Entries(
             firstOffset,
-            lastOffset,
+            lastOffsetO,
             lastLocalOffsets,
             references,
             referencesByOffset,
@@ -135,6 +135,7 @@ class InMemoryMultiDomainEventLog(
               show"Skipping publication of event reference from event log $id with local offset $localOffset, as it has already been published."
             )
           } else if (lastLocalOffsets.get(id).forall(_ < localOffset)) {
+            val lastOffset = lastOffsetO.getOrElse(ledgerFirstOffset - 1)
             val nextOffset = lastOffset + 1
             val now = clock.monotonicTime()
             val publicationTime = Ordering[CantonTimestamp].max(now, publicationTimeUpperBound)
@@ -147,19 +148,20 @@ class InMemoryMultiDomainEventLog(
               show"Published event from event log $id with local offset $localOffset at global offset $nextOffset with publication time $publicationTime."
             )
             val newEntries = Entries(
-              firstOffset,
-              nextOffset,
-              lastLocalOffsets + (id -> localOffset),
-              references + ((id, localOffset)),
-              referencesByOffset + (nextOffset -> ((id, localOffset, publicationTime))),
-              publicationTime,
+              firstOffset = firstOffset,
+              lastOffset = Some(nextOffset),
+              lastLocalOffsets = lastLocalOffsets + (id -> localOffset),
+              references = references + ((id, localOffset)),
+              referencesByOffset =
+                referencesByOffset + (nextOffset -> ((id, localOffset, publicationTime))),
+              publicationTimeUpperBound = publicationTime,
             )
             entriesRef.set(newEntries)
 
-            dispatcher.signalNewHead(newEntries.lastOffset) // new end index is inclusive
+            dispatcher.signalNewHead(nextOffset) // new end index is inclusive
             val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
             val publication = OnPublish.Publication(
-              newEntries.lastOffset,
+              nextOffset,
               publicationTime,
               inFlightReference,
               deduplicationInfo,
@@ -213,7 +215,7 @@ class InMemoryMultiDomainEventLog(
       .updateAndGet {
         case Entries(
               firstOffset,
-              nextOffset,
+              nextOffsetO,
               lastLocalOffsets,
               references,
               referencesByOffset,
@@ -225,12 +227,12 @@ class InMemoryMultiDomainEventLog(
           }
           val newReferencesByOffset = referencesByOffset -- pruned.keys
           Entries(
-            firstOffset max (upToInclusive + 1),
-            nextOffset max (upToInclusive + 1),
-            lastLocalOffsets,
-            newReferences,
-            newReferencesByOffset,
-            publicationTimeUpperBound,
+            firstOffset = firstOffset.max(upToInclusive + 1),
+            lastOffset = nextOffsetO.map(_.max(upToInclusive + 1)),
+            lastLocalOffsets = lastLocalOffsets,
+            references = newReferences,
+            referencesByOffset = newReferencesByOffset,
+            publicationTimeUpperBound = publicationTimeUpperBound,
           )
       }
       .discard[Entries]
@@ -462,12 +464,22 @@ class InMemoryMultiDomainEventLog(
     }
 
   override def lastGlobalOffset(
-      uptoInclusive: GlobalOffset = Long.MaxValue
-  )(implicit traceContext: TraceContext): OptionT[Future, GlobalOffset] = OptionT.fromOption(
-    entriesRef.get().referencesByOffset.rangeTo(uptoInclusive).lastOption.map { case (offset, _) =>
-      offset
+      upToInclusive: Option[GlobalOffset] = None
+  )(implicit traceContext: TraceContext): OptionT[Future, GlobalOffset] = {
+    upToInclusive match {
+      case Some(upToInclusive) =>
+        OptionT.fromOption(
+          entriesRef
+            .get()
+            .referencesByOffset
+            .rangeTo(upToInclusive)
+            .lastOption
+            .map { case (offset, _) => offset }
+        )
+
+      case None => OptionT.fromOption(entriesRef.get().lastOffset)
     }
-  )
+  }
 
   override def publicationTimeLowerBound: CantonTimestamp =
     entriesRef.get().referencesByOffset.lastOption.fold(CantonTimestamp.MinValue) {
