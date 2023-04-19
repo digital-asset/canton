@@ -7,6 +7,7 @@ import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   ConsoleEnvironmentTestHelpers,
   LocalParticipantReference,
+  LocalParticipantReferenceX,
   ParticipantReference,
 }
 
@@ -21,6 +22,8 @@ trait CommonTestAliases[CE <: ConsoleEnvironment] {
   lazy val participant2: LocalParticipantReference = lp("participant2")
   lazy val participant3: LocalParticipantReference = lp("participant3")
   lazy val participant4: LocalParticipantReference = lp("participant4")
+  lazy val participant1x: LocalParticipantReferenceX = px("participant1")
+  lazy val participant2x: LocalParticipantReferenceX = px("participant2")
   lazy val da: CE#DomainLocalRef = d("da")
   lazy val acme: CE#DomainLocalRef = d("acme")
   lazy val repairDomain: CE#DomainLocalRef = d("repair")

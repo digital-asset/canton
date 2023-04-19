@@ -32,7 +32,12 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       (offset, tx) <- store(singleCreate)
       to <- ledgerDao.lookupLedgerEnd()
       (_, response) <- ledgerDao.completions
-        .getCommandCompletions(from.lastOffset, to.lastOffset, tx.applicationId.get, tx.actAs.toSet)
+        .getCommandCompletions(
+          from.lastOffset,
+          to.lastOffset,
+          tx.applicationId.value,
+          tx.actAs.toSet,
+        )
         .runWith(Sink.head)
     } yield {
       offsetOf(response) shouldBe offset
@@ -40,7 +45,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       val completion = response.completions.loneElement
 
       completion.transactionId shouldBe tx.transactionId
-      completion.commandId shouldBe tx.commandId.get
+      completion.commandId shouldBe tx.commandId.value
       completion.status.value.code shouldBe io.grpc.Status.Code.OK.value()
     }
   }
@@ -52,14 +57,19 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       // Response 1: querying as all submitters
       (_, response1) <- ledgerDao.completions
-        .getCommandCompletions(from.lastOffset, to.lastOffset, tx.applicationId.get, tx.actAs.toSet)
+        .getCommandCompletions(
+          from.lastOffset,
+          to.lastOffset,
+          tx.applicationId.value,
+          tx.actAs.toSet,
+        )
         .runWith(Sink.head)
       // Response 2: querying as a proper subset of all submitters
       (_, response2) <- ledgerDao.completions
         .getCommandCompletions(
           from.lastOffset,
           to.lastOffset,
-          tx.applicationId.get,
+          tx.applicationId.value,
           Set(tx.actAs.head),
         )
         .runWith(Sink.head)
@@ -68,14 +78,14 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.lastOffset,
           to.lastOffset,
-          tx.applicationId.get,
+          tx.applicationId.value,
           tx.actAs.toSet + "UNRELATED",
         )
         .runWith(Sink.head)
     } yield {
-      response1.completions.loneElement.commandId shouldBe tx.commandId.get
-      response2.completions.loneElement.commandId shouldBe tx.commandId.get
-      response3.completions.loneElement.commandId shouldBe tx.commandId.get
+      response1.completions.loneElement.commandId shouldBe tx.commandId.value
+      response2.completions.loneElement.commandId shouldBe tx.commandId.value
+      response3.completions.loneElement.commandId shouldBe tx.commandId.value
     }
   }
 
@@ -277,6 +287,7 @@ private[dao] object JdbcLedgerDaoCompletionsSpec {
   private val parties = Set(party1, party2, party3)
   private val statistics = TransactionNodeStatistics.Empty
 
+  @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   private def offsetOf(response: CompletionStreamResponse): Offset =
     ApiOffset.assertFromString(response.checkpoint.get.offset.get.value.absolute.get)
 

@@ -4,7 +4,11 @@
 package com.digitalasset.canton.console.commands
 
 import better.files.File
-import com.digitalasset.canton.admin.api.client.commands.StatusAdminCommands
+import com.digitalasset.canton.admin.api.client.commands.{
+  StatusAdminCommands,
+  TopologyAdminCommands,
+  TopologyAdminCommandsX,
+}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
 import com.digitalasset.canton.console.ConsoleMacros.utils
@@ -28,13 +32,11 @@ import io.grpc.StatusRuntimeException
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Await, Promise, TimeoutException}
-import scala.util.Try
 
-class HealthAdministration[S <: data.NodeStatus.Status](
+abstract class HealthAdministrationCommon[S <: data.NodeStatus.Status](
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     deserialize: v0.NodeStatus.Status => ParsingResult[S],
-    topology: TopologyAdministrationGroupCommon,
 ) extends Helpful {
   private val initializedCache = new AtomicReference[Boolean](false)
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
@@ -50,7 +52,7 @@ class HealthAdministration[S <: data.NodeStatus.Status](
   }
 
   @Help.Summary("Returns true if the node has an identity")
-  def has_identity(): Boolean = Try(topology.fetchId().isDefined).toOption.contains(true)
+  def has_identity(): Boolean
 
   @Help.Summary("Wait for the node to have an identity")
   @Help.Description(
@@ -145,4 +147,34 @@ class HealthAdministration[S <: data.NodeStatus.Status](
     // timeout
     utils.retry_until_true(timeout = consoleEnvironment.commandTimeouts.unbounded)(condition)
   }
+}
+
+class HealthAdministration[S <: data.NodeStatus.Status](
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+    deserialize: v0.NodeStatus.Status => ParsingResult[S],
+) extends HealthAdministrationCommon[S](runner, consoleEnvironment, deserialize) {
+
+  override def has_identity(): Boolean = runner
+    .adminCommand(
+      TopologyAdminCommands.Init.GetId()
+    )
+    .toEither
+    .isRight
+
+}
+
+class HealthAdministrationX[S <: data.NodeStatus.Status](
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+    deserialize: v0.NodeStatus.Status => ParsingResult[S],
+) extends HealthAdministrationCommon[S](runner, consoleEnvironment, deserialize) {
+
+  override def has_identity(): Boolean = runner
+    .adminCommand(
+      TopologyAdminCommandsX.Init.GetId()
+    )
+    .toEither
+    .isRight
+
 }

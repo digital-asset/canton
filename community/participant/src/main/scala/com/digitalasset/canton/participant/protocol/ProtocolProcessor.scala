@@ -27,6 +27,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.event.AcsChange
+import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
   WrapsProcessorError,
@@ -99,6 +100,7 @@ abstract class ProtocolProcessor[
     sequencerClient: SequencerClient,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
+    skipRecipientsCheck: Boolean,
 )(implicit
     ec: ExecutionContext,
     resultCast: SignedMessageContentCast[Result],
@@ -626,8 +628,11 @@ abstract class ProtocolProcessor[
           logger.warn(s"Request $rc: Found malformed payload: $mp")
         }
 
+        // TODO(i12643): Remove this flag when no longer needed
         _ <- EitherT.right(
-          checkRecipients(requestId, viewsWithCorrectRootHash, snapshot.ipsSnapshot)
+          if (skipRecipientsCheck) Future.unit
+          else
+            checkRecipients(requestId, viewsWithCorrectRootHash, snapshot.ipsSnapshot)
         )
 
         _ <- NonEmpty.from(viewsWithCorrectRootHash) match {
@@ -975,7 +980,10 @@ abstract class ProtocolProcessor[
           )
         }
 
-        val recipientPathViewToRoot = allRecipientPathsViewToRoot.head1
+        // TODO(#12382): support group addressing for informees
+        val recipientPathViewToRoot = allRecipientPathsViewToRoot.head1.map(_.collect {
+          case RecipientsTree.MemberRecipient(member) => member
+        })
 
         /* Checks the recipients of the view at position `viewPosition`.
          * @param recipientGroups the recipient groups of the view. The order is view, parent view, grand parent view, and so on.
@@ -1328,10 +1336,16 @@ abstract class ProtocolProcessor[
       EitherT(
         ephemeral.phase37Synchronizer
           .awaitConfirmed(steps.requestType)(requestId, combinedFilter)
-          .map(_.toRight {
-            ephemeral.requestTracker.tick(sc, resultTs)
-            steps.embedResultError(UnknownPendingRequest(requestId))
-          })
+          .map {
+            case RequestOutcome.Success(pendingRequestData) =>
+              Right(pendingRequestData)
+            case RequestOutcome.AlreadyServedOrTimeout =>
+              ephemeral.requestTracker.tick(sc, resultTs)
+              Left(steps.embedResultError(UnknownPendingRequest(requestId)))
+            case RequestOutcome.Invalid =>
+              ephemeral.requestTracker.tick(sc, resultTs)
+              Left(steps.embedResultError(InvalidPendingRequest(requestId)))
+          }
       ).flatMap { pendingRequestDataOrReplayData =>
         performResultProcessing3(
           signedResultBatchE,
@@ -1509,6 +1523,11 @@ abstract class ProtocolProcessor[
               show"${steps.requestKind.unquoted} request at $requestId: Received event at $resultTimestamp for request that is not pending"
             )
             Right(default)
+          case Some(InvalidPendingRequest(requestId)) =>
+            logger.info(
+              show"${steps.requestKind.unquoted} request at $requestId: Received event at $resultTimestamp for request that is invalid"
+            )
+            Right(default)
           case err => Left(processorError)
         }
       }
@@ -1637,9 +1656,11 @@ abstract class ProtocolProcessor[
           ephemeral.phase37Synchronizer
             .awaitConfirmed(steps.requestType)(requestId)
             .map {
-              _.getOrElse(
+              case RequestOutcome.Success(pendingRequestData) => pendingRequestData
+              case RequestOutcome.AlreadyServedOrTimeout =>
                 throw new IllegalStateException(s"Unknown pending request $requestId at timeout.")
-              )
+              case RequestOutcome.Invalid =>
+                throw new IllegalStateException(s"Invalid pending request $requestId.")
             }
         )
 
@@ -1780,6 +1801,10 @@ object ProtocolProcessor {
 
   final case class UnknownPendingRequest(requestId: RequestId) extends ResultProcessingError {
     override def pretty: Pretty[UnknownPendingRequest] = prettyOfClass(unnamedParam(_.requestId))
+  }
+
+  final case class InvalidPendingRequest(requestId: RequestId) extends ResultProcessingError {
+    override def pretty: Pretty[InvalidPendingRequest] = prettyOfClass(unnamedParam(_.requestId))
   }
 
   final case class TimeoutResultTooEarly(requestId: RequestId) extends ResultProcessingError {

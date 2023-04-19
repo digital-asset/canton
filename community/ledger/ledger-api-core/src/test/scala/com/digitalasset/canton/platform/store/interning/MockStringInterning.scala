@@ -6,9 +6,12 @@ package com.digitalasset.canton.platform.store.interning
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
 
+import scala.concurrent.blocking
+
 /** This StringInterning implementation is interning in a transparent way everything it sees.
   * This is only for test purposes.
   */
+@SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
 class MockStringInterning extends StringInterning {
   private var idToString: Map[Int, String] = Map.empty
   private var stringToId: Map[String, Int] = Map.empty
@@ -18,7 +21,7 @@ class MockStringInterning extends StringInterning {
     new StringInterningAccessor[String] {
       override def internalize(t: String): Int = tryInternalize(t).get
 
-      override def tryInternalize(t: String): Option[Int] = synchronized {
+      override def tryInternalize(t: String): Option[Int] = blocking(synchronized {
         stringToId.get(t) match {
           case Some(id) => Some(id)
           case None =>
@@ -27,7 +30,7 @@ class MockStringInterning extends StringInterning {
             stringToId = stringToId + (t -> lastId)
             Some(lastId)
         }
-      }
+      })
 
       override def externalize(id: Int): String = tryExternalize(id).get
 
@@ -65,9 +68,9 @@ class MockStringInterning extends StringInterning {
         rawStringInterning.tryExternalize(id).map(Party.assertFromString)
     }
 
-  private[store] def reset(): Unit = synchronized {
+  private[store] def reset(): Unit = blocking(synchronized {
     idToString = Map.empty
     stringToId = Map.empty
     lastId = 0
-  }
+  })
 }

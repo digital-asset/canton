@@ -80,7 +80,7 @@ class DomainTopologyManagerEventHandler(
           logger.debug(
             s"New register topology transaction request from participant ${request.participant} with requestId = ${request.requestId}, size=${request.transactions.size}"
           )
-          AsyncResult.async(handleTopologyRequest(request))
+          AsyncResult(handleTopologyRequest(request))
         // if the response has been recorded before, it means we're now replaying events
         case Some(Response(response, isCompleted)) =>
           logger.debug(
@@ -96,7 +96,7 @@ class DomainTopologyManagerEventHandler(
 
   private def handleTopologyRequest(
       request: RegisterTopologyTransactionRequest
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     for {
       // TODO(i4933) we need to add a signature to the request
       //   - signature must match participant
@@ -115,12 +115,12 @@ class DomainTopologyManagerEventHandler(
       )
       pendingResponse <- pendingResponseE.fold(
         { case e @ RegisterTopologyTransactionResponse.ResultVersionsMixture =>
-          Future.failed(new IllegalStateException(e.message))
+          FutureUnlessShutdown.failed(new IllegalStateException(e.message))
         },
-        Future.successful,
+        FutureUnlessShutdown.pure,
       )
-      _ <- store.savePendingResponse(pendingResponse)
-      result <- sendResponse(pendingResponse)
+      _ <- FutureUnlessShutdown.outcomeF(store.savePendingResponse(pendingResponse))
+      result <- FutureUnlessShutdown.outcomeF(sendResponse(pendingResponse))
     } yield result
   }
 

@@ -5,17 +5,20 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend.{Lock, LockId, LockMode}
-import org.scalatest.Assertion
 import org.scalatest.concurrent.Eventually
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Seconds, Span}
+import org.scalatest.{Assertion, OptionValues}
 
 import java.sql.Connection
 import scala.util.Try
 
-private[platform] trait StorageBackendTestsDBLock extends Matchers with Eventually {
+private[platform] trait StorageBackendTestsDBLock
+    extends Matchers
+    with Eventually
+    with OptionValues {
   this: AnyFlatSpec =>
 
   protected def dbLock: DBLockStorageBackend
@@ -67,14 +70,14 @@ private[platform] trait StorageBackendTestsDBLock extends Matchers with Eventual
   }
 
   it should "unlock successfully a shared lock" in dbLockTestCase(2) { c =>
-    val lock = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).get
+    val lock = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).value
     dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(2)) shouldBe empty
     dbLock.release(lock)(c(1)) shouldBe true
     dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(2)) should not be empty
   }
 
   it should "release successfully a shared lock if connection closed" in dbLockTestCase(2) { c =>
-    dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).get
+    dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).value
     dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(2)) shouldBe empty
     c(1).close()
     eventually(timeout)(
@@ -83,7 +86,7 @@ private[platform] trait StorageBackendTestsDBLock extends Matchers with Eventual
   }
 
   it should "unlock successfully an exclusive lock" in dbLockTestCase(2) { c =>
-    val lock = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(1)).get
+    val lock = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(1)).value
     dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(2)) shouldBe empty
     dbLock.release(lock)(c(1)) shouldBe true
     dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(2)) should not be empty
@@ -91,7 +94,7 @@ private[platform] trait StorageBackendTestsDBLock extends Matchers with Eventual
 
   it should "release successfully an exclusive lock if connection closed" in dbLockTestCase(2) {
     c =>
-      dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(1)).get
+      dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(1)).value
       dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(2)) shouldBe empty
       c(1).close()
       eventually(timeout)(
@@ -101,9 +104,9 @@ private[platform] trait StorageBackendTestsDBLock extends Matchers with Eventual
 
   it should "be able to lock exclusive, if all shared locks are released" in dbLockTestCase(4) {
     c =>
-      val shared1 = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).get
-      val shared2 = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(2)).get
-      val shared3 = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(3)).get
+      val shared1 = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).value
+      val shared2 = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(2)).value
+      val shared3 = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(3)).value
       dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Exclusive)(c(4)) shouldBe empty
 
       dbLock.release(shared1)(c(1))
@@ -122,7 +125,7 @@ private[platform] trait StorageBackendTestsDBLock extends Matchers with Eventual
   }
 
   it should "fail to unlock lock held by others" in dbLockTestCase(2) { c =>
-    val lock = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).get
+    val lock = dbLock.tryAcquire(dbLock.lock(lockIdSeed), LockMode.Shared)(c(1)).value
     dbLock.release(lock)(c(2)) shouldBe false
   }
 

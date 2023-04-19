@@ -39,6 +39,7 @@ trait DbAcsCommitmentStoreTest extends AcsCommitmentStoreTest { this: DbTest =>
         testedProtocolVersion,
         cryptoApi,
         timeouts,
+        futureSupervisor,
         loggerFactory,
       )(ec)
     )

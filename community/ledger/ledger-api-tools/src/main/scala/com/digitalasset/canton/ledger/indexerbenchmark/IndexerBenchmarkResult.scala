@@ -178,7 +178,7 @@ class IndexerBenchmarkResult(
   }
 
   private def recordedHistogramValuesToString(data: Seq[Long]) = {
-    s"[min: ${data.min}, median: ${median(data)}, max: ${data.max}"
+    s"[min: ${data.foldLeft(0L)(_.min(_))}, median: ${median(data)}, max: ${data.foldLeft(0L)(_.max(_))}"
   }
 
   private def median(data: Seq[Long]) = {

@@ -16,15 +16,15 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.FutureInstances.*
-import io.circe.{Encoder, KeyEncoder}
-import io.prometheus.client.Collector.MetricFamilySamples
-import io.prometheus.client.exporter.common.TextFormat
+import io.circe.{Encoder, Json, KeyEncoder, jawn}
+import io.opentelemetry.exporter.internal.otlp.metrics.ResourceMetricsMarshaler
+import io.opentelemetry.sdk.metrics.data.MetricData
 
-import java.io.StringWriter
+import java.io.ByteArrayOutputStream
 import java.time.Instant
 import scala.concurrent.duration.TimeUnit
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
-import scala.jdk.CollectionConverters.IteratorHasAsJava
+import scala.jdk.CollectionConverters.SeqHasAsJava
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -61,11 +61,25 @@ object CantonHealthAdministrationEncoders {
       (timer.getCount, timer.getFiveMinuteRate, timer.getOneMinuteRate, timer.getSnapshot)
     }
 
-  implicit val prometheusMetricDataEncoder: Encoder[Seq[MetricFamilySamples]] =
-    Encoder.encodeString.contramap[Seq[MetricFamilySamples]] { metrics =>
-      val writer = new StringWriter()
-      TextFormat.write004(writer, metrics.iterator.asJavaEnumeration)
-      writer.toString
+  /** Wraps the standardized log writer from OpenTelemetry, that outputs the metrics as JSON
+    * Source: https://github.com/open-telemetry/opentelemetry-java/blob/main/exporters/logging-otlp/src/main/java/io/opentelemetry/exporter/logging/otlp/OtlpJsonLoggingMetricExporter.java
+    * The encoder is not the most efficient as we first use the OpenTelemetry JSON serializer to write as a String,
+    * and then use the Circe Jawn decoder to transform the string into a circe.Json object.
+    * This is fine as the encoder is used only for on demand health dumps.
+    */
+  implicit val openTelemetryMetricDataEncoder: Encoder[Seq[MetricData]] =
+    Encoder.encodeSeq[Json].contramap[Seq[MetricData]] { metrics =>
+      val resourceMetrics = ResourceMetricsMarshaler.create(metrics.asJava)
+      resourceMetrics.toSeq.map { resource =>
+        val byteArrayOutputStream = new ByteArrayOutputStream()
+        resource.writeJsonTo(byteArrayOutputStream)
+        jawn
+          .decode[Json](byteArrayOutputStream.toString)
+          .fold(
+            error => Json.fromString(s"Failed to decode metrics: $error"),
+            identity,
+          )
+      }
     }
 
   implicit val traceElemEncoder: Encoder[StackTraceElement] =

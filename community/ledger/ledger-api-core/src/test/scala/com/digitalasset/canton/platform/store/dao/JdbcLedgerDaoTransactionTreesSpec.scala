@@ -57,7 +57,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
         inside(tx.transaction.nodes.headOption) { case Some((nodeId, createNode: Node.Create)) =>
-          transaction.commandId shouldBe tx.commandId.get
+          transaction.commandId shouldBe tx.commandId.value
           transaction.offset shouldBe ApiOffset.toApiString(offset)
           TimestampConversion.toLf(
             transaction.effectiveAt.value,
@@ -92,7 +92,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
       inside(result.value.transaction) { case Some(transaction) =>
         inside(exercise.transaction.nodes.headOption) {
           case Some((nodeId, exerciseNode: Node.Exercise)) =>
-            transaction.commandId shouldBe exercise.commandId.get
+            transaction.commandId shouldBe exercise.commandId.value
             transaction.offset shouldBe ApiOffset.toApiString(offset)
             TimestampConversion.toLf(
               transaction.effectiveAt.value,
@@ -127,13 +127,13 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
         val (createNodeId, createNode) =
           tx.transaction.nodes.collectFirst { case (nodeId, node: Node.Create) =>
             nodeId -> node
-          }.get
+          }.value
         val (exerciseNodeId, exerciseNode) =
           tx.transaction.nodes.collectFirst { case (nodeId, node: Node.Exercise) =>
             nodeId -> node
-          }.get
+          }.value
 
-        transaction.commandId shouldBe tx.commandId.get
+        transaction.commandId shouldBe tx.commandId.value
         transaction.offset shouldBe ApiOffset.toApiString(offset)
         transaction.transactionId shouldBe tx.transactionId
         transaction.workflowId shouldBe tx.workflowId.getOrElse("")

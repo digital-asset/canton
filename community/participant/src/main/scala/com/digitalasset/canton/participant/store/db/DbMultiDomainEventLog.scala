@@ -65,6 +65,7 @@ import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.chaining.*
 import scala.util.control.NonFatal
 
 /** Must be created by factory methods on DbSingleDimensionEventLog for optionality on how to perform the required
@@ -111,6 +112,13 @@ class DbMultiDomainEventLog private[db] (
   import TimestampedEvent.getResultTimestampedEvent
   import storage.api.*
   import storage.converters.*
+
+  /*
+    This caches the ledger end, which is queried with `lastGlobalOffset(None)`
+    Cache is invalidated on write and prune and populated on read.
+   */
+  private val lastGlobalOffsetCache: AtomicReference[Option[GlobalOffset]] =
+    new AtomicReference[Option[GlobalOffset]](None)
 
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("multi-domain-event-log")
@@ -354,7 +362,10 @@ class DbMultiDomainEventLog private[db] (
         pp >> publicationTime
       }
       val query = storage.withSyncCommitOnPostgres(bulkInsert)
-      storage.queryAndUpdate(query, functionFullName)
+
+      storage.queryAndUpdate(query, functionFullName).map { _ =>
+        lastGlobalOffsetCache.set(None) // Cache invalidation
+      }
     }
 
   override def fetchUnpublished(id: EventLogId, upToInclusiveO: Option[LocalOffset])(implicit
@@ -406,13 +417,18 @@ class DbMultiDomainEventLog private[db] (
 
   override def prune(
       upToInclusive: GlobalOffset
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = {
     processingTime.event {
-      storage.update_(
-        sqlu"delete from linearized_event_log where global_offset <= $upToInclusive",
-        functionFullName,
-      )
+      storage
+        .update_(
+          sqlu"delete from linearized_event_log where global_offset <= $upToInclusive",
+          functionFullName,
+        )
+        .map { _ =>
+          lastGlobalOffsetCache.set(None) // Cache invalidation
+        }
     }
+  }
 
   override def subscribe(beginWith: Option[GlobalOffset])(implicit
       traceContext: TraceContext
@@ -722,10 +738,29 @@ class DbMultiDomainEventLog private[db] (
         )
     }
 
-  override def lastGlobalOffset(upToInclusive: GlobalOffset = Long.MaxValue)(implicit
+  override def lastGlobalOffset(upToInclusive: Option[GlobalOffset] = None)(implicit
       traceContext: TraceContext
-  ): OptionT[Future, GlobalOffset] =
-    OptionT(lastOffsetAndPublicationTime(storage, upToInclusive)).map(_._1)
+  ): OptionT[Future, GlobalOffset] = {
+
+    def query(upToInclusive: GlobalOffset): Future[Option[GlobalOffset]] =
+      lastOffsetAndPublicationTime(storage, upToInclusive).map(_.map(_._1))
+    def updateCache(newValueO: Option[GlobalOffset]): Unit = lastGlobalOffsetCache.getAndUpdate {
+      currentCacheValueO =>
+        newValueO.map { newValue =>
+          currentCacheValueO.fold(newValue)(_.max(newValue))
+        }
+    }.discard
+
+    upToInclusive match {
+      case Some(upToInclusive) => OptionT(query(upToInclusive))
+
+      case None =>
+        lastGlobalOffsetCache.get() match {
+          case Some(cachedValue) => OptionT.pure[Future](cachedValue)
+          case None => OptionT(query(Long.MaxValue).map(_.tap(updateCache)))
+        }
+    }
+  }
 
   /** Returns the `count` many last events in descending global offset order. */
   private def lastEvents(count: Int)(implicit

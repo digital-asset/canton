@@ -13,12 +13,17 @@ import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import org.mockito.MockitoSugar
+import org.scalatest.OptionValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicInteger
 
-class ContractStateCachesSpec extends AnyFlatSpec with Matchers with MockitoSugar {
+class ContractStateCachesSpec
+    extends AnyFlatSpec
+    with Matchers
+    with MockitoSugar
+    with OptionValues {
   private val loggingContext = LoggingContext.ForTesting
   behavior of classOf[ContractStateCaches].getSimpleName
 
@@ -51,8 +56,8 @@ class ContractStateCachesSpec extends AnyFlatSpec with Matchers with MockitoSuga
       previousCreate.contractId -> contractArchived(previousCreate),
     )
     val expectedKeyStateUpdates = Map(
-      create2.globalKey.get -> keyAssigned(create2),
-      previousCreate.globalKey.get -> ContractKeyStateValue.Unassigned,
+      create2.globalKey.value -> keyAssigned(create2),
+      previousCreate.globalKey.value -> ContractKeyStateValue.Unassigned,
     )
 
     contractStateCaches.push(batch)

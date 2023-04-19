@@ -620,7 +620,7 @@ object TopologyAdminCommandsX {
     }
 
     final case class GetId()
-        extends BaseInitializationService[Empty, v1.GetIdResponse, Option[UniqueIdentifier]] {
+        extends BaseInitializationService[Empty, v1.GetIdResponse, UniqueIdentifier] {
       override def createRequest(): Either[String, Empty] =
         Right(Empty())
 
@@ -632,9 +632,9 @@ object TopologyAdminCommandsX {
 
       override def handleResponse(
           response: v1.GetIdResponse
-      ): Either[String, Option[UniqueIdentifier]] = {
+      ): Either[String, UniqueIdentifier] = {
         if (response.uniqueIdentifier.nonEmpty)
-          UniqueIdentifier.fromProtoPrimitive_(response.uniqueIdentifier).map(Some(_))
+          UniqueIdentifier.fromProtoPrimitive_(response.uniqueIdentifier)
         else
           Left(
             s"Node is not initialized and therefore does not have an Id assigned yet."

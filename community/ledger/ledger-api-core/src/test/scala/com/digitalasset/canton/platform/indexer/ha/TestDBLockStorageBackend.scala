@@ -22,6 +22,7 @@ import java.sql.{
 import java.util.Properties
 import java.util.concurrent.Executor
 import java.{sql, util}
+import scala.concurrent.blocking
 
 class TestDBLockStorageBackend extends DBLockStorageBackend {
 
@@ -30,7 +31,7 @@ class TestDBLockStorageBackend extends DBLockStorageBackend {
   override def tryAcquire(
       lockId: DBLockStorageBackend.LockId,
       lockMode: DBLockStorageBackend.LockMode,
-  )(connection: Connection): Option[DBLockStorageBackend.Lock] = synchronized {
+  )(connection: Connection): Option[DBLockStorageBackend.Lock] = blocking(synchronized {
     if (connection.isClosed) throw new Exception("trying to acquire on a closed connection")
     if (!lockId.isInstanceOf[TestLockId]) throw new Exception("foreign lockId")
     removeClosedConnectionRelatedLocks()
@@ -58,10 +59,10 @@ class TestDBLockStorageBackend extends DBLockStorageBackend {
           case _ => None // if any exclusive lock held, we cannot lock shared
         }
     }
-  }
+  })
 
   override def release(lock: DBLockStorageBackend.Lock)(connection: Connection): Boolean =
-    synchronized {
+    blocking(synchronized {
       if (connection.isClosed) throw new Exception("trying to release on a closed connection")
       if (!lock.lockId.isInstanceOf[TestLockId]) throw new Exception("foreign lockId")
       removeClosedConnectionRelatedLocks()
@@ -73,7 +74,7 @@ class TestDBLockStorageBackend extends DBLockStorageBackend {
           true
         case _ => false
       }
-    }
+    })
 
   private def removeClosedConnectionRelatedLocks(): Unit =
     locks = locks.collect {
@@ -83,14 +84,14 @@ class TestDBLockStorageBackend extends DBLockStorageBackend {
   override def lock(id: Int): DBLockStorageBackend.LockId =
     TestLockId(id)
 
-  def cutExclusiveLockHoldingConnection(lockId: Int): Unit = synchronized {
+  def cutExclusiveLockHoldingConnection(lockId: Int): Unit = blocking(synchronized {
     val mainExclusiveIndexerLock =
       DBLockStorageBackend.Lock(TestLockId(lockId), DBLockStorageBackend.LockMode.Exclusive)
     locks
       .getOrElse(mainExclusiveIndexerLock, Set.empty)
       .foreach(_.close())
     locks = locks - mainExclusiveIndexerLock
-  }
+  })
 
   override def dbLockSupported: Boolean = true
 }
@@ -117,11 +118,11 @@ class TestConnection extends Connection {
 
   private var _closed: Boolean = false
 
-  override def close(): Unit = synchronized {
+  override def close(): Unit = blocking(synchronized {
     _closed = true
-  }
+  })
 
-  override def isClosed: Boolean = synchronized(_closed)
+  override def isClosed: Boolean = blocking(synchronized(_closed))
 
   override def getMetaData: DatabaseMetaData = throw new UnsupportedOperationException
 

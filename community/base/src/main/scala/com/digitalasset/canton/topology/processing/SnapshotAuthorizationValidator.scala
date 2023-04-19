@@ -3,7 +3,10 @@
 
 package com.digitalasset.canton.topology.processing
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
 import com.digitalasset.canton.topology.store.{
@@ -11,16 +14,10 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction.{
-  IdentifierDelegation,
-  NamespaceDelegation,
-  RequiredAuth,
-  SignedTopologyTransaction,
-  TopologyChangeOp,
-}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SimpleExecutionQueue
+import com.digitalasset.canton.util.SimpleExecutionQueueWithShutdown
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -29,18 +26,26 @@ import scala.concurrent.{ExecutionContext, Future}
 class SnapshotAuthorizationValidator(
     asOf: CantonTimestamp,
     val store: TopologyStore[TopologyStoreId],
+    override val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext)
     extends TransactionAuthorizationValidator
-    with NamedLogging {
+    with NamedLogging
+    with FlagCloseable {
 
-  private val sequential = new SimpleExecutionQueue()
+  private val sequential = new SimpleExecutionQueueWithShutdown(
+    "snapshot-authorization-validator-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   def authorizedBy(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit
       traceContext: TraceContext
-  ): Future[Option[AuthorizationChain]] = {
+  ): FutureUnlessShutdown[Option[AuthorizationChain]] = {
     // preload our cache. note, we don't want to load stuff into our cache concurrently, so we
     // squeeze this through a sequential execution queue
     val preloadF = transaction.transaction.element.mapping.requiredAuth match {
@@ -73,7 +78,7 @@ class SnapshotAuthorizationValidator(
       nsd: StoredTopologyTransactions[TopologyChangeOp],
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
+  ): FutureUnlessShutdown[Unit] =
     sequential.execute(
       Future {
         namespaceCache
@@ -92,7 +97,7 @@ class SnapshotAuthorizationValidator(
       nsd: StoredTopologyTransactions[TopologyChangeOp],
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
+  ): FutureUnlessShutdown[Unit] =
     sequential.execute(
       Future {
         val authorizedNsd = nsd.toAuthorizedTopologyTransactions { case x: IdentifierDelegation =>
@@ -105,7 +110,7 @@ class SnapshotAuthorizationValidator(
 
   def reset()(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
+  ): FutureUnlessShutdown[Unit] =
     sequential.execute(
       Future {
         identifierDelegationCache.clear()
@@ -113,5 +118,9 @@ class SnapshotAuthorizationValidator(
       },
       functionFullName,
     )
+
+  override protected def onClosed(): Unit = Lifecycle.close {
+    sequential
+  }(logger)
 
 }

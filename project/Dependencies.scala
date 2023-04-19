@@ -206,7 +206,7 @@ object Dependencies {
   lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.13"
   lazy val snakeyaml = "org.yaml" % "snakeyaml" % "2.0"
 
-  lazy val web3j = "org.web3j" % "core" % "4.9.6"
+  lazy val web3j = "org.web3j" % "core" % "4.9.7"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

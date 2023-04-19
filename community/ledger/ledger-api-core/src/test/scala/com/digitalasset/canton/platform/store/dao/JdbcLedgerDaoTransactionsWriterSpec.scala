@@ -5,11 +5,11 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.lf.data.Ref
 import com.daml.lf.transaction.{BlindingInfo, NodeId}
-import org.scalatest.LoneElement
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.{LoneElement, OptionValues}
 
-private[dao] trait JdbcLedgerDaoTransactionsWriterSpec extends LoneElement {
+private[dao] trait JdbcLedgerDaoTransactionsWriterSpec extends LoneElement with OptionValues {
   this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
 
   private val ok = io.grpc.Status.Code.OK.value()
@@ -28,8 +28,8 @@ private[dao] trait JdbcLedgerDaoTransactionsWriterSpec extends LoneElement {
       completions <- getCompletions(from.lastOffset, to.lastOffset, defaultAppId, Set(alice))
     } yield {
       completions should contain.allOf(
-        create.commandId.get -> ok,
-        lookup.commandId.get -> ok,
+        create.commandId.value -> ok,
+        lookup.commandId.value -> ok,
       )
     }
   }
@@ -46,8 +46,8 @@ private[dao] trait JdbcLedgerDaoTransactionsWriterSpec extends LoneElement {
       completions <- getCompletions(from.lastOffset, to.lastOffset, defaultAppId, Set(alice))
     } yield {
       completions should contain.allOf(
-        create.commandId.get -> ok,
-        fetch.commandId.get -> ok,
+        create.commandId.value -> ok,
+        fetch.commandId.value -> ok,
       )
     }
   }

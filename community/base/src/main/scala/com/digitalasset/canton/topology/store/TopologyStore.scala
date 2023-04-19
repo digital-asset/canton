@@ -6,6 +6,7 @@ package com.digitalasset.canton.topology.store
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedString,
@@ -84,6 +85,18 @@ trait PartyMetadataStore extends AutoCloseable {
   def metadataForParty(partyId: PartyId)(implicit
       traceContext: TraceContext
   ): Future[Option[PartyMetadata]]
+
+  final def insertOrUpdatePartyMetadata(metadata: PartyMetadata)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
+    insertOrUpdatePartyMetadata(
+      partyId = metadata.partyId,
+      participantId = metadata.participantId,
+      displayName = metadata.displayName,
+      effectiveTimestamp = metadata.effectiveTimestamp,
+      submissionId = metadata.submissionId,
+    )
+  }
 
   def insertOrUpdatePartyMetadata(
       partyId: PartyId,
@@ -310,7 +323,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   /** returns initial set of onboarding transactions that should be dispatched to the domain */
   def findParticipantOnboardingTransactions(participantId: ParticipantId, domainId: DomainId)(
       implicit traceContext: TraceContext
-  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]]
+  ): FutureUnlessShutdown[Seq[SignedTopologyTransaction[TopologyChangeOp]]]
 
   /** returns an descending ordered list of timestamps of when participant state changes occurred before a certain point in time */
   def findTsOfParticipantStateChangesBefore(
@@ -492,14 +505,16 @@ object TopologyStore {
       storage: Storage,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      futureSupervisor: FutureSupervisor,
   )(implicit
       ec: ExecutionContext
   ): TopologyStore[StoreID] =
     storage match {
       case _: MemoryStorage =>
-        (new InMemoryTopologyStore(storeId, loggerFactory)).asInstanceOf[TopologyStore[StoreID]]
+        (new InMemoryTopologyStore(storeId, loggerFactory, timeouts, futureSupervisor))
+          .asInstanceOf[TopologyStore[StoreID]]
       case jdbc: DbStorage =>
-        new DbTopologyStore(jdbc, storeId, timeouts, loggerFactory)
+        new DbTopologyStore(jdbc, storeId, timeouts, loggerFactory, futureSupervisor)
           .asInstanceOf[TopologyStore[StoreID]]
     }
 
@@ -704,10 +719,12 @@ object TopologyStore {
       store: TopologyStore[TopologyStoreId],
       loggerFactory: NamedLoggerFactory,
       transactions: StoredTopologyTransactions[TopologyChangeOp],
+      timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
+  ): FutureUnlessShutdown[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
     val logger = loggerFactory.getLogger(getClass)
     def includeState(mapping: TopologyStateUpdateMapping): Boolean = mapping match {
       case NamespaceDelegation(_, _, _) | IdentifierDelegation(_, _) =>
@@ -729,7 +746,13 @@ object TopologyStore {
       case _ => false
     }
     val validator =
-      new SnapshotAuthorizationValidator(CantonTimestamp.MaxValue, store, loggerFactory)
+      new SnapshotAuthorizationValidator(
+        CantonTimestamp.MaxValue,
+        store,
+        timeouts,
+        loggerFactory,
+        futureSupervisor,
+      )
     val filtered = transactions.result.filter(tx =>
       tx.transaction.transaction.element.mapping.restrictedToDomain
         .forall(_ == domainId) && include(tx.transaction.transaction.element.mapping)

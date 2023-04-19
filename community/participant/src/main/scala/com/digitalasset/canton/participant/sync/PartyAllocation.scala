@@ -123,6 +123,7 @@ private[sync] class PartyAllocation(
             case IdentityManagerParentError(e) => reject(e.cause, SubmissionResult.Acknowledged)
             case e => reject(e.toString, TransactionError.internalError(e.toString))
           }
+          .onShutdown(Left(TransactionError.shutdownError))
 
         // Notify upstream of display name using the participant party notifier (as display name is a participant setting)
         _ <- EitherT(

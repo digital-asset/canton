@@ -14,7 +14,7 @@ import com.digitalasset.canton.platform.localstore.api.{
 }
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.Future
+import scala.concurrent.{Future, blocking}
 
 class InMemoryIdentityProviderConfigStore(maxIdentityProviderConfigs: Int = 10)
     extends IdentityProviderConfigStore {
@@ -120,8 +120,10 @@ class InMemoryIdentityProviderConfigStore(maxIdentityProviderConfigs: Int = 10)
     state.get(id).toRight(IdentityProviderConfigNotFound(id))
 
   private def withState[T](t: => T): Future[T] =
-    state.synchronized(
-      Future.successful(t)
+    blocking(
+      state.synchronized(
+        Future.successful(t)
+      )
     )
 
 }

@@ -7,11 +7,12 @@ import cats.syntax.reducible.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.sequencing.protocol.RecipientsTree.{MemberRecipient, Recipient}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{DomainId, Member}
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 /** A tree representation of the recipients for a batch.
   * Each member receiving the batch should see only subtrees of recipients from a node containing
@@ -19,7 +20,7 @@ import com.digitalasset.canton.topology.Member
   * the top-level subtree A.
   */
 final case class RecipientsTree(
-    recipientGroup: NonEmpty[Set[Member]],
+    recipientGroup: NonEmpty[Set[Recipient]],
     children: Seq[RecipientsTree],
 ) extends PrettyPrinting {
 
@@ -29,12 +30,16 @@ final case class RecipientsTree(
       paramIfNonEmpty("children", _.children),
     )
 
-  lazy val allRecipients: NonEmpty[Set[Member]] = {
+  lazy val allRecipients: Set[Member] = {
     val tail: Set[Member] = children.flatMap(t => t.allRecipients).toSet
-    recipientGroup ++ tail
+    recipientGroup
+      .collect { case MemberRecipient(member) =>
+        member
+      }
+      ++ tail
   }
 
-  def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Member]]]]]] =
+  def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] =
     NonEmpty.from(children) match {
       case Some(childrenNE) =>
         childrenNE.flatMap { child =>
@@ -44,20 +49,31 @@ final case class RecipientsTree(
     }
 
   def forMember(member: Member): Seq[RecipientsTree] = {
-    if (recipientGroup.contains(member)) {
+    // TODO(#12360): The projection for a member should include all the group addresses that include this member,
+    //  using the appropriate topology snapshot for resolving the group addresses to members.
+    if (
+      recipientGroup
+        .collect { case MemberRecipient(member) =>
+          member
+        }
+        .contains(member)
+    ) {
       Seq(this)
     } else {
       children.flatMap(c => c.forMember(member))
     }
   }
 
-  lazy val leafMembers: NonEmpty[Set[Member]] = children match {
-    case NonEmpty(cs) => cs.toNEF.reduceLeftTo(_.leafMembers)(_ ++ _.leafMembers)
-    case _ => recipientGroup
+  lazy val leafRecipients: NonEmpty[Set[Recipient]] = children match {
+    case NonEmpty(cs) => cs.toNEF.reduceLeftTo(_.leafRecipients)(_ ++ _.leafRecipients)
+    case _ => recipientGroup.map(m => m: Recipient)
   }
 
   def toProtoV0: v0.RecipientsTree = {
-    val recipientsP = recipientGroup.toSeq.map(member => member.toProtoPrimitive).sorted
+    val recipientsP =
+      recipientGroup.toSeq.collect { case MemberRecipient(member) =>
+        member.toProtoPrimitive
+      }.sorted
     val childrenP = children.map(_.toProtoV0)
     new v0.RecipientsTree(recipientsP, childrenP)
   }
@@ -65,7 +81,47 @@ final case class RecipientsTree(
 
 object RecipientsTree {
 
-  def leaf(group: NonEmpty[Set[Member]]): RecipientsTree = RecipientsTree(group, Seq.empty)
+  def ofMembers(
+      recipientGroup: NonEmpty[Set[Member]],
+      children: Seq[RecipientsTree],
+  ) = RecipientsTree(recipientGroup.map(MemberRecipient), children)
+
+  sealed trait Recipient extends Product with Serializable with PrettyPrinting
+
+  final case class MemberRecipient(member: Member) extends Recipient {
+    override def pretty: Pretty[MemberRecipient] =
+      prettyOfClass(
+        param("member", _.member)
+      )
+  }
+
+  final case class ParticipantsOfParty(party: LfPartyId) extends Recipient {
+    override def pretty: Pretty[ParticipantsOfParty] =
+      prettyOfClass(
+        param("party", _.party)
+      )
+  }
+
+  final case class SequencersOfDomain(domain: DomainId) extends Recipient {
+    override def pretty: Pretty[SequencersOfDomain] =
+      prettyOfClass(
+        param("domain", _.domain)
+      )
+  }
+
+  final case class MediatorsOfDomain(domain: DomainId, group: Int) extends Recipient {
+    override def pretty: Pretty[MediatorsOfDomain] =
+      prettyOfClass(
+        param("domain", _.domain),
+        param("group", _.group),
+      )
+  }
+
+  def leaf(group: NonEmpty[Set[Member]]): RecipientsTree =
+    RecipientsTree(group.map(MemberRecipient), Seq.empty)
+
+  def recipientsLeaf(group: NonEmpty[Set[Recipient]]): RecipientsTree =
+    RecipientsTree(group, Seq.empty)
 
   def fromProtoV0(
       treeProto: v0.RecipientsTree
@@ -84,7 +140,10 @@ object RecipientsTree {
         )
       children = treeProto.children
       childTrees <- children.toList.traverse(fromProtoV0)
-    } yield RecipientsTree(membersNonEmpty.toSet, childTrees)
+    } yield RecipientsTree(
+      membersNonEmpty.map(m => MemberRecipient(m): Recipient).toSet,
+      childTrees,
+    )
   }
 
 }

@@ -38,7 +38,7 @@ final class UpdatePartyDetailsAuthIT extends AdminOrIDPAdminServiceCallAuthTests
     val partyId = UUID.randomUUID().toString
     for {
       response <- allocateParty(token, partyId, identityProviderId)
-      _ <- updatePartyDetails(token, response.partyDetails.get)
+      _ <- updatePartyDetails(token, response.partyDetails.value)
     } yield ()
   }
 

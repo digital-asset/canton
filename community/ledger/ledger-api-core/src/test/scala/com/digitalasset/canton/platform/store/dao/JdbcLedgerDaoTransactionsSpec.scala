@@ -61,7 +61,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
         .lookupFlatTransactionById(tx.transactionId, tx.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
-        transaction.commandId shouldBe tx.commandId.get
+        transaction.commandId shouldBe tx.commandId.value
         transaction.offset shouldBe ApiOffset.toApiString(offset)
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
@@ -95,7 +95,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
         .lookupFlatTransactionById(exercise.transactionId, exercise.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
-        transaction.commandId shouldBe exercise.commandId.get
+        transaction.commandId shouldBe exercise.commandId.value
         transaction.offset shouldBe ApiOffset.toApiString(offset)
         transaction.transactionId shouldBe exercise.transactionId
         TimestampConversion.toLf(
@@ -132,9 +132,9 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       result3 <- ledgerDao.transactionsReader
         .lookupFlatTransactionById(tx.transactionId, Set(alice, bob, charlie, david))
     } yield {
-      result1.value.transaction.value.commandId shouldBe tx.commandId.get
-      result2.value.transaction.value.commandId shouldBe tx.commandId.get
-      result3.value.transaction.value.commandId shouldBe tx.commandId.get
+      result1.value.transaction.value.commandId shouldBe tx.commandId.value
+      result2.value.transaction.value.commandId shouldBe tx.commandId.value
+      result3.value.transaction.value.commandId shouldBe tx.commandId.value
     }
   }
 
@@ -158,7 +158,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
         .lookupFlatTransactionById(tx.transactionId, tx.actAs.toSet)
     } yield {
       inside(result.value.transaction) { case Some(transaction) =>
-        transaction.commandId shouldBe tx.commandId.get
+        transaction.commandId shouldBe tx.commandId.value
         transaction.offset shouldBe ApiOffset.toApiString(offset)
         transaction.transactionId shouldBe tx.transactionId
         TimestampConversion.toLf(

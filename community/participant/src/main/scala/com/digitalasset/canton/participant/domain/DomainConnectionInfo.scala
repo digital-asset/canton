@@ -32,7 +32,8 @@ object DomainConnectionInfo {
         sequencerConnectClient: SequencerConnectClient,
     ): EitherT[Future, SequencerConnectClient.Error, (DomainId, StaticDomainParameters)] =
       (for {
-        domainId <- sequencerConnectClient.getDomainId(alias)
+        domainIdSequencerId <- sequencerConnectClient.getDomainIdSequencerId(alias)
+        (domainId, _) = domainIdSequencerId
         staticDomainParameters <- sequencerConnectClient.getDomainParameters(alias)
       } yield (domainId, staticDomainParameters))
 

@@ -300,7 +300,7 @@ trait ParticipantTopologySnapshotClient {
   this: BaseTopologySnapshotClient =>
 
   // used by domain to fetch all participants
-  @Deprecated(since = "2.7")
+  @Deprecated(since = "3.0")
   def participants(): Future[Seq[(ParticipantId, ParticipantPermission)]]
 
   /** Checks whether the provided participant exists and is active */
@@ -320,18 +320,18 @@ trait MediatorDomainStateClient {
 }
 
 // this can be removed with 3.0
-@Deprecated(since = "2.7")
+@Deprecated(since = "3.0")
 trait CertificateSnapshotClient {
 
   this: BaseTopologySnapshotClient =>
 
-  @Deprecated(since = "2.7.0")
+  @Deprecated(since = "3.0.0")
   def hasParticipantCertificate(participantId: ParticipantId)(implicit
       traceContext: TraceContext
   ): Future[Boolean] =
     findParticipantCertificate(participantId).map(_.isDefined)
 
-  @Deprecated(since = "2.7.0")
+  @Deprecated(since = "3.0.0")
   def findParticipantCertificate(participantId: ParticipantId)(implicit
       traceContext: TraceContext
   ): Future[Option[X509Cert]]

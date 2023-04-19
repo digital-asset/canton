@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.localstore
 
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.{
   IdentityProviderConfigByIssuerNotFound,
   IdentityProviderConfigNotFound,
@@ -152,7 +153,7 @@ class CachedIdentityProviderConfigStoreSpec
       res2 <- tested.listIdentityProviderConfigs()
 
       res3 <- {
-        Thread.sleep(2000)
+        Threading.sleep(2000)
         tested.getIdentityProviderConfig(cfg.identityProviderId)
       }
       res3iss <- tested.getIdentityProviderConfig(cfg.issuer)

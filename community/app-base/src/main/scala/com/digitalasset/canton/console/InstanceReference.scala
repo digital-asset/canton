@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.console
 
+import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.*
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.config.RequireTypes.Port
@@ -16,19 +17,18 @@ import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.admin.data.{DomainStatus, NodeStatus, ParticipantStatus}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.ParticipantNode
 import com.digitalasset.canton.participant.config.{
   BaseParticipantConfig,
   LocalParticipantConfig,
   RemoteParticipantConfig,
 }
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.topology.transaction.{
-  TopologyChangeOp,
-  TopologyChangeOpCommon,
-  TopologyChangeOpX,
+import com.digitalasset.canton.participant.{
+  ParticipantNode,
+  ParticipantNodeBootstrapX,
+  ParticipantNodeX,
 }
+import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.topology.{DomainId, NodeIdentity, ParticipantId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
@@ -70,11 +70,10 @@ trait InstanceReferenceCommon
   }
 
   type Status <: NodeStatus.Status
-  type TopologyChangeOperation <: TopologyChangeOpCommon
 
   def id: NodeIdentity
 
-  def health: HealthAdministration[Status]
+  def health: HealthAdministrationCommon[Status]
 
   def keys: KeyAdministrationGroup
 
@@ -87,14 +86,12 @@ trait InstanceReferenceCommon
   */
 trait InstanceReference extends InstanceReferenceCommon {
   def parties: PartiesAdministrationGroup
-  override type TopologyChangeOperation = TopologyChangeOp
   override def topology: TopologyAdministrationGroup
 }
 
 /** InstanceReferenceX with different topology administration x
   */
 trait InstanceReferenceX extends InstanceReferenceCommon {
-  override type TopologyChangeOperation = TopologyChangeOpX
   override def topology: TopologyAdministrationGroupX
 }
 
@@ -193,15 +190,17 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
 
   override protected[console] def adminCommand[Result](
       grpcCommand: GrpcAdminCommand[_, _, Result]
-  ): ConsoleCommandResult[Result] =
+  ): ConsoleCommandResult[Result] = {
     runCommandIfRunning(
       consoleEnvironment.grpcAdminCommandRunner
         .runCommand(name, grpcCommand, config.clientAdminApi, None)
     )
+  }
 
 }
 
 trait LocalInstanceReference extends LocalInstanceReferenceCommon with InstanceReference
+trait LocalInstanceReferenceX extends LocalInstanceReferenceCommon with InstanceReferenceX
 
 trait RemoteInstanceReference extends InstanceReferenceCommon {
   @Help.Summary("Manage public and secret keys")
@@ -211,6 +210,7 @@ trait RemoteInstanceReference extends InstanceReferenceCommon {
 }
 
 trait GrpcRemoteInstanceReference extends RemoteInstanceReference {
+
   def config: NodeConfig
 
   override protected[console] def adminCommand[Result](
@@ -231,7 +231,7 @@ object DomainReference {
 trait DomainReference
     extends InstanceReference
     with DomainAdministration
-    with InstanceReferenceWithSequencerConnection {
+    with InstanceReferenceWithSequencer {
   val consoleEnvironment: ConsoleEnvironment
   val name: String
 
@@ -246,14 +246,13 @@ trait DomainReference
       this,
       consoleEnvironment,
       DomainStatus.fromProtoV0,
-      topology,
     )
 
   @Help.Summary(
     "Yields the globally unique id of this domain. " +
       "Throws an exception, if the id has not yet been allocated (e.g., the domain has not yet been started)."
   )
-  def id: DomainId = topology.idHelper(name, DomainId(_))
+  def id: DomainId = topology.idHelper(DomainId(_))
 
   private lazy val topology_ =
     new TopologyAdministrationGroup(
@@ -331,7 +330,8 @@ class CommunityRemoteDomainReference(val consoleEnvironment: ConsoleEnvironment,
 
 trait InstanceReferenceWithSequencerConnection extends InstanceReferenceCommon {
   def sequencerConnection: SequencerConnection
-
+}
+trait InstanceReferenceWithSequencer extends InstanceReferenceWithSequencerConnection {
   def sequencer: SequencerAdministrationGroup
 }
 
@@ -426,31 +426,63 @@ object ParticipantReference {
   val InstanceType = "Participant"
 }
 
-abstract class ParticipantReference(
-    override val consoleEnvironment: ConsoleEnvironment,
-    val name: String,
-) extends InstanceReference
+trait ParticipantReferenceCommon
+    extends ConsoleCommandGroup
     with ParticipantAdministration
     with LedgerApiAdministration
-    with LedgerApiCommandRunner {
+    with LedgerApiCommandRunner
+    with AdminCommandRunner
+    with InstanceReferenceCommon {
 
-  override protected val instanceType: String = ParticipantReference.InstanceType
+  override type Status = ParticipantStatus
 
   override protected val loggerFactory: NamedLoggerFactory =
     consoleEnvironment.environment.loggerFactory.append("participant", name)
 
-  override type Status = ParticipantStatus
-
   @Help.Summary("Health and diagnostic related commands")
   @Help.Group("Health")
   override def health: ParticipantHealthAdministration =
-    new ParticipantHealthAdministration(this, consoleEnvironment, loggerFactory, topology)
+    new ParticipantHealthAdministration(this, consoleEnvironment, loggerFactory)
+
+  override def id: ParticipantId
+
+  def config: BaseParticipantConfig
+
+  @Help.Summary("Commands used for development and testing", FeatureFlag.Testing)
+  @Help.Group("Testing")
+  def testing: ParticipantTestingGroup
+
+  @Help.Summary("Commands to pruning the archive of the ledger", FeatureFlag.Preview)
+  @Help.Group("Ledger Pruning")
+  def pruning: ParticipantPruningAdministrationGroup
+
+  @Help.Summary("Manage participant replication")
+  @Help.Group("Replication")
+  def replication: ParticipantReplicationAdministrationGroup = replicationGroup
+  lazy private val replicationGroup =
+    new ParticipantReplicationAdministrationGroup(this, consoleEnvironment)
+
+}
+
+abstract class ParticipantReference(
+    override val consoleEnvironment: ConsoleEnvironment,
+    val name: String,
+) extends ParticipantReferenceCommon
+    with InstanceReference {
+
+  protected def runner: AdminCommandRunner = this
+
+  override protected val instanceType: String = ParticipantReference.InstanceType
+
+  @Help.Summary("Inspect and manage parties")
+  @Help.Group("Parties")
+  def parties: ParticipantPartiesAdministrationGroup
 
   @Help.Summary(
     "Yields the globally unique id of this participant. " +
       "Throws an exception, if the id has not yet been allocated (e.g., the participant has not yet been started)."
   )
-  override def id: ParticipantId = topology.idHelper(name, ParticipantId(_))
+  override def id: ParticipantId = topology.idHelper(ParticipantId(_))
 
   private lazy val topology_ =
     new TopologyAdministrationGroup(
@@ -463,44 +495,22 @@ abstract class ParticipantReference(
   @Help.Group("Topology")
   @Help.Description("This group contains access to the full set of topology management commands.")
   def topology: TopologyAdministrationGroup = topology_
+  override protected def vettedPackagesOfParticipant(): Set[PackageId] = topology.vetted_packages
+    .list(filterStore = "Authorized", filterParticipant = id.filterString)
+    .flatMap(_.item.packageIds)
+    .toSet
 
-  @Help.Summary("Commands used for development and testing", FeatureFlag.Testing)
-  @Help.Group("Testing")
-  def testing: ParticipantTestingGroup
-
-  @Help.Summary("Commands to pruning the archive of the ledger", FeatureFlag.Preview)
-  @Help.Group("Ledger Pruning")
-  def pruning: ParticipantPruningAdministrationGroup
-
-  @Help.Summary("Inspect and manage parties")
-  @Help.Group("Parties")
-  override def parties: ParticipantPartiesAdministrationGroup
-
-  def config: BaseParticipantConfig
-
-  @Help.Summary("Manage participant replication")
-  @Help.Group("Replication")
-  def replication: ParticipantReplicationAdministrationGroup = replicationGroup
-  lazy private val replicationGroup =
-    new ParticipantReplicationAdministrationGroup(this, consoleEnvironment)
-
+  override protected def participantIsActiveOnDomain(
+      domainId: DomainId,
+      participantId: ParticipantId,
+  ): Boolean = topology.participant_domain_states.active(domainId, participantId)
 }
 
-class RemoteParticipantReference(environment: ConsoleEnvironment, override val name: String)
-    extends ParticipantReference(environment, name)
-    with GrpcRemoteInstanceReference {
+trait RemoteParticipantReferenceCommon
+    extends LedgerApiCommandRunner
+    with ParticipantReferenceCommon {
 
-  @Help.Summary("Return remote participant config")
-  def config: RemoteParticipantConfig =
-    consoleEnvironment.environment.config.remoteParticipantsByString(name)
-
-  override def equals(obj: Any): Boolean = {
-    obj match {
-      case x: RemoteParticipantReference =>
-        x.consoleEnvironment == consoleEnvironment && x.name == name
-      case _ => false
-    }
-  }
+  def config: RemoteParticipantConfig
 
   override protected[console] def ledgerApiCommand[Result](
       command: GrpcAdminCommand[_, _, Result]
@@ -508,13 +518,13 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
     consoleEnvironment.grpcAdminCommandRunner.runCommand(
       name,
       command,
-      config.ledgerApi,
+      config.clientLedgerApi,
       config.token,
     )
 
   @Help.Summary("Inspect and manage parties")
   @Help.Group("Parties")
-  override def parties: ParticipantPartiesAdministrationGroup = partiesGroup
+  def parties: ParticipantPartiesAdministrationGroup = partiesGroup
   // above command needs to be def such that `Help` works.
   lazy private val partiesGroup =
     new ParticipantPartiesAdministrationGroup(id, this, consoleEnvironment)
@@ -532,14 +542,52 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
 
 }
 
+class RemoteParticipantReference(environment: ConsoleEnvironment, override val name: String)
+    extends ParticipantReference(environment, name)
+    with GrpcRemoteInstanceReference
+    with RemoteParticipantReferenceCommon {
+
+  @Help.Summary("Return remote participant config")
+  def config: RemoteParticipantConfig =
+    consoleEnvironment.environment.config.remoteParticipantsByString(name)
+
+  override def equals(obj: Any): Boolean = {
+    obj match {
+      case x: RemoteParticipantReference =>
+        x.consoleEnvironment == consoleEnvironment && x.name == name
+      case _ => false
+    }
+  }
+
+}
+
+trait LocalParticipantReferenceCommon
+    extends LedgerApiCommandRunner
+    with ParticipantReferenceCommon
+    with LocalInstanceReferenceCommon {
+
+  def config: LocalParticipantConfig
+
+  def adminToken: Option[String]
+
+  override protected[console] def ledgerApiCommand[Result](
+      command: GrpcAdminCommand[_, _, Result]
+  ): ConsoleCommandResult[Result] =
+    runCommandIfRunning(
+      consoleEnvironment.grpcAdminCommandRunner
+        .runCommand(name, command, config.clientLedgerApi, adminToken)
+    )
+}
+
 class LocalParticipantReference(
     override val consoleEnvironment: ConsoleEnvironment,
     name: String,
 ) extends ParticipantReference(consoleEnvironment, name)
+    with LocalParticipantReferenceCommon
     with LocalInstanceReference
     with BaseInspection[ParticipantNode] {
 
-  protected val nodes = consoleEnvironment.environment.participants
+  override protected val nodes = consoleEnvironment.environment.participants
 
   @Help.Summary("Return participant config")
   def config: LocalParticipantConfig =
@@ -592,12 +640,105 @@ class LocalParticipantReference(
   override def runningNode: Option[CantonNodeBootstrap[ParticipantNode]] =
     consoleEnvironment.environment.participants.getRunning(name)
 
-  override protected[console] def ledgerApiCommand[Result](
-      command: GrpcAdminCommand[_, _, Result]
-  ): ConsoleCommandResult[Result] =
-    runCommandIfRunning(
-      consoleEnvironment.grpcAdminCommandRunner
-        .runCommand(name, command, config.clientLedgerApi, adminToken)
+}
+
+abstract class ParticipantReferenceX(
+    override val consoleEnvironment: ConsoleEnvironment,
+    val name: String,
+) extends ParticipantReferenceCommon
+    with InstanceReferenceX {
+
+  override protected val instanceType: String = ParticipantReferenceX.InstanceType
+  override protected def runner: AdminCommandRunner = this
+
+  @Help.Summary(
+    "Yields the globally unique id of this participant. " +
+      "Throws an exception, if the id has not yet been allocated (e.g., the participant has not yet been started)."
+  )
+  override def id: ParticipantId = topology.idHelper(ParticipantId(_))
+
+  private lazy val topology_ =
+    new TopologyAdministrationGroupX(
+      this,
+      health.status.successOption.map(_.topologyQueue),
+      consoleEnvironment,
+      loggerFactory,
     )
+  @Help.Summary("Topology management related commands")
+  @Help.Group("Topology")
+  @Help.Description("This group contains access to the full set of topology management commands.")
+  def topology: TopologyAdministrationGroupX = topology_
+  override protected def vettedPackagesOfParticipant(): Set[PackageId] = topology.vetted_packages
+    .list(filterStore = "Authorized", filterParticipant = id.filterString)
+    .flatMap(_.item.packageIds)
+    .toSet
+  override protected def participantIsActiveOnDomain(
+      domainId: DomainId,
+      participantId: ParticipantId,
+  ): Boolean = topology.domain_trust_certificates.active(domainId, participantId)
+
+}
+object ParticipantReferenceX {
+  val InstanceType = "ParticipantX"
+}
+
+class RemoteParticipantReferenceX(environment: ConsoleEnvironment, override val name: String)
+    extends ParticipantReferenceX(environment, name)
+    with GrpcRemoteInstanceReference
+    with RemoteParticipantReferenceCommon {
+
+  @Help.Summary("Return remote participant config")
+  def config: RemoteParticipantConfig =
+    consoleEnvironment.environment.config.remoteParticipantsByStringX(name)
+
+  override def equals(obj: Any): Boolean = {
+    obj match {
+      case x: RemoteParticipantReference =>
+        x.consoleEnvironment == consoleEnvironment && x.name == name
+      case _ => false
+    }
+  }
+
+}
+
+class LocalParticipantReferenceX(
+    override val consoleEnvironment: ConsoleEnvironment,
+    name: String,
+) extends ParticipantReferenceX(consoleEnvironment, name)
+    with LocalParticipantReferenceCommon
+    with LocalInstanceReferenceX
+    with BaseInspection[ParticipantNodeX] {
+
+  override protected val nodes = consoleEnvironment.environment.participantsX
+
+  @Help.Summary("Return participant config")
+  def config: LocalParticipantConfig =
+    consoleEnvironment.environment.config.participantsByStringX(name)
+
+  override def runningNode: Option[ParticipantNodeBootstrapX] =
+    consoleEnvironment.environment.participantsX.getRunning(name)
+
+  /** secret, not publicly documented way to get the admin token */
+  def adminToken: Option[String] = underlying.map(_.adminToken.secret)
+
+  // TODO(#11255) these are "remote" groups. the normal participant node has "local" versions.
+  //   but rather than keeping this, we should make local == remote and add local methods separately
+  @Help.Summary("Inspect and manage parties")
+  @Help.Group("Parties")
+  def parties: ParticipantPartiesAdministrationGroup = partiesGroup
+  // above command needs to be def such that `Help` works.
+  lazy private val partiesGroup =
+    new ParticipantPartiesAdministrationGroup(id, this, consoleEnvironment)
+
+  private lazy val testing_ = new ParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
+  @Help.Summary("Commands used for development and testing", FeatureFlag.Testing)
+  @Help.Group("Testing")
+  override def testing: ParticipantTestingGroup = testing_
+
+  private lazy val pruning_ =
+    new ParticipantPruningAdministrationGroup(this, consoleEnvironment, loggerFactory)
+  @Help.Summary("Commands to prune the archive of the participant ledger")
+  @Help.Group("Participant Pruning")
+  def pruning: ParticipantPruningAdministrationGroup = pruning_
 
 }

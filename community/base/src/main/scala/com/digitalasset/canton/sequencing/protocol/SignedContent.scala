@@ -202,7 +202,7 @@ object SignedContent
       .map(signature => SignedContent(content, signature, timestampOfSigningKey, protocolVersion))
   }
 
-  private def hashContent(
+  def hashContent(
       cryptoApi: CryptoPureApi,
       content: HasCryptographicEvidence,
       purpose: HashPurpose,

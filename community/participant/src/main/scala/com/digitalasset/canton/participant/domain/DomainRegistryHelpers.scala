@@ -83,9 +83,10 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, DomainHandle] = {
     for {
-      domainId <- getDomainId(config.domain, sequencerConnectClient).mapK(
+      domainIdSequencerId <- getDomainId(config.domain, sequencerConnectClient).mapK(
         FutureUnlessShutdown.outcomeK
       )
+      (domainId, sequencerId) = domainIdSequencerId
       indexedDomainId <- EitherT
         .right(syncDomainPersistentStateFactory.indexedDomainId(domainId))
         .mapK(FutureUnlessShutdown.outcomeK)
@@ -118,7 +119,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       _ <- EitherT
         .fromEither[Future](verifyDomainId(config, domainId))
         .mapK(FutureUnlessShutdown.outcomeK)
-      sequencerId = SequencerId(domainId.unwrap)
 
       acceptedAgreement <- agreementClient
         .isRequiredAgreementAccepted(domainId, staticDomainParameters.protocolVersion)
@@ -295,9 +295,9 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
 
   private def getDomainId(domainAlias: DomainAlias, sequencerConnectClient: SequencerConnectClient)(
       implicit traceContext: TraceContext
-  ): EitherT[Future, DomainRegistryError, DomainId] =
+  ): EitherT[Future, DomainRegistryError, (DomainId, SequencerId)] =
     sequencerConnectClient
-      .getDomainId(domainAlias)
+      .getDomainIdSequencerId(domainAlias)
       .leftMap(DomainRegistryHelpers.toDomainRegistryError(domainAlias))
 
   private def performHandshake(

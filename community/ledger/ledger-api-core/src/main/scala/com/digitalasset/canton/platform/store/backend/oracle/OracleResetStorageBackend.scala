@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.oracle
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.platform.store.backend.ResetStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 
@@ -39,7 +40,7 @@ object OracleResetStorageBackend extends ResetStorageBackend {
       "participant_metering",
       "metering_parameters",
     ) foreach { table =>
-      SQL"delete from #$table".execute()(connection)
+      SQL"delete from #$table".execute()(connection).discard
     }
 
 }

@@ -287,6 +287,7 @@ class RepairService(
                 signatories = contract.metadata.signatories,
                 choiceObservers =
                   Set.empty[LfPartyId], // default archive choice has no choice observers
+                choiceAuthorizers = None, // default (signatories + actingParties)
                 children = ImmArray.empty[LfNodeId],
                 exerciseResult = Some(Value.ValueNone),
                 // Not setting the contract key as the indexer deletes contract keys along with contracts.

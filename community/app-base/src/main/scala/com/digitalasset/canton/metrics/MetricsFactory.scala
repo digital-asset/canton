@@ -258,8 +258,7 @@ final case class MetricsFactory(
         new CantonOpenTelemetryMetricsFactory(
           meter,
           globalMetricsContext = MetricsContext(
-            "daml_version" -> BuildInfo.damlLibrariesVersion,
-            "canton_version" -> BuildInfo.version,
+            "canton_version" -> BuildInfo.version
           ).merge(extraContext),
         )
     }

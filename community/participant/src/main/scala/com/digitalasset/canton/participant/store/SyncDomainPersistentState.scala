@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -57,6 +58,7 @@ object SyncDomainPersistentState {
       enableAdditionalConsistencyChecks: Boolean,
       indexedStringStore: IndexedStringStore,
       loggerFactory: NamedLoggerFactory,
+      futureSupervisor: FutureSupervisor,
   )(implicit ec: ExecutionContext): SyncDomainPersistentState = {
     val domainLoggerFactory = loggerFactory.append("domain-alias", domainAlias.unwrap)
     storage match {
@@ -67,6 +69,7 @@ object SyncDomainPersistentState {
           enableAdditionalConsistencyChecks,
           domainLoggerFactory,
           processingTimeouts,
+          futureSupervisor,
         )
       case db: DbStorage =>
         new DbSyncDomainPersistentState(
@@ -81,6 +84,7 @@ object SyncDomainPersistentState {
           enableAdditionalConsistencyChecks,
           indexedStringStore,
           domainLoggerFactory,
+          futureSupervisor,
         )
     }
   }

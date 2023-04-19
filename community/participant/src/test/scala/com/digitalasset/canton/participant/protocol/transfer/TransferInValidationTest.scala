@@ -125,6 +125,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       Set.empty,
       workflowId,
       contractId,
+      contract.rawContractInstance.contractInstance.unversioned.template,
       transferId.sourceDomain,
       SourceProtocolVersion(testedProtocolVersion),
       sourceMediator,

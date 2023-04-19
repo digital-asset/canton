@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.logging.LoggingContext
 import com.daml.metrics.DatabaseMetrics
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
 import com.digitalasset.canton.platform.store.backend.localstore.ResourceVersionOps
 import org.scalatest.freespec.AsyncFreeSpec
@@ -120,7 +121,7 @@ trait ConcurrentChangeControlTests extends PersistentStoreSpecBase with Matchers
       //       both wrote to the same row and Foo did it faster.
       _ = eventsQueue.iterator().asScala.toList shouldBe List("Bar0", "Foo0", "Bar1", "Foo1")
       // NOTE: Here we sleep to to give an extra time for Bar to finish to prevent false positives where Bar was simply very slow, rather than being blocked by the DBMS.
-      _ = Thread.sleep(100)
+      _ = Threading.sleep(100)
       _ = eventsQueue.iterator().asScala.toList shouldBe List("Bar0", "Foo0", "Bar1", "Foo1")
       _ = externalCheckDone.countDown()
       updateResults <- Future.sequence(List(txA, txB))

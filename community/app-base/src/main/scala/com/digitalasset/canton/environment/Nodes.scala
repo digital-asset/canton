@@ -18,7 +18,9 @@ import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapp
 import com.digitalasset.canton.participant.{
   ParticipantNode,
   ParticipantNodeBootstrap,
+  ParticipantNodeBootstrapX,
   ParticipantNodeParameters,
+  ParticipantNodeX,
 }
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.resource.{DbMigrations, DbMigrationsFactory}
@@ -265,8 +267,8 @@ class ManagedNodes[
     }
 }
 
-class ParticipantNodes[PC <: LocalParticipantConfig](
-    create: (String, PC) => ParticipantNodeBootstrap,
+class ParticipantNodes[B <: CantonNodeBootstrap[N], N <: CantonNode, PC <: LocalParticipantConfig](
+    create: (String, PC) => B, // (nodeName, config) => bootstrap
     migrationsFactory: DbMigrationsFactory,
     timeouts: ProcessingTimeout,
     configs: Map[String, PC],
@@ -274,7 +276,7 @@ class ParticipantNodes[PC <: LocalParticipantConfig](
     loggerFactory: NamedLoggerFactory,
 )(implicit
     protected val executionContext: ExecutionContextIdlenessExecutorService
-) extends ManagedNodes[ParticipantNode, PC, ParticipantNodeParameters, ParticipantNodeBootstrap](
+) extends ManagedNodes[N, PC, ParticipantNodeParameters, B](
       create,
       migrationsFactory,
       timeouts,
@@ -309,6 +311,13 @@ class ParticipantNodes[PC <: LocalParticipantConfig](
       _ <- super.migrateDatabase(name)
       _ <- migrateIndexerDatabase(name)
     } yield ()
+}
+
+object ParticipantNodes {
+  type ParticipantNodesOld[PC <: LocalParticipantConfig] =
+    ParticipantNodes[ParticipantNodeBootstrap, ParticipantNode, PC]
+  type ParticipantNodesX[PC <: LocalParticipantConfig] =
+    ParticipantNodes[ParticipantNodeBootstrapX, ParticipantNodeX, PC]
 }
 
 class DomainNodes[DC <: DomainConfig](

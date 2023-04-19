@@ -210,7 +210,7 @@ private[backend] trait StorageBackendTestsPruning
             DbDto.IdFilterCreateNonStakeholderInformee(1L, nonStakeholderInformeeParty),
             DbDto.TransactionMeta(
               transaction_id = dtoTransactionId(create),
-              event_offset = create.event_offset.get,
+              event_offset = create.event_offset.value,
               event_sequential_id_first = create.event_sequential_id,
               event_sequential_id_last = create.event_sequential_id,
             ),
@@ -219,7 +219,7 @@ private[backend] trait StorageBackendTestsPruning
             DbDto.IdFilterConsumingStakeholder(2L, someTemplateId.toString, observerParty),
             DbDto.TransactionMeta(
               transaction_id = dtoTransactionId(archive),
-              event_offset = archive.event_offset.get,
+              event_offset = archive.event_offset.value,
               event_sequential_id_first = archive.event_sequential_id,
               event_sequential_id_last = archive.event_sequential_id,
             ),
@@ -280,7 +280,7 @@ private[backend] trait StorageBackendTestsPruning
           DbDto.IdFilterCreateNonStakeholderInformee(1L, nonStakeholderInformeeParty),
           DbDto.TransactionMeta(
             transaction_id = createTxId,
-            event_offset = create.event_offset.get,
+            event_offset = create.event_offset.value,
             event_sequential_id_first = create.event_sequential_id,
             event_sequential_id_last = create.event_sequential_id,
           ),

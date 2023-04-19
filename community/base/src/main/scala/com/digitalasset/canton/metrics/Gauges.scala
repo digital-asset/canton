@@ -23,6 +23,11 @@ class TimedLoadGauge(timer: Timer, loadGauge: LoadGauge, delegateMetricHandle: C
   def event[T](fut: => Future[T])(implicit ec: ExecutionContext): Future[T] =
     Timed.future(timer, loadGauge.event(fut))
 
+  def eventUS[T](fut: => FutureUnlessShutdown[T])(implicit
+      ec: ExecutionContext
+  ): FutureUnlessShutdown[T] =
+    FutureUnlessShutdown(event(fut.unwrap))
+
   def syncEvent[T](body: => T): T =
     Timed.value(timer, loadGauge.syncEvent(body))
 

@@ -380,7 +380,7 @@ object BaseTest {
   )
 
   lazy val testedProtocolVersion: ProtocolVersion =
-    ProtocolVersion.tryGetOptFromEnv.getOrElse(ProtocolVersion.latest)
+    tryGetProtocolVersionFromEnv.getOrElse(ProtocolVersion.latest)
 
   lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion = ReleaseProtocolVersion(
     testedProtocolVersion
@@ -398,6 +398,14 @@ object BaseTest {
     Option(getClass.getClassLoader.getResource(name))
       .map(_.getPath)
       .getOrElse(throw new IllegalArgumentException(s"Cannot find resource $name"))
+
+  /** @return Parsed protocol version if found in environment variable `CANTON_PROTOCOL_VERSION`
+    * @throws java.lang.RuntimeException if the given parameter cannot be parsed to a protocol version
+    */
+  protected def tryGetProtocolVersionFromEnv: Option[ProtocolVersion] = sys.env
+    .get("CANTON_PROTOCOL_VERSION")
+    .map(ProtocolVersion.tryCreate)
+
 }
 
 trait BaseTestWordSpec extends BaseTest with AnyWordSpecLike {

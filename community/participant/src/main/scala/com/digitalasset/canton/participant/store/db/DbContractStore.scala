@@ -8,7 +8,7 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String2066
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Salt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -32,6 +32,7 @@ import com.github.blemale.scaffeine.AsyncCache
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
+import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -39,7 +40,7 @@ class DbContractStore(
     override protected val storage: DbStorage,
     domainIdIndexed: IndexedDomain,
     protocolVersion: ProtocolVersion,
-    maxContractIdSqlInListSize: PositiveNumeric[Int],
+    maxContractIdSqlInListSize: PositiveInt,
     maxDbConnections: Int, // used to throttle query batching
     cacheConfig: CacheConfig,
     dbQueryBatcherConfig: BatchAggregatorConfig,
@@ -116,7 +117,7 @@ class DbContractStore(
 
   private def lookupQueries(
       ids: NonEmpty[Seq[LfContractId]]
-  ): Iterable[DbAction.ReadOnly[Seq[Option[StoredContract]]]] = {
+  ): immutable.Iterable[DbAction.ReadOnly[Seq[Option[StoredContract]]]] = {
     import DbStorage.Implicits.BuilderChain.*
 
     DbStorage.toInClauses("contract_id", ids, maxContractIdSqlInListSize).map {
@@ -135,7 +136,7 @@ class DbContractStore(
 
   private def bulkLookupQueries(
       ids: NonEmpty[Seq[LfContractId]]
-  ): Iterable[DbAction.ReadOnly[Iterable[StoredContract]]] =
+  ): immutable.Iterable[DbAction.ReadOnly[immutable.Iterable[StoredContract]]] =
     DbStorage.toInClauses_("contract_id", ids, maxContractIdSqlInListSize).map { inClause =>
       import DbStorage.Implicits.BuilderChain.*
       val query =
@@ -408,7 +409,7 @@ class DbContractStore(
 
       override protected def checkQuery(itemsToCheck: NonEmpty[Seq[ItemIdentifier]])(implicit
           batchTraceContext: TraceContext
-      ): Iterable[DbAction.ReadOnly[Iterable[CheckData]]] =
+      ): immutable.Iterable[DbAction.ReadOnly[immutable.Iterable[CheckData]]] =
         bulkLookupQueries(itemsToCheck)
 
       override protected def analyzeFoundData(

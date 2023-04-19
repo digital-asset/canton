@@ -281,8 +281,8 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
         party2Mc <- snapshotC.activeParticipantsOf(party2.toLf)
         keysDMa <- snapshotA.signingKeys(domainManager)
         keysDMb <- snapshotB.signingKeys(domainManager)
-        keysSa <- snapshotA.signingKeys(sequencer)
-        keysSb <- snapshotB.signingKeys(sequencer)
+        keysSa <- snapshotA.signingKeys(sequencerId)
+        keysSb <- snapshotB.signingKeys(sequencerId)
         partPermA <- snapshotA.participantState(participant1)
         partPermB <- snapshotB.participantState(participant1)
         partPermC <- snapshotC.participantState(participant1)
@@ -307,7 +307,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
     }
 
     "mixin initialisation keys" in {
-      val f = new Fixture(Map(sequencer -> Seq(SigningKeys.key6)))
+      val f = new Fixture(Map(sequencerId -> Seq(SigningKeys.key6)))
       for {
         _ <- f.add(ts, Seq(ns1k2, okm1))
         _ <- f.add(ts1, Seq(okm2))
@@ -320,8 +320,8 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
         spA <- f.client.snapshot(ts1)
         spB <- f.client.snapshot(ts1.immediateSuccessor)
         dmKeys <- spA.signingKeys(domainManager)
-        seqKeyA <- spA.signingKeys(sequencer)
-        seqKeyB <- spB.signingKeys(sequencer)
+        seqKeyA <- spA.signingKeys(sequencerId)
+        seqKeyB <- spB.signingKeys(sequencerId)
       } yield {
         compareKeys(dmKeys, Seq(namespaceKey))
         compareKeys(seqKeyA, Seq(SigningKeys.key6))
@@ -418,7 +418,12 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
 class StoreBasedTopologySnapshotTestInMemory extends StoreBasedTopologySnapshotTest {
   "InMemoryTopologyStore" should {
     behave like topologySnapshot(() =>
-      new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+      new InMemoryTopologyStore(
+        TopologyStoreId.AuthorizedStore,
+        loggerFactory,
+        timeouts,
+        futureSupervisor,
+      )
     )
   }
 }
@@ -436,6 +441,7 @@ trait DbStoreBasedTopologySnapshotTest extends StoreBasedTopologySnapshotTest {
         TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
         timeouts,
         loggerFactory,
+        futureSupervisor,
       )
     )
   }

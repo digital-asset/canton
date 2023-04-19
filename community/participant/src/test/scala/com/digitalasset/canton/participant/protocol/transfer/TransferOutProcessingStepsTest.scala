@@ -100,6 +100,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     UniqueIdentifier.tryFromProtoPrimitive("submitting::participant")
   )
 
+  private val templateId = LfTemplateId.assertFromString("unknown:package:id")
+
   private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
       submitter,
@@ -124,6 +126,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       enableAdditionalConsistencyChecks = true,
       loggerFactory,
       timeouts,
+      futureSupervisor,
     )
   private val globalTracker = new GlobalCausalOrderer(
     submittingParticipant,
@@ -245,6 +248,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           submittingParticipant,
           timeEvent,
           contractId,
+          templateId,
           submitterMetadata(submitter),
           stakeholders,
           workflowId,
@@ -386,6 +390,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               adminParties = Set(adminSubmitter, admin3, admin4),
               workflowId = workflowId,
               contractId = contractId,
+              templateId = templateId,
               sourceDomain = sourceDomain,
               sourceProtocolVersion = SourceProtocolVersion(testedProtocolVersion),
               sourceMediator = sourceMediator,
@@ -411,6 +416,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               adminParties = Set(adminSubmitter, admin1),
               workflowId = workflowId,
               contractId = contractId,
+              templateId = templateId,
               sourceDomain = sourceDomain,
               sourceProtocolVersion = SourceProtocolVersion(testedProtocolVersion),
               sourceMediator = sourceMediator,
@@ -509,6 +515,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       Set(party1),
       workflowId = workflowId,
       contractId,
+      templateId = templateId,
       sourceDomain,
       SourceProtocolVersion(testedProtocolVersion),
       sourceMediator,
@@ -581,6 +588,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         Set(submittingParticipant.adminParty.toLf),
         workflowId = workflowId,
         contractId,
+        templateId = templateId,
         sourceDomain,
         SourceProtocolVersion(testedProtocolVersion),
         sourceMediator,
@@ -677,6 +685,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           SequencerCounter(1),
           rootHash,
           WithContractHash(contractId, contractHash),
+          templateId = templateId,
           transferringParticipant = false,
           submitterMetadata = submitterMetadata(submitter),
           workflowId = workflowId,

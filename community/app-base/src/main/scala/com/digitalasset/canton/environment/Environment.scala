@@ -25,13 +25,18 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.DomainNodeBootstrap
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.environment.Environment.*
+import com.digitalasset.canton.environment.ParticipantNodes.{ParticipantNodesOld, ParticipantNodesX}
 import com.digitalasset.canton.health.{HealthCheck, HealthServer}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsConfig.Prometheus
 import com.digitalasset.canton.metrics.MetricsFactory
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
+import com.digitalasset.canton.participant.{
+  ParticipantNode,
+  ParticipantNodeBootstrap,
+  ParticipantNodeBootstrapX,
+}
 import com.digitalasset.canton.resource.DbMigrationsFactory
 import com.digitalasset.canton.telemetry.{ConfiguredOpenTelemetry, OpenTelemetryFactory}
 import com.digitalasset.canton.time.EnrichedDurations.*
@@ -89,7 +94,9 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       testingConfig.metricsFactoryType,
     )
   protected def participantNodeFactory
-      : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType]
+      : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType, ParticipantNodeBootstrap]
+  protected def participantNodeFactoryX
+      : ParticipantNodeBootstrap.Factory[Config#ParticipantConfigType, ParticipantNodeBootstrapX]
   protected def domainFactory: DomainNodeBootstrap.Factory[Config#DomainConfigType]
   protected def migrationsFactory: DbMigrationsFactory
 
@@ -266,7 +273,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       loggerFactory,
     )
   lazy val participants =
-    new ParticipantNodes(
+    new ParticipantNodesOld[Config#ParticipantConfigType](
       createParticipant,
       migrationsFactory,
       timeouts,
@@ -274,11 +281,20 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       config.participantNodeParametersByString,
       loggerFactory,
     )
+  lazy val participantsX =
+    new ParticipantNodesX[Config#ParticipantConfigType](
+      createParticipantX,
+      migrationsFactory,
+      timeouts,
+      config.participantsByStringX,
+      config.participantNodeParametersByString,
+      loggerFactory,
+    )
 
   // convenient grouping of all node collections for performing operations
   // intentionally defined in the order we'd like to start them
   protected def allNodes: List[Nodes[CantonNode, CantonNodeBootstrap[CantonNode]]] =
-    List(domains, participants)
+    List(domains, participants, participantsX)
   private def runningNodes: Seq[CantonNodeBootstrap[CantonNode]] = allNodes.flatMap(_.running)
 
   private def autoConnectLocalNodes(): Either[StartupError, Unit] = {
@@ -301,7 +317,10 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     ): Either[StartupError, Unit] =
       configs.traverse_ { config =>
         val connectET =
-          node.autoConnectLocalDomain(config).leftMap(err => StartFailed(name, err.toString))
+          node
+            .autoConnectLocalDomain(config)
+            .leftMap(err => StartFailed(name, err.toString))
+            .onShutdown(Left(StartFailed(name, "aborted due to shutdown")))
         this.config.parameters.timeouts.processing.unbounded
           .await("auto-connect to local domain")(connectET.value)
       }
@@ -387,10 +406,13 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
           case Some(node) =>
             Await
               .result(
-                node.reconnectDomainsIgnoreFailures().value,
+                node
+                  .reconnectDomainsIgnoreFailures()
+                  .leftMap(err => StartFailed(instance.name.unwrap, err.toString))
+                  .onShutdown(Left(StartFailed(instance.name.unwrap, "aborted due to shutdown")))
+                  .value,
                 config.parameters.timeouts.processing.unbounded.unwrap.minus(25.milliseconds),
               )
-              .leftMap(err => StartFailed(instance.name.unwrap, err.toString))
         }
       } yield ()
     }
@@ -415,13 +437,37 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   @VisibleForTesting
   protected def createParticipant(
       name: String,
-      participantConfig: config.ParticipantConfigType,
+      participantConfig: Config#ParticipantConfigType,
   ): ParticipantNodeBootstrap = {
     participantNodeFactory
       .create(
         NodeFactoryArguments(
           name,
           participantConfig,
+          config.participantNodeParametersByString(name),
+          createClock(Some(ParticipantNodeBootstrap.LoggerFactoryKeyName -> name)),
+          metricsFactory.forParticipant(name),
+          testingConfig,
+          futureSupervisor,
+          loggerFactory.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name),
+          writeHealthDumpToFile,
+          configuredOpenTelemetry,
+        ),
+        testingTimeService,
+      )
+      .valueOr(err => throw new RuntimeException(s"Failed to create participant bootstrap: $err"))
+  }
+
+  protected def createParticipantX(
+      name: String,
+      participantConfig: Config#ParticipantConfigType,
+  ): ParticipantNodeBootstrapX = {
+    participantNodeFactoryX
+      .create(
+        NodeFactoryArguments(
+          name,
+          participantConfig,
+          // this is okay for x-nodes, as we've merged the two parameter sequences
           config.participantNodeParametersByString(name),
           createClock(Some(ParticipantNodeBootstrap.LoggerFactoryKeyName -> name)),
           metricsFactory.forParticipant(name),

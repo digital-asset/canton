@@ -8,6 +8,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger, SuppressionRule}
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
@@ -46,7 +47,12 @@ trait TopologyManagerTest
         val betaKey: SigningPublicKey,
     ) {
       val namespace: Namespace = Namespace(namespaceKey.id)
-      val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+      val store = new InMemoryTopologyStore(
+        TopologyStoreId.AuthorizedStore,
+        loggerFactory,
+        timeouts,
+        futureSupervisor,
+      )
       val uid: UniqueIdentifier = UniqueIdentifier(Identifier.tryCreate("da"), namespace)
 
       def createCertNamespace(key: SigningPublicKey, root: Boolean): TopologyStateUpdate[Add] = {
@@ -162,7 +168,12 @@ trait TopologyManagerTest
       "successfully add one" in {
         (for {
           genr @ (_, setup) <- gen("success")
-          _ <- addCertNamespace(genr, setup.namespaceKey, setup.namespaceKey, root = true)
+          _ <- addCertNamespace(
+            genr,
+            setup.namespaceKey,
+            setup.namespaceKey,
+            root = true,
+          ).failOnShutdown
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
         } yield succeed).futureValue
       }
@@ -176,7 +187,7 @@ trait TopologyManagerTest
           )
 
         val res = for {
-          genr <- EitherT.right(gen("success"))
+          genr <- EitherT.right(gen("success")).mapK(FutureUnlessShutdown.outcomeK)
           (mgr, setup) = genr
           _ <- EitherT.right(
             addCertNamespace(genr, setup.namespaceKey, setup.namespaceKey, root = true)
@@ -222,7 +233,7 @@ trait TopologyManagerTest
           )
         } yield succeed
 
-        res.futureValue
+        res.value.failOnShutdown.futureValue
       }
       "allow to add and remove one" in {
         (for {
@@ -232,7 +243,7 @@ trait TopologyManagerTest
             setup.namespaceKey,
             setup.namespaceKey,
             root = true,
-          )
+          ).failOnShutdown
           authRemove <- mgr
             .authorize(
               rootCert.reverse,
@@ -240,6 +251,7 @@ trait TopologyManagerTest
               testedProtocolVersion,
             )
             .value
+            .failOnShutdown
           _ = authRemove.value shouldBe a[SignedTopologyTransaction[_]]
           _ <- checkStore(setup.store, numTransactions = 2, numActive = 0)
         } yield succeed).futureValue
@@ -252,7 +264,7 @@ trait TopologyManagerTest
             setup.namespaceKey,
             setup.namespaceKey,
             root = true,
-          )
+          ).failOnShutdown
           removeCert = rootCert.reverse
           authRemove <- mgr
             .authorize(
@@ -261,6 +273,7 @@ trait TopologyManagerTest
               testedProtocolVersion,
             )
             .value
+            .failOnShutdown
           _ = authRemove.value shouldBe a[SignedTopologyTransaction[_]]
           _ <- checkStore(setup.store, numTransactions = 2, numActive = 0)
           authAdd2 <- mgr
@@ -270,6 +283,7 @@ trait TopologyManagerTest
               testedProtocolVersion,
             )
             .value
+            .failOnShutdown
           _ = authAdd2.value shouldBe a[SignedTopologyTransaction[_]]
           _ <- checkStore(setup.store, numTransactions = 3, numActive = 1)
         } yield succeed).futureValue
@@ -282,10 +296,11 @@ trait TopologyManagerTest
             setup.namespaceKey,
             setup.namespaceKey,
             root = true,
-          )
+          ).failOnShutdown
           authAgain <- mgr
             .authorize(rootCert, Some(setup.namespace.fingerprint), testedProtocolVersion)
             .value
+            .failOnShutdown
           _ = authAgain.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
         } yield succeed).futureValue
@@ -298,7 +313,7 @@ trait TopologyManagerTest
             setup.namespaceKey,
             setup.namespaceKey,
             root = true,
-          )
+          ).failOnShutdown
           _ <- mgr
             .authorize(
               rootCert.reverse,
@@ -306,6 +321,7 @@ trait TopologyManagerTest
               testedProtocolVersion,
             )
             .value
+            .failOnShutdown
           authFail <- mgr
             .authorize(
               rootCert.reverse,
@@ -313,6 +329,7 @@ trait TopologyManagerTest
               testedProtocolVersion,
             )
             .value
+            .failOnShutdown
           _ = authFail.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 2, numActive = 0)
         } yield succeed).futureValue
@@ -325,7 +342,7 @@ trait TopologyManagerTest
             setup.namespaceKey,
             setup.namespaceKey,
             root = true,
-          )
+          ).failOnShutdown
           removeRootCert = TopologyStateUpdate(Remove, rootCert.element, testedProtocolVersion)
           invalidRev = removeRootCert.reverse.reverse
           _ = assert(
@@ -334,6 +351,7 @@ trait TopologyManagerTest
           authFail <- mgr
             .authorize(invalidRev, Some(setup.namespace.fingerprint), testedProtocolVersion)
             .value
+            .failOnShutdown
           _ = authFail.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
         } yield succeed).futureValue
@@ -343,9 +361,24 @@ trait TopologyManagerTest
           {
             (for {
               genr @ (mgr, setup) <- gen("success")
-              _ <- addCertNamespace(genr, setup.namespaceKey, setup.namespaceKey, root = true)
-              (cert2, _) <- addCertNamespace(genr, setup.alphaKey, setup.namespaceKey, root = true)
-              _ <- addCertNamespace(genr, setup.betaKey, setup.alphaKey, root = false)
+              _ <- addCertNamespace(
+                genr,
+                setup.namespaceKey,
+                setup.namespaceKey,
+                root = true,
+              ).failOnShutdown
+              (cert2, _) <- addCertNamespace(
+                genr,
+                setup.alphaKey,
+                setup.namespaceKey,
+                root = true,
+              ).failOnShutdown
+              _ <- addCertNamespace(
+                genr,
+                setup.betaKey,
+                setup.alphaKey,
+                root = false,
+              ).failOnShutdown
 
               removeRootCert = TopologyStateUpdate(Remove, cert2.element, testedProtocolVersion)
               authFail <- mgr
@@ -355,6 +388,7 @@ trait TopologyManagerTest
                   testedProtocolVersion,
                 )
                 .value
+                .failOnShutdown
               _ = authFail.left.value shouldBe a[CantonError]
               _ <- checkStore(setup.store, numTransactions = 3, numActive = 3)
 
@@ -366,6 +400,7 @@ trait TopologyManagerTest
                   force = true,
                 )
                 .value
+                .failOnShutdown
               _ = auth.value shouldBe a[SignedTopologyTransaction[_]]
               _ <- checkStore(setup.store, numTransactions = 4, numActive = 2)
             } yield succeed).futureValue
@@ -381,14 +416,20 @@ trait TopologyManagerTest
       "fail on removal of identifier delegations that create dangling transactions (success if forced)" in {
         (for {
           genr @ (mgr, setup) <- gen("success")
-          (_, _) <- addCertNamespace(genr, setup.namespaceKey, setup.namespaceKey, root = true)
-          (cert2, _) <- addCertIdentifier(genr, setup.alphaKey, setup.namespaceKey)
-          _ <- addOwnerToKeyMapping(genr, setup.alphaKey, setup.alphaKey)
+          (_, _) <- addCertNamespace(
+            genr,
+            setup.namespaceKey,
+            setup.namespaceKey,
+            root = true,
+          ).failOnShutdown
+          (cert2, _) <- addCertIdentifier(genr, setup.alphaKey, setup.namespaceKey).failOnShutdown
+          _ <- addOwnerToKeyMapping(genr, setup.alphaKey, setup.alphaKey).failOnShutdown
 
           removeRootCert = TopologyStateUpdate(Remove, cert2.element, testedProtocolVersion)
           authFail <- mgr
             .authorize(removeRootCert, Some(setup.namespaceKey.fingerprint), testedProtocolVersion)
             .value
+            .failOnShutdown
           _ = authFail.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 3, numActive = 3)
 
@@ -400,6 +441,7 @@ trait TopologyManagerTest
               force = true,
             )
             .value
+            .failOnShutdown
           _ = auth.value shouldBe a[SignedTopologyTransaction[_]]
           _ <- checkStore(setup.store, numTransactions = 4, numActive = 2)
         } yield succeed).futureValue
@@ -414,14 +456,14 @@ trait TopologyManagerTest
             setup.namespaceKey,
             setup.namespaceKey,
             root = true,
-          )
+          ).failOnShutdown
           (otherMgr, otherSetup) <- gen("other")
           // check that we can import
-          importCert <- otherMgr.add(transaction).value
+          importCert <- otherMgr.add(transaction).value.failOnShutdown
           _ = importCert shouldBe Right(())
           _ = checkStore(otherSetup.store, 1, 1)
           // and we shouldn't be able to re-import
-          reImportFail <- mgr.add(transaction).value
+          reImportFail <- mgr.add(transaction).value.failOnShutdown
         } yield reImportFail.left.value shouldBe a[CantonError]).futureValue
       }
       "fail on re-adding removed topology transactions" in {
@@ -432,7 +474,7 @@ trait TopologyManagerTest
             setup.namespaceKey,
             setup.namespaceKey,
             root = true,
-          )
+          ).failOnShutdown
           (otherMgr, otherSetup) <- gen("other")
           reverted = rootCert.reverse
           authRev <- mgr
@@ -442,14 +484,15 @@ trait TopologyManagerTest
               testedProtocolVersion,
             )
             .value
+            .failOnShutdown
           _ = authRev.value shouldBe a[SignedTopologyTransaction[_]]
           // import cert
-          _ <- otherMgr.add(transaction).value
+          _ <- otherMgr.add(transaction).value.failOnShutdown
           // import reversion
-          _ <- otherMgr.add(authRev.getOrElse(fail("reversion failed"))).value
+          _ <- otherMgr.add(authRev.getOrElse(fail("reversion failed"))).value.failOnShutdown
           _ = checkStore(otherSetup.store, 2, 0)
           // now, re-importing previous cert should fail
-          reimport <- otherMgr.add(transaction).value
+          reimport <- otherMgr.add(transaction).value.failOnShutdown
           _ = reimport.left.value shouldBe a[CantonError]
         } yield succeed).futureValue
       }

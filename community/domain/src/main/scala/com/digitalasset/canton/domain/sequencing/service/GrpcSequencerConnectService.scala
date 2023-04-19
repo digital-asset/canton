@@ -15,7 +15,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.v0.ServiceAgreement as protoServiceAgreement
 import com.digitalasset.canton.sequencing.protocol.VerifyActiveResponse
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -25,6 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class GrpcSequencerConnectService(
     domainId: DomainId,
+    sequencerId: SequencerId,
     staticDomainParameters: StaticDomainParameters,
     cryptoApi: DomainSyncCryptoClient,
     agreementManager: Option[ServiceAgreementManager],
@@ -37,7 +38,7 @@ class GrpcSequencerConnectService(
   protected val serverProtocolVersion: ProtocolVersion = staticDomainParameters.protocolVersion
 
   def getDomainId(request: GetDomainId.Request): Future[GetDomainId.Response] =
-    Future.successful(GetDomainId.Response(domainId.toProtoPrimitive))
+    Future.successful(GetDomainId.Response(domainId.toProtoPrimitive, sequencerId.toProtoPrimitive))
 
   def getDomainParameters(
       request: GetDomainParameters.Request

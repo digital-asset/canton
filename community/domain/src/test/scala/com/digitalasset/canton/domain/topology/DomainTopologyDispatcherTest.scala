@@ -155,9 +155,19 @@ class DomainTopologyDispatcherTest
     val ts1 = ts0.plusSeconds(1)
     val ts2 = ts1.plusSeconds(1)
 
-    val sourceStore = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    val sourceStore = new InMemoryTopologyStore(
+      TopologyStoreId.AuthorizedStore,
+      loggerFactory,
+      timeouts,
+      futureSupervisor,
+    )
     val targetStore =
-      new InMemoryTopologyStore(TopologyStoreId.DomainStore(domainId), loggerFactory)
+      new InMemoryTopologyStore(
+        TopologyStoreId.DomainStore(domainId),
+        loggerFactory,
+        timeouts,
+        futureSupervisor,
+      )
 
     val manager = mock[DomainTopologyManager]
     when(manager.store).thenReturn(sourceStore)

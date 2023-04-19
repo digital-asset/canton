@@ -43,7 +43,8 @@ import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, RequestCoun
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
-import scala.concurrent.{ExecutionContext, Future}
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 /** Allows for checking model conformance of a list of transaction view trees.
   * If successful, outputs the received transaction as LfVersionedTransaction along with TransactionMetadata.
@@ -227,10 +228,35 @@ class ModelConformanceChecker(
 
 object ModelConformanceChecker {
 
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private val subviewsCheckIsEnabled = new AtomicReference[Boolean](true)
+  private val testsAllowedToDisableConformanceCheck = Seq("LedgerAuthorizationIntegrationTest")
+
+  private[protocol] def isSubviewsCheckEnabled(loggerName: String): Boolean = {
+    val checkIsEnabled = subviewsCheckIsEnabled.get()
+
+    // Ensure check is enabled except for tests allowed to disable it
+    checkIsEnabled || !testsAllowedToDisableConformanceCheck.exists(loggerName.startsWith)
+  }
+
   @VisibleForTesting
-  // TODO(i12084): Make this more robust
-  var isSubviewsCheckDisabled: Boolean = false
+  def withSubviewsCheckDisabled[A](loggerFactory: NamedLoggerFactory)(body: => A): A = {
+    // Limit disabling the checks to specific tests
+    require(
+      testsAllowedToDisableConformanceCheck.exists(loggerFactory.name.startsWith),
+      "The subviews check can only be disabled for some specific tests",
+    )
+
+    blocking {
+      synchronized {
+        subviewsCheckIsEnabled.set(false)
+        try {
+          body
+        } finally {
+          subviewsCheckIsEnabled.set(true)
+        }
+      }
+    }
+  }
 
   def apply(
       damle: DAMLe,

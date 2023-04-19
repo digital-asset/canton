@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.akkastreams.dispatcher
 import akka.NotUsed
 import akka.stream.*
 import akka.stream.scaladsl.{Source, SourceQueueWithComplete}
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SignalDispatcher.Signal
 import org.slf4j.{Logger, LoggerFactory}
 
@@ -30,7 +31,7 @@ class SignalDispatcher private () {
   /** Signal to this Dispatcher that there's a new head `Index`.
     * The Dispatcher will emit values on all streams until the new head is reached.
     */
-  def signal(): Unit = getRunningState.foreach(_.offer(Signal))
+  def signal(): Unit = getRunningState.foreach(state => discard(state.offer(Signal)))
 
   /** Returns a Source that, when materialized, subscribes to this SignalDispatcher.
     *

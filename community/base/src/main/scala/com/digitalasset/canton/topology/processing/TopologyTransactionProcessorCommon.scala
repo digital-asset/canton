@@ -34,6 +34,8 @@ abstract class TopologyTransactionProcessorCommon(
 ) extends NamedLogging
     with FlagCloseable {
 
+  def subscribe(listener: TopologyTransactionProcessingSubscriber): Unit
+
   /** Inform the topology manager where the subscription starts when using [[processEnvelopes]] rather than [[createHandler]] */
   def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(implicit
       traceContext: TraceContext

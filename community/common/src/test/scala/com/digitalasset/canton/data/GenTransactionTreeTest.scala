@@ -549,16 +549,16 @@ class GenTransactionTreeTest
         .futureValue shouldBe Recipients(
         NonEmpty(
           Seq,
-          RecipientsTree(
+          RecipientsTree.ofMembers(
             NonEmpty.mk(Set, participant(16)),
             Seq(
-              RecipientsTree(
+              RecipientsTree.ofMembers(
                 NonEmpty(Set, 11, 12, 13, 15).map(participant),
                 Seq(
-                  RecipientsTree(
+                  RecipientsTree.ofMembers(
                     NonEmpty.mk(Set, participant(12), participant(14)),
                     Seq(
-                      RecipientsTree(
+                      RecipientsTree.ofMembers(
                         NonEmpty.mk(Set, participant(11), participant(13)),
                         Seq(
                           RecipientsTree.leaf(NonEmpty.mk(Set, participant(11), participant(12)))

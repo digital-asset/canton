@@ -552,7 +552,7 @@ private[transfer] class TransferInProcessingSteps(
           )
           .map(CommitAndStoreContractsAndPublishEvent(None, Set(), _, None))
 
-      case (_: Verdict.MediatorReject) =>
+      case _: Verdict.MediatorReject =>
         EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None, None))
     }
   }

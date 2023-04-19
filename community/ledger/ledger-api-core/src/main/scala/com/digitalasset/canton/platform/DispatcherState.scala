@@ -18,7 +18,7 @@ import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import io.grpc.StatusRuntimeException
 
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.util.{Failure, Success}
 
 /** Life-cycle manager for the Ledger API streams offset dispatcher. */
@@ -30,21 +30,21 @@ class DispatcherState(dispatcherShutdownTimeout: Duration)(implicit
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var dispatcherStateRef: DispatcherState.State = DispatcherNotRunning
 
-  def isRunning: Boolean = synchronized {
+  def isRunning: Boolean = blocking(synchronized {
     dispatcherStateRef match {
       case DispatcherRunning(_) => true
       case DispatcherNotRunning | DispatcherStateShutdown => false
     }
-  }
+  })
 
-  def getDispatcher: Dispatcher[Offset] = synchronized {
+  def getDispatcher: Dispatcher[Offset] = blocking(synchronized {
     dispatcherStateRef match {
       case DispatcherStateShutdown | DispatcherNotRunning => throw dispatcherNotRunning
       case DispatcherRunning(dispatcher) => dispatcher
     }
-  }
+  })
 
-  def startDispatcher(initializationOffset: Offset): Unit = synchronized {
+  def startDispatcher(initializationOffset: Offset): Unit = blocking(synchronized {
     dispatcherStateRef match {
       case DispatcherNotRunning =>
         val activeDispatcher = buildDispatcher(initializationOffset)
@@ -59,9 +59,9 @@ class DispatcherState(dispatcherShutdownTimeout: Duration)(implicit
           "Dispatcher startup triggered while an existing dispatcher is still active."
         )
     }
-  }
+  })
 
-  def stopDispatcher(): Future[Unit] = synchronized {
+  def stopDispatcher(): Future[Unit] = blocking(synchronized {
     logger.info(s"Stopping active $ServiceName.")
     dispatcherStateRef match {
       case DispatcherNotRunning | DispatcherStateShutdown =>
@@ -80,9 +80,9 @@ class DispatcherState(dispatcherShutdownTimeout: Duration)(implicit
               f
           }(ExecutionContext.parasitic)
     }
-  }
+  })
 
-  private[platform] def shutdown(): Future[Unit] = synchronized {
+  private[platform] def shutdown(): Future[Unit] = blocking(synchronized {
     logger.info(s"Shutting down $ServiceName state.")
 
     val currentDispatcherState = dispatcherStateRef
@@ -112,7 +112,7 @@ class DispatcherState(dispatcherShutdownTimeout: Duration)(implicit
               f
           }(ExecutionContext.parasitic)
     }
-  }
+  })
 
   private def buildDispatcher(initializationOffset: Offset): Dispatcher[Offset] =
     Dispatcher(

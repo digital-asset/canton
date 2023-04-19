@@ -23,6 +23,7 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   ContractMetadata,
   LfContractId,
+  LfTemplateId,
   RequestId,
   SerializableContract,
   TransferId,
@@ -776,10 +777,12 @@ object TransferStoreTest {
     TracedLogger(loggerFactoryNotUsed.getLogger(TransferStoreTest.getClass))
   )
   val cryptoFactory =
-    TestingIdentityFactory(loggerFactoryNotUsed).forOwnerAndDomain(DefaultTestIdentities.sequencer)
+    TestingIdentityFactory(loggerFactoryNotUsed).forOwnerAndDomain(
+      DefaultTestIdentities.sequencerId
+    )
   val sequencerKey =
     TestingIdentityFactory(loggerFactoryNotUsed)
-      .newSigningPublicKey(DefaultTestIdentities.sequencer)
+      .newSigningPublicKey(DefaultTestIdentities.sequencerId)
       .fingerprint
   val privateCrypto = cryptoFactory.crypto.privateCrypto
   val pureCryptoApi: CryptoPureApi = cryptoFactory.pureCrypto
@@ -834,6 +837,16 @@ object TransferStoreTest {
     )
   }
 
+  private[participant] val templateId: LfTemplateId = {
+    if (protocolVersion >= ProtocolVersion.v5)
+      contract.contractInstance.unversioned.template
+    else
+      LfTemplateId.assertFromString(
+        "unknown:template:id"
+      ) // default value in TransferOutView/TransferInView
+
+  }
+
   def mkTransferDataForDomain(
       transferId: TransferId,
       sourceMediator: MediatorId,
@@ -857,6 +870,7 @@ object TransferStoreTest {
       Set.empty,
       workflowId,
       contract.contractId,
+      templateId = templateId,
       transferId.sourceDomain,
       SourceProtocolVersion(protocolVersion),
       sourceMediator,

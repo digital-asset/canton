@@ -17,18 +17,11 @@ import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   ConsoleMacros,
   FeatureFlag,
-  FeatureFlagFilter,
   Help,
   Helpful,
   InstanceReferenceCommon,
 }
-import com.digitalasset.canton.crypto.{
-  CertificateId,
-  Fingerprint,
-  KeyPurpose,
-  PublicKey,
-  X509Certificate,
-}
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.DynamicDomainParameters as DynamicDomainParametersInternal
@@ -52,28 +45,31 @@ abstract class TopologyAdministrationGroupCommon(
 
   protected val runner: AdminCommandRunner = instance
 
-  // small cache to avoid repetitive calls to fetchId (as the id is immutable once set)
-  protected val idCache = new AtomicReference[Option[UniqueIdentifier]](None)
+  def owner_to_key_mappings: OwnerToKeyMappingsGroup
 
-  protected[commands] def fetchId(): Option[UniqueIdentifier]
+  // small cache to avoid repetitive calls to fetchId (as the id is immutable once set)
+  protected val idCache =
+    new AtomicReference[Option[UniqueIdentifier]](None)
 
   private[console] def clearCache(): Unit = {
     idCache.set(None)
   }
 
+  protected def getIdCommand(): ConsoleCommandResult[UniqueIdentifier]
+
   private[console] def idHelper[T](
-      name: String,
-      apply: UniqueIdentifier => T,
-  ): T =
-    fetchId().fold(
-      throw new IllegalStateException(
-        s"Unable to get uid of $name. Has the node been started and is it initialized?"
-      )
-    )(apply)
-
-  def init_id(identifier: Identifier, fingerprint: Fingerprint): UniqueIdentifier
-
-  def owner_to_key_mappings: OwnerToKeyMappingsGroup
+      apply: UniqueIdentifier => T
+  ): T = {
+    apply(idCache.get() match {
+      case Some(v) => v
+      case None =>
+        val r = consoleEnvironment.run {
+          getIdCommand()
+        }
+        idCache.set(Some(r))
+        r
+    })
+  }
 
   @Help.Summary("Topology synchronisation helpers", FeatureFlag.Preview)
   @Help.Group("Synchronisation Helpers")
@@ -122,6 +118,26 @@ abstract class OwnerToKeyMappingsGroup(
   ): Unit
 }
 
+trait InitNodeId extends ConsoleCommandGroup {
+
+  @Help.Summary("Initialize the node with a unique identifier")
+  @Help.Description("""Every node in Canton is identified using a unique identifier, which is composed
+                      |of a user-chosen string and the fingerprint of a signing key. The signing key is the root key
+                      |defining a so-called namespace, where the signing key has the ultimate control over
+                      |issuing new identifiers.
+                      |During initialisation, we have to pick such a unique identifier.
+                      |By default, initialisation happens automatically, but it can be turned off by setting the auto-init
+                      |option to false.
+                      |Automatic node initialisation is usually turned off to preserve the identity of a participant or domain
+                      |node (during major version upgrades) or if the topology transactions are managed through
+                      |a different topology manager than the one integrated into this node.""")
+  def init_id(identifier: Identifier, fingerprint: Fingerprint): UniqueIdentifier =
+    consoleEnvironment.run {
+      runner.adminCommand(TopologyAdminCommands.Init.InitId(identifier.unwrap, fingerprint.unwrap))
+    }
+
+}
+
 class TopologyAdministrationGroup(
     instance: InstanceReferenceCommon,
     topologyQueueStatus: => Option[TopologyQueueStatus],
@@ -133,34 +149,12 @@ class TopologyAdministrationGroup(
       consoleEnvironment,
       loggerFactory,
     )
-    with FeatureFlagFilter {
+    with InitNodeId {
 
   import runner.*
 
-  override protected[commands] def fetchId(): Option[UniqueIdentifier] =
-    idCache
-      .updateAndGet {
-        case None =>
-          consoleEnvironment.run {
-            adminCommand(TopologyAdminCommands.Init.GetId())
-          }
-        case x => x
-      }
-
-  @Help.Summary("Initialize the node with a unique identifier")
-  @Help.Description("""Every node in Canton is identified using a unique identifier, which is composed
-      |of a user-chosen string and the fingerprint of a signing key. The signing key is the root key of
-      |said namespace.
-      |During initialisation, we have to pick such a unique identifier.
-      |By default, initialisation happens automatically, but it can be turned off by setting the auto-init
-      |option to false.
-      |Automatic node initialisation is usually turned off to preserve the identity of a participant or domain
-      |node (during major version upgrades) or if the topology transactions are managed through
-      |a different topology manager than the one integrated into this node.""")
-  override def init_id(identifier: Identifier, fingerprint: Fingerprint): UniqueIdentifier =
-    consoleEnvironment.run {
-      adminCommand(TopologyAdminCommands.Init.InitId(identifier.unwrap, fingerprint.unwrap))
-    }
+  override protected def getIdCommand(): ConsoleCommandResult[UniqueIdentifier] =
+    runner.adminCommand(TopologyAdminCommands.Init.GetId())
 
   @Help.Summary("Upload signed topology transaction")
   @Help.Description(

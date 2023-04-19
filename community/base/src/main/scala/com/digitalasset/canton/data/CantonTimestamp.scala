@@ -73,18 +73,6 @@ final case class CantonTimestamp(underlying: LfTimestamp)
 
 object CantonTimestamp {
 
-  def max(timestamp: CantonTimestamp, timestamps: CantonTimestamp*): CantonTimestamp = {
-    timestamps.foldLeft(timestamp) { case (a, b) =>
-      if (a > b) a else b
-    }
-  }
-
-  def min(timestamp: CantonTimestamp, timestamps: CantonTimestamp*): CantonTimestamp = {
-    timestamps.foldLeft(timestamp) { case (a, b) =>
-      if (a < b) a else b
-    }
-  }
-
   def Epoch: CantonTimestamp = new CantonTimestamp(LfTimestamp.Epoch)
 
   def MinValue: CantonTimestamp = new CantonTimestamp(LfTimestamp.MinValue)

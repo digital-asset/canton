@@ -8,6 +8,7 @@ import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.admin.PackageService.DarDescriptor
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
 import com.digitalasset.canton.participant.admin.*
@@ -53,7 +54,11 @@ class GrpcPackageService(
     } yield UploadDarResponse(
       UploadDarResponse.Value.Success(UploadDarResponse.Success(hash.toHexString))
     )
-    EitherTUtil.toFuture(ret.leftMap(err => err.code.asGrpcError(err)))
+    EitherTUtil.toFuture(
+      ret
+        .leftMap(err => err.code.asGrpcError(err))
+        .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
+    )
   }
 
   override def removePackage(request: RemovePackageRequest): Future[RemovePackageResponse] = {
@@ -76,6 +81,7 @@ class GrpcPackageService(
             packageId,
             request.force,
           )
+          .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error()))
           .leftMap(err => err.code.asGrpcError(err))
       } yield {
         RemovePackageResponse(success = Some(Empty()))
@@ -98,7 +104,10 @@ class GrpcPackageService(
     val ret = {
       for {
         hash <- EitherT.fromEither[Future](hashE)
-        _unit <- service.removeDar(hash).leftMap(_.asGrpcError)
+        _unit <- service
+          .removeDar(hash)
+          .leftMap(_.asGrpcError)
+          .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
       } yield {
         RemoveDarResponse(success = Some(Empty()))
       }
@@ -193,6 +202,7 @@ class GrpcPackageService(
     darDistribution
       .accept(Converters.toContractId[M.ShareDar](request.id))
       .map(acceptRejectResultToResponse("accept"))
+      .onShutdown(scala.util.Failure(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
       .flatMap(Future.fromTry)
   }
 
@@ -218,6 +228,8 @@ class GrpcPackageService(
         error.asGrpcError.getStatus
       case AcceptRejectError.InvalidOffer(error) =>
         Status.INTERNAL.withDescription(s"Invalid offer: $error")
+      case AcceptRejectError.Shutdown =>
+        Status.ABORTED.withDescription(s"Node is shutting down")
     }
 
     result

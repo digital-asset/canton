@@ -18,6 +18,7 @@ import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, SingleUseCell}
 import slick.dbio.{DBIOAction, Effect, NoStream}
 
 import java.sql.Statement
+import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 
@@ -153,7 +154,7 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
   /** A list of queries for the items that we want to check for */
   protected def checkQuery(itemsToCheck: NonEmpty[Seq[ItemIdentifier]])(implicit
       batchTraceContext: TraceContext
-  ): Iterable[DbAction.ReadOnly[Iterable[CheckData]]]
+  ): immutable.Iterable[DbAction.ReadOnly[immutable.Iterable[CheckData]]]
 
   /** Compare the item against the data that was found in the store and produce a result.
     * It is called for each item that the update command returned an update counter not equal to 1.

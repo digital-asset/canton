@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.localstore
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.ledger.api.domain.{
   IdentityProviderConfig,
   IdentityProviderId,
@@ -187,7 +188,7 @@ class CachedUserManagementStoreSpec
       get1 <- tested.getUserInfo(user.id, idpId)
       get2 <- tested.getUserInfo(user.id, idpId)
       get3 <- {
-        Thread.sleep(2000); tested.getUserInfo(user.id, idpId)
+        Threading.sleep(2000); tested.getUserInfo(user.id, idpId)
       }
     } yield {
       val order = inOrder(delegate)

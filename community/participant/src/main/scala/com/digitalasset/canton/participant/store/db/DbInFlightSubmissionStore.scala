@@ -38,6 +38,7 @@ import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -458,7 +459,7 @@ object DbInFlightSubmissionStore {
     /** A list of queries for the items that we want to check for */
     override protected def checkQuery(submissionsToCheck: NonEmpty[Seq[ChangeIdHash]])(implicit
         batchTraceContext: TraceContext
-    ): Iterable[ReadOnly[Iterable[CheckData]]] = {
+    ): immutable.Iterable[ReadOnly[immutable.Iterable[CheckData]]] = {
       DbStorage.toInClauses_("change_id_hash", submissionsToCheck, maxItemsInSqlInClause).map {
         inClause =>
           import DbStorage.Implicits.BuilderChain.*

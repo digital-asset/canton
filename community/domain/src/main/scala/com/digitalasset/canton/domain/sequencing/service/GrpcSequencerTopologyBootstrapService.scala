@@ -5,6 +5,8 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
 import cats.syntax.traverse.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.admin.v0.TopologyBootstrapRequest
 import com.digitalasset.canton.domain.admin.v0.TopologyBootstrapServiceGrpc.TopologyBootstrapService
@@ -29,6 +31,8 @@ class GrpcSequencerTopologyBootstrapService(
     client: SequencerClient,
     isInitialized: () => Future[Boolean],
     val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
+    timeouts: ProcessingTimeout,
 )(implicit executionContext: ExecutionContext)
     extends TopologyBootstrapService
     with NamedLogging {
@@ -57,6 +61,8 @@ class GrpcSequencerTopologyBootstrapService(
                 topologySnapshot.result.map(_.transaction),
                 mustHaveActiveMediator = false,
                 loggerFactory,
+                timeouts,
+                futureSupervisor,
               )
               .leftMap(Status.INVALID_ARGUMENT.withDescription(_).asException())
             _ <- EitherT

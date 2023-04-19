@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
-import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0, v1, v2}
+import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId, RootHash, ViewHash, v0, v1, v2}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.time.TimeProof
@@ -306,6 +306,7 @@ object TransferOutCommonData
   * @param salt The salt to blind the Merkle hash
   * @param submitter The submitter of the transfer-out request
   * @param contractId The contract ID to be transferred
+  * @param templateId The template ID of the contract to be transferred
   * @param targetDomain The target domain to which the contract is to be transferred
   * @param targetTimeProof The sequenced event from the target domain
   *                        whose timestamp defines the baseline for measuring time periods on the target domain
@@ -314,6 +315,7 @@ final case class TransferOutView private (
     override val salt: Salt,
     submitterMetadata: TransferSubmitterMetadata,
     contractId: LfContractId,
+    templateId: LfTemplateId,
     targetDomain: DomainId,
     targetTimeProof: TimeProof,
     targetProtocolVersion: TargetProtocolVersion,
@@ -368,6 +370,7 @@ final case class TransferOutView private (
       submissionId = submissionId.getOrElse(""),
       workflowId = workflowId.getOrElse(""),
       commandId = commandId,
+      templateId = templateId.toString,
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -376,6 +379,7 @@ final case class TransferOutView private (
   override def pretty: Pretty[TransferOutView] = prettyOfClass(
     param("submitter", _.submitter),
     param("contract id", _.contractId),
+    param("template id", _.templateId),
     param("target domain", _.targetDomain),
     param("target time proof", _.targetTimeProof),
     param("submitting participant", _.submittingParticipant),
@@ -391,6 +395,7 @@ object TransferOutView
   override val name: String = "TransferOutView"
   private val noParticipantId = LedgerParticipantId.assertFromString("no-participant-id")
   private val noApplicationId = LedgerApplicationId.assertFromString("no-application-id")
+  private val unknownTemplateId = LfTemplateId.assertFromString("unknown:template:id")
   private val noCommandId = LedgerCommandId.assertFromString("no-command-id")
 
   private[TransferOutView] final case class CommonData(
@@ -451,6 +456,7 @@ object TransferOutView
       submitterMetadata: TransferSubmitterMetadata,
       workflowId: Option[LfWorkflowId],
       contractId: LfContractId,
+      templateId: LfTemplateId,
       targetDomain: DomainId,
       targetTimeProof: TimeProof,
       sourceProtocolVersion: SourceProtocolVersion,
@@ -460,6 +466,7 @@ object TransferOutView
       salt,
       submitterMetadata,
       contractId,
+      templateId,
       targetDomain,
       targetTimeProof,
       targetProtocolVersion,
@@ -491,6 +498,7 @@ object TransferOutView
         None,
       ),
       commonData.contractId,
+      unknownTemplateId,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,
@@ -530,6 +538,7 @@ object TransferOutView
         None,
       ),
       commonData.contractId,
+      unknownTemplateId,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,
@@ -544,6 +553,7 @@ object TransferOutView
       saltP,
       submitterP,
       contractIdP,
+      templateIdP,
       targetDomainP,
       targetTimeProofP,
       targetProtocolVersionP,
@@ -570,6 +580,7 @@ object TransferOutView
       submissionId <- ProtoConverter.parseLFSubmissionIdO(submissionIdP)
       workflowId <- ProtoConverter.parseLFWorkflowIdO(worfklowIdP)
       commandId <- ProtoConverter.parseCommandId(commandIdP)
+      templateId <- ProtoConverter.parseTemplateId(templateIdP)
     } yield TransferOutView(
       commonData.salt,
       TransferSubmitterMetadata(
@@ -580,6 +591,7 @@ object TransferOutView
         submissionId,
       ),
       commonData.contractId,
+      templateId,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,

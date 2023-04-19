@@ -38,6 +38,7 @@ class TransferInProcessor(
     targetProtocolVersion: TargetProtocolVersion,
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
+    skipRecipientsCheck: Boolean,
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
       TransferInProcessingSteps.SubmissionParam,
@@ -62,4 +63,5 @@ class TransferInProcessor(
       sequencerClient,
       loggerFactory,
       futureSupervisor,
+      skipRecipientsCheck = skipRecipientsCheck,
     )

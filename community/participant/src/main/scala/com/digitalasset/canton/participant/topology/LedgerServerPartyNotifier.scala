@@ -4,18 +4,15 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.syntax.parallel.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.CantonRequireTypes.{LengthLimitedString, String255}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{
-  AsyncOrSyncCloseable,
-  FlagCloseableAsync,
-  FutureUnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
@@ -32,28 +29,27 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueueWithShutdown}
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
-import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Listens to changes of the identity stores and notifies the ledger-api server
+/** Listens to changes of the topology stores and notifies the Ledger API server
   *
-  * We need to send PartyAddedToParticipant messages to LedgerApi server for every
-  * successful addition.
+  * We need to send `PartyAddedToParticipant` messages to Ledger API server for every
+  * successful addition with a known participant ID.
   */
 class LedgerServerPartyNotifier(
     participantId: ParticipantId,
     eventPublisher: ParticipantEventPublisher,
     store: PartyMetadataStore,
     clock: Clock,
+    futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync {
+    with FlagCloseable {
 
   def resumePending(): Future[Unit] = {
     import TraceContext.Implicits.Empty.*
@@ -62,13 +58,10 @@ class LedgerServerPartyNotifier(
         logger.debug(s"Resuming party notification with ${todo.size} pending notifications")
       todo.foreach { partyMetadata =>
         val participantIdO = partyMetadata.participantId
-        participantIdO.foreach(_ => scheduleUpdate(partyMetadata, SequencedTime(clock.now)))
+        participantIdO.foreach(_ => scheduleNotification(partyMetadata, SequencedTime(clock.now)))
       }
     }
   }
-
-  @VisibleForTesting
-  def flush(): Future[Unit] = sequentialQueue.flush()
 
   def attachToTopologyProcessor(): TopologyTransactionProcessingSubscriber =
     new TopologyTransactionProcessingSubscriber {
@@ -100,24 +93,31 @@ class LedgerServerPartyNotifier(
         transactions.parTraverse_(observedF(SequencedTime(clock.now), EffectiveTime(clock.now), _))
     }
 
-  private val sequentialQueue = new SimpleExecutionQueue()
+  private val sequentialQueue = new SimpleExecutionQueueWithShutdown(
+    "LedgerServerPartyNotifier",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   def setDisplayName(partyId: PartyId, displayName: DisplayName)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    sequentialQueue.execute(
-      {
-        val currentTime = clock.now
-        updateAndNotify(
-          partyId,
-          Some(displayName),
-          None,
-          SequencedTime(currentTime),
-          EffectiveTime(currentTime),
-        )
-      },
-      s"set display name for $partyId",
-    )
+    sequentialQueue
+      .execute(
+        {
+          val currentTime = clock.now
+          updateAndNotify(
+            partyId,
+            Some(displayName),
+            None,
+            SequencedTime(currentTime),
+            EffectiveTime(currentTime),
+          )
+        },
+        s"set display name for $partyId",
+      )
+      .onShutdown(logger.debug("Shutdown in progress, canceling display name update"))
 
   private def updateAndNotify(
       partyId: PartyId,
@@ -128,165 +128,164 @@ class LedgerServerPartyNotifier(
       submissionIdRaw: String255 = LengthLimitedString.getUuid.asString255,
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
-    def desiredDisplayName(
-        stored: Option[DisplayName],
-        passed: Option[DisplayName],
-    ): Option[DisplayName] =
-      if (passed.isDefined) passed else stored
-
-    def desiredParticipantId(
-        stored: Option[ParticipantId],
-        passed: Option[ParticipantId],
-    ): Option[ParticipantId] =
-      // prefer ours over any passed
-      if (passed.isDefined && !stored.contains(participantId))
-        passed
-      else stored
-    for {
-      currentO <- store.metadataForParty(partyId)
-      current = currentO.getOrElse(
-        PartyMetadata(partyId, None, None)(
-          effectiveTimestamp = effectiveTimestamp.value,
+    // Compare the inputs of `updateAndNotify` with the party metadata retrieved from the store
+    // Returns `None` if there are no actual updates to record, otherwise `Some` with the actual update
+    // For the most part, different submissions (with different submission IDs) will always represent
+    // an update even if nothing else has changed.
+    // Assumption: `current.partyId == partyId`
+    def computeUpdateOver(current: PartyMetadata): Option[PartyMetadata] = {
+      val update = {
+        PartyMetadata(
+          partyId = partyId,
+          displayName = displayName.orElse(current.displayName),
+          participantId = // Don't overwrite the participant ID if it's already set to the expected value
+            if (current.participantId.contains(participantId)) current.participantId
+            else targetParticipantId.orElse(current.participantId),
+        )(
+          effectiveTimestamp = effectiveTimestamp.value.max(current.effectiveTimestamp),
           submissionId = submissionIdRaw,
         )
-      )
-      desired = PartyMetadata(
-        partyId,
-        displayName = desiredDisplayName(current.displayName, displayName),
-        participantId = desiredParticipantId(current.participantId, targetParticipantId),
-      )(
-        effectiveTimestamp =
-          CantonTimestamp.max(effectiveTimestamp.value, current.effectiveTimestamp),
-        submissionId = submissionIdRaw,
-      )
+      }
+      Option.when(current != update)(update)
+    }
 
-      // update or insert if necessary
-      _ <-
-        (if (current != desired)
-           updateToNewMetadata(desired, sequencerTimestamp)
-         else Future.unit)
-    } yield ()
+    val maybeUpdate: Future[Option[PartyMetadata]] =
+      store.metadataForParty(partyId).map {
+        case None =>
+          Some(
+            PartyMetadata(partyId, displayName, targetParticipantId)(
+              effectiveTimestamp.value,
+              submissionIdRaw,
+            )
+          )
+        case Some(current) =>
+          computeUpdateOver(current)
+      }
+
+    maybeUpdate.flatMap {
+      case Some(update) =>
+        applyUpdateAndNotify(update, sequencerTimestamp)
+      case None =>
+        logger.debug(
+          s"Not applying duplicate party metadata update with submission ID $submissionIdRaw"
+        )
+        Future.unit
+    }
+
   }
 
-  private def updateToNewMetadata(
+  private def applyUpdateAndNotify(
       metadata: PartyMetadata,
       sequencerTimestamp: SequencedTime,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val storedF = store.insertOrUpdatePartyMetadata(
-      partyId = metadata.partyId,
-      participantId = metadata.participantId,
-      displayName = metadata.displayName,
-      effectiveTimestamp = metadata.effectiveTimestamp,
-      submissionId = metadata.submissionId,
-    )
-    metadata.participantId match {
-      case Some(_) =>
-        scheduleUpdate(metadata, sequencerTimestamp)
-        storedF
-      case None =>
-        storedF.flatMap { _ =>
-          store.markNotified(metadata)
-        }
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    for (_ <- store.insertOrUpdatePartyMetadata(metadata)) yield {
+      scheduleNotification(metadata, sequencerTimestamp)
     }
-  }
 
-  private def scheduleUpdate(
+  private def scheduleNotification(
       metadata: PartyMetadata,
       sequencerTimestamp: SequencedTime,
   )(implicit
       traceContext: TraceContext
   ): Unit = {
-    // if the update is in the future, ensure we wait until the effective time is valid
-    if (metadata.effectiveTimestamp > sequencerTimestamp.value) {
-      // we don't await on this future
-      val _ = clock.scheduleAfter(
-        _ => notifyLedgerServer(metadata, scheduled = true),
-        metadata.effectiveTimestamp - sequencerTimestamp.value,
-      )
-    } else notifyLedgerServer(metadata, scheduled = false)
+    // Delays the notification to ensure that the topology change is visible to the ledger server
+    // This approach relies on the local `clock` not to drift to much away from the sequencer
+    PositiveFiniteDuration
+      .create(metadata.effectiveTimestamp - sequencerTimestamp.value)
+      .map(_.duration)
+      .toOption match {
+      case Some(timeBeforeScheduling) =>
+        lazy val latestMetadata = checkForConcurrentUpdate(metadata)
+        clock.scheduleAfter(notifyLedgerServer(latestMetadata), timeBeforeScheduling).discard
+      case None =>
+        notifyLedgerServer(Future.successful(metadata))(clock.now)
+    }
   }
+
+  private def checkForConcurrentUpdate(current: PartyMetadata)(implicit
+      traceContext: TraceContext
+  ): Future[PartyMetadata] =
+    for (metadata <- store.metadataForParty(current.partyId)) yield {
+      metadata
+        .collect {
+          case stored if stored.effectiveTimestamp > current.effectiveTimestamp =>
+            // Keep the submission ID as is to ensure the ledger server recognizes this message
+            stored.copy()(stored.effectiveTimestamp, current.submissionId, stored.notified)
+        }
+        .getOrElse(current)
+    }
+
+  private def sendNotification(
+      metadata: PartyMetadata
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    metadata.participantId match {
+      case Some(participantId) =>
+        logger.debug(show"Pushing ${metadata.partyId} on $participantId to ledger server")
+        eventPublisher.publish(
+          LedgerSyncEvent.PartyAddedToParticipant(
+            metadata.partyId.toLf,
+            metadata.displayName.map(_.unwrap).getOrElse(""),
+            participantId.toLf,
+            ParticipantEventPublisher.now.toLf,
+            LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
+          )
+        )
+      case None =>
+        Future.successful(
+          logger.debug(
+            s"Skipping party metadata ledger server notification because the participant ID is missing $metadata"
+          )
+        )
+    }
 
   private def notifyLedgerServer(
-      metadata: PartyMetadata,
-      scheduled: Boolean,
-  )(implicit traceContext: TraceContext): Unit = {
-    val notifyF = sequentialQueue.execute(
-      performUnlessClosingF(functionFullName) {
-        val metadataF = if (scheduled) {
-          store
-            .metadataForParty(metadata.partyId)
-            .map(_.flatMap(m => m.participantId.map(pid => (m, pid))))
-            .map {
-              case Some((stored, pid)) =>
-                if (stored.effectiveTimestamp == metadata.effectiveTimestamp) {
-                  Some((stored, pid))
-                } else {
-                  logger.debug(
-                    s"Skipping metadata update ${metadata} as it has changed in the meantime to ${stored}"
-                  )
-                  None
-                }
-              case None =>
-                logger.debug(s"Skipping metadata update as participant-id is missing ${metadata}")
-                None
-            }
-        } else Future.successful(metadata.participantId.map(p => (metadata, p)))
-        metadataF.flatMap {
-          case Some((update, targetParticipantId)) =>
-            logger.debug(
-              show"Pushing ${metadata.partyId} on ${targetParticipantId} to ledger server"
-            )
-            val event = LedgerSyncEvent.PartyAddedToParticipant(
-              update.partyId.toLf,
-              update.displayName.map(_.unwrap).getOrElse(""),
-              targetParticipantId.toLf,
-              ParticipantEventPublisher.now.toLf,
-              LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
-            )
-            for {
-              _ <- eventPublisher.publish(event)
-              _ <- store.markNotified(metadata)
-            } yield ()
-          case None => Future.unit
-        }
-      }.unwrap,
-      s"notifying ledger server about ${metadata}",
+      fetchMetadata: => Future[PartyMetadata]
+  )(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Unit =
+    FutureUtil.doNotAwait(
+      sequentialQueue
+        .execute(
+          for {
+            metadata <- fetchMetadata
+            _ <- sendNotification(metadata)
+            _ <- store.markNotified(metadata)
+          } yield {
+            logger.debug(s"Notification scheduled at $timestamp sent and marked")
+          },
+          "Notifying the ledger server about the metadata update",
+        )
+        .unwrap,
+      "Error while sending the metadata update notification to the ledger server",
     )
-    FutureUtil.doNotAwait(notifyF, s"failed to notify ledger server about ${metadata}")
-  }
 
-  @VisibleForTesting
-  private[topology] def observedF(
+  private def observedF(
       sequencerTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
       transaction: SignedTopologyTransaction[TopologyChangeOp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+
     def dispatch(
         party: PartyId,
         participant: ParticipantId,
         submissionId: String255,
-    ): FutureUnlessShutdown[Unit] = {
+    ): FutureUnlessShutdown[Unit] =
       // start the notification in the background
       // note, that if this fails, we have an issue as ledger server will not have
       // received the event. this is generally an issue with everything we send to the
       // index server
-      performUnlessClosingF(functionFullName)(
-        FutureUtil.logOnFailure(
-          sequentialQueue.execute(
-            updateAndNotify(
-              party,
-              displayName = None,
-              targetParticipantId = Some(participant),
-              sequencerTimestamp,
-              effectiveTimestamp,
-              submissionId,
-            ),
-            s"notify ledger server about $party",
+      FutureUtil.logOnFailureUnlessShutdown(
+        sequentialQueue.execute(
+          updateAndNotify(
+            party,
+            displayName = None,
+            targetParticipantId = Some(participant),
+            sequencerTimestamp,
+            effectiveTimestamp,
+            submissionId,
           ),
-          s"Notifying ledger server about ${transaction} failed",
-        )
+          s"notify ledger server about $party",
+        ),
+        s"Notifying ledger server about $transaction failed",
       )
-    }
 
     if (transaction.operation == TopologyChangeOp.Add) {
       transaction.transaction.element.mapping match {
@@ -303,14 +302,9 @@ class LedgerServerPartyNotifier(
     }
   }
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    Seq(
-      sequentialQueue.asCloseable(
-        "ledger-server-party-notifier-queue",
-        timeouts.shutdownShort.unwrap,
-      )
-    )
+  override protected def onClosed(): Unit = {
+    Lifecycle.close(sequentialQueue)(logger)
+    super.onClosed()
   }
 
 }

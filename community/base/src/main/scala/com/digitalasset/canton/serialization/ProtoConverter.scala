@@ -15,7 +15,8 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   TimestampConversionError,
 }
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId}
+import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.{
   LedgerApplicationId,
   LedgerParticipantId,
@@ -136,6 +137,12 @@ object ProtoConverter {
 
   def parseCommandId(id: String): ParsingResult[Ref.CommandId] =
     parseString(id)(Ref.CommandId.fromString)
+
+  def parseTemplateIdO(id: String): ParsingResult[Option[LfTemplateId]] =
+    OptionUtil.emptyStringAsNone(id).traverse(parseTemplateId)
+
+  def parseTemplateId(id: String): ParsingResult[LfTemplateId] =
+    parseString(id)(LfTemplateId.fromString)
 
   private def parseString[T](from: String)(to: String => Either[String, T]): ParsingResult[T] =
     to(from).leftMap(StringConversionError)

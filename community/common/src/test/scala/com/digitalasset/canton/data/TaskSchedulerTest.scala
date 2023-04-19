@@ -9,6 +9,7 @@ import com.daml.metrics.api.MetricHandle.Gauge
 import com.daml.metrics.api.MetricHandle.Gauge.SimpleCloseableGauge
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.noop.NoOpCounter
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -93,7 +94,8 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
               metrics,
               timeouts,
               loggerFactory,
-            )(executionContext)
+              futureSupervisor,
+            )
           val executionOrder = mutable.Queue.empty[Int]
 
           val barrierFutures = barriers.map(timestamp => taskScheduler.scheduleBarrier(timestamp))
@@ -167,7 +169,8 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           metrics,
           timeouts,
           loggerFactory,
-        )(executionContext)
+          futureSupervisor,
+        )
       val executionOrder = mutable.Queue.empty[Int]
       val waitPromise = Promise[Unit]()
       val task0 = TestTask(executionOrder, 0, ofEpochMilli(1), SequencerCounter(0), Activeness)
@@ -210,8 +213,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           metrics,
           timeouts,
           loggerFactory,
-        )(
-          executionContext
+          futureSupervisor,
         )
       loggerFactory.assertInternalError[IllegalArgumentException](
         taskScheduler.addTick(SequencerCounter(1), EPOCH.minusMillis(1)),
@@ -228,8 +230,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           metrics,
           timeouts,
           loggerFactory,
-        )(
-          executionContext
+          futureSupervisor,
         )
 
       taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(2))
@@ -271,8 +272,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           metrics,
           timeouts,
           loggerFactory,
-        )(
-          executionContext
+          futureSupervisor,
         )
 
       taskScheduler.addTick(SequencerCounter(0), ofEpochMilli(2))
@@ -294,8 +294,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           metrics,
           timeouts,
           loggerFactory,
-        )(
-          executionContext
+          futureSupervisor,
         )
 
       taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(10))
@@ -316,8 +315,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           metrics,
           timeouts,
           loggerFactory,
-        )(
-          executionContext
+          futureSupervisor,
         )
       loggerFactory.assertInternalError[IllegalArgumentException](
         taskScheduler.addTick(SequencerCounter.MaxValue, CantonTimestamp.MaxValue),
@@ -334,8 +332,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           metrics,
           timeouts,
           loggerFactory,
-        )(
-          executionContext
+          futureSupervisor,
         )
       val queue = mutable.Queue.empty[Int]
 
@@ -395,12 +392,13 @@ object TaskSchedulerTest {
 
     def done(): Future[Unit] = donePromise.future
 
-    override def perform(): Future[Unit] =
+    override def perform(): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.outcomeF {
       waitFor.map { _ =>
         queue.enqueue(seqNo)
         donePromise.success(())
         ()
       }
+    }
 
     override def pretty: Pretty[this.type] = adHocPrettyInstance
   }

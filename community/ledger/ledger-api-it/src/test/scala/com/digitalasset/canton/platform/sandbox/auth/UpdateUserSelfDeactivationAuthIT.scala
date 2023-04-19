@@ -47,7 +47,7 @@ final class UpdateUserSelfDeactivationAuthIT extends ServiceCallAuthTests with E
         rights = Vector(Right(Right.Kind.ParticipantAdmin(Right.ParticipantAdmin()))),
       )
       err <- updateUser(
-        accessToken = alice0Context.token.get,
+        accessToken = alice0Context.token.value,
         req = proto.UpdateUserRequest(
           user = Some(
             proto.User(

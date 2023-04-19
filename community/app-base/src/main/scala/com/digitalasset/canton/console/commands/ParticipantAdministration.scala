@@ -35,6 +35,7 @@ import com.digitalasset.canton.console.{
   InstanceReferenceWithSequencerConnection,
   LedgerApiCommandRunner,
   ParticipantReference,
+  ParticipantReferenceCommon,
 }
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.data.CantonTimestamp
@@ -181,7 +182,7 @@ private[console] object ParticipantCommands {
 }
 
 class ParticipantTestingGroup(
-    participantRef: ParticipantReference,
+    participantRef: ParticipantReferenceCommon,
     val consoleEnvironment: ConsoleEnvironment,
     val loggerFactory: NamedLoggerFactory,
 ) extends FeatureFlagFilter
@@ -706,8 +707,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
 
   private val runner = this
 
-  def topology: TopologyAdministrationGroup
   def id: ParticipantId
+
+  protected def vettedPackagesOfParticipant(): Set[PackageId]
+  protected def participantIsActiveOnDomain(
+      domainId: DomainId,
+      participantId: ParticipantId,
+  ): Boolean
 
   @Help.Summary("Manage DAR packages")
   @Help.Group("DAR Management")
@@ -949,11 +955,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.bounded
     ): Unit = {
       val connected = domains.list_connected().map(_.domainId).toSet
-      def vetted: Set[PackageId] = topology.vetted_packages
-        .list(filterStore = "Authorized", filterParticipant = id.filterString)
-        .flatMap(_.item.packageIds)
-        .toSet
-
       // ensure that the ledger api server has seen all packages
       try {
         AdminCommandRunner.retryUntilTrue(timeout) {
@@ -990,6 +991,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
                 .list(filterStore = domainId.filterString, filterParticipant = id.filterString)
                 .flatMap(_.item.packageIds)
                 .toSet
+              val vetted = vettedPackagesOfParticipant()
               val ret = vetted == onDomain
               if (!ret) {
                 logger.debug(
@@ -1063,7 +1065,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
 
         r.domainAlias == domainAlias &&
         r.healthy &&
-        topology.participant_domain_states.active(r.domainId, id) &&
+        participantIsActiveOnDomain(r.domainId, id) &&
         domainReferenceO.forall(_.participants.active(id))
       })
     }
@@ -1080,7 +1082,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         .exists(r =>
           domainUidO.contains(r.domainId.unwrap) &&
             r.healthy &&
-            topology.participant_domain_states.active(r.domainId, id) &&
+            participantIsActiveOnDomain(r.domainId, id) &&
             reference.participants.active(id)
         )
     }
@@ -1625,12 +1627,10 @@ class ParticipantHealthAdministration(
     runner: AdminCommandRunner,
     val consoleEnvironment: ConsoleEnvironment,
     override val loggerFactory: NamedLoggerFactory,
-    topology: TopologyAdministrationGroup,
 ) extends HealthAdministration[ParticipantStatus](
       runner,
       consoleEnvironment,
       ParticipantStatus.fromProtoV0,
-      topology,
     )
     with FeatureFlagFilter {
 

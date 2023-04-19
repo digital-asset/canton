@@ -11,13 +11,12 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.environment.{CantonNodeBootstrapBase, CantonNodeBootstrapCommon}
 import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-
-import scala.concurrent.Future
 
 trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
 
@@ -30,7 +29,7 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
     authorizeIfNew(
       manager,
       DomainGovernanceTransaction(mapping, protocolVersion),
@@ -45,20 +44,24 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
       staticDomainParametersFromConfig: StaticDomainParameters,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, (NodeId, DomainTopologyManager, SigningPublicKey)] = {
+  ): EitherT[FutureUnlessShutdown, String, (NodeId, DomainTopologyManager, SigningPublicKey)] = {
     // initialize domain with local keys
     val idName =
       initConfigBase.identity.flatMap(_.nodeIdentifier.identifierName).getOrElse(name.unwrap)
     for {
-      id <- Identifier.create(idName).toEitherT[Future]
+      id <- Identifier.create(idName).toEitherT[FutureUnlessShutdown]
       // first, we create the namespace key for this node
-      namespaceKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
-        s"$name-namespace"
-      )
+      namespaceKey <- CantonNodeBootstrapCommon
+        .getOrCreateSigningKey(crypto.value)(
+          s"$name-namespace"
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
       // then, we create the topology manager signing key
-      topologyManagerSigningKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto.value)(
-        s"$name-topology-manager-signing"
-      )
+      topologyManagerSigningKey <- CantonNodeBootstrapCommon
+        .getOrCreateSigningKey(crypto.value)(
+          s"$name-topology-manager-signing"
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
       // using the namespace key and the identifier, we create the uid of this node
       uid = UniqueIdentifier(id, Namespace(namespaceKey.fingerprint))
       nodeId = NodeId(uid)
@@ -67,7 +70,7 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
         nodeId,
         staticDomainParametersFromConfig,
       )
-        .toEitherT[Future]
+        .toEitherT[FutureUnlessShutdown]
       // first, we issue the root namespace delegation for our namespace
       _ <- authorizeStateUpdate(
         topologyManager,
@@ -96,8 +99,9 @@ trait DomainTopologyManagerIdentityInitialization[StoredNodeConfig] {
               uid,
               Seq(MediatorId(uid), domainTopologyManagerId),
             )
+            .mapK(FutureUnlessShutdown.outcomeK)
         } else {
-          EitherT.rightT[Future, String](())
+          EitherT.rightT[FutureUnlessShutdown, String](())
         }
       // now, we assign the topology manager key with the domain topology manager
       _ <- authorizeStateUpdate(

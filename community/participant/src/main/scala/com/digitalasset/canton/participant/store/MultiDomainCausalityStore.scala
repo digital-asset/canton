@@ -131,17 +131,16 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
 
   def highestSeenOn(domain: DomainId): Option[CantonTimestamp] = highestSeen.get(domain)
 
-  def registerSeen(domain: DomainId, timestamp: CantonTimestamp): Unit = {
+  def registerSeen(domain: DomainId, timestamp: CantonTimestamp): Unit =
     highestSeen
       .updateWith(domain) {
         case Some(value) =>
           // The existing highest seen timestamp might be higher than the timestamp we are observing
           // For example, this can happen during the replay of events after a shutdown
-          Some(CantonTimestamp.max(timestamp, value))
+          Some(timestamp.max(value))
         case None => Some(timestamp)
       }
       .discard
-  }
 
   /** Lookup the causal state at the transfer-out. Query it from the db if necessary.
     */

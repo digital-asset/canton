@@ -8,7 +8,7 @@ import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
@@ -29,6 +29,7 @@ import org.scalatest.matchers.should.Matchers
 import sun.reflect.generics.reflectiveObjects.NotImplementedException
 
 import java.sql.Connection
+import scala.concurrent.blocking
 
 class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 
@@ -123,10 +124,12 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     override def batch(dbDtos: Vector[DbDto], stringInterning: StringInterning): Vector[DbDto] =
       dbDtos
 
-    override def insertBatch(connection: Connection, batch: Vector[DbDto]): Unit = synchronized {
-      connection shouldBe someConnection
-      captured = captured ++ batch
-    }
+    override def insertBatch(connection: Connection, batch: Vector[DbDto]): Unit = blocking(
+      synchronized {
+        connection shouldBe someConnection
+        captured = captured ++ batch
+      }
+    )
 
     override def deletePartiallyIngestedData(ledgerEnd: ParameterStorageBackend.LedgerEnd)(
         connection: Connection
@@ -136,19 +139,19 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     override def updateLedgerEnd(
         params: ParameterStorageBackend.LedgerEnd
     )(connection: Connection): Unit =
-      synchronized {
+      blocking(synchronized {
         connection shouldBe someConnection
         captured = captured :+ params
-      }
+      })
 
     private var ledgerEndCalled = false
     override def ledgerEnd(connection: Connection): ParameterStorageBackend.LedgerEnd =
-      synchronized {
+      blocking(synchronized {
         connection shouldBe someConnection
         ledgerEndCalled shouldBe false
         ledgerEndCalled = true
         initialLedgerEnd
-      }
+      })
 
     override def initializeParameters(params: ParameterStorageBackend.IdentityParams)(
         connection: Connection
@@ -277,6 +280,7 @@ object SequentialWriteDaoSpec {
   val allEventsFixture: Option[state.Update.PublicPackageUploadRejected] =
     someUpdate("allEventsFixture")
 
+  @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   private val someUpdateToDbDtoFixture: Map[String, List[DbDto]] = Map(
     singlePartyFixture.get.rejectionReason -> List(someParty),
     partyAndCreateFixture.get.rejectionReason -> List(someParty, someEventCreated),

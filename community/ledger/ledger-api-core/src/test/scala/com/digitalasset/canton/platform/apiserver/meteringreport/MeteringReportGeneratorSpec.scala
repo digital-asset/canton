@@ -13,6 +13,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.R
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiMeteringReportService.toProtoTimestamp
 import com.google.protobuf.struct.Struct
 import org.scalatest.Inside.inside
+import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 import scalapb.json4s.JsonFormat
@@ -21,7 +22,7 @@ import spray.json.*
 import java.time.Duration
 import java.time.temporal.ChronoUnit
 
-class MeteringReportGeneratorSpec extends AsyncWordSpec with Matchers {
+class MeteringReportGeneratorSpec extends AsyncWordSpec with Matchers with OptionValues {
 
   private val someParticipantId = Ref.ParticipantId.assertFromString("test-participant")
 
@@ -78,8 +79,8 @@ class MeteringReportGeneratorSpec extends AsyncWordSpec with Matchers {
           generationTime,
         )
       ) { case Right(actual) =>
-        actual.meteringReportJson.get.fields
-          .get("check") shouldBe expected.meteringReportJson.get.fields.get("check")
+        actual.meteringReportJson.value.fields
+          .get("check") shouldBe expected.meteringReportJson.value.fields.get("check")
         actual.meteringReportJson shouldBe expected.meteringReportJson
         actual shouldBe expected
       }

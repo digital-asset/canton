@@ -52,7 +52,7 @@ final class ErrorInterceptorSpec
 
   classOf[ErrorInterceptor].getSimpleName - {
 
-    assert(FooMissingErrorCode.category.grpcCode.get != Status.Code.INTERNAL)
+    assert(FooMissingErrorCode.category.grpcCode.value != Status.Code.INTERNAL)
 
     "for a server unary future endpoint" - {
       "when signalling with a non-self-service error should SANITIZE the server response when arising " - {
@@ -266,7 +266,7 @@ final class ErrorInterceptorSpec
   ): Assertion = {
     assertError(
       actual,
-      expectedStatusCode = FooMissingErrorCode.category.grpcCode.get,
+      expectedStatusCode = FooMissingErrorCode.category.grpcCode.value,
       expectedMessage = s"FOO_MISSING_ERROR_CODE(11,0): Foo is missing: $expectedMsg",
       expectedDetails =
         Seq(ErrorDetails.ErrorInfoDetail("FOO_MISSING_ERROR_CODE", Map("category" -> "11"))),

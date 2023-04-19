@@ -53,7 +53,8 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
 
     def createSut(domain: DomainId): Fixture = {
       val eventLogId = DomainEventLogId(IndexedDomain.tryCreate(domain, 1))
-      val eventLog = new InMemorySingleDimensionEventLog(eventLogId, loggerFactory)
+      val eventLog =
+        new InMemorySingleDimensionEventLog(eventLogId, loggerFactory)
       val lookup = new InMemoryMultiDomainCausalityStore(loggerFactory)
       val gco =
         new GlobalCausalOrderer(participant, _ => true, ProcessingTimeout(), lookup, loggerFactory)
@@ -88,6 +89,7 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
         ProcessingTimeout(),
         true,
         loggerFactory,
+        futureSupervisor,
       )
       Fixture(multiDomainEventLog, sut, singleDomainCausalTracker, gco)
     }

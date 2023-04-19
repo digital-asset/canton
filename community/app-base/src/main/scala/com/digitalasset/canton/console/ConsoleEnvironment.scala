@@ -323,6 +323,19 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
         .map(createRemoteParticipantReference)
         .toSeq,
     )
+
+  lazy val participantsX: NodeReferences[
+    ParticipantReferenceX,
+    RemoteParticipantReferenceX,
+    LocalParticipantReferenceX,
+  ] =
+    NodeReferences(
+      environment.config.participantsByStringX.keys.map(createParticipantReferenceX).toSeq,
+      environment.config.remoteParticipantsByStringX.keys
+        .map(createRemoteParticipantReferenceX)
+        .toSeq,
+    )
+
   lazy val domains: NodeReferences[DomainReference, DomainRemoteRef, DomainLocalRef] =
     NodeReferences(
       environment.config.domainsByString.keys.map(createDomainReference).toSeq,
@@ -461,6 +474,10 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
     new LocalParticipantReference(this, name)
   private def createRemoteParticipantReference(name: String): RemoteParticipantReference =
     new RemoteParticipantReference(this, name)
+  private def createParticipantReferenceX(name: String): LocalParticipantReferenceX =
+    new LocalParticipantReferenceX(this, name)
+  private def createRemoteParticipantReferenceX(name: String): RemoteParticipantReferenceX =
+    new RemoteParticipantReferenceX(this, name)
 
   protected def createDomainReference(name: String): DomainLocalRef
   protected def createRemoteDomainReference(name: String): DomainRemoteRef

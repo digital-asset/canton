@@ -7,6 +7,7 @@ import com.daml.grpc.GrpcException
 import com.daml.grpc.adapter.server.rs.MockServerCallStreamObserver
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.logging.LoggingContext
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.ledger.api.health.*
 import com.digitalasset.canton.platform.server.api.services.grpc.GrpcHealthService.*
 import com.digitalasset.canton.platform.server.api.services.grpc.GrpcHealthServiceSpec.*
@@ -73,7 +74,7 @@ final class GrpcHealthServiceSpec
         )
       )
 
-      service.check(HealthCheckRequest())
+      discard(service.check(HealthCheckRequest()))
       for {
         response <- service.check(HealthCheckRequest())
       } yield {

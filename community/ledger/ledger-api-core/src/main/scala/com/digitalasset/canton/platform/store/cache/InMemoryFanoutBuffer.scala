@@ -12,6 +12,7 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 
 import scala.collection.Searching.{Found, InsertionPoint, SearchResult}
 import scala.collection.View
+import scala.concurrent.blocking
 
 /** The in-memory fan-out buffer.
   *
@@ -53,7 +54,7 @@ class InMemoryFanoutBuffer(
   def push(offset: Offset, entry: TransactionLogUpdate): Unit =
     Timed.value(
       pushTimer,
-      synchronized {
+      blocking(synchronized {
         _bufferLog.lastOption.foreach {
           // Encountering a non-strictly increasing offset is an error condition.
           case (lastOffset, _) if lastOffset >= offset =>
@@ -72,7 +73,7 @@ class InMemoryFanoutBuffer(
             _lookupMap = _lookupMap.updated(key, value)
           }
         }
-      },
+      }),
     )
 
   /** Returns a slice of events from the buffer.
@@ -123,23 +124,23 @@ class InMemoryFanoutBuffer(
   def prune(endInclusive: Offset): Unit =
     Timed.value(
       pruneTimer,
-      synchronized {
+      blocking(synchronized {
         val dropCount = _bufferLog.view.map(_._1).search(endInclusive) match {
           case Found(foundIndex) => foundIndex + 1
           case InsertionPoint(insertionPoint) => insertionPoint
         }
 
         dropOldest(dropCount)
-      },
+      }),
     )
 
   /** Remove all buffered entries */
-  def flush(): Unit = synchronized {
+  def flush(): Unit = blocking(synchronized {
     _bufferLog = Vector.empty
     _lookupMap = Map.empty
-  }
+  })
 
-  private def ensureSize(targetSize: Int): Unit = synchronized {
+  private def ensureSize(targetSize: Int): Unit = blocking(synchronized {
     val currentBufferLogSize = _bufferLog.size
     val currentLookupMapSize = _lookupMap.size
 
@@ -158,16 +159,16 @@ class InMemoryFanoutBuffer(
 
       flush()
     }
-  }
+  })
 
-  private def dropOldest(dropCount: Int): Unit = synchronized {
+  private def dropOldest(dropCount: Int): Unit = blocking(synchronized {
     val (evicted, remainingBufferLog) = _bufferLog.splitAt(dropCount)
     val lookupKeysToEvict =
       evicted.view.map(_._2).flatMap(extractEntryFromMap).map(_._2.transactionId)
 
     _bufferLog = remainingBufferLog
     _lookupMap = _lookupMap -- lookupKeysToEvict
-  }
+  })
 
   private def extractEntryFromMap(
       transactionLogUpdate: TransactionLogUpdate

@@ -133,10 +133,9 @@ abstract class BaseDomainTopologyClient
     ): HeadTimestamps = {
       HeadTimestamps(
         effectiveTimestamp =
-          EffectiveTime(CantonTimestamp.max(effectiveTimestamp.value, newEffectiveTimestamp.value)),
-        approximateTimestamp = ApproximateTime(
-          CantonTimestamp.max(approximateTimestamp.value, newApproximateTimestamp.value)
-        ),
+          EffectiveTime(effectiveTimestamp.value.max(newEffectiveTimestamp.value)),
+        approximateTimestamp =
+          ApproximateTime(approximateTimestamp.value.max(newApproximateTimestamp.value)),
       )
     }
   }

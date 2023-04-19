@@ -19,7 +19,7 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
         now = ts(15),
         members = Seq(
           SequencerMemberStatus(
-            member = DefaultTestIdentities.sequencer,
+            member = DefaultTestIdentities.sequencerId,
             registeredAt = ts(8),
             ts(10).some,
           ),
@@ -41,7 +41,7 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
         now = ts(15),
         members = Seq(
           SequencerMemberStatus(
-            member = DefaultTestIdentities.sequencer,
+            member = DefaultTestIdentities.sequencerId,
             registeredAt = ts(8),
             ts(15).some,
           ),
@@ -63,7 +63,7 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
         now = ts(12),
         members = Seq(
           SequencerMemberStatus(
-            member = DefaultTestIdentities.sequencer,
+            member = DefaultTestIdentities.sequencerId,
             registeredAt = ts(3),
             None,
           )
@@ -79,7 +79,7 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
         now = ts(12),
         members = Seq(
           SequencerMemberStatus(
-            member = DefaultTestIdentities.sequencer,
+            member = DefaultTestIdentities.sequencerId,
             registeredAt = ts(1),
             ts(2).some,
             enabled = false, // this is the key bit..

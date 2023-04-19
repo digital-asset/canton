@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.akkastreams.dispatcher
 import akka.stream.scaladsl.Sink
 import akka.stream.testkit.scaladsl.TestSink
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.scalautil.Statement.discard
 import org.awaitility.Awaitility.await
 import org.awaitility.Durations
 import org.scalatest.FutureOutcome
@@ -68,7 +69,7 @@ class SignalDispatcherTest
       s.request(1L)
       s.expectNext(SignalDispatcher.Signal)
       sut.getRunningState should have size 1L
-      sut.shutdown()
+      discard(sut.shutdown())
       assertThrows[IllegalStateException](sut.getRunningState)
       assertThrows[IllegalStateException](sut.signal())
       s.expectComplete()

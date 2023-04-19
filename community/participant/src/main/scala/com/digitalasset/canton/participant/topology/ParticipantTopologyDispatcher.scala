@@ -48,8 +48,6 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-sealed trait ParticipantIdentityDispatcherError
-
 trait RegisterTopologyTransactionHandle extends FlagCloseable {
   def submit(
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
@@ -213,9 +211,8 @@ private class DomainOutbox(
       dispatched: CantonTimestamp,
   ) {
     def updateAuthorized(updated: CantonTimestamp, queuedNum: Int): Watermarks = {
-      val newAuthorized = CantonTimestamp.max(authorized, updated)
       val ret = copy(
-        authorized = newAuthorized,
+        authorized = authorized.max(updated),
         queuedApprox = queuedApprox + queuedNum,
       )
       if (ret.hasPending) {
@@ -291,12 +288,12 @@ private class DomainOutbox(
       // update cached watermark
     } yield {
       val cur = watermarks.updateAndGet { c =>
-        val newAuthorized = CantonTimestamp.max(c.authorized, authorizedTs)
-        val newDispatched = CantonTimestamp.max(c.dispatched, watermarkTs)
+        val newAuthorized = c.authorized.max(authorizedTs)
+        val newDispatched = c.dispatched.max(watermarkTs)
         val next = c.copy(
           // queuing statistics during startup will be a bit off, we just ensure that we signal that we have something in our queue
           // we might improve by querying the store, checking for the number of pending tx
-          queuedApprox = c.queuedApprox + (if (newAuthorized != newDispatched) 1 else 0),
+          queuedApprox = if (newAuthorized == newDispatched) c.queuedApprox else c.queuedApprox + 1,
           authorized = newAuthorized,
           dispatched = newDispatched,
         )
@@ -417,9 +414,7 @@ private class DomainOutbox(
         } else valid
     }
     if (valid) {
-      val newWatermark = found.map(_.validFrom.value).foldLeft(current.dispatched) { case (a, b) =>
-        CantonTimestamp.max(a, b)
-      }
+      val newWatermark = found.map(_.validFrom.value).fold(current.dispatched)(_ max _)
       watermarks.updateAndGet { c =>
         c.copy(
           // this will ensure that we have a queue count of at least 1 during catchup
@@ -478,7 +473,7 @@ private class DomainOnboardingOutbox(
   ]] =
     for {
       candidates <- EitherT.right(
-        performUnlessClosingF(functionFullName)(
+        performUnlessClosingUSF(functionFullName)(
           authorizedStore
             .findParticipantOnboardingTransactions(participantId, domainId)
             .map(SignedTopologyTransactions(_))

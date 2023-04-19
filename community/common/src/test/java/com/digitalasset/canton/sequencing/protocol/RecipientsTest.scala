@@ -65,7 +65,7 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
           NonEmpty(
             List,
             RecipientsTree(
-              NonEmpty.mk(Set, p2, p1, p3),
+              NonEmpty.mk(Set, recP2, recP1, recP3),
               Seq(RecipientsTree.leaf(NonEmpty.mk(Set, p1))),
             ),
           )
@@ -80,25 +80,27 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
           RecipientsTree(
             NonEmpty.mk(Set, participant(1), participant(2)),
             Seq(
-              RecipientsTree.leaf(NonEmpty.mk(Set, participant(3))),
-              RecipientsTree.leaf(NonEmpty.mk(Set, participant(4))),
+              RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, participant(3))),
+              RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, participant(4))),
               RecipientsTree(
                 NonEmpty.mk(Set, participant(5)),
                 Seq(
-                  RecipientsTree.leaf(NonEmpty.mk(Set, participant(6), participant(2)))
+                  RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, participant(6), participant(2)))
                 ),
               ),
             ),
           ),
         )
       )
-      recipients.leafMembers shouldBe
-        NonEmpty.mk(Set, participant(2), participant(3), participant(4), participant(6))
+      recipients.leafRecipients shouldBe
+        NonEmpty.mk(Set, recP2, recP3, recP4, recP6)
     }
   }
 }
 
 object RecipientsTest {
+
+  def participantRecipient(participant: ParticipantId) = RecipientsTree.MemberRecipient(participant)
 
   lazy val p1 = ParticipantId("participant1")
   lazy val p2 = ParticipantId("participant2")
@@ -108,22 +110,40 @@ object RecipientsTest {
   lazy val p6 = ParticipantId("participant6")
   lazy val p7 = ParticipantId("participant7")
   lazy val p8 = ParticipantId("participant8")
+  lazy val p9 = ParticipantId("participant9")
+  lazy val p10 = ParticipantId("participant10")
+  lazy val p11 = ParticipantId("participant11")
+  lazy val p12 = ParticipantId("participant12")
+  lazy val p13 = ParticipantId("participant13")
+  lazy val p14 = ParticipantId("participant14")
+  lazy val p15 = ParticipantId("participant15")
 
-  lazy val t1 = RecipientsTree.leaf(NonEmpty.mk(Set, p1))
-  lazy val t2 = RecipientsTree.leaf(NonEmpty.mk(Set, p2))
+  lazy val recP1 = participantRecipient(p1)
+  lazy val recP2 = participantRecipient(p2)
+  lazy val recP3 = participantRecipient(p3)
+  lazy val recP4 = participantRecipient(p4)
+  lazy val recP5 = participantRecipient(p5)
+  lazy val recP6 = participantRecipient(p6)
+  lazy val recP7 = participantRecipient(p7)
+  lazy val recP8 = participantRecipient(p8)
 
-  lazy val t3 = RecipientsTree(NonEmpty.mk(Set, p3), Seq(t1, t2))
-  lazy val t4 = RecipientsTree.leaf(NonEmpty.mk(Set, p4))
+  lazy val t1 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP1))
+  lazy val t2 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP2))
 
-  lazy val t5 = RecipientsTree(NonEmpty.mk(Set, p5), Seq(t3, t4))
+  lazy val t3 = RecipientsTree(NonEmpty.mk(Set, recP3), Seq(t1, t2))
+  lazy val t4 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP4))
 
-  lazy val t6 = RecipientsTree.leaf(NonEmpty.mk(Set, p6))
+  lazy val t5 = RecipientsTree(NonEmpty.mk(Set, recP5), Seq(t3, t4))
+
+  lazy val t6 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP6))
 
   def testInstance: Recipients = {
     val dummyMember = ParticipantId("dummyParticipant")
     cc(dummyMember)
   }
 
-  def participant(i: Int): ParticipantId = ParticipantId(s"participant$i")
+  def participant(i: Int): RecipientsTree.MemberRecipient = participantRecipient(
+    ParticipantId(s"participant$i")
+  )
 
 }

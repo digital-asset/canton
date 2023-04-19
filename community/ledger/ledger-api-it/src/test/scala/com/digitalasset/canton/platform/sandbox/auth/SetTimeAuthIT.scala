@@ -17,8 +17,8 @@ final class SetTimeAuthIT extends AdminServiceCallAuthTests with TimeAuth {
       _ <- stub(TimeServiceGrpc.stub(channel), context.token)
         .setTime(
           new SetTimeRequest(
-            currentTime = response.get.currentTime,
-            newTime = response.get.currentTime,
+            currentTime = response.value.currentTime,
+            newTime = response.value.currentTime,
           )
         )
     } yield ()

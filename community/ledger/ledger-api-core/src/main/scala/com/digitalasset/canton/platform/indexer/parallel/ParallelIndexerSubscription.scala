@@ -30,7 +30,7 @@ import java.sql.Connection
 import scala.concurrent.Future
 import scala.util.chaining.*
 
-private[platform] case class ParallelIndexerSubscription[DB_BATCH](
+private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
     ingestionStorageBackend: IngestionStorageBackend[DB_BATCH],
     parameterStorageBackend: ParameterStorageBackend,
     participantId: Ref.ParticipantId,

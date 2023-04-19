@@ -47,7 +47,7 @@ abstract class SequencerApiTest
 
     val topologyFactory =
       new TestingIdentityFactory(
-        topology = TestingTopology(additionalParticipants = Set(p1, p2, p3)),
+        topology = TestingTopology(additionalParticipants = Set(p11, p12, p13, p14, p15)),
         loggerFactory,
         List.empty,
       )
@@ -74,7 +74,7 @@ abstract class SequencerApiTest
 
   def domainId: DomainId = DefaultTestIdentities.domainId
   def mediatorId: MediatorId = DefaultTestIdentities.mediator
-  def topologyClientMember: Member = DefaultTestIdentities.sequencer
+  def topologyClientMember: Member = DefaultTestIdentities.sequencerId
 
   def createSequencer(crypto: DomainSyncCryptoClient)(implicit
       materializer: Materializer
@@ -114,7 +114,7 @@ abstract class SequencerApiTest
       // TODO(i10412): The sequencer implementations for tests currently do not all behave in the same way.
       // Until this is fixed, we are currently sidestepping the issue by using a different set of recipients
       // for each test to ensure "isolation".
-      val sender = p7
+      val sender = p7.member
       val recipients = Recipients.cc(sender)
 
       val tsInThePast = CantonTimestamp.MinValue
@@ -153,8 +153,8 @@ abstract class SequencerApiTest
 
       val normalMessageContent = "normal message"
       val suppressedMessageContent = "suppressed message"
-      // See note from previous test
-      val sender = p8
+      // TODO(i10412): See above
+      val sender = p8.member
       val recipients = Recipients.cc(sender)
 
       val tsInThePast = CantonTimestamp.MinValue
@@ -194,6 +194,7 @@ abstract class SequencerApiTest
       import env.*
       val messageContent = "msg1"
       val sender: MediatorId = mediatorId
+      // TODO(i10412): See above
       val recipients = Recipients(NonEmpty(Seq, t5, t3))
       val readFor: List[Member] = recipients.allRecipients.toList
 
@@ -225,42 +226,43 @@ abstract class SequencerApiTest
       import env.*
 
       val messageContent = "aggregatable-message"
+      // TODO(i10412): See above
       val aggregationRule =
-        AggregationRule(NonEmpty(Seq, p1, p2), PositiveInt.tryCreate(2), testedProtocolVersion)
+        AggregationRule(NonEmpty(Seq, p6, p9), PositiveInt.tryCreate(2), testedProtocolVersion)
       val request1 = createSendRequest(
-        p1,
+        p6,
         messageContent,
-        Recipients.cc(p3),
+        Recipients.cc(p10),
         aggregationRule = Some(aggregationRule),
       )
-      val request2 = request1.copy(sender = p2, messageId = MessageId.fromUuid(new UUID(1, 2)))
+      val request2 = request1.copy(sender = p9, messageId = MessageId.fromUuid(new UUID(1, 2)))
 
       for {
-        _ <- registerMembers(Set(p1, p2, p3, topologyClientMember), sequencer)
+        _ <- registerMembers(Set(p6, p9, p10, topologyClientMember), sequencer)
         _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant1")
-        reads1 <- readForMembers(Seq(p1), sequencer)
+        reads1 <- readForMembers(Seq(p6), sequencer)
         _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async for participant2")
-        reads2 <- readForMembers(Seq(p2), sequencer)
-        reads3 <- readForMembers(Seq(p3), sequencer)
+        reads2 <- readForMembers(Seq(p9), sequencer)
+        reads3 <- readForMembers(Seq(p10), sequencer)
       } yield {
-        // p1 gets the receipt immediately
+        // p6 gets the receipt immediately
         checkMessages(
-          Seq(EventDetails(SequencerCounter.Genesis, p1, Some(request1.messageId))),
+          Seq(EventDetails(SequencerCounter.Genesis, p6, Some(request1.messageId))),
           reads1,
         )
-        // p2 gets the receipt only
+        // p9 gets the receipt only
         checkMessages(
-          Seq(EventDetails(SequencerCounter.Genesis, p2, Some(request2.messageId))),
+          Seq(EventDetails(SequencerCounter.Genesis, p9, Some(request2.messageId))),
           reads2,
         )
-        // p3 gets the message
+        // p10 gets the message
         checkMessages(
           Seq(
             EventDetails(
               SequencerCounter.Genesis,
-              p3,
+              p10,
               None,
-              EnvelopeDetails(messageContent, Recipients.cc(p3)),
+              EnvelopeDetails(messageContent, Recipients.cc(p10)),
             )
           ),
           reads3,
@@ -271,19 +273,24 @@ abstract class SequencerApiTest
     "aggregate signatures" onlyRunWhen testAggregation in { env =>
       import env.*
 
+      // TODO(i10412): See above
       val aggregationRule =
-        AggregationRule(NonEmpty(Seq, p1, p2, p3), PositiveInt.tryCreate(2), testedProtocolVersion)
+        AggregationRule(
+          NonEmpty(Seq, p11, p12, p13),
+          PositiveInt.tryCreate(2),
+          testedProtocolVersion,
+        )
 
       val content1 = "message1-to-sign"
       val content2 = "message2-to-sign"
-      val recipients1 = Recipients.cc(p1, p3)
+      val recipients1 = Recipients.cc(p11, p13)
       val envelope1 = ClosedEnvelope.tryCreate(
         ByteString.copyFromUtf8(content1),
         recipients1,
         Seq.empty,
         testedProtocolVersion,
       )
-      val recipients2 = Recipients.cc(p2, p3)
+      val recipients2 = Recipients.cc(p12, p13)
       val envelope2 = ClosedEnvelope.tryCreate(
         ByteString.copyFromUtf8(content2),
         recipients2,
@@ -294,9 +301,9 @@ abstract class SequencerApiTest
       val messageId1 = MessageId.tryCreate(s"request1")
       val messageId2 = MessageId.tryCreate(s"request2")
       val messageId3 = MessageId.tryCreate(s"request3")
-      val p1Crypto = topologyFactory.forOwnerAndDomain(p1, domainId)
-      val p2Crypto = topologyFactory.forOwnerAndDomain(p2, domainId)
-      val p3Crypto = topologyFactory.forOwnerAndDomain(p3, domainId)
+      val p11Crypto = topologyFactory.forOwnerAndDomain(p11, domainId)
+      val p12Crypto = topologyFactory.forOwnerAndDomain(p12, domainId)
+      val p13Crypto = topologyFactory.forOwnerAndDomain(p13, domainId)
 
       def mkRequest(
           sender: Member,
@@ -315,66 +322,66 @@ abstract class SequencerApiTest
         )
 
       for {
-        _ <- registerMembers(Set(p1, p2, p3, topologyClientMember), sequencer)
-        envs1 <- envelopes.parTraverse(signEnvelope(p1Crypto, _))
-        request1 = mkRequest(p1, messageId1, envs1)
-        envs2 <- envelopes.parTraverse(signEnvelope(p2Crypto, _))
-        request2 = mkRequest(p2, messageId2, envs2)
-        _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant1")
-        reads1 <- readForMembers(Seq(p1), sequencer)
-        _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async for participant3")
-        reads2 <- readForMembers(Seq(p2, p3), sequencer)
-        reads2a <- readForMembers(
-          Seq(p1),
+        _ <- registerMembers(Set(p11, p12, p13, topologyClientMember), sequencer)
+        envs1 <- envelopes.parTraverse(signEnvelope(p11Crypto, _))
+        request1 = mkRequest(p11, messageId1, envs1)
+        envs2 <- envelopes.parTraverse(signEnvelope(p12Crypto, _))
+        request2 = mkRequest(p12, messageId2, envs2)
+        _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant11")
+        reads11 <- readForMembers(Seq(p11), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async for participant13")
+        reads12 <- readForMembers(Seq(p12, p13), sequencer)
+        reads12a <- readForMembers(
+          Seq(p11),
           sequencer,
           firstSequencerCounter = SequencerCounter.Genesis + 1,
         )
 
-        // participant3 is late to the party and its request is refused
-        envs3 <- envelopes.parTraverse(signEnvelope(p3Crypto, _))
-        request3 = mkRequest(p3, messageId3, envs3)
-        _ <- valueOrFail(sequencer.sendAsync(request3))("Sent async for participant3")
-        reads3 <- readForMembers(
-          Seq(p3),
+        // participant13 is late to the party and its request is refused
+        envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
+        request3 = mkRequest(p13, messageId3, envs3)
+        _ <- valueOrFail(sequencer.sendAsync(request3))("Sent async for participant13")
+        reads13 <- readForMembers(
+          Seq(p13),
           sequencer,
           firstSequencerCounter = SequencerCounter.Genesis + 1,
         )
       } yield {
         checkMessages(
-          Seq(EventDetails(SequencerCounter.Genesis, p1, Some(request1.messageId))),
-          reads1,
+          Seq(EventDetails(SequencerCounter.Genesis, p11, Some(request1.messageId))),
+          reads11,
         )
         checkMessages(
           Seq(
             EventDetails(
               SequencerCounter.Genesis,
-              p2,
+              p12,
               Some(request1.messageId),
               EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
             ),
             EventDetails(
               SequencerCounter.Genesis,
-              p3,
+              p13,
               None,
               EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
               EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
             ),
           ),
-          reads2,
+          reads12,
         )
         checkMessages(
           Seq(
             EventDetails(
               SequencerCounter.Genesis + 1,
-              p1,
+              p11,
               None,
               EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
             )
           ),
-          reads2a,
+          reads12a,
         )
 
-        checkRejection(reads3, p3, messageId3) { case BatchRefused(reason) =>
+        checkRejection(reads13, p13, messageId3) { case BatchRefused(reason) =>
           reason should (
             include(s"The aggregatable request with aggregation ID") and
               include("was previously delivered at")
@@ -387,9 +394,10 @@ abstract class SequencerApiTest
       import env.*
 
       val messageContent = "aggregatable-message-stuffing"
+      // TODO(i10412): See above
       val aggregationRule =
-        AggregationRule(NonEmpty(Seq, p1, p3), PositiveInt.tryCreate(2), testedProtocolVersion)
-      val recipients = Recipients.cc(p1, p3)
+        AggregationRule(NonEmpty(Seq, p14, p15), PositiveInt.tryCreate(2), testedProtocolVersion)
+      val recipients = Recipients.cc(p14, p15)
       val envelope = ClosedEnvelope.tryCreate(
         ByteString.copyFromUtf8(messageContent),
         recipients,
@@ -399,8 +407,8 @@ abstract class SequencerApiTest
       val messageId1 = MessageId.tryCreate(s"request1")
       val messageId2 = MessageId.tryCreate(s"request2")
       val messageId3 = MessageId.tryCreate(s"request3")
-      val p1Crypto = topologyFactory.forOwnerAndDomain(p1, domainId)
-      val p3Crypto = topologyFactory.forOwnerAndDomain(p3, domainId)
+      val p14Crypto = topologyFactory.forOwnerAndDomain(p14, domainId)
+      val p15Crypto = topologyFactory.forOwnerAndDomain(p15, domainId)
 
       def mkRequest(
           sender: Member,
@@ -419,37 +427,37 @@ abstract class SequencerApiTest
         )
 
       for {
-        _ <- registerMembers(Set(p1, p3, topologyClientMember), sequencer)
-        env1 <- signEnvelope(p1Crypto, envelope)
-        request1 = mkRequest(p1, messageId1, env1)
-        env2 <- signEnvelope(p1Crypto, envelope)
-        request2 = mkRequest(p1, messageId2, env2)
-        env3 <- signEnvelope(p3Crypto, envelope)
-        request3 = mkRequest(p3, messageId3, env3)
-        _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant1")
-        reads1 <- readForMembers(Seq(p1), sequencer)
-        _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async stuffing for participant1")
-        reads2 <- readForMembers(
-          Seq(p1),
+        _ <- registerMembers(Set(p14, p15, topologyClientMember), sequencer)
+        env1 <- signEnvelope(p14Crypto, envelope)
+        request1 = mkRequest(p14, messageId1, env1)
+        env2 <- signEnvelope(p14Crypto, envelope)
+        request2 = mkRequest(p14, messageId2, env2)
+        env3 <- signEnvelope(p15Crypto, envelope)
+        request3 = mkRequest(p15, messageId3, env3)
+        _ <- valueOrFail(sequencer.sendAsync(request1))("Sent async for participant14")
+        reads14 <- readForMembers(Seq(p14), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request2))("Sent async stuffing for participant14")
+        reads14a <- readForMembers(
+          Seq(p14),
           sequencer,
           firstSequencerCounter = SequencerCounter.Genesis + 1,
         )
-        // p2 can still continue and finish the aggregation
-        _ <- valueOrFail(sequencer.sendAsync(request3))("Sent async for participant3")
-        reads3a <- readForMembers(
-          Seq(p1),
+        // p15 can still continue and finish the aggregation
+        _ <- valueOrFail(sequencer.sendAsync(request3))("Sent async for participant15")
+        reads14b <- readForMembers(
+          Seq(p14),
           sequencer,
           firstSequencerCounter = SequencerCounter.Genesis + 2,
         )
-        reads3b <- readForMembers(Seq(p3), sequencer)
+        reads15 <- readForMembers(Seq(p15), sequencer)
       } yield {
         checkMessages(
-          Seq(EventDetails(SequencerCounter.Genesis, p1, Some(request1.messageId))),
-          reads1,
+          Seq(EventDetails(SequencerCounter.Genesis, p14, Some(request1.messageId))),
+          reads14,
         )
-        checkRejection(reads2, p1, messageId2) { case BatchRefused(reason) =>
+        checkRejection(reads14a, p14, messageId2) { case BatchRefused(reason) =>
           reason should include(
-            s"The sender ${p1} previously contributed to the aggregatable submission with ID"
+            s"The sender ${p14} previously contributed to the aggregatable submission with ID"
           )
         }
         val deliveredEnvelopeDetails = EnvelopeDetails(
@@ -460,14 +468,14 @@ abstract class SequencerApiTest
         )
 
         checkMessages(
-          Seq(EventDetails(SequencerCounter.Genesis + 2, p1, None, deliveredEnvelopeDetails)),
-          reads3a,
+          Seq(EventDetails(SequencerCounter.Genesis + 2, p14, None, deliveredEnvelopeDetails)),
+          reads14b,
         )
         checkMessages(
           Seq(
-            EventDetails(SequencerCounter.Genesis, p3, Some(messageId3), deliveredEnvelopeDetails)
+            EventDetails(SequencerCounter.Genesis, p15, Some(messageId3), deliveredEnvelopeDetails)
           ),
-          reads3b,
+          reads15,
         )
       }
     }

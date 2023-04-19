@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
 
 import java.time.Duration
+import scala.concurrent.blocking
 
 class BridgeReadService(
     ledgerId: LedgerId,
@@ -51,11 +52,11 @@ class BridgeReadService(
     //   This method may only be called once, either with `beginAfter` set or unset.
     //   A second call will result in an error unless the server is restarted.
     //   Bootstrapping the bridge from indexer persistence is supported.
-    synchronized {
+    blocking(synchronized {
       if (stateUpdatesWasCalledAlready)
         throw new IllegalStateException("not allowed to call this twice")
       else stateUpdatesWasCalledAlready = true
-    }
+    })
     logger.info("Indexer subscribed to state updates.")
     beginAfter.foreach(offset =>
       logger.warn(

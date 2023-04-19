@@ -39,6 +39,8 @@ class TopologyTimestampPlusEpsilonTrackerTest
     val store = new InMemoryTopologyStore(
       TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
       loggerFactory,
+      timeouts,
+      futureSupervisor,
     )
     val tracker =
       new TopologyTimestampPlusEpsilonTracker(

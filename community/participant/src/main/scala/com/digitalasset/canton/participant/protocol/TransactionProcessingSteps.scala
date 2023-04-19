@@ -61,6 +61,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
+import com.digitalasset.canton.sequencing.protocol.RecipientsTree.MemberRecipient
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
@@ -564,7 +565,10 @@ class TransactionProcessingSteps(
       def extractRandomnessFromView(
           transactionViewEnvelope: OpenEnvelope[TransactionViewMessage]
       ): Unit = {
-        if (transactionViewEnvelope.recipients.leafMembers.contains(participantId)) {
+        if (
+          // TODO(#12382): support group addressing for informees
+          transactionViewEnvelope.recipients.leafRecipients.contains(MemberRecipient(participantId))
+        ) {
           val message = transactionViewEnvelope.protocolMessage
           val randomnessF = EncryptedViewMessage
             .decryptRandomness(
@@ -1331,7 +1335,10 @@ class TransactionProcessingSteps(
           )
 
         case (_: Verdict.Approve, Left(modelConformanceError))
-            if !ModelConformanceChecker.isSubviewsCheckDisabled && modelConformanceError.aSubviewIsValid =>
+            if ModelConformanceChecker
+              .isSubviewsCheckEnabled(
+                loggerFactory.name
+              ) && modelConformanceError.aSubviewIsValid =>
           ErrorUtil.invalidState(
             s"The Mediator approved a request where a root view fails the model conformance check while a subview passes it"
           )

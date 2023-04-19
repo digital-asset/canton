@@ -61,6 +61,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
       storeId,
       timeouts,
       loggerFactory,
+      futureSupervisor,
       maxItemsInSqlQuery = 1,
     )
 

@@ -16,13 +16,13 @@ object ErrorCodeDocumentationGenerator {
 
   final case class DeprecatedItem(message: String, since: Option[String])
 
-  private case class ErrorCodeAnnotations(
+  private final case class ErrorCodeAnnotations(
       deprecation: Option[DeprecatedItem],
       explanation: Option[Explanation],
       resolution: Option[Resolution],
   )
 
-  private case class ErrorGroupAnnotations(
+  private final case class ErrorGroupAnnotations(
       explanation: Option[Explanation]
   )
 

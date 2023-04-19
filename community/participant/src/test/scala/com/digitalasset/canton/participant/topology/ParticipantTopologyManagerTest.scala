@@ -29,6 +29,7 @@ class ParticipantTopologyManagerTest extends TopologyManagerTest {
           DefaultProcessingTimeouts.testing,
           testedProtocolVersion,
           factory,
+          futureSupervisor,
         )
         mgr.setParticipantId(ParticipantId(id))
         mgr

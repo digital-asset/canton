@@ -134,6 +134,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         enableAdditionalConsistencyChecks = true,
         loggerFactory,
         timeouts,
+        futureSupervisor,
       )
     for {
       _ <- persistentState.parameterStore.setParameters(defaultStaticDomainParameters)
@@ -217,6 +218,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         Set.empty,
         workflowId,
         coidAbs1,
+        TransferStoreTest.templateId,
         transferId.sourceDomain,
         SourceProtocolVersion(testedProtocolVersion),
         sourceMediator,

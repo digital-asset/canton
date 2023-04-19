@@ -74,12 +74,14 @@ object ArbitraryConfig {
     contractObservers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     choiceControllers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     choiceObservers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    choiceAuthorizers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     transactionInputContracts <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
   } yield Limits(
     contractSignatories,
     contractObservers,
     choiceControllers,
     choiceObservers,
+    choiceAuthorizers,
     transactionInputContracts,
   )
 
@@ -509,7 +511,7 @@ object ArbitraryConfig {
     metrics = metrics,
     dataSource = Map.empty, // hardcoded to wildcard, as otherwise it
     participants = Map(
-      Ref.ParticipantId.fromString("default").toOption.get -> participant
+      Ref.ParticipantId.assertFromString("default") -> participant
     ), // will be redacted and cannot be checked for isomorphism
   )
 

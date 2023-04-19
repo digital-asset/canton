@@ -67,7 +67,8 @@ trait ApiServices {
   def withServices(otherServices: immutable.Seq[BindableService]): ApiServices
 }
 
-private case class ApiServicesBundle(services: immutable.Seq[BindableService]) extends ApiServices {
+private final case class ApiServicesBundle(services: immutable.Seq[BindableService])
+    extends ApiServices {
 
   override def withServices(otherServices: immutable.Seq[BindableService]): ApiServices =
     copy(services = services ++ otherServices)

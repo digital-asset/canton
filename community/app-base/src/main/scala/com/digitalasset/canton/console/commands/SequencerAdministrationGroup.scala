@@ -14,7 +14,6 @@ import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleEnvironment,
   FeatureFlag,
-  FeatureFlagFilter,
   Help,
   Helpful,
 }
@@ -26,7 +25,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerPruningStatus,
   SequencerSnapshot,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.ShowUtil.*
@@ -34,13 +33,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.DurationConverters.*
 
-class SequencerAdministrationGroup(
-    runner: AdminCommandRunner,
-    val consoleEnvironment: ConsoleEnvironment,
-    val loggerFactory: NamedLoggerFactory,
-) extends Helpful
-    with FeatureFlagFilter
-    with NamedLogging {
+trait SequencerAdministrationGroupCommon extends ConsoleCommandGroup {
 
   @Help.Summary("Pruning of the sequencer")
   object pruning
@@ -235,6 +228,12 @@ class SequencerAdministrationGroup(
 
   }
 
+  protected def disable_member(member: Member): Unit
+
+}
+
+trait SequencerAdministrationDisableMember extends ConsoleCommandGroup {
+
   /** Disable the provided member at the sequencer preventing them from reading and writing, and allowing their
     * data to be pruned.
     */
@@ -242,13 +241,21 @@ class SequencerAdministrationGroup(
     "Disable the provided member at the Sequencer that will allow any unread data for them to be removed"
   )
   @Help.Description("""This will prevent any client for the given member to reconnect the Sequencer
-        |and allow any unread/unacknowledged data they have to be removed.
-        |This should only be used if the domain operation is confident the member will never need
-        |to reconnect as there is no way to re-enable the member.
-        |To view members using the sequencer run `sequencer.status()`."""")
+                      |and allow any unread/unacknowledged data they have to be removed.
+                      |This should only be used if the domain operation is confident the member will never need
+                      |to reconnect as there is no way to re-enable the member.
+                      |To view members using the sequencer run `sequencer.status()`."""")
   def disable_member(member: Member): Unit = consoleEnvironment.run {
     runner.adminCommand(EnterpriseSequencerAdminCommands.DisableMember(member))
   }
+}
+
+class SequencerAdministrationGroup(
+    val runner: AdminCommandRunner,
+    val consoleEnvironment: ConsoleEnvironment,
+    val loggerFactory: NamedLoggerFactory,
+) extends SequencerAdministrationGroupCommon
+    with SequencerAdministrationDisableMember {
 
   /** Snapshot based on given snapshot to used as initial state by other sequencer nodes in the process of onboarding.
     */
@@ -256,4 +263,12 @@ class SequencerAdministrationGroup(
     consoleEnvironment.run {
       runner.adminCommand(EnterpriseSequencerAdminCommands.Snapshot(timestamp))
     }
+
+}
+
+trait SequencerAdministrationGroupX extends SequencerAdministrationGroupCommon {
+
+  @Help.Summary("Methods used for repairing the node")
+  object repair extends ConsoleCommandGroup.Impl(this) with SequencerAdministrationDisableMember {}
+
 }

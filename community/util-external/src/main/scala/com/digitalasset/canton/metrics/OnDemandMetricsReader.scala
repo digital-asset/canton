@@ -37,7 +37,7 @@ class OpenTelemetryOnDemandMetricsReader
     this
   }
 
-  override def getPreferredTemporality: AggregationTemporality = AggregationTemporality.DELTA
+  override def getPreferredTemporality: AggregationTemporality = AggregationTemporality.CUMULATIVE
 
   override def flush(): CompletableResultCode = CompletableResultCode.ofSuccess()
 

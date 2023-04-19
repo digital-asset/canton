@@ -74,7 +74,7 @@ class QueueBackedTrackerSpec
           Future.successful(Done),
         )
 
-        tracker.track(input(1))
+        tracker.track(input(1)).discard
         tracker.track(input(2)).map { completion =>
           completion should matchPattern {
             case Left(
@@ -140,7 +140,7 @@ class QueueBackedTrackerSpec
           Future.successful(Done),
         )
 
-        tracker.track(input(1))
+        tracker.track(input(1)).discard
         tracker.track(input(2)).map { completion =>
           completion should matchPattern {
             case Left(

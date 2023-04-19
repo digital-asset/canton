@@ -28,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
 }
 
 import java.time.Instant
+import scala.concurrent.blocking
 
 /** An infinite stream of state updates that fully conforms to the Daml ledger model.
   *
@@ -45,17 +46,21 @@ final case class EndlessReadService(
 
   private val logger = ContextualizedLogger.get(this.getClass)
 
-  override def currentHealth(): HealthStatus = synchronized {
-    if (aborted) HealthStatus.unhealthy else HealthStatus.healthy
-  }
+  override def currentHealth(): HealthStatus = blocking(
+    synchronized(
+      if (aborted) HealthStatus.unhealthy else HealthStatus.healthy
+    )
+  )
 
-  override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] = synchronized {
-    logger.info("EndlessReadService.ledgerInitialConditions() called")
-    initialConditionCalls += 1
-    Source
-      .single(LedgerInitialConditions(ledgerId, configuration, recordTime(0)))
-      .via(killSwitch.flow)
-  }
+  override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] = blocking(
+    synchronized {
+      logger.info("EndlessReadService.ledgerInitialConditions() called")
+      initialConditionCalls += 1
+      Source
+        .single(LedgerInitialConditions(ledgerId, configuration, recordTime(0)))
+        .via(killSwitch.flow)
+    }
+  )
 
   /** Produces the following stream of updates:
     *    1. a config change
@@ -69,7 +74,7 @@ final case class EndlessReadService(
   override def stateUpdates(
       beginAfter: Option[Offset]
   )(implicit loggingContext: LoggingContext): Source[(Offset, Update), NotUsed] =
-    synchronized {
+    blocking(synchronized {
       logger.info(s"EndlessReadService.stateUpdates($beginAfter) called")
       stateUpdatesCalls += 1
       val startIndex: Int = beginAfter.map(index).getOrElse(0) + 1
@@ -122,31 +127,31 @@ final case class EndlessReadService(
             )
         }
         .via(killSwitch.flow)
-    }
+    })
 
-  def abort(cause: Throwable): Unit = synchronized {
+  def abort(cause: Throwable): Unit = blocking(synchronized {
     logger.info(s"EndlessReadService.abort() called")
     aborted = true
     killSwitch.abort(cause)
-  }
+  })
 
-  def reset(): Unit = synchronized {
+  def reset(): Unit = blocking(synchronized {
     assert(aborted)
     logger.info(s"EndlessReadService.reset() called")
     stateUpdatesCalls = 0
     initialConditionCalls = 0
     aborted = false
     killSwitch = KillSwitches.shared("EndlessReadService")
-  }
+  })
 
-  override def close(): Unit = synchronized {
+  override def close(): Unit = blocking(synchronized {
     logger.info(s"EndlessReadService.close() called")
     killSwitch.shutdown()
-  }
+  })
 
-  def isRunning: Boolean = synchronized {
+  def isRunning: Boolean = blocking(synchronized {
     stateUpdatesCalls > 0 && !aborted
-  }
+  })
 
   private var stateUpdatesCalls: Int = 0
   private var initialConditionCalls: Int = 0

@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   PackageInUse,
@@ -45,7 +46,7 @@ class PackageInspectionOpsForTesting(
 
   override def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
       tc: TraceContext
-  ): EitherT[Future, ParticipantTopologyManagerError, Unit] = EitherT.rightT(())
+  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = EitherT.rightT(())
 
   override def genRevokePackagesTx(packages: List[LfPackageId])(implicit
       tc: TraceContext

@@ -275,4 +275,20 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
     )
   }
 
+  /** store an initial set of topology transactions as given into the store */
+  override def bootstrap(
+      snapshot: GenericStoredTopologyTransactionsX
+  )(implicit traceContext: TraceContext): Future[Unit] = Future {
+    blocking {
+      synchronized {
+        topologyTransactionStore
+          .appendAll(
+            snapshot.result.map { tx =>
+              TopologyStoreEntry(tx.transaction, tx.sequenced, tx.validFrom, rejected = None)
+            }
+          )
+          .discard
+      }
+    }
+  }
 }

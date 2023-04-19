@@ -172,7 +172,11 @@ class HealthCheckTest extends AsyncWordSpec with BaseTest {
 
     trait MockEnvironmentInstance {
       val environment = mock[MockEnvironment]
-      val participants = mock[ParticipantNodes[MockEnvironment#Config#ParticipantConfigType]]
+      val participants = mock[ParticipantNodes[
+        ParticipantNodeBootstrap,
+        ParticipantNode,
+        MockEnvironment#Config#ParticipantConfigType,
+      ]]
 
       when(environment.participants).thenReturn(participants)
     }

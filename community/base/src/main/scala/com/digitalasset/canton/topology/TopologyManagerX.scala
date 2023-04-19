@@ -198,6 +198,7 @@ class TopologyManagerX(
       transactions: Seq[GenericSignedTopologyTransactionX],
       force: Boolean,
       expectFullAuthorization: Boolean,
+      abortOnError: Boolean = true,
   )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
     sequentialQueue.executeE(
       {
@@ -210,7 +211,7 @@ class TopologyManagerX(
               EffectiveTime(ts),
               transactions,
               abortIfCascading = !force,
-              abortOnError = true,
+              abortOnError = abortOnError,
               expectFullAuthorization,
             )
             .leftMap { res =>

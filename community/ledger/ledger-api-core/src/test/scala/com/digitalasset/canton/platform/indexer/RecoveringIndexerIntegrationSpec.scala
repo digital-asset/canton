@@ -337,7 +337,7 @@ object RecoveringIndexerIntegrationSpec {
           doAnswer(invocation => {
             val beginAfter = invocation.getArgument[Option[Offset]](0)
             readingDelegate.stateUpdates(beginAfter).flatMapConcat { case value @ (offset, _) =>
-              if (lastFailure.isEmpty || lastFailure.get < offset) {
+              if (lastFailure.forall(_ < offset)) {
                 lastFailure = Some(offset)
                 Source.single(value).concat(Source.failed(new StateUpdatesFailedException))
               } else {

@@ -11,6 +11,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler, TaskSchedul
 import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,
   FlagCloseableAsync,
+  FutureUnlessShutdown,
   SyncCloseable,
   UnlessShutdown,
 }
@@ -63,7 +64,8 @@ private[participant] class NaiveRequestTracker(
       taskSchedulerMetrics,
       timeouts,
       loggerFactory.appendUnnamedKey("task scheduler owner", "NaiveRequestTracker"),
-    )(executionContext)
+      futureSupervisor,
+    )
 
   /** Maps request counters to the data associated with a request.
     *
@@ -315,15 +317,16 @@ private[participant] class NaiveRequestTracker(
       *   <li>Fulfill the `activenessResult` promise with the result</li>
       * </ul>
       */
-    override def perform(): Future[Unit] = {
-      logger.debug(withRC(rc, "Performing the activeness check"))
+    override def perform(): FutureUnlessShutdown[Unit] =
+      performUnlessClosingF("check-activeness-result") {
+        logger.debug(withRC(rc, "Performing the activeness check"))
 
-      val result = conflictDetector.checkActivenessAndLock(rc)
-      activenessResult completeWith result
-      result.map { actRes =>
-        logger.trace(withRC(rc, s"Activeness result $actRes"))
+        val result = conflictDetector.checkActivenessAndLock(rc)
+        activenessResult completeWith result
+        result.map { actRes =>
+          logger.trace(withRC(rc, s"Activeness result $actRes"))
+        }
       }
-    }
 
     override def pretty: Pretty[this.type] = prettyOfClass(
       param("timestamp", _.timestamp),
@@ -348,10 +351,10 @@ private[participant] class NaiveRequestTracker(
   )(override implicit val traceContext: TraceContext)
       extends TimedTask(timestamp, sequencerCounter, Kind.Timeout) {
 
-    override def perform(): Future[Unit] =
+    override def perform(): FutureUnlessShutdown[Unit] =
       if (!timeoutPromise.isCompleted) {
         logger.debug(withRC(rc, "Timed out."))
-        releaseAllLocks(rc, requestTimestamp).map { _ =>
+        performUnlessClosingF("trigger-timeout")(releaseAllLocks(rc, requestTimestamp)).map { _ =>
           evictRequest(rc)
           /* Timeout promises are completed only here and in `addResult`.
            * These two completions never race.
@@ -373,7 +376,7 @@ private[participant] class NaiveRequestTracker(
           timeoutPromise success Timeout
           ()
         }
-      } else { Future.unit }
+      } else { FutureUnlessShutdown.unit }
 
     override def pretty: Pretty[this.type] =
       prettyOfClass(
@@ -409,7 +412,7 @@ private[participant] class NaiveRequestTracker(
       * @throws InvalidCommitSet if the commit set tries to archive or create a contract that was not locked
       *                          during the activeness check
       */
-    override def perform(): Future[Unit] = {
+    override def perform(): FutureUnlessShutdown[Unit] = performUnlessClosingF("finalize-request") {
       commitSetFuture.transformWith {
         case Success(commitSet) =>
           logger.debug(withRC(rc, s"Finalizing at $commitTime"))

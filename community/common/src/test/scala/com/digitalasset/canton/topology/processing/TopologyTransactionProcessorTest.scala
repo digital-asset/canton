@@ -29,6 +29,8 @@ class TopologyTransactionProcessorTest
     new InMemoryTopologyStore(
       TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
       loggerFactory,
+      timeouts,
+      futureSupervisor,
     ) {
       override def monotonicityTimeCheckUpdate(ts: CantonTimestamp): Option[CantonTimestamp] = None
     }

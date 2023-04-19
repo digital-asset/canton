@@ -6,12 +6,18 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.now
 import com.digitalasset.canton.error.*
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
+import com.digitalasset.canton.lifecycle.{
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  FutureUnlessShutdown,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.Clock
@@ -27,7 +33,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueueWithShutdown}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -39,6 +45,7 @@ abstract class TopologyManager[E <: CantonError](
     timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseableAsync {
@@ -135,8 +142,10 @@ abstract class TopologyManager[E <: CantonError](
       removeFromCache: (
           SnapshotAuthorizationValidator,
           StoredTopologyTransactions[TopologyChangeOp],
-      ) => EitherT[Future, TopologyManagerError, Unit],
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] = {
+      ) => EitherT[FutureUnlessShutdown, TopologyManagerError, Unit],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
 
     lazy val unauthorizedTransaction: TopologyManagerError =
       TopologyManagerError.UnauthorizedTransaction.Failure()
@@ -145,7 +154,8 @@ abstract class TopologyManager[E <: CantonError](
       TopologyManagerError.RemovingKeyWithDanglingTransactionsMustBeForced
         .Failure(targetKey.fingerprint, targetKey.purpose)
 
-    val validatorSnap = new SnapshotAuthorizationValidator(now(), store, loggerFactory)
+    val validatorSnap =
+      new SnapshotAuthorizationValidator(now(), store, timeouts, loggerFactory, futureSupervisor)
 
     for {
       // step1: check if transaction is authorized
@@ -153,14 +163,16 @@ abstract class TopologyManager[E <: CantonError](
       _ <-
         // not authorized
         if (authorized.isEmpty)
-          EitherT.leftT[Future, Unit](unauthorizedTransaction: TopologyManagerError)
+          EitherT.leftT[FutureUnlessShutdown, Unit](unauthorizedTransaction: TopologyManagerError)
         // authorized
         else if (!force) {
           for {
             // step2: find transaction that is going to be removed
-            storedTxsToRemove <- EitherT.right[TopologyManagerError](
-              store.findStoredNoSignature(transaction.transaction.reverse)
-            )
+            storedTxsToRemove <- EitherT
+              .right[TopologyManagerError](
+                store.findStoredNoSignature(transaction.transaction.reverse)
+              )
+              .mapK(FutureUnlessShutdown.outcomeK)
 
             // step3: remove namespace delegation transaction from cache store
             _ <- storedTxsToRemove.parTraverse { storedTxToRemove =>
@@ -173,16 +185,18 @@ abstract class TopologyManager[E <: CantonError](
 
             // step4: retrieve all transactions (possibly related with this namespace)
             // TODO(i9809): this is risky for a big number of parties (i.e. 1M)
-            txs <- EitherT.right(
-              store.findPositiveTransactions(
-                CantonTimestamp.MaxValue,
-                asOfInclusive = true,
-                includeSecondary = true,
-                types = DomainTopologyTransactionType.all,
-                filterUid = None,
-                filterNamespace = Some(Seq(namespace)),
+            txs <- EitherT
+              .right(
+                store.findPositiveTransactions(
+                  CantonTimestamp.MaxValue,
+                  asOfInclusive = true,
+                  includeSecondary = true,
+                  types = DomainTopologyTransactionType.all,
+                  filterUid = None,
+                  filterNamespace = Some(Seq(namespace)),
+                )
               )
-            )
+              .mapK(FutureUnlessShutdown.outcomeK)
 
             // step5: check if these transactions are still valid
             _ <- txs.combine.result.parTraverse { txToCheck =>
@@ -197,7 +211,7 @@ abstract class TopologyManager[E <: CantonError](
             }
           } yield ()
         } else
-          EitherT.rightT[Future, TopologyManagerError](())
+          EitherT.rightT[FutureUnlessShutdown, TopologyManagerError](())
     } yield ()
   }
 
@@ -206,13 +220,14 @@ abstract class TopologyManager[E <: CantonError](
       force: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, Unit] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     if (transaction.transaction.op == TopologyChangeOp.Add)
       EitherT.rightT(())
     else {
       transaction.transaction.element.mapping match {
         case OwnerToKeyMapping(owner, key) =>
           keyRevocationIsNotDangerous(owner, key, transaction.transaction.element.id, force)
+            .mapK(FutureUnlessShutdown.outcomeK)
         case NamespaceDelegation(namespace, targetKey, _) =>
           keyRevocationDelegationIsNotDangerous(
             transaction,
@@ -240,7 +255,9 @@ abstract class TopologyManager[E <: CantonError](
             },
           )
         case DomainParametersChange(_, newDomainParameters) if !force =>
-          checkLedgerTimeRecordTimeToleranceNotIncreasing(newDomainParameters)
+          checkLedgerTimeRecordTimeToleranceNotIncreasing(newDomainParameters).mapK(
+            FutureUnlessShutdown.outcomeK
+          )
         case _ => EitherT.rightT(())
       }
     }
@@ -360,12 +377,16 @@ abstract class TopologyManager[E <: CantonError](
       protocolVersion: ProtocolVersion,
       force: Boolean = false,
       replaceExisting: Boolean = false,
-  )(implicit traceContext: TraceContext): EitherT[Future, E, SignedTopologyTransaction[Op]] = {
-    sequentialQueue.executeE(
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, E, SignedTopologyTransaction[Op]] = {
+    sequentialQueue.executeEUS(
       {
         logger.debug(show"Attempting to authorize ${transaction.element.mapping} with $signingKey")
         for {
-          signed <- build(transaction, signingKey, protocolVersion)
+          signed <- build(transaction, signingKey, protocolVersion).mapK(
+            FutureUnlessShutdown.outcomeK
+          )
           _ <- process(signed, force, replaceExisting, allowDuplicateMappings = false)
         } yield signed
       },
@@ -403,18 +424,23 @@ abstract class TopologyManager[E <: CantonError](
       force: Boolean = false,
       replaceExisting: Boolean = false,
       allowDuplicateMappings: Boolean = false,
-  )(implicit traceContext: TraceContext): EitherT[Future, E, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, E, Unit] = {
     // Ensure sequential execution of `process`: When processing signed topology transactions, we test whether they can be
     // added incrementally to the existing state. Therefore, we need to sequence
     // (testing + adding) and ensure that we don't concurrently insert these
     // transactions.
-    sequentialQueue.executeE(
+    sequentialQueue.executeEUS(
       process(transaction, force, replaceExisting, allowDuplicateMappings),
       "add transaction",
     )
   }
 
-  protected val sequentialQueue = new SimpleExecutionQueue()
+  protected val sequentialQueue = new SimpleExecutionQueueWithShutdown(
+    "topology-manager-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   /** sequential(!) processing of topology transactions
     *
@@ -426,7 +452,7 @@ abstract class TopologyManager[E <: CantonError](
       force: Boolean,
       replaceExisting: Boolean,
       allowDuplicateMappings: Boolean,
-  )(implicit traceContext: TraceContext): EitherT[Future, E, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, E, Unit] = {
     def checkValidationResult(
         validated: Seq[ValidatedTopologyTransaction]
     ): EitherT[Future, E, Unit] = {
@@ -482,18 +508,31 @@ abstract class TopologyManager[E <: CantonError](
     val ret = for {
       // uniqueness check on store: ensure that transaction hasn't been added before
       _ <-
-        if (isUniquenessRequired) checkTransactionNotAddedBefore(transaction).leftMap(wrapError)
-        else EitherT.pure[Future, E](())
-      _ <- checkRemovalRefersToExisingTx(transaction).leftMap(wrapError)
-      _ <- checkMappingOfTxDoesNotExistYet(transaction, allowDuplicateMappings).leftMap(wrapError)
+        if (isUniquenessRequired)
+          checkTransactionNotAddedBefore(transaction)
+            .leftMap(wrapError)
+            .mapK(FutureUnlessShutdown.outcomeK)
+        else EitherT.pure[FutureUnlessShutdown, E](())
+      _ <- checkRemovalRefersToExisingTx(transaction)
+        .leftMap(wrapError)
+        .mapK(FutureUnlessShutdown.outcomeK)
+      _ <- checkMappingOfTxDoesNotExistYet(transaction, allowDuplicateMappings)
+        .leftMap(wrapError)
+        .mapK(FutureUnlessShutdown.outcomeK)
       _ <- transactionIsNotDangerous(transaction, force).leftMap(wrapError)
-      _ <- checkNewTransaction(transaction, force) // domain / participant specific checks
-      deactivateExisting <- removeExistingTransactions(transaction, replaceExisting)
+      _ <- checkNewTransaction(transaction, force).mapK(
+        FutureUnlessShutdown.outcomeK
+      ) // domain / participant specific checks
+      deactivateExisting <- removeExistingTransactions(transaction, replaceExisting).mapK(
+        FutureUnlessShutdown.outcomeK
+      )
       updateTx = transaction +: deactivateExisting
-      res <- EitherT.right(validator.validateAndUpdateHeadAuthState(now, updateTx))
-      _ <- checkValidationResult(res._2)
+      res <- EitherT
+        .right(validator.validateAndUpdateHeadAuthState(now, updateTx))
+        .mapK(FutureUnlessShutdown.outcomeK)
+      _ <- checkValidationResult(res._2).mapK(FutureUnlessShutdown.outcomeK)
       // TODO(i1251) batch adding once we overhaul the domain identity dispatcher (right now, adding multiple tx with same ts doesn't work)
-      _ <- addOneByOne(updateTx)
+      _ <- addOneByOne(updateTx).mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
 
     ret.leftMap { err =>
@@ -617,13 +656,9 @@ abstract class TopologyManager[E <: CantonError](
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
     Seq(
       SyncCloseable("topology-manager-store", store.close()),
-      sequentialQueue.asCloseable(
-        "topology-manager-sequential-queue",
-        timeouts.shutdownProcessing.unwrap,
-      ),
+      SyncCloseable("topology-manager-sequential-queue", sequentialQueue.close()),
     )
   }
 

@@ -13,7 +13,6 @@ import cats.{Applicative, MonoidK}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
-import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -265,12 +264,6 @@ object TransferOutRequestValidation {
   ) extends TransferOutProcessorError {
     override def message: String =
       s"Cannot transfer-out contract `$contractId`: recipients mismatch"
-  }
-
-  final case class ContractStoreFailed(transferId: TransferId, error: ContractStoreError)
-      extends TransferProcessorError {
-    override def message: String =
-      s"Cannot transfer-out `$transferId`: internal contract store error"
   }
 
 }

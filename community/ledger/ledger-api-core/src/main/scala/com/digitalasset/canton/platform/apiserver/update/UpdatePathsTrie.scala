@@ -59,7 +59,7 @@ object UpdatePathsTrie {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  private case class Builder(
+  private final case class Builder(
       nodes: mutable.SortedMap[String, Builder],
       var exists: Boolean = false,
   ) {
@@ -106,7 +106,7 @@ object UpdatePathsTrie {
   *
   * See also [[com.google.protobuf.field_mask.FieldMask]]).
   */
-private[update] case class UpdatePathsTrie(
+private[update] final case class UpdatePathsTrie(
     nodes: SortedMap[String, UpdatePathsTrie],
     exists: Boolean,
 ) {

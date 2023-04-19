@@ -10,6 +10,7 @@ import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.sequencing.protocol.RecipientsTree.Recipient
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 
@@ -18,11 +19,13 @@ import com.digitalasset.canton.topology.Member
   */
 final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends PrettyPrinting {
 
-  lazy val allRecipients: Set[Member] = {
-    trees.flatMap(t => t.allRecipients).toSet
-  }
+  // TODO(#12360): include all kinds of recipients
+  lazy val allRecipients: Set[Member] =
+    trees.forgetNE
+      .flatMap(t => t.allRecipients)
+      .toSet
 
-  def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Member]]]]]] = trees.flatMap(_.allPaths)
+  def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] = trees.flatMap(_.allPaths)
 
   def forMember(member: Member): Option[Recipients] = {
     val ts = trees.forgetNE.flatMap(t => t.forMember(member))
@@ -40,17 +43,19 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
 
   def asSingleGroup: Option[NonEmpty[Set[Member]]] = {
     trees match {
-      case Seq(RecipientsTree(group, Seq())) => Some(group)
+      case Seq(RecipientsTree(group, Seq())) =>
+        NonEmpty.from(group.collect { case RecipientsTree.MemberRecipient(member) =>
+          member
+        })
       case _ => None
     }
   }
 
-  /** Members that appear at the leaf of the BCC tree. For example, the informees of a view are leaf members of the
+  /** Recipients that appear at the leaf of the BCC tree. For example, the informees of a view are leaf members of the
     * view message.
     */
-  lazy val leafMembers: NonEmpty[Set[Member]] =
-    trees.toNEF.reduceLeftTo(_.leafMembers)(_ ++ _.leafMembers)
-
+  lazy val leafRecipients: NonEmpty[Set[Recipient]] =
+    trees.toNEF.reduceLeftTo(_.leafRecipients)(_ ++ _.leafRecipients)
 }
 
 object Recipients {

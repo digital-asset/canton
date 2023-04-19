@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -37,6 +38,7 @@ class SyncDomainPersistentStateFactory(
     val indexedStringStore: IndexedStringStore,
     parameters: ParticipantNodeParameters,
     override val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
@@ -141,6 +143,7 @@ class SyncDomainPersistentStateFactory(
           parameters.enableAdditionalConsistencyChecks,
           indexedStringStore,
           loggerFactory,
+          futureSupervisor,
         )
       )
 

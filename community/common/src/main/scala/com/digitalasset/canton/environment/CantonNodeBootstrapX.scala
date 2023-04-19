@@ -54,6 +54,9 @@ abstract class CantonNodeBootstrapX[
   protected def customNodeStages(
       storage: Storage,
       crypto: Crypto,
+      nodeId: UniqueIdentifier,
+      manager: TopologyManagerX,
+      healthReporter: GrpcHealthReporter,
   ): BootstrapStageOrLeaf[T]
 
   /** member depends on node type */
@@ -167,7 +170,7 @@ abstract class CantonNodeBootstrapX[
                 executionContext,
               )
             )
-            Some(new SetupNodeId(storage, crypto))
+            Some(new SetupNodeId(storage, crypto, healthReporter))
           }
       )
     }
@@ -176,6 +179,7 @@ abstract class CantonNodeBootstrapX[
   private class SetupNodeId(
       storage: Storage,
       val crypto: Crypto,
+      healthReporter: GrpcHealthReporter,
   ) extends BootstrapStageWithStorage[T, GenerateOrAwaitNodeTopologyTx, UniqueIdentifier](
         description = "Init node id",
         bootstrapStageCallback,
@@ -248,7 +252,14 @@ abstract class CantonNodeBootstrapX[
     ): Future[Option[UniqueIdentifier]] = initializationStore.id.map(_.map(_.identity))
 
     override protected def buildNextStage(uid: UniqueIdentifier): GenerateOrAwaitNodeTopologyTx =
-      new GenerateOrAwaitNodeTopologyTx(uid, topologyManager, authorizedStore, storage, crypto)
+      new GenerateOrAwaitNodeTopologyTx(
+        uid,
+        topologyManager,
+        authorizedStore,
+        storage,
+        crypto,
+        healthReporter,
+      )
 
     override protected def autoCompleteStage()
         : EitherT[Future, String, Option[UniqueIdentifier]] = {
@@ -285,6 +296,7 @@ abstract class CantonNodeBootstrapX[
       authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
       storage: Storage,
       crypto: Crypto,
+      healthReporter: GrpcHealthReporter,
   ) extends BootstrapStageWithStorage[T, BootstrapStageOrLeaf[T], Unit](
         description = "generate-or-await-node-topology-tx",
         bootstrapStageCallback,
@@ -326,6 +338,9 @@ abstract class CantonNodeBootstrapX[
       customNodeStages(
         storage,
         crypto,
+        nodeId,
+        manager,
+        healthReporter,
       )
 
     override protected def autoCompleteStage(): EitherT[Future, String, Option[Unit]] = {

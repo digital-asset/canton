@@ -6,17 +6,20 @@ package com.digitalasset.canton.platform.indexer.parallel
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.digitalasset.canton.concurrent.Threading
+import org.scalatest.OptionValues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.chaining.*
 
 class BatchingParallelIngestionPipeSpec
     extends AsyncFlatSpec
     with Matchers
+    with OptionValues
     with AkkaBeforeAndAfterAll {
 
   // AsyncFlatSpec is with serial execution context
@@ -39,50 +42,44 @@ class BatchingParallelIngestionPipeSpec
   it should "terminate the stream upon error in input mapper" in {
     runPipe(inputMapperHook = () => throw new Exception("inputmapper failed")).map {
       case (_, _, err) =>
-        err should not be empty
-        err.get.getMessage shouldBe "inputmapper failed"
+        err.value.getMessage shouldBe "inputmapper failed"
     }
   }
 
   it should "terminate the stream upon error in seqMapper" in {
     runPipe(seqMapperHook = () => throw new Exception("seqMapper failed")).map { case (_, _, err) =>
-      err should not be empty
-      err.get.getMessage shouldBe "seqMapper failed"
+      err.value.getMessage shouldBe "seqMapper failed"
     }
   }
 
   it should "terminate the stream upon error in batcher" in {
     runPipe(batcherHook = () => throw new Exception("batcher failed")).map { case (_, _, err) =>
-      err should not be empty
-      err.get.getMessage shouldBe "batcher failed"
+      err.value.getMessage shouldBe "batcher failed"
     }
   }
 
   it should "terminate the stream upon error in ingester" in {
     runPipe(ingesterHook = _ => throw new Exception("ingester failed")).map { case (_, _, err) =>
-      err should not be empty
-      err.get.getMessage shouldBe "ingester failed"
+      err.value.getMessage shouldBe "ingester failed"
     }
   }
 
   it should "terminate the stream upon error in ingestTail" in {
     runPipe(ingestTailHook = _ => throw new Exception("ingestTail failed")).map {
       case (_, _, err) =>
-        err should not be empty
-        err.get.getMessage shouldBe "ingestTail failed"
+        err.value.getMessage shouldBe "ingestTail failed"
     }
   }
 
   it should "hold the stream if a single ingestion takes too long" in {
     runPipe(
-      inputMapperHook = () => Thread.sleep(1L),
+      inputMapperHook = () => Threading.sleep(1L),
       ingesterHook = batch => {
-        if (batch.head == 21) Thread.sleep(1000)
+        if (batch.head == 21) Threading.sleep(1000)
       },
       timeout = FiniteDuration(100, "milliseconds"),
     ).map { case (ingested, ingestedTail, err) =>
-      err should not be empty
-      err.get.getMessage shouldBe "timed out"
+      err.value.getMessage shouldBe "timed out"
       ingested.size shouldBe 25
       ingestedTail.last shouldBe 20
     }
@@ -92,11 +89,11 @@ class BatchingParallelIngestionPipeSpec
     val batchSizes = ArrayBuffer.empty[Int]
     runPipe(
       // Back-pressure to ensure formation of max batch sizes (of size 5)
-      inputMapperHook = () => Thread.sleep(1),
+      inputMapperHook = () => Threading.sleep(1),
       ingesterHook = batch => {
-        batchSizes.synchronized {
+        blocking(batchSizes.synchronized {
           batchSizes.addOne(batch.size)
-        }
+        })
         ()
       },
     ).map { case (_, _, err) =>
@@ -113,7 +110,7 @@ class BatchingParallelIngestionPipeSpec
         batch.size shouldBe 1
         ()
       },
-      inputSource = Source(input).take(10).map(_.tap(_ => Thread.sleep(10L))).async,
+      inputSource = Source(input).take(10).map(_.tap(_ => Threading.sleep(10L))).async,
     ).map { case (_, _, err) =>
       err shouldBe empty
     }
@@ -125,7 +122,7 @@ class BatchingParallelIngestionPipeSpec
     runPipe(
       ingestTailHook = { batchOfBatches =>
         // Slow ingest tail
-        Thread.sleep(10L)
+        Threading.sleep(10L)
         batchSizes.addOne(batchOfBatches.size)
       },
       inputSource = Source(input).take(100).async,
@@ -147,7 +144,7 @@ class BatchingParallelIngestionPipeSpec
         .map(
           _.tap(_ =>
             // Slow down source to ensure ingestTail is faster
-            Thread.sleep(1L)
+            Threading.sleep(1L)
           )
         )
         .async,
@@ -198,18 +195,18 @@ class BatchingParallelIngestionPipeSpec
         ingester = dbBatch =>
           Future {
             ingesterHook(dbBatch.map(_._1))
-            semaphore.synchronized {
+            blocking(semaphore.synchronized {
               ingested = ingested ++ dbBatch
-            }
+            })
             dbBatch
           },
         maxTailerBatchSize = MaxTailerBatchSize,
         ingestTail = dbBatch =>
           Future {
             ingestTailHook(dbBatch)
-            semaphore.synchronized {
+            blocking(semaphore.synchronized {
               ingestedTail = ingestedTail :+ dbBatch.last.last._1
-            }
+            })
             dbBatch
           },
       )

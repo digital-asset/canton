@@ -25,7 +25,7 @@ import com.digitalasset.canton.environment.{
   ParticipantNodes,
 }
 import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
-import com.digitalasset.canton.participant.ParticipantNodeBootstrap
+import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.{BaseTest, ConfigStubs}
 import io.grpc.stub.AbstractStub
@@ -69,8 +69,14 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
 
   abstract class TestEnvironment(val config: CantonCommunityConfig = DefaultConfig) {
     val environment: CommunityEnvironment = mock[CommunityEnvironment]
-    val participants: ParticipantNodes[config.ParticipantConfigType] =
-      mock[ParticipantNodes[config.ParticipantConfigType]]
+    val participants: ParticipantNodes[
+      ParticipantNodeBootstrap,
+      ParticipantNode,
+      config.ParticipantConfigType,
+    ] =
+      mock[
+        ParticipantNodes[ParticipantNodeBootstrap, ParticipantNode, config.ParticipantConfigType]
+      ]
     val domains: DomainNodes[config.DomainConfigType] =
       mock[DomainNodes[config.DomainConfigType]]
     val participant: ParticipantNodeBootstrap = mock[ParticipantNodeBootstrap]

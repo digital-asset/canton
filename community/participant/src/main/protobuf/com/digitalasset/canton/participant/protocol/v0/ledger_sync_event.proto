@@ -165,6 +165,7 @@ message TransferredOut {
     string target_domain = 8;
     google.protobuf.Timestamp transfer_in_exclusivity = 9;
     string workflow_id = 10; // optional
+    string template_id = 11; // optional
 }
 
 message TransferredIn {

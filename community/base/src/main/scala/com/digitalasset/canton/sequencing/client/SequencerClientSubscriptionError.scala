@@ -5,12 +5,16 @@ package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
 
 sealed trait SequencerClientSubscriptionError extends Product with Serializable {
   def mbException: Option[Throwable] = None
 }
 
 object SequencerClientSubscriptionError {
+  final case class EventAggregationError(error: SequencerAggregatorError)
+      extends SequencerClientSubscriptionError
+
   final case class EventValidationError(error: SequencedEventValidationError)
       extends SequencerClientSubscriptionError
 

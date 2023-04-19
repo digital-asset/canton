@@ -369,8 +369,7 @@ private[mediator] object Mediator {
       cleanTs: CantonTimestamp,
   ): PruningSafetyCheck = {
     lazy val timeout = domainParameters.parameters.participantResponseTimeout
-    lazy val cappedSafePruningTs =
-      CantonTimestamp.max(cleanTs - timeout, domainParameters.validFrom)
+    lazy val cappedSafePruningTs = domainParameters.validFrom.max(cleanTs - timeout)
 
     if (cleanTs <= domainParameters.validFrom) // If these parameters apply only to the future
       Safe

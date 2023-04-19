@@ -15,7 +15,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.HealthReporting
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.topology.*
@@ -130,7 +130,13 @@ abstract class CantonNodeBootstrapBase[
   )
 
   protected val authorizedTopologyStore =
-    TopologyStore(TopologyStoreId.AuthorizedStore, storage, timeouts, loggerFactory)
+    TopologyStore(
+      TopologyStoreId.AuthorizedStore,
+      storage,
+      timeouts,
+      loggerFactory,
+      futureSupervisor,
+    )
   this.adminServerRegistry
     .addService(
       canton.topology.admin.v0.TopologyManagerReadServiceGrpc
@@ -194,7 +200,7 @@ abstract class CantonNodeBootstrapBase[
   /** Generate an identity for the node. */
   protected def autoInitializeIdentity(
       initConfigBase: InitConfigBase
-  ): EitherT[Future, String, Unit]
+  ): EitherT[FutureUnlessShutdown, String, Unit]
 
   final protected def storeId(id: NodeId): EitherT[Future, String, Unit] =
     for {
@@ -245,7 +251,9 @@ abstract class CantonNodeBootstrapBase[
       _ <- id.fold(
         if (initConfig.autoInit) {
           logger.info("Node is not initialized yet. Performing automated default initialization.")
-          autoInitializeIdentity(initConfig)
+          autoInitializeIdentity(initConfig).onShutdown(
+            Left("Node was shutdown during initialization")
+          )
         } else {
           logger.info(
             "Node is not initialized yet. You have opted for manual configuration by yourself."
@@ -359,7 +367,7 @@ abstract class CantonNodeBootstrapBase[
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
     authorizeIfNew(
       manager,
       TopologyStateUpdate.createAdd(mapping, protocolVersion),
@@ -374,14 +382,16 @@ abstract class CantonNodeBootstrapBase[
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit] = for {
-    exists <- EitherT.right(
-      manager.signedMappingAlreadyExists(transaction.element.mapping, signingKey.fingerprint)
-    )
+  ): EitherT[FutureUnlessShutdown, String, Unit] = for {
+    exists <- EitherT
+      .right(
+        manager.signedMappingAlreadyExists(transaction.element.mapping, signingKey.fingerprint)
+      )
+      .mapK(FutureUnlessShutdown.outcomeK)
     res <-
       if (exists) {
         logger.debug(s"Skipping existing ${transaction.element.mapping}")
-        EitherT.rightT[Future, String](())
+        EitherT.rightT[FutureUnlessShutdown, String](())
       } else
         manager
           .authorize(transaction, Some(signingKey.fingerprint), protocolVersion, false)

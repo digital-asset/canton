@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -37,6 +38,7 @@ class DbSyncDomainPersistentState(
     override val enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
     val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends SyncDomainPersistentState
     with AutoCloseable
@@ -113,6 +115,7 @@ class DbSyncDomainPersistentState(
     protocolVersion,
     pureCryptoApi,
     processingTimeouts,
+    futureSupervisor,
     loggerFactory,
   )
 
@@ -130,7 +133,13 @@ class DbSyncDomainPersistentState(
       loggerFactory,
     )
   val topologyStore =
-    new DbTopologyStore(storage, DomainStore(domainId.item), processingTimeouts, loggerFactory)
+    new DbTopologyStore(
+      storage,
+      DomainStore(domainId.item),
+      processingTimeouts,
+      loggerFactory,
+      futureSupervisor,
+    )
 
   override def close() = Lifecycle.close(
     eventLog,

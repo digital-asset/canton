@@ -224,12 +224,12 @@ object SequencerWriterSource {
         )
       )
       // Merge watermark updating in case we are running slow here
-      .conflate[Traced[BatchWritten]] { case (lftT, rghtT) =>
-        lftT.withTraceContext { traceContext => lft =>
-          rghtT.map(rght =>
+      .conflate[Traced[BatchWritten]] { case (tracedLeft, tracedRight) =>
+        tracedLeft.withTraceContext { _ => left =>
+          tracedRight.map(right =>
             BatchWritten(
-              lft.notifies.union(rght.notifies),
-              CantonTimestamp.max(lft.latestTimestamp, rght.latestTimestamp),
+              left.notifies.union(right.notifies),
+              left.latestTimestamp.max(right.latestTimestamp),
             )
           )
         }

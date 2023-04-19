@@ -49,12 +49,13 @@ final case class EffectiveTime(value: CantonTimestamp) {
 
   def toProtoPrimitive: ProtoTimestamp = value.toProtoPrimitive
 
+  def max(that: EffectiveTime): EffectiveTime =
+    EffectiveTime(value.max(that.value))
+
 }
 object EffectiveTime {
   val MinValue: EffectiveTime = EffectiveTime(CantonTimestamp.MinValue)
   val MaxValue: EffectiveTime = EffectiveTime(CantonTimestamp.MaxValue)
-  def max(ts: EffectiveTime, other: EffectiveTime*): EffectiveTime =
-    EffectiveTime(CantonTimestamp.max(ts.value, other.map(_.value): _*))
   implicit val orderingEffectiveTime: Ordering[EffectiveTime] =
     Ordering.by[EffectiveTime, CantonTimestamp](_.value)
   def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[EffectiveTime] =
@@ -345,7 +346,7 @@ class TopologyTransactionProcessor(
   }
 
   /** assumption: subscribers don't do heavy lifting */
-  def subscribe(listener: TopologyTransactionProcessingSubscriber): Unit = {
+  override def subscribe(listener: TopologyTransactionProcessingSubscriber): Unit = {
     listeners += listener
   }
 
@@ -643,7 +644,17 @@ class TopologyTransactionProcessor(
         TopologyTransactionProcessor.this.subscriptionStartsAt(start, domainTimeTracker)
     }
 
-  override def onClosed(): Unit = Lifecycle.close(timeAdjuster, store)(logger)
+  override def onClosed(): Unit = {
+    import TraceContext.Implicits.Empty.emptyTraceContext
+    Lifecycle.close(
+      timeAdjuster,
+      store,
+      serializer.asCloseable(
+        "topology-transaction-processor-queue",
+        timeouts.shutdownProcessing.unwrap,
+      ),
+    )(logger)
+  }
 
 }
 

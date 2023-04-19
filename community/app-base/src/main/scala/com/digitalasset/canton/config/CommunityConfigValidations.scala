@@ -151,10 +151,27 @@ object CommunityConfigValidations
   private def atLeastOneNode(
       config: CantonCommunityConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
-    val CantonCommunityConfig(domains, participants, remoteDomains, remoteParticipants, _, _, _) =
+    val CantonCommunityConfig(
+      domains,
+      participants,
+      participantsX,
+      remoteDomains,
+      remoteParticipants,
+      remoteParticipantsX,
+      _,
+      _,
+      _,
+    ) =
       config
     Validated.cond(
-      Seq(domains, participants, remoteDomains, remoteParticipants)
+      Seq(
+        domains,
+        participants,
+        remoteDomains,
+        remoteParticipants,
+        participantsX,
+        remoteParticipantsX,
+      )
         .exists(_.nonEmpty),
       (),
       NonEmpty(Seq, "At least one node must be defined in the configuration"),

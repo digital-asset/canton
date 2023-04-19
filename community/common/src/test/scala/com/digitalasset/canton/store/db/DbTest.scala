@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.store.db
 
-import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.config.CommunityDbConfig.{H2, Postgres}
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.*
 
 import scala.concurrent.duration.*
@@ -31,7 +32,9 @@ trait DbTest
   this: Suite =>
 
   /** Flag to define the migration mode for the schemas */
-  def migrationMode: MigrationMode = MigrationMode.Standard
+  def migrationMode: MigrationMode =
+    if (BaseTest.testedProtocolVersion == ProtocolVersion.dev) MigrationMode.DevVersion
+    else MigrationMode.Standard
 
   protected def mkDbConfig(basicConfig: DbBasicConfig): DbConfig
 
