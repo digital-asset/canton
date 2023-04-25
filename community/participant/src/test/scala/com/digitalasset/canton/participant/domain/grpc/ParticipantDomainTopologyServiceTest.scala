@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.participant.domain.ParticipantDomainTopologyService
 import com.digitalasset.canton.protocol.messages.{
+  ProtocolMessage,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
   RegisterTopologyTransactionResponseResult,
@@ -84,7 +85,7 @@ class ParticipantDomainTopologyServiceTest
       mock[
         (
             TraceContext,
-            OpenEnvelope[RegisterTopologyTransactionRequest],
+            OpenEnvelope[ProtocolMessage],
         ) => EitherT[Future, SendAsyncClientError, Unit]
       ]
 
@@ -120,7 +121,7 @@ class ParticipantDomainTopologyServiceTest
 
       for {
         result <- resultF
-        _ = result shouldBe UnlessShutdown.Outcome(response)
+        _ = result shouldBe UnlessShutdown.Outcome(response.results.map(_.state))
         asyncRes <- handlerResult.failOnShutdown("handler result")
         _ <- asyncRes.unwrap.failOnShutdown("async result")
       } yield succeed

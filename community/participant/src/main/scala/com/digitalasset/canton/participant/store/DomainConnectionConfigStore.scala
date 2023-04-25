@@ -124,7 +124,7 @@ object DomainConnectionConfigStore {
     override def toString: String = s"$alias is unknown. Has the domain been registered?"
   }
 
-  def apply(
+  def create(
       storage: Storage,
       releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,

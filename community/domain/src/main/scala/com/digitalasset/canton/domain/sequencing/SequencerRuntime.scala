@@ -45,7 +45,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
@@ -69,6 +69,7 @@ object SequencerAuthenticationConfig {
 
 /** Run a sequencer and its supporting services.
   * @param authenticationConfig Authentication setup if supported, otherwise none.
+  * @param staticDomainParameters The set of members to register on startup statically.
   */
 class SequencerRuntime(
     sequencerFactory: SequencerFactory,
@@ -79,7 +80,6 @@ class SequencerRuntime(
     val metrics: SequencerMetrics,
     val domainId: DomainId,
     crypto: Crypto,
-    val sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessorCommon,
     storage: Storage,
@@ -87,9 +87,10 @@ class SequencerRuntime(
     auditLogger: TracedLogger,
     authenticationConfig: SequencerAuthenticationConfig,
     additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
-    registerSequencerMember: Boolean,
+    staticMembersToRegister: Seq[Member],
     futureSupervisor: FutureSupervisor,
     agreementManager: Option[ServiceAgreementManager],
+    topologyStateForInitializationService: Option[TopologyStateForInitializationService],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext,
@@ -114,7 +115,7 @@ class SequencerRuntime(
       loggerFactory,
     )
 
-  private[domain] val sequencer: Sequencer = {
+  val sequencer: Sequencer = {
     import TraceContext.Implicits.Empty.*
     sequencerFactory
       .create(
@@ -129,7 +130,7 @@ class SequencerRuntime(
       topologyInitIsCompleted: Boolean = true
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] = {
     def keyCheckET =
-      EitherT(
+      EitherT {
         syncCrypto
           .currentSnapshotApproximation(TraceContext.empty)
           .ipsSnapshot
@@ -137,14 +138,12 @@ class SequencerRuntime(
           .map { keyO =>
             Either.cond(keyO.nonEmpty, (), "Missing sequencer keys.")
           }
-      )
+      }
     def registerInitialMembers = {
       logger.debug("Registering initial sequencer members")
       // only register the sequencer itself if we have remote sequencers that will necessitate topology transactions
       // being sent to them
-      DomainMember
-        .list(domainId, includeSequencer = registerSequencerMember)
-        .toList
+      staticMembersToRegister
         .parTraverse(
           sequencer
             .ensureRegistered(_)
@@ -156,7 +155,6 @@ class SequencerRuntime(
               case otherError => EitherT.leftT(otherError)
             }
         )
-
     }
     for {
       _ <- keyCheckET
@@ -187,6 +185,7 @@ class SequencerRuntime(
     sequencerDomainParamsLookup,
     localNodeParameters,
     staticDomainParameters.protocolVersion,
+    topologyStateForInitializationService,
     loggerFactory,
   )
 

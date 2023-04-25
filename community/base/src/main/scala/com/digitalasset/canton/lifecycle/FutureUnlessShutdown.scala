@@ -5,7 +5,7 @@ package com.digitalasset.canton.lifecycle
 
 import cats.arrow.FunctionK
 import cats.data.EitherT
-import cats.{Applicative, FlatMap, Functor, Id, Monad, Monoid, Parallel, ~>}
+import cats.{Applicative, FlatMap, Functor, Id, Monad, MonadThrow, Monoid, Parallel, ~>}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.LoggerUtil.logOnThrow_
 import com.digitalasset.canton.util.Thereafter
@@ -13,7 +13,7 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{DoNotDiscardLikeFuture, DoNotTraverseLikeFuture}
 
 import scala.concurrent.{Awaitable, ExecutionContext, Future}
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 object FutureUnlessShutdown {
 
@@ -58,6 +58,12 @@ object FutureUnlessShutdown {
 
   /** Analog to [[scala.concurrent.Future]]`.failed` */
   def failed[A](ex: Throwable): FutureUnlessShutdown[A] = FutureUnlessShutdown(Future.failed(ex))
+
+  /** Analog to [[scala.concurrent.Future]]`.fromTry` */
+  def fromTry[T](result: Try[T]): FutureUnlessShutdown[T] = result match {
+    case Success(value) => FutureUnlessShutdown.pure(value)
+    case Failure(exception) => FutureUnlessShutdown.failed(exception)
+  }
 }
 
 /** Monad combination of `Future` and [[UnlessShutdown]]
@@ -179,6 +185,20 @@ object FutureUnlessShutdownImpl {
         ec: ExecutionContext
     ): FutureUnlessShutdown[B] =
       FutureUnlessShutdown(self.unwrap.map(_.flatMap(f)))
+
+    def flatten[S](implicit
+        ec: ExecutionContext,
+        ev: A <:< FutureUnlessShutdown[S],
+    ): FutureUnlessShutdown[S] =
+      self.flatMap(ev)
+
+    /** Analog to [[scala.concurrent.Future]].recover */
+    def recover[U >: A](
+        pf: PartialFunction[Throwable, UnlessShutdown[U]]
+    )(implicit executor: ExecutionContext): FutureUnlessShutdown[U] =
+      transform[U] { value: Try[UnlessShutdown[A]] =>
+        value recover pf
+      }
   }
 
   /** Cats monad instance for the combination of [[scala.concurrent.Future]] with [[UnlessShutdown]].
@@ -186,8 +206,8 @@ object FutureUnlessShutdownImpl {
     */
   private def monadFutureUnlessShutdownOpened(implicit
       ec: ExecutionContext
-  ): Monad[λ[α => Future[UnlessShutdown[α]]]] =
-    new Monad[λ[α => Future[UnlessShutdown[α]]]] {
+  ): MonadThrow[λ[α => Future[UnlessShutdown[α]]]] =
+    new MonadThrow[λ[α => Future[UnlessShutdown[α]]]] {
       override def pure[A](x: A): Future[UnlessShutdown[A]] =
         Future.successful(UnlessShutdown.Outcome(x))
 
@@ -210,12 +230,20 @@ object FutureUnlessShutdownImpl {
             case UnlessShutdown.Outcome(Right(b)) => Right(UnlessShutdown.Outcome(b))
           }
         )
+
+      override def raiseError[A](e: Throwable): Future[UnlessShutdown[A]] = Future.failed(e)
+
+      override def handleErrorWith[A](
+          fa: Future[UnlessShutdown[A]]
+      )(f: Throwable => Future[UnlessShutdown[A]]): Future[UnlessShutdown[A]] = {
+        fa.recoverWith { case throwable => f(throwable) }
+      }
     }
 
   implicit def catsStdInstFutureUnlessShutdown(implicit
       ec: ExecutionContext
-  ): Monad[FutureUnlessShutdown] =
-    Instance.subst[Monad](monadFutureUnlessShutdownOpened)
+  ): MonadThrow[FutureUnlessShutdown] =
+    Instance.subst[MonadThrow](monadFutureUnlessShutdownOpened)
 
   implicit def monoidFutureUnlessShutdown[A](implicit
       M: Monoid[A],
@@ -295,5 +323,12 @@ object FutureUnlessShutdownImpl {
         ec: ExecutionContext
     ): EitherT[Future, C, D] =
       EitherT(eitherT.value.onShutdown(f))
+
+    /** Evaluates `f` on shutdown but retains the result of the future. */
+    def tapOnShutdown(f: => Unit)(implicit
+        ec: ExecutionContext,
+        errorLoggingContext: ErrorLoggingContext,
+    ): EitherT[FutureUnlessShutdown, A, B] =
+      EitherT(eitherT.value.tapOnShutdown(f))
   }
 }

@@ -955,6 +955,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.bounded
     ): Unit = {
       val connected = domains.list_connected().map(_.domainId).toSet
+
       // ensure that the ledger api server has seen all packages
       try {
         AdminCommandRunner.retryUntilTrue(timeout) {

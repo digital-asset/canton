@@ -295,6 +295,12 @@ abstract class CantonNodeBootstrapBase[
 
   def getId: Option[NodeId] = nodeId.get()
 
+  protected def startInstanceUS(
+      instanceET: => EitherT[FutureUnlessShutdown, String, T]
+  ): EitherT[Future, String, Unit] = startInstanceUnlessClosing(
+    instanceET.onShutdown(Left("Aborting startup due to shutdown"))
+  )
+
   /** kick off initialisation during startup */
   protected def startInstanceUnlessClosing(
       instanceET: => EitherT[Future, String, T]

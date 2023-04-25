@@ -110,14 +110,13 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
   }
 
   "DbMultiDomainEventLog" should {
-
     behave like multiDomainEventLog { clock =>
       Await.result(createDbMultiDomainEventLog(storage, clock), 10.seconds)
     }
   }
 }
 
-object DbMultiDomainEventLogTest {
+private object DbMultiDomainEventLogTest {
 
   /** Synchronize access to the linearized_event_log so that tests do not interfere */
   private val accessLinearizedEventLog: Semaphore = new Semaphore(1)

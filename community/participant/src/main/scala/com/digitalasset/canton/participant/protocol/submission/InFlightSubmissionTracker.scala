@@ -193,8 +193,8 @@ class InFlightSubmissionTracker(
     */
   def timelyReject(domainId: DomainId, upToInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, UnknownDomain, Unit] = {
-    domainStateFor(domainId).semiflatMap { domainState =>
+  ): EitherT[FutureUnlessShutdown, UnknownDomain, Unit] = {
+    domainStateFor(domainId).mapK(FutureUnlessShutdown.outcomeK).semiflatMap { domainState =>
       for {
         // Increase the watermark for two reasons:
         // 1. Below, we publish an event via the ParticipantEventPublisher. This will then call the
@@ -203,8 +203,10 @@ class InFlightSubmissionTracker(
         // 2. Timestamps are also observed via the RecordOrderPublisher. If the RecordOrderPublisher
         //    does not advance due to a long-running request-response-result cycle, we get here
         //    a second chance of observing the timestamp when the sequencer counter becomes clean.
-        _ <- domainState.observedTimestampTracker.increaseWatermark(upToInclusive)
-        timelyRejects <- store.value.lookupUnsequencedUptoUnordered(domainId, upToInclusive)
+        _ <- FutureUnlessShutdown
+          .outcomeF(domainState.observedTimestampTracker.increaseWatermark(upToInclusive))
+        timelyRejects <- FutureUnlessShutdown
+          .outcomeF(store.value.lookupUnsequencedUptoUnordered(domainId, upToInclusive))
         events = timelyRejects.map(timelyRejectionEventFor)
         skippedE <- participantEventPublisher.publishWithIds(events).value
       } yield {
@@ -287,13 +289,13 @@ class InFlightSubmissionTracker(
       byEventId <- multiDomainEventLog.value.lookupByEventIds(eventIds)
       (references, publications) = unsequenced.mapFilter { inFlight =>
         byEventId.get(inFlight.timelyRejectionEventId).map {
-          case (globalOffset, timestampedEventAndCausalUpdate, publicationTime) =>
+          case (globalOffset, event, publicationTime) =>
             val reference = inFlight.referenceByMessageId
             val publication = OnPublish.Publication(
               globalOffset,
               publicationTime,
               reference.some,
-              DeduplicationInfo.fromTimestampedEvent(timestampedEventAndCausalUpdate.tse),
+              DeduplicationInfo.fromTimestampedEvent(event),
             )
             reference -> publication
         }
@@ -363,7 +365,7 @@ class InFlightSubmissionTracker(
             // Instead we check the unique sequencer counters.
             val sequencerCounter = inFlight.sequencingInfo.sequencerCounter.some
             val eventO = foundLocalEvents.find { case (_localOffset, event) =>
-              event.tse.requestSequencerCounter == sequencerCounter
+              event.requestSequencerCounter == sequencerCounter
             }
             eventO match {
               case None =>
@@ -373,7 +375,7 @@ class InFlightSubmissionTracker(
                   )
                 )
               case Some((localOffset, event)) =>
-                val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event.tse)
+                val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
                 localOffsetsB += ((localOffset, inFlight, deduplicationInfo))
             }
           }

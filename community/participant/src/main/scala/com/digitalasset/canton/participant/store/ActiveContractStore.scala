@@ -12,7 +12,12 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{
+  LfContractId,
+  SourceDomainId,
+  TargetDomainId,
+  TransferDomainId,
+}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.CheckedT
@@ -152,11 +157,11 @@ trait ActiveContractStore
     *           <li>[[ActiveContractStore.ChangeBeforeCreation]] if this timestamp is before the latest creation of the contract.</li>
     *         </ul>
     */
-  def transferInContracts(transferIns: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(implicit
-      traceContext: TraceContext
+  def transferInContracts(transferIns: Seq[(LfContractId, SourceDomainId)], toc: TimeOfChange)(
+      implicit traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit]
 
-  def transferInContract(contractId: LfContractId, toc: TimeOfChange, sourceDomain: DomainId)(
+  def transferInContract(contractId: LfContractId, toc: TimeOfChange, sourceDomain: SourceDomainId)(
       implicit traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     transferInContracts(Seq((contractId, sourceDomain)), toc)
@@ -178,12 +183,16 @@ trait ActiveContractStore
     *           <li>[[ActiveContractStore.ChangeBeforeCreation]] if this timestamp is before the latest creation of the contract.</li>
     *         </ul>
     */
-  def transferOutContracts(transferOuts: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(implicit
-      traceContext: TraceContext
+  def transferOutContracts(transferOuts: Seq[(LfContractId, TargetDomainId)], toc: TimeOfChange)(
+      implicit traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit]
 
-  def transferOutContract(contractId: LfContractId, toc: TimeOfChange, targetDomain: DomainId)(
-      implicit traceContext: TraceContext
+  def transferOutContract(
+      contractId: LfContractId,
+      toc: TimeOfChange,
+      targetDomain: TargetDomainId,
+  )(implicit
+      traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     transferOutContracts(Seq((contractId, targetDomain)), toc)
 
@@ -233,6 +242,9 @@ object ActiveContractStore {
     override def unwrap: Option[DomainId] = Some(domain)
     override def isTransfer: Boolean = true
   }
+  object TransferDetail {
+    def apply(domain: TransferDomainId): TransferDetail = TransferDetail(domain.unwrap)
+  }
   case object CreationArchivalDetail extends ActivenessChangeDetail {
     override def unwrap: None.type = None
     override def isTransfer: Boolean = false
@@ -240,7 +252,7 @@ object ActiveContractStore {
   type CreationArchivalDetail = CreationArchivalDetail.type
   object ActivenessChangeDetail {
     def apply(remoteDomain: Option[DomainId]): ActivenessChangeDetail =
-      remoteDomain.fold[ActivenessChangeDetail](CreationArchivalDetail)(TransferDetail)
+      remoteDomain.fold[ActivenessChangeDetail](CreationArchivalDetail)(TransferDetail(_))
 
     private[store] implicit val orderForActivenessChangeDetail: Order[ActivenessChangeDetail] =
       Order.by[ActivenessChangeDetail, Option[DomainId]](_.unwrap)
@@ -327,7 +339,7 @@ object ActiveContractStore {
     *   <li>The contract is active or archived on any other domain.</li>
     * </ul>
     */
-  final case class TransferredAway(targetDomain: DomainId) extends Status {
+  final case class TransferredAway(targetDomain: TargetDomainId) extends Status {
     override def prunable: Boolean = true
     override def pretty: Pretty[TransferredAway] = prettyOfClass(unnamedParam(_.targetDomain))
   }

@@ -13,11 +13,10 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
-import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
@@ -52,16 +51,12 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
 
   private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =
     SerializableTraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
-  private implicit val setParameterCausalityUpdate: SetParameter[CausalityUpdate] =
-    CausalityUpdate.getVersionedSetParameter
-  private implicit val setParameterCausalityUpdateO: SetParameter[Option[CausalityUpdate]] =
-    CausalityUpdate.getVersionedSetParameterO
   private implicit val setParameterSerializableLedgerSyncEvent
       : SetParameter[SerializableLedgerSyncEvent] =
     SerializableLedgerSyncEvent.getVersionedSetParameter
 
   override def insertsUnlessEventIdClash(
-      events: Seq[TimestampedEventAndCausalChange]
+      events: Seq[TimestampedEvent]
   )(implicit traceContext: TraceContext): Future[Seq[Either[TimestampedEvent, Unit]]] = {
     idempotentInserts(events).flatMap { insertResult =>
       insertResult.parTraverse {
@@ -70,7 +65,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
           event.eventId match {
             case None => cannotInsertEvent(event)
             case Some(eventId) =>
-              val e = eventById(eventId).map(_.tse)
+              val e = eventById(eventId)
               e.toLeft(cannotInsertEvent(event)).value
           }
       }
@@ -78,7 +73,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   }
 
   private def idempotentInserts(
-      events: Seq[TimestampedEventAndCausalChange]
+      events: Seq[TimestampedEvent]
   )(implicit traceContext: TraceContext): Future[List[Either[TimestampedEvent, Unit]]] =
     processingTime.event {
       for {
@@ -91,21 +86,14 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
           Either.cond(rowCount == 1, (), event)
         }
         checkResults <- insertionResults.parTraverse {
-          case Right(()) =>
-            Future.successful(Right(()))
-          case Left(TimestampedEventAndCausalChange(event, causalityUpdate)) =>
+          case Right(()) => Future.successful(Right(()))
+          case Left(event) =>
             logger.info(
               show"Insertion into event log at offset ${event.localOffset} skipped. Checking the reason..."
             )
             eventAt(event.localOffset).fold(Either.left[TimestampedEvent, Unit](event)) {
-              case TimestampedEventAndCausalChange(existingEvent, existingUpdate) =>
+              existingEvent =>
                 if (existingEvent.normalized == event.normalized) {
-                  ErrorUtil.requireState(
-                    existingUpdate == causalityUpdate,
-                    show"The event at offset" +
-                      show" ${event.localOffset} has been re-inserted with a different causality update." +
-                      show"Old value: ${existingUpdate}, new value: ${causalityUpdate}.",
-                  )
                   logger.info(
                     show"The event at offset ${event.localOffset} has already been inserted. Nothing to do."
                   )
@@ -124,30 +112,18 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       } yield checkResults
     }
 
-  def storeTransferUpdate(
-      causalityUpdate: CausalityUpdate
-  )(implicit tc: TraceContext): Future[Unit] = {
-    val insertAction = IdempotentInsert.insertIgnoringConflicts(
-      storage,
-      "transfer_causality_updates pk_transfer_causality_updates",
-      sql"""transfer_causality_updates
-                   values (${log_id}, ${causalityUpdate.rc}, ${causalityUpdate.ts}, ${causalityUpdate})""",
-    )
-
-    storage.update_(insertAction, functionFullName)
-  }
-
   private def rawInserts(
-      events: Seq[TimestampedEventAndCausalChange]
+      events: Seq[TimestampedEvent]
   )(implicit traceContext: TraceContext): Future[Array[Int]] = {
     // resolve associated domain-id
     val eventsWithAssociatedDomainIdF = events.parTraverse { event =>
-      event.tse.eventId.flatMap(_.associatedDomain) match {
+      event.eventId.flatMap(_.associatedDomain) match {
         case Some(domainId) =>
           IndexedDomain.indexed(indexedStringStore)(domainId).map(indexed => (event, Some(indexed)))
         case None => Future.successful((event, None))
       }
     }
+
     eventsWithAssociatedDomainIdF.flatMap { eventsWithAssociatedDomainId =>
       processingTime.event {
         val dbio = storage.profile match {
@@ -156,15 +132,14 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
               """merge into event_log e
                  using dual on ( (e.event_id = ?) or (e.log_id = ? and e.local_offset = ?))
                  when not matched then
-                 insert (log_id, local_offset, ts, request_sequencer_counter, event_id, associated_domain, content, trace_context, causality_update)
-                 values (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                 insert (log_id, local_offset, ts, request_sequencer_counter, event_id, associated_domain, content, trace_context)
+                 values (?, ?, ?, ?, ?, ?, ?, ?)"""
             DbStorage.bulkOperation(
               query,
               eventsWithAssociatedDomainId,
               storage.profile,
-            ) { pp => eventWithClock =>
-              val (TimestampedEventAndCausalChange(event, clock), associatedDomainIdO) =
-                eventWithClock
+            ) { pp => eventWithDomain =>
+              val (event, associatedDomainIdO) = eventWithDomain
 
               pp >> event.eventId
               pp >> log_id
@@ -177,17 +152,15 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
               pp >> associatedDomainIdO.map(_.index)
               pp >> SerializableLedgerSyncEvent(event.event, releaseProtocolVersion.v)
               pp >> SerializableTraceContext(event.traceContext)
-              pp >> clock
             }
           case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Postgres =>
             val query =
-              """insert into event_log (log_id, local_offset, ts, request_sequencer_counter, event_id, associated_domain, content, trace_context, causality_update)
-               values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              """insert into event_log (log_id, local_offset, ts, request_sequencer_counter, event_id, associated_domain, content, trace_context)
+               values (?, ?, ?, ?, ?, ?, ?, ?)
                on conflict do nothing"""
             DbStorage.bulkOperation(query, eventsWithAssociatedDomainId, storage.profile) {
-              pp => eventAndClock =>
-                val (TimestampedEventAndCausalChange(event, clock), associatedDomainIdO) =
-                  eventAndClock
+              pp => eventWithDomain =>
+                val (event, associatedDomainIdO) = eventWithDomain
 
                 pp >> log_id
                 pp >> event.localOffset
@@ -197,7 +170,6 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
                 pp >> associatedDomainIdO.map(_.index)
                 pp >> SerializableLedgerSyncEvent(event.event, releaseProtocolVersion.v)
                 pp >> SerializableTraceContext(event.traceContext)
-                pp >> clock
             }
         }
         storage.queryAndUpdate(dbio, functionFullName)
@@ -233,7 +205,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       limit: Option[Int],
   )(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]] = {
+  ): Future[SortedMap[LocalOffset, TimestampedEvent]] = {
 
     processingTime.event {
       DbSingleDimensionEventLog.lookupEventRange(
@@ -250,25 +222,19 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
 
   override def eventAt(
       offset: LocalOffset
-  )(implicit traceContext: TraceContext): OptionT[Future, TimestampedEventAndCausalChange] = {
-    implicit val getResultCU: GetResult[Option[CausalityUpdate]] =
-      CausalityUpdate.hasVersionedWrapperGetResultO
-    import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
-
+  )(implicit traceContext: TraceContext): OptionT[Future, TimestampedEvent] =
     processingTime.optionTEvent {
       storage
         .querySingle(
           sql"""select /*+ INDEX (event_log pk_event_log) */
-       local_offset, request_sequencer_counter, event_id, content, trace_context, causality_update
+       local_offset, request_sequencer_counter, event_id, content, trace_context
               from event_log
               where log_id = $log_id and local_offset = $offset"""
-            .as[TimestampedEventAndCausalChange]
+            .as[TimestampedEvent]
             .headOption,
           functionFullName,
         )
     }
-
-  }
 
   override def lastOffset(implicit traceContext: TraceContext): OptionT[Future, LocalOffset] =
     processingTime.optionTEvent {
@@ -283,23 +249,18 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
 
   override def eventById(
       eventId: EventId
-  )(implicit traceContext: TraceContext): OptionT[Future, TimestampedEventAndCausalChange] = {
-    implicit val getResultCU: GetResult[Option[CausalityUpdate]] =
-      CausalityUpdate.hasVersionedWrapperGetResultO
-    import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
-
+  )(implicit traceContext: TraceContext): OptionT[Future, TimestampedEvent] =
     processingTime.optionTEvent {
       storage
         .querySingle(
-          sql"""select local_offset, request_sequencer_counter, event_id, content, trace_context, causality_update
+          sql"""select local_offset, request_sequencer_counter, event_id, content, trace_context
               from event_log
               where log_id = $log_id and event_id = $eventId"""
-            .as[TimestampedEventAndCausalChange]
+            .as[TimestampedEvent]
             .headOption,
           functionFullName,
         )
     }
-  }
 
   override def existsBetween(
       timestampInclusive: CantonTimestamp,
@@ -340,10 +301,10 @@ object DbSingleDimensionEventLog {
       traceContext: TraceContext,
       ec: ExecutionContext,
       closeContext: CloseContext,
-  ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]] = {
+  ): Future[SortedMap[LocalOffset, TimestampedEvent]] = {
     import DbStorage.Implicits.BuilderChain.*
     import ParticipantStorageImplicits.*
-    import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
+    import TimestampedEvent.getResultTimestampedEvent
     import storage.api.*
     import storage.converters.*
 
@@ -356,18 +317,16 @@ object DbSingleDimensionEventLog {
 
     for {
       eventsVector <- storage.query(
-        (sql"""select local_offset, request_sequencer_counter, event_id, content, trace_context, causality_update
+        (sql"""select local_offset, request_sequencer_counter, event_id, content, trace_context
                  from event_log
                  where log_id = ${eventLogId.index}""" ++ filters ++
           sql""" order by local_offset asc #${storage.limit(limit.getOrElse(Int.MaxValue))}""")
-          .as[TimestampedEventAndCausalChange]
-          .map(_.map { case t @ TimestampedEventAndCausalChange(event, cu) =>
-            event.localOffset -> t
-          }),
+          .as[TimestampedEvent]
+          .map(_.map { event => event.localOffset -> event }),
         functionFullName,
       )
     } yield {
-      val result = new mutable.TreeMap[LocalOffset, TimestampedEventAndCausalChange]()
+      val result = new mutable.TreeMap[LocalOffset, TimestampedEvent]()
       result ++= eventsVector
       result
     }

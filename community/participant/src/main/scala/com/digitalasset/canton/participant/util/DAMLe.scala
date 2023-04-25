@@ -149,7 +149,6 @@ class DAMLe(
                     )
                   case LfNodeRollback(_) =>
                     err(s"Root-level rollback node not expected to parent another rollback node")
-                  case _: LfNodeAuthority => sys.error("LfNodeAuthority")
                 }
               case Seq() => err(s"Root-level rollback node not expected to have no child node")
               case multipleChildNodes =>

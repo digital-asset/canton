@@ -169,7 +169,7 @@ object RequestId {
 }
 
 /** A transfer is identified by the source domain and the sequencer timestamp on the transfer-out request. */
-final case class TransferId(sourceDomain: DomainId, requestTimestamp: CantonTimestamp)
+final case class TransferId(sourceDomain: SourceDomainId, requestTimestamp: CantonTimestamp)
     extends PrettyPrinting {
   def toProtoV0: v0.TransferId =
     v0.TransferId(
@@ -187,12 +187,12 @@ final case class TransferId(sourceDomain: DomainId, requestTimestamp: CantonTime
 object TransferId {
   def fromProtoV0(transferIdP: v0.TransferId): ParsingResult[TransferId] =
     transferIdP match {
-      case v0.TransferId(originDomainP, requestTimestampP) =>
+      case v0.TransferId(sourceDomainP, requestTimestampP) =>
         for {
-          sourceDomain <- DomainId.fromProtoPrimitive(originDomainP, "TransferId.originDomain")
+          sourceDomain <- DomainId.fromProtoPrimitive(sourceDomainP, "TransferId.origin_domain")
           requestTimestamp <- ProtoConverter
             .required("TransferId.timestamp", requestTimestampP)
             .flatMap(CantonTimestamp.fromProtoPrimitive)
-        } yield TransferId(sourceDomain, requestTimestamp)
+        } yield TransferId(SourceDomainId(sourceDomain), requestTimestamp)
     }
 }

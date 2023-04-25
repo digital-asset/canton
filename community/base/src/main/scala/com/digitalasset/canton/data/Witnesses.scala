@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.foldable.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
+import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
 
@@ -41,7 +41,7 @@ final case class Witnesses(unwrap: Seq[Set[Informee]]) {
           )
         } yield Seq(
           // TODO(#12382): support group addressing for informees
-          RecipientsTree(informeeParticipantSet.map(RecipientsTree.MemberRecipient), children)
+          RecipientsTree(informeeParticipantSet.map(MemberRecipient), children)
         )
       }
       // TODO(error handling) Why is it safe to assume that the recipient list is non-empty?

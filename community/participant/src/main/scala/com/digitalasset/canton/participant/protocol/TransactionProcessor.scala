@@ -103,6 +103,8 @@ class TransactionProcessor(
       ephemeral,
       crypto,
       sequencerClient,
+      domainId,
+      staticDomainParameters.protocolVersion,
       loggerFactory,
       futureSupervisor,
       skipRecipientsCheck = skipRecipientsCheck,

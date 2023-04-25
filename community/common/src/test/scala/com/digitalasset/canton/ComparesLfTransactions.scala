@@ -15,7 +15,6 @@ import com.digitalasset.canton.protocol.{
   LfContractId,
   LfLeafOnlyActionNode,
   LfNode,
-  LfNodeAuthority,
   LfNodeCreate,
   LfNodeExercises,
   LfNodeFetch,
@@ -50,7 +49,6 @@ trait ComparesLfTransactions {
         case rn: LfNodeRollback =>
           TxTree(rn.copy(children = ImmArray.empty), rn.children.toSeq.map(go): _*)
         case leafNode: LfLeafOnlyActionNode => TxTree(leafNode)
-        case _: LfNodeAuthority => sys.error("LfNodeAuthority")
       }
       tx.roots.toSeq.map(go)
     }
@@ -84,7 +82,6 @@ trait ComparesLfTransactions {
     tx.foldInExecutionOrder(())(
       exerciseBegin = (_, _, en) => (add(en.targetCoid), LfTransaction.ChildrenRecursion.DoRecurse),
       rollbackBegin = (_, _, _) => ((), LfTransaction.ChildrenRecursion.DoRecurse),
-      authorityBegin = (_, _, _) => sys.error("LfNodeAuthority"),
       leaf = {
         case (_, _, cn: LfNodeCreate) => add(cn.coid)
         case (_, _, fn: LfNodeFetch) => add(fn.coid)
@@ -92,7 +89,6 @@ trait ComparesLfTransactions {
       },
       exerciseEnd = (_, _, _) => (),
       rollbackEnd = (_, _, _) => (),
-      authorityEnd = (_, _, _) => sys.error("LfNodeAuthority"),
     )
 
     contractIds.result()

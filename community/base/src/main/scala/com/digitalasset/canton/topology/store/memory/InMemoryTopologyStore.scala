@@ -22,6 +22,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future, blocking}
@@ -81,6 +82,32 @@ class InMemoryPartyMetadataStore extends PartyMetadataStore {
   override def close(): Unit = ()
 }
 
+trait InMemoryTopologyStoreCommon[+StoreId <: TopologyStoreId] extends NamedLogging {
+  this: TopologyStoreCommon[StoreId, ?, ?, ?] =>
+
+  private val watermark = new AtomicReference[Option[CantonTimestamp]](None)
+
+  @nowarn("cat=unused")
+  override def currentDispatchingWatermark(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]] =
+    Future.successful(watermark.get())
+
+  override def updateDispatchingWatermark(
+      timestamp: CantonTimestamp
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    watermark.getAndSet(Some(timestamp)) match {
+      case Some(old) if old > timestamp =>
+        logger.error(
+          s"Topology dispatching watermark is running backwards! new=$timestamp, old=${old}"
+        )
+      case _ => ()
+    }
+    Future.unit
+  }
+
+}
+
 class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     val storeId: StoreId,
     val loggerFactory: NamedLoggerFactory,
@@ -88,6 +115,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     futureSupervisor: FutureSupervisor,
 )(implicit val ec: ExecutionContext)
     extends TopologyStore[StoreId]
+    with InMemoryTopologyStoreCommon[StoreId]
     with NamedLogging {
 
   private case class TopologyStoreEntry[+Op <: TopologyChangeOp](
@@ -521,25 +549,6 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
           .map(_.toStoredTransaction)
       )
     )
-
-  private val watermark = new AtomicReference[Option[CantonTimestamp]](None)
-  override def currentDispatchingWatermark(implicit
-      traceContext: TraceContext
-  ): Future[Option[CantonTimestamp]] =
-    Future.successful(watermark.get())
-
-  override def updateDispatchingWatermark(
-      timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    watermark.getAndSet(Some(timestamp)) match {
-      case Some(old) if old > timestamp =>
-        logger.error(
-          s"Topology dispatching watermark is running backwards! new=$timestamp, old=${old}"
-        )
-      case _ => ()
-    }
-    Future.unit
-  }
 
   override def findDispatchingTransactionsAfter(
       timestampExclusive: CantonTimestamp,

@@ -155,8 +155,12 @@ class SimpleExecutionQueueWithShutdown(
       // first task after the running one and shut it down, it might already have started if the running task finished in the meantime.
       // This is fine though because tasks are wrapped in a performUnlessShutdown so the task will be `AbortedDueToShutdown` anyway
       // instead of actually start, so the race is benign.
-      if (cell.predecessor.exists(_.future.unwrap.isCompleted)) nextTaskAfterRunningOne
-      else {
+      if (cell.predecessor.exists(_.future.unwrap.isCompleted)) {
+        errorLoggingContext(TraceContext.empty).debug(
+          s"${cell.description} is still running. It will be left running but all subsequent tasks will be aborted."
+        )
+        nextTaskAfterRunningOne
+      } else {
         cell.predecessor match {
           case Some(predCell) => go(predCell, Some(cell))
           case _ => None

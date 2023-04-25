@@ -6,30 +6,19 @@ package com.digitalasset.canton.participant.admin
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.SyncCryptoApiProvider
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   PackageInUse,
   PackageVetted,
 }
-import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
 import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManager,
   ParticipantTopologyManagerError,
 }
-import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.topology.ParticipantId
-import com.digitalasset.canton.topology.client.{
-  StoreBasedDomainTopologyClient,
-  StoreBasedTopologySnapshot,
-  TopologySnapshot,
-}
-import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyTransaction,
@@ -64,12 +53,8 @@ trait PackageInspectionOps extends NamedLogging {
 
 class PackageInspectionOpsImpl(
     participantId: ParticipantId,
-    storage: Storage,
-    authorizedTopologyStore: TopologyStore[AuthorizedStore],
-    aliasManager: DomainAliasManager,
+    headAuthorizedTopologySnapshot: TopologySnapshot,
     stateManager: SyncDomainPersistentStateManager,
-    syncCryptoApiProvider: SyncCryptoApiProvider,
-    timeouts: ProcessingTimeout,
     topologyManager: ParticipantTopologyManager,
     protocolVersion: ProtocolVersion,
     val loggerFactory: NamedLoggerFactory,
@@ -81,32 +66,13 @@ class PackageInspectionOpsImpl(
   )(implicit tc: TraceContext): EitherT[Future, PackageVetted, Unit] = {
     // TODO(i9505): Consider unit testing this
 
-    def snapshotFromStore(domainStore: TopologyStore[TopologyStoreId]) = {
-
-      new StoreBasedTopologySnapshot(
-        CantonTimestamp.MaxValue,
-        domainStore,
-        initKeys = Map(),
-        useStateTxs = false,
-        packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
-        loggerFactory,
-      )
-    }
-
     // Use the aliasManager to query all domains, even those that are currently disconnected
     val snapshotsForDomains: List[TopologySnapshot] =
-      stateManager.getAll.map { case (domainId, state) =>
-        syncCryptoApiProvider.ips
-          .forDomain(domainId)
-          .map(client => (client.headSnapshot))
-          .getOrElse({
-            snapshotFromStore(state.topologyStore)
-          })
-      }.toList
+      stateManager.getAll.toList
+        .map { case (domainId, _) => domainId }
+        .flatMap(stateManager.topologyFactoryFor(_).map(_.createHeadTopologySnapshot()).toList)
 
-    val snapshotFromAuthorizedStore = snapshotFromStore(authorizedTopologyStore)
-
-    val packageIsVettedOn = (snapshotFromAuthorizedStore :: snapshotsForDomains)
+    val packageIsVettedOn = (headAuthorizedTopologySnapshot :: snapshotsForDomains)
       .parTraverse { snapshot =>
         snapshot
           .findUnvettedPackagesOrDependencies(participantId, Set(pkg))

@@ -36,7 +36,6 @@ import com.digitalasset.canton.participant.sync.{
   DefaultLedgerSyncEvent,
   LedgerSyncEvent,
   TimestampedEvent,
-  TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.sequencing.protocol.MessageId
@@ -61,24 +60,24 @@ trait MultiDomainEventLogTest
     with HasExecutionContext
     with BeforeAndAfterAll {
 
-  lazy val indexedStringStore: InMemoryIndexedStringStore =
+  protected lazy val indexedStringStore: InMemoryIndexedStringStore =
     DbEventLogTestResources.dbMultiDomainEventLogTestIndexedStringStore
 
-  lazy val participantEventLogId: ParticipantEventLogId =
+  protected lazy val participantEventLogId: ParticipantEventLogId =
     DbEventLogTestResources.dbMultiDomainEventLogTestParticipantEventLogId
 
-  lazy val domainIds: List[DomainId] = for (i <- (0 to 2).toList) yield {
+  private lazy val domainIds: List[DomainId] = for (i <- (0 to 2).toList) yield {
     DomainId.tryFromString(s"MultiDomainEventLogTest::domain$i")
   }
 
-  lazy val domainEventLogIds: List[DomainEventLogId] =
+  private lazy val domainEventLogIds: List[DomainEventLogId] =
     domainIds.map(EventLogId.forDomain(indexedStringStore)(_).futureValue)
 
-  lazy val eventLogIds: List[EventLogId] = domainEventLogIds :+ participantEventLogId
+  private lazy val eventLogIds: List[EventLogId] = domainEventLogIds :+ participantEventLogId
 
   private def timestampAtRc(rc: Long): CantonTimestamp = CantonTimestamp.assertFromLong(rc * 1000)
 
-  def timestampedEvent(
+  private def timestampedEvent(
       eventLogIndex: Int,
       localOffset: LocalOffset,
       maybeEventId: Option[EventId] = None,
@@ -94,57 +93,56 @@ trait MultiDomainEventLogTest
       ),
     )
 
-  lazy val allTestEvents: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] = Seq(
-    // events published in the normal way
-    (
-      eventLogIds(0),
-      timestampedEvent(0, 3),
-      InFlightBySequencingInfo(
-        domainIds(1),
-        SequencedSubmission(SequencerCounter(0), CantonTimestamp.ofEpochSecond(1)),
-      ).some,
-    ),
-    (
-      eventLogIds(1),
-      timestampedEvent(1, 5),
-      InFlightByMessageId(domainIds(0), MessageId.fromUuid(new UUID(1, 1))).some,
-    ),
-    (eventLogIds(3), timestampedEvent(3, 1), None),
-    (
-      eventLogIds(3),
-      timestampedEvent(
-        eventLogIndex = 3,
-        localOffset = 2,
-        maybeEventId = Some(
-          TimelyRejectionEventId(
-            domainId = domainIds(1),
-            uuid = new UUID(3, 2),
-          )
-        ),
+  private lazy val allTestEvents: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] =
+    Seq(
+      // events published in the normal way
+      (
+        eventLogIds(0),
+        timestampedEvent(0, 3),
+        InFlightBySequencingInfo(
+          domainIds(1),
+          SequencedSubmission(SequencerCounter(0), CantonTimestamp.ofEpochSecond(1)),
+        ).some,
       ),
-      None,
-    ),
-    (eventLogIds(1), timestampedEvent(1, 6), None),
-    // from here on, events are published through recovery
-    (eventLogIds(0), timestampedEvent(0, 4), None),
-    (eventLogIds(0), timestampedEvent(0, 5), None),
-    (eventLogIds(1), timestampedEvent(1, 7), None),
-    // these events are in the SingleDimensionEventLog, but not yet published
-    (eventLogIds(1), timestampedEvent(1, 10), None),
-    (eventLogIds(3), timestampedEvent(3, 3), None),
-  )
+      (
+        eventLogIds(1),
+        timestampedEvent(1, 5),
+        InFlightByMessageId(domainIds(0), MessageId.fromUuid(new UUID(1, 1))).some,
+      ),
+      (eventLogIds(3), timestampedEvent(3, 1), None),
+      (
+        eventLogIds(3),
+        timestampedEvent(
+          eventLogIndex = 3,
+          localOffset = 2,
+          maybeEventId = Some(
+            TimelyRejectionEventId(
+              domainId = domainIds(1),
+              uuid = new UUID(3, 2),
+            )
+          ),
+        ),
+        None,
+      ),
+      (eventLogIds(1), timestampedEvent(1, 6), None),
+      // from here on, events are published through recovery
+      (eventLogIds(0), timestampedEvent(0, 4), None),
+      (eventLogIds(0), timestampedEvent(0, 5), None),
+      (eventLogIds(1), timestampedEvent(1, 7), None),
+      // these events are in the SingleDimensionEventLog, but not yet published
+      (eventLogIds(1), timestampedEvent(1, 10), None),
+      (eventLogIds(3), timestampedEvent(3, 3), None),
+    )
 
-  lazy val outdatedEvent: (EventLogId, TimestampedEvent, Option[InFlightReference]) =
+  private lazy val outdatedEvent: (EventLogId, TimestampedEvent, Option[InFlightReference]) =
     (eventLogIds(0), timestampedEvent(0, -42), None)
 
-  lazy val initialTestEvents: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] =
+  private lazy val initialTestEvents
+      : Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] =
     allTestEvents.slice(0, 5)
-  lazy val initialPublicationTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(10)
+  private lazy val initialPublicationTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(10)
 
-  def addTimestamp(localOffset: LocalOffset): (LocalOffset, CantonTimestamp) =
-    (localOffset, CantonTimestamp.ofEpochMilli(localOffset))
-
-  lazy val lastOffsets: Seq[(Map[DomainId, LocalOffset], Option[LocalOffset])] = Seq(
+  private lazy val lastOffsets: Seq[(Map[DomainId, LocalOffset], Option[LocalOffset])] = Seq(
     (Map(domainIds(0) -> 3L), None),
     (Map(domainIds(0) -> 3L, domainIds(1) -> 5L), None),
     (Map(domainIds(0) -> 3L, domainIds(1) -> 5L), Some(1L)),
@@ -152,30 +150,31 @@ trait MultiDomainEventLogTest
     (Map(domainIds(0) -> 3L, domainIds(1) -> 6L), Some(2L)),
   )
 
-  lazy val recoveryBounds: Seq[(EventLogId, Option[LocalOffset])] = Seq(
+  private lazy val recoveryBounds: Seq[(EventLogId, Option[LocalOffset])] = Seq(
     eventLogIds(0) -> None, // recover all events
     eventLogIds(1) -> Some(7), // recover some events
     eventLogIds(2) -> Some(Long.MaxValue), // recover no events, as there is no event
     eventLogIds(3) -> Some(0), // recover no events, as the bound is in the past
   )
-  lazy val recoveryPublicationTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(30)
+  private lazy val recoveryPublicationTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(30)
 
-  lazy val invalidRecoveryBound: (EventLogId, Option[LocalOffset]) = eventLogIds(3) -> Some(1)
+  private lazy val invalidRecoveryBound: (EventLogId, Option[LocalOffset]) =
+    eventLogIds(3) -> Some(1)
 
-  lazy val testEventsForRecoveredEventLog
+  private lazy val testEventsForRecoveredEventLog
       : Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] =
     allTestEvents.slice(0, 8)
 
-  lazy val publishedThroughRecovery
+  private lazy val publishedThroughRecovery
       : Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] =
     allTestEvents.slice(5, 8)
 
-  lazy val numPrunedEvents = 4
-  lazy val testEventsForPrunedEventLog
+  private lazy val numPrunedEvents = 4
+  private lazy val testEventsForPrunedEventLog
       : Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] =
     allTestEvents.slice(numPrunedEvents, 8)
 
-  def storeEventsToSingleDimensionEventLogs(
+  protected def storeEventsToSingleDimensionEventLogs(
       events: Seq[(EventLogId, TimestampedEvent)]
   ): Future[Unit]
 
@@ -207,7 +206,7 @@ trait MultiDomainEventLogTest
     globalOffsets = Seq.empty // Reset global offsets
     cleanUpEventLogs()
     storeEventsToSingleDimensionEventLogs(allTestEvents.map {
-      case (eventLogId, event, inFlightRef) => eventLogId -> event
+      case (eventLogId, event, _inFlightRef) => eventLogId -> event
     }).futureValue
   }
 
@@ -363,12 +362,9 @@ trait MultiDomainEventLogTest
         upToInclusive: Option[GlobalOffset],
         expectedTimestampedEvents: Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])],
     ): Unit = {
-      val storedEventsWithOffsets = eventLog.lookupEventRange(upToInclusive, None).futureValue
-      val storedEvents = storedEventsWithOffsets.map { case (_, eventAndCausalChange) =>
-        eventAndCausalChange.tse
-      }
-      val storedOffsets = storedEventsWithOffsets.map { case (offset, _) => offset }
+      val storedOffsetWithEvents = eventLog.lookupEventRange(upToInclusive, None).futureValue
 
+      val (storedOffsets, storedEvents) = storedOffsetWithEvents.unzip
       val expectedEvents = expectedTimestampedEvents.map { case (_, timestampedEvent, _) =>
         timestampedEvent
       }
@@ -413,13 +409,7 @@ trait MultiDomainEventLogTest
       val expectedResult = expected.zipWithIndex.mapFilter {
         case ((_eventLogId, event, _inFlightRefO), index) =>
           event.eventId.map(eventId =>
-            eventId -> (
-              (
-                globalOffsets(index),
-                TimestampedEventAndCausalChange(event, None),
-                initialPublicationTime,
-              ),
-            )
+            eventId -> (globalOffsets(index), event, initialPublicationTime)
           )
       }.toMap
 
@@ -805,12 +795,14 @@ trait MultiDomainEventLogTest
             val unpublished = eventLog.fetchUnpublished(id, upToInclusive).futureValue
 
             val expectedUnpublished = publishedThroughRecovery
-              .filter { case (eventLogId, event, ifr) => id == eventLogId }
-              .map { case (eventLogId, event, ifr) => PublicationData(eventLogId, event, None) }
+              .collect {
+                case (eventLogId, event, _ifr) if id == eventLogId =>
+                  PublicationData(eventLogId, event, None)
+              }
             val unpublishedEvents = unpublished.map {
-              case PendingEventPublish(update, event, ts, eventLogId) =>
+              case PendingEventPublish(event, _ts, eventLogId) =>
                 PublicationData(eventLogId, event, None)
-              case PendingTransferPublish(rc, updateS, ts, eventLogId) =>
+              case PendingTransferPublish(_rc, ts, _eventLogId) =>
                 fail("Cannot publish a transfer")
             }
             unpublishedEvents shouldBe expectedUnpublished

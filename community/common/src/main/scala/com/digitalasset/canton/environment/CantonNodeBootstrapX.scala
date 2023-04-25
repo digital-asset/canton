@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.{LocalNodeConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.GrpcHealthReporter
+import com.digitalasset.canton.health.{GrpcHealthReporter, HealthReporting}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -57,6 +57,7 @@ abstract class CantonNodeBootstrapX[
       nodeId: UniqueIdentifier,
       manager: TopologyManagerX,
       healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ): BootstrapStageOrLeaf[T]
 
   /** member depends on node type */
@@ -88,9 +89,9 @@ abstract class CantonNodeBootstrapX[
     override def timeouts: ProcessingTimeout = CantonNodeBootstrapX.this.timeouts
     override def abortThisNodeOnStartupFailure(): Unit = {
       // TODO(#11255) bubble this up into env ensuring that the node is properly deregistered from env if we fail during
-      //   async startup
-      logger.error("Closing node due to startup failure")
-      CantonNodeBootstrapX.this.close()
+      //   async startup. (node should be removed from running nodes)
+      //   we can't call node.close() here as this thing is executed within a performUnlessClosing, so we'd deadlock
+      logger.error("Should be closing node due to startup failure")
     }
     override val queue: SimpleExecutionQueueWithShutdown = new SimpleExecutionQueueWithShutdown(
       s"init-queue-${arguments.name}",
@@ -126,12 +127,11 @@ abstract class CantonNodeBootstrapX[
         ).map { storage =>
           registerHealthGauge()
           // init health services once
-          val (healthReporter, grpcHealthServer) = mkHealthComponents(
-            mkNodeHealthService(storage)
-          )
+          val healthService = mkNodeHealthService(storage)
+          val (healthReporter, grpcHealthServer) = mkHealthComponents(healthService)
           grpcHealthServer.foreach(addCloseable)
           addCloseable(storage)
-          Some(new SetupCrypto(storage, healthReporter))
+          Some(new SetupCrypto(storage, healthReporter, healthService))
         }
       }
     }
@@ -139,6 +139,7 @@ abstract class CantonNodeBootstrapX[
   private class SetupCrypto(
       val storage: Storage,
       val healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ) extends BootstrapStage[T, SetupNodeId](
         description = "Init crypto module",
         bootstrapStageCallback,
@@ -170,7 +171,7 @@ abstract class CantonNodeBootstrapX[
                 executionContext,
               )
             )
-            Some(new SetupNodeId(storage, crypto, healthReporter))
+            Some(new SetupNodeId(storage, crypto, healthReporter, healthService))
           }
       )
     }
@@ -180,6 +181,7 @@ abstract class CantonNodeBootstrapX[
       storage: Storage,
       val crypto: Crypto,
       healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ) extends BootstrapStageWithStorage[T, GenerateOrAwaitNodeTopologyTx, UniqueIdentifier](
         description = "Init node id",
         bootstrapStageCallback,
@@ -259,6 +261,7 @@ abstract class CantonNodeBootstrapX[
         storage,
         crypto,
         healthReporter,
+        healthService,
       )
 
     override protected def autoCompleteStage()
@@ -297,6 +300,7 @@ abstract class CantonNodeBootstrapX[
       storage: Storage,
       crypto: Crypto,
       healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ) extends BootstrapStageWithStorage[T, BootstrapStageOrLeaf[T], Unit](
         description = "generate-or-await-node-topology-tx",
         bootstrapStageCallback,
@@ -341,6 +345,7 @@ abstract class CantonNodeBootstrapX[
         nodeId,
         manager,
         healthReporter,
+        healthService,
       )
 
     override protected def autoCompleteStage(): EitherT[Future, String, Option[Unit]] = {

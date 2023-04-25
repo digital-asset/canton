@@ -34,7 +34,7 @@ import com.digitalasset.canton.version.{
 final case class AggregationRule(
     // TODO(#12075) This is a `Seq` rather than a `Set` just because we then have to worry less about deterministic serialization.
     //  Change it to a set.
-    eligibleMembers: NonEmpty[Seq[Member]],
+    eligibleSenders: NonEmpty[Seq[Member]],
     threshold: PositiveInt,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[AggregationRule.type]
@@ -43,17 +43,17 @@ final case class AggregationRule(
   @transient override protected lazy val companionObj: AggregationRule.type = AggregationRule
 
   private[protocol] def toProtoV0: v0.AggregationRule = v0.AggregationRule(
-    eligibleMembers = eligibleMembers.map(_.toProtoPrimitive),
+    eligibleMembers = eligibleSenders.map(_.toProtoPrimitive),
     threshold = threshold.value,
   )
 
   override def pretty: Pretty[this.type] = prettyOfClass(
     param("threshold", _.threshold),
-    param("eligible members", _.eligibleMembers),
+    param("eligible members", _.eligibleSenders),
   )
 
   def copy(
-      eligibleMembers: NonEmpty[Seq[Member]] = this.eligibleMembers,
+      eligibleMembers: NonEmpty[Seq[Member]] = this.eligibleSenders,
       threshold: PositiveInt = this.threshold,
   ): AggregationRule =
     AggregationRule(eligibleMembers, threshold)(representativeProtocolVersion)

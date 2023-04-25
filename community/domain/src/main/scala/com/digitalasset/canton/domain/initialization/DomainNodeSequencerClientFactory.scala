@@ -100,7 +100,7 @@ class DomainNodeSequencerClientFactory(
         loggerFactory,
       )
 
-    SequencerClient(
+    SequencerClientFactory(
       id,
       sequencerId,
       sequencerClientSyncCrypto,

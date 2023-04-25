@@ -69,9 +69,15 @@ trait AbstractSequencerPruningStatus {
 private[canton] final case class InternalSequencerPruningStatus(
     override val lowerBound: CantonTimestamp,
     override val members: Seq[SequencerMemberStatus],
-) extends AbstractSequencerPruningStatus {
+) extends AbstractSequencerPruningStatus
+    with PrettyPrinting {
   def toSequencerPruningStatus(now: CantonTimestamp): SequencerPruningStatus =
     SequencerPruningStatus(lowerBound, now, members)
+
+  override def pretty: Pretty[InternalSequencerPruningStatus] = prettyOfClass(
+    param("lower bound", _.lowerBound),
+    param("members", _.members),
+  )
 }
 
 private[canton] object InternalSequencerPruningStatus {

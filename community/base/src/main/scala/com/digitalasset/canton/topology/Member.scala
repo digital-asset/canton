@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.daml.ledger.client.binding.Primitive.Party as ClientParty
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String3, String300}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -240,7 +241,7 @@ object DomainId {
   ): ParsingResult[DomainId] =
     UniqueIdentifier.fromProtoPrimitive(proto, fieldName).map(DomainId(_))
 
-  def tryFromString(str: String) = DomainId(UniqueIdentifier.tryFromProtoPrimitive(str))
+  def tryFromString(str: String): DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive(str))
 
   def fromString(str: String): Either[String, DomainId] =
     UniqueIdentifier.fromProtoPrimitive_(str).map(DomainId(_))
@@ -365,6 +366,13 @@ object DomainMember {
   /** List all domain members always including the sequencer. */
   def listAll(id: DomainId): Set[DomainMember] = list(id, includeSequencer = true)
 }
+
+final case class MediatorGroup(
+    index: NonNegativeInt,
+    active: Seq[MediatorId],
+    passive: Seq[MediatorId],
+    threshold: PositiveInt,
+)
 
 final case class MediatorId(uid: UniqueIdentifier) extends DomainMember with NodeIdentity {
   override def code: AuthenticatedMemberCode = MediatorId.Code

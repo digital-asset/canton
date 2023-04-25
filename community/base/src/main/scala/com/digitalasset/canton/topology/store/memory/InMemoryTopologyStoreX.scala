@@ -4,31 +4,26 @@
 package com.digitalasset.canton.topology.store.memory
 
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionX.GenericStoredTopologyTransactionX
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
   GenericStoredTopologyTransactionsX,
   PositiveStoredTopologyTransactionsX,
 }
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
-import com.digitalasset.canton.topology.store.{
-  StoredTopologyTransactionX,
-  StoredTopologyTransactionsX,
-  TimeQueryX,
-  TopologyStoreId,
-  TopologyStoreX,
-}
+import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
-import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
-import com.digitalasset.canton.topology.transaction.{
-  TopologyChangeOp,
-  TopologyChangeOpX,
-  TopologyMappingX,
-  TopologyTransactionX,
+import com.digitalasset.canton.topology.transaction.TopologyTransactionX.{
+  GenericTopologyTransactionX,
+  TxHash,
 }
-import com.digitalasset.canton.topology.{Namespace, SafeSimpleString, UniqueIdentifier}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ArrayBuffer
@@ -39,6 +34,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyStoreX[StoreId]
+    with InMemoryTopologyStoreCommon[StoreId]
     with NamedLogging {
 
   override def close(): Unit = {}
@@ -179,6 +175,37 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       )
     )
 
+  override def inspectKnownParties(
+      timestamp: CantonTimestamp,
+      filterParty: String,
+      filterParticipant: String,
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Set[PartyId]] = {
+    def filter(entry: TopologyStoreEntry): Boolean = {
+      // active
+      entry.from.value < timestamp && entry.until.get().forall(until => timestamp <= until.value) &&
+      // not rejected
+      entry.rejected.isEmpty &&
+      // matches a party to participant mapping (with appropriate filters)
+      (entry.transaction.transaction.mapping match {
+        case ptp: PartyToParticipantX =>
+          ptp.maybeUid.exists(_.toProtoPrimitive.startsWith(filterParty)) &&
+          ptp.participants.exists(_.participantId.toProtoPrimitive.startsWith(filterParticipant))
+        case _ => false
+      })
+    }
+
+    val topologyStateStoreSeq = blocking(synchronized(topologyTransactionStore.toSeq))
+    Future.successful(
+      topologyStateStoreSeq
+        .foldLeft(Set.empty[PartyId]) {
+          case (acc, elem) if acc.size >= limit || !filter(elem) => acc
+          case (acc, elem) =>
+            elem.transaction.transaction.mapping.maybeUid.fold(acc)(x => acc + PartyId(x))
+        }
+    )
+  }
+
   override def inspect(
       proposals: Boolean,
       timeQuery: TimeQueryX,
@@ -247,7 +274,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       _.collectOfType[TopologyChangeOpX.Replace]
     )
 
-  private def findTransactionsInStore[Op <: TopologyChangeOp](
+  private def findTransactionsInStore(
       asOf: CantonTimestamp,
       asOfInclusive: Boolean,
       isProposal: Boolean,
@@ -275,6 +302,75 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
     )
   }
 
+  override def findFirstMediatorStateForMediator(
+      mediatorId: MediatorId
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransactionX[TopologyChangeOpX.Replace, MediatorDomainStateX]]] = {
+    filteredState(
+      blocking(synchronized(topologyTransactionStore.toSeq)),
+      entry =>
+        !entry.transaction.isProposal &&
+          entry.transaction.transaction.op == TopologyChangeOpX.Replace &&
+          entry.transaction.transaction.mapping
+            .select[MediatorDomainStateX]
+            .exists(m => m.observers.contains(mediatorId) || m.active.contains(mediatorId)),
+    ).map(
+      _.collectOfType[TopologyChangeOpX.Replace]
+        .collectOfMapping[MediatorDomainStateX]
+        .result
+        .sortBy(_.transaction.transaction.serial)
+        .headOption
+    )
+  }
+
+  def findFirstTrustCertificateForParticipant(
+      participant: ParticipantId
+  )(implicit
+      traceContext: TraceContext
+  ): Future[
+    Option[StoredTopologyTransactionX[TopologyChangeOpX.Replace, DomainTrustCertificateX]]
+  ] = {
+    filteredState(
+      blocking(synchronized(topologyTransactionStore.toSeq)),
+      entry =>
+        !entry.transaction.isProposal &&
+          entry.transaction.transaction.op == TopologyChangeOpX.Replace &&
+          entry.transaction.transaction.mapping
+            .select[DomainTrustCertificateX]
+            .exists(m => m.participantId == participant.uid),
+    ).map(
+      _.collectOfType[TopologyChangeOpX.Replace]
+        .collectOfMapping[DomainTrustCertificateX]
+        .result
+        .sortBy(_.transaction.transaction.serial)
+        .headOption
+    )
+
+  }
+
+  override def findEssentialStateForMember(member: Member, asOfInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[GenericStoredTopologyTransactionsX] = {
+    findTransactionsInStore(
+      asOf = asOfInclusive,
+      asOfInclusive = true,
+      isProposal = false,
+      types = Seq(
+        NamespaceDelegationX.code,
+        UnionspaceDefinitionX.code,
+        IdentifierDelegationX.code,
+        OwnerToKeyMappingX.code,
+        DomainTrustCertificateX.code,
+        MediatorDomainStateX.code,
+        SequencerDomainStateX.code,
+        DomainParametersStateX.code,
+      ),
+      filterUid = None,
+      filterNamespace = None,
+    )
+  }
+
   /** store an initial set of topology transactions as given into the store */
   override def bootstrap(
       snapshot: GenericStoredTopologyTransactionsX
@@ -291,4 +387,92 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       }
     }
   }
+
+  override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Seq[TopologyStore.Change]] =
+    Future {
+      blocking {
+        synchronized {
+          TopologyStoreX.accumulateUpcomingEffectiveChanges(
+            topologyTransactionStore
+              .filter(_.from.value >= asOfInclusive)
+              .map(_.toStoredTransaction)
+              .toSeq
+          )
+        }
+      }
+    }
+
+  override def maxTimestamp()(implicit
+      traceContext: TraceContext
+  ): Future[Option[(SequencedTime, EffectiveTime)]] = Future {
+    blocking {
+      synchronized {
+        topologyTransactionStore.lastOption.map(x => (x.sequenced, x.from))
+      }
+    }
+  }
+
+  override def findDispatchingTransactionsAfter(
+      timestampExclusive: CantonTimestamp,
+      limit: Option[Int],
+  )(implicit
+      traceContext: TraceContext
+  ): Future[GenericStoredTopologyTransactionsX] =
+    blocking(synchronized {
+      val selected = topologyTransactionStore
+        .filter(x =>
+          x.from.value > timestampExclusive && (x.until
+            .get()
+            .isEmpty || x.transaction.transaction.op == TopologyChangeOpX.Remove) && x.rejected.isEmpty
+        )
+        .map(_.toStoredTransaction)
+        .toSeq
+      Future.successful(StoredTopologyTransactionsX(limit.fold(selected)(selected.take)))
+    })
+
+  private def allTransactions: Future[GenericStoredTopologyTransactionsX] =
+    filteredState(blocking(synchronized(topologyTransactionStore.toSeq)), _ => true)
+
+  override def findStored(
+      transaction: GenericSignedTopologyTransactionX
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[GenericStoredTopologyTransactionX]] =
+    allTransactions.map(_.result.find(_.transaction == transaction))
+
+  override def findStoredForVersion(
+      transaction: GenericTopologyTransactionX,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[GenericStoredTopologyTransactionX]] =
+    allTransactions.map(
+      _.result.find(tx =>
+        tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == TopologyTransaction
+          .protocolVersionRepresentativeFor(protocolVersion)
+      )
+    )
+
+  override def findParticipantOnboardingTransactions(
+      participantId: ParticipantId,
+      domainId: DomainId,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransactionX]] = {
+    val res = blocking(synchronized {
+      topologyTransactionStore.filter(x =>
+        x.until.get().isEmpty && TopologyStoreX.initialParticipantDispatchingSet.contains(
+          x.transaction.transaction.mapping.code
+        )
+      )
+    })
+
+    // TODO(#11255): Put in place filtering along the lines of:
+    //  TopologyStore.filterInitialParticipantDispatchingTransactions
+    //  see the note in TopologyStoreX.initialParticipantDispatchingSet
+    FutureUnlessShutdown.pure(res.map(_.transaction).toSeq)
+  }
+
 }

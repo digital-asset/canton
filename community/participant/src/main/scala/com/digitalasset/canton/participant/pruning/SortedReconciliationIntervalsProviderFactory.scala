@@ -4,12 +4,11 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.StoreBasedDomainTopologyClient
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime}
@@ -18,9 +17,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.concurrent.{ExecutionContext, Future}
 
 class SortedReconciliationIntervalsProviderFactory(
-    clock: Clock,
     syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
-    timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -29,35 +26,31 @@ class SortedReconciliationIntervalsProviderFactory(
       traceContext: TraceContext
   ): EitherT[Future, String, SortedReconciliationIntervalsProvider] =
     for {
-      syncDomainPersistentStateManager <- EitherT.fromEither[Future](
+      syncDomainPersistentState <- EitherT.fromEither[Future](
         syncDomainPersistentStateManager
           .get(domainId)
           .toRight(s"Unable to get sync domain persistent state for domain $domainId")
       )
 
       staticDomainParameters <- EitherT(
-        syncDomainPersistentStateManager.parameterStore.lastParameters.map(
+        syncDomainPersistentState.parameterStore.lastParameters.map(
           _.toRight(s"Unable to fetch static domain parameters for domain $domainId")
         )
       )
 
       subscriptionTs <- EitherT.liftF(
-        syncDomainPersistentStateManager.sequencerCounterTrackerStore.preheadSequencerCounter
+        syncDomainPersistentState.sequencerCounterTrackerStore.preheadSequencerCounter
           .map(_.fold(CantonTimestamp.MinValue)(_.timestamp))
       )
+      topologyFactory <- syncDomainPersistentStateManager
+        .topologyFactoryFor(domainId)
+        .toRight(s"Can not obtain topology factory for ${domainId}")
+        .toEitherT[Future]
     } yield {
-      val topologyClient = new StoreBasedDomainTopologyClient(
-        clock = clock,
-        domainId = domainId,
-        protocolVersion = staticDomainParameters.protocolVersion,
-        store = syncDomainPersistentStateManager.topologyStore,
-        initKeys = Map.empty,
-        packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
-        timeouts = timeouts,
-        loggerFactory = loggerFactory,
-        futureSupervisor = futureSupervisor,
+      val topologyClient = topologyFactory.createTopologyClient(
+        staticDomainParameters.protocolVersion,
+        StoreBasedDomainTopologyClient.NoPackageDependencies,
       )
-
       topologyClient.updateHead(
         EffectiveTime(subscriptionTs),
         ApproximateTime(subscriptionTs),

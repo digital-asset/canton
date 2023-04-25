@@ -213,7 +213,8 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
     CommitSet(
       archivals = arch.map(_ -> WithContractHash(Set.empty[LfPartyId], contractHash)).toMap,
       creations = create.map(_ -> WithContractHash(ContractMetadata.empty, contractHash)).toMap,
-      transferOuts = txOut.fmap(id => WithContractHash((id, Set.empty), contractHash)),
+      transferOuts =
+        txOut.fmap(id => WithContractHash((TargetDomainId(id), Set.empty), contractHash)),
       transferIns = txIn.fmap(id =>
         WithContractHash(WithContractMetadata(id, ContractMetadata.empty), contractHash)
       ),

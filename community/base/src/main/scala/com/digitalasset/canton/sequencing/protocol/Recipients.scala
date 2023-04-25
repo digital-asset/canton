@@ -10,7 +10,6 @@ import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.sequencing.protocol.RecipientsTree.Recipient
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 
@@ -19,11 +18,9 @@ import com.digitalasset.canton.topology.Member
   */
 final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends PrettyPrinting {
 
-  // TODO(#12360): include all kinds of recipients
-  lazy val allRecipients: Set[Member] =
-    trees.forgetNE
-      .flatMap(t => t.allRecipients)
-      .toSet
+  lazy val allRecipients: NonEmpty[Set[Recipient]] = trees
+    .flatMap(t => t.allRecipients)
+    .toSet
 
   def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] = trees.flatMap(_.allPaths)
 
@@ -44,7 +41,7 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
   def asSingleGroup: Option[NonEmpty[Set[Member]]] = {
     trees match {
       case Seq(RecipientsTree(group, Seq())) =>
-        NonEmpty.from(group.collect { case RecipientsTree.MemberRecipient(member) =>
+        NonEmpty.from(group.collect { case MemberRecipient(member) =>
           member
         })
       case _ => None
@@ -60,9 +57,14 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
 
 object Recipients {
 
-  def fromProtoV0(proto: v0.Recipients): ParsingResult[Recipients] = {
+  def fromProtoV0(
+      proto: v0.Recipients,
+      supportGroupAddressing: Boolean,
+  ): ParsingResult[Recipients] = {
     for {
-      trees <- proto.recipientsTree.traverse(t => RecipientsTree.fromProtoV0(t))
+      trees <- proto.recipientsTree.traverse(t =>
+        RecipientsTree.fromProtoV0(t, supportGroupAddressing)
+      )
       recipients <- NonEmpty
         .from(trees)
         .toRight(

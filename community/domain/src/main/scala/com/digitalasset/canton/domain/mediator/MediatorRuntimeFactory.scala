@@ -20,6 +20,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.sequencing.UnsignedProtocolEventHandler
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, GrpcDomainTimeService}
@@ -80,6 +81,7 @@ trait MediatorRuntimeFactory {
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessorCommon,
+      topologyRequestProcessor: Option[UnsignedProtocolEventHandler],
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
@@ -105,6 +107,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessorCommon,
+      topologyRequestProcessor: Option[UnsignedProtocolEventHandler],
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
@@ -149,6 +152,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
           topologyClient,
           syncCrypto,
           topologyTransactionProcessor,
+          topologyRequestProcessor,
           timeTrackerConfig,
           state,
           sequencerCounterTrackerStore,

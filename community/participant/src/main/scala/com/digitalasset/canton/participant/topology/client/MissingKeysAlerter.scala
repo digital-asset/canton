@@ -10,13 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.client.DomainTopologyClient
-import com.digitalasset.canton.topology.processing.{
-  ApproximateTime,
-  EffectiveTime,
-  SequencedTime,
-  TopologyTransactionProcessingSubscriber,
-  TopologyTransactionProcessor,
-}
+import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,7 +23,7 @@ class MissingKeysAlerter(
     participantId: ParticipantId,
     domainId: DomainId,
     client: DomainTopologyClient,
-    processor: TopologyTransactionProcessor,
+    processor: TopologyTransactionProcessorCommon,
     cryptoPrivateStore: CryptoPrivateStore,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)

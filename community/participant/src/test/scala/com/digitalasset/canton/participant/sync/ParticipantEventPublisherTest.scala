@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.sync
 
 import cats.Eval
 import cats.syntax.option.*
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.participant.domain.DomainAliasResolution
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.ParticipantEventLog.ProductionParticipantEventLogId
 import com.digitalasset.canton.participant.store.memory.{
@@ -14,7 +14,6 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryParticipantEventLog,
 }
 import com.digitalasset.canton.participant.store.{
-  DomainConnectionConfigStore,
   MultiDomainEventLog,
   ParticipantEventLog,
   SingleDimensionEventLogTest,
@@ -25,7 +24,6 @@ import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.Traced
-import com.digitalasset.canton.{BaseTest, DomainAlias}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -47,18 +45,7 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
 
   def withPublisher(test: Fixture => Future[Assertion]): Future[Assertion] = {
     val eventLog = new InMemoryParticipantEventLog(ProductionParticipantEventLogId, loggerFactory)
-    val noDomainResolution = new DomainAliasResolution {
-      override def domainIdForAlias(alias: DomainAlias): Option[DomainId] = None
-      override def aliasForDomainId(id: DomainId): Option[DomainAlias] = None
-      override def close(): Unit = ()
-      override def connectionStateForDomain(
-          id: DomainId
-      ): Option[DomainConnectionConfigStore.Status] = Some(DomainConnectionConfigStore.Active)
-    }
-    val persistentStateManager = new SyncDomainPersistentStateManager(
-      noDomainResolution,
-      loggerFactory,
-    )
+    val persistentStateManager = mock[SyncDomainPersistentStateManager]
     val indexedStringStore = InMemoryIndexedStringStore()
     val multiDomainEventLog = InMemoryMultiDomainEventLog(
       persistentStateManager,
@@ -67,6 +54,7 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
       DefaultProcessingTimeouts.testing,
       indexedStringStore,
       ParticipantTestMetrics,
+      futureSupervisor,
       loggerFactory,
     )
     val publisher = new ParticipantEventPublisher(
@@ -75,7 +63,8 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
       Eval.now(multiDomainEventLog),
       clock,
       Eval.now(Duration.ofDays(1)),
-      DefaultProcessingTimeouts.testing,
+      timeouts,
+      futureSupervisor,
       loggerFactory,
     )
     val fixture = new Fixture(publisher, eventLog, multiDomainEventLog)

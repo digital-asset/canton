@@ -25,6 +25,7 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
+  MemberRecipient,
   SendAsyncError,
   SignedContent,
   SubmissionRequest,
@@ -239,7 +240,28 @@ class DatabaseSequencer(
   override def sendAsyncInternal(submission: SubmissionRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncError, Unit] =
-    writer.send(submission)
+    for {
+      // TODO(#12405) Support aggregatable submissions in the DB sequencer
+      _ <- EitherT.cond[Future](
+        submission.aggregationRule.isEmpty,
+        (),
+        SendAsyncError.RequestRefused(
+          "Aggregatable submissions are not yet supported by this database sequencer"
+        ),
+      )
+      // TODO(#12363) Support group addresses in the DB Sequencer
+      _ <- EitherT.cond[Future](
+        !submission.batch.allRecipients.exists {
+          case _: MemberRecipient => false
+          case _ => true
+        },
+        (),
+        SendAsyncError.RequestRefused(
+          "Group addresses are not yet supported by this database sequencer"
+        ),
+      )
+      _ <- writer.send(submission)
+    } yield ()
 
   override protected def sendAsyncSignedInternal(
       signedSubmission: SignedContent[SubmissionRequest]

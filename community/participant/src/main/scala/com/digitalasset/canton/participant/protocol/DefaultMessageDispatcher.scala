@@ -49,7 +49,6 @@ class DefaultMessageDispatcher(
     override protected val participantId: ParticipantId,
     override protected val requestTracker: RequestTracker,
     override protected val requestProcessors: RequestProcessors,
-    override protected val tracker: SingleDomainCausalTracker,
     override protected val topologyProcessor: (
         SequencerCounter,
         CantonTimestamp,

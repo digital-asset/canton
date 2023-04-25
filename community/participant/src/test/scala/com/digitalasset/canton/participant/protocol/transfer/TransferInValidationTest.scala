@@ -27,11 +27,15 @@ import java.util.UUID
 import scala.concurrent.{Future, Promise}
 
 class TransferInValidationTest extends AsyncWordSpec with BaseTest {
-  private val sourceDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
+  private val sourceDomain = SourceDomainId(
+    DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
+  )
   private val sourceMediator = MediatorId(
     UniqueIdentifier.tryFromProtoPrimitive("mediator::source")
   )
-  private val targetDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::target"))
+  private val targetDomain = TargetDomainId(
+    DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::target"))
+  )
   private val targetMediator = MediatorId(
     UniqueIdentifier.tryFromProtoPrimitive("mediator::target")
   )
@@ -52,14 +56,13 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       LedgerApplicationId.assertFromString("tests"),
       participant.toLf,
       LedgerCommandId.assertFromString("transfer-in-validation-command-id"),
-      None,
+      submissionId = None,
+      workflowId = None,
     )
   }
 
-  private val workflowId: Option[LfWorkflowId] = None
-
   private val identityFactory = TestingTopology()
-    .withDomains(sourceDomain)
+    .withDomains(sourceDomain.unwrap)
     .withReversedTopology(
       Map(submitterParticipant -> Map(party1 -> ParticipantPermission.Submission))
     )
@@ -68,7 +71,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
 
   private val cryptoSnapshot =
     identityFactory
-      .forOwnerAndDomain(submitterParticipant, sourceDomain)
+      .forOwnerAndDomain(submitterParticipant, sourceDomain.unwrap)
       .currentSnapshotApproximation
 
   private val pureCrypto = TestingIdentityFactory.pureCrypto()
@@ -123,7 +126,6 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       submitterInfo(party1),
       Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
       Set.empty,
-      workflowId,
       contractId,
       contract.rawContractInstance.contractInstance.unversioned.template,
       transferId.sourceDomain,
@@ -131,7 +133,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       sourceMediator,
       targetDomain,
       TargetProtocolVersion(testedProtocolVersion),
-      TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
+      TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, targetDomain = targetDomain),
     )
     val uuid = new UUID(3L, 4L)
     val seed = seedGenerator.generateSaltSeed()
@@ -208,7 +210,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
   }
 
   private def testInstance(
-      domainId: DomainId,
+      domainId: TargetDomainId,
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],
       snapshotOverride: DomainSnapshotSyncCryptoApi,
@@ -227,7 +229,6 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         Some(awaitTimestampOverride),
         loggerFactory,
       ),
-      causalityTracking = true,
       TargetProtocolVersion(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )
@@ -238,7 +239,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
-      targetDomain: DomainId,
+      targetDomain: TargetDomainId,
       targetMediator: MediatorId,
       transferOutResult: DeliveredTransferOutResult,
       uuid: UUID = new UUID(4L, 5L),
@@ -248,7 +249,6 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       pureCrypto,
       seed,
       submitterInfo(submitter),
-      workflowId,
       stakeholders,
       contract,
       creatingTransactionId,

@@ -15,7 +15,7 @@ object MockedNodeParameters {
       _processingTimeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing,
       _cachingConfigs: CachingConfigs = CachingConfigs.testing,
       _loggingConfig: LoggingConfig = LoggingConfig(),
-      _enableAdditionalConsistencyChecks: Boolean = false,
+      _enableAdditionalConsistencyChecks: Boolean = true,
       _nonStandardConfig: Boolean = false,
   ): CantonNodeParameters = new CantonNodeParameters {
     override def delayLoggingThreshold: NonNegativeFiniteDuration = ???

@@ -9,9 +9,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.protocol.{SourceDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, OptionUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
@@ -186,7 +185,7 @@ trait TransferLookup {
     * Results need not be consistent with [[lookup]].
     */
   def find(
-      filterSource: Option[DomainId],
+      filterSource: Option[SourceDomainId],
       filterRequestTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -203,7 +202,7 @@ trait TransferLookup {
     *                     (request timestamp, source domain ID) ordering
     * @param limit limit the number of results
     */
-  def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
+  def findAfter(requestAfter: Option[(CantonTimestamp, SourceDomainId)], limit: Int)(implicit
       traceContext: TraceContext
   ): Future[Seq[TransferData]]
 
@@ -219,7 +218,7 @@ trait TransferLookup {
     * @param limit limit the number of results
     */
   def findInFlight(
-      sourceDomain: DomainId,
+      sourceDomain: SourceDomainId,
       onlyCompletedTransferOut: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],

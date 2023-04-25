@@ -5,12 +5,12 @@ package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.participant.store.TransferStoreTest
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.protocol.TargetDomainId
 import org.scalatest.wordspec.AsyncWordSpec
 
 class TransferStoreTestInMemory extends AsyncWordSpec with BaseTest with TransferStoreTest {
 
-  private def mk(domain: DomainId): InMemoryTransferStore =
+  private def mk(domain: TargetDomainId): InMemoryTransferStore =
     new InMemoryTransferStore(domain, loggerFactory)
 
   "TransferStoreTestInMemory" should {

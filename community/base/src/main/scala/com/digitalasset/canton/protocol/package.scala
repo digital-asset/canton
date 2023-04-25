@@ -94,10 +94,6 @@ package object protocol {
   type LfNodeRollback = Node.Rollback
   val LfNodeRollback: Node.Rollback.type = Node.Rollback
 
-  /** Shorthand for authority nodes. */
-  type LfNodeAuthority = Node.Authority
-  val LfNodeAuthority: Node.Authority.type = Node.Authority
-
   /** Shorthand for leaf only action nodes. */
   type LfLeafOnlyActionNode = Node.LeafOnlyAction
 

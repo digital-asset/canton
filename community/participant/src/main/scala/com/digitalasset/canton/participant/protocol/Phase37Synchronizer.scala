@@ -75,7 +75,7 @@ class Phase37Synchronizer(
     logger.debug(s"Registering a new request $ts")
 
     blocking(synchronized {
-      lazy val requestRelation: RequestRelation[requestType.PendingRequestData] = RequestRelation(
+      val requestRelation: RequestRelation[requestType.PendingRequestData] = RequestRelation(
         promise.future
           .map(_.orElse {
             blocking(synchronized {

@@ -11,11 +11,7 @@ import com.digitalasset.canton.participant.protocol.TransactionUpdate
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
 import com.digitalasset.canton.participant.sync.LedgerSyncEvent.PublicPackageUploadRejected
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
-import com.digitalasset.canton.participant.sync.{
-  LedgerSyncEvent,
-  TimestampedEvent,
-  TimestampedEventAndCausalChange,
-}
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.{LedgerSyncRecordTime, LocalOffset}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DomainId
@@ -108,11 +104,9 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         events <- eventLog.lookupEventRange(None, None, None, None, None)
         lastOffset <- eventLog.lastOffset.value
       } yield {
-        val normalizedEvents = events
-          .map({ case (offset, TimestampedEventAndCausalChange(event, clock)) =>
-            offset -> event.normalized
-          })
-          .toMap
+        val normalizedEvents = events.map { case (offset, event) =>
+          offset -> event.normalized
+        }.toMap
         normalizedEvents shouldBe expectedEvents
           .map(event => event.localOffset -> event.normalized)
           .toMap
@@ -129,20 +123,10 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event = generateEvent(ts, 1L)
         logger.debug("Starting 1")
         for {
-          _ <- eventLog.insert(event, None)
+          _ <- eventLog.insert(event)
           _ <- assertEvents(eventLog, Seq(event))
         } yield {
           logger.debug("Finished 1")
-          succeed
-        }
-      }
-
-      "store dummy events for transfers" in withEventLog { eventLog =>
-        logger.debug("Starting 2")
-        for {
-          _ <- eventLog.storeTransferUpdate(update)
-        } yield {
-          logger.debug("Finished 2")
           succeed
         }
       }
@@ -171,9 +155,9 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event3 = generateEventWithTransactionId(3L, "transaction-id")
 
         for {
-          () <- eventLog.insertUnlessEventIdClash(event1, None).valueOrFail("First insert")
-          () <- eventLog.insertUnlessEventIdClash(event2, None).valueOrFail("Second insert")
-          () <- eventLog.insert(event3, None)
+          () <- eventLog.insertUnlessEventIdClash(event1).valueOrFail("First insert")
+          () <- eventLog.insertUnlessEventIdClash(event2).valueOrFail("Second insert")
+          () <- eventLog.insert(event3)
           _ <- assertEvents(eventLog, Seq(event1, event2, event3))
         } yield {
           logger.debug("Finished 4")
@@ -192,9 +176,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event2 = generateEvent(ts2, 2)
 
         for {
-          inserts <- eventLog.insertsUnlessEventIdClash(
-            Seq(event1, event2).map(e => TimestampedEventAndCausalChange(e, None))
-          )
+          inserts <- eventLog.insertsUnlessEventIdClash(Seq(event1, event2))
           _ <- assertEvents(eventLog, Seq(event1, event2))
         } yield {
           logger.debug("Finished 5")
@@ -209,9 +191,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event2 = generateEvent(ts, 2)
 
         for {
-          inserts <- eventLog.insertsUnlessEventIdClash(
-            Seq(event1, event2).map(e => TimestampedEventAndCausalChange(e, None))
-          )
+          inserts <- eventLog.insertsUnlessEventIdClash(Seq(event1, event2))
           _ <- assertEvents(eventLog, Seq(event1, event2))
         } yield {
           logger.debug("Finished 6")
@@ -228,8 +208,8 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event2 = generateEvent(ts2, 2)
 
         for {
-          _ <- eventLog.insert(event2, None)
-          _ <- eventLog.insert(event1, None)
+          _ <- eventLog.insert(event2)
+          _ <- eventLog.insert(event1)
           _ <- assertEvents(eventLog, Seq(event1, event2))
         } yield {
           logger.debug("Finished 7")
@@ -242,8 +222,8 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event = generateEvent(LedgerSyncRecordTime.Epoch, 1)
 
         for {
-          _ <- eventLog.insert(event, None)
-          _ <- eventLog.insert(event, None)
+          _ <- eventLog.insert(event)
+          _ <- eventLog.insert(event)
           _ <- assertEvents(eventLog, Seq(event))
         } yield {
           logger.debug("Finished 8")
@@ -267,9 +247,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
           )
 
         for {
-          inserts <- eventLog.insertsUnlessEventIdClash(
-            Seq(event1, event2).map(e => TimestampedEventAndCausalChange(e, None))
-          )
+          inserts <- eventLog.insertsUnlessEventIdClash(Seq(event1, event2))
           _ <- assertEvents(eventLog, Seq(event1, event2))
         } yield {
           logger.debug("Finished 9")
@@ -289,13 +267,13 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val eventId = TimelyRejectionEventId(domainId, new UUID(0L, 1L))
 
         for {
-          _ <- eventLog.insert(event1, None)
+          _ <- eventLog.insert(event1)
           _ <- loggerFactory.assertInternalErrorAsync[IllegalArgumentException](
-            eventLog.insert(event2, None),
+            eventLog.insert(event2),
             _.getMessage should startWith("Unable to overwrite an existing event. Aborting."),
           )
           _ <- loggerFactory.assertInternalErrorAsync[IllegalArgumentException](
-            eventLog.insertUnlessEventIdClash(event2.copy(eventId = eventId.some), None).value,
+            eventLog.insertUnlessEventIdClash(event2.copy(eventId = eventId.some)).value,
             _.getMessage should startWith("Unable to overwrite an existing event. Aborting."),
           )
           _ <- assertEvents(eventLog, Seq(event1))
@@ -317,12 +295,11 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event2 = generateEvent(ts2, 2L).copy(eventId = eventId.some)
 
         for {
-          () <- eventLog.insertUnlessEventIdClash(event1, None).valueOrFail("first insert")
-          clash <- leftOrFail(eventLog.insertUnlessEventIdClash(event2, None))("second insert")
+          () <- eventLog.insertUnlessEventIdClash(event1).valueOrFail("first insert")
+          clash <- leftOrFail(eventLog.insertUnlessEventIdClash(event2))("second insert")
           _ <- assertEvents(eventLog, Seq(event1))
           _ <- eventLog.insert(
-            event2.copy(eventId = None),
-            None,
+            event2.copy(eventId = None)
           ) // We can still insert it normally without generating an ID
           _ <- assertEvents(eventLog, Seq(event1, event2.copy(eventId = None)))
         } yield {
@@ -338,10 +315,10 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event3 = generateEventWithTransactionId(3, "id1")
 
         for {
-          _ <- eventLog.insert(event1, None)
-          _ <- eventLog.insert(event2, None)
+          _ <- eventLog.insert(event1)
+          _ <- eventLog.insert(event2)
           _ <- loggerFactory.assertInternalErrorAsync[IllegalArgumentException](
-            eventLog.insert(event3, None),
+            eventLog.insert(event3),
             _.getMessage should fullyMatch regex "Unable to insert event, as the eventId id .* has already been inserted with offset 1\\.",
           )
         } yield {
@@ -357,16 +334,16 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event3 = generateEvent(LedgerSyncRecordTime.Epoch, 3)
 
         for {
-          _ <- eventLog.insert(event1, None)
-          _ <- eventLog.insert(event2, None)
-          _ <- eventLog.insert(event3, None)
+          _ <- eventLog.insert(event1)
+          _ <- eventLog.insert(event2)
+          _ <- eventLog.insert(event3)
           et1 <- eventLog.eventByTransactionId(LedgerTransactionId.assertFromString("id1")).value
           et2 <- eventLog.eventByTransactionId(LedgerTransactionId.assertFromString("id2")).value
           et3 <- eventLog.eventByTransactionId(LedgerTransactionId.assertFromString("id3")).value
         } yield {
           logger.debug("Finished 13")
-          et1.value.tse.normalized shouldBe event1.normalized
-          et2.value.tse.normalized shouldBe event2.normalized
+          et1.value.normalized shouldBe event1.normalized
+          et2.value.normalized shouldBe event2.normalized
           et3 shouldBe None
         }
       }
@@ -380,9 +357,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event3 = generateEvent(ts3, 3)
 
         for {
-          inserts <- eventLog.insertsUnlessEventIdClash(
-            Seq(event1, event2, event3).map(e => TimestampedEventAndCausalChange(e, None))
-          )
+          inserts <- eventLog.insertsUnlessEventIdClash(Seq(event1, event2, event3))
           _ <- eventLog.prune(2)
           _ <- assertEvents(eventLog, Seq(event3))
         } yield {
@@ -401,9 +376,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event3 = generateEvent(ts3, 3L)
 
         for {
-          inserts <- eventLog.insertsUnlessEventIdClash(
-            Seq(event1, event2, event3).map(e => TimestampedEventAndCausalChange(e, None))
-          )
+          inserts <- eventLog.insertsUnlessEventIdClash(Seq(event1, event2, event3))
           q1 <- eventLog.existsBetween(CantonTimestamp(ts1), 2L)
           q2 <- eventLog.existsBetween(CantonTimestamp(ts1).immediateSuccessor, 2L)
           q3 <- eventLog.existsBetween(CantonTimestamp(ts2), 0L)
@@ -435,12 +408,10 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
         val event4a = generateEvent(ts4a, 4)
 
         for {
-          inserts <- eventLog.insertsUnlessEventIdClash(
-            Seq(event1, event2, event4).map(e => TimestampedEventAndCausalChange(e, None))
-          )
+          inserts <- eventLog.insertsUnlessEventIdClash(Seq(event1, event2, event4))
           () <- eventLog.deleteSince(3L)
           _ <- assertEvents(eventLog, Seq(event1, event2))
-          () <- eventLog.insert(event4a, None) // can insert deleted event with different timestamp
+          () <- eventLog.insert(event4a) // can insert deleted event with different timestamp
           _ <- assertEvents(eventLog, Seq(event1, event2, event4a))
           () <- eventLog.deleteSince(2L)
           _ <- assertEvents(eventLog, Seq(event1))

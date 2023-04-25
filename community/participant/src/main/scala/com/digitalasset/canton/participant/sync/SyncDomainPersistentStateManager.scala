@@ -3,17 +3,36 @@
 
 package com.digitalasset.canton.participant.sync
 
-import cats.syntax.traverse.*
+import cats.Eval
+import cats.data.EitherT
+import cats.syntax.bifunctor.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.environment.{
+  DomainTopologyInitializationCallback,
+  StoreBasedDomainTopologyInitializationCallback,
+}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.domain.DomainAliasResolution
-import com.digitalasset.canton.participant.store.{
-  DomainConnectionConfigStore,
-  SyncDomainPersistentState,
+import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.domain.{DomainAliasResolution, DomainRegistryError}
+import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.topology.{
+  TopologyComponentFactory,
+  TopologyComponentFactoryOld,
+  TopologyComponentFactoryX,
 }
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore, SequencedEventStore}
+import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.concurrent
@@ -26,71 +45,408 @@ trait SyncDomainPersistentStateLookup {
 }
 
 /** Manages domain state that needs to survive reconnects
+  *
+  * Factory for [[com.digitalasset.canton.participant.store.SyncDomainPersistentState]]. Tries to discover existing persistent states or create new ones
+  * and checks consistency of domain parameters and unique contract key domains
   */
-class SyncDomainPersistentStateManager(
-    aliasResolution: DomainAliasResolution,
-    protected val loggerFactory: NamedLoggerFactory,
-) extends SyncDomainPersistentStateLookup
-    with NamedLogging
-    with AutoCloseable {
-  private val protocolVersionCache: TrieMap[DomainId, ProtocolVersion] = TrieMap()
+trait SyncDomainPersistentStateManager extends AutoCloseable with SyncDomainPersistentStateLookup {
 
+  /** Creates [[com.digitalasset.canton.participant.store.SyncDomainPersistentState]]s for all known domain aliases
+    * provided that the domain parameters and a sequencer offset are known.
+    * Does not check for unique contract key domain constraints.
+    * Must not be called concurrently with itself or other methods of this class.
+    */
+  def initializePersistentStates()(implicit traceContext: TraceContext): Future[Unit]
+
+  def indexedDomainId(domainId: DomainId): Future[IndexedDomain]
+
+  /** Retrieves the [[com.digitalasset.canton.participant.store.SyncDomainPersistentState]] from the [[com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager]]
+    * for the given domain if there is one. Otherwise creates a new [[com.digitalasset.canton.participant.store.SyncDomainPersistentState]] for the domain
+    * and registers it with the [[com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager]].
+    * Checks that the [[com.digitalasset.canton.protocol.StaticDomainParameters]] are the same as what has been persisted (if so)
+    * and enforces the unique contract key domain constraints.
+    *
+    * Must not be called concurrently with itself or other methods of this class.
+    */
+  def lookupOrCreatePersistentState(
+      domainAlias: DomainAlias,
+      domainId: IndexedDomain,
+      domainParameters: StaticDomainParameters,
+      participantSettings: Eval[ParticipantSettingsLookup],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainRegistryError, SyncDomainPersistentState]
+
+  def domainTopologyStateInitFor(
+      domainId: DomainId,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainRegistryError, Option[DomainTopologyInitializationCallback]]
   def protocolVersionFor(
       domainId: DomainId
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): Future[Option[ProtocolVersion]] = {
-    protocolVersionCache.get(domainId) match {
-      case Some(protocolVersion) => Future.successful(Some(protocolVersion))
-      case None =>
-        get(domainId)
-          .map(_.parameterStore)
-          .traverse(_.lastParameters)
-          .map(_.flatten)
-          .map {
-            case Some(staticDomainParameters) =>
-              protocolVersionCache
-                .put(domainId, staticDomainParameters.protocolVersion)
-                .discard[Option[ProtocolVersion]]
-              Some(staticDomainParameters.protocolVersion)
+  ): Future[Option[ProtocolVersion]]
 
-            case None => None
-          }
+  def get(domainId: DomainId): Option[SyncDomainPersistentState]
+
+  def getStatusOf(domainId: DomainId): Option[DomainConnectionConfigStore.Status]
+
+  def getByAlias(domainAlias: DomainAlias): Option[SyncDomainPersistentState]
+
+  def domainIdForAlias(domainAlias: DomainAlias): Option[DomainId]
+
+  def aliasForDomainId(domainId: DomainId): Option[DomainAlias]
+
+  def topologyFactoryFor(domainId: DomainId): Option[TopologyComponentFactory]
+
+}
+
+abstract class SyncDomainPersistentStateManagerImpl[S <: SyncDomainPersistentState](
+    aliasResolution: DomainAliasResolution,
+    storage: Storage,
+    val indexedStringStore: IndexedStringStore,
+    parameters: ParticipantNodeParameters,
+    protected val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends SyncDomainPersistentStateManager
+    with NamedLogging {
+
+  override def initializePersistentStates()(implicit traceContext: TraceContext): Future[Unit] = {
+    def getProtocolVersion(domainId: DomainId)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, String, ProtocolVersion] =
+      EitherT
+        .fromOptionF(
+          DomainParameterStore(
+            storage,
+            domainId,
+            parameters.processingTimeouts,
+            loggerFactory,
+          ).lastParameters,
+          "No domain parameters in store",
+        )
+        .map(_.protocolVersion)
+
+    aliasResolution.aliases.toList.parTraverse_ { alias =>
+      val resultE = for {
+        domainId <- EitherT.fromEither[Future](
+          aliasResolution.domainIdForAlias(alias).toRight("Unknown domain-id")
+        )
+        domainIdIndexed <- EitherT.right(IndexedDomain.indexed(indexedStringStore)(domainId))
+        protocolVersion <- getProtocolVersion(domainId)
+        persistentState = createPersistentState(alias, domainIdIndexed, protocolVersion)
+        _lastProcessedPresent <- persistentState.sequencedEventStore
+          .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))
+          .leftMap(_ => "No persistent event")
+        _ = logger.debug(s"Discovered existing state for $alias")
+      } yield put(persistentState)
+
+      resultE.valueOr(error => logger.debug(s"No state for $alias discovered: ${error}"))
     }
   }
 
-  private val domainStates: concurrent.Map[DomainId, SyncDomainPersistentState] =
-    TrieMap[DomainId, SyncDomainPersistentState]()
+  override def indexedDomainId(domainId: DomainId): Future[IndexedDomain] = {
+    IndexedDomain.indexed(this.indexedStringStore)(domainId)
+  }
 
-  def put(state: SyncDomainPersistentState): Unit = {
+  override def lookupOrCreatePersistentState(
+      domainAlias: DomainAlias,
+      domainId: IndexedDomain,
+      domainParameters: StaticDomainParameters,
+      participantSettings: Eval[ParticipantSettingsLookup],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainRegistryError, SyncDomainPersistentState] = {
+    // TODO(#11255) does this method need to be synchronized?
+    val persistentState =
+      createPersistentState(domainAlias, domainId, domainParameters.protocolVersion)
+    for {
+      _ <- checkAndUpdateDomainParameters(
+        domainAlias,
+        persistentState.parameterStore,
+        domainParameters,
+      )
+      _ <- checkUniqueContractKeys(
+        domainAlias,
+        domainParameters.uniqueContractKeys,
+        domainId.domainId,
+        participantSettings,
+      )
+    } yield {
+      // TODO(#11255) potentially delete putIfAbsent
+      putIfAbsent(persistentState)
+      persistentState
+    }
+  }
+
+  private def createPersistentState(
+      alias: DomainAlias,
+      domainId: IndexedDomain,
+      protocolVersion: ProtocolVersion,
+  ): S =
+    get(domainId.item)
+      .getOrElse(
+        mkPersistentState(alias, domainId, protocolVersion)
+      )
+
+  protected def mkPersistentState(
+      alias: DomainAlias,
+      domainId: IndexedDomain,
+      protocolVersion: ProtocolVersion,
+  ): S
+
+  private def checkAndUpdateDomainParameters(
+      alias: DomainAlias,
+      parameterStore: DomainParameterStore,
+      newParameters: StaticDomainParameters,
+  )(implicit traceContext: TraceContext): EitherT[Future, DomainRegistryError, Unit] = {
+    for {
+      oldParametersO <- EitherT.liftF(parameterStore.lastParameters)
+      _ <- oldParametersO match {
+        case None =>
+          // Store the parameters
+          logger.debug(s"Storing domain parameters for domain $alias: $newParameters")
+          EitherT.liftF[Future, DomainRegistryError, Unit](
+            parameterStore.setParameters(newParameters)
+          )
+        case Some(oldParameters) =>
+          EitherT.cond[Future](
+            oldParameters == newParameters,
+            (),
+            DomainRegistryError.ConfigurationErrors.DomainParametersChanged
+              .Error(oldParametersO, newParameters): DomainRegistryError,
+          )
+      }
+    } yield ()
+  }
+
+  private def checkUniqueContractKeys(
+      domainAlias: DomainAlias,
+      connectToUniqueContractKeys: Boolean,
+      domainId: DomainId,
+      participantSettings: Eval[ParticipantSettingsLookup],
+  )(implicit traceContext: TraceContext): EitherT[Future, DomainRegistryError, Unit] = {
+    val uckMode = participantSettings.value.settings.uniqueContractKeys
+      .getOrElse(
+        ErrorUtil.internalError(
+          new IllegalStateException("unique-contract-keys setting is undefined")
+        )
+      )
+    for {
+      _ <- EitherTUtil.condUnitET[Future](
+        uckMode == connectToUniqueContractKeys,
+        DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
+          s"Cannot connect to domain ${domainAlias.unwrap} with${if (!connectToUniqueContractKeys) "out"
+            else ""} unique contract keys semantics as the participant has set unique-contract-keys=$uckMode"
+        ),
+      )
+      _ <- EitherT.cond[Future](!uckMode, (), ()).leftFlatMap { _ =>
+        // If we're connecting to a UCK domain,
+        // make sure that we haven't been connected to a different domain before (unless we are doing a migration here)
+        val allActiveDomains = getAll.keySet
+          .filter(getStatusOf(_).exists(_.isActive))
+        EitherTUtil
+          .condUnitET[Future](
+            allActiveDomains.forall(_ == domainId),
+            DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
+              s"Cannot connect to domain ${domainAlias.unwrap} as the participant has UCK semantics enabled and has already been connected to other domains: ${allActiveDomains
+                  .mkString(", ")}"
+            ),
+          )
+          .leftWiden[DomainRegistryError]
+      }
+    } yield ()
+  }
+
+  def protocolVersionFor(
+      domainId: DomainId
+  ): Future[Option[ProtocolVersion]] = {
+    // TODO(#11255) remove future
+    Future.successful(get(domainId).map(_.protocolVersion))
+  }
+
+  private val domainStates: concurrent.Map[DomainId, S] =
+    TrieMap[DomainId, S]()
+
+  private def put(state: S): Unit = {
     val domainId = state.domainId
     val previous = domainStates.putIfAbsent(domainId.item, state)
     if (previous.isDefined)
       throw new IllegalArgumentException(s"domain state already exists for $domainId")
   }
 
-  def putIfAbsent(state: SyncDomainPersistentState): Unit =
+  private def putIfAbsent(state: S): Unit =
     domainStates.putIfAbsent(state.domainId.item, state).discard
 
-  def get(domainId: DomainId): Option[SyncDomainPersistentState] = domainStates.get(domainId)
+  override def get(domainId: DomainId): Option[S] =
+    domainStates.get(domainId)
 
   override def getAll: Map[DomainId, SyncDomainPersistentState] = domainStates.toMap
 
-  def getStatusOf(domainId: DomainId): Option[DomainConnectionConfigStore.Status] =
+  override def getStatusOf(domainId: DomainId): Option[DomainConnectionConfigStore.Status] =
     this.aliasResolution.connectionStateForDomain(domainId)
 
-  def getByAlias(domainAlias: DomainAlias): Option[SyncDomainPersistentState] =
+  override def getByAlias(domainAlias: DomainAlias): Option[SyncDomainPersistentState] =
     for {
       domainId <- domainIdForAlias(domainAlias)
       res <- get(domainId)
     } yield res
 
-  def domainIdForAlias(domainAlias: DomainAlias): Option[DomainId] =
+  override def domainIdForAlias(domainAlias: DomainAlias): Option[DomainId] =
     aliasResolution.domainIdForAlias(domainAlias)
-  def aliasForDomainId(domainId: DomainId): Option[DomainAlias] =
+  override def aliasForDomainId(domainId: DomainId): Option[DomainAlias] =
     aliasResolution.aliasForDomainId(domainId)
 
   override def close(): Unit =
     Lifecycle.close(domainStates.values.toSeq :+ aliasResolution: _*)(logger)
+}
+
+class SyncDomainPersistentStateManagerOld(
+    aliasResolution: DomainAliasResolution,
+    storage: Storage,
+    indexedStringStore: IndexedStringStore,
+    parameters: ParticipantNodeParameters,
+    pureCrypto: CryptoPureApi,
+    clock: Clock,
+    futureSupervisor: FutureSupervisor,
+    loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends SyncDomainPersistentStateManagerImpl[SyncDomainPersistentStateOld](
+      aliasResolution,
+      storage,
+      indexedStringStore,
+      parameters,
+      loggerFactory,
+    ) {
+  override protected def mkPersistentState(
+      alias: DomainAlias,
+      domainId: IndexedDomain,
+      protocolVersion: ProtocolVersion,
+  ): SyncDomainPersistentStateOld = SyncDomainPersistentState
+    .createOld(
+      storage,
+      alias,
+      domainId,
+      protocolVersion,
+      pureCrypto,
+      parameters.stores,
+      parameters.cachingConfigs,
+      parameters.maxDbConnections,
+      parameters.processingTimeouts,
+      parameters.enableAdditionalConsistencyChecks,
+      indexedStringStore,
+      loggerFactory,
+      futureSupervisor,
+    )
+
+  override def topologyFactoryFor(domainId: DomainId): Option[TopologyComponentFactory] = {
+    get(domainId).map(state =>
+      new TopologyComponentFactoryOld(
+        domainId,
+        pureCrypto,
+        clock,
+        parameters.processingTimeouts,
+        futureSupervisor,
+        parameters.cachingConfigs,
+        state.topologyStore,
+        loggerFactory,
+      )
+    )
+  }
+
+  def domainTopologyStateInitFor(
+      domainId: DomainId,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainRegistryError, Option[DomainTopologyInitializationCallback]] =
+    EitherT.pure(None)
+}
+
+class SyncDomainPersistentStateManagerX(
+    aliasResolution: DomainAliasResolution,
+    storage: Storage,
+    indexedStringStore: IndexedStringStore,
+    parameters: ParticipantNodeParameters,
+    pureCrypto: CryptoPureApi,
+    clock: Clock,
+    futureSupervisor: FutureSupervisor,
+    loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends SyncDomainPersistentStateManagerImpl[SyncDomainPersistentStateX](
+      aliasResolution,
+      storage,
+      indexedStringStore,
+      parameters,
+      loggerFactory,
+    ) {
+
+  override protected def mkPersistentState(
+      alias: DomainAlias,
+      domainId: IndexedDomain,
+      protocolVersion: ProtocolVersion,
+  ): SyncDomainPersistentStateX = SyncDomainPersistentState
+    .createX(
+      storage,
+      alias,
+      domainId,
+      protocolVersion,
+      pureCrypto,
+      parameters.stores,
+      parameters.cachingConfigs,
+      parameters.maxDbConnections,
+      parameters.processingTimeouts,
+      parameters.enableAdditionalConsistencyChecks,
+      indexedStringStore,
+      loggerFactory,
+      futureSupervisor,
+    )
+
+  override def topologyFactoryFor(domainId: DomainId): Option[TopologyComponentFactory] = {
+    get(domainId).map(state =>
+      new TopologyComponentFactoryX(
+        domainId,
+        pureCrypto,
+        clock,
+        parameters.processingTimeouts,
+        futureSupervisor,
+        parameters.cachingConfigs,
+        state.topologyStore,
+        loggerFactory,
+      )
+    )
+  }
+
+  override def domainTopologyStateInitFor(
+      domainId: DomainId,
+      participantId: ParticipantId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainRegistryError, Option[DomainTopologyInitializationCallback]] = {
+    get(domainId) match {
+      case None =>
+        EitherT.leftT[Future, Option[DomainTopologyInitializationCallback]](
+          DomainRegistryError.DomainRegistryInternalError.InvalidState(
+            "topology factory for domain is unavailable"
+          )
+        )
+
+      case Some(state) =>
+        EitherT.liftF(
+          state.topologyStore
+            .findFirstTrustCertificateForParticipant(participantId)
+            .map(trustCert =>
+              // only if the participant's trustCert is not yet in the topology store do we have to initialize it.
+              // The callback will fetch the essential topology state from the sequencer
+              Option.when(trustCert.isEmpty)(
+                new StoreBasedDomainTopologyInitializationCallback(
+                  participantId,
+                  state.topologyStore,
+                )
+              )
+            )
+        )
+
+    }
+  }
 }

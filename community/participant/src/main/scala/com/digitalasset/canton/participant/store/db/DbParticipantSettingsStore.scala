@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore
@@ -12,7 +14,7 @@ import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settin
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueueWithShutdown}
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 import slick.sql.SqlAction
@@ -22,6 +24,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class DbParticipantSettingsStore(
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends ParticipantSettingsStore
@@ -31,7 +34,12 @@ class DbParticipantSettingsStore(
 
   private val processingTime = storage.metrics.loadGaugeM("participant-settings-store")
 
-  private val executionQueue = new SimpleExecutionQueue()
+  private val executionQueue = new SimpleExecutionQueueWithShutdown(
+    "participant-setting-store-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   import storage.api.*
   import storage.converters.*
@@ -53,7 +61,7 @@ class DbParticipantSettingsStore(
     )
   }
 
-  override def refreshCache()(implicit traceContext: TraceContext): Future[Unit] =
+  override def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     executionQueue.execute(
       processingTime.event {
         for {
@@ -93,8 +101,8 @@ class DbParticipantSettingsStore(
 
   override def writeResourceLimits(
       resourceLimits: ResourceLimits
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    processingTime.event {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    processingTime.eventUS {
       // Put the new value into the cache right away so that changes become effective immediately.
       // This also ensures that value meets the object invariant of Settings.
       cache.updateAndGet(_.map(_.copy(resourceLimits = resourceLimits)))
@@ -119,17 +127,17 @@ class DbParticipantSettingsStore(
 
   override def insertMaxDeduplicationDuration(maxDeduplicationDuration: NonNegativeFiniteDuration)(
       implicit traceContext: TraceContext
-  ): Future[Unit] =
+  ): FutureUnlessShutdown[Unit] =
     insertOrUpdateIfNull("max_deduplication_duration", maxDeduplicationDuration)
 
   override def insertUniqueContractKeysMode(uniqueContractKeys: Boolean)(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
+  ): FutureUnlessShutdown[Unit] =
     insertOrUpdateIfNull("unique_contract_keys", uniqueContractKeys)
 
   private def insertOrUpdateIfNull[A: SetParameter](columnName: String, newValue: A)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = processingTime.event {
+  ): FutureUnlessShutdown[Unit] = processingTime.eventUS {
     val query = storage.profile match {
       case _: DbStorage.Profile.Postgres =>
         sqlu"""insert into participant_settings(#$columnName, client) values ($newValue, $client)
@@ -155,14 +163,17 @@ class DbParticipantSettingsStore(
   private def runQueryAndRefreshCache(
       query: SqlAction[Int, NoStream, Effect.Write],
       operationName: String,
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    storage.update_(query, operationName).transformWith { res =>
-      // Reload cache to make it consistent with the DB. Particularly important in case of concurrent writes.
-      FutureUtil
-        .logOnFailure(
-          refreshCache(),
-          s"An exception occurred while refreshing the cache. Keeping old value $settings.",
-        )
-        .transform(_ => res)
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    performUnlessClosingF(operationName)(storage.update_(query, operationName)).transformWith {
+      res =>
+        // Reload cache to make it consistent with the DB. Particularly important in case of concurrent writes.
+        FutureUtil
+          .logOnFailureUnlessShutdown(
+            refreshCache(),
+            s"An exception occurred while refreshing the cache. Keeping old value $settings.",
+          )
+          .transform(_ => res)
     }
+
+  override protected def onClosed(): Unit = Lifecycle.close(executionQueue)(logger)
 }

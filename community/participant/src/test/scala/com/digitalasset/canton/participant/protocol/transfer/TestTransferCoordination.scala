@@ -7,15 +7,14 @@ import cats.data.EitherT
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.protocol.transfer.TransferCoordination.{
-  DomainData,
-  TimeProofSourceError,
+import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
+  TransferProcessorError,
+  UnknownDomain,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
 import com.digitalasset.canton.participant.store.memory.InMemoryTransferStore
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
@@ -24,49 +23,50 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.when
+import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.{ExecutionContext, Future}
 
-object TestTransferCoordination {
+private[transfer] object TestTransferCoordination {
   def apply(
-      domains: Set[DomainId],
+      domains: Set[TargetDomainId],
       timeProofTimestamp: CantonTimestamp,
       snapshotOverride: Option[DomainSnapshotSyncCryptoApi] = None,
       awaitTimestampOverride: Option[Option[Future[Unit]]] = None,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): TransferCoordination = {
-    def mkDomainData(domain: DomainId): DomainData = {
-      val timeProof = TimeProofTestUtil.mkTimeProof(timeProofTimestamp)
-      val transferStore = new InMemoryTransferStore(domain, loggerFactory)
 
-      DomainData(
-        transferStore,
-        () => EitherT.rightT[FutureUnlessShutdown, TimeProofSourceError](timeProof),
-      )
-    }
+    val recentTimeProofProvider = mock[RecentTimeProofProvider]
+    when(recentTimeProofProvider.get(any[TargetDomainId])(any[TraceContext]))
+      .thenReturn(EitherT.pure(TimeProofTestUtil.mkTimeProof(timeProofTimestamp)))
 
-    val domainDataMap = domains.map(domain => domain -> mkDomainData(domain)).toMap
+    val transferStores =
+      domains.map(domain => domain -> new InMemoryTransferStore(domain, loggerFactory)).toMap
     val transferInBySubmission = { _: DomainId => None }
     val protocolVersionGetter = (_: Traced[DomainId]) =>
       Future.successful(Some(BaseTest.testedProtocolVersion))
 
     new TransferCoordination(
-      domainDataMap.get,
-      transferInBySubmission,
-      protocolVersion = protocolVersionGetter,
-      defaultSyncCryptoApi(domains.toSeq, loggerFactory),
+      transferStoreFor = id =>
+        transferStores.get(id).toRight(UnknownDomain(id.unwrap, "not found")),
+      recentTimeProofFor = recentTimeProofProvider,
+      inSubmissionById = transferInBySubmission,
+      protocolVersionFor = protocolVersionGetter,
+      syncCryptoApi = defaultSyncCryptoApi(domains.toSeq.map(_.unwrap), loggerFactory),
       loggerFactory,
     ) {
 
       override def awaitTransferOutTimestamp(
-          domain: DomainId,
+          sourceDomain: SourceDomainId,
           timestamp: CantonTimestamp,
       )(implicit
           traceContext: TraceContext
       ): Either[TransferProcessingSteps.UnknownDomain, Future[Unit]] = {
         awaitTimestampOverride match {
           case None =>
-            super.awaitTransferOutTimestamp(domain, timestamp)
+            super.awaitTransferOutTimestamp(sourceDomain, timestamp)
           case Some(overridden) => Right(overridden.getOrElse(Future.unit))
         }
       }
@@ -95,7 +95,7 @@ object TestTransferCoordination {
     }
   }
 
-  def defaultSyncCryptoApi(
+  private def defaultSyncCryptoApi(
       domains: Seq[DomainId],
       loggerFactory: NamedLoggerFactory,
   ): SyncCryptoApiProvider =
@@ -104,10 +104,10 @@ object TestTransferCoordination {
       .build(loggerFactory)
       .forOwner(submitterParticipant)
 
-  val observerParticipant1: ParticipantId = ParticipantId("observerParticipant1")
-  val observerParticipant2: ParticipantId = ParticipantId("observerParticipant2")
+  private val observerParticipant1: ParticipantId = ParticipantId("observerParticipant1")
+  private val observerParticipant2: ParticipantId = ParticipantId("observerParticipant2")
 
-  val defaultTopology = Map(
+  private val defaultTopology = Map(
     submitterParticipant -> Map(submitter -> Submission),
     signatoryParticipant -> Map(signatory -> Submission),
     observerParticipant1 -> Map(observer -> Confirmation),

@@ -217,7 +217,7 @@ class LedgerServerPartyNotifier(
 
   private def sendNotification(
       metadata: PartyMetadata
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     metadata.participantId match {
       case Some(participantId) =>
         logger.debug(show"Pushing ${metadata.partyId} on $participantId to ledger server")
@@ -231,7 +231,7 @@ class LedgerServerPartyNotifier(
           )
         )
       case None =>
-        Future.successful(
+        FutureUnlessShutdown.pure(
           logger.debug(
             s"Skipping party metadata ledger server notification because the participant ID is missing $metadata"
           )
@@ -243,11 +243,11 @@ class LedgerServerPartyNotifier(
   )(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Unit =
     FutureUtil.doNotAwait(
       sequentialQueue
-        .execute(
+        .executeUS(
           for {
-            metadata <- fetchMetadata
+            metadata <- FutureUnlessShutdown.outcomeF(fetchMetadata)
             _ <- sendNotification(metadata)
-            _ <- store.markNotified(metadata)
+            _ <- FutureUnlessShutdown.outcomeF(store.markNotified(metadata))
           } yield {
             logger.debug(s"Notification scheduled at $timestamp sent and marked")
           },

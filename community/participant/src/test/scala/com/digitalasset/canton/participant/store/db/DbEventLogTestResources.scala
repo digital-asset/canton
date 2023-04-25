@@ -15,7 +15,7 @@ import com.digitalasset.canton.topology.DomainId
 /** Resources shared between tests acceding DbEventLogs.
   * Make sure that the resources here do not overlap for different tests.
   */
-object DbEventLogTestResources {
+private[store] object DbEventLogTestResources {
 
   lazy val dbSingleDimensionEventLogEventLogId: EventLogId =
     DomainEventLogId(

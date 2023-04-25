@@ -10,12 +10,19 @@ import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
-import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
-import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
+import com.digitalasset.canton.participant.store.db.{
+  DbSyncDomainPersistentStateOld,
+  DbSyncDomainPersistentStateX,
+}
+import com.digitalasset.canton.participant.store.memory.{
+  InMemorySyncDomainPersistentStateOld,
+  InMemorySyncDomainPersistentStateX,
+}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.*
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.TopologyStoreCommon.DomainStoreCommon
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreX}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -27,6 +34,7 @@ trait SyncDomainPersistentState extends NamedLogging with AutoCloseable {
   /** The crypto operations used on the domain */
   def pureCryptoApi: CryptoPureApi
   def domainId: IndexedDomain
+  def protocolVersion: ProtocolVersion
   def enableAdditionalConsistencyChecks: Boolean
   def eventLog: SingleDimensionEventLog[DomainEventLogId]
   def contractStore: ContractStore
@@ -39,13 +47,24 @@ trait SyncDomainPersistentState extends NamedLogging with AutoCloseable {
   def requestJournalStore: RequestJournalStore
   def acsCommitmentStore: AcsCommitmentStore
   def parameterStore: DomainParameterStore
-  def causalDependencyStore: SingleDomainCausalDependencyStore
+  def topologyStore: DomainStoreCommon
+  def isMemory(): Boolean
+
+}
+
+trait SyncDomainPersistentStateOld extends SyncDomainPersistentState {
+
   def topologyStore: TopologyStore[DomainStore]
+}
+trait SyncDomainPersistentStateX extends SyncDomainPersistentState {
+
+  def topologyStore: TopologyStoreX[DomainStore]
 
 }
 
 object SyncDomainPersistentState {
-  def apply(
+
+  def createOld(
       storage: Storage,
       domainAlias: DomainAlias,
       domainId: IndexedDomain,
@@ -59,12 +78,13 @@ object SyncDomainPersistentState {
       indexedStringStore: IndexedStringStore,
       loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
-  )(implicit ec: ExecutionContext): SyncDomainPersistentState = {
+  )(implicit ec: ExecutionContext): SyncDomainPersistentStateOld = {
     val domainLoggerFactory = loggerFactory.append("domain-alias", domainAlias.unwrap)
     storage match {
       case _: MemoryStorage =>
-        new InMemorySyncDomainPersistentState(
+        new InMemorySyncDomainPersistentStateOld(
           domainId,
+          protocolVersion,
           pureCryptoApi,
           enableAdditionalConsistencyChecks,
           domainLoggerFactory,
@@ -72,7 +92,52 @@ object SyncDomainPersistentState {
           futureSupervisor,
         )
       case db: DbStorage =>
-        new DbSyncDomainPersistentState(
+        new DbSyncDomainPersistentStateOld(
+          domainId,
+          protocolVersion,
+          db,
+          pureCryptoApi,
+          parameters,
+          caching,
+          maxDbConnections,
+          processingTimeouts,
+          enableAdditionalConsistencyChecks,
+          indexedStringStore,
+          domainLoggerFactory,
+          futureSupervisor,
+        )
+    }
+  }
+
+  def createX(
+      storage: Storage,
+      domainAlias: DomainAlias,
+      domainId: IndexedDomain,
+      protocolVersion: ProtocolVersion,
+      pureCryptoApi: CryptoPureApi,
+      parameters: ParticipantStoreConfig,
+      caching: CachingConfigs,
+      maxDbConnections: Int,
+      processingTimeouts: ProcessingTimeout,
+      enableAdditionalConsistencyChecks: Boolean,
+      indexedStringStore: IndexedStringStore,
+      loggerFactory: NamedLoggerFactory,
+      futureSupervisor: FutureSupervisor,
+  )(implicit ec: ExecutionContext): SyncDomainPersistentStateX = {
+    val domainLoggerFactory = loggerFactory.append("domain-alias", domainAlias.unwrap)
+    storage match {
+      case _: MemoryStorage =>
+        new InMemorySyncDomainPersistentStateX(
+          domainId,
+          protocolVersion,
+          pureCryptoApi,
+          enableAdditionalConsistencyChecks,
+          domainLoggerFactory,
+          processingTimeouts,
+          futureSupervisor,
+        )
+      case db: DbStorage =>
+        new DbSyncDomainPersistentStateX(
           domainId,
           protocolVersion,
           db,

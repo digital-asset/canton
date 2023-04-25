@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.HashPurpose
+import com.digitalasset.canton.protocol.TransferDomainId
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.mutable

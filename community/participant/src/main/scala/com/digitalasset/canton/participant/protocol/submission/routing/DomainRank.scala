@@ -115,7 +115,7 @@ private[routing] class DomainRankComputation(
 private[routing] final case class DomainRank(
     transfers: Map[LfContractId, (LfPartyId, DomainId)], // (cid, (submitter, current domain))
     priority: Int,
-    domainId: DomainId,
+    domainId: DomainId, // domain for submission
 )
 
 private[routing] object DomainRank {

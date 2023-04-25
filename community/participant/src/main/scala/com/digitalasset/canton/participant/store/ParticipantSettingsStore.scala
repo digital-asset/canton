@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings
@@ -14,7 +16,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 /** Read-only interface for [[ParticipantSettingsStore]] */
 trait ParticipantSettingsLookup {
@@ -49,28 +51,34 @@ trait ParticipantSettingsStore extends ParticipantSettingsLookup with AutoClosea
 
   def writeResourceLimits(resourceLimits: ResourceLimits)(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): FutureUnlessShutdown[Unit]
 
   /** Insert the given max deduplication duration provided unless a max deduplication duration has been set previously. */
   def insertMaxDeduplicationDuration(maxDeduplicationDuration: NonNegativeFiniteDuration)(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): FutureUnlessShutdown[Unit]
 
   /** Insert the setting for whether the participant provides unique-contract-key semantics. */
   def insertUniqueContractKeysMode(uniqueContractKeys: Boolean)(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): FutureUnlessShutdown[Unit]
 
-  def refreshCache()(implicit traceContext: TraceContext): Future[Unit]
+  def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 }
 
 object ParticipantSettingsStore {
-  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit executionContext: ExecutionContext
+  def apply(
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      executionContext: ExecutionContext
   ): ParticipantSettingsStore = {
     storage match {
       case _: MemoryStorage => new InMemoryParticipantSettingsStore(loggerFactory)
-      case storage: DbStorage => new DbParticipantSettingsStore(storage, timeouts, loggerFactory)
+      case storage: DbStorage =>
+        new DbParticipantSettingsStore(storage, timeouts, futureSupervisor, loggerFactory)
     }
   }
 

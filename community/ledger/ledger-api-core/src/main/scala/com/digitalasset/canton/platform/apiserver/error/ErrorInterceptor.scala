@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.error
 
 import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{BaseError, DamlContextualizedErrorLogger}
+import com.daml.error.{BaseError, DamlContextualizedErrorLogger, NoLogging}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall
@@ -22,9 +22,6 @@ import io.grpc.{
 import scala.util.control.NonFatal
 
 final class ErrorInterceptor extends ServerInterceptor {
-
-  private val logger = ContextualizedLogger.get(getClass)
-  private val emptyLoggingContext = LoggingContext.newLoggingContext(identity)
 
   override def interceptCall[ReqT, RespT](
       call: ServerCall[ReqT, RespT],
@@ -67,9 +64,7 @@ final class ErrorInterceptor extends ServerInterceptor {
         if (isUnsanitizedInternal(status) || status.getCode == Status.Code.UNKNOWN) {
           val recreatedException = status.asRuntimeException(trailers)
           val errorCodeException = LedgerApiErrors.InternalError
-            .UnexpectedOrUnknownException(t = recreatedException)(
-              new DamlContextualizedErrorLogger(logger, emptyLoggingContext, None)
-            )
+            .UnexpectedOrUnknownException(t = recreatedException)(NoLogging)
             .asGrpcError
           // Retrieving status and metadata in the same way as in `io.grpc.stub.ServerCalls.ServerCallStreamObserverImpl.onError`.
           val newMetadata =
@@ -99,7 +94,7 @@ final class ErrorInterceptor extends ServerInterceptor {
     )
   }
 
-  private def isUnsanitizedInternal[RespT, ReqT](status: Status): Boolean =
+  private def isUnsanitizedInternal(status: Status): Boolean =
     status.getCode == Status.Code.INTERNAL &&
       (status.getDescription == null ||
         !BaseError.isSanitizedSecuritySensitiveMessage(
@@ -107,13 +102,8 @@ final class ErrorInterceptor extends ServerInterceptor {
         ))
 }
 
-object ErrorInterceptor
-
 class ErrorListener[ReqT, RespT](delegate: ServerCall.Listener[ReqT], call: ServerCall[ReqT, RespT])
     extends ForwardingServerCallListener.SimpleForwardingServerCallListener[ReqT](delegate) {
-
-  private val logger = ContextualizedLogger.get(getClass)
-  private val emptyLoggingContext = LoggingContext.newLoggingContext(identity)
 
   /** Handles errors arising outside Futures or Akka streaming.
     *
@@ -135,9 +125,7 @@ class ErrorListener[ReqT, RespT](delegate: ServerCall.Listener[ReqT], call: Serv
         LogOnUnhandledFailureInClose(call.close(t.getStatus, t.getTrailers))
       case NonFatal(t) =>
         val e = LedgerApiErrors.InternalError
-          .UnexpectedOrUnknownException(t = t)(
-            new DamlContextualizedErrorLogger(logger, emptyLoggingContext, None)
-          )
+          .UnexpectedOrUnknownException(t = t)(NoLogging)
           .asGrpcError
         LogOnUnhandledFailureInClose(call.close(e.getStatus, e.getTrailers))
     }

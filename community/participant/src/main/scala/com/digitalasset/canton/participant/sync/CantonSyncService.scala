@@ -47,6 +47,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
@@ -54,7 +55,6 @@ import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
-import com.digitalasset.canton.participant.protocol.GlobalCausalOrderer
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
 import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter
@@ -86,7 +86,6 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -122,11 +121,9 @@ class CantonSyncService(
     private[canton] val participantNodePersistentState: Eval[ParticipantNodePersistentState],
     participantNodeEphemeralState: ParticipantNodeEphemeralState,
     private[canton] val syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
-    syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
     private[canton] val packageService: PackageService,
-    domainCausalityStore: MultiDomainCausalityStore,
-    topologyManager: ParticipantTopologyManager,
-    identityPusher: ParticipantTopologyDispatcher,
+    topologyManagerOps: ParticipantTopologyManagerOps,
+    identityPusher: ParticipantTopologyDispatcherCommon,
     partyNotifier: LedgerServerPartyNotifier,
     val syncCrypto: SyncCryptoApiProvider,
     pruningProcessor: PruningProcessor,
@@ -215,7 +212,7 @@ class CantonSyncService(
   private val partyAllocation = new PartyAllocation(
     participantId,
     participantNodeEphemeralState,
-    topologyManager,
+    topologyManagerOps,
     partyNotifier,
     parameters,
     isActive,
@@ -251,15 +248,6 @@ class CantonSyncService(
   private val connectedDomainsLookup: ConnectedDomainsLookup =
     ConnectedDomainsLookup.create(connectedDomainsMap)
 
-  private val globalTracker =
-    new GlobalCausalOrderer(
-      participantId,
-      connectedDomainsLookup.isConnected,
-      parameters.processingTimeouts,
-      domainCausalityStore,
-      loggerFactory,
-    )
-
   private val domainRouter =
     DomainRouter(
       packageService,
@@ -280,19 +268,17 @@ class CantonSyncService(
       connectedDomainsLookup.get,
       syncCrypto,
       loggerFactory,
-    )(ec, TraceContext.empty)
+    )(ec)
 
   val protocolVersionGetter: Traced[DomainId] => Future[Option[ProtocolVersion]] =
     (tracedDomainId: Traced[DomainId]) =>
-      tracedDomainId.withTraceContext { implicit traceContext => domainId =>
-        syncDomainPersistentStateManager.protocolVersionFor(domainId)
-      }
+      syncDomainPersistentStateManager.protocolVersionFor(tracedDomainId.value)
 
   val transferService: TransferService = new TransferService(
     domainIdOfAlias = aliasManager.domainIdForAlias,
     submissionHandles = readySyncDomainById,
     transferLookups = domainId =>
-      syncDomainPersistentStateManager.get(domainId).map(_.transferStore),
+      syncDomainPersistentStateManager.get(domainId.unwrap).map(_.transferStore),
     protocolVersionFor = protocolVersionGetter,
   )
 
@@ -356,6 +342,7 @@ class CantonSyncService(
     parameters,
     indexedStringStore,
     connectedDomainsLookup.isConnected,
+    futureSupervisor,
     loggerFactory,
   )
 
@@ -415,18 +402,22 @@ class CantonSyncService(
     (withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
       span.setAttribute("submission_id", submissionId)
 
-      pruneInternally(pruneUpToInclusive).fold(
-        err => PruningResult.NotPruned(err.code.asGrpcStatus(err)),
-        _ => PruningResult.ParticipantPruned,
-      )
+      pruneInternally(pruneUpToInclusive)
+        .fold(
+          err => PruningResult.NotPruned(err.code.asGrpcStatus(err)),
+          _ => PruningResult.ParticipantPruned,
+        )
+        .onShutdown(
+          PruningResult.NotPruned(GrpcErrors.AbortedDueToShutdown.Error().asGoogleGrpcStatus)
+        )
     }).asJava
 
   def pruneInternally(
       pruneUpToInclusive: LedgerSyncOffset
-  )(implicit traceContext: TraceContext): EitherT[Future, CantonError, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonError, Unit] =
     (for {
       pruneUpToMultiDomainGlobalOffset <- EitherT
-        .fromEither[Future](UpstreamOffsetConvert.toGlobalOffset(pruneUpToInclusive))
+        .fromEither[FutureUnlessShutdown](UpstreamOffsetConvert.toGlobalOffset(pruneUpToInclusive))
         .leftMap { message =>
           LedgerPruningOffsetNonCantonFormat(
             s"Specified offset does not convert to a canton multi domain event log global offset: ${message}"
@@ -696,13 +687,13 @@ class CantonSyncService(
           None,
         )
         unpublishedEvents = unpublished.mapFilter {
-          case RecordOrderPublisher.PendingTransferPublish(rc, updateS, ts, eventLogId) =>
+          case RecordOrderPublisher.PendingTransferPublish(rc, ts, eventLogId) =>
             logger.error(
               s"Pending transfer event with rc $rc timestamp $ts found in participant event log " +
                 s"$participantEventLogId. Participant event log should not contain transfers."
             )
             None
-          case RecordOrderPublisher.PendingEventPublish(update, tse, ts, eventLogId) => Some(tse)
+          case RecordOrderPublisher.PendingEventPublish(tse, _ts, _eventLogId) => Some(tse)
         }
 
         _units <- MonadUtil.sequentialTraverse(unpublishedEvents) { tse =>
@@ -737,6 +728,7 @@ class CantonSyncService(
     parameters.processingTimeouts.default
       .await("Publish time model configuration event if ledger is brand new")(
         participantNodeEphemeralState.participantEventPublisher.publishTimeModelConfigNeededUpstreamOnlyIfFirst
+          .onShutdown(logger.debug("Aborted publishing of time model due to shutdown"))
       )
   }
 
@@ -1106,7 +1098,7 @@ class CantonSyncService(
     def createDomainHandle(
         config: DomainConnectionConfig
     ): EitherT[FutureUnlessShutdown, SyncServiceError, DomainHandle] =
-      EitherT(domainRegistry.connect(config, syncDomainPersistentStateFactory)).leftMap(err =>
+      EitherT(domainRegistry.connect(config)).leftMap(err =>
         SyncServiceError.SyncServiceFailedDomainConnection(domainAlias, err)
       )
 
@@ -1148,13 +1140,14 @@ class CantonSyncService(
               .createFromPersistent(
                 persistent,
                 participantNodePersistentState.map(_.multiDomainEventLog),
-                globalTracker,
                 inFlightSubmissionTracker,
                 (loggerFactory: NamedLoggerFactory) =>
                   DomainTimeTracker(
                     domainConnectionConfig.config.timeTracker,
                     clock,
                     domainHandle.sequencerClient,
+                    domainHandle.staticParameters.protocolVersion,
+                    timeouts,
                     loggerFactory,
                   ),
                 domainMetrics,
@@ -1176,9 +1169,8 @@ class CantonSyncService(
           ephemeral,
           packageService,
           syncCrypto.tryForDomain(domainId, Some(domainAlias)),
-          partyNotifier,
-          domainHandle.topologyClient,
           identityPusher,
+          domainHandle.topologyFactory.createTopologyProcessorFactory(partyNotifier),
           transferCoordination,
           inFlightSubmissionTracker,
           clock,
@@ -1310,15 +1302,6 @@ class CantonSyncService(
     }).toRight(SyncServiceError.SyncServiceUnknownDomain.Error(domain))
   }
 
-  /** Disconnect knowing that the alias exists */
-  private def tryDisconnectDomain(
-      domain: DomainAlias
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    disconnectDomain(domain).value.map(
-      _.valueOr(err => throw new RuntimeException(s"Error while disconnecting domain: $err"))
-    )
-  }
-
   /** Disconnect from all connected domains. */
   def disconnectDomains()(implicit
       traceContext: TraceContext
@@ -1418,9 +1401,9 @@ class CantonSyncService(
     resourceManagementService.checkOverloaded(load)
   }
 
-  def refreshCaches()(implicit traceContext: TraceContext): Future[Unit] =
+  def refreshCaches()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
-      _ <- domainConnectionConfigStore.refreshCache()
+      _ <- FutureUnlessShutdown.outcomeF(domainConnectionConfigStore.refreshCache())
       _ <- resourceManagementService.refreshCache()
       _ = participantNodePersistentState.value.multiDomainEventLog.setOnPublish(
         inFlightSubmissionTracker.onPublishListener
@@ -1439,9 +1422,11 @@ class CantonSyncService(
       domainRegistry,
       inFlightSubmissionTracker,
       domainConnectionConfigStore,
-      domainCausalityStore,
       syncDomainPersistentStateManager,
       participantNodePersistentState.value,
+      syncDomainHealth,
+      ephemeralHealth,
+      sequencerClientHealth,
     )
 
     Lifecycle.close(instances: _*)(logger)
@@ -1460,11 +1445,9 @@ object CantonSyncService {
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         participantNodeEphemeralState: ParticipantNodeEphemeralState,
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
-        syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
         packageService: PackageService,
-        multiDomainCausalityStore: MultiDomainCausalityStore,
-        topologyManager: ParticipantTopologyManager,
-        identityPusher: ParticipantTopologyDispatcher,
+        topologyManagerOps: ParticipantTopologyManagerOps,
+        identityPusher: ParticipantTopologyDispatcherCommon,
         partyNotifier: LedgerServerPartyNotifier,
         syncCrypto: SyncCryptoApiProvider,
         ledgerId: LedgerId,
@@ -1492,11 +1475,9 @@ object CantonSyncService {
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         participantNodeEphemeralState: ParticipantNodeEphemeralState,
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
-        syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
         packageService: PackageService,
-        multiDomainCausalityStore: MultiDomainCausalityStore,
-        topologyManager: ParticipantTopologyManager,
-        identityPusher: ParticipantTopologyDispatcher,
+        topologyManagerOps: ParticipantTopologyManagerOps,
+        identityPusher: ParticipantTopologyDispatcherCommon,
         partyNotifier: LedgerServerPartyNotifier,
         syncCrypto: SyncCryptoApiProvider,
         ledgerId: LedgerId,
@@ -1512,7 +1493,11 @@ object CantonSyncService {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         skipRecipientsCheck: Boolean,
-    )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): CantonSyncService =
+    )(implicit
+        ec: ExecutionContext,
+        mat: Materializer,
+        tracer: Tracer,
+    ): CantonSyncService =
       new CantonSyncService(
         participantId,
         domainRegistry,
@@ -1521,10 +1506,8 @@ object CantonSyncService {
         participantNodePersistentState,
         participantNodeEphemeralState,
         syncDomainPersistentStateManager,
-        syncDomainPersistentStateFactory,
         packageService,
-        multiDomainCausalityStore,
-        topologyManager,
+        topologyManagerOps,
         identityPusher,
         partyNotifier,
         syncCrypto,

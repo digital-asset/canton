@@ -7,7 +7,7 @@ import cats.Monoid
 import com.digitalasset.canton.DoNotDiscardLikeFuture
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.util.Try
 
 /** The asynchronous part of processing an event (or of a stage of its processing). */
@@ -39,10 +39,6 @@ object AsyncResult {
 
   /** No asynchronous processing. */
   val immediate: AsyncResult = AsyncResult(FutureUnlessShutdown.unit)
-
-  /** Asynchronous processing that does not stop early due to shutdowns */
-  def async(f: Future[Unit])(implicit ec: ExecutionContext): AsyncResult =
-    AsyncResult(FutureUnlessShutdown.outcomeF(f))
 
   implicit def monoidAsyncResult(implicit ec: ExecutionContext): Monoid[AsyncResult] =
     new Monoid[AsyncResult] {

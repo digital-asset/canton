@@ -90,8 +90,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
       Ordering.by[TaskScheduler.TimeBarrier, CantonTimestamp](_.timestamp).reverse
     )
 
-  /** The [[scala.concurrent.Future]] of the latest task that was executed.
-    * The next task's [[TaskScheduler.TimedTask.perform()]] will run after this future completes.
+  /** The queue controlling the sequential execution of tasks within the scheduler.
     */
   private[this] val queue: SimpleExecutionQueueWithShutdown =
     new SimpleExecutionQueueWithShutdown(

@@ -25,7 +25,6 @@ import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
   PendingTransferPublish,
 }
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
-import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store.EventLogId.ParticipantEventLogId
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.{
   DeduplicationInfo,
@@ -35,11 +34,7 @@ import com.digitalasset.canton.participant.store.MultiDomainEventLog.{
 import com.digitalasset.canton.participant.store.db.DbMultiDomainEventLog.*
 import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLog}
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TransactionEventId
-import com.digitalasset.canton.participant.sync.{
-  LedgerSyncEvent,
-  TimestampedEvent,
-  TimestampedEventAndCausalChange,
-}
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
@@ -58,14 +53,13 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{DiscardOps, LedgerTransactionId, RequestCounter}
+import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
-import slick.jdbc.GetResult
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.chaining.*
 import scala.util.control.NonFatal
 
 /** Must be created by factory methods on DbSingleDimensionEventLog for optionality on how to perform the required
@@ -118,7 +112,7 @@ class DbMultiDomainEventLog private[db] (
     Cache is invalidated on write and prune and populated on read.
    */
   private val lastGlobalOffsetCache: AtomicReference[Option[GlobalOffset]] =
-    new AtomicReference[Option[GlobalOffset]](None)
+    new AtomicReference[Option[GlobalOffset]](initialLastGlobalOffset)
 
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("multi-domain-event-log")
@@ -169,6 +163,17 @@ class DbMultiDomainEventLog private[db] (
       ),
       publicationFlow,
     )
+
+  @VisibleForTesting
+  private[db] def getLastGlobalOffsetCache: Option[GlobalOffset] = lastGlobalOffsetCache.get()
+
+  private def updateCache(newLastGlobalOffset: GlobalOffset): Unit =
+    lastGlobalOffsetCache.getAndUpdate { currentCacheValueO =>
+      Some(
+        currentCacheValueO
+          .fold(newLastGlobalOffset)(_.max(newLastGlobalOffset))
+      )
+    }.discard
 
   override def publish(data: PublicationData): Future[Unit] = {
     implicit val traceContext: TraceContext = data.traceContext
@@ -268,6 +273,9 @@ class DbMultiDomainEventLog private[db] (
       newGlobalOffsetO match {
         case Some(newGlobalOffset) =>
           logger.debug(show"Signalling global offset $newGlobalOffset.")
+
+          updateCache(newGlobalOffset)
+
           dispatcher.signalNewHead(newGlobalOffset)
 
           val previousGlobalOffset = lastPublishedOffset.getAndSet(newGlobalOffset)
@@ -362,18 +370,12 @@ class DbMultiDomainEventLog private[db] (
         pp >> publicationTime
       }
       val query = storage.withSyncCommitOnPostgres(bulkInsert)
-
-      storage.queryAndUpdate(query, functionFullName).map { _ =>
-        lastGlobalOffsetCache.set(None) // Cache invalidation
-      }
+      storage.queryAndUpdate(query, functionFullName)
     }
 
   override def fetchUnpublished(id: EventLogId, upToInclusiveO: Option[LocalOffset])(implicit
       traceContext: TraceContext
   ): Future[List[PendingPublish]] = {
-    implicit val getResultEC: GetResult[CausalityUpdate] =
-      CausalityUpdate.hasVersionedWrapperGetResult
-
     val fromExclusive = lastLocalOffsets.getOrElse(id.index, Long.MinValue)
     val upToInclusive = upToInclusiveO.getOrElse(Long.MaxValue)
     logger.info(s"Fetch unpublished from $id up to ${upToInclusiveO}")
@@ -391,24 +393,17 @@ class DbMultiDomainEventLog private[db] (
         )
 
         unpublishedTransfers <- storage.query(
-          sql"""select request_counter, request_timestamp, causality_update from transfer_causality_updates where log_id = ${id.index} and request_counter > $fromExclusive and request_counter <= $upToInclusive order by request_counter"""
-            .as[(RequestCounter, CantonTimestamp, CausalityUpdate)],
+          sql"""select request_counter, request_timestamp from transfer_causality_updates where log_id = ${id.index} and request_counter > $fromExclusive and request_counter <= $upToInclusive order by request_counter"""
+            .as[(RequestCounter, CantonTimestamp)],
           functionFullName,
         )
       } yield {
         val publishes: List[PendingPublish] = unpublishedLocalOffsets.toList.map {
 
-          case (rc, tseAndUpdate) =>
-            PendingEventPublish(
-              tseAndUpdate.causalityUpdate,
-              tseAndUpdate.tse,
-              tseAndUpdate.tse.timestamp,
-              id,
-            )
+          case (_rc, tse) => PendingEventPublish(tse, tse.timestamp, id)
         }
         val transferPublishes: List[PendingPublish] = unpublishedTransfers.toList.map {
-          case (rc, timestamp, clock) =>
-            PendingTransferPublish(rc, clock, timestamp, id)
+          case (rc, timestamp) => PendingTransferPublish(rc, timestamp, id)
         }
         (publishes ++ transferPublishes).sortBy(pending => pending.rc)
       }
@@ -425,7 +420,16 @@ class DbMultiDomainEventLog private[db] (
           functionFullName,
         )
         .map { _ =>
-          lastGlobalOffsetCache.set(None) // Cache invalidation
+          lastGlobalOffsetCache.getAndUpdate { cachedValueO =>
+            cachedValueO.flatMap { cachedValue =>
+              /*
+                If the pruning bound is before the current cache value, we don't update `lastGlobalOffsetCache`.
+                Otherwise, we invalidate the cache. In that case, the cache will be updated only by the next
+                write.
+               */
+              if (upToInclusive < cachedValue) Some(cachedValue) else None
+            }
+          }.discard
         }
     }
   }
@@ -498,29 +502,23 @@ class DbMultiDomainEventLog private[db] (
 
   override def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEventAndCausalChange)]] = {
-
-    implicit val getResultECO: GetResult[Option[CausalityUpdate]] =
-      CausalityUpdate.hasVersionedWrapperGetResultO
-    import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
-
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] =
     processingTime.event {
       storage
         .query(
-          sql"""select global_offset, el.local_offset, request_sequencer_counter, el.event_id, content, trace_context, causality_update
+          sql"""select global_offset, el.local_offset, request_sequencer_counter, el.event_id, content, trace_context
                 from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
                 where global_offset <= ${upToInclusive.getOrElse(Long.MaxValue)}
                 order by global_offset asc #${storage.limit(limit.getOrElse(Int.MaxValue))}"""
-            .as[(GlobalOffset, TimestampedEventAndCausalChange)],
+            .as[(GlobalOffset, TimestampedEvent)],
           functionFullName,
         )
     }
-  }
 
   override def lookupByEventIds(
       eventIds: Seq[TimestampedEvent.EventId]
   )(implicit traceContext: TraceContext): Future[
-    Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
+    Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEvent, CantonTimestamp)]
   ] = eventIds match {
     case NonEmpty(nonEmptyEventIds) =>
       val inClauses = DbStorage.toInClauses_(
@@ -531,28 +529,21 @@ class DbMultiDomainEventLog private[db] (
       val queries = inClauses.map { inClause =>
         import DbStorage.Implicits.BuilderChain.*
         (sql"""
-            select global_offset,
-              el.local_offset, request_sequencer_counter, el.event_id, content, trace_context, causality_update,
-              publication_time
+            select global_offset, el.local_offset, request_sequencer_counter, el.event_id, content, trace_context, publication_time
             from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
             where
-            """ ++ inClause).as[(GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
+            """ ++ inClause).as[(GlobalOffset, TimestampedEvent, CantonTimestamp)]
       }
       storage.sequentialQueryAndCombine(queries, functionFullName).map { events =>
-        events.map {
-          case data @ (
-                globalOffset,
-                TimestampedEventAndCausalChange(event, _causalChange),
-                _publicationTime,
-              ) =>
-            val eventId = event.eventId.getOrElse(
-              ErrorUtil.internalError(
-                new DbDeserializationException(
-                  s"Event $event at global offset $globalOffset does not have an event ID."
-                )
+        events.map { case data @ (globalOffset, event, _publicationTime) =>
+          val eventId = event.eventId.getOrElse(
+            ErrorUtil.internalError(
+              new DbDeserializationException(
+                s"Event $event at global offset $globalOffset does not have an event ID."
               )
             )
-            eventId -> data
+          )
+          eventId -> data
         }.toMap
       }
     case _ => Future.successful(Map.empty)
@@ -744,12 +735,6 @@ class DbMultiDomainEventLog private[db] (
 
     def query(upToInclusive: GlobalOffset): Future[Option[GlobalOffset]] =
       lastOffsetAndPublicationTime(storage, upToInclusive).map(_.map(_._1))
-    def updateCache(newValueO: Option[GlobalOffset]): Unit = lastGlobalOffsetCache.getAndUpdate {
-      currentCacheValueO =>
-        newValueO.map { newValue =>
-          currentCacheValueO.fold(newValue)(_.max(newValue))
-        }
-    }.discard
 
     upToInclusive match {
       case Some(upToInclusive) => OptionT(query(upToInclusive))
@@ -757,7 +742,7 @@ class DbMultiDomainEventLog private[db] (
       case None =>
         lastGlobalOffsetCache.get() match {
           case Some(cachedValue) => OptionT.pure[Future](cachedValue)
-          case None => OptionT(query(Long.MaxValue).map(_.tap(updateCache)))
+          case None => OptionT(query(Long.MaxValue))
         }
     }
   }
@@ -778,7 +763,7 @@ class DbMultiDomainEventLog private[db] (
     storage.query(query, functionFullName).flatMap { vec =>
       vec.parTraverseFilter { case (offset, logId, localOffset, ts) =>
         EventLogId
-          .fromDbLogIdOT("lineralized event log", indexedStringStore)(logId)
+          .fromDbLogIdOT("linearized event log", indexedStringStore)(logId)
           .map { evLogId =>
             (offset, evLogId, localOffset, ts)
           }
@@ -856,6 +841,7 @@ object DbMultiDomainEventLog {
       )
     }
 
+  @VisibleForTesting
   private[db] def lastOffsetAndPublicationTime(
       storage: DbStorage,
       upToInclusive: GlobalOffset = Long.MaxValue,

@@ -7,6 +7,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.*
@@ -91,7 +92,7 @@ final class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
     when(eventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext)).thenAnswer {
       event: LedgerSyncEvent =>
         observedEvents += event
-        Future.unit
+        FutureUnlessShutdown.unit
     }
 
     def expectLastObserved(

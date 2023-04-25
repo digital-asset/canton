@@ -21,6 +21,8 @@ import com.digitalasset.canton.sequencing.protocol.{
   SignedContent,
   SubmissionRequest,
   SubscriptionRequest,
+  TopologyStateForInitRequest,
+  TopologyStateForInitResponse,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -162,4 +164,10 @@ class DirectSequencerClientTransport(
       "handshake is not implemented for DirectSequencerClientTransport"
     )
 
+  override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, TopologyStateForInitResponse] =
+    throw new UnsupportedOperationException(
+      "downloadTopologyStateForInit is not implemented for DirectSequencerClientTransport"
+    )
 }
