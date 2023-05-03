@@ -11,6 +11,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, Hash}
 import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.v2.TopologyMappingX.Mapping
@@ -46,7 +47,7 @@ class GrpcTopologyManagerWriteServiceX(
 
     val result = request.`type` match {
       case Type.Empty =>
-        EitherT.leftT[Future, GenericSignedTopologyTransactionX][CantonError](
+        EitherT.leftT[FutureUnlessShutdown, GenericSignedTopologyTransactionX][CantonError](
           ProtoDeserializationFailure.Wrap(
             ProtoDeserializationError.FieldNotSet("AuthorizeRequest.type")
           )
@@ -55,11 +56,13 @@ class GrpcTopologyManagerWriteServiceX(
       case Type.TransactionHash(value) =>
         for {
           txHash <- EitherT
-            .fromEither[Future](Hash.fromHexString(value).map(TxHash))
+            .fromEither[FutureUnlessShutdown](Hash.fromHexString(value).map(TxHash))
             .leftMap(err => ProtoDeserializationFailure.Wrap(err.toProtoDeserializationError))
           signingKeys <-
             EitherT
-              .fromEither[Future](request.signedBy.traverse(Fingerprint.fromProtoPrimitive))
+              .fromEither[FutureUnlessShutdown](
+                request.signedBy.traverse(Fingerprint.fromProtoPrimitive)
+              )
               .leftMap(ProtoDeserializationFailure.Wrap(_))
           signedTopoTx <-
             // TODO(#11255) understand when and why force needs to come in effect
@@ -102,7 +105,7 @@ class GrpcTopologyManagerWriteServiceX(
         }
         for {
           mapping <- EitherT
-            .fromEither[Future](validatedMappingE)
+            .fromEither[FutureUnlessShutdown](validatedMappingE)
             .leftMap(ProtoDeserializationFailure.Wrap(_))
           (op, serial, validatedMapping, signingKeys, forceChange) = mapping
           signedTopoTx <- manager
@@ -120,7 +123,7 @@ class GrpcTopologyManagerWriteServiceX(
           signedTopoTx
         }
     }
-    CantonGrpcUtil.mapErrNew(result).map(tx => v1.AuthorizeResponse(Some(tx.toProtoV2)))
+    CantonGrpcUtil.mapErrNewEUS(result.map(tx => v1.AuthorizeResponse(Some(tx.toProtoV2))))
   }
 
   override def addTransactions(
@@ -128,7 +131,7 @@ class GrpcTopologyManagerWriteServiceX(
   ): Future[v1.AddTransactionsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val res = for {
-      signedTxs <- EitherT.fromEither[Future](
+      signedTxs <- EitherT.fromEither[FutureUnlessShutdown](
         request.transactions
           .traverse(SignedTopologyTransactionX.fromProtoV2)
           .leftMap(ProtoDeserializationFailure.Wrap(_): CantonError)
@@ -138,7 +141,7 @@ class GrpcTopologyManagerWriteServiceX(
         .add(signedTxs, force = request.forceChange, expectFullAuthorization = false)
         .leftWiden[CantonError]
     } yield v1.AddTransactionsResponse()
-    CantonGrpcUtil.mapErrNew(res).andThen(_ => topologyStoreX.dumpStoreContent())
+    CantonGrpcUtil.mapErrNewEUS(res).andThen(_ => topologyStoreX.dumpStoreContent())
   }
 
 }

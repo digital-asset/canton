@@ -94,6 +94,10 @@ trait BaseCantonError extends BaseError {
 
   def asGrpcError(implicit loggingContext: ErrorLoggingContext): StatusRuntimeException =
     code.asGrpcError(this)(loggingContext)
+
+  def asGoogleGrpcStatus(implicit loggingContext: ErrorLoggingContext): com.google.rpc.Status =
+    code.asGrpcStatus(this)(loggingContext)
+
 }
 
 object CantonErrorResource {

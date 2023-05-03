@@ -39,12 +39,10 @@ import com.digitalasset.canton.topology.store.memory.{
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -255,48 +253,27 @@ object TimeQuery {
 
 }
 
-trait BaseTopologyStore[+StoreID <: TopologyStoreId, ValidTx] extends AutoCloseable {
+trait TopologyStoreCommon[+StoreID <: TopologyStoreId, ValidTx, StoredTx, SignedTx]
+    extends AutoCloseable {
 
   this: NamedLogging =>
 
   protected implicit def ec: ExecutionContext
 
-  private val monotonicityCheck = new AtomicReference[Option[CantonTimestamp]](None)
-
-  protected def monotonicityTimeCheckUpdate(ts: CantonTimestamp): Option[CantonTimestamp] =
-    monotonicityCheck.getAndSet(Some(ts))
-
   def storeId: StoreID
-}
 
-abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
-    ec: ExecutionContext
-) extends AutoCloseable
-    with BaseTopologyStore[StoreID, ValidatedTopologyTransaction] {
-  this: NamedLogging =>
-
-  /** add validated topology transaction as is to the topology transaction table */
-  def append(
-      sequenced: SequencedTime,
-      effective: EffectiveTime,
-      transactions: Seq[ValidatedTopologyTransaction],
-  )(implicit
+  /** fetch the effective time updates greater than or equal to a certain timestamp
+    *
+    * this function is used to recover the future effective timestamp such that we can reschedule "pokes" of the
+    * topology client and updates of the acs commitment processor on startup
+    */
+  def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
-    monotonicityTimeCheckUpdate(effective.value).foreach { prev =>
-      ErrorUtil.requireState(
-        prev < effective.value,
-        s"Append is not monotonically increasing. However, the topology store is based on this assumption. Previous: $prev, Next: $effective",
-      )
-    }
-    doAppend(sequenced, effective, transactions)
-  }
+  ): Future[Seq[TopologyStore.Change]]
 
-  private[topology] def doAppend(
-      sequenced: SequencedTime,
-      effective: EffectiveTime,
-      transactions: Seq[ValidatedTopologyTransaction],
-  )(implicit traceContext: TraceContext): Future[Unit]
+  def maxTimestamp()(implicit
+      traceContext: TraceContext
+  ): Future[Option[(SequencedTime, EffectiveTime)]]
 
   /** returns the current dispatching watermark
     *
@@ -311,6 +288,40 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
 
   /** update the dispatching watermark for this target store */
   def updateDispatchingWatermark(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
+
+  protected def signedTxFromStoredTx(storedTx: StoredTx): SignedTx
+
+  final def exists(transaction: SignedTx)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean] = findStored(transaction).map(_.exists(signedTxFromStoredTx(_) == transaction))
+
+  def findStored(transaction: SignedTx)(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTx]]
+}
+
+object TopologyStoreCommon {
+
+  type DomainStoreCommon = TopologyStoreCommon[DomainStore, _, _, _]
+
+}
+
+abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
+    ec: ExecutionContext
+) extends AutoCloseable
+    with TopologyStoreCommon[StoreID, ValidatedTopologyTransaction, StoredTopologyTransaction[
+      TopologyChangeOp
+    ], SignedTopologyTransaction[TopologyChangeOp]] {
+  this: NamedLogging =>
+
+  /** add validated topology transaction as is to the topology transaction table */
+  def append(
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
+      transactions: Seq[ValidatedTopologyTransaction],
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit]
 
@@ -341,6 +352,10 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       traceContext: TraceContext
   ): Future[Option[(SequencedTime, EffectiveTime)]]
 
+  override def maxTimestamp()(implicit
+      traceContext: TraceContext
+  ): Future[Option[(SequencedTime, EffectiveTime)]] = timestamp(useStateStore = true)
+
   /** set of topology transactions which are active */
   def headTransactions(implicit
       traceContext: TraceContext
@@ -361,14 +376,6 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   def allTransactions(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]]
-
-  final def exists(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
-      traceContext: TraceContext
-  ): Future[Boolean] = findStored(transaction).map(_.exists(_.transaction == transaction))
-
-  def findStored(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
-      traceContext: TraceContext
-  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]]
 
   def findStoredNoSignature(transaction: TopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
@@ -394,7 +401,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
         case ((sequenced, effective), transactions) =>
           val txs = transactions.map(tx => ValidatedTopologyTransaction(tx.transaction, None))
           for {
-            _ <- doAppend(sequenced, effective, txs)
+            _ <- append(sequenced, effective, txs)
             _ <- updateState(
               sequenced,
               effective,
@@ -486,22 +493,16 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       filterNamespace: Option[Seq[Namespace]],
   )(implicit traceContext: TraceContext): Future[PositiveStoredTopologyTransactions]
 
-  /** fetch the effective time updates greater than or equal to a certain timestamp
-    *
-    * this function is used to recover the future effective timestamp such that we can reschedule "pokes" of the
-    * topology client and updates of the acs commitment processor on startup
-    */
-  def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): Future[Seq[TopologyStore.Change]]
+  override protected def signedTxFromStoredTx(
+      storedTx: StoredTopologyTransaction[TopologyChangeOp]
+  ): SignedTopologyTransaction[TopologyChangeOp] = storedTx.transaction
 
 }
 
 object TopologyStore {
 
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def apply[StoreID <: TopologyStoreId](
-      storeId: TopologyStoreId,
+      storeId: StoreID,
       storage: Storage,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -512,10 +513,10 @@ object TopologyStore {
     storage match {
       case _: MemoryStorage =>
         (new InMemoryTopologyStore(storeId, loggerFactory, timeouts, futureSupervisor))
-          .asInstanceOf[TopologyStore[StoreID]]
+
       case jdbc: DbStorage =>
         new DbTopologyStore(jdbc, storeId, timeouts, loggerFactory, futureSupervisor)
-          .asInstanceOf[TopologyStore[StoreID]]
+
     }
 
   sealed trait Change extends Product with Serializable {

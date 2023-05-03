@@ -4,10 +4,10 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
 import com.digitalasset.canton.ledger.api.domain
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.platform.server.api.validation.FieldValidations
 import io.grpc.StatusRuntimeException
 

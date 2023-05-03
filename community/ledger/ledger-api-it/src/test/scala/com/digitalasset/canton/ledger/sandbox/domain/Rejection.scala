@@ -4,11 +4,11 @@
 package com.digitalasset.canton.ledger.sandbox.domain
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.{CommonErrors, LedgerApiErrors}
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.ledger.configuration.LedgerTimeModel
+import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.v2.Update.CommandRejected.FinalReason
 import com.digitalasset.canton.ledger.participant.state.v2.{ChangeId, CompletionInfo, Update}
 import com.google.rpc.status.Status

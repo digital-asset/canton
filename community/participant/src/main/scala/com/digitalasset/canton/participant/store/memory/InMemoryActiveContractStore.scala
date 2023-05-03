@@ -17,9 +17,8 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
-import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
@@ -115,8 +114,11 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
         .toMap
     }
 
-  override def transferInContracts(transferIns: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(
-      implicit traceContext: TraceContext
+  override def transferInContracts(
+      transferIns: Seq[(LfContractId, SourceDomainId)],
+      toc: TimeOfChange,
+  )(implicit
+      traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.successful {
       logger.trace(s"Transferring-in contracts at $toc: $transferIns")
@@ -125,8 +127,11 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
       }
     })
 
-  override def transferOutContracts(transferOuts: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(
-      implicit traceContext: TraceContext
+  override def transferOutContracts(
+      transferOuts: Seq[(LfContractId, TargetDomainId)],
+      toc: TimeOfChange,
+  )(implicit
+      traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.successful {
       logger.trace(s"Transferring-out contracts at $toc: $transferOuts")
@@ -256,9 +261,9 @@ object InMemoryActiveContractStore {
   object IndividualChange {
     def create(toc: TimeOfChange): IndividualChange = Activation(toc) -> CreationArchivalDetail
     def archive(toc: TimeOfChange): IndividualChange = Deactivation(toc) -> CreationArchivalDetail
-    def transferOut(toc: TimeOfChange, targetDomain: DomainId): IndividualChange =
+    def transferOut(toc: TimeOfChange, targetDomain: TargetDomainId): IndividualChange =
       Deactivation(toc) -> TransferDetail(targetDomain)
-    def transferIn(toc: TimeOfChange, sourceDomain: DomainId): IndividualChange =
+    def transferIn(toc: TimeOfChange, sourceDomain: SourceDomainId): IndividualChange =
       Activation(toc) -> TransferDetail(sourceDomain)
   }
 
@@ -376,7 +381,7 @@ object InMemoryActiveContractStore {
     private[InMemoryActiveContractStore] def addTransferIn(
         contractId: LfContractId,
         transfer: TimeOfChange,
-        sourceDomain: DomainId,
+        sourceDomain: SourceDomainId,
     ): Checked[AcsError, AcsWarning, ContractStatus] =
       for {
         nextChanges <- addIndividualChange(contractId, transferIn(transfer, sourceDomain))
@@ -387,7 +392,7 @@ object InMemoryActiveContractStore {
     private[InMemoryActiveContractStore] def addTransferOut(
         contractId: LfContractId,
         transfer: TimeOfChange,
-        targetDomain: DomainId,
+        targetDomain: TargetDomainId,
     ): Checked[AcsError, AcsWarning, ContractStatus] =
       for {
         nextChanges <- addIndividualChange(contractId, transferOut(transfer, targetDomain))
@@ -489,7 +494,7 @@ object InMemoryActiveContractStore {
           if (change.isActivation) Active
           else
             detail match {
-              case TransferDetail(targetDomain) => TransferredAway(targetDomain)
+              case TransferDetail(targetDomain) => TransferredAway(TargetDomainId(targetDomain))
               case CreationArchivalDetail => Archived
             }
         ContractState(status, change.toc)

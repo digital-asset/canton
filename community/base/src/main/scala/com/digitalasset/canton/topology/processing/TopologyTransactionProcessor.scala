@@ -121,7 +121,12 @@ class TopologyTransactionProcessor(
   private val listeners = ListBuffer[TopologyTransactionProcessingSubscriber]()
   private val timeAdjuster =
     new TopologyTimestampPlusEpsilonTracker(timeouts, loggerFactory, futureSupervisor)
-  private val serializer = new SimpleExecutionQueue()
+  private val serializer = new SimpleExecutionQueue(
+    "topology-transaction-processor-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
   private val initialised = new AtomicBoolean(false)
 
   private def listenersUpdateHead(
@@ -576,8 +581,8 @@ class TopologyTransactionProcessor(
       effectiveTime <- computeEffectiveTime(updates)
     } yield {
       // the rest, we'll run asynchronously, but sequential
-      val scheduledF = FutureUnlessShutdown(
-        serializer.execute(
+      val scheduledF =
+        serializer.executeUS(
           {
             if (updates.nonEmpty) {
               // TODO(i4933) check signature of domain idm and don't accept any transaction other than domain uid tx until we are bootstrapped
@@ -588,10 +593,9 @@ class TopologyTransactionProcessor(
             } else {
               tickleListeners(sequencedTime, effectiveTime)
             }
-          }.unwrap,
+          },
           "processing identity",
         )
-      )
       AsyncResult(scheduledF)
     }
   }
@@ -645,14 +649,10 @@ class TopologyTransactionProcessor(
     }
 
   override def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty.emptyTraceContext
     Lifecycle.close(
       timeAdjuster,
       store,
-      serializer.asCloseable(
-        "topology-transaction-processor-queue",
-        timeouts.shutdownProcessing.unwrap,
-      ),
+      serializer,
     )(logger)
   }
 

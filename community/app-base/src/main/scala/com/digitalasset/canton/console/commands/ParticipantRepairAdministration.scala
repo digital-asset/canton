@@ -35,7 +35,7 @@ import io.grpc.StatusRuntimeException
 import java.time.Instant
 import scala.concurrent.{Await, Promise, TimeoutException}
 
-abstract class ParticipantRepairAdministration(
+class ParticipantRepairAdministration(
     val consoleEnvironment: ConsoleEnvironment,
     runner: AdminCommandRunner,
     val loggerFactory: NamedLoggerFactory,
@@ -43,8 +43,137 @@ abstract class ParticipantRepairAdministration(
     with NoTracing
     with Helpful {
 
-  protected def access[T](handler: ParticipantNode => T): T
+  @Help.Summary("Migrate contracts from one domain to another one.")
+  @Help.Description(
+    """This method can be used to migrate all the contracts associated with a domain to a new domain connection.
+         This method will register the new domain, connect to it and then re-associate all contracts on the source
+         domain to the target domain. Please note that this migration needs to be done by all participants
+         at the same time. The domain should only be used once all participants have finished their migration.
 
+         The arguments are:
+         source: the domain alias of the source domain
+         target: the configuration for the target domain
+         """
+  )
+  def migrate_domain(
+      source: DomainAlias,
+      target: DomainConnectionConfig,
+  ): Unit = {
+    consoleEnvironment.run {
+      runner.adminCommand(
+        ParticipantAdminCommands.ParticipantRepairManagement.MigrateDomain(source, target)
+      )
+    }
+  }
+
+  @Help.Summary("Download all contracts for the given set of parties to a file.")
+  @Help.Description(
+    """This command can be used to download the current active contract set of a given set of parties to a text file.
+        |This is mainly interesting for recovery and operational purposes.
+        |
+        |The file will contain base64 encoded strings, one line per contract. The lines are written
+        |sorted according to their domain and contract id. This allows to compare the contracts stored
+        |by two participants using standard file comparison tools.
+        |The domain-id is printed with the prefix domain-id before the block of contracts starts.
+        |
+        |This command may take a long time to complete and may require significant resources.
+        |It will first load the contract ids of the active contract set into memory and then subsequently
+        |load the contracts in batches and inspect their stakeholders. As this operation needs to traverse
+        |the entire datastore, it might take a long time to complete.
+        |
+        |The command will return a map of domainId -> number of active contracts stored
+        |
+        The arguments are:
+        - parties: identifying contracts having at least one stakeholder from the given set
+        - outputFile: the output file name where to store the data. Use .gz as a suffix to get a compressed file (recommended)
+        - filterDomainId: restrict the export to a given domain
+        - timestamp: optionally a timestamp for which we should take the state (useful to reconcile states of a domain)
+        - protocolVersion: optional the protocol version to use for the serialization. Defaults to the one of the domains.
+        - chunkSize: size of the byte chunks to stream back: default 1024 * 1024 * 2 = (2MB)
+        """
+  )
+  def download(
+      parties: Set[PartyId],
+      outputFile: String = ParticipantRepairAdministration.defaultFile,
+      filterDomainId: String = "",
+      timestamp: Option[Instant] = None,
+      protocolVersion: Option[ProtocolVersion] = None,
+      chunkSize: Option[PositiveInt] = None,
+  ): Unit = {
+    consoleEnvironment.run {
+      val target = File(outputFile)
+      val requestComplete = Promise[String]()
+      val observer = new GrpcByteChunksToFileObserver[AcsSnapshotChunk](
+        target,
+        requestComplete,
+      )
+      val timeout = consoleEnvironment.commandTimeouts.ledgerCommand
+
+      def call = consoleEnvironment.run {
+        runner.adminCommand(
+          ParticipantAdminCommands.ParticipantRepairManagement
+            .Download(
+              parties,
+              filterDomainId,
+              timestamp,
+              protocolVersion,
+              chunkSize,
+              observer,
+              target.toJava.getName.endsWith(".gz"),
+            )
+        )
+      }
+
+      try {
+        ResourceUtil.withResource(call) { _ =>
+          CommandSuccessful(
+            Await
+              .result(
+                requestComplete.future,
+                timeout.duration,
+              )
+              .discard
+          )
+        }
+      } catch {
+        case sre: StatusRuntimeException =>
+          GenericCommandError(
+            GrpcError("Generating acs snapshot file", "download_acs_snapshot", sre).toString
+          )
+        case _: TimeoutException =>
+          target.delete(swallowIOExceptions = true)
+          CommandErrors.ConsoleTimeout.Error(timeout.asJavaApproximation)
+      }
+    }
+  }
+
+  @Help.Summary("Import ACS snapshot", FeatureFlag.Preview)
+  @Help.Description("""Uploads a binary into the participant's ACS""")
+  def upload(
+      inputFile: String = ParticipantRepairAdministration.defaultFile
+  ): Unit = {
+    val file = File(inputFile)
+    consoleEnvironment.run {
+      runner.adminCommand(
+        ParticipantAdminCommands.ParticipantRepairManagement.Upload(
+          ByteString.copyFrom(file.loadBytes)
+        )
+      )
+    }
+  }
+}
+
+abstract class LocalParticipantRepairAdministration(
+    override val consoleEnvironment: ConsoleEnvironment,
+    runner: AdminCommandRunner,
+    override val loggerFactory: NamedLoggerFactory,
+) extends ParticipantRepairAdministration(
+      consoleEnvironment = consoleEnvironment,
+      runner = runner,
+      loggerFactory = loggerFactory,
+    ) {
+
+  protected def access[T](handler: ParticipantNode => T): T
   @Help.Summary("Add specified contracts to specific domain on local participant.")
   @Help.Description(
     """This is a last resort command to recover from data corruption, e.g. in scenarios in which participant
@@ -153,29 +282,6 @@ abstract class ParticipantRepairAdministration(
       )
     )
 
-  @Help.Summary("Migrate domain to a new version.")
-  @Help.Description(
-    """This method can be used to migrate all the contracts associated with a domain to a new domain connection.
-         This method will register the new domain, connect to it and then re-associate all contracts on the source
-         domain to the target domain. Please note that this migration needs to be done by all participants
-         at the same time. The domain should only be used once all participants have finished their migration.
-
-         The arguments are:
-         source: the domain alias of the source domain
-         target: the configuration for the target domain
-         """
-  )
-  def migrate_domain(
-      source: DomainAlias,
-      target: DomainConnectionConfig,
-  ): Unit = {
-    consoleEnvironment.run {
-      runner.adminCommand(
-        ParticipantAdminCommands.ParticipantRepairManagement.MigrateDomain(source, target)
-      )
-    }
-  }
-
   @Help.Summary("Mark sequenced events as ignored.")
   @Help.Description(
     """This is the last resort to ignore events that the participant is unable to process.
@@ -199,7 +305,9 @@ abstract class ParticipantRepairAdministration(
       force: Boolean = false,
   ): Unit =
     runRepairCommand(tc =>
-      access { _.sync.repairService.ignoreEvents(domainId, from, to, force)(tc) }
+      access {
+        _.sync.repairService.ignoreEvents(domainId, from, to, force)(tc)
+      }
     )
 
   @Help.Summary("Remove the ignored status from sequenced events.")
@@ -222,105 +330,10 @@ abstract class ParticipantRepairAdministration(
       force: Boolean = false,
   ): Unit =
     runRepairCommand(tc =>
-      access { _.sync.repairService.unignoreEvents(domainId, from, to, force)(tc) }
+      access {
+        _.sync.repairService.unignoreEvents(domainId, from, to, force)(tc)
+      }
     )
-
-  @Help.Summary("Download all contracts for the given set of parties to a file.")
-  @Help.Description(
-    """This command can be used to download the current active contract set of a given set of parties to a text file.
-        |This is mainly interesting for recovery and operational purposes.
-        |
-        |The file will contain base64 encoded strings, one line per contract. The lines are written
-        |sorted according to their domain and contract id. This allows to compare the contracts stored
-        |by two participants using standard file comparison tools.
-        |The domain-id is printed with the prefix domain-id before the block of contracts starts.
-        |
-        |This command may take a long time to complete and may require significant resources.
-        |It will first load the contract ids of the active contract set into memory and then subsequently
-        |load the contracts in batches and inspect their stakeholders. As this operation needs to traverse
-        |the entire datastore, it might take a long time to complete.
-        |
-        |The command will return a map of domainId -> number of active contracts stored
-        |
-        The arguments are:
-        - parties: identifying contracts having at least one stakeholder from the given set
-        - outputFile: the output file name where to store the data. Use .gz as a suffix to get a compressed file (recommended)
-        - filterDomainId: restrict the export to a given domain
-        - timestamp: optionally a timestamp for which we should take the state (useful to reconcile states of a domain)
-        - protocolVersion: optional the protocol version to use for the serialization. Defaults to the one of the domains.
-        - chunkSize: size of the byte chunks to stream back: default 1024 * 1024 * 2 = (2MB)
-        """
-  )
-  def download(
-      parties: Set[PartyId],
-      outputFile: String = ParticipantRepairAdministration.defaultFile,
-      filterDomainId: String = "",
-      timestamp: Option[Instant] = None,
-      protocolVersion: Option[ProtocolVersion] = None,
-      chunkSize: Option[PositiveInt] = None,
-  ): Unit = {
-    consoleEnvironment.run {
-      val target = File(outputFile)
-      val requestComplete = Promise[String]()
-      val observer = new GrpcByteChunksToFileObserver[AcsSnapshotChunk](
-        target,
-        requestComplete,
-      )
-      val timeout = consoleEnvironment.commandTimeouts.ledgerCommand
-
-      def call = consoleEnvironment.run {
-        runner.adminCommand(
-          ParticipantAdminCommands.ParticipantRepairManagement
-            .Download(
-              parties,
-              filterDomainId,
-              timestamp,
-              protocolVersion,
-              chunkSize,
-              observer,
-              target.toJava.getName.endsWith(".gz"),
-            )
-        )
-      }
-
-      try {
-        ResourceUtil.withResource(call) { _ =>
-          CommandSuccessful(
-            Await
-              .result(
-                requestComplete.future,
-                timeout.duration,
-              )
-              .discard
-          )
-        }
-      } catch {
-        case sre: StatusRuntimeException =>
-          GenericCommandError(
-            GrpcError("Generating acs snapshot file", "download_acs_snapshot", sre).toString
-          )
-        case _: TimeoutException =>
-          target.delete(swallowIOExceptions = true)
-          CommandErrors.ConsoleTimeout.Error(timeout.asJavaApproximation)
-      }
-    }
-  }
-
-  @Help.Summary("Import ACS snapshot", FeatureFlag.Preview)
-  @Help.Description("""Uploads a binary into the participant's ACS""")
-  def upload(
-      inputFile: String = ParticipantRepairAdministration.defaultFile
-  ): Unit = {
-    val file = File(inputFile)
-    consoleEnvironment.run {
-      runner.adminCommand(
-        ParticipantAdminCommands.ParticipantRepairManagement.Upload(
-          ByteString.copyFrom(file.loadBytes)
-        )
-      )
-    }
-  }
-
 }
 
 object ParticipantRepairAdministration {

@@ -64,7 +64,7 @@ abstract class BaseSequencer(
       submission: SubmissionRequest
   )(implicit traceContext: TraceContext): EitherT[Future, WriteRequestRefused, Unit] = {
     def ensureAllRecipientsRegistered: EitherT[Future, WriteRequestRefused, Unit] =
-      submission.batch.allRecipients.toList
+      submission.batch.allMembers.toList
         .parTraverse(ensureMemberRegistered)
         .map(_ => ())
 
@@ -100,7 +100,6 @@ abstract class BaseSequencer(
       span.setAttribute("sender", submission.sender.toString)
       span.setAttribute("message_id", submission.messageId.unwrap)
       for {
-        _ <- checkMemberRegistration(submission)
         signedSubmissionWithFixedTs <- signatureVerifier
           .verifySignature[SubmissionRequest](
             signedSubmission,
@@ -108,6 +107,7 @@ abstract class BaseSequencer(
             _.sender,
           )
           .leftMap(e => SendAsyncError.RequestRefused(e))
+        _ <- checkMemberRegistration(submission)
         _ <- sendAsyncSignedInternal(signedSubmissionWithFixedTs)
       } yield ()
   }

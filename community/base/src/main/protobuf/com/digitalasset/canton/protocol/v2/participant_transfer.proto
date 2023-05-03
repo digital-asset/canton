@@ -43,3 +43,28 @@ message TransferInView {
   string workflow_id = 10; // optional - added in v2
   string command_id = 11; // added in v2
 }
+
+message TransferOutCommonData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
+  com.digitalasset.canton.crypto.v0.Salt salt = 1;
+  string source_domain = 2;
+  repeated string stakeholders = 3;
+  repeated string admin_parties = 4;
+  string uuid = 5;
+  string source_mediator = 6;
+  int32 source_protocol_version = 7;
+  int64 transfer_counter = 8; // added in v2
+}
+
+message TransferInCommonData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
+  com.digitalasset.canton.crypto.v0.Salt salt = 1;
+  string target_domain = 2;
+  repeated string stakeholders = 3;
+  string uuid = 4;
+  string target_mediator = 6;
+  int32 target_protocol_version = 7;
+  int64 transfer_counter = 8; // added in v2
+}

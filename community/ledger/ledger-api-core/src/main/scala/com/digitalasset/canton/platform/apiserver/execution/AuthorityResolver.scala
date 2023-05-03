@@ -5,11 +5,14 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import com.daml.lf.data.Ref.*
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver.AuthorityResponse
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
 
 trait AuthorityResolver {
-  def resolve(request: AuthorityResolver.AuthorityRequest): Future[AuthorityResponse]
+  def resolve(request: AuthorityResolver.AuthorityRequest)(implicit
+      traceContext: TraceContext
+  ): Future[AuthorityResponse]
 }
 
 object AuthorityResolver {
@@ -31,7 +34,9 @@ object AuthorityResolver {
   def apply(): AuthorityResolver = new TopologyUnawareAuthorityResolver
 
   class TopologyUnawareAuthorityResolver extends AuthorityResolver {
-    override def resolve(request: AuthorityRequest): Future[AuthorityResponse] =
+    override def resolve(request: AuthorityRequest)(implicit
+        traceContext: TraceContext
+    ): Future[AuthorityResponse] =
       Future.successful(AuthorityResponse.MissingAuthorisation(request.requesting))
   }
 

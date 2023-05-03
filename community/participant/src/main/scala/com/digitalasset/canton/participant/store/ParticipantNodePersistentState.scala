@@ -7,8 +7,14 @@ import akka.stream.Materializer
 import cats.Eval
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  Lifecycle,
+}
 import com.digitalasset.canton.logging.{
   HasLoggerName,
   NamedLoggerFactory,
@@ -22,15 +28,14 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{ErrorUtil, retry}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
-import scala.concurrent.{ExecutionContext, Future}
 
 /** Some of the state of a participant that is not tied to a domain and must survive restarts.
   * Does not cover topology stores (as they are also present for domain nodes)
@@ -69,12 +74,13 @@ trait ParticipantNodePersistentStateFactory {
       metrics: ParticipantMetrics,
       indexedStringStore: IndexedStringStore,
       timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       mat: Materializer,
       traceContext: TraceContext,
-  ): Future[Eval[ParticipantNodePersistentState]]
+  ): FutureUnlessShutdown[Eval[ParticipantNodePersistentState]]
 }
 
 object ParticipantNodePersistentStateFactory extends ParticipantNodePersistentStateFactory {
@@ -89,12 +95,13 @@ object ParticipantNodePersistentStateFactory extends ParticipantNodePersistentSt
       metrics: ParticipantMetrics,
       indexedStringStore: IndexedStringStore,
       timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       mat: Materializer,
       traceContext: TraceContext,
-  ): Future[Eval[ParticipantNodePersistentState]] = ParticipantNodePersistentState
+  ): FutureUnlessShutdown[Eval[ParticipantNodePersistentState]] = ParticipantNodePersistentState
     .create(
       syncDomainPersistentStates,
       storage,
@@ -106,6 +113,7 @@ object ParticipantNodePersistentStateFactory extends ParticipantNodePersistentSt
       metrics,
       indexedStringStore,
       timeouts,
+      futureSupervisor,
       loggerFactory,
     )
     .map(Eval.now)
@@ -131,13 +139,14 @@ object ParticipantNodePersistentState extends HasLoggerName {
       metrics: ParticipantMetrics,
       indexedStringStore: IndexedStringStore,
       timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       mat: Materializer,
       traceContext: TraceContext,
-  ): Future[ParticipantNodePersistentState] = {
-    val settingsStore = ParticipantSettingsStore(storage, timeouts, loggerFactory)
+  ): FutureUnlessShutdown[ParticipantNodePersistentState] = {
+    val settingsStore = ParticipantSettingsStore(storage, timeouts, futureSupervisor, loggerFactory)
     val participantEventLog =
       ParticipantEventLog(
         storage,
@@ -171,7 +180,7 @@ object ParticipantNodePersistentState extends HasLoggerName {
     def waitForSettingsStoreUpdate[A](
         lens: ParticipantSettingsStore.Settings => Option[A],
         settingName: String,
-    ): Future[A] =
+    ): FutureUnlessShutdown[A] =
       retry
         .Pause(
           logger,
@@ -180,7 +189,7 @@ object ParticipantNodePersistentState extends HasLoggerName {
           50.millis,
           functionFullName,
         )
-        .apply(
+        .unlessShutdown(
           settingsStore.refreshCache().map(_ => lens(settingsStore.settings).toRight(())),
           NoExnRetryable,
         )
@@ -194,23 +203,24 @@ object ParticipantNodePersistentState extends HasLoggerName {
 
     def checkOrSetMaxDedupDuration(
         maxDeduplicationDuration: NonNegativeFiniteDuration
-    ): Future[Unit] = {
+    ): FutureUnlessShutdown[Unit] = {
 
       def checkStoredMaxDedupDuration(
           storedMaxDeduplication: NonNegativeFiniteDuration
-      ): Future[Unit] = {
+      ): FutureUnlessShutdown[Unit] = {
         if (maxDeduplicationDuration != storedMaxDeduplication) {
           logger.warn(
             show"Using the max deduplication duration ${storedMaxDeduplication} instead of the configured $maxDeduplicationDuration."
           )
         }
-        Future.unit
+        FutureUnlessShutdown.unit
       }
 
       if (storage.isActive) {
         settingsStore.settings.maxDeduplicationDuration match {
           case None => settingsStore.insertMaxDeduplicationDuration(maxDeduplicationDuration)
-          case Some(storedMaxDeduplication) => checkStoredMaxDedupDuration(storedMaxDeduplication)
+          case Some(storedMaxDeduplication) =>
+            checkStoredMaxDedupDuration(storedMaxDeduplication)
         }
       } else {
         // On the passive replica wait for the max deduplication duration to be written by the active replica
@@ -219,14 +229,14 @@ object ParticipantNodePersistentState extends HasLoggerName {
       }
     }
 
-    def setUniqueContractKeysSetting(uniqueContractKeys: Boolean): Future[Unit] = {
-      def checkStoredSetting(stored: Boolean): Future[Unit] = {
+    def setUniqueContractKeysSetting(uniqueContractKeys: Boolean): FutureUnlessShutdown[Unit] = {
+      def checkStoredSetting(stored: Boolean): FutureUnlessShutdown[Unit] = {
         if (uniqueContractKeys != stored) {
           logger.warn(
             show"Using unique-contract-keys=$stored instead of the configured $uniqueContractKeys.\nThis indicates that the participant was previously started with unique-contract-keys=$stored and then the configuration was changed."
           )
         }
-        Future.unit
+        FutureUnlessShutdown.unit
       }
 
       if (storage.isActive) {
@@ -234,8 +244,10 @@ object ParticipantNodePersistentState extends HasLoggerName {
           // Figure out whether the participant has previously been connected to a UCK or a non-UCK domain.
           ucksByDomain <- syncDomainPersistentStates.getAll.toSeq.parTraverseFilter {
             case (domainId, state) =>
-              state.parameterStore.lastParameters.map(
-                _.map(param => domainId -> param.uniqueContractKeys)
+              FutureUnlessShutdown.outcomeF(
+                state.parameterStore.lastParameters.map(
+                  _.map(param => domainId -> param.uniqueContractKeys)
+                )
               )
           }
           (nonUckDomains, uckDomains) = ucksByDomain.partitionMap { case (domainId, isUck) =>
@@ -273,15 +285,18 @@ object ParticipantNodePersistentState extends HasLoggerName {
       _ <- settingsStore.refreshCache()
       _ <- uniqueContractKeysO.traverse_(setUniqueContractKeysSetting)
       _ <- maxDeduplicationDurationO.traverse_(checkOrSetMaxDedupDuration)
-      multiDomainEventLog <- MultiDomainEventLog(
-        syncDomainPersistentStates,
-        participantEventLog,
-        storage,
-        clock,
-        metrics,
-        indexedStringStore,
-        timeouts,
-        loggerFactory,
+      multiDomainEventLog <- FutureUnlessShutdown.outcomeF(
+        MultiDomainEventLog.create(
+          syncDomainPersistentStates,
+          participantEventLog,
+          storage,
+          clock,
+          metrics,
+          indexedStringStore,
+          timeouts,
+          futureSupervisor,
+          loggerFactory,
+        )
       )
       _ = flagCloseable.close()
     } yield {

@@ -25,6 +25,7 @@ trait DomainAliasResolution extends AutoCloseable {
   def domainIdForAlias(alias: DomainAlias): Option[DomainId]
   def aliasForDomainId(id: DomainId): Option[DomainAlias]
   def connectionStateForDomain(id: DomainId): Option[DomainConnectionConfigStore.Status]
+  def aliases: Set[DomainAlias]
 }
 
 class DomainAliasManager private (
@@ -75,7 +76,7 @@ class DomainAliasManager private (
     conf <- configStore.get(alias).toOption
   } yield conf.status
 
-  def aliases: Set[DomainAlias] = Set(domainAliasMap.get().keySet().asScala.toSeq: _*)
+  override def aliases: Set[DomainAlias] = Set(domainAliasMap.get().keySet().asScala.toSeq: _*)
   def ids: Set[DomainId] = Set(domainAliasMap.get().values().asScala.toSeq: _*)
 
   private def addMapping(domainAlias: DomainAlias, domainId: DomainId)(implicit
@@ -99,7 +100,7 @@ class DomainAliasManager private (
 }
 
 object DomainAliasManager {
-  def apply(
+  def create(
       configStore: DomainConnectionConfigStore,
       domainAliasAndIdStore: DomainAliasAndIdStore,
       loggerFactory: NamedLoggerFactory,

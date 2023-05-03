@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.{LocalNodeConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.GrpcHealthReporter
+import com.digitalasset.canton.health.{GrpcHealthReporter, HealthReporting}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -25,7 +25,7 @@ import com.digitalasset.canton.topology.admin.v1 as topologyProto
 import com.digitalasset.canton.topology.store.{InitializationStore, TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SimpleExecutionQueueWithShutdown
+import com.digitalasset.canton.util.SimpleExecutionQueue
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 
 import java.util.concurrent.ScheduledExecutorService
@@ -57,6 +57,7 @@ abstract class CantonNodeBootstrapX[
       nodeId: UniqueIdentifier,
       manager: TopologyManagerX,
       healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ): BootstrapStageOrLeaf[T]
 
   /** member depends on node type */
@@ -88,11 +89,11 @@ abstract class CantonNodeBootstrapX[
     override def timeouts: ProcessingTimeout = CantonNodeBootstrapX.this.timeouts
     override def abortThisNodeOnStartupFailure(): Unit = {
       // TODO(#11255) bubble this up into env ensuring that the node is properly deregistered from env if we fail during
-      //   async startup
-      logger.error("Closing node due to startup failure")
-      CantonNodeBootstrapX.this.close()
+      //   async startup. (node should be removed from running nodes)
+      //   we can't call node.close() here as this thing is executed within a performUnlessClosing, so we'd deadlock
+      logger.error("Should be closing node due to startup failure")
     }
-    override val queue: SimpleExecutionQueueWithShutdown = new SimpleExecutionQueueWithShutdown(
+    override val queue: SimpleExecutionQueue = new SimpleExecutionQueue(
       s"init-queue-${arguments.name}",
       arguments.futureSupervisor,
       timeouts,
@@ -126,12 +127,11 @@ abstract class CantonNodeBootstrapX[
         ).map { storage =>
           registerHealthGauge()
           // init health services once
-          val (healthReporter, grpcHealthServer) = mkHealthComponents(
-            mkNodeHealthService(storage)
-          )
+          val healthService = mkNodeHealthService(storage)
+          val (healthReporter, grpcHealthServer) = mkHealthComponents(healthService)
           grpcHealthServer.foreach(addCloseable)
           addCloseable(storage)
-          Some(new SetupCrypto(storage, healthReporter))
+          Some(new SetupCrypto(storage, healthReporter, healthService))
         }
       }
     }
@@ -139,6 +139,7 @@ abstract class CantonNodeBootstrapX[
   private class SetupCrypto(
       val storage: Storage,
       val healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ) extends BootstrapStage[T, SetupNodeId](
         description = "Init crypto module",
         bootstrapStageCallback,
@@ -170,7 +171,7 @@ abstract class CantonNodeBootstrapX[
                 executionContext,
               )
             )
-            Some(new SetupNodeId(storage, crypto, healthReporter))
+            Some(new SetupNodeId(storage, crypto, healthReporter, healthService))
           }
       )
     }
@@ -180,6 +181,7 @@ abstract class CantonNodeBootstrapX[
       storage: Storage,
       val crypto: Crypto,
       healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ) extends BootstrapStageWithStorage[T, GenerateOrAwaitNodeTopologyTx, UniqueIdentifier](
         description = "Init node id",
         bootstrapStageCallback,
@@ -202,6 +204,7 @@ abstract class CantonNodeBootstrapX[
         authorizedStore,
         timeouts,
         parameterConfig.initialProtocolVersion,
+        futureSupervisor,
         loggerFactory,
       )
     addCloseable(topologyManager)
@@ -259,10 +262,11 @@ abstract class CantonNodeBootstrapX[
         storage,
         crypto,
         healthReporter,
+        healthService,
       )
 
     override protected def autoCompleteStage()
-        : EitherT[Future, String, Option[UniqueIdentifier]] = {
+        : EitherT[FutureUnlessShutdown, String, Option[UniqueIdentifier]] = {
       for {
         // create namespace key
         namespaceKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto)(s"$name-namespace")
@@ -277,9 +281,9 @@ abstract class CantonNodeBootstrapX[
           identifier,
           Namespace(namespaceKey.fingerprint),
         )
-        _ <- EitherT.right(initializationStore.setId(NodeId(uid)))
-      } yield Some(uid)
-    }
+        _ <- EitherT.right[String](initializationStore.setId(NodeId(uid)))
+      } yield Option(uid)
+    }.mapK(FutureUnlessShutdown.outcomeK)
 
     override def initializeWithProvidedId(uid: UniqueIdentifier): EitherT[Future, String, Unit] =
       completeWithExternal(
@@ -297,6 +301,7 @@ abstract class CantonNodeBootstrapX[
       storage: Storage,
       crypto: Crypto,
       healthReporter: GrpcHealthReporter,
+      healthService: HealthReporting.HealthService,
   ) extends BootstrapStageWithStorage[T, BootstrapStageOrLeaf[T], Unit](
         description = "generate-or-await-node-topology-tx",
         bootstrapStageCallback,
@@ -341,21 +346,24 @@ abstract class CantonNodeBootstrapX[
         nodeId,
         manager,
         healthReporter,
+        healthService,
       )
 
-    override protected def autoCompleteStage(): EitherT[Future, String, Option[Unit]] = {
+    override protected def autoCompleteStage()
+        : EitherT[FutureUnlessShutdown, String, Option[Unit]] = {
       val protocolVersion = parameterConfig.initialProtocolVersion
       for {
         namespaceKeyO <- crypto.cryptoPublicStore
           .signingKey(nodeId.namespace.fingerprint)
           .leftMap(_.toString)
-        namespaceKey <- EitherT.fromEither[Future](
+          .mapK(FutureUnlessShutdown.outcomeK)
+        namespaceKey <- EitherT.fromEither[FutureUnlessShutdown](
           namespaceKeyO.toRight(
             s"Performing auto-init but can't find key ${nodeId.namespace.fingerprint} from previous step"
           )
         )
         // init topology manager
-        nsd <- EitherT.fromEither[Future](
+        nsd <- EitherT.fromEither[FutureUnlessShutdown](
           NamespaceDelegationX.create(
             Namespace(namespaceKey.fingerprint),
             namespaceKey,
@@ -364,19 +372,23 @@ abstract class CantonNodeBootstrapX[
         )
         _ <- authorizeStateUpdate(namespaceKey, nsd, protocolVersion)
         // all nodes need a signing key
-        signingKey <- CantonNodeBootstrapCommon.getOrCreateSigningKey(crypto)(s"$name-signing")
+        signingKey <- CantonNodeBootstrapCommon
+          .getOrCreateSigningKey(crypto)(s"$name-signing")
+          .mapK(FutureUnlessShutdown.outcomeK)
         // key owner id depends on the type of node
         ownerId = member(nodeId)
         // participants need also an encryption key
         keys <-
           if (ownerId.code == ParticipantId.Code) {
             for {
-              encryptionKey <- CantonNodeBootstrapCommon.getOrCreateEncryptionKey(crypto)(
-                s"$name-encryption"
-              )
+              encryptionKey <- CantonNodeBootstrapCommon
+                .getOrCreateEncryptionKey(crypto)(
+                  s"$name-encryption"
+                )
+                .mapK(FutureUnlessShutdown.outcomeK)
             } yield NonEmpty.mk(Seq, signingKey, encryptionKey)
           } else {
-            EitherT.rightT[Future, String](NonEmpty.mk(Seq, signingKey))
+            EitherT.rightT[FutureUnlessShutdown, String](NonEmpty.mk(Seq, signingKey))
           }
         // register the keys
         _ <- authorizeStateUpdate(
@@ -393,7 +405,7 @@ abstract class CantonNodeBootstrapX[
         protocolVersion: ProtocolVersion,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[Future, String, Unit] = {
+    ): EitherT[FutureUnlessShutdown, String, Unit] = {
       manager
         .proposeAndAuthorize(
           TopologyChangeOpX.Replace,

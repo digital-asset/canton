@@ -6,14 +6,16 @@ package com.digitalasset.canton.ledger.api.auth
 import akka.actor.{Cancellable, Scheduler}
 import com.daml.clock.AdjustableClock
 import com.daml.error.ErrorsAssertions
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.auth.AuthorizationError.Expired
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
+import com.digitalasset.canton.testing.ErrorAssertionsWithLogCollectorAssertions
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.ServerCallStreamObserver
 import org.mockito.{ArgumentCaptor, ArgumentMatchersSugar, MockitoSugar}
+import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -24,9 +26,12 @@ import scala.concurrent.duration.FiniteDuration
 class OngoingAuthorizationObserverSpec
     extends AsyncFlatSpec
     with Matchers
+    with Eventually
+    with IntegrationPatience
     with MockitoSugar
     with ArgumentMatchersSugar
-    with ErrorsAssertions {
+    with ErrorsAssertions
+    with ErrorAssertionsWithLogCollectorAssertions {
 
   it should "signal onError aborting the stream when user rights state hasn't been refreshed in a timely manner" in {
     val clock = AdjustableClock(

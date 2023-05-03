@@ -31,9 +31,7 @@ class TopologyTransactionProcessorTest
       loggerFactory,
       timeouts,
       futureSupervisor,
-    ) {
-      override def monotonicityTimeCheckUpdate(ts: CantonTimestamp): Option[CantonTimestamp] = None
-    }
+    )
 
   private def mk(
       store: TopologyStore[TopologyStoreId.DomainStore] = mkStore
@@ -143,13 +141,18 @@ class TopologyTransactionProcessorTest
     "idempotent / crash recovery" in {
       val (proc, store) = mk()
       val block1 = List(ns1k1_k1, ns1k2_k1, okm1bk5_k1, p1p1B_k2)
+      val block2 = List(p1p2F_k2)
       for {
         _ <- process(proc, ts(0), 0, block1)
+        _ <- process(proc, ts(1), 1, block2)
         proc2 = mk(store)._1
         _ <- process(proc2, ts(0), 0, block1)
+        _ <- process(proc2, ts(1), 1, block2)
         st1 <- fetch(store, ts(0).immediateSuccessor)
+        st2 <- fetch(store, ts(1).immediateSuccessor)
       } yield {
         validate(st1, block1)
+        validate(st2, block1 ++ block2)
       }
     }
 

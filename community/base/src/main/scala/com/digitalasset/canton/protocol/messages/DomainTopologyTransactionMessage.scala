@@ -4,13 +4,18 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.data.EitherT
+import cats.syntax.traverse.*
+import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.protocol.messages.AcceptedTopologyTransactionsX.AcceptedRequest
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
+import com.digitalasset.canton.protocol.v2.EnvelopeContent
 import com.digitalasset.canton.protocol.{v0, v1, v2}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
@@ -136,7 +141,6 @@ object DomainTopologyTransactionMessage
   def fromProtoV0(
       message: v0.DomainTopologyTransactionMessage
   ): ParsingResult[DomainTopologyTransactionMessage] = {
-    import cats.syntax.traverse.*
 
     def decodeTransactions(
         payload: List[ByteString]
@@ -159,4 +163,89 @@ object DomainTopologyTransactionMessage
   }
 
   override protected def name: String = "DomainTopologyTransactionMessage"
+}
+
+final case class AcceptedTopologyTransactionsX private (
+    override val domainId: DomainId,
+    accepted: Seq[AcceptedRequest],
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      AcceptedTopologyTransactionsX.type
+    ]
+) extends UnsignedProtocolMessage
+    // TODO(#11255) make me a SignedProtocolMessageContent
+    with UnsignedProtocolMessageV2 {
+
+  @transient override protected lazy val companionObj: AcceptedTopologyTransactionsX.type =
+    AcceptedTopologyTransactionsX
+
+  override protected[messages] def toProtoSomeEnvelopeContentV2
+      : EnvelopeContent.SomeEnvelopeContent =
+    v2.EnvelopeContent.SomeEnvelopeContent.AcceptedTopologyTransactions(toProtoV2)
+
+  def toProtoV2: v2.AcceptedTopologyTransactionsX = v2.AcceptedTopologyTransactionsX(
+    domainId.toProtoPrimitive,
+    accepted = accepted.map(_.toProtoV2),
+  )
+
+}
+
+object AcceptedTopologyTransactionsX
+    extends HasProtocolVersionedCompanion[
+      AcceptedTopologyTransactionsX
+    ] {
+
+  def create(
+      domainId: DomainId,
+      accepted: Seq[AcceptedRequest],
+      protocolVersion: ProtocolVersion,
+  ): AcceptedTopologyTransactionsX =
+    AcceptedTopologyTransactionsX(domainId = domainId, accepted = accepted)(
+      supportedProtoVersions.protocolVersionRepresentativeFor(protocolVersion)
+    )
+
+  override protected def name: String = "AcceptedTopologyTransactionsX"
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(
+      v2.AcceptedTopologyTransactionsX
+    )(
+      supportedProtoVersion(_)(fromProtoV2),
+      _.toProtoV2.toByteString,
+    ),
+  )
+
+  private[messages] def fromProtoV2(
+      message: v2.AcceptedTopologyTransactionsX
+  ): ParsingResult[AcceptedTopologyTransactionsX] = {
+    val v2.AcceptedTopologyTransactionsX(domain, accepted) = message
+    for {
+      domainId <- DomainId.fromProtoPrimitive(domain, "domain")
+      accepted <- accepted.traverse(acceptedRequestFromProtoV2)
+    } yield AcceptedTopologyTransactionsX(domainId, accepted.toList)(
+      protocolVersionRepresentativeFor(ProtoVersion(2))
+    )
+  }
+
+  private def acceptedRequestFromProtoV2(
+      message: v2.AcceptedTopologyTransactionsX.AcceptedRequest
+  ): ParsingResult[AcceptedRequest] = {
+    val v2.AcceptedTopologyTransactionsX.AcceptedRequest(requestId, transactions) = message
+    for {
+      requestId <- String255.fromProtoPrimitive(requestId, "request_id")
+      transactions <- transactions.traverse(SignedTopologyTransactionX.fromProtoV2)
+    } yield AcceptedRequest(requestId, transactions.toList)
+  }
+
+  final case class AcceptedRequest(
+      requestId: TopologyRequestId,
+      transactions: List[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
+  ) {
+    def toProtoV2: v2.AcceptedTopologyTransactionsX.AcceptedRequest =
+      v2.AcceptedTopologyTransactionsX.AcceptedRequest(
+        requestId = requestId.toProtoPrimitive,
+        transactions = transactions.map(_.toProtoV2),
+      )
+  }
 }

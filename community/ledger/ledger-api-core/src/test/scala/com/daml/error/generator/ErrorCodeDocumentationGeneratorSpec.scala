@@ -6,10 +6,10 @@ package com.daml.error.generator
 import com.daml.error.ErrorCategory.TransientServerFailure
 import com.daml.error.*
 import com.daml.error.generator.ErrorCodeDocumentationGenerator.DeprecatedItem
-import com.daml.error.utils.testpackage.subpackage.MildErrorsParent
-import com.daml.error.utils.testpackage.subpackage.MildErrorsParent.MildErrors
-import com.daml.error.utils.testpackage.subpackage.MildErrorsParent.MildErrors.NotSoSeriousError
-import com.daml.error.utils.testpackage.{DeprecatedError, SeriousError}
+import com.digitalasset.canton.ledger.error.testpackage.subpackage.MildErrorsParent
+import com.digitalasset.canton.ledger.error.testpackage.subpackage.MildErrorsParent.MildErrors
+import com.digitalasset.canton.ledger.error.testpackage.subpackage.MildErrorsParent.MildErrors.NotSoSeriousError
+import com.digitalasset.canton.ledger.error.testpackage.{DeprecatedError, SeriousError}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -20,7 +20,7 @@ import scala.reflect.ClassTag
 class ErrorCodeDocumentationGeneratorSpec extends AnyFlatSpec with Matchers {
 
   it should "return the correct doc items from the error classes" in {
-    val searchPackages = Array("com.daml.error.utils.testpackage")
+    val searchPackages = Array("com.digitalasset.canton.ledger.error.testpackage")
     val actualGroupDocItems = ErrorCodeDocumentationGenerator.getErrorGroupItems(searchPackages)
     val actualErrorDocItems = ErrorCodeDocumentationGenerator.getErrorCodeItems(searchPackages)
 

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin
 
 import cats.implicits.toFoldableOps
 import cats.syntax.parallel.*
-import com.daml.error.definitions.LedgerApiErrors.ConsistencyErrors.ContractNotFound
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.api.v1.commands.Command as ScalaCommand
 import com.daml.ledger.api.v1.event.CreatedEvent
@@ -13,10 +12,12 @@ import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.error.ErrorCodeUtils
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.ConsistencyErrors.ContractNotFound
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.admin.workflows.{PingPong as M, PingPongVacuum as V}
@@ -76,11 +77,12 @@ class PingService(
     pingDeduplicationTime: NonNegativeFiniteDuration,
     isActive: => Boolean,
     syncService: Option[CantonSyncService],
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
     protected val clock: Clock,
 )(implicit ec: ExecutionContext, timeoutScheduler: ScheduledExecutorService)
     extends AdminWorkflowService
-    with FlagCloseableAsync
+    with FlagCloseable
     with NamedLogging {
   private val adminParty = adminPartyId.toPrim
 
@@ -104,7 +106,12 @@ class PingService(
   private val vacuumWorkflowId = WorkflowId("vacuuming")
 
   // Execution queue for the vacuuming tasks
-  private val vacuumQueue = new SimpleExecutionQueue()
+  private val vacuumQueue = new SimpleExecutionQueue(
+    "ping-service-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   // Execute vacuuming task when (re)connecting to a new domain
   syncService.foreach(
@@ -112,7 +119,9 @@ class PingService(
       withNewTraceContext { implicit traceContext =>
         logger.debug(s"Received connection notification from $domainAlias")
         FutureUtil.doNotAwait(
-          vacuumQueue.execute(vacuumStaleContracts, "Ping vacuuming"),
+          vacuumQueue
+            .execute(vacuumStaleContracts, "Ping vacuuming")
+            .onShutdown(logger.debug("Aborted ping vacuuming due to shutdown")),
           "Failed to execute Ping vacuuming task",
         )
       }
@@ -423,19 +432,7 @@ class PingService(
     }
   }
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    Seq(
-      SyncCloseable(
-        "ping-service-connection",
-        connection.close(),
-      ),
-      vacuumQueue.asCloseable(
-        "ping-service-vacuuming-sequential-queue",
-        timeouts.shutdownProcessing.unwrap,
-      ),
-    )
-  }
+  override protected def onClosed(): Unit = Lifecycle.close(connection, vacuumQueue)(logger)
 
   private def submitPing(
       id: String,

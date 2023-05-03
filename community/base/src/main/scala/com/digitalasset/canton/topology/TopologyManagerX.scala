@@ -6,15 +6,17 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
+import com.digitalasset.canton.topology.store.TopologyStoreX
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.*
@@ -24,22 +26,43 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SimpleExecutionQueue
 import com.digitalasset.canton.version.ProtocolVersion
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
+
+trait TopologyManagerObserver {
+  def addedNewTransactions(
+      timestamp: CantonTimestamp,
+      transactions: Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+}
 
 class TopologyManagerX(
     val clock: Clock,
     val crypto: Crypto,
-    protected val store: TopologyStoreX[TopologyStoreId],
+    val store: TopologyStoreX[AuthorizedStore],
     val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync {
+    with FlagCloseable {
 
   // sequential queue to run all the processing that does operate on the state
-  protected val sequentialQueue = new SimpleExecutionQueue()
+  protected val sequentialQueue = new SimpleExecutionQueue(
+    "topology-manager-x-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
+
   private val processor = new TopologyStateProcessorX(store, loggerFactory)
+
+  def queueSize: Int = sequentialQueue.queueSize
+
+  private val observers = new AtomicReference[Seq[TopologyManagerObserver]](Seq.empty)
+  def addObserver(observer: TopologyManagerObserver): Unit =
+    observers.updateAndGet(_ :+ observer).discard
 
   /** Authorizes a new topology transaction by signing it and adding it to the topology state
     *
@@ -61,11 +84,12 @@ class TopologyManagerX(
       force: Boolean = false,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, GenericSignedTopologyTransactionX] = {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
     logger.debug(show"Attempting to build, sign, and ${op} ${mapping}")
     for {
-      tx <- build(op, mapping, serial = serial, protocolVersion)
+      tx <- build(op, mapping, serial = serial, protocolVersion).mapK(FutureUnlessShutdown.outcomeK)
       signedTx <- signTransaction(tx, signingKeys, isProposal = !expectFullAuthorization)
+        .mapK(FutureUnlessShutdown.outcomeK)
       _ <- add(Seq(signedTx), force = force, expectFullAuthorization)
     } yield signedTx
   }
@@ -88,19 +112,23 @@ class TopologyManagerX(
       expectFullAuthorization: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, GenericSignedTopologyTransactionX] = {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
     // TODO(#11255): check that there is an existing topology transaction with the hash of the unique key
     for {
-      proposals <- EitherT.right[TopologyManagerError](
-        store.findProposalsByTxHash(EffectiveTime(clock.now), Seq(transactionHash))
-      )
+      proposals <- EitherT
+        .right[TopologyManagerError](
+          store.findProposalsByTxHash(EffectiveTime(clock.now), Seq(transactionHash))
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
       existingTransaction =
         (proposals match {
           case Seq() => ??? // TODO(#11255) proper error
           case Seq(tx) => tx
           case _otherwise => ??? // TODO(#11255) proper error
         })
-      extendedTransaction <- extendSignature(existingTransaction, signingKeys)
+      extendedTransaction <- extendSignature(existingTransaction, signingKeys).mapK(
+        FutureUnlessShutdown.outcomeK
+      )
       _ <- add(
         Seq(extendedTransaction),
         force = force,
@@ -199,7 +227,9 @@ class TopologyManagerX(
       force: Boolean,
       expectFullAuthorization: Boolean,
       abortOnError: Boolean = true,
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     sequentialQueue.executeE(
       {
         val ts = clock.uniqueTime()
@@ -229,17 +259,14 @@ class TopologyManagerX(
   protected def notifyObservers(
       timestamp: CantonTimestamp,
       transactions: Seq[GenericSignedTopologyTransactionX],
-  ): Future[Unit] = Future.unit
-
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    Seq(
-      SyncCloseable("topology-manager-store", store.close()),
-      sequentialQueue.asCloseable(
-        "topology-manager-sequential-queue",
-        timeouts.shutdownProcessing.unwrap,
-      ),
+  )(implicit traceContext: TraceContext): Future[Unit] = Future
+    .sequence(
+      observers
+        .get()
+        .map(_.addedNewTransactions(timestamp, transactions).onShutdown(()))
     )
-  }
+    .map(_ => ())
+
+  override protected def onClosed(): Unit = Lifecycle.close(store, sequentialQueue)(logger)
 
 }

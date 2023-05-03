@@ -317,17 +317,20 @@ message SignedTopologyTransactionX {
  * to which the sequencers subscribe and use to forward the messages to the participants
  * accordingly.
  */
-// TODO(#11255) make this a signed content
-message AcceptedTopologyTransactionX {
+// TODO(#11255) make this a signed protocol message
+message AcceptedTopologyTransactionsX {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
   message AcceptedRequest {
     string request_id = 1;
     repeated SignedTopologyTransactionX transactions = 2;
   }
-  AcceptedRequest accepted = 1;
+  string domain = 1;
+  repeated AcceptedRequest accepted = 2;
   // TODO(#11255) include max-sequencing time (should be set to request timeout)
 }
 
 message RegisterTopologyTransactionRequestX {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
   // the member requesting the approval of the transactions on behalf of the participant.
   // typically this will be either an unauthenticated member (before the participant is active)
   // or the participant or member itself (after it has become active)
@@ -341,6 +344,7 @@ message RegisterTopologyTransactionRequestX {
 
 
 message RegisterTopologyTransactionResponseX {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
   message Result {
     enum State {
       MISSING_STATE = 0;
@@ -356,7 +360,6 @@ message RegisterTopologyTransactionResponseX {
       OBSOLETE = 5;
     }
     State state = 1;
-    string error_message = 2;
   }
   string requested_by = 1;
   string requested_for = 2;

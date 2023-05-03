@@ -12,9 +12,8 @@ import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil, MapsUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
@@ -25,7 +24,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.Future
 
 class InMemoryTransferStore(
-    domain: DomainId,
+    domain: TargetDomainId,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends TransferStore
     with NamedLogging {
@@ -40,7 +39,7 @@ class InMemoryTransferStore(
   )(implicit traceContext: TraceContext): EitherT[Future, TransferStoreError, Unit] = {
     ErrorUtil.requireArgument(
       transferData.targetDomain == domain,
-      s"Domain ${domain.unwrap}: Transfer store cannot store transfer for domain ${transferData.targetDomain.unwrap}",
+      s"Domain ${domain.unwrap.unwrap}: Transfer store cannot store transfer for domain ${transferData.targetDomain.unwrap.unwrap}",
     )
 
     val transferId = transferData.transferId
@@ -139,7 +138,7 @@ class InMemoryTransferStore(
     })
 
   override def find(
-      filterSource: Option[DomainId],
+      filterSource: Option[SourceDomainId],
       filterTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -161,8 +160,8 @@ class InMemoryTransferStore(
     Future.unit
   }
 
-  override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
-      traceContext: TraceContext
+  override def findAfter(requestAfter: Option[(CantonTimestamp, SourceDomainId)], limit: Int)(
+      implicit traceContext: TraceContext
   ): Future[Seq[TransferData]] = Future.successful {
     def filter(entry: TransferEntry): Boolean =
       entry.timeOfCompletion.isEmpty && // Always filter out completed transfer-in
@@ -173,20 +172,20 @@ class InMemoryTransferStore(
     transferDataMap.values
       .to(LazyList)
       .filter(filter)
-      .take(limit)
       .map(_.transferData)
       .sortBy(t => (t.transferId.requestTimestamp, t.transferId.sourceDomain))(
         // Explicitly use the standard ordering on two-tuples here
         // As Scala does not seem to infer the right implicits to use here
         Ordering.Tuple2(
           CantonTimestamp.orderCantonTimestamp.toOrdering,
-          DomainId.orderDomainId.toOrdering,
+          SourceDomainId.orderSourceDomainId.toOrdering,
         )
       )
+      .take(limit)
   }
 
   override def findInFlight(
-      sourceDomain: DomainId,
+      sourceDomain: SourceDomainId,
       onlyCompletedTransferOut: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
@@ -197,9 +196,7 @@ class InMemoryTransferStore(
       entry.timeOfCompletion.isEmpty && // Always filter out completed transfer-in
       entry.transferData.transferOutRequestCounter.asLocalOffset <= transferOutRequestNotAfter &&
       (!onlyCompletedTransferOut || entry.transferData.transferOutResult.isDefined == onlyCompletedTransferOut) && // Transfer-out is completed condition
-      stakeholders
-        .map(_.intersect(entry.transferData.contract.metadata.stakeholders).nonEmpty)
-        .getOrElse(true)
+      stakeholders.forall(_.exists(entry.transferData.contract.metadata.stakeholders))
     }
 
     val values = transferDataMap.values

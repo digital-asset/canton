@@ -7,8 +7,11 @@ import com.daml.ledger.api.benchtool.metrics.LatencyMetric.{LatencyNanos, MaxLat
 
 import java.time.Duration
 
-final case class LatencyMetric(totalNanos: LatencyNanos, numberObservations: Int, maxLatency: MaxLatency)
-    extends Metric[LatencyNanos] {
+final case class LatencyMetric(
+    totalNanos: LatencyNanos,
+    numberObservations: Int,
+    maxLatency: MaxLatency,
+) extends Metric[LatencyNanos] {
   override type V = LatencyMetric.Value
   override type Objective = MaxLatency
 
@@ -39,7 +42,7 @@ final case class LatencyMetric(totalNanos: LatencyNanos, numberObservations: Int
 
 object LatencyMetric {
   type LatencyNanos = Long
-    final case class Value(latencyNanos: LatencyNanos) extends MetricValue
+  final case class Value(latencyNanos: LatencyNanos) extends MetricValue
 
   def empty(maxLatencyObjectiveMillis: Long): LatencyMetric =
     LatencyMetric(0, 0, MaxLatency(maxLatencyObjectiveMillis * 1000000L))

@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueueWithShutdown}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, SequencerCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
@@ -90,11 +90,10 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
       Ordering.by[TaskScheduler.TimeBarrier, CantonTimestamp](_.timestamp).reverse
     )
 
-  /** The [[scala.concurrent.Future]] of the latest task that was executed.
-    * The next task's [[TaskScheduler.TimedTask.perform()]] will run after this future completes.
+  /** The queue controlling the sequential execution of tasks within the scheduler.
     */
-  private[this] val queue: SimpleExecutionQueueWithShutdown =
-    new SimpleExecutionQueueWithShutdown(
+  private[this] val queue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(
       "task-scheduler",
       futureSupervisor,
       timeouts,

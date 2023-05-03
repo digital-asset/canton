@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.sandbox.bridge.validate
 
 import com.daml.api.util.TimeProvider
 import com.daml.error.ErrorCode
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.error.utils.ErrorDetails
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.IdString
@@ -20,6 +19,7 @@ import com.daml.logging.LoggingContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update.CommandRejected
 import com.digitalasset.canton.ledger.participant.state.v2.Update.CommandRejected.RejectionReasonTemplate

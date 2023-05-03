@@ -3,8 +3,7 @@
 
 package com.daml.ledger.api.benchtool.submission
 
-import com.daml.ledger.test.benchtool.Foo.Foo1
-import scalaz.syntax.tag._
+import com.daml.ledger.api.benchtool.infrastructure.TestDars
 
 final case class BenchtoolTestsPackageInfo(
     packageId: String
@@ -15,6 +14,6 @@ object BenchtoolTestsPackageInfo {
 
   // The packageId obtained from the compiled Scala bindings
   val StaticDefault: BenchtoolTestsPackageInfo =
-    BenchtoolTestsPackageInfo(packageId = Foo1.id.unwrap.packageId)
+    BenchtoolTestsPackageInfo(packageId = TestDars.benchtoolDarPackageId)
 
 }

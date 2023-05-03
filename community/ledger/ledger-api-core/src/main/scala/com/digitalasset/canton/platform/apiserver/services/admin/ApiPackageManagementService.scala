@@ -7,9 +7,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.daml.api.util.TimestampConversion
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.error.definitions.PackageServiceError.Validation
-import com.daml.error.definitions.{DamlError, LedgerApiErrors}
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.{ContextualizedErrorLogger, DamlError}
 import com.daml.ledger.api.v1.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementService
 import com.daml.ledger.api.v1.admin.package_management_service.*
 import com.daml.lf.archive.{Dar, DarParser, Decode, GenDarReader}
@@ -19,12 +17,13 @@ import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
+import com.digitalasset.canton.ledger.error.PackageServiceError.Validation
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
   IndexTransactionsService,
-  LedgerEndService,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPackageManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
@@ -61,14 +60,12 @@ private[apiserver] final class ApiPackageManagementService private (
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
-      transactionsService,
       packagesIndex,
       packagesWrite,
-    ),
-    timeToLive = managementServiceTimeout,
+    )
   )
 
-  override def close(): Unit = ()
+  override def close(): Unit = synchronousResponse.close()
 
   override def bindService(): ServerServiceDefinition =
     PackageManagementServiceGrpc.bindService(this, executionContext)
@@ -136,7 +133,13 @@ private[apiserver] final class ApiPackageManagementService private (
 
       val response = for {
         dar <- decodeAndValidate(request.darFile)
-        _ <- synchronousResponse.submitAndWait(submissionId, dar)
+        ledgerEndbeforeRequest <- transactionsService.currentLedgerEnd().map(Some(_))
+        _ <- synchronousResponse.submitAndWait(
+          submissionId,
+          dar,
+          ledgerEndbeforeRequest,
+          managementServiceTimeout,
+        )
       } yield {
         for (archive <- dar.all) {
           logger.info(s"Package ${archive.getHash} successfully uploaded")
@@ -183,19 +186,15 @@ private[apiserver] object ApiPackageManagementService {
     )
 
   private final class SynchronousResponseStrategy(
-      ledgerEndService: LedgerEndService,
       packagesIndex: IndexPackagesService,
       packagesWrite: state.WritePackagesService,
-  )(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
+  )(implicit loggingContext: LoggingContext)
       extends SynchronousResponse.Strategy[
         Dar[Archive],
         PackageEntry,
         PackageEntry.PackageUploadAccepted,
       ] {
     private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
-
-    override def currentLedgerEnd(): Future[Option[LedgerOffset.Absolute]] =
-      ledgerEndService.currentLedgerEnd().map(Some(_))
 
     override def submit(submissionId: Ref.SubmissionId, dar: Dar[Archive])(implicit
         telemetryContext: TelemetryContext,

@@ -10,7 +10,6 @@ import com.digitalasset.canton.participant.LedgerSyncRecordTime
 import com.digitalasset.canton.participant.store.EventLogId.ParticipantEventLogId
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
-import com.digitalasset.canton.participant.sync.TimestampedEventAndCausalChange
 import com.digitalasset.canton.topology.DomainId
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -88,9 +87,7 @@ trait ParticipantEventLogTest extends AsyncWordSpec with BaseTest {
         event4 = SingleDimensionEventLogTest
           .generateEvent(LedgerSyncRecordTime.Epoch.addMicros(3000), offsets(3))
           .copy(eventId = TimelyRejectionEventId(domainId1, UUID.randomUUID()).some)
-        inserts <- store.insertsUnlessEventIdClash(
-          Seq(event1, event2, event3, event4).map(e => TimestampedEventAndCausalChange(e, None))
-        )
+        inserts <- store.insertsUnlessEventIdClash(Seq(event1, event2, event3, event4))
         first1 <- store.firstEventWithAssociatedDomainAtOrAfter(domainId1, CantonTimestamp.Epoch)
         first2 <- store.firstEventWithAssociatedDomainAtOrAfter(domainId2, CantonTimestamp.Epoch)
         first1a <- store.firstEventWithAssociatedDomainAtOrAfter(

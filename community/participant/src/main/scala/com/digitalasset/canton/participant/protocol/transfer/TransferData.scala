@@ -3,13 +3,19 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
-import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.protocol.{
+  SerializableContract,
+  SourceDomainId,
+  TargetDomainId,
+  TransactionId,
+  TransferId,
+}
+import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
+import com.digitalasset.canton.{RequestCounter, TransferCounter}
 
 /** Stores the data for a transfer that needs to be passed from the source domain to the target domain. */
 final case class TransferData(
@@ -19,6 +25,7 @@ final case class TransferData(
     transferOutRequest: FullTransferOutTree,
     transferOutDecisionTime: CantonTimestamp,
     contract: SerializableContract,
+    transferCounter: TransferCounter,
     creatingTransactionId: TransactionId,
     transferOutResult: Option[DeliveredTransferOutResult],
 ) {
@@ -28,9 +35,9 @@ final case class TransferData(
     s"Supplied contract with ID ${contract.contractId} differs from the ID ${transferOutRequest.contractId} of the transfer-out request.",
   )
 
-  def targetDomain: DomainId = transferOutRequest.targetDomain
+  def targetDomain: TargetDomainId = transferOutRequest.targetDomain
 
-  def sourceDomain: DomainId = transferOutRequest.sourceDomain
+  def sourceDomain: SourceDomainId = transferOutRequest.sourceDomain
 
   def transferId: TransferId = TransferId(transferOutRequest.sourceDomain, transferOutTimestamp)
 
@@ -50,6 +57,7 @@ final case class TransferData(
               `transferOutRequest`,
               `transferOutDecisionTime`,
               `contract`,
+              `transferCounter`,
               `creatingTransactionId`,
               otherResult,
             ) =>

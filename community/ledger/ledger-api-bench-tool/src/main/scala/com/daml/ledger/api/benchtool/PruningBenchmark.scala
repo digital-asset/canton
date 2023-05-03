@@ -5,18 +5,23 @@ package com.daml.ledger.api.benchtool
 
 import akka.actor.typed.{ActorSystem, SpawnProtocol}
 import com.daml.ledger.api.benchtool.config.WorkflowConfig
+import com.daml.ledger.api.benchtool.infrastructure.TestDars
 import com.daml.ledger.api.benchtool.metrics.{BenchmarkResult, MetricsManager, MetricsSet}
 import com.daml.ledger.api.benchtool.services.LedgerApiServices
-import com.daml.ledger.api.benchtool.submission.Names
+import com.daml.ledger.api.benchtool.submission.{FooTemplateDescriptor, Names}
 import com.daml.ledger.api.v1.admin.participant_pruning_service.PruneRequest
+import com.daml.ledger.api.v1.commands.{Command, Commands, CreateCommand}
+import com.daml.ledger.api.v1.value.{Record, RecordField, Value}
 import com.daml.ledger.client.binding.Primitive
-import com.daml.ledger.test.benchtool.Foo.Dummy
-import com.daml.ledger.api.v1.commands.Commands
+import com.daml.lf.data.Ref
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 class PruningBenchmark(reportingPeriod: FiniteDuration) {
+
+  private val packageId: Ref.PackageId = TestDars.benchtoolDarPackageId
+
   def benchmarkPruning(
       signatory: Primitive.Party,
       pruningConfig: WorkflowConfig.PruningConfig,
@@ -31,7 +36,7 @@ class PruningBenchmark(reportingPeriod: FiniteDuration) {
       Commands(
         applicationId = names.benchtoolApplicationId,
         commandId = "pruning-benchmarking-dummy-command",
-        commands = Seq(Dummy(signatory).create.command),
+        commands = Seq(makeCreateDummyCommand(signatory)),
         actAs = Seq(signatory.toString),
       )
     )
@@ -58,5 +63,30 @@ class PruningBenchmark(reportingPeriod: FiniteDuration) {
         }
       }
   } yield Right(())
+
+  private def makeCreateDummyCommand(
+      signatory: Primitive.Party
+  ) = {
+    val createArguments: Option[Record] = Some(
+      Record(
+        None,
+        Seq(
+          RecordField(
+            label = "signatory",
+            value = Some(Value(Value.Sum.Party(signatory.toString))),
+          )
+        ),
+      )
+    )
+    val c: Command = Command(
+      command = Command.Command.Create(
+        CreateCommand(
+          templateId = Some(FooTemplateDescriptor.dummyTemplateId(packageId = packageId)),
+          createArguments = createArguments,
+        )
+      )
+    )
+    c
+  }
 
 }

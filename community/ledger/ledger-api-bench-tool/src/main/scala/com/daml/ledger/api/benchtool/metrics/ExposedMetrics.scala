@@ -3,12 +3,12 @@
 
 package com.daml.ledger.api.benchtool.metrics
 
-import java.time.Clock
-
 import com.daml.ledger.api.benchtool.util.TimeUtil
-import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Histogram, MetricsFactory}
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Histogram, LabeledMetricsFactory}
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.google.protobuf.timestamp.Timestamp
+
+import java.time.Clock
 
 final class ExposedMetrics[T](
     counterMetric: ExposedMetrics.CounterMetric[T],
@@ -44,17 +44,17 @@ final class ExposedMetrics[T](
 object ExposedMetrics {
   private val Prefix: MetricName = MetricName.Daml :+ "bench_tool"
 
-    final case class CounterMetric[T](counter: Counter, countingFunction: T => Long)
-    final case class BytesProcessedMetric[T](bytesProcessed: Counter, sizingFunction: T => Long)
-    final case class DelayMetric[T](delays: Histogram, recordTimeFunction: T => Seq[Timestamp])
-    final case class LatestRecordTimeMetric[T](
+  final case class CounterMetric[T](counter: Counter, countingFunction: T => Long)
+  final case class BytesProcessedMetric[T](bytesProcessed: Counter, sizingFunction: T => Long)
+  final case class DelayMetric[T](delays: Histogram, recordTimeFunction: T => Seq[Timestamp])
+  final case class LatestRecordTimeMetric[T](
       latestRecordTime: Gauge[Long],
       recordTimeFunction: T => Seq[Timestamp],
   )
 
   def apply[T](
       streamName: String,
-      factory: MetricsFactory,
+      factory: LabeledMetricsFactory,
       countingFunction: T => Long,
       sizingFunction: T => Long,
       recordTimeFunction: Option[T => Seq[Timestamp]],

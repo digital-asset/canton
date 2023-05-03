@@ -3,11 +3,8 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.daml.error.definitions.CommonErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
-import com.daml.ledger.api.v1.ledger_identity_service.LedgerIdentityServiceGrpc.{
-  LedgerIdentityService as GrpcLedgerIdentityService
-}
+import com.daml.error.ContextualizedErrorLogger
+import com.daml.ledger.api.v1.ledger_identity_service.LedgerIdentityServiceGrpc.LedgerIdentityService as GrpcLedgerIdentityService
 import com.daml.ledger.api.v1.ledger_identity_service.{
   GetLedgerIdentityRequest,
   GetLedgerIdentityResponse,
@@ -15,6 +12,7 @@ import com.daml.ledger.api.v1.ledger_identity_service.{
 }
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import io.grpc.{BindableService, ServerServiceDefinition}
 import scalaz.syntax.tag.*

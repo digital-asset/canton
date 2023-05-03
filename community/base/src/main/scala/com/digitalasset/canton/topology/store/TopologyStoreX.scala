@@ -7,25 +7,34 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v1 as topoV1
+import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionX.GenericStoredTopologyTransactionX
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
   GenericStoredTopologyTransactionsX,
   PositiveStoredTopologyTransactionsX,
 }
+import com.digitalasset.canton.topology.store.TopologyStore.Change.{Other, TopologyDelay}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreX
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
-import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
+import com.digitalasset.canton.topology.transaction.TopologyTransactionX.{
+  GenericTopologyTransactionX,
+  TxHash,
+}
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
+import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
@@ -73,7 +82,12 @@ object ValidatedTopologyTransactionX {
 abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
     val ec: ExecutionContext
 ) extends AutoCloseable
-    with BaseTopologyStore[StoreID, GenericValidatedTopologyTransactionX] {
+    with TopologyStoreCommon[
+      StoreID,
+      GenericValidatedTopologyTransactionX,
+      GenericStoredTopologyTransactionX,
+      GenericSignedTopologyTransactionX,
+    ] {
   this: NamedLogging =>
 
   def findProposalsByTxHash(effective: EffectiveTime, hashes: Seq[TxHash])(implicit
@@ -145,6 +159,111 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]]
 
+  def inspectKnownParties(
+      timestamp: CantonTimestamp,
+      filterParty: String,
+      filterParticipant: String,
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Set[PartyId]]
+
+  def findFirstMediatorStateForMediator(
+      mediatorId: MediatorId
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransactionX[TopologyChangeOpX.Replace, MediatorDomainStateX]]]
+
+  def findFirstTrustCertificateForParticipant(
+      participant: ParticipantId
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransactionX[TopologyChangeOpX.Replace, DomainTrustCertificateX]]]
+
+  def findEssentialStateForMember(
+      member: Member,
+      asOfInclusive: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[GenericStoredTopologyTransactionsX]
+
+  protected def signedTxFromStoredTx(
+      storedTx: GenericStoredTopologyTransactionX
+  ): SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX] = storedTx.transaction
+
+  /** returns initial set of onboarding transactions that should be dispatched to the domain */
+  def findParticipantOnboardingTransactions(participantId: ParticipantId, domainId: DomainId)(
+      implicit traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransactionX]]
+
+  def findDispatchingTransactionsAfter(
+      timestampExclusive: CantonTimestamp,
+      limit: Option[Int],
+  )(implicit
+      traceContext: TraceContext
+  ): Future[GenericStoredTopologyTransactionsX]
+
+  def findStoredForVersion(
+      transaction: GenericTopologyTransactionX,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[GenericStoredTopologyTransactionX]]
+}
+
+object TopologyStoreX {
+  def accumulateUpcomingEffectiveChanges(
+      items: Seq[StoredTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
+  ): Seq[TopologyStore.Change] = {
+    items
+      .map(x => (x, x.transaction.transaction.mapping))
+      .map {
+        case (tx, x: DomainParametersStateX) =>
+          TopologyDelay(tx.sequenced, tx.validFrom, x.parameters.topologyChangeDelay)
+        case (tx, _) => Other(tx.sequenced, tx.validFrom)
+      }
+      .sortBy(_.effective)
+      .distinct
+  }
+
+  def apply[StoreID <: TopologyStoreId](
+      storeId: StoreID,
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext
+  ): TopologyStoreX[StoreID] =
+    storage match {
+      case _: MemoryStorage =>
+        (new InMemoryTopologyStoreX(storeId, loggerFactory))
+      case jdbc: DbStorage =>
+        // TODO(#11255) implement me!
+        (new InMemoryTopologyStoreX(storeId, loggerFactory))
+    }
+
+  lazy val initialParticipantDispatchingSet = Set(
+    TopologyMappingX.Code.DomainTrustCertificateX,
+    TopologyMappingX.Code.OwnerToKeyMappingX,
+    // TODO(#11255) - potentially revisit this once we implement TopologyStoreX.filterInitialParticipantDispatchingTransactions
+    TopologyMappingX.Code.NamespaceDelegationX,
+    TopologyMappingX.Code.IdentifierDelegationX,
+    TopologyMappingX.Code.UnionspaceDefinitionX,
+  )
+
+  /** convenience method waiting until the last eligible transaction inserted into the source store has been dispatched successfully to the target domain */
+  def awaitTxObserved(
+      client: DomainTopologyClient,
+      transaction: GenericSignedTopologyTransactionX,
+      target: TopologyStoreX[?],
+      timeout: Duration,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Boolean] = {
+    client.await(
+      // we know that the transaction is stored and effective once we find it in the target
+      // domain store and once the effective time (valid from) is smaller than the client timestamp
+      sp => target.findStored(transaction).map(_.exists(_.validFrom.value < sp.timestamp)),
+      timeout,
+    )
+  }
 }
 
 sealed trait TimeQueryX {
@@ -181,24 +300,5 @@ object TimeQueryX {
           fromO <- value.from.traverse(CantonTimestamp.fromProtoPrimitive)
           toO <- value.until.traverse(CantonTimestamp.fromProtoPrimitive)
         } yield Range(fromO, toO)
-    }
-}
-
-object TopologyStoreX {
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def apply[StoreID <: TopologyStoreId](
-      storeId: TopologyStoreId,
-      storage: Storage,
-      timeouts: ProcessingTimeout,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      ec: ExecutionContext
-  ): TopologyStoreX[StoreID] =
-    storage match {
-      case _: MemoryStorage =>
-        (new InMemoryTopologyStoreX(storeId, loggerFactory)).asInstanceOf[TopologyStoreX[StoreID]]
-      case jdbc: DbStorage =>
-        // TODO(#11255) implement me!
-        (new InMemoryTopologyStoreX(storeId, loggerFactory)).asInstanceOf[TopologyStoreX[StoreID]]
     }
 }

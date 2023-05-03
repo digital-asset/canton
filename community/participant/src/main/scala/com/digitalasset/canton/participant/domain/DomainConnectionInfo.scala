@@ -31,11 +31,10 @@ object DomainConnectionInfo {
         alias: DomainAlias,
         sequencerConnectClient: SequencerConnectClient,
     ): EitherT[Future, SequencerConnectClient.Error, (DomainId, StaticDomainParameters)] =
-      (for {
-        domainIdSequencerId <- sequencerConnectClient.getDomainIdSequencerId(alias)
-        (domainId, _) = domainIdSequencerId
+      for {
+        domainClientBootstrapInfo <- sequencerConnectClient.getDomainClientBootstrapInfo(alias)
         staticDomainParameters <- sequencerConnectClient.getDomainParameters(alias)
-      } yield (domainId, staticDomainParameters))
+      } yield (domainClientBootstrapInfo.domainId, staticDomainParameters)
 
     for {
       sequencerConnectClient <- sequencerConnectClientBuilder(config.sequencerConnection)

@@ -15,7 +15,6 @@ import com.digitalasset.canton.metrics.MetricsFactoryType.External
   */
 final case class TestingConfigInternal(
     testSequencerClientFor: Set[TestSequencerClientFor] = Set.empty,
-    useCausalityTracking: Boolean = false,
     metricsFactoryType: MetricsFactoryType = External,
     initializeGlobalOpenTelemetry: Boolean = true,
 )

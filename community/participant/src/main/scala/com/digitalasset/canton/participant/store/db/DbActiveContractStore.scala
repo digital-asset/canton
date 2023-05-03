@@ -21,7 +21,12 @@ import com.digitalasset.canton.participant.store.db.DbActiveContractStore.*
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{
+  LfContractId,
+  SourceDomainId,
+  TargetDomainId,
+  TransferDomainId,
+}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
@@ -68,6 +73,13 @@ class DbActiveContractStore(
 
   protected[this] override val pruning_status_table = "active_contract_pruning"
 
+  /*
+  Consider the scenario where a contract is created on domain D1, then transferred to D2, then to D3 and is finally archived.
+  We will have the corresponding entries in the ActiveContractStore:
+  - On D1, remoteDomain will initially be None and then Some(D2) (after the transfer-out)
+  - On D2, remoteDomain will initially be Some(D1) and then Some(D3) (after the transfer-out)
+  - On D3, remoteDomain will initially be Some(D2) and then None (after the archival).
+   */
   private case class StoredActiveContract(
       change: ChangeType,
       timestamp: CantonTimestamp,
@@ -78,11 +90,14 @@ class DbActiveContractStore(
       val statusF = change match {
         case ChangeType.Activation => Future.successful(Active)
         case ChangeType.Deactivation =>
-          remoteDomainIdF.map(_.fold[Status](Archived)(TransferredAway))
+          // In case of a deactivation, then `remoteDomainIdIndex` is empty iff it is a transfer-out,
+          // in which case the corresponding domain is the target domain.
+          // The same holds for `remoteDomainIdF`.
+          remoteDomainIdF.map(
+            _.fold[Status](Archived)(domainId => TransferredAway(TargetDomainId(domainId)))
+          )
       }
-      statusF.map { status =>
-        ContractState(status, rc, timestamp)
-      }
+      statusF.map(ContractState(_, rc, timestamp))
     }
 
     private def remoteDomainIdF: Future[Option[DomainId]] = {
@@ -90,9 +105,7 @@ class DbActiveContractStore(
         import TraceContext.Implicits.Empty.*
         IndexedDomain
           .fromDbIndexOT("active_contracts remote domain index", indexedStringStore)(index)
-          .map { x =>
-            x.domainId
-          }
+          .map(_.domainId)
           .value
       }
     }
@@ -177,17 +190,17 @@ class DbActiveContractStore(
     }
 
   private def indexedDomains(
-      contractAndDomain: Seq[(LfContractId, DomainId)]
+      contractAndDomain: Seq[(LfContractId, TransferDomainId)]
   ): CheckedT[Future, AcsError, AcsWarning, Seq[(LfContractId, IndexedDomain)]] = {
     CheckedT.result(contractAndDomain.parTraverse { case (contractId, domainId) =>
       IndexedDomain
-        .indexed(indexedStringStore)(domainId)
+        .indexed(indexedStringStore)(domainId.unwrap)
         .map(s => (contractId, s))
     })
   }
 
-  def transferInContracts(transferIns: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(implicit
-      traceContext: TraceContext
+  def transferInContracts(transferIns: Seq[(LfContractId, SourceDomainId)], toc: TimeOfChange)(
+      implicit traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     processingTime.checkedTEvent {
       for {
@@ -204,8 +217,8 @@ class DbActiveContractStore(
       } yield ()
     }
 
-  def transferOutContracts(transferOuts: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(implicit
-      traceContext: TraceContext
+  def transferOutContracts(transferOuts: Seq[(LfContractId, TargetDomainId)], toc: TimeOfChange)(
+      implicit traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     processingTime.checkedTEvent {
       for {
@@ -539,7 +552,7 @@ class DbActiveContractStore(
   }
 
   private def checkTransfersConsistency(
-      transfers: Seq[(LfContractId, DomainId)],
+      transfers: Seq[(LfContractId, TransferDomainId)],
       toc: TimeOfChange,
   )(implicit traceContext: TraceContext): CheckedT[Future, AcsError, AcsWarning, Unit] =
     if (enableAdditionalConsistencyChecks) {

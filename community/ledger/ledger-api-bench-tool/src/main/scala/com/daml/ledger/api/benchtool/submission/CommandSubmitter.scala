@@ -15,15 +15,15 @@ import com.daml.ledger.api.v1.commands.{Command, Commands}
 import com.daml.ledger.client
 import com.daml.ledger.client.binding.Primitive
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
-import com.daml.metrics.api.MetricHandle.{MetricsFactory, Timer}
+import com.daml.metrics.api.MetricHandle.{LabeledMetricsFactory, Timer}
 import com.daml.metrics.api.MetricName
 import io.grpc.Status
 import org.slf4j.LoggerFactory
-import scalaz.syntax.tag._
+import scalaz.syntax.tag.*
 
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.chaining._
+import scala.util.chaining.*
 import scala.util.control.NonFatal
 
 final case class CommandSubmitter(
@@ -31,7 +31,7 @@ final case class CommandSubmitter(
     benchtoolUserServices: LedgerApiServices,
     adminServices: LedgerApiServices,
     partyAllocating: PartyAllocating,
-    metricsFactory: MetricsFactory,
+    metricsFactory: LabeledMetricsFactory,
     metricsManager: MetricsManager[LatencyNanos],
     waitForSubmission: Boolean,
     commandGenerationParallelism: Int = 8,
@@ -247,10 +247,10 @@ final case class CommandSubmitter(
 }
 
 object CommandSubmitter {
-    final case class CommandSubmitterError(msg: String, cause: Throwable)
+  final case class CommandSubmitterError(msg: String, cause: Throwable)
       extends RuntimeException(msg, cause)
 
-    final case class SubmissionSummary(observers: List[Primitive.Party])
+  final case class SubmissionSummary(observers: List[Primitive.Party])
 
   class ProgressMeter(totalItems: Int) {
     var startTimeMillis: Long = System.currentTimeMillis()

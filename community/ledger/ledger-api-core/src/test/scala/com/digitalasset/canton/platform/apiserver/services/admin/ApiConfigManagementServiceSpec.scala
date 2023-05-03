@@ -7,6 +7,9 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.daml.api.util.TimeProvider
+import com.daml.error.ErrorsAssertions
+import com.daml.error.utils.ErrorDetails
+import com.daml.error.utils.ErrorDetails.RetryInfoDetail
 import com.daml.grpc.{GrpcException, GrpcStatus}
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.v1.admin.config_management_service.{
@@ -19,6 +22,7 @@ import com.daml.lf.data.{Ref, Time}
 import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
 import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, TelemetryContext, TelemetrySpecBase}
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
@@ -27,10 +31,12 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   WriteConfigService,
   WriteService,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiConfigManagementServiceSpec.*
-import com.google.protobuf.duration.{Duration as DurationProto}
+import com.google.protobuf.duration.Duration as DurationProto
 import com.google.protobuf.timestamp.Timestamp
+import io.grpc.Status.Code
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Inside
@@ -39,10 +45,10 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
 import java.util.concurrent.CompletableFuture.completedFuture
-import java.util.concurrent.CompletionStage
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.immutable
-import scala.concurrent.duration.{Duration as ScalaDuration}
+import scala.concurrent.duration.{Duration as ScalaDuration, DurationInt}
 import scala.concurrent.{Await, Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -53,7 +59,8 @@ class ApiConfigManagementServiceSpec
     with MockitoSugar
     with ArgumentMatchersSugar
     with TelemetrySpecBase
-    with AkkaBeforeAndAfterAll {
+    with AkkaBeforeAndAfterAll
+    with ErrorsAssertions {
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
@@ -136,7 +143,7 @@ class ApiConfigManagementServiceSpec
       val timeProvider = TimeProvider.UTC
       val maximumRecordTime = timeProvider.getCurrentTime.plusSeconds(60)
 
-      val (indexService, writeService, currentConfiguration) = fakeServices(
+      val (indexService, writeService, currentConfiguration) = bridgedServices(
         startingOffset = 7,
         submissions = Seq(Ref.SubmissionId.assertFromString("one") -> initialConfiguration),
       )
@@ -150,7 +157,7 @@ class ApiConfigManagementServiceSpec
       apiConfigManagementService
         .setTimeModel(
           SetTimeModelRequest.of(
-            "some submission ID",
+            submissionId = "some submission ID",
             maximumRecordTime = Some(Timestamp.of(maximumRecordTime.getEpochSecond, 0)),
             configurationGeneration = initialGeneration,
             newTimeModel = Some(
@@ -228,6 +235,63 @@ class ApiConfigManagementServiceSpec
           succeed
         }
     }
+
+    "close while setting time model" in {
+      val writeService = mock[state.WriteConfigService]
+      when(
+        writeService.submitConfiguration(
+          any[Time.Timestamp],
+          any[Ref.SubmissionId],
+          any[Configuration],
+        )(any[LoggingContext], any[TelemetryContext])
+      ).thenReturn(CompletableFuture.completedFuture(SubmissionResult.Acknowledged))
+
+      val indexConfigManagementService = new FakeCurrentIndexConfigManagementService(
+        LedgerOffset.Absolute(Ref.LedgerString.assertFromString("0")),
+        aConfiguration,
+      )
+
+      val apiConfigManagementService = ApiConfigManagementService.createApiService(
+        indexConfigManagementService,
+        writeService,
+        TimeProvider.UTC,
+        telemetry = NoOpTelemetry,
+      )
+
+      indexConfigManagementService.getNextConfigurationEntriesPromise.future
+        .map(_ => apiConfigManagementService.close())
+        .discard
+
+      apiConfigManagementService
+        .setTimeModel(
+          aSetTimeModelRequest
+        )
+        .transform {
+          case Success(_) =>
+            fail("Expected a failure, but received success")
+          case Failure(err: StatusRuntimeException) =>
+            assertError(
+              actual = err,
+              expectedStatusCode = Code.UNAVAILABLE,
+              expectedMessage = "SERVER_IS_SHUTTING_DOWN(1,0): Server is shutting down",
+              expectedDetails = List(
+                ErrorDetails.ErrorInfoDetail(
+                  "SERVER_IS_SHUTTING_DOWN",
+                  Map(
+                    "submissionId" -> s"'$aSubmissionId'",
+                    "category" -> "1",
+                    "definite_answer" -> "false",
+                  ),
+                ),
+                RetryInfoDetail(1.second),
+              ),
+              verifyEmptyStackTrace = true,
+            )
+            Success(succeed)
+          case Failure(other) =>
+            fail("Unexpected error", other)
+        }
+    }
   }
 }
 
@@ -236,21 +300,23 @@ object ApiConfigManagementServiceSpec {
 
   private val aConfigurationGeneration = 0L
 
+  private val aConfiguration = Configuration(
+    aConfigurationGeneration,
+    LedgerTimeModel.reasonableDefault,
+    Duration.ZERO,
+  )
+
   private val someConfigurationEntries = List(
     LedgerOffset.Absolute(Ref.LedgerString.assertFromString("0")) ->
       ConfigurationEntry.Accepted(
         aSubmissionId,
-        Configuration(
-          aConfigurationGeneration,
-          LedgerTimeModel.reasonableDefault,
-          Duration.ZERO,
-        ),
+        aConfiguration,
       )
   )
 
   private val aSetTimeModelRequest = SetTimeModelRequest(
     aSubmissionId,
-    Some(Timestamp.defaultInstance),
+    Some(Timestamp.of(TimeProvider.UTC.getCurrentTime.plusSeconds(600).getEpochSecond, 0)),
     aConfigurationGeneration,
     Some(
       TimeModel(
@@ -284,8 +350,14 @@ object ApiConfigManagementServiceSpec {
 
     override def configurationEntries(startExclusive: Option[LedgerOffset.Absolute])(implicit
         loggingContext: LoggingContext
-    ): Source[(LedgerOffset.Absolute, ConfigurationEntry), NotUsed] =
+    ): Source[(LedgerOffset.Absolute, ConfigurationEntry), NotUsed] = {
+      nextConfigurationEntriesPromise.getAndSet(Promise[Unit]()).success(())
       Source.never
+    }
+
+    private val nextConfigurationEntriesPromise =
+      new AtomicReference[Promise[Unit]](Promise[Unit]())
+    def getNextConfigurationEntriesPromise: Promise[Unit] = nextConfigurationEntriesPromise.get()
   }
 
   private final class FakeStreamingIndexConfigManagementService(
@@ -324,7 +396,7 @@ object ApiConfigManagementServiceSpec {
     }
   }
 
-  private def fakeServices(
+  private def bridgedServices(
       startingOffset: Long,
       submissions: Iterable[(Ref.SubmissionId, Configuration)],
   )(implicit

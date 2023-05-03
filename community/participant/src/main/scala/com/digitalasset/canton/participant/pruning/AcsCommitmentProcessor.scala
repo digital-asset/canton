@@ -192,8 +192,8 @@ class AcsCommitmentProcessor(
   private val timestampsWithPotentialTopologyChanges =
     new AtomicReference[List[Traced[CantonTimestamp]]](List())
 
-  private[pruning] val queue: SimpleExecutionQueueWithShutdown =
-    new SimpleExecutionQueueWithShutdown(
+  private[pruning] val queue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(
       "acs-commitment-processor-queue",
       futureSupervisor,
       timeouts,
@@ -346,7 +346,7 @@ class AcsCommitmentProcessor(
       }
     }
 
-    def performPublish(): Future[Unit] = {
+    def performPublish(): FutureUnlessShutdown[Unit] = {
       for {
         snapshot <- performUnlessClosingF(functionFullName)(runningCommitments)
         reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
@@ -385,16 +385,13 @@ class AcsCommitmentProcessor(
             } yield ()
           }
       } yield ()
-    }.onShutdown {
-      // TODO(#6175) maybe stop the queue instead?
-      logger.info(s"Not processing ACS change at $toc due to shutdown")
     }
 
     FutureUtil.doNotAwait(
       queue
         .executeUS(
           Policy
-            .noisyInfiniteRetry(
+            .noisyInfiniteRetryUS(
               performPublish(),
               this,
               timeouts.storageMaxRetryInterval.asFiniteApproximation,

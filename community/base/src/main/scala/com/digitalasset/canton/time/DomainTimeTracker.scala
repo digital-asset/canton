@@ -17,6 +17,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -455,13 +456,22 @@ object DomainTimeTracker {
       config: DomainTimeTrackerConfig,
       clock: Clock,
       sequencerClient: SequencerClient,
+      protocolVersion: ProtocolVersion,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): DomainTimeTracker =
     new DomainTimeTracker(
       config,
       clock,
-      TimeProofRequestSubmitter(config.timeRequest, clock, sequencerClient, loggerFactory),
-      sequencerClient.timeouts,
+      TimeProofRequestSubmitter(
+        config.timeRequest,
+        clock,
+        sequencerClient,
+        protocolVersion,
+        timeouts,
+        loggerFactory,
+      ),
+      timeouts,
       loggerFactory,
     )
 }

@@ -96,16 +96,20 @@ object TopologyManagementInitialization {
         OpenEnvelope(content, Recipients.cc(member))(protocolVersion)
       )
       _ = logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
-      _ <- SequencerClient.sendWithRetries(
-        callback =>
-          client
-            .sendAsync(Batch(batch.toList, protocolVersion), SendType.Other, callback = callback),
-        maxRetries = 600,
-        delay = 1.second,
-        sendDescription = "Send initial topology transaction to domain members",
-        errMsg = "Failed to send initial topology transactions to domain members",
-        flagCloseable = client,
-      )
+      _ <- SequencerClient
+        .sendWithRetries(
+          callback =>
+            client
+              .sendAsync(Batch(batch.toList, protocolVersion), SendType.Other, callback = callback),
+          maxRetries = 600,
+          delay = 1.second,
+          sendDescription = "Send initial topology transaction to domain members",
+          errMsg = "Failed to send initial topology transactions to domain members",
+          flagCloseable = client,
+        )
+        .onShutdown(
+          logger.debug("sequenceInitialTopology aborted due to shutdown")
+        )
     } yield ()
   }
 
@@ -168,7 +172,14 @@ object TopologyManagementInitialization {
           sequencerConnection,
         )
       }
-      timeTracker = DomainTimeTracker(config.timeTracker, clock, newClient, loggerFactory)
+      timeTracker = DomainTimeTracker(
+        config.timeTracker,
+        clock,
+        newClient,
+        protocolVersion,
+        timeouts,
+        loggerFactory,
+      )
       domainTopologyServiceHandler =
         new DomainTopologyManagerEventHandler(
           RegisterTopologyTransactionResponseStore(

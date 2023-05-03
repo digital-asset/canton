@@ -8,13 +8,13 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.daml.error.definitions.DamlError
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{DamlError, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.refinements.ApiTypes as A
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.language.Ast
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AdminWorkflowServicesErrorGroup
@@ -58,6 +58,7 @@ class AdminWorkflowServices(
     adminPartyId: PartyId,
     hashOps: HashOps,
     adminToken: CantonAdminToken,
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
     protected val clock: Clock,
     tracerProvider: TracerProvider,
@@ -94,6 +95,7 @@ class AdminWorkflowServices(
       syncService.maxDeduplicationDuration, // Set the deduplication duration for Ping command to the maximum allowed.
       syncService.isActive(),
       Some(syncService),
+      futureSupervisor,
       loggerFactory,
       clock,
     )

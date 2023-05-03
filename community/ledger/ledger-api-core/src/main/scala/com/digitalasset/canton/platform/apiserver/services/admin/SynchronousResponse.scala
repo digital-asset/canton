@@ -3,16 +3,15 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.CommonErrors
+import akka.stream.{KillSwitches, Materializer}
 import com.daml.lf.data.Ref
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
+import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.apiserver.services.admin.SynchronousResponse.{
   Accepted,
   Rejected,
@@ -28,23 +27,32 @@ import scala.concurrent.{ExecutionContext, Future, TimeoutException}
   * the appropriate entry.
   */
 class SynchronousResponse[Input, Entry, AcceptedEntry](
-    strategy: SynchronousResponse.Strategy[Input, Entry, AcceptedEntry],
-    timeToLive: FiniteDuration,
+    strategy: SynchronousResponse.Strategy[Input, Entry, AcceptedEntry]
 )(implicit
     executionContext: ExecutionContext,
     materializer: Materializer,
-) {
+) extends AutoCloseable {
 
   private val logger = ContextualizedLogger.get(getClass)
 
-  def submitAndWait(submissionId: Ref.SubmissionId, input: Input)(implicit
+  private val shutdownKillSwitch = KillSwitches.shared("shutdown-synchronous-response")
+
+  object ShuttingDown extends RuntimeException;
+
+  override def close(): Unit = shutdownKillSwitch.abort(ShuttingDown)
+
+  def submitAndWait(
+      submissionId: Ref.SubmissionId,
+      input: Input,
+      ledgerEndBeforeRequest: Option[LedgerOffset.Absolute],
+      timeToLive: FiniteDuration,
+  )(implicit
       telemetryContext: TelemetryContext,
       loggingContext: LoggingContext,
   ): Future[AcceptedEntry] = {
     for {
-      ledgerEndBeforeRequest <- strategy.currentLedgerEnd()
       submissionResult <- strategy.submit(submissionId, input)
-      entry <- toResult(submissionId, ledgerEndBeforeRequest, submissionResult)
+      entry <- toResult(submissionId, ledgerEndBeforeRequest, submissionResult, timeToLive)
     } yield entry
   }
 
@@ -52,9 +60,10 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
       submissionId: Ref.SubmissionId,
       ledgerEndBeforeRequest: Option[LedgerOffset.Absolute],
       submissionResult: SubmissionResult,
+      timeToLive: FiniteDuration,
   )(implicit loggingContext: LoggingContext) = submissionResult match {
     case SubmissionResult.Acknowledged =>
-      acknowledged(submissionId, ledgerEndBeforeRequest)
+      acknowledged(submissionId, ledgerEndBeforeRequest, timeToLive)
     case synchronousError: SubmissionResult.SynchronousError =>
       Future.failed(synchronousError.exception)
   }
@@ -62,11 +71,19 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
   private def acknowledged(
       submissionId: Ref.SubmissionId,
       ledgerEndBeforeRequest: Option[LedgerOffset.Absolute],
+      timeToLive: FiniteDuration,
   )(implicit loggingContext: LoggingContext) = {
     val isAccepted = new Accepted(strategy.accept(submissionId))
     val isRejected = new Rejected(strategy.reject(submissionId))
+    val contextualizedErrorLogger =
+      new DamlContextualizedErrorLogger(logger, loggingContext, None)
     strategy
       .entries(ledgerEndBeforeRequest)
+      .via(shutdownKillSwitch.flow)
+      .mapError { case ShuttingDown =>
+        // This is needed for getting a different instance of StatusRuntimeException for each shut down stream
+        CommonErrors.ServerIsShuttingDown.Reject()(contextualizedErrorLogger).asGrpcError
+      }
       .collect {
         case isAccepted(entry) => Future.successful(entry)
         case isRejected(exception) => Future.failed(exception)
@@ -105,9 +122,6 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
 object SynchronousResponse {
 
   trait Strategy[Input, Entry, AcceptedEntry] {
-
-    /** Fetches the current ledger end before the request is submitted. */
-    def currentLedgerEnd(): Future[Option[LedgerOffset.Absolute]]
 
     /** Submits a request to the ledger. */
     def submit(submissionId: Ref.SubmissionId, input: Input)(implicit

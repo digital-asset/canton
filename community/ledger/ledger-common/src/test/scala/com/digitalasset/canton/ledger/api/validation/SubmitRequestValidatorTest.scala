@@ -4,9 +4,8 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.api.util.{DurationConversion, TimestampConversion}
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
-import com.daml.ledger.api.v1.commands.Commands.{DeduplicationPeriod as DeduplicationPeriodProto}
+import com.daml.ledger.api.v1.commands.Commands.DeduplicationPeriod as DeduplicationPeriodProto
 import com.daml.ledger.api.v1.commands.{Command, Commands, CreateCommand}
 import com.daml.ledger.api.v1.value.Value.Sum
 import com.daml.ledger.api.v1.value.{List as ApiList, Map as ApiMap, Optional as ApiOptional, *}
@@ -18,7 +17,7 @@ import com.daml.lf.command.{
 }
 import com.daml.lf.data.*
 import com.daml.lf.value.Value.ValueRecord
-import com.daml.lf.value.{Value as Lf}
+import com.daml.lf.value.Value as Lf
 import com.digitalasset.canton.ledger.api.DomainMocks.{
   applicationId,
   commandId,
@@ -27,6 +26,7 @@ import com.digitalasset.canton.ledger.api.DomainMocks.{
 }
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, LedgerId}
 import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, DomainMocks}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.empty.Empty
 import io.grpc.Status.Code.{INVALID_ARGUMENT, NOT_FOUND}

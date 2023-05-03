@@ -6,13 +6,14 @@ package com.digitalasset.canton.ledger.sandbox.bridge.validate
 import akka.NotUsed
 import akka.stream.scaladsl.Flow
 import com.daml.api.util.TimeProvider
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.Ref
 import com.daml.lf.transaction.{GlobalKey as LfGlobalKey, Transaction as LfTransaction}
 import com.daml.lf.value.Value.ContractId
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.InstrumentedGraph.*
 import com.digitalasset.canton.ledger.configuration.Configuration
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.participant.state.v2.Update

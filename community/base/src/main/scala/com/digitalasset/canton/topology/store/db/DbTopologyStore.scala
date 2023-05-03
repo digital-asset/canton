@@ -227,7 +227,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
 
   }
 
-  override private[topology] def doAppend(
+  override def append(
       sequenced: SequencedTime,
       effective: EffectiveTime,
       transactions: Seq[ValidatedTopologyTransaction],

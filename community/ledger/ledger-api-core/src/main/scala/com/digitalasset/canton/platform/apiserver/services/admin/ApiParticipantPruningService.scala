@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.participant_pruning_service.{
   ParticipantPruningServiceGrpc,
   PruneRequest,
@@ -17,12 +16,13 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.{Metrics, Tracked}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexParticipantPruningService,
   LedgerEndService,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService

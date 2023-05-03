@@ -3,15 +3,14 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.user_management_service.{
   CreateUserResponse,
   GetUserResponse,
   UpdateUserRequest,
   UpdateUserResponse,
 }
-import com.daml.ledger.api.v1.admin.{user_management_service as proto}
+import com.daml.ledger.api.v1.admin.user_management_service as proto
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.ledger.api.auth.ClaimAdmin
 import com.digitalasset.canton.ledger.api.auth.ClaimSet.Claims
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.ledger.api.domain.*
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPartyManagementService
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.update

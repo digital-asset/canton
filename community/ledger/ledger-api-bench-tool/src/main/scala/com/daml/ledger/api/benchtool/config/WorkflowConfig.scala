@@ -94,7 +94,7 @@ object WorkflowConfig {
 
   }
 
-    final case class PruningConfig(
+  final case class PruningConfig(
       name: String,
       pruneAllDivulgedContracts: Boolean,
       maxDurationObjective: FiniteDuration,

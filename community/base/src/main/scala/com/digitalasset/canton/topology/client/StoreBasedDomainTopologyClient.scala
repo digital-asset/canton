@@ -10,6 +10,7 @@ import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
@@ -722,14 +723,14 @@ class StoreBasedTopologySnapshot(
   }
 
   /** returns the list of currently known mediators */
-  override def mediators(): Future[Seq[MediatorId]] = findTransactions(
+  override def mediatorGroups(): Future[Seq[MediatorGroup]] = findTransactions(
     asOfInclusive = false,
     includeSecondary = false,
     types = Seq(DomainTopologyTransactionType.MediatorDomainState),
     filterUid = None,
     filterNamespace = None,
   ).map { res =>
-    ArraySeq.from(
+    val activeMediators = ArraySeq.from(
       res.toTopologyState
         .foldLeft(Map.empty[MediatorId, (Boolean, Boolean)]) {
           case (acc, TopologyStateUpdateElement(_, MediatorDomainState(side, _, mediator))) =>
@@ -742,8 +743,26 @@ class StoreBasedTopologySnapshot(
         }
         .keys
     )
-
+    Seq(
+      MediatorGroup(
+        index = NonNegativeInt.zero,
+        activeMediators,
+        Seq.empty,
+        threshold = PositiveInt.one,
+      )
+    )
   }
+
+  /** returns the current sequencer group if known
+    * TODO(#11255): Decide whether it is advantageous e.g. for testing to expose a sequencer-group on daml 2.*
+    *   perhaps we cook up a SequencerId based on the domainId assuming that the sequencer (or sequencers all with the
+    *   same sequencerId) is/are active
+    */
+  override def sequencerGroup(): Future[Option[SequencerGroup]] = Future.failed(
+    new UnsupportedOperationException(
+      s"SequencerGroup lookup not supported by StoreBasedDomainTopologyClient. This is a coding bug."
+    )
+  )
 
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext

@@ -77,4 +77,8 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
 
   /** The transport can decide which errors will cause the sequencer client to not try to reestablish a subscription */
   def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy
+
+  def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, TopologyStateForInitResponse]
 }

@@ -10,11 +10,16 @@ import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.LedgerTransactionId
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.{
   HasLoggerName,
   NamedLoggerFactory,
@@ -43,7 +48,6 @@ import com.digitalasset.canton.participant.sync.{
   LedgerSyncEvent,
   SyncDomainPersistentStateLookup,
   TimestampedEvent,
-  TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
@@ -64,7 +68,7 @@ class InMemoryMultiDomainEventLog(
     lookupEvent: NamedLoggingContext => (
         EventLogId,
         LocalOffset,
-    ) => Future[TimestampedEventAndCausalChange],
+    ) => Future[TimestampedEvent],
     lookupOffsetsBetween: NamedLoggingContext => EventLogId => (
         LocalOffset,
         LocalOffset,
@@ -75,10 +79,11 @@ class InMemoryMultiDomainEventLog(
     metrics: ParticipantMetrics,
     override val indexedStringStore: IndexedStringStore,
     override protected val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(override protected implicit val executionContext: ExecutionContext)
     extends MultiDomainEventLog
-    with FlagCloseable
+    with FlagCloseableAsync
     with NamedLogging {
 
   private case class Entries(
@@ -108,7 +113,12 @@ class InMemoryMultiDomainEventLog(
     ledgerFirstOffset - 1, // end index is inclusive
   )
 
-  private val executionQueue = new SimpleExecutionQueue()
+  private val executionQueue = new SimpleExecutionQueue(
+    "in-mem-multi-domain-event-log-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   override def publish(data: PublicationData): Future[Unit] = {
     implicit val traceContext: TraceContext = data.traceContext
@@ -118,68 +128,70 @@ class InMemoryMultiDomainEventLog(
     // Overkill to use an executionQueue here, but it facilitates testing, because it
     // makes it behave similar to the DB version.
     FutureUtil.doNotAwait(
-      executionQueue.executeUnlessFailed(
-        {
-          // Since we're in an execution queue, we don't need the compare-and-set operations
-          val Entries(
-            firstOffset,
-            lastOffsetO,
-            lastLocalOffsets,
-            references,
-            referencesByOffset,
-            publicationTimeUpperBound,
-          ) = entriesRef.get()
+      executionQueue
+        .execute(
+          {
+            // Since we're in an execution queue, we don't need the compare-and-set operations
+            val Entries(
+              firstOffset,
+              lastOffsetO,
+              lastLocalOffsets,
+              references,
+              referencesByOffset,
+              publicationTimeUpperBound,
+            ) = entriesRef.get()
 
-          if (references.contains((id, localOffset))) {
-            logger.info(
-              show"Skipping publication of event reference from event log $id with local offset $localOffset, as it has already been published."
-            )
-          } else if (lastLocalOffsets.get(id).forall(_ < localOffset)) {
-            val lastOffset = lastOffsetO.getOrElse(ledgerFirstOffset - 1)
-            val nextOffset = lastOffset + 1
-            val now = clock.monotonicTime()
-            val publicationTime = Ordering[CantonTimestamp].max(now, publicationTimeUpperBound)
-            if (now < publicationTime) {
+            if (references.contains((id, localOffset))) {
               logger.info(
-                s"Local participant clock at $now is before a previous publication time $publicationTime. Has the clock been reset, e.g., during participant failover?"
+                show"Skipping publication of event reference from event log $id with local offset $localOffset, as it has already been published."
+              )
+            } else if (lastLocalOffsets.get(id).forall(_ < localOffset)) {
+              val lastOffset = lastOffsetO.getOrElse(ledgerFirstOffset - 1)
+              val nextOffset = lastOffset + 1
+              val now = clock.monotonicTime()
+              val publicationTime = Ordering[CantonTimestamp].max(now, publicationTimeUpperBound)
+              if (now < publicationTime) {
+                logger.info(
+                  s"Local participant clock at $now is before a previous publication time $publicationTime. Has the clock been reset, e.g., during participant failover?"
+                )
+              }
+              logger.debug(
+                show"Published event from event log $id with local offset $localOffset at global offset $nextOffset with publication time $publicationTime."
+              )
+              val newEntries = Entries(
+                firstOffset = firstOffset,
+                lastOffset = Some(nextOffset),
+                lastLocalOffsets = lastLocalOffsets + (id -> localOffset),
+                references = references + ((id, localOffset)),
+                referencesByOffset =
+                  referencesByOffset + (nextOffset -> ((id, localOffset, publicationTime))),
+                publicationTimeUpperBound = publicationTime,
+              )
+              entriesRef.set(newEntries)
+
+              dispatcher.signalNewHead(nextOffset) // new end index is inclusive
+              val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
+              val publication = OnPublish.Publication(
+                nextOffset,
+                publicationTime,
+                inFlightReference,
+                deduplicationInfo,
+              )
+              notifyOnPublish(Seq(publication))
+
+              metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
+            } else {
+              ErrorUtil.internalError(
+                new IllegalArgumentException(
+                  show"Unable to publish event at id $id and localOffset $localOffset, as that would reorder events."
+                )
               )
             }
-            logger.debug(
-              show"Published event from event log $id with local offset $localOffset at global offset $nextOffset with publication time $publicationTime."
-            )
-            val newEntries = Entries(
-              firstOffset = firstOffset,
-              lastOffset = Some(nextOffset),
-              lastLocalOffsets = lastLocalOffsets + (id -> localOffset),
-              references = references + ((id, localOffset)),
-              referencesByOffset =
-                referencesByOffset + (nextOffset -> ((id, localOffset, publicationTime))),
-              publicationTimeUpperBound = publicationTime,
-            )
-            entriesRef.set(newEntries)
-
-            dispatcher.signalNewHead(nextOffset) // new end index is inclusive
-            val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
-            val publication = OnPublish.Publication(
-              nextOffset,
-              publicationTime,
-              inFlightReference,
-              deduplicationInfo,
-            )
-            notifyOnPublish(Seq(publication))
-
-            metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
-          } else {
-            ErrorUtil.internalError(
-              new IllegalArgumentException(
-                show"Unable to publish event at id $id and localOffset $localOffset, as that would reorder events."
-              )
-            )
-          }
-          Future.unit
-        },
-        s"publish event $id",
-      ),
+            Future.unit
+          },
+          s"publish event $id",
+        )
+        .onShutdown(logger.debug(s"Publish event $id aborted due to shutdown")),
       "An exception occurred while publishing an event. Stop publishing events.",
     )
     Future.unit
@@ -198,13 +210,8 @@ class InMemoryMultiDomainEventLog(
       unpublishedEvents <- unpublishedOffsets.parTraverse(offset =>
         lookupEvent(namedLoggingContext)(id, offset)
       )
-    } yield unpublishedEvents.map { tseAndUpdate =>
-      PendingEventPublish(
-        tseAndUpdate.causalityUpdate,
-        tseAndUpdate.tse,
-        tseAndUpdate.tse.timestamp,
-        id,
-      )
+    } yield unpublishedEvents.map { tse =>
+      PendingEventPublish(tse, tse.timestamp, id)
     }
   }
 
@@ -251,9 +258,9 @@ class InMemoryMultiDomainEventLog(
           .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
             case (globalOffset, (id, localOffset, _processingTime)) =>
               for {
-                eventAndCausalChange <- lookupEvent(namedLoggingContext)(id, localOffset)
-              } yield globalOffset -> Traced(eventAndCausalChange.tse.event)(
-                eventAndCausalChange.tse.traceContext
+                event <- lookupEvent(namedLoggingContext)(id, localOffset)
+              } yield globalOffset -> Traced(event.event)(
+                event.traceContext
               )
           }
       },
@@ -271,7 +278,7 @@ class InMemoryMultiDomainEventLog(
 
     def eventBelongsToDomain(
         eventLogId: EventLogId,
-        timestampedEvent: TimestampedEventAndCausalChange,
+        timestampedEvent: TimestampedEvent,
     ): Boolean =
       eventLogId match {
         case EventLogId.DomainEventLogId(indexedDomain) =>
@@ -280,7 +287,7 @@ class InMemoryMultiDomainEventLog(
 
         case `participantEventLogId` =>
           // Covers CommandRejected events in the participant event log
-          timestampedEvent.tse.eventId.exists(_.associatedDomain.exists(_ == domainId))
+          timestampedEvent.eventId.exists(_.associatedDomain.exists(_ == domainId))
 
         case _ =>
           false
@@ -293,14 +300,10 @@ class InMemoryMultiDomainEventLog(
           .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
             case (globalOffset, (id, localOffset, _processingTime)) =>
               for {
-                eventAndCausalChange <- lookupEvent(namedLoggingContext)(id, localOffset)
+                event <- lookupEvent(namedLoggingContext)(id, localOffset)
               } yield {
-                if (eventBelongsToDomain(id, eventAndCausalChange))
-                  List(
-                    globalOffset -> Traced(eventAndCausalChange.tse.event)(
-                      eventAndCausalChange.tse.traceContext
-                    )
-                  )
+                if (eventBelongsToDomain(id, event))
+                  List(globalOffset -> Traced(event.event)(event.traceContext))
                 else Nil
               }
           }
@@ -312,7 +315,7 @@ class InMemoryMultiDomainEventLog(
 
   override def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEventAndCausalChange)]] = {
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = {
     val referencesInRange =
       entriesRef.get().referencesByOffset.rangeTo(upToInclusive.getOrElse(Long.MaxValue))
     val limitedReferencesInRange = limit match {
@@ -328,7 +331,7 @@ class InMemoryMultiDomainEventLog(
   override def lookupByEventIds(
       eventIds: Seq[TimestampedEvent.EventId]
   )(implicit traceContext: TraceContext): Future[
-    Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
+    Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEvent, CantonTimestamp)]
   ] = {
     eventIds
       .parTraverseFilter { eventId =>
@@ -350,9 +353,7 @@ class InMemoryMultiDomainEventLog(
     offsets
       .parTraverseFilter { localOffset =>
         OptionT(globalOffsetFor(id, localOffset)).semiflatMap { case (globalOffset, _) =>
-          lookupEvent(namedLoggingContext)(id, localOffset).map { event =>
-            (globalOffset, event.tse)
-          }
+          lookupEvent(namedLoggingContext)(id, localOffset).map((globalOffset, _))
         }.value
       }
       .map(_.sortBy { case (globalOffset, _) => globalOffset })
@@ -378,11 +379,9 @@ class InMemoryMultiDomainEventLog(
         .reverse
 
     reversedLocalOffsets.collectFirstSomeM { localOffset =>
-      lookupEvent(namedLoggingContext)(eventLogId, localOffset).map(eventAndCausalChange =>
+      lookupEvent(namedLoggingContext)(eventLogId, localOffset).map(event =>
         timestampInclusive
-          .map { ts =>
-            if (eventAndCausalChange.tse.timestamp <= ts) Some(localOffset) else None
-          }
+          .map(ts => Option.when(event.timestamp <= ts)(localOffset))
           .getOrElse(Some(localOffset))
       )
     }
@@ -486,17 +485,16 @@ class InMemoryMultiDomainEventLog(
       case (_offset, (_eventLogId, _localOffset, publicationTime)) => publicationTime
     }
 
-  override def onClosed(): Unit = {
+  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
-    Lifecycle.close(
-      executionQueue
-        .asCloseable("InMemoryMultiDomainEventLog.executionQueue", timeouts.shutdownShort.duration),
+    Seq(
+      SyncCloseable("executionQueue", executionQueue.close()),
       AsyncCloseable(
         s"${this.getClass}: dispatcher",
         dispatcher.shutdown(),
         timeouts.shutdownShort.duration,
       ),
-    )(logger)
+    )
   }
 
   override def flush(): Future[Unit] = executionQueue.flush()
@@ -517,6 +515,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
       timeouts: ProcessingTimeout,
       indexedStringStore: IndexedStringStore,
       metrics: ParticipantMetrics,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): InMemoryMultiDomainEventLog = {
 
@@ -535,13 +534,14 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
       metrics,
       indexedStringStore,
       timeouts,
+      futureSupervisor,
       loggerFactory,
     )
   }
 
   private def lookupEvent(allEventLogs: => Map[EventLogId, SingleDimensionEventLog[EventLogId]])(
       namedLoggingContext: NamedLoggingContext
-  )(id: EventLogId, localOffset: LocalOffset): Future[TimestampedEventAndCausalChange] = {
+  )(id: EventLogId, localOffset: LocalOffset): Future[TimestampedEvent] = {
     implicit val loggingContext: NamedLoggingContext = namedLoggingContext
     implicit val tc: TraceContext = loggingContext.traceContext
     implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
@@ -584,7 +584,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
 
     OptionT(for {
       result <- allEventLogs.toList.parTraverseFilter { case (eventLogId, eventLog) =>
-        eventLog.eventById(eventId).map(event => eventLogId -> event.tse.localOffset).value
+        eventLog.eventById(eventId).map(event => eventLogId -> event.localOffset).value
       }
     } yield result.headOption)
   }

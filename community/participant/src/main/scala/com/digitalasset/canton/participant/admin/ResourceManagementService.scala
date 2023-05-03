@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.daml.error.definitions.LedgerApiErrors.ParticipantBackpressure
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.ParticipantBackpressure
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -15,7 +16,6 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.Future
 import scala.math.Ordered.orderingToOrdered
 
 trait ResourceManagementService {
@@ -80,9 +80,11 @@ trait ResourceManagementService {
 
   def resourceLimits: ResourceLimits
 
-  def writeResourceLimits(limits: ResourceLimits)(implicit traceContext: TraceContext): Future[Unit]
+  def writeResourceLimits(limits: ResourceLimits)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
 
-  def refreshCache()(implicit traceContext: TraceContext): Future[Unit]
+  def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 }
 
 object ResourceManagementService {
@@ -102,9 +104,12 @@ object ResourceManagementService {
 
     override def writeResourceLimits(limits: ResourceLimits)(implicit
         traceContext: TraceContext
-    ): Future[Unit] =
-      Future.failed(StaticGrpcServices.notSupportedByCommunityStatus.asRuntimeException())
+    ): FutureUnlessShutdown[Unit] =
+      FutureUnlessShutdown.failed(
+        StaticGrpcServices.notSupportedByCommunityStatus.asRuntimeException()
+      )
 
-    override def refreshCache()(implicit traceContext: TraceContext): Future[Unit] = Future.unit
+    override def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+      FutureUnlessShutdown.unit
   }
 }

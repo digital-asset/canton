@@ -7,12 +7,11 @@ import cats.syntax.reducible.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.sequencing.protocol.RecipientsTree.{MemberRecipient, Recipient}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{DomainId, Member}
-import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
+import com.digitalasset.canton.topology.Member
 
 /** A tree representation of the recipients for a batch.
   * Each member receiving the batch should see only subtrees of recipients from a node containing
@@ -30,13 +29,9 @@ final case class RecipientsTree(
       paramIfNonEmpty("children", _.children),
     )
 
-  lazy val allRecipients: Set[Member] = {
-    val tail: Set[Member] = children.flatMap(t => t.allRecipients).toSet
-    recipientGroup
-      .collect { case MemberRecipient(member) =>
-        member
-      }
-      ++ tail
+  lazy val allRecipients: NonEmpty[Set[Recipient]] = {
+    val tail: Set[Recipient] = children.flatMap(t => t.allRecipients).toSet
+    recipientGroup ++ tail
   }
 
   def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] =
@@ -70,10 +65,7 @@ final case class RecipientsTree(
   }
 
   def toProtoV0: v0.RecipientsTree = {
-    val recipientsP =
-      recipientGroup.toSeq.collect { case MemberRecipient(member) =>
-        member.toProtoPrimitive
-      }.sorted
+    val recipientsP = recipientGroup.toSeq.map(_.toProtoPrimitive).sorted
     val childrenP = children.map(_.toProtoV0)
     new v0.RecipientsTree(recipientsP, childrenP)
   }
@@ -86,37 +78,6 @@ object RecipientsTree {
       children: Seq[RecipientsTree],
   ) = RecipientsTree(recipientGroup.map(MemberRecipient), children)
 
-  sealed trait Recipient extends Product with Serializable with PrettyPrinting
-
-  final case class MemberRecipient(member: Member) extends Recipient {
-    override def pretty: Pretty[MemberRecipient] =
-      prettyOfClass(
-        param("member", _.member)
-      )
-  }
-
-  final case class ParticipantsOfParty(party: LfPartyId) extends Recipient {
-    override def pretty: Pretty[ParticipantsOfParty] =
-      prettyOfClass(
-        param("party", _.party)
-      )
-  }
-
-  final case class SequencersOfDomain(domain: DomainId) extends Recipient {
-    override def pretty: Pretty[SequencersOfDomain] =
-      prettyOfClass(
-        param("domain", _.domain)
-      )
-  }
-
-  final case class MediatorsOfDomain(domain: DomainId, group: Int) extends Recipient {
-    override def pretty: Pretty[MediatorsOfDomain] =
-      prettyOfClass(
-        param("domain", _.domain),
-        param("group", _.group),
-      )
-  }
-
   def leaf(group: NonEmpty[Set[Member]]): RecipientsTree =
     RecipientsTree(group.map(MemberRecipient), Seq.empty)
 
@@ -124,13 +85,16 @@ object RecipientsTree {
     RecipientsTree(group, Seq.empty)
 
   def fromProtoV0(
-      treeProto: v0.RecipientsTree
+      treeProto: v0.RecipientsTree,
+      supportGroupAddressing: Boolean,
   ): ParsingResult[RecipientsTree] = {
     for {
       members <- treeProto.recipients.traverse(str =>
-        Member.fromProtoPrimitive(str, "RecipientsTreeProto.recipients")
+        if (supportGroupAddressing)
+          Recipient.fromProtoPrimitive(str, "RecipientsTreeProto.recipients")
+        else Member.fromProtoPrimitive(str, "RecipientsTreeProto.recipients").map(MemberRecipient)
       )
-      membersNonEmpty <- NonEmpty
+      recipientsNonEmpty <- NonEmpty
         .from(members)
         .toRight(
           ProtoDeserializationError.ValueConversionError(
@@ -139,9 +103,9 @@ object RecipientsTree {
           )
         )
       children = treeProto.children
-      childTrees <- children.toList.traverse(fromProtoV0)
+      childTrees <- children.toList.traverse(fromProtoV0(_, supportGroupAddressing))
     } yield RecipientsTree(
-      membersNonEmpty.map(m => MemberRecipient(m): Recipient).toSet,
+      recipientsNonEmpty.toSet,
       childTrees,
     )
   }

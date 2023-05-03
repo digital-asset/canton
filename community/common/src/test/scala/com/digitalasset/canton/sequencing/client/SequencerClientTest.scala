@@ -720,7 +720,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
   }
 
   private case class Env(
-      client: SequencerClient,
+      client: SequencerClientImpl,
       transport: MockTransport,
       sequencerCounterTrackerStore: SequencerCounterTrackerStore,
       sequencedEventStore: SequencedEventStore,
@@ -846,9 +846,13 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         request: SubscriptionRequest,
         handler: SerializedEventHandler[E],
     )(implicit traceContext: TraceContext): SequencerSubscription[E] = ???
+
+    override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, String, TopologyStateForInitResponse] = ???
   }
 
-  private implicit class RichSequencerClient(client: SequencerClient) {
+  private implicit class RichSequencerClient(client: SequencerClientImpl) {
     // flush needs to be called twice in order to finish asynchronous processing
     // (see comment around shutdown in SequencerClient). So we have this small
     // helper for the tests.
@@ -932,7 +936,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
           loggerFactory,
         )
 
-      val client = new SequencerClient(
+      val client = new SequencerClientImpl(
         DefaultTestIdentities.domainId,
         participant1,
         transport,

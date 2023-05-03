@@ -4,11 +4,11 @@
 package com.digitalasset.canton.platform
 
 import akka.stream.scaladsl.Source
-import com.daml.error.definitions.CommonErrors
 import com.daml.error.utils.ErrorDetails
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.akkastreams.dispatcher.{Dispatcher, SubSource}
 import io.grpc.StatusRuntimeException

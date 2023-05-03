@@ -11,8 +11,12 @@ import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
-import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
+import com.digitalasset.canton.participant.topology.{
+  DomainOnboardingOutbox,
+  DomainOnboardingOutboxX,
+}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RequestSigner.UnauthenticatedRequestSigner
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
@@ -21,38 +25,49 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, Deliv
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreX}
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
-object ParticipantInitializeTopology {
+/** Takes care of requesting approval of the participant's initial topology transactions to the IDM via the sequencer.
+  * Before these transactions have been approved, the participant cannot connect to the sequencer because it can't
+  * authenticate without the IDM having approved the transactions. Because of that, this initial request is sent by
+  * a dynamically created unauthenticated member whose sole purpose is to send this request and wait for the response.
+  */
+abstract class ParticipantInitializeTopologyCommon[TX](
+    alias: DomainAlias,
+    participantId: ParticipantId,
+    clock: Clock,
+    timeouts: ProcessingTimeout,
+    timeTracker: DomainTimeTrackerConfig,
+    loggerFactory: NamedLoggerFactory,
+    sequencerClientFactory: SequencerClientFactory,
+    connection: SequencerConnection,
+    crypto: Crypto,
+    protocolVersion: ProtocolVersion,
+) {
 
-  /** Takes care of requesting approval of the participant's initial topology transactions to the IDM via the sequencer.
-    * Before these transactions have been approved, the participant cannot connect to the sequencer because it can't
-    * authenticate without the IDM having approved the transactions. Because of that, this initial request is sent by
-    * a dynamically created unauthenticated member whose sole purpose is to send this request and wait for the response.
-    */
-  def apply(
-      domainId: DomainId,
-      alias: DomainAlias,
-      participantId: ParticipantId,
-      clock: Clock,
-      timeTracker: DomainTimeTrackerConfig,
-      processingTimeout: ProcessingTimeout,
-      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
-      targetDomainStore: TopologyStore[TopologyStoreId.DomainStore],
-      loggerFactory: NamedLoggerFactory,
-      sequencerClientFactory: SequencerClientFactory,
-      connection: SequencerConnection,
-      crypto: Crypto,
-      protocolVersion: ProtocolVersion,
-  )(implicit
+  protected def createHandler(
+      client: SequencerClient,
+      member: UnauthenticatedMemberId,
+  )(implicit ec: ExecutionContext): RegisterTopologyTransactionHandleWithProcessor[TX]
+
+  protected def initiateOnboarding(handle: RegisterTopologyTransactionHandleWithProcessor[TX])(
+      implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean]
+
+  def run()(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
@@ -67,18 +82,7 @@ object ParticipantInitializeTopology {
     )
 
     def pushTopologyAndVerify(client: SequencerClient, domainTimeTracker: DomainTimeTracker) = {
-      val handle = new SequencerBasedRegisterTopologyTransactionHandle(
-        (traceContext, env) =>
-          client.sendAsyncUnauthenticated(
-            Batch(List(env), client.protocolVersion)
-          )(traceContext),
-        domainId,
-        participantId,
-        unauthenticatedMember,
-        protocolVersion,
-        processingTimeout,
-        loggerFactory,
-      )
+      val handle = createHandler(client, unauthenticatedMember)
 
       val eventHandler = new OrdinaryApplicationHandler[ClosedEnvelope] {
         override def name: String = s"participant-initialize-topology-$alias"
@@ -131,19 +135,7 @@ object ParticipantInitializeTopology {
           )
         )
         // push the initial set of topology transactions to the domain and stop using the unauthenticated member
-        success <- DomainOnboardingOutbox
-          .initiateOnboarding(
-            alias,
-            domainId,
-            protocolVersion,
-            participantId,
-            handle,
-            authorizedStore,
-            targetDomainStore,
-            processingTimeout,
-            loggerFactory,
-            crypto,
-          )
+        success <- initiateOnboarding(handle)
       } yield success
     }
 
@@ -165,6 +157,8 @@ object ParticipantInitializeTopology {
         timeTracker,
         clock,
         unauthenticatedSequencerClient,
+        protocolVersion,
+        timeouts,
         loggerFactory,
       )
 
@@ -195,4 +189,144 @@ object ParticipantInitializeTopology {
       success
     }
   }
+}
+
+class ParticipantInitializeTopology(
+    domainId: DomainId,
+    alias: DomainAlias,
+    participantId: ParticipantId,
+    authorizedStore: TopologyStore[AuthorizedStore],
+    targetStore: TopologyStore[DomainStore],
+    clock: Clock,
+    timeTracker: DomainTimeTrackerConfig,
+    processingTimeout: ProcessingTimeout,
+    loggerFactory: NamedLoggerFactory,
+    sequencerClientFactory: SequencerClientFactory,
+    connection: SequencerConnection,
+    crypto: Crypto,
+    protocolVersion: ProtocolVersion,
+) extends ParticipantInitializeTopologyCommon[SignedTopologyTransaction[TopologyChangeOp]](
+      alias,
+      participantId,
+      clock,
+      processingTimeout,
+      timeTracker,
+      loggerFactory,
+      sequencerClientFactory,
+      connection,
+      crypto,
+      protocolVersion,
+    ) {
+
+  override protected def createHandler(
+      client: SequencerClient,
+      member: UnauthenticatedMemberId,
+  )(implicit
+      ec: ExecutionContext
+  ): RegisterTopologyTransactionHandleWithProcessor[SignedTopologyTransaction[TopologyChangeOp]] =
+    new SequencerBasedRegisterTopologyTransactionHandle(
+      (traceContext, env) =>
+        client.sendAsyncUnauthenticated(
+          Batch(List(env), protocolVersion)
+        )(traceContext),
+      domainId,
+      participantId,
+      member,
+      protocolVersion,
+      processingTimeout,
+      loggerFactory,
+    )
+
+  protected def initiateOnboarding(
+      handle: RegisterTopologyTransactionHandleWithProcessor[
+        SignedTopologyTransaction[TopologyChangeOp]
+      ]
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
+    DomainOnboardingOutbox
+      .initiateOnboarding(
+        alias,
+        domainId,
+        protocolVersion,
+        participantId,
+        handle,
+        authorizedStore,
+        targetStore,
+        processingTimeout,
+        loggerFactory,
+        crypto,
+      )
+
+}
+
+class ParticipantInitializeTopologyX(
+    domainId: DomainId,
+    alias: DomainAlias,
+    topologyRequestAddress: TopologyRequestAddressX,
+    participantId: ParticipantId,
+    authorizedStore: TopologyStoreX[AuthorizedStore],
+    targetStore: TopologyStoreX[DomainStore],
+    clock: Clock,
+    timeTracker: DomainTimeTrackerConfig,
+    processingTimeout: ProcessingTimeout,
+    loggerFactory: NamedLoggerFactory,
+    sequencerClientFactory: SequencerClientFactory,
+    connection: SequencerConnection,
+    crypto: Crypto,
+    protocolVersion: ProtocolVersion,
+) extends ParticipantInitializeTopologyCommon[GenericSignedTopologyTransactionX](
+      alias,
+      participantId,
+      clock,
+      processingTimeout,
+      timeTracker,
+      loggerFactory,
+      sequencerClientFactory,
+      connection,
+      crypto,
+      protocolVersion,
+    ) {
+
+  override protected def createHandler(
+      client: SequencerClient,
+      member: UnauthenticatedMemberId,
+  )(implicit
+      ec: ExecutionContext
+  ): RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX] =
+    new SequencerBasedRegisterTopologyTransactionHandleX(
+      (traceContext, env) =>
+        client.sendAsyncUnauthenticated(
+          Batch(List(env), protocolVersion)
+        )(traceContext),
+      domainId,
+      topologyRequestAddress,
+      participantId,
+      member,
+      protocolVersion,
+      processingTimeout,
+      loggerFactory,
+    )
+
+  protected def initiateOnboarding(
+      handle: RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX]
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
+    DomainOnboardingOutboxX
+      .initiateOnboarding(
+        alias,
+        domainId,
+        protocolVersion,
+        participantId,
+        handle,
+        authorizedStore,
+        targetStore,
+        processingTimeout,
+        loggerFactory,
+        crypto,
+      )
+
 }

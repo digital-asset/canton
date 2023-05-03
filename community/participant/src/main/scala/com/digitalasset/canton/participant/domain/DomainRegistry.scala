@@ -9,12 +9,10 @@ import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
-import com.digitalasset.canton.participant.store.{
-  SyncDomainPersistentState,
-  SyncDomainPersistentStateFactory,
-}
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
+import com.digitalasset.canton.participant.store.SyncDomainPersistentState
 import com.digitalasset.canton.participant.sync.SyncServiceError.DomainRegistryErrorGroup
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
+import com.digitalasset.canton.participant.topology.TopologyComponentFactory
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.topology.DomainId
@@ -28,8 +26,7 @@ trait DomainRegistry extends AutoCloseable {
   /**  Returns a domain handle that is used to setup a connection to a new domain
     */
   def connect(
-      config: DomainConnectionConfig,
-      syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
+      config: DomainConnectionConfig
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[DomainRegistryError, DomainHandle]]
@@ -140,9 +137,9 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
           id = "CANNOT_ISSUE_DOMAIN_TRUST_CERTIFICATE",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
-      final case class Error()(implicit val loggingContext: ErrorLoggingContext)
+      final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(
-            cause = "Can not auto-issue a domain-trust certificate on this node."
+            cause = s"Can not auto-issue a domain-trust certificate on this node: ${reason}"
           )
           with DomainRegistryError {}
     }
@@ -321,12 +318,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause)
         with DomainRegistryError
-    final case class FailedToAddParticipantDomainStateCert(reason: ParticipantTopologyManagerError)(
-        implicit val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause = "Failed to issue domain state cert due to an unexpected reason"
-        )
-        with DomainRegistryError
+
   }
 
 }
@@ -348,4 +340,9 @@ trait DomainHandle extends AutoCloseable {
   def topologyClient: DomainTopologyClientWithInit
 
   def domainPersistentState: SyncDomainPersistentState
+
+  def topologyFactory: TopologyComponentFactory
+
+  def topologyRequestAddress: Option[TopologyRequestAddressX]
+
 }

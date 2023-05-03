@@ -3,10 +3,7 @@
 
 package com.digitalasset.canton.platform.server.api.services.grpc
 
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc.{
-  CommandSubmissionService as ApiCommandSubmissionService
-}
+import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc.CommandSubmissionService as ApiCommandSubmissionService
 import com.daml.ledger.api.v1.command_submission_service.{
   CommandSubmissionServiceGrpc,
   SubmitRequest as ApiSubmitRequest,
@@ -18,6 +15,7 @@ import com.daml.tracing.{SpanAttribute, Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, SubmitRequestValidator}
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.server.api.services.domain.CommandSubmissionService
 import com.digitalasset.canton.platform.server.api.{ProxyCloseable, ValidationLogger}

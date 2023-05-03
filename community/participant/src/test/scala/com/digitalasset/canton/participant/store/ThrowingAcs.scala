@@ -15,9 +15,8 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
   ContractState,
 }
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
-import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
 
@@ -38,13 +37,19 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.failed[M](mk(s"archiveContracts for $contractIds at $toc")))
 
-  override def transferInContracts(transferIns: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(
-      implicit traceContext: TraceContext
+  override def transferInContracts(
+      transferIns: Seq[(LfContractId, SourceDomainId)],
+      toc: TimeOfChange,
+  )(implicit
+      traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.failed[M](mk(s"transferInContracts for $transferIns at $toc")))
 
-  override def transferOutContracts(transferOuts: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(
-      implicit traceContext: TraceContext
+  override def transferOutContracts(
+      transferOuts: Seq[(LfContractId, TargetDomainId)],
+      toc: TimeOfChange,
+  )(implicit
+      traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.failed[M](mk(s"transferOutContracts for $transferOuts at $toc")))
 

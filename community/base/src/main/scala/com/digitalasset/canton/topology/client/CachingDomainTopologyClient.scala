@@ -17,7 +17,12 @@ import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.store.{
+  TopologyStore,
+  TopologyStoreCommon,
+  TopologyStoreId,
+  TopologyStoreX,
+}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
@@ -197,6 +202,29 @@ object CachingDomainTopologyClient {
         futureSupervisor,
         loggerFactory,
       )
+    createCachingClient(
+      dbClient,
+      clock,
+      store,
+      cachingConfigs,
+      timeouts,
+      futureSupervisor,
+      loggerFactory,
+    )
+  }
+
+  protected def createCachingClient(
+      dbClient: DomainTopologyClientWithInit,
+      clock: Clock,
+      store: TopologyStoreCommon[TopologyStoreId.DomainStore, _, _, _],
+      cachingConfigs: CachingConfigs,
+      timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): Future[CachingDomainTopologyClient] = {
     val caching =
       new CachingDomainTopologyClient(
         clock,
@@ -206,14 +234,48 @@ object CachingDomainTopologyClient {
         futureSupervisor,
         loggerFactory,
       )
-
-    store.timestamp(useStateStore = true).map { x =>
-      x.foreach { case (sequenced, effective) =>
+    store.maxTimestamp().map { x =>
+      x.foreach { case (_, effective) =>
         caching
           .updateHead(effective, effective.toApproximate, potentialTopologyChange = true)
       }
       caching
     }
+  }
+  def createX(
+      clock: Clock,
+      domainId: DomainId,
+      protocolVersion: ProtocolVersion,
+      store: TopologyStoreX[TopologyStoreId.DomainStore],
+      packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
+      cachingConfigs: CachingConfigs,
+      timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): Future[CachingDomainTopologyClient] = {
+    val dbClient =
+      new StoreBasedDomainTopologyClientX(
+        clock,
+        domainId,
+        protocolVersion,
+        store,
+        packageDependencies,
+        timeouts,
+        futureSupervisor,
+        loggerFactory,
+      )
+    createCachingClient(
+      dbClient,
+      clock,
+      store,
+      cachingConfigs,
+      timeouts,
+      futureSupervisor,
+      loggerFactory,
+    )
   }
 }
 
@@ -271,7 +333,10 @@ private class ForwardingTopologySnapshotClient(
     parent.loadUnvettedPackagesOrDependencies(participant, packageId)
 
   /** returns the list of currently known mediators */
-  override def mediators(): Future[Seq[MediatorId]] = parent.mediators()
+  override def mediatorGroups(): Future[Seq[MediatorGroup]] = parent.mediatorGroups()
+
+  /** returns the sequencer group if known */
+  override def sequencerGroup(): Future[Option[SequencerGroup]] = parent.sequencerGroup()
 
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
@@ -324,7 +389,10 @@ class CachingTopologySnapshot(
       loadUnvettedPackagesOrDependencies(x._1, x._2).value
     )
 
-  private val mediatorsCache = new AtomicReference[Option[Future[Seq[MediatorId]]]](None)
+  private val mediatorsCache = new AtomicReference[Option[Future[Seq[MediatorGroup]]]](None)
+
+  private val sequencerGroupCache =
+    new AtomicReference[Option[Future[Option[SequencerGroup]]]](None)
 
   private val domainParametersCache =
     new AtomicReference[Option[Future[Either[String, DynamicDomainParametersWithValidity]]]](None)
@@ -400,8 +468,12 @@ class CachingTopologySnapshot(
     parent.inspectKnownParties(filterParty, filterParticipant, limit)
 
   /** returns the list of currently known mediators */
-  override def mediators(): Future[Seq[MediatorId]] =
-    getAndCache(mediatorsCache, parent.mediators())
+  override def mediatorGroups(): Future[Seq[MediatorGroup]] =
+    getAndCache(mediatorsCache, parent.mediatorGroups())
+
+  /** returns the sequencer group if known */
+  override def sequencerGroup(): Future[Option[SequencerGroup]] =
+    getAndCache(sequencerGroupCache, parent.sequencerGroup())
 
   /** Returns the value if it is present in the cache. Otherwise, use the
     * `getter` to fetch it and cache the result.

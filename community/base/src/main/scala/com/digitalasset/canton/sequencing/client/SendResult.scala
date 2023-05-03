@@ -4,12 +4,10 @@
 package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.UnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.protocol.{Deliver, DeliverError, Envelope}
 import com.digitalasset.canton.tracing.TraceContext
-
-import scala.util.Try
 
 /** Possible outcomes for a send operation can be observed by a SequencerClient */
 sealed trait SendResult extends Product with Serializable
@@ -51,18 +49,21 @@ object SendResult {
       logger.debug(s"$sendDescription aborted due to shutdown")
   }
 
-  def toTry(sendDescription: String)(result: UnlessShutdown[SendResult]): Try[Unit] = result match {
-    case UnlessShutdown.Outcome(SendResult.Success(_)) =>
-      util.Success(())
-    case UnlessShutdown.Outcome(SendResult.Error(error)) =>
-      util.Failure(
-        new RuntimeException(
-          s"$sendDescription was rejected by the sequencer at ${error.timestamp} because [${error.reason}]"
+  def toFutureUnlessShutdown(
+      sendDescription: String
+  )(result: SendResult): FutureUnlessShutdown[Unit] =
+    result match {
+      case SendResult.Success(_) =>
+        FutureUnlessShutdown.pure(())
+      case SendResult.Error(error) =>
+        FutureUnlessShutdown.failed(
+          new RuntimeException(
+            s"$sendDescription was rejected by the sequencer at ${error.timestamp} because [${error.reason}]"
+          )
         )
-      )
-    case UnlessShutdown.Outcome(SendResult.Timeout(sequencerTime)) =>
-      util.Failure(new RuntimeException(s"$sendDescription timed out at $sequencerTime"))
-    case UnlessShutdown.AbortedDueToShutdown =>
-      util.Failure(new RuntimeException(s"$sendDescription was aborted due to shutdown"))
-  }
+      case SendResult.Timeout(sequencerTime) =>
+        FutureUnlessShutdown.failed(
+          new RuntimeException(s"$sendDescription timed out at $sequencerTime")
+        )
+    }
 }

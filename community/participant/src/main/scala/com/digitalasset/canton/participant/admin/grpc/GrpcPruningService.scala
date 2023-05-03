@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
 import cats.syntax.either.*
-import com.daml.error.definitions.LedgerApiErrors.RequestValidation.NonHexOffset
-import com.daml.error.{BaseError, ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.admin.grpc.{GrpcPruningScheduler, HasPruningScheduler}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PruningServiceErrorGroup
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.RequestValidation.NonHexOffset
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.sync.{CantonSyncService, UpstreamOffsetConvert}
 import com.digitalasset.canton.scheduler.PruningScheduler
@@ -33,16 +33,19 @@ class GrpcPruningService(
 
   override def prune(request: PruneRequest): Future[PruneResponse] =
     TraceContext.withNewTraceContext { implicit traceContext =>
-      val eithert = for {
-        ledgerSyncOffset <- EitherT.fromEither[Future](
-          UpstreamOffsetConvert
-            .toLedgerSyncOffset(request.pruneUpTo)
-            .leftMap(err => NonHexOffset.Error("prune_up_to", request.pruneUpTo, err))
-        )
-        _ <- sync.pruneInternally(ledgerSyncOffset).leftWiden[BaseError]
-      } yield PruneResponse()
-
-      EitherTUtil.toFuture(eithert.leftMap(err => err.code.asGrpcError(err)))
+      EitherTUtil.toFuture {
+        for {
+          ledgerSyncOffset <-
+            EitherT.fromEither[Future](
+              UpstreamOffsetConvert
+                .toLedgerSyncOffset(request.pruneUpTo)
+                .leftMap(err =>
+                  NonHexOffset.Error("prune_up_to", request.pruneUpTo, err).asGrpcError
+                )
+            )
+          _ <- CantonGrpcUtil.mapErrNewETUS(sync.pruneInternally(ledgerSyncOffset))
+        } yield PruneResponse()
+      }
     }
 
   private lazy val maybeScheduleAccessor: Option[PruningScheduler] =

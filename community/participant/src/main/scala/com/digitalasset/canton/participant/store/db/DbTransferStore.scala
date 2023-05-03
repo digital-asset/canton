@@ -20,18 +20,24 @@ import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.store.db.DbTransferStore.RawDeliveredTransferOutResult
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
+import com.digitalasset.canton.protocol.{
+  SerializableContract,
+  SourceDomainId,
+  TargetDomainId,
+  TransactionId,
+  TransferDomainId,
+  TransferId,
+}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{SequencedEvent, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
-import com.digitalasset.canton.{LfPartyId, RequestCounter}
+import com.digitalasset.canton.{LfPartyId, RequestCounter, TransferCounter}
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
@@ -43,7 +49,7 @@ import scala.util.control.NonFatal
 
 class DbTransferStore(
     override protected val storage: DbStorage,
-    domain: DomainId,
+    domain: TargetDomainId,
     protocolVersion: ProtocolVersion,
     cryptoApi: CryptoPureApi,
     override protected val timeouts: ProcessingTimeout,
@@ -121,6 +127,7 @@ class DbTransferStore(
       transferOutRequest = getResultFullTransferOutTree(r),
       transferOutDecisionTime = GetResult[CantonTimestamp].apply(r),
       contract = GetResult[SerializableContract].apply(r),
+      transferCounter = TransferCounter.Genesis, // TODO(#12286) add a transfer counter to DB
       creatingTransactionId = GetResult[TransactionId].apply(r),
       transferOutResult = getResultDeliveredTransferOutResult(fixedSourceProtocolVersion).apply(r),
     )
@@ -307,11 +314,13 @@ class DbTransferStore(
   }
 
   // TODO(#11722) Parameter domainIsTarget can be dropped once TransferStore is owned by source domain
-  private def findPendingBase(domainIsTarget: Boolean = true, domainId: DomainId = domain) = {
+  private def findPendingBase(domainId: TransferDomainId = domain) = {
     import DbStorage.Implicits.BuilderChain.*
 
-    val domainFilter =
-      if (domainIsTarget) sql"target_domain=$domainId" else sql"origin_domain=$domainId"
+    val domainFilter = domainId match {
+      case SourceDomainId(domainId) => sql"origin_domain=$domainId"
+      case TargetDomainId(domainId) => sql"target_domain=$domainId"
+    }
 
     val notFinishedFilter =
       sql" and time_of_completion_request_counter is null and time_of_completion_timestamp is null"
@@ -327,7 +336,7 @@ class DbTransferStore(
   }
 
   override def find(
-      filterSource: Option[DomainId],
+      filterSource: Option[SourceDomainId],
       filterTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -351,7 +360,7 @@ class DbTransferStore(
     }
 
   override def findAfter(
-      requestAfter: Option[(CantonTimestamp, DomainId)],
+      requestAfter: Option[(CantonTimestamp, SourceDomainId)],
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
     processingTime.event {
@@ -378,7 +387,7 @@ class DbTransferStore(
     }
 
   private def findInFlight(
-      sourceDomain: DomainId,
+      sourceDomain: SourceDomainId,
       transferredOutOnly: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       start: Long,
@@ -398,7 +407,7 @@ class DbTransferStore(
         val order = sql" order by request_timestamp "
         val limitSql = storage.limitSql(numberOfItems = limit, skipItems = start)
 
-        val base = findPendingBase(false, sourceDomain)
+        val base = findPendingBase(sourceDomain)
 
         (base ++ offsetFilter ++ transferredOutOnlyFilter ++ order ++ limitSql).as[TransferData]
       },
@@ -406,7 +415,7 @@ class DbTransferStore(
     )
 
   override def findInFlight(
-      sourceDomain: DomainId,
+      sourceDomain: SourceDomainId,
       onlyCompletedTransferOut: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
@@ -417,8 +426,7 @@ class DbTransferStore(
     val dbQueryLimit = 1000
 
     def stakeholderFilter(data: TransferData): Boolean = stakeholders
-      .map(_.intersect(data.contract.metadata.stakeholders).nonEmpty)
-      .getOrElse(true)
+      .forall(_.exists(data.contract.metadata.stakeholders))
 
     // We cannot do the stakeholders filtering in the DB, so we may need to query the
     // DB several times in order to be able to return `limit` elements.

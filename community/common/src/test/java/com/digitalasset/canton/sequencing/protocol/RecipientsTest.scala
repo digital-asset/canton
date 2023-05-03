@@ -31,13 +31,13 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
 
     "be preserved through serialization / deserialization" in {
       val proto = recipients.toProtoV0
-      val fromProto = Recipients.fromProtoV0(proto)
+      val fromProto = Recipients.fromProtoV0(proto, supportGroupAddressing = false)
       fromProto shouldBe Right(recipients)
     }
 
     "store all recipients" in {
       val all = recipients.allRecipients
-      all shouldBe Set(p1, p2, p3, p4, p5, p6)
+      all shouldBe Set(recP1, recP2, recP3, recP4, recP5, recP6)
     }
 
     "test for a single group when present" in {
@@ -100,7 +100,7 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
 
 object RecipientsTest {
 
-  def participantRecipient(participant: ParticipantId) = RecipientsTree.MemberRecipient(participant)
+  def participantRecipient(participant: ParticipantId) = MemberRecipient(participant)
 
   lazy val p1 = ParticipantId("participant1")
   lazy val p2 = ParticipantId("participant2")
@@ -117,6 +117,9 @@ object RecipientsTest {
   lazy val p13 = ParticipantId("participant13")
   lazy val p14 = ParticipantId("participant14")
   lazy val p15 = ParticipantId("participant15")
+  lazy val p16 = ParticipantId("participant16")
+  lazy val p17 = ParticipantId("participant17")
+  lazy val p18 = ParticipantId("participant18")
 
   lazy val recP1 = participantRecipient(p1)
   lazy val recP2 = participantRecipient(p2)
@@ -142,7 +145,7 @@ object RecipientsTest {
     cc(dummyMember)
   }
 
-  def participant(i: Int): RecipientsTree.MemberRecipient = participantRecipient(
+  def participant(i: Int): MemberRecipient = participantRecipient(
     ParticipantId(s"participant$i")
   )
 

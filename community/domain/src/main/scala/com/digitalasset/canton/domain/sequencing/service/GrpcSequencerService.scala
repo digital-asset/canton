@@ -7,7 +7,9 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -15,8 +17,8 @@ import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.SequencerParameters
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityContextHelper
-import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
+import com.digitalasset.canton.domain.sequencing.sequencer.{Sequencer, SequencerValidations}
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerService.*
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -27,7 +29,8 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{Clock, TimeProof}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, RateLimiter}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
@@ -97,6 +100,8 @@ object GrpcSequencerService {
       domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
       parameters: SequencerParameters,
       protocolVersion: ProtocolVersion,
+      topologyStateForInitializationService: Option[TopologyStateForInitializationService],
+      enableMediatorUnauthenticatedMessages: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
     new GrpcSequencerService(
@@ -118,7 +123,9 @@ object GrpcSequencerService {
       ),
       domainParamsLookup,
       parameters,
+      topologyStateForInitializationService,
       protocolVersion,
+      enableMediatorUnauthenticatedMessages,
     )
 
   /** Abstracts the steps that are different in processing the submission requests coming from the various sendAsync endpoints
@@ -260,7 +267,9 @@ class GrpcSequencerService(
     directSequencerSubscriptionFactory: DirectSequencerSubscriptionFactory,
     domainParamsLookup: DomainParametersLookup[SequencerDomainParameters],
     parameters: SequencerParameters,
+    topologyStateForInitializationService: Option[TopologyStateForInitializationService],
     protocolVersion: ProtocolVersion,
+    enableMediatorUnauthenticatedMessages: Boolean,
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
     with NamedLogging
@@ -490,7 +499,7 @@ class GrpcSequencerService(
         "Batch contains envelope without content.",
       )
       _ <- refuseUnless(sender)(
-        atMostOneMediator(sender, request.batch.envelopes),
+        SequencerValidations.checkFromParticipantToAtMostOneMediator(request),
         "Batch from participant contains multiple mediators as recipients.",
       )
       _ <- refuseUnless(sender)(
@@ -501,13 +510,7 @@ class GrpcSequencerService(
         ),
         "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key",
       )
-      _ <- refuseUnless(sender)(
-        request.aggregationRule.isEmpty,
-        // TODO(#12364) Support aggregatable submissions in block sequencers.
-        //  Validate the aggregation rule (threshold can be exceeded, all eligible members are known, sender is eligible)
-        // TODO(#12405) Support aggregatable submissions in the DB sequencer
-        "Aggregatable submissions are not yet supported",
-      )
+      _ <- request.aggregationRule.traverse_(validateAggregationRule(sender, messageId, _))
     } yield {
       // TODO(M40) requestSize might be misleading under faulty participants.
       // A faulty submitter may include irrelevant fields / repeated fields in the sent message
@@ -517,26 +520,6 @@ class GrpcSequencerService(
       if (TimeProof.isTimeProofSubmission(request)) metrics.timeRequests.mark()
 
       ()
-    }
-  }
-
-  /** Reject requests from participants that try to send something to multiple mediators.
-    * Mediators are identified by their [[com.digitalasset.canton.topology.KeyOwnerCode]]
-    * rather than by the topology snapshot's [[com.digitalasset.canton.topology.client.MediatorDomainStateClient.mediators]]
-    * because the submission has not yet been sequenced and we therefore do not yet know the topology snapshot.
-    */
-  private def atMostOneMediator(sender: Member, envelopes: Seq[ClosedEnvelope]): Boolean = {
-    sender match {
-      case ParticipantId(_) =>
-        val allMediatorRecipients =
-          envelopes.foldLeft(Set.empty[MediatorId]) { (acc, envelope) =>
-            val mediatorRecipients = envelope.recipients.allRecipients.collect {
-              case mediatorId: MediatorId => mediatorId
-            }
-            acc.union(mediatorRecipients)
-          }
-        allMediatorRecipients.sizeCompare(1) <= 0
-      case _ => true
     }
   }
 
@@ -550,8 +533,21 @@ class GrpcSequencerService(
       envelopes: Seq[ClosedEnvelope],
   ): Boolean =
     timestampOfSigningKey.isEmpty || (sender.isAuthenticated && envelopes.forall(
-      _.recipients.allRecipients.forall(_.isAuthenticated)
+      _.recipients.allRecipients.forall {
+        case MemberRecipient(m) => m.isAuthenticated
+        case _ => true
+      }
     ))
+
+  private def validateAggregationRule(
+      sender: Member,
+      messageId: MessageId,
+      aggregationRule: AggregationRule,
+  )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = {
+    SequencerValidations
+      .wellformedAggregationRule(sender, aggregationRule)
+      .leftMap(message => invalid(messageId.toProtoPrimitive, sender)(message))
+  }
 
   private def invalid(messageIdP: String, senderPO: String)(
       message: String
@@ -588,11 +584,12 @@ class GrpcSequencerService(
   )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = sender match {
     case _: DomainTopologyManagerId =>
       Right(())
+    case _: MediatorId if enableMediatorUnauthenticatedMessages => Right(())
     case _ =>
       val unauthRecipients = request.batch.envelopes
         .toSet[ClosedEnvelope]
         .flatMap(_.recipients.allRecipients)
-        .collect { case unauthMember: UnauthenticatedMemberId =>
+        .collect { case MemberRecipient(unauthMember: UnauthenticatedMemberId) =>
           unauthMember
         }
       Either.cond(
@@ -612,7 +609,8 @@ class GrpcSequencerService(
     val nonIdmRecipients = request.batch.envelopes
       .flatMap(_.recipients.allRecipients)
       .filter {
-        case _: DomainTopologyManagerId => false
+        case MemberRecipient(_: DomainTopologyManagerId) => false
+        case MemberRecipient(_: MediatorId) if enableMediatorUnauthenticatedMessages => false
         case _ => true
       }
     Either.cond(
@@ -877,6 +875,30 @@ class GrpcSequencerService(
         logger.warn(s"Authentication check failed: $message")
         permissionDenied(message)
       }
+
+  override def downloadTopologyStateForInit(
+      requestP: v0.TopologyStateForInitRequest
+  ): Future[v0.TopologyStateForInitResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    topologyStateForInitializationService match {
+      case Some(topologyStateForInitializationService) =>
+        TopologyStateForInitRequest
+          .fromProtoV0(requestP)
+          .map(request =>
+            topologyStateForInitializationService
+              .initialSnapshot(request.member)
+              .map(txs => TopologyStateForInitResponse(Traced(txs)).toProtoV0)
+          )
+          .fold(err => Future.failed(ProtoDeserializationFailure.Wrap(err).asGrpcError), identity)
+
+      case None =>
+        Future.failed(
+          new UnsupportedOperationException(
+            "service not implemented for non-x nodes. this is a coding bug"
+          )
+        )
+    }
+  }
 
   private def invalidRequest(message: String): Status =
     Status.INVALID_ARGUMENT.withDescription(message)

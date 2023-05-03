@@ -8,7 +8,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{TransferId, v0, v1, v2}
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -23,20 +23,21 @@ import com.digitalasset.canton.version.{
   * the events a participant has "seen" for a party at the time of the transfer-out.
   * TODO(i9514): Encrypt the causality messages
   *
-  * @param domainId The domain ID that the causality message is addressed to
+  * @param targetDomain The domain ID that the causality message is addressed to
   * @param transferId The ID of the transfer for which we are propagating causality information
   * @param clock The vector clock specifying causality information at the time of the transfer out
   */
-final case class CausalityMessage(
-    domainId: DomainId,
+final case class CausalityMessage private (
+    targetDomain: TargetDomainId,
     transferId: TransferId,
     clock: VectorClock,
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityMessage.type])
     extends UnsignedProtocolMessage
     with PrettyPrinting
     with ProtocolMessageV0
-    with ProtocolMessageV1
-    with UnsignedProtocolMessageV2 {
+    with ProtocolMessageV1 {
+
+  val domainId = targetDomain.unwrap
 
   def toProtoV0: v0.CausalityMessage = v0.CausalityMessage(
     targetDomainId = domainId.toProtoPrimitive,
@@ -49,9 +50,6 @@ final case class CausalityMessage(
 
   override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0))
-
-  override def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent =
-    v2.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0)
 
   override def pretty: Pretty[CausalityMessage.this.type] =
     prettyOfClass(
@@ -78,21 +76,10 @@ object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] 
       case _ => None
     }
 
-  def apply(
-      domainId: DomainId,
-      protocolVersion: ProtocolVersion,
-      transferId: TransferId,
-      clock: VectorClock,
-  ): CausalityMessage = CausalityMessage(
-    domainId,
-    transferId,
-    clock,
-  )(protocolVersionRepresentativeFor(protocolVersion))
-
-  def fromProtoV0(cmP: v0.CausalityMessage): ParsingResult[CausalityMessage] = {
+  private[messages] def fromProtoV0(cmP: v0.CausalityMessage): ParsingResult[CausalityMessage] = {
     val v0.CausalityMessage(domainIdP, transferIdP, clockPO) = cmP
     for {
-      domainId <- DomainId.fromProtoPrimitive(domainIdP, "target_domain_id")
+      domainId <- DomainId.fromProtoPrimitive(domainIdP, "target_domain_id").map(TargetDomainId(_))
       clocks <- ProtoConverter.parseRequired(VectorClock.fromProtoV0, "clock", clockPO)
       tid <- ProtoConverter.parseRequired(TransferId.fromProtoV0, "transfer_id", transferIdP)
     } yield CausalityMessage(
@@ -114,7 +101,7 @@ object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] 
   * @param clock The most recent timestamp on each domain that `partyId` has causally observed
   */
 final case class VectorClock(
-    sourceDomainId: DomainId,
+    sourceDomainId: SourceDomainId,
     localTs: CantonTimestamp,
     partyId: LfPartyId,
     clock: Map[DomainId, CantonTimestamp],
@@ -128,7 +115,7 @@ final case class VectorClock(
       param("Party", _.partyId),
     )
 
-  def toProtoV0: v0.VectorClock = {
+  private[messages] def toProtoV0: v0.VectorClock = {
     v0.VectorClock(
       originDomainId = sourceDomainId.toProtoPrimitive,
       localTs = Some(localTs.toProtoPrimitive),
@@ -139,12 +126,12 @@ final case class VectorClock(
 }
 
 object VectorClock {
-  def fromProtoV0(vc: v0.VectorClock): ParsingResult[VectorClock] = {
-    val v0.VectorClock(did, ts, partyid, clock) = vc
+  private[messages] def fromProtoV0(vc: v0.VectorClock): ParsingResult[VectorClock] = {
+    val v0.VectorClock(did, ts, partyId, clock) = vc
     for {
       localTs <- ProtoConverter.parseRequired(CantonTimestamp.fromProtoPrimitive, "local_ts", ts)
-      domainId <- DomainId.fromProtoPrimitive(did, "origin_domain_id")
-      party <- ProtoConverter.parseLfPartyId(partyid)
+      sourceDomainId <- DomainId.fromProtoPrimitive(did, "origin_domain_id").map(SourceDomainId(_))
+      party <- ProtoConverter.parseLfPartyId(partyId)
       domainTimestamps <- clock.toList.traverse { case (kProto, vProto) =>
         for {
           k <- DomainId.fromProtoPrimitive(kProto, "clock (key: DomainId)")
@@ -152,7 +139,7 @@ object VectorClock {
         } yield k -> v
       }
     } yield {
-      VectorClock(domainId, localTs, party, domainTimestamps.toMap)
+      VectorClock(sourceDomainId, localTs, party, domainTimestamps.toMap)
     }
   }
 }

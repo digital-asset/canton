@@ -45,7 +45,7 @@ final case class TransferOutMediatorMessage(
       : RepresentativeProtocolVersion[TransferOutMediatorMessage.type] =
     TransferOutMediatorMessage.protocolVersionRepresentativeFor(protocolVersion.v)
 
-  override def domainId: DomainId = commonData.sourceDomain
+  override def domainId: DomainId = commonData.sourceDomain.unwrap
 
   override def mediatorId: MediatorId = commonData.sourceMediator
 
@@ -72,7 +72,7 @@ final case class TransferOutMediatorMessage(
     TransferResult.create(
       requestId,
       informees,
-      TransferOutDomainId(domainId),
+      commonData.sourceDomain,
       verdict,
       protocolVersion.v,
     )

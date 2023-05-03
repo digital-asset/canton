@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.daml.error.definitions.DamlError
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{DamlError, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PackageServiceErrorGroup

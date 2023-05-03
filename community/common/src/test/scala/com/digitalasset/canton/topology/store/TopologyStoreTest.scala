@@ -263,14 +263,6 @@ trait TopologyStoreTest
       store.append(SequencedTime(ts), EffectiveTime(ts), items)
     }
 
-    def doAppend(
-        store: TopologyStore[TopologyStoreId],
-        ts: CantonTimestamp,
-        items: List[ValidatedTopologyTransaction],
-    ): Future[Unit] = {
-      store.doAppend(SequencedTime(ts), EffectiveTime(ts), items)
-    }
-
     def updateState(
         store: TopologyStore[TopologyStoreId],
         ts: CantonTimestamp,
@@ -404,14 +396,14 @@ trait TopologyStoreTest
           val snd = List[ValidatedTopologyTransaction](rokm1, ps2, rps1, dpc1Updated)
 
           for {
-            _ <- doAppend(store, ts, first)
-            _ <- doAppend(store, ts, first)
+            _ <- append(store, ts, first)
+            _ <- append(store, ts, first)
             initialAdds <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Add)
             initialReplaces <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Replace)
-            _ <- doAppend(store, ts1, snd)
-            _ <- doAppend(store, ts1, snd)
-            _ <- doAppend(store, ts, first)
-            _ <- doAppend(store, ts1, snd)
+            _ <- append(store, ts1, snd)
+            _ <- append(store, ts1, snd)
+            _ <- append(store, ts, first)
+            _ <- append(store, ts1, snd)
             expiredAdds <- findTransactionsForTesting(store, ts, Some(ts1), TopologyChangeOp.Add)
             expiredReplaces <- findTransactionsForTesting(
               store,

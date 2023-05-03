@@ -12,6 +12,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Backoff, Success}
 import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture, retry}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -134,13 +135,15 @@ object TimeProofRequestSubmitter {
       config: TimeProofRequestConfig,
       clock: Clock,
       sequencerClient: SequencerClient,
+      protocolVersion: ProtocolVersion,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): TimeProofRequestSubmitter =
     new TimeProofRequestSubmitterImpl(
       config,
-      TimeProof.sendRequest(sequencerClient)(_),
+      TimeProof.sendRequest(sequencerClient, protocolVersion)(_),
       clock,
-      sequencerClient.timeouts,
+      timeouts,
       loggerFactory,
     )
 }

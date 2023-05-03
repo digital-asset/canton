@@ -5,11 +5,11 @@ package com.digitalasset.canton.participant.protocol.transfer
 
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId}
+import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId, SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.time.TimeProof
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, LfWorkflowId}
+import com.digitalasset.canton.{LfPartyId, TransferCounter}
 
 import java.util.UUID
 
@@ -24,15 +24,15 @@ final case class TransferOutRequest(
     submitterMetadata: TransferSubmitterMetadata,
     stakeholders: Set[LfPartyId],
     adminParties: Set[LfPartyId],
-    workflowId: Option[LfWorkflowId],
     contractId: LfContractId,
     templateId: LfTemplateId,
-    sourceDomain: DomainId,
+    sourceDomain: SourceDomainId,
     sourceProtocolVersion: SourceProtocolVersion,
     sourceMediator: MediatorId,
-    targetDomain: DomainId,
+    targetDomain: TargetDomainId,
     targetProtocolVersion: TargetProtocolVersion,
     targetTimeProof: TimeProof,
+    transferCounter: TransferCounter,
 ) {
 
   def toFullTransferOutTree(
@@ -51,12 +51,12 @@ final case class TransferOutRequest(
         stakeholders,
         adminParties,
         uuid,
+        transferCounter,
         sourceProtocolVersion,
       )
     val view = TransferOutView.create(hashOps)(
       viewSalt,
       submitterMetadata,
-      workflowId,
       contractId,
       templateId,
       targetDomain,

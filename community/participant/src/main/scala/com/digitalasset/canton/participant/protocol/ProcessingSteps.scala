@@ -430,13 +430,12 @@ trait ProcessingSteps[
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
-      causalityLookup: SingleDomainCausalTracker,
-      activenessResultFuture: Future[ActivenessResult],
+      activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, RequestError, StorePendingDataAndSendResponseAndCreateTimeout]
+  ): EitherT[FutureUnlessShutdown, RequestError, StorePendingDataAndSendResponseAndCreateTimeout]
 
   /** Phase 3:
     * Yields the mediator responses (i.e. rejections) for the case that all payloads are malformed.
@@ -457,7 +456,6 @@ trait ProcessingSteps[
   case class StorePendingDataAndSendResponseAndCreateTimeout(
       pendingData: requestType.PendingRequestData,
       mediatorResponses: Seq[(MediatorResponse, Recipients)],
-      causalityMessages: Seq[(CausalityMessage, Recipients)],
       rejectionArgs: RejectionArgs,
   )
 
@@ -490,7 +488,6 @@ trait ProcessingSteps[
       resultE: Either[MalformedMediatorRequestResult, Result],
       pendingRequestData: requestType.PendingRequestData,
       pendingSubmissions: PendingSubmissions,
-      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -508,7 +505,6 @@ trait ProcessingSteps[
       commitSet: Option[Future[CommitSet]],
       contractsToBeStored: Set[LfContractId],
       maybeEvent: Option[TimestampedEvent],
-      update: Option[CausalityUpdate],
   )
 
   /** Phase 7, step 4:

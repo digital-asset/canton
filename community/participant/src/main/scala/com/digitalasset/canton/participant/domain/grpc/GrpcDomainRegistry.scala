@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.domain.grpc
 
 import akka.stream.Materializer
+import cats.Eval
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.*
@@ -13,15 +14,17 @@ import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.store.{
+  ParticipantSettingsLookup,
   SyncDomainPersistentState,
-  SyncDomainPersistentStateFactory,
 }
+import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
 import com.digitalasset.canton.participant.topology.{
-  ParticipantTopologyDispatcher,
-  ParticipantTopologyManagerError,
+  ParticipantTopologyDispatcherCommon,
+  TopologyComponentFactory,
 }
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
@@ -45,8 +48,10 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
   */
 class GrpcDomainRegistry(
     val participantId: ParticipantId,
+    syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
+    participantSettings: Eval[ParticipantSettingsLookup],
     agreementService: AgreementService,
-    topologyDispatcher: ParticipantTopologyDispatcher,
+    topologyDispatcher: ParticipantTopologyDispatcherCommon,
     val aliasManager: DomainAliasManager,
     cryptoApiProvider: SyncCryptoApiProvider,
     cryptoConfig: CryptoConfig,
@@ -55,17 +60,15 @@ class GrpcDomainRegistry(
     testingConfig: TestingConfigInternal,
     recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
     replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
-    trustDomain: (
-        DomainId,
-        StaticDomainParameters,
-        TraceContext,
-    ) => FutureUnlessShutdown[Either[ParticipantTopologyManagerError, Unit]],
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
     metrics: DomainAlias => SyncDomainMetrics,
     override protected val futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
-)(implicit val ec: ExecutionContextExecutor, val materializer: Materializer, val tracer: Tracer)
-    extends DomainRegistry
+)(implicit
+    val ec: ExecutionContextExecutor,
+    val materializer: Materializer,
+    val tracer: Tracer,
+) extends DomainRegistry
     with DomainRegistryHelpers
     with FlagCloseable
     with HasFutureSupervision
@@ -74,12 +77,14 @@ class GrpcDomainRegistry(
   override protected def timeouts: ProcessingTimeout = participantNodeParameters.processingTimeouts
 
   private class GrpcDomainHandle(
-      val domainId: DomainId,
-      val domainAlias: DomainAlias,
-      val staticParameters: StaticDomainParameters,
+      override val domainId: DomainId,
+      override val domainAlias: DomainAlias,
+      override val staticParameters: StaticDomainParameters,
       sequencer: SequencerClient,
-      val topologyClient: DomainTopologyClientWithInit,
-      val domainPersistentState: SyncDomainPersistentState,
+      override val topologyClient: DomainTopologyClientWithInit,
+      override val topologyFactory: TopologyComponentFactory,
+      override val topologyRequestAddress: Option[TopologyRequestAddressX],
+      override val domainPersistentState: SyncDomainPersistentState,
       override protected val timeouts: ProcessingTimeout,
   ) extends DomainHandle
       with FlagCloseableAsync
@@ -112,8 +117,7 @@ class GrpcDomainRegistry(
   }
 
   override def connect(
-      config: DomainConnectionConfig,
-      syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
+      config: DomainConnectionConfig
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[DomainRegistryError, DomainHandle]] = {
@@ -134,20 +138,20 @@ class GrpcDomainRegistry(
       domainHandle <- getDomainHandle(
         config,
         sequencerConnection,
-        syncDomainPersistentStateFactory,
+        syncDomainPersistentStateManager,
       )(
-        topologyDispatcher.manager.store,
         cryptoApiProvider,
         cryptoConfig,
         clock,
         testingConfig,
         recordSequencerInteractions,
         replaySequencerConfig,
-        trustDomain,
+        topologyDispatcher,
         packageDependencies,
         metrics,
         agreementClient,
         sequencerConnectClient,
+        participantSettings,
       ).thereafter(_ => sequencerConnectClient.close())
     } yield new GrpcDomainHandle(
       domainHandle.domainId,
@@ -155,6 +159,8 @@ class GrpcDomainRegistry(
       domainHandle.staticParameters,
       domainHandle.sequencer,
       domainHandle.topologyClient,
+      domainHandle.topologyFactory,
+      domainHandle.topologyRequestAddress,
       domainHandle.domainPersistentState,
       domainHandle.timeouts,
     )

@@ -8,7 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.daml_lf_dev.DamlLf
-import com.daml.error.definitions.{DamlError, PackageServiceError}
+import com.daml.error.DamlError
 import com.daml.lf.archive
 import com.daml.lf.archive.{DarParser, Decode, Error as LfArchiveError}
 import com.daml.lf.data.Ref.PackageId
@@ -19,6 +19,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.Dar
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
+import com.digitalasset.canton.ledger.error.PackageServiceError
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode
@@ -32,9 +33,9 @@ import com.digitalasset.canton.participant.admin.PackageService.*
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.DamlPackageStore.readPackageId
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
+import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerOps
 import com.digitalasset.canton.protocol.{PackageDescription, PackageInfoService}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PathUtils
 import com.github.blemale.scaffeine.Scaffeine
@@ -68,11 +69,7 @@ class PackageService(
     private[admin] val packagesDarsStore: DamlPackageStore,
     eventPublisher: ParticipantEventPublisher,
     hashOps: HashOps,
-    vetPackages: Traced[(Seq[PackageId], Boolean)] => EitherT[
-      FutureUnlessShutdown,
-      ParticipantTopologyManagerError,
-      Unit,
-    ],
+    vettingHandle: ParticipantTopologyManagerOps,
     inspectionOps: PackageInspectionOps,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -378,7 +375,8 @@ class PackageService(
   def vetPackages(packages: Seq[PackageId], syncVetting: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DamlError, Unit] = {
-    vetPackages(Traced((packages, syncVetting)))
+    vettingHandle
+      .vetPackages(packages, syncVetting)
       .leftMap[DamlError] { err =>
         implicit val code = err.code
         CantonPackageServiceError.IdentityManagerParentError(err)
@@ -484,14 +482,12 @@ class PackageService(
               logger.debug(
                 s"Managed to upload one or more archives in submissionId $submissionId and sourceDescription $sourceDescription"
               )
-              FutureUnlessShutdown.outcomeF(
-                eventPublisher.publish(
-                  LedgerSyncEvent.PublicPackageUpload(
-                    archives = archives,
-                    sourceDescription = Some(sourceDescription.unwrap),
-                    recordTime = ParticipantEventPublisher.now.toLf,
-                    submissionId = Some(submissionId),
-                  )
+              eventPublisher.publish(
+                LedgerSyncEvent.PublicPackageUpload(
+                  archives = archives,
+                  sourceDescription = Some(sourceDescription.unwrap),
+                  recordTime = ParticipantEventPublisher.now.toLf,
+                  submissionId = Some(submissionId),
                 )
               )
             case Failure(e) =>
@@ -499,13 +495,11 @@ class PackageService(
                 s"Failed to upload one or more archives in submissionId $submissionId and sourceDescription $sourceDescription",
                 e,
               )
-              FutureUnlessShutdown.outcomeF(
-                eventPublisher.publish(
-                  LedgerSyncEvent.PublicPackageUploadRejected(
-                    rejectionReason = e.getMessage,
-                    recordTime = ParticipantEventPublisher.now.toLf,
-                    submissionId = submissionId,
-                  )
+              eventPublisher.publish(
+                LedgerSyncEvent.PublicPackageUploadRejected(
+                  rejectionReason = e.getMessage,
+                  recordTime = ParticipantEventPublisher.now.toLf,
+                  submissionId = submissionId,
                 )
               )
           }

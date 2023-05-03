@@ -31,7 +31,10 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.protocol.{LfCommittedTransaction, LfContractId, SerializableContract}
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener
-import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
+import com.digitalasset.canton.store.CursorPrehead.{
+  RequestCounterCursorPrehead,
+  SequencerCounterCursorPrehead,
+}
 import com.digitalasset.canton.store.SequencedEventStore.{
   ByTimestampRange,
   PossiblyIgnoredSequencedEvent,
@@ -336,9 +339,7 @@ class SyncStateInspection(
       timeouts.inspection.await("finding events in the multi-domain event log")(
         participantNodePersistentState.value.multiDomainEventLog
           .lookupEventRange(None, limit)
-          .map(_.map { case (offset, eventAndCausalChange) =>
-            (offset.toString, eventAndCausalChange.tse)
-          })
+          .map(_.map { case (offset, event) => (offset.toString, event) })
       )
     else {
       timeouts.inspection
@@ -347,9 +348,7 @@ class SyncStateInspection(
             .lookupEventRange(None, None, from, to, limit)
         )
         .toSeq
-        .map { case (offset, eventAndCausalChange) =>
-          (offset.toString, eventAndCausalChange.tse)
-        }
+        .map { case (offset, event) => (offset.toString, event) }
     }
 
   private def tryGetProtocolVersion(
@@ -485,7 +484,16 @@ class SyncStateInspection(
   ): Either[String, Future[Unit]] = {
     getPersistentState(domain)
       .map(state => state.requestJournalStore.overridePreheadCleanForTesting(newHead))
-      .toRight(s"Not connected to $domain")
+      .toRight(s"Unknown domain $domain")
+  }
+
+  def forceCleanSequencerCounterPrehead(
+      newHead: Option[SequencerCounterCursorPrehead],
+      domain: DomainAlias,
+  )(implicit traceContext: TraceContext): Either[String, Future[Unit]] = {
+    getPersistentState(domain)
+      .map(state => state.sequencerCounterTrackerStore.rewindPreheadSequencerCounter(newHead))
+      .toRight(s"Unknown domain $domain")
   }
 
   def lookupCleanPrehead(domain: DomainAlias)(implicit

@@ -21,8 +21,6 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   OrdinarySequencedEvent,
   PossiblyIgnoredSequencedEvent,
 }
-import com.digitalasset.canton.time.v0
-import com.digitalasset.canton.topology.{AuthenticatedMember, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -127,29 +125,21 @@ object TimeProof {
 
   /** Send placed alongside the validation logic for a time proof to help ensure it remains consistent */
   def sendRequest(
-      client: SequencerClient
+      client: SequencerClient,
+      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
-    client.member match {
-      case _: AuthenticatedMember =>
-        client.sendAsync(
-          // we intentionally ask for an empty event to be sequenced to observe the time.
-          // this means we can safely share this event without mentioning other recipients.
-          Batch.empty(client.protocolVersion),
-          // as we typically won't know the domain time at the point of doing this request (hence doing the request for the time...),
-          // we can't pick a known good domain time for the max sequencing time.
-          // if we were to guess it we may get it wrong and then in the event of no activity on the domain for our recipient,
-          // we'd then never actually learn of the time.
-          // so instead we just use the maximum value allowed.
-          maxSequencingTime = CantonTimestamp.MaxValue,
-          messageId = mkTimeProofRequestMessageId,
-        )
-      case _: UnauthenticatedMemberId =>
-        client.sendAsyncUnauthenticated(
-          Batch.empty(client.protocolVersion),
-          maxSequencingTime = CantonTimestamp.MaxValue,
-          messageId = mkTimeProofRequestMessageId,
-        )
-    }
+    client.sendAsyncUnauthenticatedOrNot(
+      // we intentionally ask for an empty event to be sequenced to observe the time.
+      // this means we can safely share this event without mentioning other recipients.
+      batch = Batch.empty(protocolVersion),
+      // as we typically won't know the domain time at the point of doing this request (hence doing the request for the time...),
+      // we can't pick a known good domain time for the max sequencing time.
+      // if we were to guess it we may get it wrong and then in the event of no activity on the domain for our recipient,
+      // we'd then never actually learn of the time.
+      // so instead we just use the maximum value allowed.
+      maxSequencingTime = CantonTimestamp.MaxValue,
+      messageId = mkTimeProofRequestMessageId,
+    )
 
   /** Use a constant prefix for a message which would permit the sequencer to track how many
     * time request events it is receiving.

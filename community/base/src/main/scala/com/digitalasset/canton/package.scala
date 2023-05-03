@@ -106,6 +106,13 @@ package object canton {
   type RequestCounterDiscriminator
   type RequestCounter = Counter[RequestCounterDiscriminator]
 
+  /** The counter assigned to a contract to count the number of its transfers */
+  case object TransferCounterDiscriminator
+
+  type TransferCounterDiscriminator = TransferCounterDiscriminator.type
+  type TransferCounter = Counter[TransferCounterDiscriminator]
+  object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {}
+
   object RequestCounter extends CounterCompanion[RequestCounterDiscriminator] {
 
     /** A strict lower bound on all request counters */

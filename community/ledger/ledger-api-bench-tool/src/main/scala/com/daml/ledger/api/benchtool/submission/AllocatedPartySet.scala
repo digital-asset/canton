@@ -4,7 +4,7 @@
 package com.daml.ledger.api.benchtool.submission
 
 import com.daml.ledger.client.binding.Primitive
-import scalaz.syntax.tag._
+import scalaz.syntax.tag.*
 
 final case class AllocatedPartySet(
     mainPartyNamePrefix: String,

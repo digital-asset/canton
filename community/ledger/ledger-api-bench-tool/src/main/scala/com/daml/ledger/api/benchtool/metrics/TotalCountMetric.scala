@@ -10,7 +10,7 @@ final case class TotalCountMetric[T](
     counter: Int = 0,
     lastCount: Int = 0,
 ) extends Metric[T] {
-  import TotalCountMetric._
+  import TotalCountMetric.*
 
   override type V = Value
 

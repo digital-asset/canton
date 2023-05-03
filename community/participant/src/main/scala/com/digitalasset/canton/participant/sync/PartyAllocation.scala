@@ -19,20 +19,17 @@ import com.digitalasset.canton.participant.store.ParticipantNodeEphemeralState
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
-  ParticipantTopologyManager,
+  ParticipantTopologyManagerOps,
 }
 import com.digitalasset.canton.topology.TopologyManagerError.MappingAlreadyExists
-import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{DomainId, Identifier, ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{Identifier, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, LfTimestamp}
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.UUID
 import java.util.concurrent.CompletionStage
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.FutureConverters.*
 import scala.util.chaining.*
@@ -41,11 +38,11 @@ import scala.util.{Failure, Success}
 private[sync] class PartyAllocation(
     participantId: ParticipantId,
     participantNodeEphemeralState: ParticipantNodeEphemeralState,
-    topologyManager: ParticipantTopologyManager,
+    topologyManagerOps: ParticipantTopologyManagerOps,
     partyNotifier: LedgerServerPartyNotifier,
     parameters: ParticipantNodeParameters,
     isActive: () => Boolean,
-    connectedDomainsMap: TrieMap[DomainId, SyncDomain],
+    connectedDomainsLookup: ConnectedDomainsLookup,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, val tracer: Tracer)
     extends Spanning
@@ -101,19 +98,14 @@ private[sync] class PartyAllocation(
         // Otherwise the gRPC call will just timeout without a meaning error message
         _ <- EitherT.cond[Future](
           parameters.partyChangeNotification == PartyNotificationConfig.Eager ||
-            connectedDomainsMap.nonEmpty,
+            connectedDomainsLookup.snapshot.nonEmpty,
           (),
           SubmissionResult.SynchronousError(
             SyncServiceError.PartyAllocationNoDomainError.Error(rawSubmissionId).rpcStatus()
           ),
         )
-        _ <- topologyManager
-          .authorize(
-            topologyTransaction(partyId, validatedSubmissionId, protocolVersion),
-            None,
-            protocolVersion,
-            force = false,
-          )
+        _ <- topologyManagerOps
+          .allocateParty(validatedSubmissionId, partyId, participantId, protocolVersion)
           .leftMap[SubmissionResult] {
             case IdentityManagerParentError(e) if e.code == MappingAlreadyExists =>
               reject(
@@ -163,34 +155,21 @@ private[sync] class PartyAllocation(
       traceContext: TraceContext
   ): Unit = {
     FutureUtil.doNotAwait(
-      participantNodeEphemeralState.participantEventPublisher.publish(
-        LedgerSyncEvent.PartyAllocationRejected(
-          rawSubmissionId,
-          participantId.toLf,
-          recordTime =
-            LfTimestamp.Epoch, // The actual record time will be filled in by the ParticipantEventPublisher
-          rejectionReason = reason,
+      participantNodeEphemeralState.participantEventPublisher
+        .publish(
+          LedgerSyncEvent.PartyAllocationRejected(
+            rawSubmissionId,
+            participantId.toLf,
+            recordTime =
+              LfTimestamp.Epoch, // The actual record time will be filled in by the ParticipantEventPublisher
+            rejectionReason = reason,
+          )
         )
-      ),
+        .onShutdown(
+          logger.debug(s"Aborted publishing of party allocation rejection due to shutdown")
+        ),
       s"Failed to publish allocation rejection for party $displayName",
     )
   }
 
-  private def topologyTransaction(
-      partyId: PartyId,
-      validatedSubmissionId: String255,
-      protocolVersion: ProtocolVersion,
-  ): TopologyStateUpdate[TopologyChangeOp.Add] = TopologyStateUpdate(
-    TopologyChangeOp.Add,
-    TopologyStateUpdateElement(
-      TopologyElementId.adopt(validatedSubmissionId),
-      PartyToParticipant(
-        RequestSide.Both,
-        partyId,
-        participantId,
-        ParticipantPermission.Submission,
-      ),
-    ),
-    protocolVersion,
-  )
 }

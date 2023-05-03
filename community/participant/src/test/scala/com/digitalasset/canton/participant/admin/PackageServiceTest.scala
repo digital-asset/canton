@@ -4,20 +4,21 @@
 package com.digitalasset.canton.participant.admin
 
 import better.files.*
-import cats.data.EitherT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.error.definitions.PackageServiceError
 import com.daml.lf.archive.DarParser
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.ledger.error.PackageServiceError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
 import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonExamples
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
+import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerOps
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.topology.DefaultTestIdentities
@@ -53,20 +54,22 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
   private val bytes = PackageServiceTest.readCantonExamplesBytes()
   val darName = String255.tryCreate("CantonExamples")
   private val eventPublisher = mock[ParticipantEventPublisher]
-  when(eventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext)).thenAnswer(Future.unit)
+  when(eventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext))
+    .thenAnswer(FutureUnlessShutdown.unit)
   val participantId = DefaultTestIdentities.participant1
 
   private class Env {
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
     val engine =
       DAMLe.newEngine(uniqueContractKeys = false, enableLfDev = false, enableStackTraces = false)
+    val vettingOps = mock[ParticipantTopologyManagerOps]
     val sut =
       new PackageService(
         engine,
         packageStore,
         eventPublisher,
-        new SymbolicPureCrypto,
-        _ => EitherT.rightT(()),
+        new SymbolicPureCrypto(),
+        vettingOps,
         new PackageInspectionOpsForTesting(participantId, loggerFactory),
         ProcessingTimeout(),
         loggerFactory,

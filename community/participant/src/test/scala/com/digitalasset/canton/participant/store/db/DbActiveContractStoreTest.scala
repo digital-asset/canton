@@ -69,7 +69,8 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
 
   }
 }
-object DbActiveContractStoreTest {
+
+private[db] object DbActiveContractStoreTest {
 
   /** Limit the range of domain indices that the ActiveContractStoreTest can use, to future-proof against interference
     * with the ContractStoreTest.

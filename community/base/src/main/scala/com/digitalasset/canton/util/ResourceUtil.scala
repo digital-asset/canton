@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.util
 
+import cats.MonadThrow
 import cats.data.EitherT
-import com.digitalasset.canton.util.Thereafter.syntax.*
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
@@ -54,16 +54,30 @@ object ResourceUtil {
     }
   }
 
-  def withResourceEitherT[T <: AutoCloseable, E, V](r: => T)(f: T => EitherT[Future, E, V])(implicit
-      ec: ExecutionContext
+  final private[util] class ResourceMonadApplied[M[_]](
+      private val dummy: Boolean = true
+  ) extends AnyVal {
+    def apply[T <: AutoCloseable, V, Content[_]](r: => T)(
+        f: T => M[V]
+    )(implicit M: MonadThrow[M], TM: Thereafter[M, Content], executionContext: ExecutionContext) = {
+      import Thereafter.syntax.*
+      import cats.syntax.flatMap.*
+      MonadThrow[M].fromTry(Try(f(r))).flatten.thereafter(_ => r.close())
+    }
+  }
+
+  def withResourceM[M[_]]: ResourceMonadApplied[M] = new ResourceMonadApplied[M]
+
+  def withResourceEitherT[T <: AutoCloseable, E, V, F[_]](r: => T)(f: T => EitherT[Future, E, V])(
+      implicit ec: ExecutionContext
   ): EitherT[Future, E, V] = {
-    EitherT(withResourceFuture(r)(rs => f(rs).value))
+    withResourceM(r)(f)
   }
 
   def withResourceFuture[T <: AutoCloseable, V](r: => T)(f: T => Future[V])(implicit
       ec: ExecutionContext
   ): Future[V] = {
-    Future.fromTry(Try(f(r))).flatten.thereafter(_ => r.close())
+    withResourceM(r)(f)
   }
 
   def closeAndAddSuppressed(e: Option[Throwable], resource: AutoCloseable): Unit =

@@ -7,7 +7,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.CausalityUpdate.Tag
-import com.digitalasset.canton.protocol.{TransferId, v0}
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -88,7 +88,8 @@ final case class TransferOutUpdate(
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate.type])
     extends CausalityUpdate {
 
-  override val domain: DomainId = transferId.sourceDomain
+  override val domain: DomainId = transferId.sourceDomain.unwrap
+  val sourceDomain: SourceDomainId = transferId.sourceDomain
 
   override def pretty: Pretty[TransferOutUpdate] =
     prettyOfClass(
@@ -127,11 +128,14 @@ object TransferOutUpdate {
 final case class TransferInUpdate(
     hostedInformeeStakeholders: Set[LfPartyId],
     ts: CantonTimestamp,
-    domain: DomainId,
+    targetDomain: TargetDomainId,
     rc: RequestCounter,
     transferId: TransferId,
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[CausalityUpdate.type])
     extends CausalityUpdate {
+
+  val domain: DomainId = targetDomain.unwrap
+
   override def pretty: Pretty[TransferInUpdate] =
     prettyOfClass(
       param("domain", _.domain),
@@ -155,7 +159,7 @@ object TransferInUpdate {
   def apply(
       hostedInformeeStakeholders: Set[LfPartyId],
       ts: CantonTimestamp,
-      domain: DomainId,
+      domain: TargetDomainId,
       rc: RequestCounter,
       transferId: TransferId,
       protocolVersion: TargetProtocolVersion,
@@ -207,7 +211,7 @@ object CausalityUpdate
               "transfer_id",
               transferIdO,
             )
-          } yield TransferInUpdate(informeeStks, ts, domainId, rc, tid)(
+          } yield TransferInUpdate(informeeStks, ts, TargetDomainId(domainId), rc, tid)(
             representativeProtocolVersion
           )
       }

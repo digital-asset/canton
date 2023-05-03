@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
-import com.daml.error.definitions.LedgerApiErrors.ThreadpoolOverloaded
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.ThreadpoolOverloaded
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.{
   LimitResultCheck,
   OverLimit,

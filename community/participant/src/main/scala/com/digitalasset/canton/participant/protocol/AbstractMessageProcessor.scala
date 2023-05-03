@@ -8,7 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessSet
@@ -39,11 +39,10 @@ abstract class AbstractMessageProcessor(
     ephemeral: SyncDomainEphemeralState,
     crypto: DomainSyncCryptoClient,
     sequencerClient: SequencerClient,
+    protocolVersion: ProtocolVersion,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable {
-  private lazy val protocolVersion: ProtocolVersion =
-    sequencerClient.protocolVersion
 
   protected def terminateRequest(
       requestCounter: RequestCounter,
@@ -101,7 +100,7 @@ abstract class AbstractMessageProcessor(
         )
         maxSequencingTime = requestId.unwrap.add(domainParameters.participantResponseTimeout.unwrap)
         _ <- sequencerClient.sendAsync(
-          Batch.of(sequencerClient.protocolVersion, messages: _*),
+          Batch.of(protocolVersion, messages: _*),
           maxSequencingTime = maxSequencingTime,
           callback = SendCallback.log(s"Response message for request [$rc]", logger),
         )
@@ -117,15 +116,15 @@ abstract class AbstractMessageProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     crypto.ips
-      .awaitSnapshot(timestamp)
-      .flatMap(_.findDynamicDomainParameters())
+      .awaitSnapshotUS(timestamp)
+      .flatMap(snapshot => FutureUnlessShutdown.outcomeF(snapshot.findDynamicDomainParameters()))
       .flatMap { domainParametersE =>
         val decisionTimeE = domainParametersE.flatMap(_.decisionTimeFor(timestamp))
         val decisionTimeF = decisionTimeE.fold(
           err => Future.failed(new IllegalStateException(err)),
-          Future.successful(_),
+          Future.successful,
         )
 
         def onTimeout: Future[Unit] = {
@@ -155,9 +154,9 @@ abstract class AbstractMessageProcessor(
       timestamp: CantonTimestamp,
       decisionTimeF: Future[CantonTimestamp],
       onTimeout: => Future[Unit],
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
-      decisionTime <- decisionTimeF
+      decisionTime <- FutureUnlessShutdown.outcomeF(decisionTimeF)
       requestFutures <- ephemeral.requestTracker
         .addRequest(
           requestCounter,
@@ -170,16 +169,20 @@ abstract class AbstractMessageProcessor(
         .valueOr(error =>
           ErrorUtil.internalError(new IllegalStateException(show"Request already exists: $error"))
         )
-      _ <- unlessCleanReplay(requestCounter)(
-        ephemeral.requestJournal.insert(requestCounter, timestamp)
+      _ <- FutureUnlessShutdown.outcomeF(
+        unlessCleanReplay(requestCounter)(
+          ephemeral.requestJournal.insert(requestCounter, timestamp)
+        )
       )
       _ <- requestFutures.activenessResult
-      _ <- unlessCleanReplay(requestCounter)(
-        ephemeral.requestJournal.transit(
-          requestCounter,
-          timestamp,
-          RequestState.Pending,
-          RequestState.Confirmed,
+      _ <- FutureUnlessShutdown.outcomeF(
+        unlessCleanReplay(requestCounter)(
+          ephemeral.requestJournal.transit(
+            requestCounter,
+            timestamp,
+            RequestState.Pending,
+            RequestState.Confirmed,
+          )
         )
       )
 
@@ -199,7 +202,7 @@ abstract class AbstractMessageProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     // Let the request immediately timeout (upon the next message) rather than explicitly adding an empty commit set
     // because we don't have a sequencer counter to associate the commit set with.
     val decisionTime = timestamp.immediateSuccessor

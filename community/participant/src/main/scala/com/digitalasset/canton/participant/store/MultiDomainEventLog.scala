@@ -9,6 +9,7 @@ import akka.stream.scaladsl.Source
 import cats.data.OptionT
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -32,7 +33,6 @@ import com.digitalasset.canton.participant.sync.{
   LedgerSyncEvent,
   SyncDomainPersistentStateLookup,
   TimestampedEvent,
-  TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -130,14 +130,14 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   /** Yields all events with offset up to `upToInclusive`. */
   def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEventAndCausalChange)]]
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]]
 
   /** Yields the global offset, event and publication time for all the published events with the given IDs.
     * Unpublished events are ignored.
     */
   def lookupByEventIds(eventIds: Seq[EventId])(implicit
       traceContext: TraceContext
-  ): Future[Map[EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]]
+  ): Future[Map[EventId, (GlobalOffset, TimestampedEvent, CantonTimestamp)]]
 
   /** Yields all the published events with the given IDs.
     * Unpublished events are ignored.
@@ -288,7 +288,7 @@ object MultiDomainEventLog {
 
   val ledgerFirstOffset = 1L
 
-  def apply(
+  def create(
       syncDomainPersistentStates: SyncDomainPersistentStateLookup,
       participantEventLog: ParticipantEventLog,
       storage: Storage,
@@ -296,6 +296,7 @@ object MultiDomainEventLog {
       metrics: ParticipantMetrics,
       indexedStringStore: IndexedStringStore,
       timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
@@ -313,6 +314,7 @@ object MultiDomainEventLog {
             timeouts,
             indexedStringStore,
             metrics,
+            futureSupervisor,
             loggerFactory,
           )
         Future.successful(mdel)

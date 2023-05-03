@@ -7,9 +7,9 @@ import akka.NotUsed
 import akka.stream.scaladsl.{Keep, Source}
 import akka.stream.{KillSwitch, KillSwitches, Materializer}
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.CommonErrors
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.server.akka.ServerAdapter
+import com.digitalasset.canton.ledger.error.CommonErrors
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
 

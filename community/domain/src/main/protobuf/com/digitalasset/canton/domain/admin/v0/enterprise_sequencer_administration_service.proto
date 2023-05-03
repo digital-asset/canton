@@ -90,8 +90,12 @@ message Snapshot {
   }
   message Response {
     oneof value {
+      // Used for sequencers running protocol versions up to v5
       Success success = 1;
       Failure failure = 2;
+      // TODO(#12373) Adapt when releasing BFT
+      // Used for sequencers running protocol version dev or higher.
+      VersionedSuccess versionedSuccess = 3;
     }
   }
   message Success {
@@ -99,6 +103,10 @@ message Snapshot {
   }
   message Failure {
     string reason = 1;
+  }
+  message VersionedSuccess {
+    // Contains a versioned SequencerSnapshot of version v1 or higher
+    bytes snapshot = 1;
   }
 }
 

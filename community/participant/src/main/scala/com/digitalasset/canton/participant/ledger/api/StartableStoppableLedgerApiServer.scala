@@ -16,7 +16,10 @@ import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
 import com.daml.ports.Port
 import com.daml.tracing.Telemetry
-import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.concurrent.{
+  ExecutionContextIdlenessExecutorService,
+  FutureSupervisor,
+}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.ledger.api.auth.CachedJwtVerifierLoader
 import com.digitalasset.canton.ledger.api.domain
@@ -25,7 +28,13 @@ import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
   TimedReadService,
   TimedWriteService,
 }
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  FutureUnlessShutdown,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ApiRequestLogger
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
@@ -87,6 +96,7 @@ class StartableStoppableLedgerApiServer(
     dbConfig: DbSupport.DbConfig,
     createExternalServices: () => List[BindableService] = () => Nil,
     telemetry: Telemetry,
+    futureSupervisor: FutureSupervisor,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -95,7 +105,12 @@ class StartableStoppableLedgerApiServer(
     with NamedLogging {
 
   // Use a simple execution queue as locking to ensure only one start and stop run at a time.
-  private val execQueue = new SimpleExecutionQueue()
+  private val execQueue = new SimpleExecutionQueue(
+    "start-stop-ledger-api-server-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   private val ledgerApiResource = new AtomicReference[Option[Resource[Unit]]](None)
 
@@ -116,7 +131,7 @@ class StartableStoppableLedgerApiServer(
     */
   def start(overrideIndexerStartupMode: Option[IndexerStartupMode] = None)(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
+  ): FutureUnlessShutdown[Unit] =
     execQueue.execute(
       performUnlessClosingF(functionFullName) {
         ledgerApiResource.get match {
@@ -144,7 +159,7 @@ class StartableStoppableLedgerApiServer(
 
   /** Stops the ledger API server, e.g. upon shutdown or when participant becomes passive.
     */
-  def stop()(implicit traceContext: TraceContext): Future[Unit] =
+  def stop()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     execQueue.execute(
       ledgerApiResource.get match {
         case Some(ledgerApiServerToStop) =>
@@ -166,7 +181,8 @@ class StartableStoppableLedgerApiServer(
     TraceContext.withNewTraceContext { implicit traceContext =>
       logger.debug("Shutting down ledger API server")
       Seq(
-        AsyncCloseable("ledger API server", stop(), timeouts.shutdownNetwork.duration)
+        AsyncCloseable("ledger API server", stop().unwrap, timeouts.shutdownNetwork.duration),
+        SyncCloseable("ledger-api-server-queue", execQueue.close()),
       )
     }
 
@@ -226,6 +242,7 @@ class StartableStoppableLedgerApiServer(
       (inMemoryState, inMemoryStateUpdaterFlow) <-
         LedgerApiServer.createInMemoryStateAndUpdater(
           indexServiceConfig,
+          config.serverConfig.commandService.maxCommandsInFlight,
           config.metrics,
           executionContext,
         )
@@ -272,6 +289,7 @@ class StartableStoppableLedgerApiServer(
 
       timedWriteService = new TimedWriteService(config.syncService, config.metrics)
       _ <- ApiServiceOwner(
+        submissionTracker = inMemoryState.submissionTracker,
         indexService = indexService,
         userManagementStore = userManagementStore,
         identityProviderConfigStore = getIdentityProviderConfigStore(dbSupport, apiServerConfig),

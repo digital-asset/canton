@@ -14,7 +14,7 @@ final case class DelayMetric[T](
     objective: Option[(DelayMetric.MaxDelay, Option[DelayMetric.Value])],
     delaysInCurrentInterval: List[Duration] = List.empty,
 ) extends Metric[T] {
-  import DelayMetric._
+  import DelayMetric.*
 
   override type V = Value
   override type Objective = MaxDelay

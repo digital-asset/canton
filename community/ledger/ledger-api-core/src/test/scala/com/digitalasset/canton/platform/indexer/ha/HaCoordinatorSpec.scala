@@ -57,17 +57,17 @@ class HaCoordinatorSpec
     for {
       _ <- connectionInitializerFuture
       _ = {
-        info("As HACoordinator is initialized")
+        logger.info("As HACoordinator is initialized")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is not completed")
+        logger.info("Protected Handle is not completed")
         completeExecutionInitialization()
-        info("As protected execution initialization is finished")
+        logger.info("As protected execution initialization is finished")
         executionCompletedPromise.success(())
-        info("As execution is completed")
+        logger.info("As execution is completed")
       }
       _ <- protectedHandle.completed
     } yield {
-      info("Protected Handle is completed successfully")
+      logger.info("Protected Handle is completed successfully")
       1 shouldBe 1
     }
   }
@@ -79,17 +79,17 @@ class HaCoordinatorSpec
     for {
       _ <- connectionInitializerFuture
       _ = {
-        info("As HACoordinator is initialized")
+        logger.info("As HACoordinator is initialized")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is not completed")
+        logger.info("Protected Handle is not completed")
         completeExecutionInitialization()
-        info("As protected execution initialization is finished")
+        logger.info("As protected execution initialization is finished")
         executionCompletedPromise.failure(new Exception("failed execution"))
-        info("As execution completes with failure")
+        logger.info("As execution completes with failure")
       }
       ex <- protectedHandle.completed.failed
     } yield {
-      info("Protected Handle is completed with failure")
+      logger.info("Protected Handle is completed with failure")
       ex.getMessage shouldBe "failed execution"
     }
   }
@@ -101,41 +101,41 @@ class HaCoordinatorSpec
     for {
       connectionInitializer <- connectionInitializerFuture
       _ = {
-        info("As HACoordinator is initialized")
+        logger.info("As HACoordinator is initialized")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is not completed")
+        logger.info("Protected Handle is not completed")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         completeExecutionInitialization()
-        info("As protected execution initialization is finished")
+        logger.info("As protected execution initialization is finished")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         protectedHandle.killSwitch.shutdown()
-        info("And as graceful shutdown started")
+        logger.info("And as graceful shutdown started")
       }
       _ <- executionShutdownFuture
       _ = {
-        info("Shutdown is observed at execution")
+        logger.info("Shutdown is observed at execution")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         executionAbortedFuture.isCompleted shouldBe false
-        info("Abort is not observed at execution")
+        logger.info("Abort is not observed at execution")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle not completed")
+        logger.info("Protected Handle not completed")
         Threading.sleep(200)
-        info("As waiting 200 millis")
+        logger.info("As waiting 200 millis")
         protectedHandle.completed.isCompleted shouldBe false
-        info(
+        logger.info(
           "Protected Handle is still not completed (hence it is waiting for execution to finish as the first step of the teardown process)"
         )
         executionCompletedPromise.success(())
-        info("As execution is completed")
+        logger.info("As execution is completed")
       }
       _ <- protectedHandle.completed
     } yield {
-      info("Protected Handle is completed successfully")
+      logger.info("Protected Handle is completed successfully")
       Try(connectionInitializer.initialize(new TestConnection)).isFailure shouldBe true
-      info("Connection initializer does not work anymore")
+      logger.info("Connection initializer does not work anymore")
       1 shouldBe 1
     }
   }
@@ -147,37 +147,37 @@ class HaCoordinatorSpec
     for {
       connectionInitializer <- connectionInitializerFuture
       _ = {
-        info("As HACoordinator is initialized")
+        logger.info("As HACoordinator is initialized")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is not completed")
+        logger.info("Protected Handle is not completed")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         protectedHandle.killSwitch.shutdown()
-        info("As graceful shutdown started")
+        logger.info("As graceful shutdown started")
         completeExecutionInitialization()
-        info("And As protected execution initialization is finished")
+        logger.info("And As protected execution initialization is finished")
         connectionInitializer.initialize(new TestConnection)
-        info(
+        logger.info(
           "Connection initializer still works (release process first releases the execution, and only then the main connection and the poller)"
         )
       }
       _ <- executionShutdownFuture
       _ = {
-        info("Shutdown is observed at execution")
+        logger.info("Shutdown is observed at execution")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         executionAbortedFuture.isCompleted shouldBe false
-        info("Abort is not observed at execution")
+        logger.info("Abort is not observed at execution")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle not completed")
+        logger.info("Protected Handle not completed")
         executionCompletedPromise.success(())
-        info("As execution is completed")
+        logger.info("As execution is completed")
       }
       _ <- protectedHandle.completed
     } yield {
-      info("Protected Handle is completed successfully")
+      logger.info("Protected Handle is completed successfully")
       Try(connectionInitializer.initialize(new TestConnection)).isFailure shouldBe true
-      info("Connection initializer does not work anymore")
+      logger.info("Connection initializer does not work anymore")
       1 shouldBe 1
     }
   }
@@ -189,35 +189,35 @@ class HaCoordinatorSpec
     for {
       connectionInitializer <- connectionInitializerFuture
       _ = {
-        info("As HACoordinator is initialized")
+        logger.info("As HACoordinator is initialized")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is not completed")
+        logger.info("Protected Handle is not completed")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         completeExecutionInitialization()
-        info("As protected execution initialization is finished")
+        logger.info("As protected execution initialization is finished")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         protectedHandle.killSwitch.shutdown()
-        info("And as graceful shutdown started")
+        logger.info("And as graceful shutdown started")
       }
       _ <- executionShutdownFuture
       _ = {
-        info("Shutdown is observed at execution")
+        logger.info("Shutdown is observed at execution")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         executionAbortedFuture.isCompleted shouldBe false
-        info("Abort is not observed at execution")
+        logger.info("Abort is not observed at execution")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle not completed")
+        logger.info("Protected Handle not completed")
         executionCompletedPromise.failure(new Exception("some exception"))
-        info("As execution is completes with failure")
+        logger.info("As execution is completes with failure")
       }
       _ <- protectedHandle.completed
     } yield {
-      info("Protected Handle is completed successfully")
+      logger.info("Protected Handle is completed successfully")
       Try(connectionInitializer.initialize(new TestConnection)).isFailure shouldBe true
-      info("Connection initializer does not work anymore")
+      logger.info("Connection initializer does not work anymore")
       1 shouldBe 1
     }
   }
@@ -232,7 +232,7 @@ class HaCoordinatorSpec
     for {
       result <- protectedHandle.completed.failed
     } yield {
-      info("Protected Handle is completed with failure")
+      logger.info("Protected Handle is completed with failure")
       result.getMessage shouldBe "as getting connection"
     }
   }
@@ -242,22 +242,22 @@ class HaCoordinatorSpec
     val blockingConnection = new TestConnection
     val blockingLock =
       dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
-    info("As acquiring the main lock from the outside")
+    logger.info("As acquiring the main lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
-    info("As acquiring the main lock from the outside")
+    logger.info("As acquiring the main lock from the outside")
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
-    info("Initialization should be waiting")
+    logger.info("Initialization should be waiting")
     dbLock.release(blockingLock)(blockingConnection) shouldBe true
-    info("As releasing the blocking lock")
+    logger.info("As releasing the blocking lock")
 
     for {
       _ <- connectionInitializerFuture
       _ = {
-        info("Initialisation should completed successfully")
+        logger.info("Initialisation should completed successfully")
         completeExecutionInitialization() // cleanup
         executionCompletedPromise.success(()) // cleanup
       }
@@ -271,21 +271,21 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
-    info("As acquiring the main lock from the outside")
+    logger.info("As acquiring the main lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
-    info("Initialization should be waiting")
+    logger.info("Initialization should be waiting")
     protectedHandle.killSwitch.shutdown()
-    info("As graceful shutdown started")
+    logger.info("As graceful shutdown started")
 
     for {
       _ <- protectedHandle.completed
     } yield {
-      info("Protected Handle is completed successfully")
+      logger.info("Protected Handle is completed successfully")
       connectionInitializerFuture.isCompleted shouldBe false
     }
   }
@@ -294,7 +294,7 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     dbLock.tryAcquire(main, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
-    info("As acquiring the main lock from the outside")
+    logger.info("As acquiring the main lock from the outside")
     val mainConnection = new TestConnection
     val protectedSetup = setup(
       dbLock = dbLock,
@@ -302,17 +302,17 @@ class HaCoordinatorSpec
     )
     import protectedSetup.*
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
-    info("Initialization should be waiting")
+    logger.info("Initialization should be waiting")
     mainConnection.close()
-    info("As main connection is closed (triggers exception as used for acquiring lock)")
+    logger.info("As main connection is closed (triggers exception as used for acquiring lock)")
 
     for {
       failure <- protectedHandle.completed.failed
     } yield {
-      info("Protected Handle is completed with a failure")
+      logger.info("Protected Handle is completed with a failure")
       failure.getMessage shouldBe "trying to acquire on a closed connection"
       connectionInitializerFuture.isCompleted shouldBe false
     }
@@ -323,21 +323,21 @@ class HaCoordinatorSpec
     val blockingConnection = new TestConnection
     val blockingLock =
       dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Exclusive)(blockingConnection).pick
-    info("As acquiring the worker lock from the outside")
+    logger.info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
-    info("Initialization should be waiting")
+    logger.info("Initialization should be waiting")
     dbLock.release(blockingLock)(blockingConnection) shouldBe true
-    info("As releasing the blocking lock")
+    logger.info("As releasing the blocking lock")
 
     for {
       _ <- connectionInitializerFuture
       _ = {
-        info("Initialisation should completed successfully")
+        logger.info("Initialisation should completed successfully")
         completeExecutionInitialization() // cleanup
         executionCompletedPromise.success(()) // cleanup
       }
@@ -352,22 +352,22 @@ class HaCoordinatorSpec
     val blockingConnection = new TestConnection
     val blockingLock =
       dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
-    info("As acquiring the worker lock from the outside")
+    logger.info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
 
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
-    info("Initialization should be waiting")
+    logger.info("Initialization should be waiting")
     dbLock.release(blockingLock)(blockingConnection) shouldBe true
-    info("As releasing the blocking lock")
+    logger.info("As releasing the blocking lock")
 
     for {
       _ <- connectionInitializerFuture
       _ = {
-        info("Initialisation should completed successfully")
+        logger.info("Initialisation should completed successfully")
         completeExecutionInitialization() // cleanup
         executionCompletedPromise.success(()) // cleanup
       }
@@ -381,22 +381,22 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
-    info("As acquiring the worker lock from the outside")
+    logger.info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(dbLock = dbLock)
     import protectedSetup.*
 
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
-    info("Initialization should be waiting")
+    logger.info("Initialization should be waiting")
     protectedHandle.killSwitch.shutdown()
-    info("As graceful shutdown starts")
+    logger.info("As graceful shutdown starts")
 
     for {
       _ <- protectedHandle.completed
     } yield {
-      info("Protected Handle completes successfully")
+      logger.info("Protected Handle completes successfully")
       connectionInitializerFuture.isCompleted shouldBe false
     }
   }
@@ -405,7 +405,7 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
-    info("As acquiring the worker lock from the outside")
+    logger.info("As acquiring the worker lock from the outside")
     val mainConnection = new TestConnection
     val protectedSetup = setup(
       dbLock = dbLock,
@@ -414,17 +414,17 @@ class HaCoordinatorSpec
     import protectedSetup.*
 
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     connectionInitializerFuture.isCompleted shouldBe false
     protectedHandle.completed.isCompleted shouldBe false
-    info("Initialization should be waiting")
+    logger.info("Initialization should be waiting")
     mainConnection.close()
-    info("As main connection is closed (triggers exception as used for acquiring lock)")
+    logger.info("As main connection is closed (triggers exception as used for acquiring lock)")
 
     for {
       failure <- protectedHandle.completed.failed
     } yield {
-      info("Protected Handle completed with a failure")
+      logger.info("Protected Handle completed with a failure")
       failure.getMessage shouldBe "trying to acquire on a closed connection"
       connectionInitializerFuture.isCompleted shouldBe false
     }
@@ -434,18 +434,18 @@ class HaCoordinatorSpec
     val dbLock = new TestDBLockStorageBackend
     val blockingConnection = new TestConnection
     dbLock.tryAcquire(worker, DBLockStorageBackend.LockMode.Shared)(blockingConnection).pick
-    info("As acquiring the worker lock from the outside")
+    logger.info("As acquiring the worker lock from the outside")
     val protectedSetup = setup(
       dbLock = dbLock,
       workerLockAcquireMaxRetry = 2,
     )
     import protectedSetup.*
     Threading.sleep(200)
-    info("And as waiting for 200 millis")
+    logger.info("And as waiting for 200 millis")
     for {
       failure <- protectedHandle.completed.failed
     } yield {
-      info("Initialisation should completed with failure")
+      logger.info("Initialisation should completed with failure")
       failure.getMessage shouldBe "Cannot acquire lock TestLockId(20) in lock-mode Exclusive"
     }
   }
@@ -457,13 +457,13 @@ class HaCoordinatorSpec
     for {
       _ <- connectionInitializerFuture
       _ = {
-        info("As execution initialization starts")
+        logger.info("As execution initialization starts")
         failDuringExecutionInitialization(new Exception("failed as initializing"))
-        info("Initialization fails")
+        logger.info("Initialization fails")
       }
       failure <- protectedHandle.completed.failed
     } yield {
-      info("Protected execution fails with failure")
+      logger.info("Protected execution fails with failure")
       failure.getMessage shouldBe "failed as initializing"
     }
   }
@@ -477,42 +477,42 @@ class HaCoordinatorSpec
     for {
       connectionInitializer <- connectionInitializerFuture
       _ = {
-        info("As HACoordinator is initialized")
+        logger.info("As HACoordinator is initialized")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is not completed")
+        logger.info("Protected Handle is not completed")
         completeExecutionInitialization()
-        info("As protected execution initialization is finished")
+        logger.info("As protected execution initialization is finished")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         Threading.sleep(200)
-        info("As waiting 200 millis")
+        logger.info("As waiting 200 millis")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is still not completed")
+        logger.info("Protected Handle is still not completed")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer still works")
+        logger.info("Connection initializer still works")
         executionAbortedFuture.isCompleted shouldBe false
-        info("Execution is not aborted yet")
+        logger.info("Execution is not aborted yet")
         dbLock.cutExclusiveLockHoldingConnection(mainLockId)
-        info("As main connection is severed")
+        logger.info("As main connection is severed")
         Try(connectionInitializer.initialize(new TestConnection)).isFailure shouldBe true
-        info("Connection initializer not working anymore")
+        logger.info("Connection initializer not working anymore")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is still not completed")
+        logger.info("Protected Handle is still not completed")
       }
       abortException <- executionAbortedFuture
       _ = {
-        info("Execution is aborted")
+        logger.info("Execution is aborted")
         abortException.getMessage shouldBe "check failed, killSwitch aborted"
         executionCompletedPromise.failure(
           new Exception("execution failed due to abort coming from outside")
         )
-        info("As execution fails")
+        logger.info("As execution fails")
       }
       failure <- protectedHandle.completed.failed
     } yield {
-      info("Protected Handle is completed with failure")
+      logger.info("Protected Handle is completed with failure")
       failure.getMessage shouldBe "check failed, killSwitch aborted"
-      info("And completion failure is populated by check-failure")
+      logger.info("And completion failure is populated by check-failure")
       1 shouldBe 1
     }
   }
@@ -524,48 +524,48 @@ class HaCoordinatorSpec
     for {
       connectionInitializer <- connectionInitializerFuture
       mainConnectionSeveredAtNanos = {
-        info("As HACoordinator is initialized")
+        logger.info("As HACoordinator is initialized")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is not completed")
+        logger.info("Protected Handle is not completed")
         completeExecutionInitialization()
-        info("As protected execution initialization is finished")
+        logger.info("As protected execution initialization is finished")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer works")
+        logger.info("Connection initializer works")
         Threading.sleep(200)
-        info("As waiting 200 millis")
+        logger.info("As waiting 200 millis")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is still not completed")
+        logger.info("Protected Handle is still not completed")
         connectionInitializer.initialize(new TestConnection)
-        info("Connection initializer still works")
+        logger.info("Connection initializer still works")
         protectedSetup.executionAbortedFuture.isCompleted shouldBe false
-        info("Execution is not aborted yet")
+        logger.info("Execution is not aborted yet")
         dbLock.cutExclusiveLockHoldingConnection(mainLockId)
-        info("As main connection is severed")
+        logger.info("As main connection is severed")
         System.nanoTime()
       }
       abortException <- executionAbortedFuture
       _ = {
-        info("Execution is aborted")
+        logger.info("Execution is aborted")
         abortException.getMessage shouldBe "check failed, killSwitch aborted"
         (System.nanoTime() - mainConnectionSeveredAtNanos) should be < ((
           mainLockAcquireRetryMillis +
             timeoutToleranceMillis
         ) * 1000L * 1000L)
-        info("Within polling time-bounds")
+        logger.info("Within polling time-bounds")
         Try(connectionInitializer.initialize(new TestConnection)).isFailure shouldBe true
-        info("Connection initializer not working anymore")
+        logger.info("Connection initializer not working anymore")
         protectedHandle.completed.isCompleted shouldBe false
-        info("Protected Handle is still not completed")
+        logger.info("Protected Handle is still not completed")
         executionCompletedPromise.failure(
           new Exception("execution failed due to abort coming from outside")
         )
-        info("As execution fails")
+        logger.info("As execution fails")
       }
       failure <- protectedHandle.completed.failed
     } yield {
-      info("Protected Handle is completed with failure")
+      logger.info("Protected Handle is completed with failure")
       failure.getMessage shouldBe "check failed, killSwitch aborted"
-      info("And completion failure is populated by check-failure")
+      logger.info("And completion failure is populated by check-failure")
       1 shouldBe 1
     }
   }
@@ -604,7 +604,7 @@ class HaCoordinatorSpec
           nodeHaltedProbe.send(nodeHaltedProbe.ref, "halted")
         }
       nodes = nodes + node
-      info("As a node added")
+      logger.info("As a node added")
     })
 
     def removeNode(node: ProtectedSetup): Unit = blocking(synchronized {
@@ -626,18 +626,18 @@ class HaCoordinatorSpec
       nodeStartedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeStoppedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeHaltedProbe.expectNoMessage(FiniteDuration(0, "seconds"))
-      info("Cluster is in expected shape")
+      logger.info("Cluster is in expected shape")
     })
 
     def wait(): Unit = {
       val waitMillis: Long = Random.nextInt(100).toLong
       Threading.sleep(waitMillis)
-      info(s"As waiting $waitMillis millis")
+      logger.info(s"As waiting $waitMillis millis")
     }
 
     addNode()
     nodeStartedExecutionProbe.expectMsg("started")
-    info("The first node started execution")
+    logger.info("The first node started execution")
     verifyCleanSlate(1)
     addNode()
     verifyCleanSlate(2)
@@ -647,10 +647,10 @@ class HaCoordinatorSpec
     verifyCleanSlate(4)
     addNode()
     verifyCleanSlate(5)
-    info("As adding 5 nodes")
+    logger.info("As adding 5 nodes")
     wait()
     verifyCleanSlate(5)
-    info("Cluster stabilized")
+    logger.info("Cluster stabilized")
 
     for (_ <- 1 to 30) {
       wait()
@@ -658,7 +658,7 @@ class HaCoordinatorSpec
       dbLock.cutExclusiveLockHoldingConnection(mainLockId)
       logger.info(s"main lock force-released")
       val mainConnCutNanos = System.nanoTime()
-      info(
+      logger.info(
         "As active node looses main connection (and main index lock is available for acquisition again)"
       )
       nodeStartedExecutionProbe.expectMsg("started")
@@ -666,10 +666,10 @@ class HaCoordinatorSpec
         mainLockAcquireRetryMillis +
           timeoutToleranceMillis
       ) * 1000L * 1000L)
-      info("Some other node started execution within time bounds")
+      logger.info("Some other node started execution within time bounds")
       nodeStoppedExecutionProbe.expectMsg("stopped")
       nodeHaltedProbe.expectMsg("halted")
-      info("And originally active node stopped")
+      logger.info("And originally active node stopped")
       verifyCleanSlate(4)
       addNode()
       verifyCleanSlate(5)
@@ -747,7 +747,7 @@ class HaCoordinatorSpec
           nodeHaltedProbe.send(nodeHaltedProbe.ref, "halted")
         }
       nodes = nodes + node
-      info("As a node added")
+      logger.info("As a node added")
     })
 
     def removeNode(node: ProtectedSetup): Unit = blocking(synchronized {
@@ -770,18 +770,18 @@ class HaCoordinatorSpec
       nodeStartedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeStoppedExecutionProbe.expectNoMessage(FiniteDuration(0, "seconds"))
       nodeHaltedProbe.expectNoMessage(FiniteDuration(0, "seconds"))
-      info("Cluster is in expected shape")
+      logger.info("Cluster is in expected shape")
     })
 
     def wait(): Unit = {
       val waitMillis: Long = Random.nextInt(100).toLong
       Threading.sleep(waitMillis)
-      info(s"As waiting $waitMillis millis")
+      logger.info(s"As waiting $waitMillis millis")
     }
 
     addNode()
     nodeStartedExecutionProbe.expectMsg("started")
-    info("The first node started execution")
+    logger.info("The first node started execution")
     verifyCleanSlate(1)
     addNode()
     verifyCleanSlate(2)
@@ -791,10 +791,10 @@ class HaCoordinatorSpec
     verifyCleanSlate(4)
     addNode()
     verifyCleanSlate(5)
-    info("As adding 5 nodes")
+    logger.info("As adding 5 nodes")
     wait()
     verifyCleanSlate(5)
-    info("Cluster stabilized")
+    logger.info("Cluster stabilized")
 
     for (_ <- 1 to 30) {
       wait()
@@ -802,7 +802,9 @@ class HaCoordinatorSpec
       dbLock.cutExclusiveLockHoldingConnection(mainLockId)
       logger.info(s"main lock force-released")
       val mainConnCutNanos = System.nanoTime()
-      info("As active node looses main connection (and with time drops worker connection as well)")
+      logger.info(
+        "As active node looses main connection (and with time drops worker connection as well)"
+      )
       nodeStartedExecutionProbe.expectMsg("started")
       (System.nanoTime() - mainConnCutNanos) should be < ((
         mainLockCheckerPeriodMillis + // first active node has to realize that it lost the lock
@@ -810,10 +812,10 @@ class HaCoordinatorSpec
           workerLockAcquireRetryMillis + // by the time of here the new active node already acquired the main lock, and it is polling for the worker lock, so maximum so much time we need to wait
           timeoutToleranceMillis
       ) * 1000L * 1000L)
-      info("Some other node started execution within time bounds")
+      logger.info("Some other node started execution within time bounds")
       nodeStoppedExecutionProbe.expectMsg("stopped")
       nodeHaltedProbe.expectMsg("halted")
-      info("And originally active node stopped")
+      logger.info("And originally active node stopped")
       verifyCleanSlate(4)
       addNode()
       verifyCleanSlate(5)
@@ -875,8 +877,8 @@ class HaCoordinatorSpec
         executionHandlePromise.future.map(_ =>
           Handle(
             killSwitch = new KillSwitch {
-              override def shutdown(): Unit = shutdownPromise.success(())
-              override def abort(ex: Throwable): Unit = abortPromise.success(ex)
+              override def shutdown(): Unit = shutdownPromise.trySuccess(())
+              override def abort(ex: Throwable): Unit = abortPromise.trySuccess(ex)
             },
             completed = completedPromise.future,
           )

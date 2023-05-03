@@ -14,7 +14,7 @@ final case class CountRateMetric[T](
     counter: Int = 0,
     lastCount: Int = 0,
 ) extends Metric[T] {
-  import CountRateMetric._
+  import CountRateMetric.*
 
   override type V = Value
   override type Objective = RateObjective

@@ -38,7 +38,7 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueueWithShutdown}
+import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
@@ -66,7 +66,7 @@ class DbAcsCommitmentStore(
 
   override protected[this] val pruning_status_table = "commitment_pruning"
 
-  private val markSafeQueue = new SimpleExecutionQueueWithShutdown(
+  private val markSafeQueue = new SimpleExecutionQueue(
     "db-acs-commitment-store-queue",
     futureSupervisor,
     timeouts,

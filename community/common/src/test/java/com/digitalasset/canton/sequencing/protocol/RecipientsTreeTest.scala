@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.protocol
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.sequencing.protocol.RecipientsTree.{MemberRecipient, Recipient}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -31,7 +30,7 @@ class RecipientsTreeTest extends AnyWordSpec with BaseTest {
   "RecipientsTree" when {
     "allRecipients" should {
       "give all recipients" in {
-        t5.allRecipients shouldBe Set(p1, p2, p3, p4, p5, p6)
+        t5.allRecipients shouldBe Set(p1, p2, p3, p4, p5, p6).map(rec)
       }
     }
 
@@ -51,7 +50,7 @@ class RecipientsTreeTest extends AnyWordSpec with BaseTest {
     "preserve the same thing" in {
 
       val serialized = t5.toProtoV0
-      val deserialized = RecipientsTree.fromProtoV0(serialized)
+      val deserialized = RecipientsTree.fromProtoV0(serialized, supportGroupAddressing = false)
 
       deserialized shouldBe Right(t5)
     }

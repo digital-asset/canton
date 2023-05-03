@@ -125,6 +125,7 @@ object EmbeddedMediatorInitialization {
           syncCrypto,
           topologyClient,
           topologyProcessor,
+          None,
           timeTrackerConfig,
           cantonParameterConfig,
           protocolVersion,

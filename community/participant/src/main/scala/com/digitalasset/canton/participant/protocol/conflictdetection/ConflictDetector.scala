@@ -10,9 +10,9 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.RequestCounter
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableStates.LockableStatesCheckHandle
@@ -64,15 +64,20 @@ private[participant] class ConflictDetector(
     private val checkedInvariant: Boolean,
     private val executionContext: ExecutionContext,
     override protected val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
 ) extends NamedLogging
     with FlagCloseable {
   import ConflictDetector.*
   import LockableStates.withRC
 
   /** Execution queue to ensure that there are no concurrent accesses to the states */
-  private[this] val executionQueue: SimpleExecutionQueue = new SimpleExecutionQueue()(
-    executionContext
-  )
+  private[this] val executionQueue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(
+      "conflict-detector-queue",
+      futureSupervisor,
+      timeouts,
+      loggerFactory,
+    )
 
   /** Lock management and cache for contracts. */
   private[this] val contractStates
@@ -139,18 +144,18 @@ private[participant] class ConflictDetector(
     */
   def registerActivenessSet(rc: RequestCounter, activenessSet: ActivenessSet)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     implicit val ec: ExecutionContext = executionContext
 
     for {
       handle <- runSequentially(s"register activeness check for request $rc")(
         pendingActivenessCheckUnguarded(rc, activenessSet)
       )
-      prefetched <- prefetch(rc, handle)
+      prefetched <- FutureUnlessShutdown.outcomeF(prefetch(rc, handle))
       _ <- runSequentially(s"prefetch states for request $rc")(
         providePrefetchedStatesUnguarded(rc, prefetched)
       )
-      _ <- handle.statesReady
+      _ <- FutureUnlessShutdown.outcomeF(handle.statesReady)
     } yield ()
   }
 
@@ -251,7 +256,7 @@ private[participant] class ConflictDetector(
     */
   def checkActivenessAndLock(
       rc: RequestCounter
-  )(implicit traceContext: TraceContext): Future[ActivenessResult] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[ActivenessResult] = {
     runSequentially(s"activeness check for request $rc") {
       // This part must be run sequentially because we're accessing the mutable state in `contractStates` and `keyStates`.
       // The task scheduler's synchronization is not enough because the task scheduler doesn't cover
@@ -293,14 +298,16 @@ private[participant] class ConflictDetector(
         }
       }
 
-      for {
-        _ <- MonadUtil.sequentialTraverse_(pending.transferIds)(checkTransfer)
-        _ <- sequentiallyCheckInvariant()
-      } yield ActivenessResult(
-        contracts = contractsResult,
-        inactiveTransfers = inactiveTransfers.result(),
-        keys = keysResult,
-      )
+      FutureUnlessShutdown.outcomeF {
+        for {
+          _ <- MonadUtil.sequentialTraverse_(pending.transferIds)(checkTransfer)
+          _ <- sequentiallyCheckInvariant()
+        } yield ActivenessResult(
+          contracts = contractsResult,
+          inactiveTransfers = inactiveTransfers.result(),
+          keys = keysResult,
+        )
+      }
     }(executionContext)
   }
 
@@ -344,7 +351,9 @@ private[participant] class ConflictDetector(
     */
   def finalizeRequest(commitSet: CommitSet, toc: TimeOfChange)(implicit
       traceContext: TraceContext
-  ): Future[Future[Either[NonEmptyChain[RequestTrackerStoreError], Unit]]] =
+  ): FutureUnlessShutdown[
+    FutureUnlessShutdown[Either[NonEmptyChain[RequestTrackerStoreError], Unit]]
+  ] =
     runSequentially(s"finalize request ${toc.rc}") {
       checkInvariant()
       val rc = toc.rc
@@ -382,7 +391,7 @@ private[participant] class ConflictDetector(
         lockedKeys.foreach(keyStates.releaseLock(rc, _))
         // There is no need to update the `pendingEvictions` here because the request cannot be in there by the invariant.
         checkInvariant()
-        Future.failed(InvalidCommitSet(rc, commitSet, locked))
+        FutureUnlessShutdown.failed(InvalidCommitSet(rc, commitSet, locked))
       } else {
         val pendingContractWrites = new mutable.ArrayDeque[LfContractId]
 
@@ -489,24 +498,26 @@ private[participant] class ConflictDetector(
         // Every single body of a Future after the next `flatMap` may be interleaved
         // at EVERY flatMap in on anything that runs through guardedExecution. This includes all operations up to here.
         // The execution queue merely ensures that each Future by itself runs atomically.
-        storeFuture.flatMap { results =>
-          logger.debug(
-            withRC(
-              rc,
-              "Conflict detection store updates have finished. Waiting for evicting states.",
+        FutureUnlessShutdown
+          .outcomeF(storeFuture)(executionContext)
+          .flatMap { results =>
+            logger.debug(
+              withRC(
+                rc,
+                "Conflict detection store updates have finished. Waiting for evicting states.",
+              )
             )
-          )
-          runSequentially(s"evict states for request $rc") {
-            val result = results.sequence_.toEither
-            logger.debug(withRC(rc, "Evicting states"))
-            // Schedule evictions only if no shutdown is happening. (ecForCd is shut down before ecForAcs.)
-            pendingContractWrites.foreach(contractStates.signalWriteAndTryEvict(rc, _))
-            pendingKeyWrites.foreach(keyStates.signalWriteAndTryEvict(rc, _))
-            pendingEvictions.remove(rc).discard
-            checkInvariant()
-            result
-          }
-        }(executionContext)
+            runSequentially(s"evict states for request $rc") {
+              val result = results.sequence_.toEither
+              logger.debug(withRC(rc, "Evicting states"))
+              // Schedule evictions only if no shutdown is happening. (ecForCd is shut down before ecForAcs.)
+              pendingContractWrites.foreach(contractStates.signalWriteAndTryEvict(rc, _))
+              pendingKeyWrites.foreach(keyStates.signalWriteAndTryEvict(rc, _))
+              pendingEvictions.remove(rc).discard
+              checkInvariant()
+              result
+            }
+          }(executionContext)
       }
     }
 
@@ -551,7 +562,7 @@ private[participant] class ConflictDetector(
     */
   private[this] def runSequentially[A](
       description: String
-  )(x: => A)(implicit traceContext: TraceContext): Future[A] = {
+  )(x: => A)(implicit traceContext: TraceContext): FutureUnlessShutdown[A] = {
     implicit val ec = executionContext
     executionQueue.execute(Future { x }, description)
   }
@@ -572,7 +583,10 @@ private[participant] class ConflictDetector(
   private[this] def sequentiallyCheckInvariant()(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    if (checkedInvariant) runSequentially(s"invariant check")(invariant()) else Future.unit
+    if (checkedInvariant)
+      runSequentially(s"invariant check")(invariant())
+        .onShutdown(logger.debug("Invariant check aborted due to shutdown"))(executionContext)
+    else Future.unit
 
   /** Checks the class invariant.
     *
@@ -614,6 +628,8 @@ private[participant] class ConflictDetector(
       _.pendingKeys,
     )
   }
+
+  override protected def onClosed(): Unit = Lifecycle.close(executionQueue)(logger)
 }
 
 private[conflictdetection] object ConflictDetector {

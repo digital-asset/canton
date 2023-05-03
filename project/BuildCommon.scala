@@ -484,7 +484,9 @@ object BuildCommon {
       `wartremover-extension`,
       `akka-fork`,
       `demo`,
+      `daml-errors`,
       `ledger-common`,
+      `ledger-api-bench-tool`,
       `ledger-api-core`,
       `ledger-api-it`,
       `ledger-api-tools`,
@@ -1102,6 +1104,25 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
+    lazy val `daml-errors` = project
+      .in(file("daml-common-staging/daml-errors"))
+      .dependsOn(
+        DamlProjects.`google-common-protos-scala`,
+        `wartremover-extension` % "compile->compile;test->test",
+      )
+      .settings(
+        sharedSettings ++ cantonWarts,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        libraryDependencies ++= Seq(
+          slf4j_api,
+          grpc_api,
+          reflections,
+          scalatest % Test,
+        ),
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
     lazy val `ledger-common` = project
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
@@ -1110,6 +1131,7 @@ object BuildCommon {
         DamlProjects.`daml-copy-protobuf-java`,
         DamlProjects.`daml-copy-common`,
         DamlProjects.`daml-copy-testing` % "test",
+        `daml-errors` % "compile->compile;test->test",
         `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
@@ -1236,7 +1258,29 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
-    // TODO(#12060) This sbt project relies on the deprecated Sandbox-on-X sources
+    lazy val `ledger-api-bench-tool` = project
+      .in(file("community/ledger/ledger-api-bench-tool"))
+      .dependsOn(
+        `ledger-api-core`,
+        `ledger-common` % "compile->compile;compile->test",
+        `community-base`,
+        `ledger-api-it` % "test->test",
+      )
+      .disablePlugins(WartRemover) // TODO(i12064): enable WartRemover
+      .settings(
+        libraryDependencies ++= Seq(
+          akka_actor_typed,
+          akka_actor_testkit_typed % Test,
+          circe_yaml,
+        ),
+        sharedSettings,
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+        Test / fork := true,
+        Test / javaOptions += s"-Dlogback.configurationFile=${(Test / resourceDirectory).value.getAbsolutePath}/logback-test-benchtool.xml",
+      )
+
+    // TODO(i12448) This sbt project relies on the deprecated Sandbox-on-X sources
     //              for ensuring test coverage only.
     //              Once a Canton-based SandboxFixture is available,
     //              use it to run the integration tests in this module

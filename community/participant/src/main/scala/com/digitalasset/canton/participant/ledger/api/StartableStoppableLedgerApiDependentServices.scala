@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.ledger.api
 
 import akka.actor.ActorSystem
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonMutableHandlerRegistry
@@ -44,6 +45,7 @@ class StartableStoppableLedgerApiDependentServices(
     clock: Clock,
     registry: CantonMutableHandlerRegistry,
     adminToken: CantonAdminToken,
+    futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
     tracerProvider: TracerProvider,
 )(implicit
@@ -93,6 +95,7 @@ class StartableStoppableLedgerApiDependentServices(
                 participantId.adminParty,
                 hashOps,
                 adminToken,
+                futureSupervisor,
                 loggerFactory,
                 clock,
                 tracerProvider,

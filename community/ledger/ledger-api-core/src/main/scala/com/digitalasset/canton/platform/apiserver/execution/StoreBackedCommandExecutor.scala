@@ -20,15 +20,16 @@ import com.daml.lf.engine.{
 import com.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{Metrics, Timed, Tracked}
-import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands}
+import com.digitalasset.canton.ledger.api.domain.Commands as ApiCommands
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractStore,
   IndexPackagesService,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
+import com.digitalasset.canton.tracing.TraceContext
 import scalaz.syntax.tag.*
 
 import java.util.concurrent.TimeUnit
@@ -237,8 +238,10 @@ private[apiserver] final class StoreBackedCommandExecutor(
 
         case ResultNeedAuthority(holding @ _, requesting @ _, resume) =>
           authorityResolver
-            // TODO(i11255) DomainId is required to be passed here
-            .resolve(AuthorityResolver.AuthorityRequest(holding, requesting, domainId = None))
+            // TODO(i12742) DomainId is required to be passed here
+            .resolve(AuthorityResolver.AuthorityRequest(holding, requesting, domainId = None))(
+              TraceContext.empty
+            )
             .flatMap { response =>
               val resumed = response match {
                 case AuthorityResolver.AuthorityResponse.MissingAuthorisation(parties) =>

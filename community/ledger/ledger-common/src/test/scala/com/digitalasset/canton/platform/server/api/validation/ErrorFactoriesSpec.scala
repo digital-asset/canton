@@ -4,18 +4,22 @@
 package com.digitalasset.canton.platform.server.api.validation
 
 import ch.qos.logback.classic.Level
-import com.daml.error.definitions.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
-import com.daml.error.definitions.{CommonErrors, DamlError, IndexErrors, LedgerApiErrors}
 import com.daml.error.utils.ErrorDetails
-import com.daml.error.{
-  ContextualizedErrorLogger,
-  DamlContextualizedErrorLogger,
-  ErrorAssertionsWithLogCollectorAssertions,
-  ErrorCode,
-}
+import com.daml.error.{ContextualizedErrorLogger, DamlError, ErrorCode}
 import com.daml.lf.data.Ref
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
+import com.digitalasset.canton.ledger.error.{
+  CommonErrors,
+  DamlContextualizedErrorLogger,
+  IndexErrors,
+  LedgerApiErrors,
+}
 import com.digitalasset.canton.testing.TestingLogCollector.ExpectedLogEntry
-import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
+import com.digitalasset.canton.testing.{
+  ErrorAssertionsWithLogCollectorAssertions,
+  LoggingAssertions,
+  TestingLogCollector,
+}
 import com.google.rpc.*
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException

@@ -18,6 +18,7 @@ import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
+  ApplicationHandler,
   AsyncResult,
   HandlerResult,
   TracedProtocolEvent,
@@ -87,6 +88,7 @@ private[mediator] class MediatorEventsProcessor(
     state: MediatorState,
     crypto: DomainSyncCryptoClient,
     identityClientEventHandler: UnsignedProtocolEventHandler,
+    maybeTopologyRequestProcessor: Option[UnsignedProtocolEventHandler],
     handleMediatorEvents: (
         RequestId,
         Seq[Traced[MediatorEvent]],
@@ -104,10 +106,15 @@ private[mediator] class MediatorEventsProcessor(
   ): HandlerResult =
     NonEmpty.from(events).fold(HandlerResult.done)(handle)
 
+  private val topologyRequestProcessor =
+    maybeTopologyRequestProcessor.getOrElse(ApplicationHandler.success())
+
   private def handle(
       events: NonEmpty[Seq[TracedProtocolEvent]]
   )(implicit traceContext: TraceContext): HandlerResult = {
     val identityF = identityClientEventHandler(Traced(events))
+    val topologyRequestF =
+      topologyRequestProcessor((Traced(events)))
 
     val envelopesByEvent = envelopesGroupedByEvent(events)
 
@@ -121,12 +128,15 @@ private[mediator] class MediatorEventsProcessor(
       (hasIdentityUpdates, stages) = determinedStages
       _ <- MonadUtil.sequentialTraverseMonoid(stages)(executeStage(traceContext))
 
-      resI <- identityF
+      resultIdentity <- identityF
+      resultTopologyRequest <- topologyRequestF
     } yield {
       // reset the ready check if there was an identity update.
       if (hasIdentityUpdates)
         readyCheck.reset()
-      resI.andThenF(_ => FutureUnlessShutdown.outcomeF(storeF))
+      Monoid[AsyncResult]
+        .combine(resultIdentity, resultTopologyRequest)
+        .andThenF(_ => FutureUnlessShutdown.outcomeF(storeF))
     }
   }
 
@@ -322,6 +332,7 @@ private[mediator] object MediatorEventsProcessor {
       state: MediatorState,
       crypto: DomainSyncCryptoClient,
       identityClientEventHandler: UnsignedProtocolEventHandler,
+      topologyRequestProcessor: Option[UnsignedProtocolEventHandler],
       confirmationResponseProcessor: ConfirmationResponseProcessor,
       mediatorEventDeduplicator: MediatorEventDeduplicator,
       protocolVersion: ProtocolVersion,
@@ -332,6 +343,7 @@ private[mediator] object MediatorEventsProcessor {
       state,
       crypto,
       identityClientEventHandler,
+      topologyRequestProcessor,
       confirmationResponseProcessor.handleRequestEvents,
       protocolVersion,
       mediatorEventDeduplicator,

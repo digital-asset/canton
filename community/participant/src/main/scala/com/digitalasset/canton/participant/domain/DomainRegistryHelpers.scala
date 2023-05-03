@@ -4,7 +4,9 @@
 package com.digitalasset.canton.participant.domain
 
 import akka.stream.Materializer
+import cats.Eval
 import cats.data.EitherT
+import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.lf.data.Ref.PackageId
@@ -17,30 +19,30 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainRegistryError.HandshakeErrors.DomainIdMismatch
 import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.DomainHandle
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.{
+  DomainClientBootstrapInfo,
+  TopologyRequestAddressX,
+}
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.store.{
+  ParticipantSettingsLookup,
   SyncDomainPersistentState,
-  SyncDomainPersistentStateFactory,
 }
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
+import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
+import com.digitalasset.canton.participant.topology.{
+  ParticipantTopologyDispatcherCommon,
+  TopologyComponentFactory,
+}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.sequencing.client.{
-  RecordingConfig,
-  ReplayConfig,
-  RequestSigner,
-  SequencerClient,
-}
+import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.{
-  CachingDomainTopologyClient,
-  DomainTopologyClientWithInit,
-}
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersionCompatibility
+import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.AtomicReference
@@ -61,34 +63,30 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
   protected def getDomainHandle(
       config: DomainConnectionConfig,
       sequencerConnection: SequencerConnection,
-      syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
+      syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
   )(
-      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
       cryptoApiProvider: SyncCryptoApiProvider,
       cryptoConfig: CryptoConfig,
       clock: Clock,
       testingConfig: TestingConfigInternal,
       recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
       replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
-      trustDomain: (
-          DomainId,
-          StaticDomainParameters,
-          TraceContext,
-      ) => FutureUnlessShutdown[Either[ParticipantTopologyManagerError, Unit]],
+      topologyDispatcher: ParticipantTopologyDispatcherCommon,
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
       metrics: DomainAlias => SyncDomainMetrics,
       agreementClient: AgreementClient,
       sequencerConnectClient: SequencerConnectClient,
+      participantSettings: Eval[ParticipantSettingsLookup],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, DomainHandle] = {
     for {
-      domainIdSequencerId <- getDomainId(config.domain, sequencerConnectClient).mapK(
+      domainInfo <- getDomainInfo(config.domain, sequencerConnectClient).mapK(
         FutureUnlessShutdown.outcomeK
       )
-      (domainId, sequencerId) = domainIdSequencerId
+      DomainClientBootstrapInfo(domainId, sequencerId, topologyRequestAddress) = domainInfo
       indexedDomainId <- EitherT
-        .right(syncDomainPersistentStateFactory.indexedDomainId(domainId))
+        .right(syncDomainPersistentStateManager.indexedDomainId(domainId))
         .mapK(FutureUnlessShutdown.outcomeK)
 
       // Perform the version handshake
@@ -127,44 +125,41 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
-      // check and issue the domain trust certificate
-      _ <- EitherT(trustDomain(domainId, staticDomainParameters, traceContext)).leftMap {
-        case ParticipantTopologyManagerError.IdentityManagerParentError(
-              TopologyManagerError.NoAppropriateSigningKeyInStore.Failure(_)
-            ) =>
-          DomainRegistryError.ConfigurationErrors.CanNotIssueDomainTrustCertificate.Error()
-        case err =>
-          DomainRegistryError.DomainRegistryInternalError.FailedToAddParticipantDomainStateCert(err)
-      }
-
       // fetch or create persistent state for the domain
-      persistentState <- syncDomainPersistentStateFactory
+      persistentState <- syncDomainPersistentStateManager
         .lookupOrCreatePersistentState(
           config.domain,
           indexedDomainId,
           staticDomainParameters,
+          participantSettings,
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
+      // check and issue the domain trust certificate
+      _ <- topologyDispatcher
+        .trustDomain(domainId, staticDomainParameters)
+        .leftMap(
+          DomainRegistryError.ConfigurationErrors.CanNotIssueDomainTrustCertificate.Error(_)
+        )
+
       domainLoggerFactory = loggerFactory.append("domain", config.domain.unwrap)
 
+      topologyFactory <- syncDomainPersistentStateManager
+        .topologyFactoryFor(domainId)
+        .toRight(
+          DomainRegistryError.DomainRegistryInternalError
+            .InvalidState("topology factory for domain is unavailable"): DomainRegistryError
+        )
+        .toEitherT[FutureUnlessShutdown]
+
       topologyClient <- EitherT.right(
-        FutureUnlessShutdown.outcomeF(
-          CachingDomainTopologyClient.create(
-            clock,
-            domainId,
+        performUnlessClosingF("create caching client")(
+          topologyFactory.createCachingTopologyClient(
             staticDomainParameters.protocolVersion,
-            persistentState.topologyStore,
-            Map(),
             packageDependencies,
-            participantNodeParameters.cachingConfigs,
-            timeouts,
-            futureSupervisor,
-            domainLoggerFactory,
           )
         )
       )
-
       _ = cryptoApiProvider.ips.add(topologyClient)
 
       domainCryptoApi <- EitherT.fromEither[FutureUnlessShutdown](
@@ -200,7 +195,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           case _: ParticipantId => configO
           case _ => None // unauthenticated members don't need it
         }
-        SequencerClient(
+        SequencerClientFactory(
           domainId,
           sequencerId,
           domainCryptoApi,
@@ -239,19 +234,13 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         else {
           logger.debug(s"Participant is not yet active on domain $domainId. Initialising topology")
           for {
-            success <- ParticipantInitializeTopology(
+            success <- topologyDispatcher.onboardToDomain(
               domainId,
+              topologyRequestAddress,
               config.domain,
-              participantId,
-              clock,
               config.timeTracker,
-              participantNodeParameters.processingTimeouts,
-              authorizedStore,
-              persistentState.topologyStore,
-              loggerFactory,
-              sequencerClientFactory,
               sequencerConnection,
-              cryptoApiProvider.crypto,
+              sequencerClientFactory,
               staticDomainParameters.protocolVersion,
             )
             _ <- EitherT.cond[FutureUnlessShutdown](
@@ -270,12 +259,22 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           } yield ()
         }
 
+      requestSigner = RequestSigner(domainCryptoApi, staticDomainParameters.protocolVersion)
+      _ <- downloadDomainTopologyStateForInitializationIfNeeded(
+        sequencerConnection,
+        syncDomainPersistentStateManager,
+        domainId,
+        topologyClient,
+        sequencerClientFactory,
+        requestSigner,
+        staticDomainParameters.protocolVersion,
+      )
       sequencerClient <- sequencerClientFactory
         .create(
           participantId,
           persistentState.sequencedEventStore,
           persistentState.sendTrackerStore,
-          RequestSigner(domainCryptoApi, staticDomainParameters.protocolVersion),
+          requestSigner,
           sequencerConnection,
         )
         .leftMap[DomainRegistryError](
@@ -288,16 +287,70 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       staticDomainParameters,
       sequencerClient,
       topologyClient,
+      topologyFactory,
+      topologyRequestAddress,
       persistentState,
       timeouts,
     )
   }
 
-  private def getDomainId(domainAlias: DomainAlias, sequencerConnectClient: SequencerConnectClient)(
-      implicit traceContext: TraceContext
-  ): EitherT[Future, DomainRegistryError, (DomainId, SequencerId)] =
+  private def downloadDomainTopologyStateForInitializationIfNeeded(
+      sequencerConnection: SequencerConnection,
+      syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
+      domainId: DomainId,
+      topologyClient: DomainTopologyClientWithInit,
+      sequencerClientFactory: SequencerClientTransportFactory,
+      requestSigner: RequestSigner,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      ec: ExecutionContextExecutor,
+      traceContext: TraceContext,
+      materializer: Materializer,
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
+
+    performUnlessClosingEitherU("check-for-domain-topology-initialization")(
+      syncDomainPersistentStateManager.domainTopologyStateInitFor(
+        domainId,
+        participantId,
+      )
+    ).flatMap {
+      case None =>
+        EitherT.right[DomainRegistryError](FutureUnlessShutdown.unit)
+      case Some(topologyInitializationCallback) =>
+        performUnlessClosingEitherU(
+          name = "sequencer-transport-for-downloading-essential-state"
+        )(
+          sequencerClientFactory
+            .makeTransport(
+              sequencerConnection,
+              participantId,
+              requestSigner,
+            )
+        )
+          .flatMap(transport =>
+            performUnlessClosingEitherU(
+              "downloading-essential-topology-state"
+            )(
+              ResourceUtil.withResourceM(transport)(
+                topologyInitializationCallback
+                  .callback(topologyClient, _, protocolVersion)
+              )
+            )
+          )
+          .leftMap[DomainRegistryError](
+            DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
+          )
+    }
+  }
+
+  private def getDomainInfo(
+      domainAlias: DomainAlias,
+      sequencerConnectClient: SequencerConnectClient,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainRegistryError, DomainClientBootstrapInfo] =
     sequencerConnectClient
-      .getDomainIdSequencerId(domainAlias)
+      .getDomainClientBootstrapInfo(domainAlias)
       .leftMap(DomainRegistryHelpers.toDomainRegistryError(domainAlias))
 
   private def performHandshake(
@@ -406,6 +459,8 @@ object DomainRegistryHelpers {
       staticParameters: StaticDomainParameters,
       sequencer: SequencerClient,
       topologyClient: DomainTopologyClientWithInit,
+      topologyFactory: TopologyComponentFactory,
+      topologyRequestAddress: Option[TopologyRequestAddressX],
       domainPersistentState: SyncDomainPersistentState,
       timeouts: ProcessingTimeout,
   )

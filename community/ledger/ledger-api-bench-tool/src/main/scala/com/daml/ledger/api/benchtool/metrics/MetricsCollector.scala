@@ -50,9 +50,9 @@ class MetricsCollector[T](
     minimumTimePeriodBetweenSubsequentReports: Duration = Duration.ofMillis(100),
     clock: Clock,
 ) {
-  import MetricsCollector._
-  import MetricsCollector.Message._
-  import MetricsCollector.Response._
+  import MetricsCollector.*
+  import MetricsCollector.Message.*
+  import MetricsCollector.Response.*
 
   @scala.annotation.nowarn("msg=.*is unchecked since it is eliminated by erasure")
   def handlingMessages(

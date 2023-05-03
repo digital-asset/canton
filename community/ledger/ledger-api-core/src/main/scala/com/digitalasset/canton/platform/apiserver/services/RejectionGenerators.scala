@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.{DamlError, LedgerApiErrors}
+import com.daml.error.{ContextualizedErrorLogger, DamlError}
 import com.daml.lf.engine.Error.{Interpretation, Package, Preprocessing, Validation}
 import com.daml.lf.engine.{Error as LfError}
 import com.daml.lf.interpretation.{Error as LfInterpretationError}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 
 sealed abstract class ErrorCause extends Product with Serializable
 

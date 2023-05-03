@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.api.v1.commands.{
   Commands as ProtoCommands,
   DisclosedContract as ProtoDisclosedContract,
@@ -18,6 +17,7 @@ import com.digitalasset.canton.ledger.api.validation.ValueValidator.{
   validateOptionalIdentifier,
   validateRecordFields,
 }
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.platform.server.api.validation.FieldValidations.*
 import com.google.protobuf.any.Any.toJavaProto
 import io.grpc.StatusRuntimeException

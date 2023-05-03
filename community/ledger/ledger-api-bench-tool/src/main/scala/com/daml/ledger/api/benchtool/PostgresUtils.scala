@@ -3,9 +3,9 @@
 
 package com.daml.ledger.api.benchtool
 
-import java.sql.{Connection, DriverManager, Statement}
-
 import com.daml.ledger.api.benchtool.LedgerApiBenchTool.logger
+
+import java.sql.{Connection, DriverManager, Statement}
 
 object PostgresUtils {
 

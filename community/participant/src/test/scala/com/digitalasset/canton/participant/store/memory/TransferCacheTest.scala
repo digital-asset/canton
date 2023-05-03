@@ -13,9 +13,8 @@ import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.store.memory.TransferCacheTest.HookTransferStore
 import com.digitalasset.canton.participant.store.{TransferStore, TransferStoreTest}
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.protocol.{SourceDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, RequestCounter}
@@ -283,19 +282,19 @@ object TransferCacheTest {
       baseStore.deleteCompletionsSince(criterionInclusive)
 
     override def find(
-        filterSource: Option[DomainId],
+        filterSource: Option[SourceDomainId],
         filterTimestamp: Option[CantonTimestamp],
         filterSubmitter: Option[LfPartyId],
         limit: Int,
     )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
       baseStore.find(filterSource, filterTimestamp, filterSubmitter, limit)
 
-    override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
-        traceContext: TraceContext
+    override def findAfter(requestAfter: Option[(CantonTimestamp, SourceDomainId)], limit: Int)(
+        implicit traceContext: TraceContext
     ): Future[Seq[TransferData]] = baseStore.findAfter(requestAfter, limit)
 
     override def findInFlight(
-        sourceDomain: DomainId,
+        sourceDomain: SourceDomainId,
         onlyCompletedTransferOut: Boolean,
         transferOutRequestNotAfter: LocalOffset,
         stakeholders: Option[NonEmpty[Set[LfPartyId]]],

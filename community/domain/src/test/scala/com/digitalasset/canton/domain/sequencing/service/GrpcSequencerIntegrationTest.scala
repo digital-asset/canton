@@ -162,11 +162,14 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       sequencerSubscriptionFactory,
       domainParamsLookup,
       params,
+      None,
       BaseTest.testedProtocolVersion,
+      enableMediatorUnauthenticatedMessages = false,
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,
     sequencerId = sequencerId,
+    mediatorsProcessParticipantTopologyRequests = false,
     staticDomainParameters = BaseTest.defaultStaticDomainParameters,
     cryptoApi = cryptoApi,
     agreementManager = None,
@@ -221,7 +224,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
 
   val client = Await
     .result(
-      SequencerClient(
+      SequencerClientFactory(
         domainId,
         sequencerId,
         cryptoApi,

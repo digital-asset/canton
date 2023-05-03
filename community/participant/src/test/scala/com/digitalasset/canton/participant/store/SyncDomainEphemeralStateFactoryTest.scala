@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.OptionT
-import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.LocalOffset
@@ -69,7 +68,8 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
       new SimClock(loggerFactory = loggerFactory),
       ParticipantTestMetrics,
       indexedStringStore = indexedStringStore,
-      timeouts = DefaultProcessingTimeouts.testing,
+      timeouts,
+      futureSupervisor,
       loggerFactory,
     )
 

@@ -26,6 +26,8 @@ import com.digitalasset.canton.protocol.{
   LfTemplateId,
   RequestId,
   SerializableContract,
+  SourceDomainId,
+  TargetDomainId,
   TransferId,
 }
 import com.digitalasset.canton.sequencing.protocol.*
@@ -41,9 +43,9 @@ import com.digitalasset.canton.{
   LedgerCommandId,
   LedgerParticipantId,
   LfPartyId,
-  LfWorkflowId,
   RequestCounter,
   SequencerCounter,
+  TransferCounter,
 }
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -56,7 +58,7 @@ trait TransferStoreTest {
 
   import TransferStoreTest.*
 
-  protected def transferStore(mk: DomainId => TransferStore): Unit = {
+  protected def transferStore(mk: TargetDomainId => TransferStore): Unit = {
     val transferData = FutureUtil.noisyAwaitResult(
       mkTransferData(transfer10, mediator1),
       "make transfer data",
@@ -122,15 +124,15 @@ trait TransferStoreTest {
 
         for {
           transfer1 <- mkTransferData(
-            TransferId(domain1, CantonTimestamp.ofEpochMilli(100L)),
+            TransferId(sourceDomain1, CantonTimestamp.ofEpochMilli(100L)),
             mediator1,
           )
           transfer2 <- mkTransferData(
-            TransferId(domain1, CantonTimestamp.ofEpochMilli(200L)),
+            TransferId(sourceDomain1, CantonTimestamp.ofEpochMilli(200L)),
             mediator1,
           )
           transfer3 <- mkTransferData(
-            TransferId(domain1, CantonTimestamp.ofEpochMilli(300L)),
+            TransferId(sourceDomain1, CantonTimestamp.ofEpochMilli(300L)),
             mediator1,
           )
           _ <- valueOrFail(store.addTransfer(transfer1))("add1 failed")
@@ -145,16 +147,16 @@ trait TransferStoreTest {
         val store = mk(targetDomain)
         for {
           transfer1 <- mkTransferData(
-            TransferId(domain1, CantonTimestamp.ofEpochMilli(100L)),
+            TransferId(sourceDomain1, CantonTimestamp.ofEpochMilli(100L)),
             mediator1,
           )
           transfer2 <- mkTransferData(
-            TransferId(domain2, CantonTimestamp.ofEpochMilli(200L)),
+            TransferId(sourceDomain2, CantonTimestamp.ofEpochMilli(200L)),
             mediator2,
           )
           _ <- valueOrFail(store.addTransfer(transfer1))("add1 failed")
           _ <- valueOrFail(store.addTransfer(transfer2))("add2 failed")
-          lookup <- store.find(Some(domain2), None, None, 10)
+          lookup <- store.find(Some(sourceDomain2), None, None, 10)
         } yield {
           assert(lookup.toList == List(transfer2))
         }
@@ -179,25 +181,25 @@ trait TransferStoreTest {
         for {
           // Correct timestamp
           transfer1 <- mkTransferData(
-            TransferId(domain1, CantonTimestamp.Epoch.plusMillis(200L)),
+            TransferId(sourceDomain1, CantonTimestamp.Epoch.plusMillis(200L)),
             mediator1,
             LfPartyId.assertFromString("party1"),
           )
           // Correct submitter
           transfer2 <- mkTransferData(
-            TransferId(domain1, CantonTimestamp.Epoch.plusMillis(100L)),
+            TransferId(sourceDomain1, CantonTimestamp.Epoch.plusMillis(100L)),
             mediator1,
             LfPartyId.assertFromString("party2"),
           )
           // Correct domain
           transfer3 <- mkTransferData(
-            TransferId(domain2, CantonTimestamp.Epoch.plusMillis(100L)),
+            TransferId(sourceDomain2, CantonTimestamp.Epoch.plusMillis(100L)),
             mediator2,
             LfPartyId.assertFromString("party2"),
           )
           // Correct transfer
           transfer4 <- mkTransferData(
-            TransferId(domain2, CantonTimestamp.Epoch.plusMillis(200L)),
+            TransferId(sourceDomain2, CantonTimestamp.Epoch.plusMillis(200L)),
             mediator2,
             LfPartyId.assertFromString("party2"),
           )
@@ -206,7 +208,7 @@ trait TransferStoreTest {
           _ <- valueOrFail(store.addTransfer(transfer3))("third add failed")
           _ <- valueOrFail(store.addTransfer(transfer4))("fourth add failed")
           lookup <- store.find(
-            Some(domain2),
+            Some(sourceDomain2),
             Some(CantonTimestamp.Epoch.plusMillis(200L)),
             Some(LfPartyId.assertFromString("party2")),
             10,
@@ -218,24 +220,24 @@ trait TransferStoreTest {
 
     "findAfter" should {
 
-      def populate(store: TransferStore) = for {
+      def populate(store: TransferStore): Future[List[TransferData]] = for {
         transfer1 <- mkTransferData(
-          TransferId(domain1, CantonTimestamp.Epoch.plusMillis(200L)),
+          TransferId(sourceDomain1, CantonTimestamp.Epoch.plusMillis(200L)),
           mediator1,
           LfPartyId.assertFromString("party1"),
         )
         transfer2 <- mkTransferData(
-          TransferId(domain1, CantonTimestamp.Epoch.plusMillis(100L)),
+          TransferId(sourceDomain1, CantonTimestamp.Epoch.plusMillis(100L)),
           mediator1,
           LfPartyId.assertFromString("party2"),
         )
         transfer3 <- mkTransferData(
-          TransferId(domain2, CantonTimestamp.Epoch.plusMillis(100L)),
+          TransferId(sourceDomain2, CantonTimestamp.Epoch.plusMillis(100L)),
           mediator2,
           LfPartyId.assertFromString("party2"),
         )
         transfer4 <- mkTransferData(
-          TransferId(domain2, CantonTimestamp.Epoch.plusMillis(200L)),
+          TransferId(sourceDomain2, CantonTimestamp.Epoch.plusMillis(200L)),
           mediator2,
           LfPartyId.assertFromString("party2"),
         )
@@ -284,7 +286,7 @@ trait TransferStoreTest {
           transfers <- populate(store)
           lookup <- store.findAfter(None, 2)
         } yield {
-          val List(transfer1, transfer2, transfer3, transfer4) = transfers: @unchecked
+          val List(_transfer1, transfer2, transfer3, _transfer4) = transfers: @unchecked
           assert(lookup == Seq(transfer2, transfer3))
         }
       }
@@ -316,7 +318,7 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
+          lookup <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
         } yield {
           lookup shouldBe empty
         }
@@ -334,7 +336,8 @@ trait TransferStoreTest {
         val transfersData =
           Seq(aliceContract, bobContract, aliceContract, bobContract).zipWithIndex.map {
             case (contract, idx) =>
-              val transferId = TransferId(domain1, CantonTimestamp.Epoch.plusSeconds(idx.toLong))
+              val transferId =
+                TransferId(sourceDomain1, CantonTimestamp.Epoch.plusSeconds(idx.toLong))
 
               transferDataFor(transferId, contract)
           }
@@ -347,11 +350,11 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(addTransfersET)("add failed")
 
-          lookupNone <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
-          lookupAll <- store.findInFlight(domain1, false, Long.MaxValue, lift(alice, bob), 10)
+          lookupNone <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
+          lookupAll <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(alice, bob), 10)
 
-          lookupAlice <- store.findInFlight(domain1, false, Long.MaxValue, lift(alice), 10)
-          lookupBob <- store.findInFlight(domain1, false, Long.MaxValue, lift(bob), 10)
+          lookupAlice <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(alice), 10)
+          lookupBob <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(bob), 10)
         } yield {
 
           lookupNone shouldBe transfersData
@@ -368,12 +371,12 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup1a <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
-          lookup1b <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
+          lookup1a <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
+          lookup1b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup2a <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
-          lookup2b <- store.findInFlight(domain1, true, Long.MaxValue, None, 10)
+          lookup2a <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
+          lookup2b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
         } yield {
           lookup1a shouldBe Seq(transferData)
           lookup1b shouldBe Seq()
@@ -393,8 +396,8 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
 
-          lookup1a <- store.findInFlight(domain1, false, transferOutLocalOffset - 1, None, 10)
-          lookup1b <- store.findInFlight(domain1, false, transferOutLocalOffset, None, 10)
+          lookup1a <- store.findInFlight(sourceDomain1, false, transferOutLocalOffset - 1, None, 10)
+          lookup1b <- store.findInFlight(sourceDomain1, false, transferOutLocalOffset, None, 10)
         } yield {
           lookup1a shouldBe Seq()
           lookup1b shouldBe Seq(transferData)
@@ -407,8 +410,8 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
 
-          lookup1a <- store.findInFlight(domain2, false, Long.MaxValue, None, 10)
-          lookup1b <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+          lookup1a <- store.findInFlight(sourceDomain2, false, Long.MaxValue, None, 10)
+          lookup1b <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
         } yield {
           lookup1a shouldBe Seq()
           lookup1b shouldBe Seq(transferData)
@@ -420,13 +423,13 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup1 <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+          lookup1 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup2 <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+          lookup2 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
 
           _ <- store.completeTransfer(transferData.transferId, toc).value
-          lookup3 <- store.findInFlight(domain1, false, Long.MaxValue, None, 10)
+          lookup3 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
         } yield {
           lookup1 shouldBe Seq(transferData)
 
@@ -442,12 +445,12 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup11 <- store.findInFlight(domain1, false, Long.MaxValue, None, 1)
-          lookup10 <- store.findInFlight(domain1, false, Long.MaxValue, None, 0)
+          lookup11 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 1)
+          lookup10 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 0)
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup21 <- store.findInFlight(domain1, true, Long.MaxValue, None, 1)
-          lookup20 <- store.findInFlight(domain1, true, Long.MaxValue, None, 0)
+          lookup21 <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 1)
+          lookup20 <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 0)
         } yield {
           lookup11 shouldBe Seq(transferData)
           lookup10 shouldBe Seq()
@@ -519,7 +522,7 @@ trait TransferStoreTest {
       }
 
       "complain about transfers for a different domain" in {
-        val store = mk(domain1)
+        val store = mk(TargetDomainId(sourceDomain1.unwrap))
         loggerFactory.assertInternalError[IllegalArgumentException](
           store.addTransfer(transferData),
           _.getMessage shouldBe "Domain domain1::DOMAIN1: Transfer store cannot store transfer for domain target::DOMAIN",
@@ -700,7 +703,7 @@ trait TransferStoreTest {
 
     "transfer stores should be isolated" in {
       val storeTarget = mk(targetDomain)
-      val store1 = mk(domain1)
+      val store1 = mk(TargetDomainId(sourceDomain1.unwrap))
       for {
         _ <- valueOrFail(storeTarget.addTransfer(transferData))("add failed")
         found <- store1.lookup(transferData.transferId).value
@@ -763,14 +766,20 @@ object TransferStoreTest {
   val transactionId1 = transactionId(1)
 
   val domain1 = DomainId(UniqueIdentifier.tryCreate("domain1", "DOMAIN1"))
+  val sourceDomain1 = SourceDomainId(DomainId(UniqueIdentifier.tryCreate("domain1", "DOMAIN1")))
+  val targetDomain1 = TargetDomainId(DomainId(UniqueIdentifier.tryCreate("domain1", "DOMAIN1")))
   val mediator1 = MediatorId(UniqueIdentifier.tryCreate("mediator1", "DOMAIN1"))
-  val domain2 = DomainId(UniqueIdentifier.tryCreate("domain2", "DOMAIN2"))
-  val mediator2 = MediatorId(UniqueIdentifier.tryCreate("mediator2", "DOMAIN2"))
-  val targetDomain = DomainId(UniqueIdentifier.tryCreate("target", "DOMAIN"))
 
-  val transfer10 = TransferId(domain1, CantonTimestamp.Epoch)
-  val transfer11 = TransferId(domain1, CantonTimestamp.ofEpochMilli(1))
-  val transfer20 = TransferId(domain2, CantonTimestamp.Epoch)
+  val domain2 = DomainId(UniqueIdentifier.tryCreate("domain2", "DOMAIN2"))
+  val sourceDomain2 = SourceDomainId(DomainId(UniqueIdentifier.tryCreate("domain2", "DOMAIN2")))
+  val targetDomain2 = TargetDomainId(DomainId(UniqueIdentifier.tryCreate("domain2", "DOMAIN2")))
+  val mediator2 = MediatorId(UniqueIdentifier.tryCreate("mediator2", "DOMAIN2"))
+
+  val targetDomain = TargetDomainId(DomainId(UniqueIdentifier.tryCreate("target", "DOMAIN")))
+
+  val transfer10 = TransferId(sourceDomain1, CantonTimestamp.Epoch)
+  val transfer11 = TransferId(sourceDomain1, CantonTimestamp.ofEpochMilli(1))
+  val transfer20 = TransferId(sourceDomain2, CantonTimestamp.Epoch)
 
   val loggerFactoryNotUsed = NamedLoggerFactory.unnamedKey("test", "NotUsed-TransferStoreTest")
   implicit val ec = DirectExecutionContext(
@@ -787,7 +796,6 @@ object TransferStoreTest {
   val privateCrypto = cryptoFactory.crypto.privateCrypto
   val pureCryptoApi: CryptoPureApi = cryptoFactory.pureCrypto
 
-  private val workflowId: Option[LfWorkflowId] = None
   def sign(str: String): Signature = {
     val hash =
       pureCryptoApi.build(HashPurpose.TransferResultSignature).addWithoutLengthPrefix(str).finish()
@@ -833,7 +841,8 @@ object TransferStoreTest {
       applicationId,
       submittingParticipant,
       commandId,
-      None,
+      submissionId = None,
+      workflowId = None,
     )
   }
 
@@ -851,7 +860,7 @@ object TransferStoreTest {
       transferId: TransferId,
       sourceMediator: MediatorId,
       submittingParty: LfPartyId = LfPartyId.assertFromString("submitter"),
-      targetDomainId: DomainId,
+      targetDomainId: TargetDomainId,
       contract: SerializableContract = contract,
   ): Future[TransferData] = {
 
@@ -868,7 +877,6 @@ object TransferStoreTest {
       submitterMetadata(submittingParty),
       Set(submittingParty),
       Set.empty,
-      workflowId,
       contract.contractId,
       templateId = templateId,
       transferId.sourceDomain,
@@ -876,7 +884,11 @@ object TransferStoreTest {
       sourceMediator,
       targetDomainId,
       targetProtocolVersion,
-      TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomainId),
+      TimeProofTestUtil.mkTimeProof(
+        timestamp = CantonTimestamp.Epoch,
+        targetDomain = targetDomainId,
+      ),
+      TransferCounter.Genesis,
     )
     val uuid = new UUID(10L, 0L)
     val seed = seedGenerator.generateSaltSeed()
@@ -895,6 +907,7 @@ object TransferStoreTest {
         fullTransferOutViewTree,
         CantonTimestamp.ofEpochSecond(10),
         contract,
+        TransferCounter.Genesis,
         transactionId1,
         None,
       )
@@ -926,7 +939,7 @@ object TransferStoreTest {
         Deliver.create(
           SequencerCounter(1),
           CantonTimestamp.ofEpochMilli(10),
-          transferData.sourceDomain,
+          transferData.sourceDomain.unwrap,
           Some(MessageId.tryCreate("1")),
           batch,
           protocolVersion,

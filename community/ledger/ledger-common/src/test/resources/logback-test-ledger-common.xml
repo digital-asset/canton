@@ -71,10 +71,10 @@
     </logger>
 
     <appender name="ErrorCodeLogCollector" class="com.digitalasset.canton.testing.TestingLogCollector">
-        <test>com.daml.error.ErrorCodeSpec</test>
+        <test>com.digitalasset.canton.ledger.error.DamlContextualizedErrorLoggerSpec</test>
     </appender>
 
-    <logger name="com.daml.error.ErrorCodeSpec" level="INFO">
+    <logger name="com.digitalasset.canton.ledger.error.DamlContextualizedErrorLoggerSpec" level="INFO">
         <appender-ref ref="ErrorCodeLogCollector"/>
     </logger>
 

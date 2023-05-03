@@ -7,7 +7,7 @@ import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, v0}
+import com.digitalasset.canton.protocol.{RequestId, TargetDomainId, v0}
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DefaultTestIdentities
@@ -26,7 +26,7 @@ class SequencedEventTest extends BaseTestWordSpec {
           TransferResult.create(
             RequestId(CantonTimestamp.now()),
             Set.empty,
-            TransferInDomainId(domainId),
+            TargetDomainId(domainId),
             Verdict.Approve(testedProtocolVersion),
             testedProtocolVersion,
           ),

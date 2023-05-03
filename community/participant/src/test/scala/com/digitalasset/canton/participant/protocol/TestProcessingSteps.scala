@@ -223,19 +223,21 @@ class TestProcessingSteps(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
-      tracker: SingleDomainCausalTracker,
-      activenessResultFuture: Future[ActivenessResult],
+      activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TestProcessingError, StorePendingDataAndSendResponseAndCreateTimeout] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    TestProcessingError,
+    StorePendingDataAndSendResponseAndCreateTimeout,
+  ] = {
     val res = StorePendingDataAndSendResponseAndCreateTimeout(
       pendingRequestData.getOrElse(
         TestPendingRequestData(RequestCounter(0), SequencerCounter(0), Set.empty, mediatorId)
       ),
       Seq.empty,
-      List.empty,
       (),
     )
     EitherT.rightT(res)
@@ -271,12 +273,11 @@ class TestProcessingSteps(
       resultE: Either[MalformedMediatorRequestResult, TransactionResultMessage],
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
-      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TestProcessingError, CommitAndStoreContractsAndPublishEvent] = {
-    val result = CommitAndStoreContractsAndPublishEvent(None, Set.empty, None, None)
+    val result = CommitAndStoreContractsAndPublishEvent(None, Set.empty, None)
     EitherT.pure[Future, TestProcessingError](result)
   }
 

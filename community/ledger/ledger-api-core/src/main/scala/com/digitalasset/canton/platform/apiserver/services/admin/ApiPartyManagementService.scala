@@ -5,9 +5,7 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.ledger.api.v1.admin.object_meta.{ObjectMeta as ProtoObjectMeta}
+import com.daml.ledger.api.v1.admin.object_meta.ObjectMeta as ProtoObjectMeta
 import com.daml.ledger.api.v1.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementService
 import com.daml.ledger.api.v1.admin.party_management_service.{
   AllocatePartyRequest,
@@ -36,8 +34,9 @@ import com.digitalasset.canton.ledger.api.domain.{
   PartyDetails,
 }
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
@@ -89,14 +88,12 @@ private[apiserver] final class ApiPartyManagementService private (
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
-      transactionService,
       writeService,
       partyManagementService,
-    ),
-    timeToLive = managementServiceTimeout,
+    )
   )
 
-  override def close(): Unit = ()
+  override def close(): Unit = synchronousResponse.close()
 
   override def bindService(): ServerServiceDefinition =
     PartyManagementServiceGrpc.bindService(this, executionContext)
@@ -205,9 +202,12 @@ private[apiserver] final class ApiPartyManagementService private (
       } { case (partyIdHintO, displayNameO, annotations, identityProviderId) =>
         (for {
           _ <- identityProviderExistsOrError(identityProviderId)
+          ledgerEndbeforeRequest <- transactionService.currentLedgerEnd().map(Some(_))
           allocated <- synchronousResponse.submitAndWait(
             submissionId,
             (partyIdHintO, displayNameO),
+            ledgerEndbeforeRequest,
+            managementServiceTimeout,
           )
           _ <- verifyPartyIsNonExistentOrInIdp(
             identityProviderId,
@@ -552,19 +552,15 @@ private[apiserver] object ApiPartyManagementService {
   }
 
   private final class SynchronousResponseStrategy(
-      ledgerEndService: LedgerEndService,
       writeService: state.WritePartyService,
       partyManagementService: IndexPartyManagementService,
-  )(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
+  )(implicit loggingContext: LoggingContext)
       extends SynchronousResponse.Strategy[
         (Option[Ref.Party], Option[String]),
         PartyEntry,
         PartyEntry.AllocationAccepted,
       ] {
     private val logger = ContextualizedLogger.get(getClass)
-
-    override def currentLedgerEnd(): Future[Option[LedgerOffset.Absolute]] =
-      ledgerEndService.currentLedgerEnd().map(Some(_))
 
     override def submit(
         submissionId: Ref.SubmissionId,

@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.participant.sync
 
-import com.daml.error.definitions.LedgerApiErrors.ConsistencyErrors.DuplicateCommand
-import com.daml.error.definitions.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.ConsistencyErrors.DuplicateCommand
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 
 object CommandDeduplicationError extends InjectionErrorGroup {
@@ -37,7 +37,7 @@ object CommandDeduplicationError extends InjectionErrorGroup {
 
   final case class DuplicateCommandReject(
       changeId: ChangeId,
-      // use the same field name as defined in com.digitalasset.canton.ledger.grpc.GrpcStatuses.CompletionOffsetKey
+      // use the same field name as defined in com.daml.error.GrpcStatuses.CompletionOffsetKey
       // use a Hexstring instead of LedgerSyncOffset so that we don't get the pretty printer in the way
       completion_offset: String,
       accepted: Boolean,
@@ -55,7 +55,7 @@ object CommandDeduplicationError extends InjectionErrorGroup {
       changeId: ChangeId,
       requestedPeriod: DeduplicationPeriod,
       // machine readable field for the earliest supported offset;
-      // must be the same as com.daml.error.definitions.LedgerApiErrors.EarliestOffsetMetadataKey
+      // must be the same as com.digitalasset.canton.ledger.error.LedgerApiErrors.EarliestOffsetMetadataKey
       earliest_offset: String,
   ) extends TransactionErrorImpl(
         "Deduplication period starts too early. The error metadata field earliest_offset contains the earliest deduplication offset currently allowed.",

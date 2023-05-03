@@ -7,7 +7,6 @@ import com.digitalasset.canton.protocol.{
   LfCommittedTransaction,
   LfGlobalKeyWithMaintainers,
   LfNode,
-  LfNodeAuthority,
   LfNodeCreate,
   LfNodeExercises,
   LfNodeFetch,
@@ -39,7 +38,6 @@ trait PrettyTestInstances {
     case n: LfNodeFetch => prettyLfNodeFetch.treeOf(n)
     case n: LfNodeLookupByKey => prettyLfNodeLookupByKey.treeOf(n)
     case n: LfNodeRollback => prettyLfNodeRollback.treeOf(n)
-    case _: LfNodeAuthority => sys.error("LfNodeAuthority")
   }
 
   implicit lazy val prettyLfNodeCreate: Pretty[LfNodeCreate] = prettyOfClass(

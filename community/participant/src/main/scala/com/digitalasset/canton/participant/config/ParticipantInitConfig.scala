@@ -44,7 +44,7 @@ object ParticipantInitConfig {
 
   /** Init configuration of the ledger API for participant nodes
     * @param maxDeduplicationDuration The max deduplication duration reported by the participant's ledger configuration service.
-    *                                 This duration defines a lower bound on the durations that the participant's command and command submission services accept as command deduplication durations.
+    *                                 The participant's command and command submission services accept all command deduplication durations up to this duration. Acceptance of longer ones is at the discretion of the participant and may vary over time.
     */
   final case class ParticipantLedgerApiInitConfig(
       maxDeduplicationDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7L)
@@ -52,10 +52,8 @@ object ParticipantInitConfig {
 
   /** Init configuration of the ledger API for participant nodes
     * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
-    * @param unsafeEnableCausalityTracking Experimental. Ensures that the event ordering on the participant node is consistent even for cross domain contracts
     */
   final case class ParticipantParametersInitConfig(
-      uniqueContractKeys: Boolean = true,
-      unsafeEnableCausalityTracking: Boolean = false,
+      uniqueContractKeys: Boolean = true
   )
 }

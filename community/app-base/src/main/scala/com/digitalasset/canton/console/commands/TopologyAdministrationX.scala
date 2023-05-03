@@ -148,12 +148,13 @@ class TopologyAdministrationGroupX(
 
       val thisNodeRootKey = Some(instance.id.uid.namespace.fingerprint)
 
+      val codes = Set(NamespaceDelegationX.code, OwnerToKeyMappingX.code)
       // provide the root namespace delegation and owner to key mapping
       val namespace = instance.topology.transactions
         .list(filterAuthorizedKey = thisNodeRootKey)
         .result
         .map(_.transaction)
-        .filter(_.transaction.mapping.code == NamespaceDelegationX.code)
+        .filter(x => codes.contains(x.transaction.mapping.code))
 
       // create and sign the unionspace for the domain
       val unionspaceTransaction = instance.topology.unionspaces.propose(

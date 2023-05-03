@@ -67,6 +67,7 @@ class IndexerBenchmark() {
           LedgerApiServer
             .createInMemoryStateAndUpdater(
               config.indexServiceConfig,
+              256,
               metrics,
               indexerExecutionContext,
             )
