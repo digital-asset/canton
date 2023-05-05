@@ -8,7 +8,11 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.ProtoDeserializationError.UnrecognizedEnum
+import com.digitalasset.canton.ProtoDeserializationError.{
+  FieldNotSet,
+  UnrecognizedEnum,
+  ValueConversionError,
+}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -555,6 +559,7 @@ object OwnerToKeyMappingX {
 /** Participant domain trust certificate
   */
 final case class DomainTrustCertificateX(
+    // TODO(#11255) should be ParticipantId and DomainId
     participantId: UniqueIdentifier,
     domainId: UniqueIdentifier,
 )(
@@ -617,25 +622,26 @@ object DomainTrustCertificateX {
  */
 sealed trait ParticipantPermissionX {
   def toProtoV2: v2.ParticipantPermissionX
+  def toNonX: ParticipantPermission
 }
 object ParticipantPermissionX {
-  case object MissingParticipantPermission extends ParticipantPermissionX {
-    lazy val toProtoV2 = v2.ParticipantPermissionX.MissingParticipantPermission
-  }
   case object Submission extends ParticipantPermissionX {
     lazy val toProtoV2 = v2.ParticipantPermissionX.Submission
+    override def toNonX: ParticipantPermission = ParticipantPermission.Submission
   }
   case object Confirmation extends ParticipantPermissionX {
     lazy val toProtoV2 = v2.ParticipantPermissionX.Confirmation
+    override def toNonX: ParticipantPermission = ParticipantPermission.Confirmation
   }
   case object Observation extends ParticipantPermissionX {
     lazy val toProtoV2 = v2.ParticipantPermissionX.Observation
+    override def toNonX: ParticipantPermission = ParticipantPermission.Observation
   }
 
   def fromProtoV2(value: v2.ParticipantPermissionX): ParsingResult[ParticipantPermissionX] =
     value match {
       case v2.ParticipantPermissionX.MissingParticipantPermission =>
-        Right(MissingParticipantPermission)
+        Left(FieldNotSet(value.name))
       case v2.ParticipantPermissionX.Submission => Right(Submission)
       case v2.ParticipantPermissionX.Confirmation => Right(Confirmation)
       case v2.ParticipantPermissionX.Observation => Right(Observation)
@@ -645,22 +651,22 @@ object ParticipantPermissionX {
 
 sealed trait TrustLevelX {
   def toProtoV2: v2.TrustLevelX
+  def toNonX: TrustLevel
 }
 object TrustLevelX {
-  case object MissingTrustLevel extends TrustLevelX {
-    lazy val toProtoV2 = v2.TrustLevelX.MissingTrustLevel
-  }
   case object Ordinary extends TrustLevelX {
     lazy val toProtoV2 = v2.TrustLevelX.Ordinary
+    def toNonX: TrustLevel = TrustLevel.Ordinary
   }
   case object Vip extends TrustLevelX {
     lazy val toProtoV2 = v2.TrustLevelX.Vip
+    def toNonX: TrustLevel = TrustLevel.Vip
   }
 
   def fromProtoV2(value: v2.TrustLevelX): ParsingResult[TrustLevelX] = value match {
-    case v2.TrustLevelX.MissingTrustLevel => Right(MissingTrustLevel)
     case v2.TrustLevelX.Ordinary => Right(Ordinary)
     case v2.TrustLevelX.Vip => Right(Vip)
+    case v2.TrustLevelX.MissingTrustLevel => Left(FieldNotSet(value.name))
     case v2.TrustLevelX.Unrecognized(x) => Left(UnrecognizedEnum(value.name, x))
   }
 }
@@ -683,6 +689,9 @@ final case class ParticipantDomainPermissionX(
     val limits: Option[ParticipantDomainLimits],
     val loginAfter: Option[CantonTimestamp],
 ) extends TopologyMappingX {
+
+  def toParticipantAttributes: ParticipantAttributes =
+    ParticipantAttributes(permission.toNonX, trustLevel.toNonX)
 
   def toProto: v2.ParticipantDomainPermissionX =
     v2.ParticipantDomainPermissionX(
@@ -715,11 +724,35 @@ final case class ParticipantDomainPermissionX(
     builder
       .add(domainId.toProtoPrimitive)
       .add(participantId.toProtoPrimitive)
+
+  def setDefaultLimitIfNotSet(
+      defaultLimits: ParticipantDomainLimits
+  ): ParticipantDomainPermissionX =
+    if (limits.nonEmpty)
+      this
+    else
+      ParticipantDomainPermissionX(domainId, participantId)(
+        permission,
+        trustLevel,
+        Some(defaultLimits),
+        loginAfter,
+      )
 }
 
 object ParticipantDomainPermissionX {
 
   def code: Code = Code.ParticipantDomainPermissionX
+
+  def default(
+      domainId: UniqueIdentifier,
+      participantId: UniqueIdentifier,
+  ): ParticipantDomainPermissionX =
+    ParticipantDomainPermissionX(domainId, participantId)(
+      ParticipantPermissionX.Submission,
+      TrustLevelX.Ordinary,
+      None,
+      None,
+    )
 
   def fromProtoV2(
       value: v2.ParticipantDomainPermissionX
@@ -941,14 +974,14 @@ final case class AuthorityOfX(
     partyId: UniqueIdentifier,
     domainId: Option[UniqueIdentifier],
 )(
-    val threshold: Int,
+    val threshold: PositiveInt,
     val parties: Seq[UniqueIdentifier],
 ) extends TopologyMappingX {
 
   def toProto: v2.AuthorityOfX =
     v2.AuthorityOfX(
       party = partyId.toProtoPrimitive,
-      threshold = threshold,
+      threshold = threshold.unwrap,
       parties = parties.map(_.toProtoPrimitive),
       domain = domainId.fold("")(_.toProtoPrimitive),
     )
@@ -987,7 +1020,14 @@ object AuthorityOfX {
   ): ParsingResult[AuthorityOfX] =
     for {
       partyId <- UniqueIdentifier.fromProtoPrimitive(value.party, "party")
-      threshold = value.threshold
+      threshold <- PositiveInt
+        .create(value.threshold)
+        .leftMap(_ =>
+          ValueConversionError(
+            "threshold",
+            s"threshold needs to be positive and not ${value.threshold}",
+          )
+        )
       parties <- value.parties.traverse(UniqueIdentifier.fromProtoPrimitive(_, "party"))
       domainId <-
         if (value.domain.nonEmpty)

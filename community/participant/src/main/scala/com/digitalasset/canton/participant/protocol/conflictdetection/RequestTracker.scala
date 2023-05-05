@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.{EitherT, NonEmptyChain}
 import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.LockedStates
@@ -227,7 +228,9 @@ trait RequestTracker extends AutoCloseable with NamedLogging {
       activenessTime: CantonTimestamp,
       decisionTime: CantonTimestamp,
       activenessSet: ActivenessSet,
-  )(implicit traceContext: TraceContext): Either[RequestAlreadyExists, Future[RequestFutures]]
+  )(implicit
+      traceContext: TraceContext
+  ): Either[RequestAlreadyExists, FutureUnlessShutdown[RequestFutures]]
 
   /** Informs the request tracker that a result message has arrived for the given request.
     * This marks the request as not having timed out. The actual effect of the result must
@@ -276,7 +279,9 @@ trait RequestTracker extends AutoCloseable with NamedLogging {
     */
   def addCommitSet(requestCounter: RequestCounter, commitSet: Try[CommitSet])(implicit
       traceContext: TraceContext
-  ): Either[CommitSetError, EitherT[Future, NonEmptyChain[RequestTrackerStoreError], Unit]]
+  ): Either[CommitSetError, EitherT[FutureUnlessShutdown, NonEmptyChain[
+    RequestTrackerStoreError
+  ], Unit]]
 
   /** Returns a possibly outdated state of the contract. */
   def getApproximateStates(coid: Seq[LfContractId])(implicit
@@ -299,7 +304,7 @@ object RequestTracker {
     *                      request times out or a transaction result is added.
     */
   final case class RequestFutures(
-      activenessResult: Future[ActivenessResult],
+      activenessResult: FutureUnlessShutdown[ActivenessResult],
       timeoutResult: Future[TimeoutResult],
   )
 

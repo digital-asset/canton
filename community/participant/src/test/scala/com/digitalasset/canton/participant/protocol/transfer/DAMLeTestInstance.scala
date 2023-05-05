@@ -13,6 +13,7 @@ import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting, PackageService}
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
+import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerOps
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
@@ -36,7 +37,7 @@ object DAMLeTestInstance {
         new InMemoryDamlPackageStore(loggerFactory),
         mock[ParticipantEventPublisher],
         pureCrypto,
-        _ => EitherT.rightT(()),
+        mock[ParticipantTopologyManagerOps],
         new PackageInspectionOpsForTesting(participant, loggerFactory),
         ProcessingTimeout(),
         loggerFactory,

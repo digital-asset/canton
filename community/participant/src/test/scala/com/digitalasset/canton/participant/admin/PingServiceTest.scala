@@ -53,6 +53,7 @@ class PingServiceTest
         pingDeduplicationTime = NonNegativeFiniteDuration.tryOfMinutes(5),
         isActive = true,
         None,
+        futureSupervisor,
         loggerFactory.append("tag", tag.toString),
         clock,
       )(parallelExecutionContext, scheduler)

@@ -11,11 +11,11 @@ import com.digitalasset.canton.protocol.{
   ContractMetadata,
   LfContractId,
   LfGlobalKey,
+  TargetDomainId,
   TransferId,
   WithContractHash,
   WithContractMetadata,
 }
-import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.SetsUtil.requireDisjoint
 
 /** Describes the effect of a confirmation request on the active contracts, contract keys, and transfers.
@@ -37,7 +37,7 @@ import com.digitalasset.canton.util.SetsUtil.requireDisjoint
 final case class CommitSet(
     archivals: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
     creations: Map[LfContractId, WithContractHash[ContractMetadata]],
-    transferOuts: Map[LfContractId, WithContractHash[(DomainId, Set[LfPartyId])]],
+    transferOuts: Map[LfContractId, WithContractHash[(TargetDomainId, Set[LfPartyId])]],
     transferIns: Map[LfContractId, WithContractHash[WithContractMetadata[TransferId]]],
     keyUpdates: Map[LfGlobalKey, ContractKeyJournal.Status],
 ) extends PrettyPrinting {

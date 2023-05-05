@@ -7,7 +7,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
+import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -49,6 +49,11 @@ final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: Top
       result.mapFilter(_.selectOp[T])
     )
 
+  def collectOfMapping[T <: TopologyMappingX: ClassTag]: StoredTopologyTransactionsX[Op, T] =
+    StoredTopologyTransactionsX(
+      result.mapFilter(_.selectMapping[T])
+    )
+
   /** Split transactions into certificates and everything else (used when uploading to a participant) */
   def splitCertsAndRest: StoredTopologyTransactionsX.CertsAndRest = {
     val certTypes = Set(
@@ -69,19 +74,9 @@ final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: Top
   /** The timestamp of the last topology transaction (if there is at least one)
     * adjusted by topology change delay
     */
-  def lastChangeTimestamp: Option[CantonTimestamp] = {
-    val epsilon = result
-      .map(_.transaction.transaction.mapping)
-      .collect { case x: DomainParametersStateX =>
-        x.parameters.topologyChangeDelay
-      }
-      .lastOption
-      .getOrElse(DynamicDomainParameters.topologyChangeDelayIfAbsent)
-    val timestamp = result
-      .map(_.validFrom.value)
-      .maxOption
-    timestamp.map(_.minus(epsilon.duration))
-  }
+  def lastChangeTimestamp: Option[CantonTimestamp] = result
+    .map(_.sequenced.value)
+    .maxOption
 }
 
 object StoredTopologyTransactionsX

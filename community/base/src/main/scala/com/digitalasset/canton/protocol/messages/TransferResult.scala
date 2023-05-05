@@ -12,10 +12,18 @@ import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.TransferDomainId.TransferDomainIdCast
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult.InvalidTransferOutResult
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.messages.TransferDomainId.TransferDomainIdCast
-import com.digitalasset.canton.protocol.{RequestId, TransferId, v0, v1}
+import com.digitalasset.canton.protocol.{
+  RequestId,
+  SourceDomainId,
+  TargetDomainId,
+  TransferDomainId,
+  TransferId,
+  v0,
+  v1,
+}
 import com.digitalasset.canton.sequencing.RawProtocolEvent
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, EventWithErrors, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -59,9 +67,9 @@ case class TransferResult[+Domain <: TransferDomainId] private (
 
   def toProtoV0: v0.TransferResult = {
     val domainP = (domain: @unchecked) match {
-      case TransferOutDomainId(domainId) =>
+      case SourceDomainId(domainId) =>
         v0.TransferResult.Domain.OriginDomain(domainId.toProtoPrimitive)
-      case TransferInDomainId(domainId) =>
+      case TargetDomainId(domainId) =>
         v0.TransferResult.Domain.TargetDomain(domainId.toProtoPrimitive)
     }
     v0.TransferResult(
@@ -74,9 +82,9 @@ case class TransferResult[+Domain <: TransferDomainId] private (
 
   def toProtoV1: v1.TransferResult = {
     val domainP = (domain: @unchecked) match {
-      case TransferOutDomainId(domainId) =>
+      case SourceDomainId(domainId) =>
         v1.TransferResult.Domain.OriginDomain(domainId.toProtoPrimitive)
-      case TransferInDomainId(domainId) =>
+      case TargetDomainId(domainId) =>
         v1.TransferResult.Domain.TargetDomain(domainId.toProtoPrimitive)
     }
     v1.TransferResult(
@@ -161,11 +169,11 @@ object TransferResult
             case Domain.OriginDomain(sourceDomain) =>
               DomainId
                 .fromProtoPrimitive(sourceDomain, "TransferResult.originDomain")
-                .map(TransferOutDomainId(_))
+                .map(SourceDomainId(_))
             case Domain.TargetDomain(targetDomain) =>
               DomainId
                 .fromProtoPrimitive(targetDomain, "TransferResult.targetDomain")
-                .map(TransferInDomainId(_))
+                .map(TargetDomainId(_))
             case Domain.Empty => Left(FieldNotSet("TransferResponse.domain"))
           }
           informees <- informeesP.traverse(ProtoConverter.parseLfPartyId)
@@ -191,11 +199,11 @@ object TransferResult
         case Domain.OriginDomain(sourceDomain) =>
           DomainId
             .fromProtoPrimitive(sourceDomain, "TransferResult.originDomain")
-            .map(TransferOutDomainId(_))
+            .map(SourceDomainId(_))
         case Domain.TargetDomain(targetDomain) =>
           DomainId
             .fromProtoPrimitive(targetDomain, "TransferResult.targetDomain")
-            .map(TransferInDomainId(_))
+            .map(TargetDomainId(_))
         case Domain.Empty => Left(FieldNotSet("TransferResponse.domain"))
       }
       informees <- informeesP.traverse(ProtoConverter.parseLfPartyId)
@@ -239,7 +247,7 @@ final case class DeliveredTransferOutResult(result: SignedContent[Deliver[Defaul
       throw InvalidTransferOutResult(result.content, "The transfer-out result must be approving.")
   }
 
-  def transferId: TransferId = TransferId(unwrap.domainId, unwrap.requestId.unwrap)
+  def transferId: TransferId = TransferId(unwrap.domain, unwrap.requestId.unwrap)
 
   override def pretty: Pretty[DeliveredTransferOutResult] = prettyOfParam(_.unwrap)
 }

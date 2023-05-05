@@ -513,7 +513,9 @@ private[domain] class DomainTopologyDispatcher(
           case (participantId, perm) if perm.isActive => participantId
         })
     )
-    val mediatorsF = performUnlessClosingF(functionFullName)(headSnapshot.mediators())
+    val mediatorsF = performUnlessClosingF(functionFullName)(
+      headSnapshot.mediatorGroups().map(_.flatMap(_.active))
+    )
     for {
       receivingParticipants <- EitherT.right(receivingParticipantsF)
       mediators <- EitherT.right(mediatorsF)

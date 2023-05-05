@@ -14,7 +14,7 @@ import com.digitalasset.canton.protocol.messages.ProtocolMessage
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{MediatorId, Member}
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion2,
@@ -40,9 +40,20 @@ final case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
 
   /** builds a set of recipients from all messages in this message batch
     */
-  lazy val allRecipients: Set[Member] = envelopes.flatMap { e =>
+  lazy val allMembers: Set[Member] = allRecipients.collect { case MemberRecipient(member) =>
+    member
+  }
+
+  lazy val allRecipients: Set[Recipient] = envelopes.flatMap { e =>
     e.recipients.allRecipients
   }.toSet
+
+  lazy val allMediatorRecipients: Set[Recipient] = {
+    allRecipients.collect {
+      case r @ MemberRecipient(_: MediatorId) => r
+      case r: MediatorsOfDomain => r
+    }
+  }
 
   def toProtoV0: v0.CompressedBatch = {
     val batch = v0.Batch(envelopes = envelopes.map(_.closeEnvelope.toProtoV0))

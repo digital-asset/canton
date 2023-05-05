@@ -15,6 +15,7 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
@@ -26,7 +27,7 @@ import com.digitalasset.canton.crypto.{HashPurpose, Salt, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.validation.StricterValueValidator as LedgerApiValueValidator
 import com.digitalasset.canton.ledger.participant.state.v2.TransactionMeta
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, HasCloseContext}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
   HasLoggerName,
@@ -40,13 +41,10 @@ import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
-import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
 import com.digitalasset.canton.participant.sync.{
   LedgerSyncEvent,
   SyncDomainPersistentStateManager,
   TimestampedEvent,
-  TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
@@ -60,11 +58,7 @@ import com.digitalasset.canton.store.{
   IndexedStringStore,
   SequencedEventStore,
 }
-import com.digitalasset.canton.topology.client.{
-  CachingTopologySnapshot,
-  StoreBasedTopologySnapshot,
-  TopologySnapshot,
-}
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -103,10 +97,11 @@ class RepairService(
     parameters: ParticipantNodeParameters,
     indexedStringStore: IndexedStringStore,
     isConnected: DomainId => Boolean,
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync
+    with FlagCloseable
     with HasCloseContext {
   import RepairService.*
 
@@ -114,7 +109,12 @@ class RepairService(
 
   // Ensure only one repair runs at a time. This ensures concurrent activity among repair operations does
   // not corrupt state.
-  private val executionQueue = new SimpleExecutionQueue()
+  private val executionQueue = new SimpleExecutionQueueWithShutdown(
+    "repair-service-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   private def aliasToUnconnectedDomainId(alias: DomainAlias): EitherT[Future, String, DomainId] =
     for {
@@ -182,10 +182,10 @@ class RepairService(
                   }
                 }
               }
-              .map(x => x.groupBy(_._1))
+              .map(x => x.groupBy { case (globalKey, _) => globalKey })
             EitherT(keysWithContractIdsF.map { keysWithContractIds =>
               val duplicates = keysWithContractIds.mapFilter { keyCoids =>
-                if (keyCoids.size > 1) Some(keyCoids.map(_._2)) else None
+                if (keyCoids.lengthCompare(1) > 0) Some(keyCoids.map(_._2)) else None
               }
               Either.cond(
                 duplicates.isEmpty,
@@ -530,7 +530,6 @@ class RepairService(
             s"Contract ${contract.contractId} metadata stakeholders ${contract.metadata.stakeholders} differ from actual stakeholders ${computedContractWithMetadata.stakeholders}"
           ).discard
         }
-        ()
       }
       _warnOnEmptyMaintainers <- EitherT.cond[Future](
         !computedContractWithMetadata.keyWithMaintainers.exists(_.maintainers.isEmpty),
@@ -602,12 +601,12 @@ class RepairService(
               s"Cannot add previously archived contract ${contract.contractId} as archived contracts cannot become active."
             )
           )
-        case Some(ActiveContractStore.TransferredAway(domainId)) =>
-          val _ = log(
-            s"Marking contract ${contract.contractId} previously transferred away to ${domainId} as " +
-              s"transferred in from ${domainId} (even though contract may have been transferred to yet another domain since)."
-          )
-          Right((true, Some(domainId)))
+        case Some(ActiveContractStore.TransferredAway(targetDomain)) =>
+          log(
+            s"Marking contract ${contract.contractId} previously transferred-out to ${targetDomain} as " +
+              s"transferred-in from ${targetDomain} (even though contract may have been transferred to yet another domain since)."
+          ).discard
+          Right((true, Some(SourceDomainId(targetDomain.unwrap))))
       })
       (needToAddContract, transferringFrom) = res
 
@@ -741,13 +740,13 @@ class RepairService(
               s"Contract ${cid} is already archived in domain ${repair.domainAlias} and cannot be purged. Set ignoreAlreadyPurged = true to skip archived contracts."
             ),
           )
-        case Some(ActiveContractStore.TransferredAway(domainId)) =>
-          val _ = log(
-            s"Purging contract ${cid} previously marked as transferred away to ${domainId}. " +
-              s"Marking contract as transferred in from ${domainId} (even though contract may have since been transferred to yet another domain) and subsequently as archived."
-          )
+        case Some(ActiveContractStore.TransferredAway(targetDomain)) =>
+          log(
+            s"Purging contract ${cid} previously marked as transferred away to ${targetDomain}. " +
+              s"Marking contract as transferred-in from ${targetDomain} (even though contract may have since been transferred to yet another domain) and subsequently as archived."
+          ).discard
           for {
-            _unit <- persistTransferInAndArchival(repair, domainId)(cid)
+            _unit <- persistTransferInAndArchival(repair, SourceDomainId(targetDomain.unwrap))(cid)
           } yield contractO
       }
     } yield contractToArchiveInEvent
@@ -919,7 +918,7 @@ class RepairService(
       // Note: this supports crash recovery, as we only activate these changes once we commit using clean-head logic
       val outF = repairSource.domainPersistence.activeContractStore
         .transferOutContracts(
-          cids.map(cid => (cid -> repairTarget.domainId)),
+          cids.map(cid => (cid -> TargetDomainId(repairTarget.domainId))),
           repairSource.timeOfChange,
         )
         .toEitherT
@@ -927,7 +926,7 @@ class RepairService(
 
       val inF = repairTarget.domainPersistence.activeContractStore
         .transferInContracts(
-          cids.map(cid => (cid -> repairSource.domainId)),
+          cids.map(cid => (cid -> SourceDomainId(repairSource.domainId))),
           repairTarget.timeOfChange,
         )
         .toEitherT
@@ -991,11 +990,15 @@ class RepairService(
     } yield ()
   }
 
-  private def persistTransferIn(repair: RepairRequest, from: DomainId, cid: LfContractId)(implicit
+  private def persistTransferIn(
+      repair: RepairRequest,
+      sourceDomain: SourceDomainId,
+      cid: LfContractId,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
     repair.domainPersistence.activeContractStore
-      .transferInContract(cid, repair.timeOfChange, from)
+      .transferInContract(cid, repair.timeOfChange, sourceDomain)
       .toEitherTWithNonaborts
       .leftMap(e => log(s"Failed to transfer in contract ${cid} in ActiveContractStore: ${e}"))
 
@@ -1007,11 +1010,11 @@ class RepairService(
       .toEitherT // not turning warnings to errors on behalf of archived contracts, in contract to created contracts
       .leftMap(e => log(s"Failed to mark contract ${cid} as archived: ${e}"))
 
-  private def persistTransferInAndArchival(repair: RepairRequest, from: DomainId)(
+  private def persistTransferInAndArchival(repair: RepairRequest, sourceDomain: SourceDomainId)(
       cid: LfContractId
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
     for {
-      _ <- persistTransferIn(repair, from, cid)
+      _ <- persistTransferIn(repair, sourceDomain, cid)
       _ <- persistArchival(repair)(cid)
     } yield ()
 
@@ -1081,14 +1084,13 @@ class RepairService(
         for {
           existingEventO <- eventLog.eventByTransactionId(transactionId).value
           _ <- existingEventO match {
-            case None => eventLog.insert(event, None)
-            case Some(TimestampedEventAndCausalChange(existingEvent, updateO))
-                if existingEvent.normalized.event == event.normalized.event =>
+            case None => eventLog.insert(event)
+            case Some(existingEvent) if existingEvent.normalized.event == event.normalized.event =>
               logger.info(
                 show"Skipping duplicate publication of event at offset ${event.localOffset} with transaction id $transactionId."
               )
               Future.unit
-            case Some(TimestampedEventAndCausalChange(existingEvent, updateO)) =>
+            case Some(existingEvent) =>
               ErrorUtil.internalError(
                 new IllegalArgumentException(
                   show"Unable to publish event at offset ${event.localOffset}, " +
@@ -1198,17 +1200,15 @@ class RepairService(
             ),
           )
       }
-      topologySnapshot = new CachingTopologySnapshot(
-        new StoreBasedTopologySnapshot(
-          tsRepair,
-          persistentState.topologyStore,
-          initKeys = Map.empty,
-          useStateTxs = true,
-          packageId => packagesDarsService.packageDependencies(List(packageId)),
-          loggerFactory,
-        ),
-        parameters.cachingConfigs,
-        loggerFactory,
+      topologyFactory <- syncDomainPersistentStateManager
+        .topologyFactoryFor(domainId)
+        .toRight("No topology factory for domain")
+        .toEitherT[Future]
+
+      topologySnapshot = topologyFactory.createTopologySnapshot(
+        tsRepair,
+        packageId => packagesDarsService.packageDependencies(List(packageId)),
+        preferCaching = true,
       )
       domainParameters <- OptionT(persistentState.parameterStore.lastParameters)
         .toRight(log(s"No static domains parameters found for $domainAlias"))
@@ -1284,27 +1284,25 @@ class RepairService(
       dp <- syncDomainPersistentStateManager
         .get(domainId)
         .toRight(log(s"Could not find ${domainDescription}"))
-      _ <- dp match {
-        case _: InMemorySyncDomainPersistentState =>
-          Left(
-            log(
-              s"${domainDescription} is in memory which is not supported by repair. Use db persistence."
-            )
-          )
-        case _: DbSyncDomainPersistentState =>
-          Right(())
-        case _ =>
-          Left(log(s"${domainDescription} does not support repair. Use db persistence."))
-      }
+      _ <- Either.cond(
+        !dp.isMemory(),
+        (),
+        log(
+          s"${domainDescription} is in memory which is not supported by repair. Use db persistence."
+        ),
+      )
     } yield dp
 
-  private def lockAndAwaitEitherT[A, B](description: String, code: => EitherT[Future, A, B])(
+  private def lockAndAwaitEitherT[B](description: String, code: => EitherT[Future, String, B])(
       implicit traceContext: TraceContext
-  ): Either[A, B] = {
+  ): Either[String, B] = {
     logger.info(s"Queuing ${description}")
     // repair commands can take an unbounded amount of time
     parameters.processingTimeouts.unbounded.await(description)(
-      executionQueue.executeE(code, description).value
+      executionQueue
+        .executeE(code, description)
+        .value
+        .onShutdown(Left(s"$description aborted due to shutdown"))
     )
   }
 
@@ -1317,15 +1315,7 @@ class RepairService(
     message
   }
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    Seq(
-      executionQueue.asCloseable(
-        "repair-service-queue",
-        parameters.processingTimeouts.shutdownProcessing.unwrap,
-      )
-    )
-  }
+  override protected def onClosed(): Unit = Lifecycle.close(executionQueue)(logger)
 
 }
 
@@ -1343,8 +1333,8 @@ object RepairService {
       ts: CantonTimestamp,
       context: RepairContext,
   )(val domainPersistence: SyncDomainPersistentState, val topologySnapshot: TopologySnapshot) {
-    def timeOfChange = TimeOfChange(rc, ts)
-    def requestJournalData =
+    def timeOfChange: TimeOfChange = TimeOfChange(rc, ts)
+    def requestJournalData: RequestData =
       // Trace context persisted explicitly doubling as a marker for repair requests in the request journal
       RequestData(rc, RequestState.Pending, ts, Some(context))
   }

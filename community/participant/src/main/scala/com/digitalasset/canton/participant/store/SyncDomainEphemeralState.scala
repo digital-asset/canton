@@ -30,7 +30,6 @@ import com.digitalasset.canton.participant.protocol.{
   ProcessingStartingPoints,
   RequestCounterAllocatorImpl,
   RequestJournal,
-  SingleDomainCausalTracker,
 }
 import com.digitalasset.canton.participant.store.memory.TransferCache
 import com.digitalasset.canton.protocol.RootHash
@@ -47,13 +46,11 @@ import scala.concurrent.ExecutionContext
 class SyncDomainEphemeralState(
     persistentState: SyncDomainPersistentState,
     multiDomainEventLog: Eval[MultiDomainEventLog],
-    val singleDomainCausalTracker: SingleDomainCausalTracker,
     inFlightSubmissionTracker: InFlightSubmissionTracker,
     val startingPoints: ProcessingStartingPoints,
     createTimeTracker: NamedLoggerFactory => DomainTimeTracker,
     metrics: SyncDomainMetrics,
     override val timeouts: ProcessingTimeout,
-    useCausalityTracking: Boolean,
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext)
@@ -100,6 +97,7 @@ class SyncDomainEphemeralState(
       persistentState.enableAdditionalConsistencyChecks,
       executionContext,
       timeouts,
+      futureSupervisor,
     )
 
     new NaiveRequestTracker(
@@ -121,11 +119,9 @@ class SyncDomainEphemeralState(
       startingPoints.processing.prenextTimestamp,
       persistentState.eventLog,
       multiDomainEventLog,
-      singleDomainCausalTracker,
       inFlightSubmissionTracker,
       metrics.recordOrderPublisher,
       timeouts,
-      useCausalityTracking,
       loggerFactory,
       futureSupervisor,
     )
@@ -181,8 +177,6 @@ trait SyncDomainEphemeralStateLookup {
   def contractLookup: ContractLookup = storedContractManager
 
   def transferLookup: TransferLookup = transferCache
-
-  def causalityLookup: SingleDomainCausalTracker = singleDomainCausalTracker
 
   def observedTimestampLookup: WatermarkLookup[CantonTimestamp] = observedTimestampTracker
 }

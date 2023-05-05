@@ -61,7 +61,6 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
-import com.digitalasset.canton.sequencing.protocol.RecipientsTree.MemberRecipient
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
@@ -772,13 +771,16 @@ class TransactionProcessingSteps(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
-      tracker: SingleDomainCausalTracker,
-      activenessResultFuture: Future[ActivenessResult],
+      activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransactionProcessorError, StorePendingDataAndSendResponseAndCreateTimeout] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    TransactionProcessorError,
+    StorePendingDataAndSendResponseAndCreateTimeout,
+  ] = {
     import cats.Order.*
 
     val PendingDataAndResponseArgs(
@@ -857,7 +859,7 @@ class TransactionProcessingSteps(
       )
     }
 
-    def awaitActivenessResult: Future[ActivenessResult] = activenessResultFuture.map {
+    def awaitActivenessResult: FutureUnlessShutdown[ActivenessResult] = activenessResultFuture.map {
       activenessResult =>
         val contractResult = activenessResult.contracts
 
@@ -977,7 +979,7 @@ class TransactionProcessingSteps(
 
     val result =
       for {
-        parallelChecksResult <- doParallelChecks(enrichedTransaction)
+        parallelChecksResult <- FutureUnlessShutdown.outcomeF(doParallelChecks(enrichedTransaction))
         activenessResult <- awaitActivenessResult
         _ = crashOnUnknownKeys(activenessResult)
         transactionValidationResult = computeValidationResult(
@@ -985,11 +987,13 @@ class TransactionProcessingSteps(
           parallelChecksResult,
           activenessResult,
         )
-        responses <- confirmationResponseFactory.createConfirmationResponses(
-          requestId,
-          malformedPayloads,
-          transactionValidationResult,
-          ipsSnapshot,
+        responses <- FutureUnlessShutdown.outcomeF(
+          confirmationResponseFactory.createConfirmationResponses(
+            requestId,
+            malformedPayloads,
+            transactionValidationResult,
+            ipsSnapshot,
+          )
         )
       } yield {
 
@@ -998,7 +1002,6 @@ class TransactionProcessingSteps(
         StorePendingDataAndSendResponseAndCreateTimeout(
           pendingTransaction,
           responses.map(_ -> mediatorRecipient),
-          Seq.empty,
           RejectionArgs(
             pendingTransaction,
             LocalReject.TimeRejects.LocalTimeout.Reject(protocolVersion),
@@ -1282,15 +1285,6 @@ class TransactionProcessingSteps(
       Some(commitSetF),
       contractsToBeStored,
       Some(timestampedEvent),
-      Some(
-        TransactionUpdate(
-          pendingRequestData.transactionValidationResult.hostedInformeeStakeholders,
-          pendingRequestData.requestTime,
-          domainId,
-          pendingRequestData.requestCounter,
-          protocolVersion,
-        )
-      ),
     )
   }
 
@@ -1302,7 +1296,6 @@ class TransactionProcessingSteps(
       resultE: Either[MalformedMediatorRequestResult, TransactionResultMessage],
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
-      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -1317,7 +1310,7 @@ class TransactionProcessingSteps(
         event <- EitherT.fromEither[Future](
           createRejectionEvent(RejectionArgs(pendingRequestData, error))
         )
-      } yield CommitAndStoreContractsAndPublishEvent(None, Set(), event, None)
+      } yield CommitAndStoreContractsAndPublishEvent(None, Set(), event)
     }
 
     def getCommitSetAndContractsToBeStoredAndEvent()

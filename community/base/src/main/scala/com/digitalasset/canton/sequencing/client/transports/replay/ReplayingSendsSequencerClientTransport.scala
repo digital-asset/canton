@@ -25,8 +25,9 @@ import com.digitalasset.canton.sequencing.{
   SerializedEventHandler,
 }
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -410,6 +411,11 @@ class ReplayingSendsSequencerClientTransport(
       traceContext: TraceContext
   ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
     EitherT.rightT(HandshakeResponse.Success(protocolVersion))
+
+  override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, TopologyStateForInitResponse] =
+    EitherT.rightT(TopologyStateForInitResponse(Traced(StoredTopologyTransactionsX.empty)))
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
     SyncCloseable("underlying-transport", underlyingTransport.close())

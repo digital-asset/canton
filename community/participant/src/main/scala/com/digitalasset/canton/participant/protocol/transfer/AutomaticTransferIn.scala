@@ -29,7 +29,7 @@ import scala.concurrent.{ExecutionContext, Future}
 private[participant] object AutomaticTransferIn {
   def perform(
       id: TransferId,
-      targetDomain: DomainId,
+      targetDomain: TargetDomainId,
       transferCoordination: TransferCoordination,
       stks: Set[LfPartyId],
       transferOutSubmitterMetadata: TransferSubmitterMetadata,
@@ -57,7 +57,7 @@ private[participant] object AutomaticTransferIn {
         targetIps <- transferCoordination
           .getTimeProofAndSnapshot(targetDomain)
           .map(_._2)
-          .onShutdown(Left(DomainNotReady(targetDomain, "Shutdown of time tracker")))
+          .onShutdown(Left(DomainNotReady(targetDomain.unwrap, "Shutdown of time tracker")))
         possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetIps.ipsSnapshot))
         inParty <- EitherT.fromOption[Future](
           possibleSubmittingParties.headOption,
@@ -65,7 +65,7 @@ private[participant] object AutomaticTransferIn {
         )
         sourceProtocolVersion <- EitherT(
           transferCoordination
-            .protocolVersion(Traced(id.sourceDomain))
+            .protocolVersionFor(Traced(id.sourceDomain.unwrap))
             .map(
               _.toRight(
                 AutomaticTransferInError(
@@ -82,9 +82,9 @@ private[participant] object AutomaticTransferIn {
               transferOutSubmitterMetadata.applicationId,
               participantId.toLf,
               transferOutSubmitterMetadata.commandId,
-              None,
+              submissionId = None,
+              workflowId = None,
             ),
-            workflowId = None,
             id,
             sourceProtocolVersion,
           )(
@@ -129,7 +129,7 @@ private[participant] object AutomaticTransferIn {
           .fromEither[Future](
             targetDomainParameters
               .transferExclusivityLimitFor(t0)
-              .leftMap(TransferParametersError(targetDomain, _))
+              .leftMap(TransferParametersError(targetDomain.unwrap, _))
           )
           .leftWiden[TransferProcessorError]
 
@@ -142,7 +142,7 @@ private[participant] object AutomaticTransferIn {
             for {
               timeoutFuture <- EitherT.fromEither[Future](
                 transferCoordination.awaitTimestamp(
-                  targetDomain,
+                  targetDomain.unwrap,
                   exclusivityLimit,
                   waitForEffectiveTime = false,
                 )
@@ -156,9 +156,9 @@ private[participant] object AutomaticTransferIn {
                 case NoTransferData(_id, TransferCompleted(_transferId, _timeOfCompletion)) =>
                   Right(())
                 // Filter out the case that the participant has disconnected from the target domain in the meantime.
-                case UnknownDomain(domain, _reason) if domain == targetDomain =>
+                case UnknownDomain(domain, _reason) if domain == targetDomain.unwrap =>
                   Right(())
-                case DomainNotReady(domain, _reason) if domain == targetDomain =>
+                case DomainNotReady(domain, _reason) if domain == targetDomain.unwrap =>
                   Right(())
                 // Filter out the case that the target domain is closing right now
                 case other => Left(other)
@@ -171,13 +171,13 @@ private[participant] object AutomaticTransferIn {
     }
 
     for {
-      targetIps <- transferCoordination.cryptoSnapshot(targetDomain, t0)
+      targetIps <- transferCoordination.cryptoSnapshot(targetDomain.unwrap, t0)
       targetSnapshot = targetIps.ipsSnapshot
 
       targetDomainParameters <- EitherT(
         targetSnapshot
           .findDynamicDomainParameters()
-          .map(_.leftMap(DomainNotReady(targetDomain, _)))
+          .map(_.leftMap(DomainNotReady(targetDomain.unwrap, _)))
       ).leftWiden[TransferProcessorError]
     } yield {
 

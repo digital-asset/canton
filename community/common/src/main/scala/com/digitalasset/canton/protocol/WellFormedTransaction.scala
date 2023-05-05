@@ -362,7 +362,6 @@ object WellFormedTransaction {
               case None => Validated.Valid(())
             }
           case (_nodeId, _rn: LfNodeRollback) => Validated.Valid(())
-          case (_nodeId, _rn: LfNodeAuthority) => sys.error("LfNodeAuthority")
         }
         .toEither
     )
@@ -408,7 +407,6 @@ object WellFormedTransaction {
             Checked.continue(s"signatory or maintainer not declared as informee: ${missingInformees
                 .mkString(", ")} at node ${nodeId.index}")
         case (_nodeId, _rn: LfNodeRollback) => Checked.unit
-        case (_nodeId, _rn: LfNodeAuthority) => sys.error("LfNodeAuthority")
       }
     } yield ()
   }
@@ -434,7 +432,6 @@ object WellFormedTransaction {
       case (_, _: LfNodeFetch) => Checked.result(())
       case (_, _: LfNodeLookupByKey) => Checked.result(())
       case (_, _: LfNodeRollback) => Checked.result(())
-      case (_, _: LfNodeAuthority) => sys.error("LfNodeAuthority")
     }
 
   private def checkPartyNames(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] = {

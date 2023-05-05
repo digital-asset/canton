@@ -11,19 +11,19 @@ import com.digitalasset.canton.participant.protocol.transfer.{
   TransferSubmissionHandle,
 }
 import com.digitalasset.canton.participant.store.TransferLookup
-import com.digitalasset.canton.protocol.{LfContractId, TransferId}
+import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDomainId, TransferId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{DomainAlias, LfPartyId, LfWorkflowId}
+import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class TransferService(
     domainIdOfAlias: DomainAlias => Option[DomainId],
     submissionHandles: DomainId => Option[TransferSubmissionHandle],
-    transferLookups: DomainId => Option[TransferLookup],
+    transferLookups: TargetDomainId => Option[TransferLookup],
     protocolVersionFor: Traced[DomainId] => Future[Option[ProtocolVersion]],
 )(implicit ec: ExecutionContext) {
 
@@ -32,20 +32,17 @@ class TransferService(
       contractId: LfContractId,
       sourceDomain: DomainAlias,
       targetDomain: DomainAlias,
-      workflowId: Option[LfWorkflowId],
   )(implicit traceContext: TraceContext): EitherT[Future, String, TransferId] =
     for {
       submissionHandle <- EitherT.fromEither[Future](submissionHandleFor(sourceDomain))
-      targetDomainId <- EitherT.fromEither[Future](domainIdFor(targetDomain))
+      targetDomainId <- EitherT.fromEither[Future](domainIdFor(targetDomain)).map(TargetDomainId(_))
 
-      targetProtocolVersion <- protocolVersionFor(targetDomainId, "target").map(
-        TargetProtocolVersion(_)
-      )
+      rawTargetProtocolVersion <- protocolVersionFor(targetDomainId.unwrap, "target")
+      targetProtocolVersion = TargetProtocolVersion(rawTargetProtocolVersion)
 
       transferId <- submissionHandle
         .submitTransferOut(
           submitterMetadata,
-          workflowId,
           contractId,
           targetDomainId,
           targetProtocolVersion,
@@ -81,19 +78,16 @@ class TransferService(
       submitterMetadata: TransferSubmitterMetadata,
       targetDomain: DomainAlias,
       transferId: TransferId,
-      workflowId: Option[LfWorkflowId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
     for {
       submisisonHandle <- EitherT.fromEither[Future](submissionHandleFor(targetDomain))
-      sourceProtocolVersion <- protocolVersionFor(transferId.sourceDomain, "source").map(
-        SourceProtocolVersion(_)
-      )
+      rawSourceProtocolVersion <- protocolVersionFor(transferId.sourceDomain.unwrap, "source")
+      sourceProtocolVersion = SourceProtocolVersion(rawSourceProtocolVersion)
       result <- submisisonHandle
         .submitTransferIn(
           submitterMetadata,
-          workflowId,
           transferId,
           sourceProtocolVersion,
         )
@@ -113,21 +107,26 @@ class TransferService(
     } yield ()
 
   def transferSearch(
-      searchDomainAlias: DomainAlias,
+      targetDomainAlias: DomainAlias,
       filterSourceDomainAlias: Option[DomainAlias],
       filterTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
   )(implicit traceContext: TraceContext): EitherT[Future, String, Seq[TransferData]] = {
     for {
-      searchDomainId <- EitherT.fromEither[Future](domainIdFor(searchDomainAlias))
+      rawTargetDomain <- EitherT.fromEither[Future](domainIdFor(targetDomainAlias))
+      targetDomain = TargetDomainId(rawTargetDomain)
+
       transferLookup <- EitherT.fromEither[Future](
-        transferLookups(searchDomainId).toRight(s"Unknown domain alias $searchDomainAlias")
+        transferLookups(targetDomain).toRight(s"Unknown domain alias $targetDomainAlias")
       )
+
       filterDomain <- EitherT.fromEither[Future](filterSourceDomainAlias match {
         case None => Right(None)
-        case Some(value) =>
-          domainIdOfAlias(value).toRight(s"Unknown domain alias $value").map(x => Some(x))
+        case Some(alias) =>
+          domainIdOfAlias(alias)
+            .toRight(s"Unknown domain alias `$alias`")
+            .map(id => Some(SourceDomainId(id)))
       })
       result <- EitherT.liftF(
         transferLookup.find(filterDomain, filterTimestamp, filterSubmitter, limit)

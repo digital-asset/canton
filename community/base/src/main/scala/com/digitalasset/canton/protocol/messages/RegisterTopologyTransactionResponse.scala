@@ -9,8 +9,11 @@ import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.Top
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.V2
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.State as ProtoStateV0
 import com.digitalasset.canton.protocol.v1.RegisterTopologyTransactionResponse.Result.State as ProtoStateV1
+import com.digitalasset.canton.protocol.v2.EnvelopeContent
+import com.digitalasset.canton.protocol.v2.RegisterTopologyTransactionResponseX.Result.State as ProtoStateV2
 import com.digitalasset.canton.protocol.{v0, v1, v2}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
@@ -366,6 +369,52 @@ object RegisterTopologyTransactionResponseResult {
       }
     }
   }
+  private[messages] sealed abstract case class V2(state: State) extends PrettyPrinting {
+    override def pretty: Pretty[V2] = prettyOfClass(
+      param("state", _.state)
+    )
+    def toProtoV2: v2.RegisterTopologyTransactionResponseX.Result = {
+
+      def reply(state: v2.RegisterTopologyTransactionResponseX.Result.State) =
+        v2.RegisterTopologyTransactionResponseX.Result(
+          state = state
+        )
+      state match {
+        case State.Failed => reply(ProtoStateV2.FAILED)
+        case State.Rejected => reply(ProtoStateV2.REJECTED)
+        case State.Accepted => reply(ProtoStateV2.ACCEPTED)
+        case State.Duplicate => reply(ProtoStateV2.DUPLICATE)
+        case State.Obsolete => reply(ProtoStateV2.OBSOLETE)
+        case State.Requested =>
+          throw new IllegalStateException("State.Requested not allowed in Result.V1")
+      }
+    }
+
+  }
+  private[messages] object V2 {
+    def apply(state: State): V2 = new V2(state) {}
+    def fromProtoV2(result: v2.RegisterTopologyTransactionResponseX.Result): ParsingResult[V2] = {
+      result.state match {
+        case ProtoStateV2.MISSING_STATE =>
+          Left(
+            ProtoDeserializationError.OtherError(
+              "Missing state for v2.RegisterTopologyTransactionResponse.State.Result"
+            )
+          )
+        case ProtoStateV2.FAILED => Right(V2(State.Failed))
+        case ProtoStateV2.REJECTED => Right(V2(State.Rejected))
+        case ProtoStateV2.ACCEPTED => Right(V2(State.Accepted))
+        case ProtoStateV2.DUPLICATE => Right(V2(State.Duplicate))
+        case ProtoStateV2.OBSOLETE => Right(V2(State.Obsolete))
+        case ProtoStateV2.Unrecognized(unrecognizedValue) =>
+          Left(
+            ProtoDeserializationError.OtherError(
+              s"Unrecognised state for v2.RegisterTopologyTransactionResponse.State.Result: $unrecognizedValue"
+            )
+          )
+      }
+    }
+  }
 
   def create(
       uniquePathProtoPrimitive: String,
@@ -375,4 +424,97 @@ object RegisterTopologyTransactionResponseResult {
     if (protocolVersion >= ProtocolVersion.v4)
       V1(state)
     else V0(uniquePathProtoPrimitive, state)
+}
+
+final case class RegisterTopologyTransactionResponseX(
+    requestedBy: Member,
+    requestedFor: Member,
+    requestId: TopologyRequestId,
+    results: Seq[RegisterTopologyTransactionResponseResult.V2],
+    override val domainId: DomainId,
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      RegisterTopologyTransactionResponseX.type
+    ]
+) extends UnsignedProtocolMessage
+    // TODO(#11255) make me a SignedProtocolMessageContent
+    with UnsignedProtocolMessageV2 {
+
+  @transient override protected lazy val companionObj: RegisterTopologyTransactionResponseX.type =
+    RegisterTopologyTransactionResponseX
+
+  override protected[messages] def toProtoSomeEnvelopeContentV2
+      : EnvelopeContent.SomeEnvelopeContent =
+    v2.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponseX(toProtoV2)
+
+  def toProtoV2: v2.RegisterTopologyTransactionResponseX =
+    v2.RegisterTopologyTransactionResponseX(
+      requestedBy = requestedBy.toProtoPrimitive,
+      requestedFor = requestedFor.toProtoPrimitive,
+      requestId = requestId.unwrap,
+      results = results.map(_.toProtoV2),
+      domain = domainId.toProtoPrimitive,
+    )
+
+}
+
+object RegisterTopologyTransactionResponseX
+    extends HasProtocolVersionedCompanion[
+      RegisterTopologyTransactionResponseX
+    ] {
+
+  override protected def name: String = "RegisterTopologyTransactionResponseX"
+
+  def create(
+      requestedBy: Member,
+      requestedFor: Member,
+      requestId: TopologyRequestId,
+      results: Seq[RegisterTopologyTransactionResponseResult.State],
+      domainId: DomainId,
+      protocolVersion: ProtocolVersion,
+  ): RegisterTopologyTransactionResponseX = RegisterTopologyTransactionResponseX(
+    requestedBy,
+    requestedFor,
+    requestId,
+    results.map(
+      RegisterTopologyTransactionResponseResult.V2(_)
+    ),
+    domainId,
+  )(supportedProtoVersions.protocolVersionRepresentativeFor(protocolVersion))
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(
+      v2.RegisterTopologyTransactionResponseX
+    )(
+      supportedProtoVersion(_)(fromProtoV2),
+      _.toProtoV2.toByteString,
+    ),
+  )
+
+  private[messages] def fromProtoV2(
+      message: v2.RegisterTopologyTransactionResponseX
+  ): ParsingResult[RegisterTopologyTransactionResponseX] = {
+    val v2.RegisterTopologyTransactionResponseX(
+      requestedBy,
+      requestedFor,
+      requestId,
+      results,
+      domainId,
+    ) = message
+    for {
+      requestedBy <- Member.fromProtoPrimitive(requestedBy, "requested_by")
+      requestedFor <- Member.fromProtoPrimitive(requestedFor, "requested_for")
+      requestId <- String255.fromProtoPrimitive(requestId, "request_id")
+      domainId <- DomainId.fromProtoPrimitive(domainId, "domain")
+      results <- results.traverse(V2.fromProtoV2)
+    } yield RegisterTopologyTransactionResponseX(
+      requestedBy,
+      requestedFor,
+      requestId,
+      results,
+      domainId,
+    )(protocolVersionRepresentativeFor(ProtoVersion(2)))
+  }
+
 }

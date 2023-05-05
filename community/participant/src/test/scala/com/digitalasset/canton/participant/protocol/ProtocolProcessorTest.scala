@@ -42,16 +42,8 @@ import com.digitalasset.canton.participant.sync.{
   ParticipantEventPublisher,
   SyncDomainPersistentStateLookup,
 }
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{
-  DynamicDomainParameters,
-  DynamicDomainParametersWithValidity,
-  RequestAndRootHashMessage,
-  RequestId,
-  RootHash,
-  TestDomainParameters,
-  ViewHash,
-}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.AsyncResult
 import com.digitalasset.canton.sequencing.client.SendResult.Success
@@ -106,6 +98,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       any[Option[CantonTimestamp]],
       any[CantonTimestamp],
       any[MessageId],
+      any[Option[AggregationRule]],
       any[SendCallback],
     )(anyTraceContext)
   )
@@ -116,6 +109,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
           _: Option[CantonTimestamp],
           _: CantonTimestamp,
           messageId: MessageId,
+          _: Option[AggregationRule],
           callback: SendCallback,
       ) => {
         callback(
@@ -135,10 +129,6 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         EitherT.pure[Future, SendAsyncClientError](())
       }
     )
-  when(mockSequencerClient.domainId).thenReturn(domain)
-  when(mockSequencerClient.protocolVersion).thenReturn(
-    defaultStaticDomainParameters.protocolVersion
-  )
 
   private val trm = mock[TransactionResultMessage]
   when(trm.pretty).thenAnswer(Pretty.adHocPrettyInstance[TransactionResultMessage])
@@ -178,8 +168,9 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
 
     val multiDomainEventLog = mock[MultiDomainEventLog]
     val persistentState =
-      new InMemorySyncDomainPersistentState(
+      new InMemorySyncDomainPersistentStateOld(
         IndexedDomain.tryCreate(domain, 1),
+        testedProtocolVersion,
         crypto.crypto.pureCrypto,
         enableAdditionalConsistencyChecks = true,
         loggerFactory,
@@ -196,34 +187,23 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     val clock = new WallClock(timeouts, loggerFactory)
     implicit val mat = mock[Materializer]
     val nodePersistentState = timeouts.default.await("creating node persistent state")(
-      ParticipantNodePersistentState.create(
-        syncDomainPersistentStates,
-        new MemoryStorage(loggerFactory, timeouts),
-        clock,
-        None,
-        uniqueContractKeysO = Some(false),
-        ParticipantStoreConfig(),
-        testedReleaseProtocolVersion,
-        ParticipantTestMetrics,
-        indexedStringStore,
-        timeouts,
-        loggerFactory,
-      )
+      ParticipantNodePersistentState
+        .create(
+          syncDomainPersistentStates,
+          new MemoryStorage(loggerFactory, timeouts),
+          clock,
+          None,
+          uniqueContractKeysO = Some(false),
+          ParticipantStoreConfig(),
+          testedReleaseProtocolVersion,
+          ParticipantTestMetrics,
+          indexedStringStore,
+          timeouts,
+          futureSupervisor,
+          loggerFactory,
+        )
+        .failOnShutdown
     )
-    val globalTracker =
-      new GlobalCausalOrderer(
-        participant,
-        _ => true,
-        DefaultProcessingTimeouts.testing,
-        new InMemoryMultiDomainCausalityStore(loggerFactory),
-        loggerFactory,
-      )
-    val domainCausalTracker =
-      new SingleDomainCausalTracker(
-        globalTracker,
-        persistentState.causalDependencyStore,
-        loggerFactory,
-      )
 
     val mdel = InMemoryMultiDomainEventLog(
       syncDomainPersistentStates,
@@ -232,6 +212,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       timeouts,
       indexedStringStore,
       ParticipantTestMetrics,
+      futureSupervisor,
       loggerFactory,
     )
 
@@ -244,6 +225,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       clock,
       Eval.now(Duration.ofDays(1L)),
       timeouts,
+      futureSupervisor,
       loggerFactory,
     )
     val inFlightSubmissionTracker = new InFlightSubmissionTracker(
@@ -263,13 +245,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       new SyncDomainEphemeralState(
         persistentState,
         Eval.now(multiDomainEventLog),
-        domainCausalTracker,
         inFlightSubmissionTracker,
         startingPoints,
         _ => timeTracker,
         ParticipantTestMetrics.domain,
         timeouts,
-        useCausalityTracking = true,
         loggerFactory,
         FutureSupervisor.Noop,
       )
@@ -294,6 +274,8 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         ephemeralState.get(),
         crypto,
         sequencerClient,
+        domainId = DefaultTestIdentities.domainId,
+        testedProtocolVersion,
         loggerFactory,
         FutureSupervisor.Noop,
         skipRecipientsCheck = false,
@@ -352,7 +334,6 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     "clean up the pending submissions when send request fails" in {
       val submissionMap = TrieMap[Int, Unit]()
       val failingSequencerClient = mock[SequencerClient]
-      when(failingSequencerClient.domainId).thenReturn(domain)
       val sendError = SendAsyncClientError.RequestFailed("no thank you")
       when(
         failingSequencerClient.sendAsync(
@@ -361,6 +342,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],
           any[MessageId],
+          any[Option[AggregationRule]],
           any[SendCallback],
         )(anyTraceContext)
       )
@@ -631,6 +613,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
           activenessSet,
         )
         .value
+        .failOnShutdown
         .futureValue
 
     def setUpOrFail(

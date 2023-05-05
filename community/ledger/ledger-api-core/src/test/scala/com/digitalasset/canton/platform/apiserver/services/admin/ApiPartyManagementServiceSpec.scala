@@ -4,6 +4,9 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import akka.stream.scaladsl.Source
+import com.daml.error.ErrorsAssertions
+import com.daml.error.utils.ErrorDetails
+import com.daml.error.utils.ErrorDetails.RetryInfoDetail
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.v1.admin.party_management_service.{
   AllocatePartyRequest,
@@ -12,7 +15,8 @@ import com.daml.ledger.api.v1.admin.party_management_service.{
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
-import com.daml.tracing.{DefaultOpenTelemetry, TelemetryContext, TelemetrySpecBase}
+import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, TelemetryContext, TelemetrySpecBase}
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset.Absolute
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -21,29 +25,33 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexerPartyDetails,
   PartyEntry,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementService.blindAndConvertToProto
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementServiceSpec.*
 import com.digitalasset.canton.platform.localstore.api.{PartyRecord, PartyRecordStore}
+import io.grpc.Status.Code
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.{CompletableFuture, CompletionStage}
-import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.{Duration, DurationInt}
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.{Failure, Success}
 
 class ApiPartyManagementServiceSpec
-    extends AnyWordSpec
+    extends AsyncWordSpec
     with TelemetrySpecBase
     with MockitoSugar
     with Matchers
     with ScalaFutures
     with ArgumentMatchersSugar
     with IntegrationPatience
-    with AkkaBeforeAndAfterAll {
+    with AkkaBeforeAndAfterAll
+    with ErrorsAssertions {
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
   private implicit val ec = ExecutionContext.global
@@ -56,16 +64,16 @@ class ApiPartyManagementServiceSpec
     ): ProtoPartyDetails =
       blindAndConvertToProto(idpId)((partyDetails, partyRecord))
 
-    "translate basic input to the output" in new TestScope {
+    "translate basic input to the output" in {
       blind(IdentityProviderId.Default, partyDetails, Some(partyRecord)) shouldBe protoPartyDetails
     }
 
-    "blind identity_provider_id for non default IDP" in new TestScope {
+    "blind identity_provider_id for non default IDP" in {
       blind(IdentityProviderId("idp_1"), partyDetails, Some(partyRecord)) shouldBe protoPartyDetails
         .copy(isLocal = false)
     }
 
-    "blind identity_provider_id if record is for non default IDP" in new TestScope {
+    "blind identity_provider_id if record is for non default IDP" in {
       blind(
         IdentityProviderId.Default,
         partyDetails,
@@ -73,25 +81,23 @@ class ApiPartyManagementServiceSpec
       ) shouldBe protoPartyDetails.copy(identityProviderId = "")
     }
 
-    "not blind `isLocal` if local record does not exist" in new TestScope {
+    "not blind `isLocal` if local record does not exist" in {
       blind(IdentityProviderId.Default, partyDetails, None) shouldBe protoPartyDetails
     }
 
-    "blind `isLocal` if local record does not exist for non default IDP" in new TestScope {
+    "blind `isLocal` if local record does not exist for non default IDP" in {
       blind(IdentityProviderId("idp_1"), partyDetails, None) shouldBe protoPartyDetails
         .copy(isLocal = false)
     }
 
     "propagate trace context" in {
-      val mockIndexTransactionsService = mock[IndexTransactionsService]
-      val mockPartyRecordStore = mock[PartyRecordStore]
-      val mockIdentityProviderExists = mock[IdentityProviderExists]
-      when(mockIndexTransactionsService.currentLedgerEnd())
-        .thenReturn(Future.successful(Absolute(Ref.LedgerString.assertFromString("0"))))
-      when(mockIdentityProviderExists.apply(IdentityProviderId.Default))
-        .thenReturn(Future.successful(true))
-      val mockIndexPartyManagementService = mock[IndexPartyManagementService]
-      val party = Ref.Party.assertFromString("aParty")
+      val (
+        mockIndexTransactionsService,
+        mockIdentityProviderExists,
+        mockIndexPartyManagementService,
+        mockPartyRecordStore,
+      ) = mockedServices()
+
       when(
         mockIndexPartyManagementService.partyEntries(any[Option[Absolute]])(any[LoggingContext])
       )
@@ -99,20 +105,10 @@ class ApiPartyManagementServiceSpec
           Source.single(
             PartyEntry.AllocationAccepted(
               Some("aSubmission"),
-              IndexerPartyDetails(party, None, isLocal = true),
+              IndexerPartyDetails(aParty, None, isLocal = true),
             )
           )
         )
-      when(
-        mockPartyRecordStore.createPartyRecord(any[PartyRecord])(any[LoggingContext])
-      ).thenReturn(
-        Future.successful(
-          Right(PartyRecord(party, ObjectMeta.empty, IdentityProviderId.Default))
-        )
-      )
-      when(
-        mockPartyRecordStore.getPartyRecordO(any[Ref.Party])(any[LoggingContext])
-      ).thenReturn(Future.successful(Right(None)))
 
       val apiService = ApiPartyManagementService.createApiService(
         mockIndexPartyManagementService,
@@ -137,29 +133,128 @@ class ApiPartyManagementServiceSpec
 
       spanExporter.finishedSpanAttributes should contain(anApplicationIdSpanAttribute)
     }
+
+    "close while allocating party" in {
+      val (
+        mockIndexTransactionsService,
+        mockIdentityProviderExists,
+        mockIndexPartyManagementService,
+        mockPartyRecordStore,
+      ) = mockedServices()
+
+      val promise = Promise[Unit]()
+
+      when(
+        mockIndexPartyManagementService.partyEntries(any[Option[Absolute]])(any[LoggingContext])
+      )
+        .thenReturn({
+          promise.success(())
+          Source.never
+        })
+
+      val apiPartyManagementService = ApiPartyManagementService.createApiService(
+        mockIndexPartyManagementService,
+        mockIdentityProviderExists,
+        mockPartyRecordStore,
+        mockIndexTransactionsService,
+        TestWritePartyService,
+        Duration.Zero,
+        _ => Ref.SubmissionId.assertFromString("aSubmission"),
+        NoOpTelemetry,
+      )
+
+      promise.future.map(_ => apiPartyManagementService.close()).discard
+
+      apiPartyManagementService
+        .allocateParty(AllocatePartyRequest("aParty"))
+        .transform {
+          case Success(_) =>
+            fail("Expected a failure, but received success")
+          case Failure(err: StatusRuntimeException) =>
+            assertError(
+              actual = err,
+              expectedStatusCode = Code.UNAVAILABLE,
+              expectedMessage = "SERVER_IS_SHUTTING_DOWN(1,0): Server is shutting down",
+              expectedDetails = List(
+                ErrorDetails.ErrorInfoDetail(
+                  "SERVER_IS_SHUTTING_DOWN",
+                  Map(
+                    "parties" -> "['aParty']",
+                    "submissionId" -> "'aSubmission'",
+                    "tid" -> "''",
+                    "category" -> "1",
+                    "definite_answer" -> "false",
+                  ),
+                ),
+                RetryInfoDetail(1.second),
+              ),
+              verifyEmptyStackTrace = true,
+            )
+            Success(succeed)
+          case Failure(other) =>
+            fail("Unexpected error", other)
+        }
+    }
+  }
+
+  private def mockedServices(): (
+      IndexTransactionsService,
+      IdentityProviderExists,
+      IndexPartyManagementService,
+      PartyRecordStore,
+  ) = {
+    val mockIndexTransactionsService = mock[IndexTransactionsService]
+    when(mockIndexTransactionsService.currentLedgerEnd()((any[LoggingContext])))
+      .thenReturn(Future.successful(Absolute(Ref.LedgerString.assertFromString("0"))))
+
+    val mockIdentityProviderExists = mock[IdentityProviderExists]
+    when(mockIdentityProviderExists.apply(IdentityProviderId.Default))
+      .thenReturn(Future.successful(true))
+
+    val mockIndexPartyManagementService = mock[IndexPartyManagementService]
+
+    val mockPartyRecordStore = mock[PartyRecordStore]
+    when(
+      mockPartyRecordStore.createPartyRecord(any[PartyRecord])(any[LoggingContext])
+    ).thenReturn(
+      Future.successful(
+        Right(PartyRecord(aParty, ObjectMeta.empty, IdentityProviderId.Default))
+      )
+    )
+    when(
+      mockPartyRecordStore.getPartyRecordO(any[Ref.Party])(any[LoggingContext])
+    ).thenReturn(Future.successful(Right(None)))
+
+    (
+      mockIndexTransactionsService,
+      mockIdentityProviderExists,
+      mockIndexPartyManagementService,
+      mockPartyRecordStore,
+    )
   }
 }
 
 object ApiPartyManagementServiceSpec {
-  trait TestScope {
-    val partyDetails: IndexerPartyDetails = IndexerPartyDetails(
-      party = Ref.Party.assertFromString("Bob"),
-      displayName = Some("Bob Martin"),
-      isLocal = true,
-    )
-    val partyRecord: PartyRecord = PartyRecord(
-      party = Ref.Party.assertFromString("Bob"),
-      ObjectMeta.empty,
-      IdentityProviderId.Default,
-    )
-    val protoPartyDetails: ProtoPartyDetails = ProtoPartyDetails(
-      party = "Bob",
-      displayName = "Bob Martin",
-      localMetadata = Some(new com.daml.ledger.api.v1.admin.object_meta.ObjectMeta()),
-      isLocal = true,
-      identityProviderId = "",
-    )
-  }
+
+  val partyDetails: IndexerPartyDetails = IndexerPartyDetails(
+    party = Ref.Party.assertFromString("Bob"),
+    displayName = Some("Bob Martin"),
+    isLocal = true,
+  )
+  val partyRecord: PartyRecord = PartyRecord(
+    party = Ref.Party.assertFromString("Bob"),
+    ObjectMeta.empty,
+    IdentityProviderId.Default,
+  )
+  val protoPartyDetails: ProtoPartyDetails = ProtoPartyDetails(
+    party = "Bob",
+    displayName = "Bob Martin",
+    localMetadata = Some(new com.daml.ledger.api.v1.admin.object_meta.ObjectMeta()),
+    isLocal = true,
+    identityProviderId = "",
+  )
+
+  val aParty = Ref.Party.assertFromString("aParty")
 
   private object TestWritePartyService extends state.WritePartyService {
     override def allocateParty(

@@ -5,10 +5,7 @@ package com.digitalasset.canton.participant.ledger.api
 
 import cats.syntax.either.*
 import com.digitalasset.canton.config.{DbConfig, MemoryStorageConfig, StorageConfig}
-import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.{
-  FailedToStopLedgerApiServer,
-  LedgerApiServerError,
-}
+import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.LedgerApiServerError
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.{DiscardOps, LedgerParticipantId}
 
@@ -25,13 +22,16 @@ class LedgerApiStorage private[api] (
     val jdbcUrl: String,
     createAction: () => Unit,
     closeAction: String => Unit,
-) {
+) extends AutoCloseable {
 
   def createSchema(): Either[SQLException, Unit] =
     asEitherT(_ => createAction(), Predef.identity)
 
-  def close(): Either[FailedToStopLedgerApiServer, Unit] =
-    asEitherT(closeAction, FailedToStopLedgerApiServer(s"Closing storage failed with error", _))
+  override def close(): Unit = {
+    blocking {
+      closeAction(jdbcUrl)
+    }
+  }
 
   private def asEitherT[E](action: String => Unit, error: SQLException => E): Either[E, Unit] =
     blocking {

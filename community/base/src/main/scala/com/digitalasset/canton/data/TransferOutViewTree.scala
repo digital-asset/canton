@@ -9,7 +9,17 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
-import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId, RootHash, ViewHash, v0, v1, v2}
+import com.digitalasset.canton.protocol.{
+  LfContractId,
+  LfTemplateId,
+  RootHash,
+  SourceDomainId,
+  TargetDomainId,
+  ViewHash,
+  v0,
+  v1,
+  v2,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.time.TimeProof
@@ -142,7 +152,7 @@ object TransferOutViewTree
   */
 final case class TransferOutCommonData private (
     override val salt: Salt,
-    sourceDomain: DomainId,
+    sourceDomain: SourceDomainId,
     sourceMediator: MediatorId,
     stakeholders: Set[LfPartyId],
     adminParties: Set[LfPartyId],
@@ -220,7 +230,7 @@ object TransferOutCommonData
 
   def create(hashOps: HashOps)(
       salt: Salt,
-      sourceDomain: DomainId,
+      sourceDomain: SourceDomainId,
       sourceMediator: MediatorId,
       stakeholders: Set[LfPartyId],
       adminParties: Set[LfPartyId],
@@ -256,7 +266,7 @@ object TransferOutCommonData
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
     } yield TransferOutCommonData(
       salt,
-      sourceDomain,
+      SourceDomainId(sourceDomain),
       sourceMediator,
       stakeholders.toSet,
       adminParties.toSet,
@@ -292,7 +302,7 @@ object TransferOutCommonData
       protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield TransferOutCommonData(
       salt,
-      sourceDomain,
+      SourceDomainId(sourceDomain),
       sourceMediator,
       stakeholders.toSet,
       adminParties.toSet,
@@ -316,10 +326,9 @@ final case class TransferOutView private (
     submitterMetadata: TransferSubmitterMetadata,
     contractId: LfContractId,
     templateId: LfTemplateId,
-    targetDomain: DomainId,
+    targetDomain: TargetDomainId,
     targetTimeProof: TimeProof,
     targetProtocolVersion: TargetProtocolVersion,
-    workflowId: Option[LfWorkflowId],
 )(
     hashOps: HashOps,
     override val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutView.type],
@@ -333,6 +342,7 @@ final case class TransferOutView private (
   val applicationId: LedgerApplicationId = submitterMetadata.applicationId
   val submissionId: Option[LedgerSubmissionId] = submitterMetadata.submissionId
   val commandId: LedgerCommandId = submitterMetadata.commandId
+  val workflowId: Option[LfWorkflowId] = submitterMetadata.workflowId
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferOutView
 
@@ -402,7 +412,7 @@ object TransferOutView
       salt: Salt,
       submitter: LfPartyId,
       contractId: LfContractId,
-      targetDomain: DomainId,
+      targetDomain: TargetDomainId,
       targetDomainPV: TargetProtocolVersion,
       targetTimeProof: TimeProof,
   )
@@ -429,7 +439,7 @@ object TransferOutView
         salt,
         submitter,
         contractId,
-        targetDomain,
+        TargetDomainId(targetDomain),
         TargetProtocolVersion(targetProtocolVersion),
         targetTimeProof,
       )
@@ -454,10 +464,9 @@ object TransferOutView
   def create(hashOps: HashOps)(
       salt: Salt,
       submitterMetadata: TransferSubmitterMetadata,
-      workflowId: Option[LfWorkflowId],
       contractId: LfContractId,
       templateId: LfTemplateId,
-      targetDomain: DomainId,
+      targetDomain: TargetDomainId,
       targetTimeProof: TimeProof,
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
@@ -470,7 +479,6 @@ object TransferOutView
       targetDomain,
       targetTimeProof,
       targetProtocolVersion,
-      workflowId,
     )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.v), None)
 
   private[this] def fromProtoV0(hashOps: HashOps, transferOutViewP: v0.TransferOutView)(
@@ -495,14 +503,14 @@ object TransferOutView
         noApplicationId,
         noParticipantId,
         noCommandId,
-        None,
+        submissionId = None,
+        workflowId = None,
       ),
       commonData.contractId,
       unknownTemplateId,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,
-      None,
     )(hashOps, protocolVersionRepresentativeFor(ProtoVersion(0)), Some(bytes))
   }
 
@@ -535,14 +543,14 @@ object TransferOutView
         noApplicationId,
         noParticipantId,
         noCommandId,
-        None,
+        submissionId = None,
+        workflowId = None,
       ),
       commonData.contractId,
       unknownTemplateId,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,
-      None,
     )(hashOps, protocolVersionRepresentativeFor(ProtoVersion(1)), Some(bytes))
   }
 
@@ -589,13 +597,13 @@ object TransferOutView
         submittingParticipantId,
         commandId,
         submissionId,
+        workflowId,
       ),
       commonData.contractId,
       templateId,
       commonData.targetDomain,
       commonData.targetTimeProof,
       commonData.targetDomainPV,
-      workflowId,
     )(hashOps, protocolVersionRepresentativeFor(ProtoVersion(2)), Some(bytes))
 
   }
@@ -628,15 +636,15 @@ final case class FullTransferOutTree(tree: TransferOutViewTree)
 
   def contractId: LfContractId = view.contractId
 
-  def sourceDomain: DomainId = commonData.sourceDomain
+  def sourceDomain: SourceDomainId = commonData.sourceDomain
 
-  def targetDomain: DomainId = view.targetDomain
+  def targetDomain: TargetDomainId = view.targetDomain
 
   def targetTimeProof: TimeProof = view.targetTimeProof
 
   def mediatorMessage: TransferOutMediatorMessage = tree.mediatorMessage
 
-  override def domainId: DomainId = sourceDomain
+  override def domainId: DomainId = sourceDomain.unwrap
 
   override def mediatorId: MediatorId = commonData.sourceMediator
 

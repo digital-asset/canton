@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.messages.{LocalReject, MediatorResponse}
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.Recipients
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -26,6 +26,7 @@ class BadRootHashMessagesRequestProcessor(
     ephemeral: SyncDomainEphemeralState,
     crypto: DomainSyncCryptoClient,
     sequencerClient: SequencerClient,
+    domainId: DomainId,
     participantId: ParticipantId,
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
@@ -35,6 +36,7 @@ class BadRootHashMessagesRequestProcessor(
       ephemeral,
       crypto,
       sequencerClient,
+      protocolVersion,
     ) {
 
   /** Immediately moves the request to Confirmed and
@@ -47,15 +49,18 @@ class BadRootHashMessagesRequestProcessor(
       timestamp: CantonTimestamp,
       mediatorId: MediatorId,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF(functionFullName) {
-      crypto.awaitIpsSnapshot(timestamp).flatMap(_.isMediatorActive(mediatorId)).flatMap {
-        case true =>
-          prepareForMediatorResultOfBadRequest(requestCounter, sequencerCounter, timestamp)
-        case false =>
-          // If the mediator is not active, then it will not send a result,
-          // so we can finish off the request immediately
-          invalidRequest(requestCounter, sequencerCounter, timestamp)
-      }
+    performUnlessClosingUSF(functionFullName) {
+      crypto
+        .awaitIpsSnapshotUS(timestamp)
+        .flatMap(snapshot => FutureUnlessShutdown.outcomeF(snapshot.isMediatorActive(mediatorId)))
+        .flatMap {
+          case true =>
+            prepareForMediatorResultOfBadRequest(requestCounter, sequencerCounter, timestamp)
+          case false =>
+            // If the mediator is not active, then it will not send a result,
+            // so we can finish off the request immediately
+            invalidRequest(requestCounter, sequencerCounter, timestamp)
+        }
     }
 
   /** Immediately moves the request to Confirmed and registers a timeout handler at the decision time with the request tracker.
@@ -70,11 +75,10 @@ class BadRootHashMessagesRequestProcessor(
       mediatorId: MediatorId,
       reject: LocalReject,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF(functionFullName) {
-      val domainId = sequencerClient.domainId
+    performUnlessClosingUSF(functionFullName) {
       for {
         _ <- prepareForMediatorResultOfBadRequest(requestCounter, sequencerCounter, timestamp)
-        snapshot <- crypto.snapshot(timestamp)
+        snapshot <- crypto.snapshotUS(timestamp)
         requestId = RequestId(timestamp)
         rejection = checked(
           MediatorResponse.tryCreate(
@@ -88,12 +92,12 @@ class BadRootHashMessagesRequestProcessor(
             protocolVersion = protocolVersion,
           )
         )
-        signedRejection <- signResponse(snapshot, rejection)
+        signedRejection <- FutureUnlessShutdown.outcomeF(signResponse(snapshot, rejection))
         _ <- sendResponses(
           requestId,
           requestCounter,
           Seq(signedRejection -> Recipients.cc(mediatorId)),
-        )
+        ).mapK(FutureUnlessShutdown.outcomeK)
           .valueOr(
             // This is a best-effort response anyway, so we merely log the failure and continue
             error =>

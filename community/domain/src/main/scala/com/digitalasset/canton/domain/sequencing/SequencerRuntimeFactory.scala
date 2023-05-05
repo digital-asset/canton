@@ -27,8 +27,8 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.{DomainId, Member, SequencerId}
+import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
+import com.digitalasset.canton.topology.{DomainId, DomainMember, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 
@@ -47,7 +47,6 @@ trait SequencerRuntimeFactory {
       domainId: DomainId,
       sequencerId: SequencerId,
       crypto: Crypto,
-      sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
       topologyClientMember: Member,
       topologyClient: DomainTopologyClientWithInit,
       topologyProcessor: TopologyTransactionProcessor,
@@ -63,6 +62,7 @@ trait SequencerRuntimeFactory {
       metrics: SequencerMetrics,
       indexedStringStore: IndexedStringStore,
       futureSupervisor: FutureSupervisor,
+      topologyStateForInitializationService: Option[TopologyStateForInitializationService],
       loggerFactory: NamedLoggerFactory,
       logger: TracedLogger,
   )(implicit
@@ -81,7 +81,6 @@ object SequencerRuntimeFactory {
         domainId: DomainId,
         sequencerId: SequencerId,
         crypto: Crypto,
-        sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
         topologyClientMember: Member,
         topologyClient: DomainTopologyClientWithInit,
         topologyProcessor: TopologyTransactionProcessor,
@@ -97,6 +96,7 @@ object SequencerRuntimeFactory {
         metrics: SequencerMetrics,
         indexedStringStore: IndexedStringStore,
         futureSupervisor: FutureSupervisor,
+        topologyStateForInitializationService: Option[TopologyStateForInitializationService],
         loggerFactory: NamedLoggerFactory,
         logger: TracedLogger,
     )(implicit
@@ -123,7 +123,6 @@ object SequencerRuntimeFactory {
         metrics,
         domainId,
         crypto,
-        sequencedTopologyStore,
         topologyClient,
         topologyProcessor,
         storage,
@@ -138,10 +137,12 @@ object SequencerRuntimeFactory {
           StaticGrpcServices
             .notSupportedByCommunity(EnterpriseSequencerAdministrationServiceGrpc.SERVICE, logger)
             .some,
-        registerSequencerMember =
-          false, // the community sequencer is always an embedded single sequencer
+        DomainMember
+          .list(domainId, includeSequencer = false)
+          .toList, // the community sequencer is always an embedded single sequencer
         futureSupervisor,
         agreementManager,
+        topologyStateForInitializationService,
         loggerFactory,
       )
       ret.initialize().map(_ => ret)

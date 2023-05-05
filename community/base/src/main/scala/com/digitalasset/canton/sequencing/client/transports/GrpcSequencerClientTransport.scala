@@ -336,6 +336,31 @@ class GrpcSequencerClientTransport(
       .map(_ => logger.debug(s"Acknowledged timestamp: $timestamp"))
   }
 
+  override def downloadTopologyStateForInit(request: TopologyStateForInitRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, TopologyStateForInitResponse] = {
+    val requestP = request.toProtoV0
+
+    logger.debug("Downloading topology state for initialization")
+    CantonGrpcUtil
+      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
+        _.downloadTopologyStateForInit(requestP),
+        requestDescription = s"download-topology-state-for-init/${request.member}",
+        timeout = timeouts.network.duration,
+        logger = logger,
+        logPolicy = noLoggingShutdownErrorsLogPolicy,
+        retryPolicy = retryPolicy(retryOnUnavailable = false),
+      )
+      .leftMap(_.toString)
+      .subflatMap(TopologyStateForInitResponse.fromProtoV0(_).leftMap(_.toString))
+      .map { response =>
+        logger.debug(
+          s"Downloaded topology state for initialization with last change timestamp at ${response.topologyTransactions.value.lastChangeTimestamp}"
+        )
+        response
+      }
+  }
+
   override protected def onClosed(): Unit =
     Lifecycle.close(
       clientAuth,

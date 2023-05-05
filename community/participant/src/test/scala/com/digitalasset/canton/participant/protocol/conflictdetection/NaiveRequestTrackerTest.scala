@@ -44,6 +44,7 @@ class NaiveRequestTrackerTest
         checkedInvariant = true,
         parallelExecutionContext,
         timeouts,
+        futureSupervisor,
       )
 
     new NaiveRequestTracker(

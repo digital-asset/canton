@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,
   FlagCloseableAsync,
   FutureUnlessShutdown,
+  PromiseUnlessShutdown,
   SyncCloseable,
   UnlessShutdown,
 }
@@ -90,7 +91,9 @@ private[participant] class NaiveRequestTracker(
       activenessTimestamp: CantonTimestamp,
       decisionTime: CantonTimestamp,
       activenessSet: ActivenessSet,
-  )(implicit traceContext: TraceContext): Either[RequestAlreadyExists, Future[RequestFutures]] = {
+  )(implicit
+      traceContext: TraceContext
+  ): Either[RequestAlreadyExists, FutureUnlessShutdown[RequestFutures]] = {
     ErrorUtil.requireArgument(rc.isNotMaxValue, "Request counter MaxValue used")
     ErrorUtil.requireArgument(sc.isNotMaxValue, "Sequencer counter Long.MaxValue used")
     ErrorUtil.requireArgument(
@@ -131,7 +134,7 @@ private[participant] class NaiveRequestTracker(
         val f = conflictDetector.registerActivenessSet(rc, activenessSet).map { _ =>
           // Tick the task scheduler only after all states have been prefetched into the conflict detector
           taskScheduler.addTick(sc, requestTimestamp)
-          RequestFutures(data.activenessResult.future, data.timeoutResult.future)
+          RequestFutures(data.activenessResult.futureUS, data.timeoutResult.future)
         }
         Right(f)
 
@@ -139,8 +142,8 @@ private[participant] class NaiveRequestTracker(
         if (oldData == data) {
           logger.debug(withRC(rc, s"Added a second time to the request tracker"))
           Right(
-            Future.successful(
-              RequestFutures(oldData.activenessResult.future, oldData.timeoutResult.future)
+            FutureUnlessShutdown.pure(
+              RequestFutures(oldData.activenessResult.futureUS, oldData.timeoutResult.future)
             )
           )
         } else {
@@ -214,24 +217,28 @@ private[participant] class NaiveRequestTracker(
 
   override def addCommitSet(rc: RequestCounter, commitSet: Try[CommitSet])(implicit
       traceContext: TraceContext
-  ): Either[CommitSetError, EitherT[Future, NonEmptyChain[RequestTrackerStoreError], Unit]] = {
+  ): Either[CommitSetError, EitherT[FutureUnlessShutdown, NonEmptyChain[
+    RequestTrackerStoreError
+  ], Unit]] = {
 
     def tryAddCommitSet(
         commitSetPromise: Promise[CommitSet],
-        finalizationResult: Promise[Either[NonEmptyChain[RequestTrackerStoreError], Unit]],
-    ): Either[CommitSetError, EitherT[Future, NonEmptyChain[RequestTrackerStoreError], Unit]] = {
+        finalizationResult: PromiseUnlessShutdown[
+          Either[NonEmptyChain[RequestTrackerStoreError], Unit]
+        ],
+    ): Either[CommitSetError, EitherT[FutureUnlessShutdown, NonEmptyChain[
+      RequestTrackerStoreError
+    ], Unit]] = {
       // Complete the promise only if we're not shutting down.
       performUnlessClosing(functionFullName) { commitSetPromise.tryComplete(commitSet) } match {
         case UnlessShutdown.AbortedDueToShutdown =>
           // Try to clean up as good as possible even though recovery of the ephemeral state will ultimately
           // take care of the cleaning up.
           logger.info(withRC(rc, s"Not adding commit set due to shutdown being in progress."))
-          val neverCompletedFuture =
-            Promise[Either[NonEmptyChain[RequestTrackerStoreError], Unit]]().future
-          Either.right(EitherT(neverCompletedFuture))
+          Either.right(EitherT.right(FutureUnlessShutdown.abortedDueToShutdown))
         case UnlessShutdown.Outcome(true) =>
           logger.debug(withRC(rc, "New commit set added."))
-          Right(EitherT(finalizationResult.future))
+          Right(EitherT(finalizationResult.futureUS))
         case UnlessShutdown.Outcome(false) =>
           val oldCommitSet = commitSetPromise.future.value
             .getOrElse(
@@ -241,7 +248,7 @@ private[participant] class NaiveRequestTracker(
             )
           if (oldCommitSet == commitSet) {
             logger.debug(withRC(rc, s"Commit set added a second time."))
-            Right(EitherT(finalizationResult.future))
+            Right(EitherT(finalizationResult.futureUS))
           } else {
             logger.warn(withRC(rc, s"Commit set with different parameters added a second time."))
             Left(CommitSetAlreadyExists(rc))
@@ -281,14 +288,17 @@ private[participant] class NaiveRequestTracker(
   /** Releases all locks that are held by the given request */
   private[this] def releaseAllLocks(rc: RequestCounter, requestTimestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     logger.trace(withRC(rc, "Releasing all locks."))
     if (!requests.contains(rc))
       throw new FatalRequestTrackerException(withRC(rc, s"No entry found in request table"))
     conflictDetector
       .finalizeRequest(CommitSet.empty, TimeOfChange(rc, requestTimestamp))
       .map { acsFuture =>
-        FutureUtil.doNotAwait(acsFuture, s"Rollback of request $rc")
+        FutureUtil.doNotAwait(
+          acsFuture.onShutdown(logger.debug(s"Rollback of request $rc aborted due to shutdown")),
+          s"Rollback of request $rc",
+        )
       }
   }
 
@@ -301,7 +311,7 @@ private[participant] class NaiveRequestTracker(
     */
   private[this] class CheckActivenessAndLock(
       val rc: RequestCounter,
-      activenessResult: Promise[ActivenessResult],
+      activenessResult: PromiseUnlessShutdown[ActivenessResult],
       timestamp: CantonTimestamp,
       sequencerCounter: SequencerCounter,
   )(override implicit val traceContext: TraceContext)
@@ -318,11 +328,11 @@ private[participant] class NaiveRequestTracker(
       * </ul>
       */
     override def perform(): FutureUnlessShutdown[Unit] =
-      performUnlessClosingF("check-activeness-result") {
+      performUnlessClosingUSF("check-activeness-result") {
         logger.debug(withRC(rc, "Performing the activeness check"))
 
         val result = conflictDetector.checkActivenessAndLock(rc)
-        activenessResult completeWith result
+        activenessResult.completeWith(result)
         result.map { actRes =>
           logger.trace(withRC(rc, s"Activeness result $actRes"))
         }
@@ -354,7 +364,7 @@ private[participant] class NaiveRequestTracker(
     override def perform(): FutureUnlessShutdown[Unit] =
       if (!timeoutPromise.isCompleted) {
         logger.debug(withRC(rc, "Timed out."))
-        performUnlessClosingF("trigger-timeout")(releaseAllLocks(rc, requestTimestamp)).map { _ =>
+        performUnlessClosingUSF("trigger-timeout")(releaseAllLocks(rc, requestTimestamp)).map { _ =>
           evictRequest(rc)
           /* Timeout promises are completed only here and in `addResult`.
            * These two completions never race.
@@ -393,8 +403,6 @@ private[participant] class NaiveRequestTracker(
     * @param sequencerCounter The sequencer counter on the result message
     * @param requestTimestamp The timestamp on the request
     * @param commitSetFuture The promise which contracts should be activated and deactivated.
-    * @param finalizationResult The promise to fulfill once the request has been finalized and all changes have been
-    *                           persisted to the ACS.
     */
   private[this] case class FinalizeRequest(
       rc: RequestCounter,
@@ -402,37 +410,50 @@ private[participant] class NaiveRequestTracker(
       requestTimestamp: CantonTimestamp,
       commitSetFuture: Future[CommitSet],
       commitTime: CantonTimestamp,
-      finalizationResult: Promise[Either[NonEmptyChain[RequestTrackerStoreError], Unit]] =
-        Promise[Either[NonEmptyChain[RequestTrackerStoreError], Unit]](),
   )(override implicit val traceContext: TraceContext)
       extends TimedTask(commitTime, sequencerCounter, Kind.Finalization) {
+
+    /** The promise to fulfill once the request has been finalized and all changes have been
+      * persisted to the ACS.
+      */
+    val finalizationResult: PromiseUnlessShutdown[
+      Either[NonEmptyChain[RequestTrackerStoreError], Unit]
+    ] = new PromiseUnlessShutdown[Either[NonEmptyChain[RequestTrackerStoreError], Unit]](
+      "finalization-result",
+      futureSupervisor,
+    )
 
     /** Tries to finalize the request with the data given in this class.
       *
       * @throws InvalidCommitSet if the commit set tries to archive or create a contract that was not locked
       *                          during the activeness check
       */
-    override def perform(): FutureUnlessShutdown[Unit] = performUnlessClosingF("finalize-request") {
-      commitSetFuture.transformWith {
-        case Success(commitSet) =>
-          logger.debug(withRC(rc, s"Finalizing at $commitTime"))
-          conflictDetector
-            .finalizeRequest(commitSet, TimeOfChange(rc, requestTimestamp))
-            .map { storeFuture =>
-              // The finalization is complete when the conflict detection stores have been updated
-              finalizationResult.completeWith(storeFuture)
-              // Immediately evict the request
-              evictRequest(rc)
-            }
+    override def perform(): FutureUnlessShutdown[Unit] =
+      performUnlessClosingUSF("finalize-request") {
+        FutureUnlessShutdown.outcomeF(commitSetFuture).transformWith {
+          case Success(UnlessShutdown.Outcome(commitSet)) =>
+            logger.debug(withRC(rc, s"Finalizing at $commitTime"))
+            conflictDetector
+              .finalizeRequest(commitSet, TimeOfChange(rc, requestTimestamp))
+              .map { storeFuture =>
+                // The finalization is complete when the conflict detection stores have been updated
+                finalizationResult.completeWith(storeFuture.unwrap)
+                // Immediately evict the request
+                evictRequest(rc)
+              }
 
-        case Failure(ex) =>
-          logger.debug(withRC(rc, "Commit set computation failed"), ex)
-          // Propagate the exception back to the protocol processor
-          finalizationResult.failure(ex)
-          // Pass the exception to the task scheduler and thereby interrupt conflict detection
-          Future.failed(ex)
+          case Success(UnlessShutdown.AbortedDueToShutdown) =>
+            logger.debug(withRC(rc, s"Aborted finalizing at $commitTime due to shutdown"))
+            FutureUnlessShutdown.abortedDueToShutdown
+
+          case Failure(ex) =>
+            logger.debug(withRC(rc, "Commit set computation failed"), ex)
+            // Propagate the exception back to the protocol processor
+            finalizationResult.failure(ex)
+            // Pass the exception to the task scheduler and thereby interrupt conflict detection
+            FutureUnlessShutdown.failed(ex)
+        }
       }
-    }
 
     override def pretty: Pretty[this.type] =
       prettyOfClass(
@@ -534,7 +555,7 @@ private[conflictdetection] object NaiveRequestTracker {
       decisionTime: CantonTimestamp,
       activenessSet: ActivenessSet,
   )(
-      val activenessResult: Promise[ActivenessResult],
+      val activenessResult: PromiseUnlessShutdown[ActivenessResult],
       val timeoutResult: Promise[TimeoutResult],
       val finalizationDataCell: SingleUseCell[FinalizationData],
       val commitSetPromise: Promise[CommitSet],
@@ -558,7 +579,7 @@ private[conflictdetection] object NaiveRequestTracker {
         activenessSet = activenessSet,
       )(
         activenessResult =
-          new SupervisedPromise[ActivenessResult]("activeness-result", futureSupervisor),
+          new PromiseUnlessShutdown[ActivenessResult]("activeness-result", futureSupervisor),
         timeoutResult = Promise[TimeoutResult](),
         finalizationDataCell = new SingleUseCell[FinalizationData],
         commitSetPromise = new SupervisedPromise[CommitSet]("commit-set", futureSupervisor),
@@ -576,5 +597,5 @@ private[conflictdetection] object NaiveRequestTracker {
   private final case class FinalizationData(
       resultTimestamp: CantonTimestamp,
       commitTime: CantonTimestamp,
-  )(val result: Promise[Either[NonEmptyChain[RequestTrackerStoreError], Unit]])
+  )(val result: PromiseUnlessShutdown[Either[NonEmptyChain[RequestTrackerStoreError], Unit]])
 }

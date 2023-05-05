@@ -10,11 +10,17 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
+import com.digitalasset.canton.lifecycle.{
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  FutureUnlessShutdown,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
+import com.digitalasset.canton.topology.store.TopologyStoreX
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.*
@@ -24,12 +30,20 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SimpleExecutionQueue
 import com.digitalasset.canton.version.ProtocolVersion
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
+
+trait TopologyManagerObserver {
+  def addedNewTransactions(
+      timestamp: CantonTimestamp,
+      transactions: Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+}
 
 class TopologyManagerX(
     val clock: Clock,
     val crypto: Crypto,
-    protected val store: TopologyStoreX[TopologyStoreId],
+    val store: TopologyStoreX[AuthorizedStore],
     val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
@@ -40,6 +54,12 @@ class TopologyManagerX(
   // sequential queue to run all the processing that does operate on the state
   protected val sequentialQueue = new SimpleExecutionQueue()
   private val processor = new TopologyStateProcessorX(store, loggerFactory)
+
+  def queueSize: Int = sequentialQueue.queueSize
+
+  private val observers = new AtomicReference[Seq[TopologyManagerObserver]](Seq.empty)
+  def addObserver(observer: TopologyManagerObserver): Unit =
+    observers.updateAndGet(_ :+ observer).discard
 
   /** Authorizes a new topology transaction by signing it and adding it to the topology state
     *
@@ -229,7 +249,13 @@ class TopologyManagerX(
   protected def notifyObservers(
       timestamp: CantonTimestamp,
       transactions: Seq[GenericSignedTopologyTransactionX],
-  ): Future[Unit] = Future.unit
+  )(implicit traceContext: TraceContext): Future[Unit] = Future
+    .sequence(
+      observers
+        .get()
+        .map(_.addedNewTransactions(timestamp, transactions).onShutdown(()))
+    )
+    .map(_ => ())
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*

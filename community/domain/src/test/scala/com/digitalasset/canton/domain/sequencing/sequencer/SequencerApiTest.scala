@@ -17,8 +17,8 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
-import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason.BatchRefused
-import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason.{BatchInvalid, BatchRefused}
+import com.digitalasset.canton.sequencing.protocol.{AggregationRule, *}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.util.FutureInstances.*
@@ -82,7 +82,7 @@ abstract class SequencerApiTest
 
   protected def supportAggregation: Boolean
 
-  "The sequencers should" should {
+  "The sequencers" should {
     "send a batch to one recipient" in { env =>
       import env.*
       val messageContent = "hello"
@@ -196,7 +196,9 @@ abstract class SequencerApiTest
       val sender: MediatorId = mediatorId
       // TODO(i10412): See above
       val recipients = Recipients(NonEmpty(Seq, t5, t3))
-      val readFor: List[Member] = recipients.allRecipients.toList
+      val readFor: List[Member] = recipients.allRecipients.collect { case MemberRecipient(member) =>
+        member
+      }.toList
 
       val request: SubmissionRequest = createSendRequest(sender, messageContent, recipients)
 
@@ -210,7 +212,12 @@ abstract class SequencerApiTest
       }
 
       for {
-        _ <- registerMembers(recipients.allRecipients + sender + topologyClientMember, sequencer)
+        _ <- registerMembers(
+          recipients.allRecipients.collect { case MemberRecipient(member) =>
+            member
+          } + sender + topologyClientMember,
+          sequencer,
+        )
         _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
         reads <- readForMembers(readFor, sequencer)
       } yield {
@@ -479,6 +486,131 @@ abstract class SequencerApiTest
         )
       }
     }
+
+    "require eligible senders be registered" onlyRunWhen testAggregation in { env =>
+      import env.*
+
+      // We expect synchronous rejections and can therefore reuse participant1.
+      // But we need a fresh unregistered participant16
+      // TODO(i10412): remove this comment
+      val aggregationRule =
+        AggregationRule(NonEmpty(Seq, p1, p16), PositiveInt.tryCreate(1), testedProtocolVersion)
+
+      val request = createSendRequest(
+        p1,
+        "unregistered-eligible-sender",
+        Recipients.cc(p1),
+        aggregationRule = Some(aggregationRule),
+      )
+
+      for {
+        _ <- registerMembers(Set(p1, topologyClientMember), sequencer)
+        error <- leftOrFail(sequencer.sendAsync(request))("Sent async")
+      } yield {
+        error shouldBe a[SendAsyncError.SenderUnknown]
+        error.message should (
+          include("The following senders in the aggregation rule are unknown") and
+            include(p16.toString)
+        )
+      }
+    }
+
+    "require the threshold to be reachable" onlyRunWhen testAggregation in { env =>
+      import env.*
+
+      // TODO(i10412): See above
+      val aggregationRule =
+        AggregationRule(NonEmpty(Seq, p16, p16), PositiveInt.tryCreate(2), testedProtocolVersion)
+
+      val messageId = MessageId.tryCreate("unreachable-threshold")
+      val request = SubmissionRequest.tryCreate(
+        p16,
+        messageId,
+        isRequest = false,
+        Batch.empty(testedProtocolVersion),
+        maxSequencingTime = CantonTimestamp.MaxValue,
+        timestampOfSigningKey = None,
+        aggregationRule = Some(aggregationRule),
+        testedProtocolVersion,
+      )
+
+      for {
+        _ <- registerMembers(Set(p16, topologyClientMember), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
+        reads <- readForMembers(Seq(p16), sequencer)
+      } yield {
+        checkRejection(reads, p16, messageId) { case BatchInvalid(reason) =>
+          reason should include("Threshold 2 cannot be reached")
+        }
+      }
+    }
+
+    "require the sender to be eligible" onlyRunWhen testAggregation in { env =>
+      import env.*
+
+      // TODO(i10412): See above
+      val aggregationRule =
+        AggregationRule(NonEmpty(Seq, p16), PositiveInt.tryCreate(1), testedProtocolVersion)
+
+      val messageId = MessageId.tryCreate("unreachable-threshold")
+      val request = SubmissionRequest.tryCreate(
+        p17,
+        messageId,
+        isRequest = false,
+        Batch.empty(testedProtocolVersion),
+        maxSequencingTime = CantonTimestamp.MaxValue,
+        timestampOfSigningKey = None,
+        aggregationRule = Some(aggregationRule),
+        testedProtocolVersion,
+      )
+
+      for {
+        _ <- registerMembers(Set(p16, p17, topologyClientMember), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
+        reads <- readForMembers(Seq(p17), sequencer)
+      } yield {
+        checkRejection(reads, p17, messageId) { case BatchInvalid(reason) =>
+          reason should include("Sender is not eligible according to the aggregation rule")
+        }
+      }
+    }
+
+    "require all eligible senders be authenticated" onlyRunWhen testAggregation in { env =>
+      import env.*
+
+      val unauthenticatedMember =
+        UnauthenticatedMemberId(UniqueIdentifier.tryCreate("unauthenticated", "member"))
+      // TODO(i10412): See above
+      val aggregationRule = AggregationRule(
+        NonEmpty(Seq, p18, unauthenticatedMember),
+        PositiveInt.tryCreate(1),
+        testedProtocolVersion,
+      )
+
+      val messageId = MessageId.tryCreate("unreachable-threshold")
+      val request = SubmissionRequest.tryCreate(
+        p18,
+        messageId,
+        isRequest = false,
+        Batch.empty(testedProtocolVersion),
+        maxSequencingTime = CantonTimestamp.MaxValue,
+        timestampOfSigningKey = None,
+        aggregationRule = Some(aggregationRule),
+        testedProtocolVersion,
+      )
+
+      for {
+        _ <- registerMembers(Set(p18, unauthenticatedMember, topologyClientMember), sequencer)
+        _ <- valueOrFail(sequencer.sendAsync(request))("Sent async")
+        reads <- readForMembers(Seq(p18), sequencer)
+      } yield {
+        checkRejection(reads, p18, messageId) { case BatchInvalid(reason) =>
+          reason should include(
+            "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
+          )
+        }
+      }
+    }
   }
 
   private def readForMembers(
@@ -571,8 +703,6 @@ abstract class SequencerApiTest
 
       event match {
         case Deliver(_, _, _, _, batch) =>
-          batch.allRecipients
-
           withClue(s"Received the wrong number of envelopes for recipient $member") {
             batch.envelopes.length shouldBe expectedMessage.envs.length
           }

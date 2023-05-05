@@ -227,8 +227,6 @@ object TransactionViewDecomposition {
                 remainingChildrenRbContext -> remainingNodes,
               ) ++ remainingGroups
             )
-          case (_, (_nodeId, _: LfNodeAuthority) +: _) +: _ =>
-            sys.error("LfNodeAuthority")
         }
 
       go(Seq(rbContext -> nodes))

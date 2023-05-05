@@ -540,6 +540,12 @@ trait RemoteParticipantReferenceCommon
   @Help.Group("Participant Pruning")
   def pruning: ParticipantPruningAdministrationGroup = pruning_
 
+  private lazy val repair_ =
+    new ParticipantRepairAdministration(consoleEnvironment, this, loggerFactory)
+
+  @Help.Summary("Commands to repair the participant contract state", FeatureFlag.Repair)
+  @Help.Group("Repair")
+  def repair: ParticipantRepairAdministration = repair_
 }
 
 class RemoteParticipantReference(environment: ConsoleEnvironment, override val name: String)
@@ -611,13 +617,13 @@ class LocalParticipantReference(
   def commitments: LocalCommitmentsAdministrationGroup = commitments_
 
   private lazy val repair_ =
-    new ParticipantRepairAdministration(consoleEnvironment, this, loggerFactory) {
+    new LocalParticipantRepairAdministration(consoleEnvironment, this, loggerFactory) {
       override protected def access[T](handler: ParticipantNode => T): T =
         LocalParticipantReference.this.access(handler)
     }
   @Help.Summary("Commands to repair the local participant contract state", FeatureFlag.Repair)
   @Help.Group("Repair")
-  def repair: ParticipantRepairAdministration = repair_
+  def repair: LocalParticipantRepairAdministration = repair_
 
   @Help.Summary("Inspect and manage parties")
   @Help.Group("Parties")

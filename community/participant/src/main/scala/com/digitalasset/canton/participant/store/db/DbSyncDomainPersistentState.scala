@@ -10,7 +10,12 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
-import com.digitalasset.canton.participant.store.SyncDomainPersistentState
+import com.digitalasset.canton.participant.store.{
+  SyncDomainPersistentState,
+  SyncDomainPersistentStateOld,
+  SyncDomainPersistentStateX,
+}
+import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{
   DbSequencedEventStore,
@@ -20,25 +25,25 @@ import com.digitalasset.canton.store.db.{
 import com.digitalasset.canton.store.memory.InMemorySendTrackerStore
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.db.DbTopologyStore
+import com.digitalasset.canton.topology.store.db.{DbTopologyStore, DbTopologyStoreX}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 
 import scala.concurrent.ExecutionContext
 
-class DbSyncDomainPersistentState(
+abstract class DbSyncDomainPersistentStateCommon(
     override val domainId: IndexedDomain,
-    protocolVersion: ProtocolVersion,
+    val protocolVersion: ProtocolVersion,
     storage: DbStorage,
     override val pureCryptoApi: CryptoPureApi,
     parameters: ParticipantStoreConfig,
-    caching: CachingConfigs,
+    val caching: CachingConfigs,
     maxDbConnections: Int,
-    processingTimeouts: ProcessingTimeout,
+    val timeouts: ProcessingTimeout,
     override val enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
     val loggerFactory: NamedLoggerFactory,
-    futureSupervisor: FutureSupervisor,
+    val futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends SyncDomainPersistentState
     with AutoCloseable
@@ -49,7 +54,7 @@ class DbSyncDomainPersistentState(
     storage,
     indexedStringStore,
     ReleaseProtocolVersion.latest,
-    processingTimeouts,
+    timeouts,
     loggerFactory,
   )
 
@@ -63,15 +68,15 @@ class DbSyncDomainPersistentState(
       caching.contractStore,
       dbQueryBatcherConfig = parameters.dbBatchAggregationConfig,
       insertBatchAggregatorConfig = parameters.dbBatchAggregationConfig,
-      processingTimeouts,
+      timeouts,
       loggerFactory,
     )
   val transferStore: DbTransferStore = new DbTransferStore(
     storage,
-    domainId.item,
+    TargetDomainId(domainId.item),
     protocolVersion,
     pureCryptoApi,
-    processingTimeouts,
+    timeouts,
     loggerFactory,
   )
   val activeContractStore: DbActiveContractStore =
@@ -81,14 +86,14 @@ class DbSyncDomainPersistentState(
       enableAdditionalConsistencyChecks,
       parameters.maxItemsInSqlClause,
       indexedStringStore,
-      processingTimeouts,
+      timeouts,
       loggerFactory,
     )
   val contractKeyJournal: DbContractKeyJournal = new DbContractKeyJournal(
     storage,
     domainId,
     parameters.maxItemsInSqlClause,
-    processingTimeouts,
+    timeouts,
     loggerFactory,
   )
   private val client = SequencerClientDiscriminator.fromIndexedDomainId(domainId)
@@ -96,7 +101,7 @@ class DbSyncDomainPersistentState(
     storage,
     client,
     protocolVersion,
-    processingTimeouts,
+    timeouts,
     loggerFactory,
   )
   val requestJournalStore: DbRequestJournalStore = new DbRequestJournalStore(
@@ -106,7 +111,7 @@ class DbSyncDomainPersistentState(
     insertBatchAggregatorConfig = parameters.dbBatchAggregationConfig,
     replaceBatchAggregatorConfig = parameters.dbBatchAggregationConfig,
     enableAdditionalConsistencyChecks,
-    processingTimeouts,
+    timeouts,
     loggerFactory,
   )
   val acsCommitmentStore = new DbAcsCommitmentStore(
@@ -114,32 +119,19 @@ class DbSyncDomainPersistentState(
     domainId,
     protocolVersion,
     pureCryptoApi,
-    processingTimeouts,
+    timeouts,
     futureSupervisor,
     loggerFactory,
   )
 
   val parameterStore: DbDomainParameterStore =
-    new DbDomainParameterStore(domainId.item, storage, processingTimeouts, loggerFactory)
+    new DbDomainParameterStore(domainId.item, storage, timeouts, loggerFactory)
   val sequencerCounterTrackerStore =
-    new DbSequencerCounterTrackerStore(client, storage, processingTimeouts, loggerFactory)
+    new DbSequencerCounterTrackerStore(client, storage, timeouts, loggerFactory)
   // TODO(i5660): Use the db-based send tracker store
   val sendTrackerStore = new InMemorySendTrackerStore()
-  val causalDependencyStore: DbSingleDomainCausalDependencyStore =
-    new DbSingleDomainCausalDependencyStore(
-      domainId.item,
-      storage,
-      processingTimeouts,
-      loggerFactory,
-    )
-  val topologyStore =
-    new DbTopologyStore(
-      storage,
-      DomainStore(domainId.item),
-      processingTimeouts,
-      loggerFactory,
-      futureSupervisor,
-    )
+
+  override def isMemory(): Boolean = false
 
   override def close() = Lifecycle.close(
     eventLog,
@@ -153,7 +145,100 @@ class DbSyncDomainPersistentState(
     parameterStore,
     sequencerCounterTrackerStore,
     sendTrackerStore,
-    causalDependencyStore,
-    topologyStore,
   )(logger)
+}
+
+class DbSyncDomainPersistentStateOld(
+    domainId: IndexedDomain,
+    protocolVersion: ProtocolVersion,
+    storage: DbStorage,
+    pureCryptoApi: CryptoPureApi,
+    parameters: ParticipantStoreConfig,
+    caching: CachingConfigs,
+    maxDbConnections: Int,
+    timeouts: ProcessingTimeout,
+    enableAdditionalConsistencyChecks: Boolean,
+    indexedStringStore: IndexedStringStore,
+    loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
+)(implicit ec: ExecutionContext)
+    extends DbSyncDomainPersistentStateCommon(
+      domainId,
+      protocolVersion,
+      storage,
+      pureCryptoApi,
+      parameters,
+      caching,
+      maxDbConnections,
+      timeouts,
+      enableAdditionalConsistencyChecks,
+      indexedStringStore,
+      loggerFactory,
+      futureSupervisor,
+    )
+    with SyncDomainPersistentStateOld {
+
+  val topologyStore =
+    new DbTopologyStore(
+      storage,
+      DomainStore(domainId.item),
+      timeouts,
+      loggerFactory,
+      futureSupervisor,
+    )
+
+  override def close() = {
+    Lifecycle.close(
+      topologyStore
+    )(logger)
+    super.close()
+  }
+
+}
+
+class DbSyncDomainPersistentStateX(
+    domainId: IndexedDomain,
+    protocolVersion: ProtocolVersion,
+    storage: DbStorage,
+    pureCryptoApi: CryptoPureApi,
+    parameters: ParticipantStoreConfig,
+    cachingConfigs: CachingConfigs,
+    maxDbConnections: Int,
+    processingTimeouts: ProcessingTimeout,
+    enableAdditionalConsistencyChecks: Boolean,
+    indexedStringStore: IndexedStringStore,
+    loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
+)(implicit ec: ExecutionContext)
+    extends DbSyncDomainPersistentStateCommon(
+      domainId,
+      protocolVersion,
+      storage,
+      pureCryptoApi,
+      parameters,
+      cachingConfigs,
+      maxDbConnections,
+      processingTimeouts,
+      enableAdditionalConsistencyChecks,
+      indexedStringStore,
+      loggerFactory,
+      futureSupervisor,
+    )
+    with SyncDomainPersistentStateX {
+
+  val topologyStore =
+    new DbTopologyStoreX(
+      storage,
+      DomainStore(domainId.item),
+      processingTimeouts,
+      loggerFactory,
+    )
+
+  override def close() = {
+    Lifecycle.close(
+      topologyStore
+    )(logger)
+    super.close()
+  }
+
 }

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.digitalasset.canton.LfWorkflowId
 import com.digitalasset.canton.data.TransferSubmitterMetadata
 import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -14,7 +13,7 @@ import com.digitalasset.canton.participant.protocol.submission.routing.Contracts
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
 import com.digitalasset.canton.participant.sync.{ConnectedDomainsLookup, TransactionRoutingError}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -38,16 +37,16 @@ private[routing] class ContractsTransfer(
       domainRankTarget.transfers.toSeq.parTraverse_ { case (cid, (lfParty, sourceDomainId)) =>
         perform(
           TransferArgs(
-            sourceDomainId,
-            domainRankTarget.domainId,
+            SourceDomainId(sourceDomainId),
+            TargetDomainId(domainRankTarget.domainId),
             TransferSubmitterMetadata(
               lfParty,
               submitterInfo.applicationId,
               submittingParticipant.toLf,
               submitterInfo.commandId,
               submitterInfo.submissionId,
+              workflowId = None,
             ),
-            workflowId = None,
             cid,
             traceContext,
           )
@@ -65,7 +64,6 @@ private[routing] class ContractsTransfer(
       sourceDomain,
       targetDomain,
       submitterMetadata,
-      workflowId,
       contractId,
       _traceContext,
     ) = args
@@ -73,11 +71,11 @@ private[routing] class ContractsTransfer(
 
     val transfer = for {
       sourceSyncDomain <- EitherT.fromEither[Future](
-        connectedDomains.get(sourceDomain).toRight("Not connected to the source domain")
+        connectedDomains.get(sourceDomain.unwrap).toRight("Not connected to the source domain")
       )
 
       targetSyncDomain <- EitherT.fromEither[Future](
-        connectedDomains.get(targetDomain).toRight("Not connected to the target domain")
+        connectedDomains.get(targetDomain.unwrap).toRight("Not connected to the target domain")
       )
 
       _unit <- EitherT
@@ -86,7 +84,6 @@ private[routing] class ContractsTransfer(
       outResult <- sourceSyncDomain
         .submitTransferOut(
           submitterMetadata,
-          workflowId,
           contractId,
           targetDomain,
           TargetProtocolVersion(targetSyncDomain.staticDomainParameters.protocolVersion),
@@ -108,7 +105,6 @@ private[routing] class ContractsTransfer(
       inResult <- targetSyncDomain
         .submitTransferIn(
           submitterMetadata,
-          workflowId,
           outResult.transferId,
           SourceProtocolVersion(sourceSyncDomain.staticDomainParameters.protocolVersion),
         )
@@ -133,10 +129,9 @@ private[routing] class ContractsTransfer(
 
 private[routing] object ContractsTransfer {
   final case class TransferArgs(
-      sourceDomain: DomainId,
-      targetDomain: DomainId,
+      sourceDomain: SourceDomainId,
+      targetDomain: TargetDomainId,
       submitterMetadata: TransferSubmitterMetadata,
-      workflowId: Option[LfWorkflowId],
       contract: LfContractId,
       traceContext: TraceContext,
   )

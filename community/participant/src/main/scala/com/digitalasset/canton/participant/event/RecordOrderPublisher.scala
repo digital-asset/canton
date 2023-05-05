@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.event
 import cats.Eval
 import cats.syntax.foldable.*
 import cats.syntax.option.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{
@@ -25,13 +24,10 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
-import com.digitalasset.canton.participant.protocol.ProcessingSteps.RequestType
-import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventClock
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   SequencedSubmission,
 }
-import com.digitalasset.canton.participant.protocol.{CausalityUpdate, SingleDomainCausalTracker}
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
@@ -78,11 +74,9 @@ class RecordOrderPublisher(
     initTimestamp: CantonTimestamp,
     eventLog: SingleDimensionEventLog[DomainEventLogId],
     multiDomainEventLog: Eval[MultiDomainEventLog],
-    singleDomainCausalTracker: SingleDomainCausalTracker,
     inFlightSubmissionTracker: InFlightSubmissionTracker,
     metrics: TaskSchedulerMetrics,
     override protected val timeouts: ProcessingTimeout,
-    useCausalityTracking: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit val executionContextForPublishing: ExecutionContext, elc: ErrorLoggingContext)
@@ -117,31 +111,15 @@ class RecordOrderPublisher(
       requestCounter: RequestCounter,
       requestTimestamp: CantonTimestamp,
       eventO: Option[TimestampedEvent],
-      updateO: Option[CausalityUpdate],
-      requestType: RequestType,
   )(implicit traceContext: TraceContext): Future[Unit] =
-    if (eventO.isEmpty && updateO.isEmpty) Future.unit
+    if (eventO.isEmpty) Future.unit
     else {
       logger.debug(
-        s"Schedule publication for request counter $requestCounter: event = ${eventO.isDefined}, causality update = ${updateO.isDefined}"
+        s"Schedule publication for request counter $requestCounter: event = ${eventO.isDefined}"
       )
 
-      val isTransfer = requestType match {
-        case values: RequestType.Values =>
-          values match {
-            case RequestType.Transaction => false
-            case _: RequestType.Transfer => true
-          }
-        case _ => false
-      }
-
       for {
-        _ <-
-          if (isTransfer)
-            updateO.traverse_[Future, Unit](u => eventLog.storeTransferUpdate(u))
-          else Future.unit
-
-        _ <- eventO.traverse_(eventLog.insert(_, updateO))
+        _ <- eventO.traverse_(eventLog.insert(_))
       } yield {
         val inFlightReference =
           InFlightBySequencingInfo(
@@ -152,7 +130,6 @@ class RecordOrderPublisher(
           EventPublicationTask(requestSequencerCounter, requestTimestamp, requestCounter)(
             eventO,
             Some(inFlightReference),
-            updateO,
           )
         taskScheduler.scheduleTask(task)
       }
@@ -168,9 +145,8 @@ class RecordOrderPublisher(
         logger.info(s"Recover pending causality update $pendingPublish")
 
         val eventO = pendingPublish match {
-          case RecordOrderPublisher.PendingTransferPublish(rc, updateS, ts, eventLogId) => None
-          case RecordOrderPublisher.PendingEventPublish(update, event, ts, eventLogId) =>
-            Some(event)
+          case RecordOrderPublisher.PendingTransferPublish(rc, ts, eventLogId) => None
+          case RecordOrderPublisher.PendingEventPublish(event, ts, eventLogId) => Some(event)
         }
 
         val inFlightRef = eventO.flatMap(tse =>
@@ -182,7 +158,7 @@ class RecordOrderPublisher(
           )
         )
 
-        publishEvent(pendingPublish.update, eventO, pendingPublish.rc, inFlightRef)
+        publishEvent(eventO, pendingPublish.rc, inFlightRef)
     }
 
     recovered.completeWith(recoverF)
@@ -278,15 +254,25 @@ class RecordOrderPublisher(
   )(implicit traceContext: TraceContext)
       extends PublicationTask {
     override def perform(): FutureUnlessShutdown[Unit] = {
-      performUnlessClosingF("observe-timestamp-task") {
-        inFlightSubmissionTracker.observeTimestamp(domainId, timestamp).valueOr {
-          case InFlightSubmissionTracker.UnknownDomain(_domainId) =>
-            // TODO(#6175) Prevent that later tasks get executed if the domain ID is not found,
-            //  which should only happen during shutdown
+      performUnlessClosingUSF("observe-timestamp-task") {
+        /*
+         * Observe timestamp will only return an UnknownDomain error if the domain ID is not in the connectedDomainMap
+         * in the CantonSyncService. When disconnecting from the domain we first remove the domain from the map and only then
+         * close the sync domain, so there's a window at the beginning of shutdown where we could get an UnknownDomain error here.
+         * To prevent further tasks to be executed we return a 'FutureUnlessShutdown.abortedDueToShutdown' which will
+         * cause the execution queue in the task scheduler to abort all subsequent queued tasks instead of running them.
+         * Note that in this context 'shutdown' doesn't necessarily mean complete node shutdown, closing of the SyncDomain is enough,
+         * which can happen when we disconnect from the domain (without necessarily shutting down the node entirely)
+         */
+        inFlightSubmissionTracker
+          .observeTimestamp(domainId, timestamp)
+          .mapK(FutureUnlessShutdown.outcomeK)
+          .valueOrF { case InFlightSubmissionTracker.UnknownDomain(_domainId) =>
             logger.info(
               s"Skip the synchronization with the in-flight submission tracker for sequencer counter $sequencerCounter at $timestamp due to shutdown."
             )
-        }
+            FutureUnlessShutdown.abortedDueToShutdown
+          }
       }
     }
 
@@ -308,7 +294,6 @@ class RecordOrderPublisher(
   )(
       val eventO: Option[TimestampedEvent],
       val inFlightReference: Option[InFlightReference],
-      updateO: Option[CausalityUpdate],
   )(implicit val traceContext: TraceContext)
       extends PublicationTask {
 
@@ -318,7 +303,7 @@ class RecordOrderPublisher(
     override def perform(): FutureUnlessShutdown[Unit] = {
       for {
         _recovered <- recovered.futureUS
-        _unit <- publishEvent(updateO, eventO, requestCounter, inFlightReference)
+        _unit <- publishEvent(eventO, requestCounter, inFlightReference)
       } yield ()
     }
 
@@ -331,63 +316,19 @@ class RecordOrderPublisher(
   }
 
   private def publishEvent(
-      updateO: Option[CausalityUpdate],
       eventO: Option[TimestampedEvent],
       requestCounter: RequestCounter,
       inFlightRef: Option[InFlightReference],
   )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF("publish-event") {
+    performUnlessClosingUSF("publish-event") {
       logger.debug(s"Publish event with request counter $requestCounter")
       for {
-        clockO <- waitPublishableO(updateO)
-        _published <- eventO.fold(Future.unit) { event =>
+        _published <- eventO.fold(FutureUnlessShutdown.unit) { event =>
           val data = PublicationData(eventLog.id, event, inFlightRef)
-          multiDomainEventLog.value.publish(data)
+          FutureUnlessShutdown.outcomeF(multiDomainEventLog.value.publish(data))
         }
-      } yield {
-        published(clockO, requestCounter)
-      }
+      } yield ()
     }
-
-  private def published(clockO: Option[EventClock], requestCounter: RequestCounter)(implicit
-      tc: TraceContext
-  ): Unit = {
-    val () = clockO.foreach { c =>
-      if (useCausalityTracking)
-        singleDomainCausalTracker.globalCausalOrderer.registerPublished(c)
-      else ()
-    }
-    logger.debug(s"Participant completed publishing for event with request counter $requestCounter")
-  }
-
-  private def waitPublishableO(
-      updateO: Option[CausalityUpdate]
-  )(implicit tc: TraceContext): Future[Option[EventClock]] = {
-    val updateAndUseTracking = updateO.flatMap { update =>
-      if (useCausalityTracking) Some(update)
-      else {
-        logger.debug(s"Causality tracking is not enabled so not awaiting causal dependencies.")
-        None
-      }
-    }
-    updateAndUseTracking.traverse(up => waitPublishable(up))
-  }
-
-  private def waitPublishable(
-      update: CausalityUpdate
-  )(implicit tc: TraceContext): Future[EventClock] = {
-    for {
-      clockEvent <- singleDomainCausalTracker.registerCausalityUpdate(update)
-      clock = clockEvent.clock
-      _ = logger.debug(
-        s"Causal update $update given clock $clock with dependencies ${clock.waitOn}"
-      )
-      _unit <- {
-        // Block until the event is causally publishable
-        singleDomainCausalTracker.globalCausalOrderer.waitPublishable(clock)
-      }
-    } yield clock
-  }
 
   // tieBreaker is used to order tasks with the same timestamp
   private case class AcsChangePublicationTask(
@@ -426,7 +367,6 @@ class RecordOrderPublisher(
 object RecordOrderPublisher {
   sealed trait PendingPublish {
     def rc: RequestCounter // TODO(#10497) should that be a localOffset ?
-    val update: Option[CausalityUpdate]
     val ts: CantonTimestamp
     val createsEvent: Boolean
     val eventLogId: EventLogId
@@ -434,16 +374,13 @@ object RecordOrderPublisher {
 
   final case class PendingTransferPublish(
       override val rc: RequestCounter,
-      updateS: CausalityUpdate,
       ts: CantonTimestamp,
       eventLogId: EventLogId,
   ) extends PendingPublish {
-    override val update: Option[CausalityUpdate] = Some(updateS)
     override val createsEvent: Boolean = false
   }
 
   final case class PendingEventPublish(
-      update: Option[CausalityUpdate],
       event: TimestampedEvent,
       ts: CantonTimestamp,
       eventLogId: EventLogId,

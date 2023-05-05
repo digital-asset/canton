@@ -13,31 +13,16 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.ValueRecord
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
-import com.digitalasset.canton.config.{
-  ApiLoggingConfig,
-  BatchAggregatorConfig,
-  CachingConfigs,
-  DefaultProcessingTimeouts,
-  LoggingConfig,
-}
-import com.digitalasset.canton.crypto.{Fingerprint, SyncCryptoApiProvider}
+import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.{
-  AdminWorkflowConfig,
   PackageService,
   ResourceManagementService,
   workflows,
-}
-import com.digitalasset.canton.participant.config.{
-  LedgerApiServerParametersConfig,
-  ParticipantProtocolConfig,
-  ParticipantStoreConfig,
-  PartyNotificationConfig,
 }
 import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainRegistry}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
@@ -57,22 +42,10 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManager,
 }
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.{
-  ParticipantPermission,
-  PartyToParticipant,
-  RequestSide,
-  SignedTopologyTransaction,
-  TopologyChangeOp,
-  TopologyElementId,
-  TopologyStateUpdate,
-  TopologyStateUpdateElement,
-  TopologyTransaction,
-}
-import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
@@ -80,7 +53,6 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   LedgerSubmissionId,
   LfPartyId,
-  config,
 }
 import org.mockito.ArgumentMatchers
 import org.scalatest.Outcome
@@ -91,46 +63,7 @@ import scala.jdk.FutureConverters.*
 
 class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContext {
 
-  private val LocalNodeParameters = ParticipantNodeParameters(
-    general = CantonNodeParameters.General.Impl(
-      tracing = TracingConfig(TracingConfig.Propagation.Disabled),
-      delayLoggingThreshold = NonNegativeFiniteDuration.tryOfMillis(5000),
-      enableAdditionalConsistencyChecks = true,
-      loggingConfig = LoggingConfig(api = ApiLoggingConfig(messagePayloads = Some(true))),
-      logQueryCost = None,
-      processingTimeouts = DefaultProcessingTimeouts.testing,
-      enablePreviewFeatures = false,
-      nonStandardConfig = false,
-      cachingConfigs = CachingConfigs(),
-      sequencerClient = SequencerClientConfig(),
-    ),
-    partyChangeNotification = PartyNotificationConfig.Eager,
-    adminWorkflow = AdminWorkflowConfig(
-      bongTestMaxLevel = 10,
-      retries = 10,
-      submissionTimeout = config.NonNegativeFiniteDuration.ofHours(1),
-    ),
-    maxUnzippedDarSize = 10,
-    stores = ParticipantStoreConfig(
-      maxItemsInSqlClause = PositiveNumeric.tryCreate(10),
-      maxPruningBatchSize = PositiveNumeric.tryCreate(10),
-      acsPruningInterval = config.NonNegativeFiniteDuration.ofSeconds(30),
-      dbBatchAggregationConfig = BatchAggregatorConfig.defaultsForTesting,
-    ),
-    transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
-    protocolConfig = ParticipantProtocolConfig(
-      Some(testedProtocolVersion),
-      devVersionSupport = false,
-      dontWarnOnDeprecatedPV = false,
-      initialProtocolVersion = testedProtocolVersion,
-    ),
-    uniqueContractKeys = false,
-    enableCausalityTracking = true,
-    ledgerApiServerParameters = LedgerApiServerParametersConfig(),
-    maxDbConnections = 10,
-    excludeInfrastructureTransactions = true,
-    enableEngineStackTrace = false,
-  )
+  private val LocalNodeParameters = ParticipantNodeParameters.forTestingOnly(testedProtocolVersion)
 
   case class Fixture() {
 
@@ -138,11 +71,10 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     private val domainRegistry = mock[DomainRegistry]
     private val aliasManager = mock[DomainAliasManager]
     private val syncDomainPersistentStateManager = mock[SyncDomainPersistentStateManager]
-    private val syncDomainPersistentStateFactory = mock[SyncDomainPersistentStateFactory]
     private val domainConnectionConfigStore = mock[DomainConnectionConfigStore]
     private val packageService = mock[PackageService]
-    private val causalityLookup = mock[MultiDomainCausalityStore]
     val topologyManager: ParticipantTopologyManager = mock[ParticipantTopologyManager]
+
     private val identityPusher = mock[ParticipantTopologyDispatcher]
     val partyNotifier = mock[LedgerServerPartyNotifier]
     private val syncCrypto = mock[SyncCryptoApiProvider]
@@ -165,6 +97,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
 
     participantSettingsStore
       .insertMaxDeduplicationDuration(NonNegativeFiniteDuration.Zero)
+      .failOnShutdown
       .futureValue
 
     when(participantNodePersistentState.participantEventLog).thenReturn(participantEventLog)
@@ -190,7 +123,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       participantEventPublisher
     )
     when(participantEventPublisher.publishTimeModelConfigNeededUpstreamOnlyIfFirst(anyTraceContext))
-      .thenReturn(Future.unit)
+      .thenReturn(FutureUnlessShutdown.unit)
     when(domainConnectionConfigStore.getAll()).thenReturn(Seq.empty)
     when(aliasManager.ids).thenReturn(Set.empty)
 
@@ -210,9 +143,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       Eval.now(participantNodePersistentState),
       participantNodeEphemeralState,
       syncDomainPersistentStateManager,
-      syncDomainPersistentStateFactory,
       packageService,
-      causalityLookup,
       topologyManager,
       identityPusher,
       partyNotifier,
@@ -245,18 +176,16 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
   "Canton sync service" should {
     "emit add party event" in { f =>
       when(
-        f.topologyManager.authorize(
-          any[TopologyTransaction[TopologyChangeOp]],
-          any[Option[Fingerprint]],
+        f.topologyManager.allocateParty(
+          any[String255],
+          any[PartyId],
+          any[ParticipantId],
           any[ProtocolVersion],
-          anyBoolean,
-          anyBoolean,
-        )(anyTraceContext)
-      )
-        .thenReturn(EitherT.rightT(mock[SignedTopologyTransaction[TopologyChangeOp]]))
+        )(any[TraceContext])
+      ).thenReturn(EitherT.rightT(()))
 
       when(f.participantEventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext))
-        .thenReturn(Future.unit)
+        .thenReturn(FutureUnlessShutdown.unit)
 
       val lfInputPartyId = LfPartyId.assertFromString("desiredPartyName")
       val partyId =
@@ -279,26 +208,11 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
         .asScala
 
       val result = fut.map(_ => {
-        verify(f.topologyManager).authorize(
-          eqTo(
-            TopologyStateUpdate(
-              TopologyChangeOp.Add,
-              TopologyStateUpdateElement(
-                TopologyElementId.tryCreate(submissionId),
-                PartyToParticipant(
-                  RequestSide.Both,
-                  partyId,
-                  f.participantId,
-                  ParticipantPermission.Submission,
-                ),
-              ),
-              testedProtocolVersion,
-            )
-          ),
-          eqTo(None),
+        verify(f.topologyManager).allocateParty(
+          eqTo(String255.tryCreate(submissionId)),
+          eqTo(partyId),
+          eqTo(f.participantId),
           eqTo(testedProtocolVersion),
-          eqTo(false),
-          eqTo(false),
         )(anyTraceContext)
         succeed
       })

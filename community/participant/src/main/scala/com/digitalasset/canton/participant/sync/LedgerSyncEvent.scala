@@ -24,9 +24,10 @@ import com.digitalasset.canton.protocol.{
   LfNodeId,
   LfTemplateId,
   LfVersionedTransaction,
+  SourceDomainId,
+  TargetDomainId,
   TransferId,
 }
-import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.{
   LedgerConfiguration,
   LedgerParticipantId,
@@ -298,8 +299,8 @@ object LedgerSyncEvent {
       contractId: LfContractId,
       templateId: Option[LfTemplateId], // TODO(#9014): make this field not optional anymore
       contractStakeholders: Set[LfPartyId],
-      sourceDomainId: DomainId,
-      targetDomainId: DomainId,
+      sourceDomainId: SourceDomainId,
+      targetDomainId: TargetDomainId,
       transferInExclusivity: Option[LfTimestamp],
       workflowId: Option[LfWorkflowId],
   ) extends LedgerSyncEvent
@@ -350,12 +351,12 @@ object LedgerSyncEvent {
       creatingTransactionId: LedgerTransactionId,
       contractMetadata: Bytes,
       transferOutId: TransferId,
-      targetDomain: DomainId,
+      targetDomain: TargetDomainId,
       createTransactionAccepted: Boolean,
       workflowId: Option[LfWorkflowId],
   ) extends LedgerSyncEvent
       with PrettyPrinting {
-    def sourceDomain: DomainId = transferOutId.sourceDomain
+    def sourceDomain: SourceDomainId = transferOutId.sourceDomain
 
     override def description: String =
       s"transferred-in ${createNode.coid} from $targetDomain to ${sourceDomain}"
@@ -373,7 +374,7 @@ object LedgerSyncEvent {
       paramIfDefined("workflowId", _.workflowId),
     )
 
-    lazy val transactionMeta = TransactionMeta(
+    private lazy val transactionMeta: TransactionMeta = TransactionMeta(
       ledgerEffectiveTime = ledgerCreateTime,
       workflowId = workflowId,
       submissionTime = recordTime, // TODO(M41): Upstream mismatch, replace with enter/leave view

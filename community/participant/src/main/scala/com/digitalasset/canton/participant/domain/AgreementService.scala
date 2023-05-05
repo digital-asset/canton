@@ -19,6 +19,7 @@ import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -73,16 +74,18 @@ class AgreementService(
     for {
       optAgreement <- {
         if (protocolVersion >= ProtocolVersion.v3) {
-          val client = new GrpcSequencerConnectClient(
-            sequencerConnection,
-            timeouts,
-            nodeParameters.tracing.propagation,
-            loggerFactory,
+          ResourceUtil.withResource(
+            new GrpcSequencerConnectClient(
+              sequencerConnection,
+              timeouts,
+              nodeParameters.tracing.propagation,
+              loggerFactory,
+            )
+          )(client =>
+            client
+              .getAgreement(domainId)
+              .leftMap(err => AgreementServiceError(err.message))
           )
-
-          client
-            .getAgreement(domainId)
-            .leftMap(err => AgreementServiceError(err.message))
         } else
           domainServiceClient
             .getAgreement(domainId, sequencerConnection)
@@ -109,6 +112,7 @@ class AgreementService(
     acceptedAgreements.containsAcceptedAgreement(domainId, agreementId)
 
   override def onClosed(): Unit = Lifecycle.close(acceptedAgreements)(logger)
+
 }
 
 object AgreementService {

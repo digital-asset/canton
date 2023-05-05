@@ -96,12 +96,16 @@ final case class SubmissionRequest private (
     .valueOr(err => throw new IllegalArgumentException(err.message))
 
   def isConfirmationRequest(mediator: Member): Boolean =
-    batch.envelopes.exists(_.recipients.allRecipients == Set(mediator)) && batch.envelopes.exists(
-      e => e.recipients.allRecipients != Set(mediator)
+    batch.envelopes.exists(
+      _.recipients.allRecipients.forgetNE == Set(MemberRecipient(mediator))
+    ) && batch.envelopes.exists(e =>
+      e.recipients.allRecipients.forgetNE != Set(MemberRecipient(mediator))
     )
 
   def isConfirmationResponse(mediator: Member): Boolean =
-    batch.envelopes.nonEmpty && batch.envelopes.forall(_.recipients.allRecipients == Set(mediator))
+    batch.envelopes.nonEmpty && batch.envelopes.forall(
+      _.recipients.allRecipients.forgetNE == Set(MemberRecipient(mediator))
+    )
 
   def isMediatorResult(mediator: Member): Boolean = batch.envelopes.nonEmpty && sender == mediator
 
@@ -147,8 +151,8 @@ final case class SubmissionRequest private (
     builder.add(maxSequencingTime.underlying.micros)
     // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MaxValue as the default.
     builder.add(timestampOfSigningKey.fold(Long.MinValue)(_.underlying.micros))
-    builder.add(rule.eligibleMembers.size)
-    rule.eligibleMembers.foreach(member => builder.add(member.toProtoPrimitive))
+    builder.add(rule.eligibleSenders.size)
+    rule.eligibleSenders.foreach(member => builder.add(member.toProtoPrimitive))
     builder.add(rule.threshold.value)
     val hash = builder.finish()
     AggregationId(hash)

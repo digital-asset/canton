@@ -3,58 +3,33 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.metrics.Timed
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.common.domain.ServiceAgreementId
-import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.crypto.{
-  Crypto,
-  CryptoPureApi,
-  HashPurpose,
-  SyncCryptoApi,
-  SyncCryptoClient,
-}
+import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.HealthReporting.MutableHealthComponent
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  NamedLoggingContext,
-}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
-import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
+import com.digitalasset.canton.protocol.DomainParametersLookup
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
-import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
 import com.digitalasset.canton.sequencing.client.SendCallback.CallbackFuture
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
-import com.digitalasset.canton.sequencing.client.grpc.GrpcSequencerChannelBuilder
 import com.digitalasset.canton.sequencing.client.transports.*
-import com.digitalasset.canton.sequencing.client.transports.replay.{
-  ReplayingEventsSequencerClientTransport,
-  ReplayingSendsSequencerClientTransport,
-}
 import com.digitalasset.canton.sequencing.handlers.{
   CleanSequencerCounterTracker,
   StoreSequencedEvent,
 }
-import com.digitalasset.canton.sequencing.handshake.SequencerHandshake
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequest.usingSignedSubmissionRequest
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
@@ -62,17 +37,15 @@ import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequence
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.DomainTopologyClient
-import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced, TracingConfig}
+import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.util.retry.RetryUtil.{AllExnRetryable, NoExnRetryable}
+import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
-import io.grpc.{CallOptions, ConnectivityState}
 import io.opentelemetry.api.trace.Tracer
 
 import java.nio.file.Path
@@ -83,77 +56,124 @@ import scala.concurrent.*
 import scala.concurrent.duration.*
 import scala.util.{Failure, Success, Try}
 
-/** Client configured options for how to connect to a sequencer
-  *
-  * @param eventInboxSize The size of the inbox queue used to store received events. Must be at least one.
-  *                       Events in the inbox are processed in parallel.
-  *                       A larger inbox may result in higher throughput at the price of higher memory consumption,
-  *                       larger database queries, and longer crash recovery.
-  * @param startupConnectionRetryDelay Initial delay before we attempt to establish an initial connection
-  * @param initialConnectionRetryDelay Initial delay before a reconnect attempt
-  * @param warnDisconnectDelay Consider sequencer to be degraded after delay
-  * @param maxConnectionRetryDelay Maximum delay before a reconnect attempt
-  * @param handshakeRetryAttempts How many attempts should we make to get a handshake response
-  * @param handshakeRetryDelay How long to delay between attempts to fetch a handshake response
-  * @param defaultMaxSequencingTimeOffset if no max-sequencing-time is supplied to send, our current time will be offset by this amount
-  * @param acknowledgementInterval Controls how frequently the client acknowledges how far it has successfully processed
-  *                                to the sequencer which allows the sequencer to remove this data when pruning.
-  * @param keepAlive keep alive config used for GRPC sequencers
-  * @param authToken configuration settings for the authentication token manager
-  * @param optimisticSequencedEventValidation if true, sequenced event signatures will be validated first optimistically
-  *                                           and only strict if the optimistic evaluation failed. this means that
-  *                                           for a split second, we might still accept an event signed with a key that
-  *                                           has just been revoked.
-  * @param skipSequencedEventValidation if true, sequenced event validation will be skipped. the default setting is false.
-  *                                     this option should only be enabled if a defective validation is blocking processing.
-  *                                     therefore, unless you know what you are doing, you shouldn't touch this setting.
-  * @param overrideMaxRequestSize overrides the maxRequestSize configured in the dynamic domain parameters. If overrideMaxRequestSize,
-  *                               is set, modifying the maxRequestSize won't have any effect.
-  */
-final case class SequencerClientConfig(
-    eventInboxSize: PositiveInt = PositiveInt.tryCreate(100),
-    startupConnectionRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(1),
-    initialConnectionRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(10),
-    warnDisconnectDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5),
-    maxConnectionRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(30),
-    handshakeRetryAttempts: NonNegativeInt = NonNegativeInt.tryCreate(50),
-    handshakeRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5),
-    defaultMaxSequencingTimeOffset: NonNegativeFiniteDuration =
-      NonNegativeFiniteDuration.ofMinutes(5),
-    acknowledgementInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(1),
-    keepAliveClient: Option[KeepAliveClientConfig] = Some(KeepAliveClientConfig()),
-    authToken: AuthenticationTokenManagerConfig = AuthenticationTokenManagerConfig(),
-    // TODO(#10040) remove optimistic validation
-    optimisticSequencedEventValidation: Boolean = true,
-    skipSequencedEventValidation: Boolean = false,
-    overrideMaxRequestSize: Option[NonNegativeInt] = None,
-)
+trait SequencerClient extends SequencerClientSend with FlagCloseable {
 
-/** What type of message is being sent.
-  * Used by the domain and surrounding infrastructure for prioritizing send requests.
-  */
-sealed trait SendType {
-  private[client] val isRequest: Boolean
-}
+  /** Sends a request to sequence a deliver event to the sequencer.
+    * This method merely dispatches to one of the other methods (`sendAsync` or `sendAsyncUnauthenticated`)
+    * depending if member is Authenticated or Unauthenticated.
+    */
+  def sendAsyncUnauthenticatedOrNot(
+      batch: Batch[DefaultOpenEnvelope],
+      sendType: SendType = SendType.Other,
+      timestampOfSigningKey: Option[CantonTimestamp] = None,
+      maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
+      messageId: MessageId = generateMessageId,
+      aggregationRule: Option[AggregationRule] = None,
+      callback: SendCallback = SendCallback.empty,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit]
 
-object SendType {
+  /** Does the same as [[sendAsync]], except that this method is supposed to be used
+    * only by unauthenticated members for very specific operations that do not require authentication
+    * such as requesting that a participant's topology data gets accepted by the topology manager
+    */
+  def sendAsyncUnauthenticated(
+      batch: Batch[DefaultOpenEnvelope],
+      sendType: SendType = SendType.Other,
+      maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
+      messageId: MessageId = generateMessageId,
+      callback: SendCallback = SendCallback.empty,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit]
 
-  /** An initial confirmation request. This is subject to throttling at the domain if resource constrained. */
-  case object ConfirmationRequest extends SendType {
-    override private[client] val isRequest = true
-  }
+  /** Create a subscription for sequenced events for this member,
+    * starting after the prehead in the `sequencerCounterTrackerStore`.
+    *
+    * The `eventHandler` is monitored by [[com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker]]
+    * so that the `sequencerCounterTrackerStore` advances the prehead
+    * when (a batch of) events has been successfully processed by the `eventHandler` (synchronously and asynchronously).
+    *
+    * @see subscribe for the description of the `eventHandler`, `timeTracker` and the `timeoutHandler`
+    */
+  def subscribeTracking(
+      sequencerCounterTrackerStore: SequencerCounterTrackerStore,
+      eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
+      timeTracker: DomainTimeTracker,
+      onCleanHandler: Traced[SequencerCounterCursorPrehead] => Future[Unit] = _ => Future.unit,
+  )(implicit traceContext: TraceContext): Future[Unit]
 
-  /** There's currently no requirement to distinguish other types of request */
-  case object Other extends SendType {
-    override private[client] val isRequest = false
-  }
+  /** Create a subscription for sequenced events for this member,
+    * starting after the last event in the [[com.digitalasset.canton.store.SequencedEventStore]] up to `priorTimestamp`.
+    * A sequencer client can only have a single subscription - additional subscription attempts will throw an exception.
+    * When an event is received any send timeouts caused by the advancement of the sequencer clock observed from the
+    * event will first be raised to the `timeoutHandler`, then the `eventHandler` will be invoked.
+    *
+    * If the [[com.digitalasset.canton.store.SequencedEventStore]] contains events after `priorTimestamp`,
+    * the handler is first fed with these events before the subscription is established,
+    * starting at the last event found in the [[com.digitalasset.canton.store.SequencedEventStore]].
+    *
+    * @param priorTimestamp      The timestamp of the event prior to where the event processing starts.
+    *                            If [[scala.None$]], the subscription starts at the [[com.digitalasset.canton.data.CounterCompanion.Genesis]].
+    * @param cleanPreheadTsO     The timestamp of the clean prehead sequencer counter, if known.
+    * @param eventHandler        A function handling the events.
+    * @param timeTracker         Tracker for operations requiring the current domain time. Only updated with received events and not previously stored events.
+    * @param fetchCleanTimestamp A function for retrieving the latest clean timestamp to use for periodic acknowledgements
+    * @return The future completes after the subscription has been established or when an error occurs before that.
+    *         In particular, synchronous processing of events from the [[com.digitalasset.canton.store.SequencedEventStore]]
+    *         runs before the future completes.
+    */
+  def subscribeAfter(
+      priorTimestamp: CantonTimestamp,
+      cleanPreheadTsO: Option[CantonTimestamp],
+      eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
+      timeTracker: DomainTimeTracker,
+      fetchCleanTimestamp: PeriodicAcknowledgements.FetchCleanTimestamp,
+  )(implicit traceContext: TraceContext): Future[Unit]
+
+  /** Does the same as [[subscribeAfter]], except that this method is supposed to be used
+    * only by unauthenticated members
+    */
+  def subscribeAfterUnauthenticated(
+      priorTimestamp: CantonTimestamp,
+      eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
+      timeTracker: DomainTimeTracker,
+  )(implicit traceContext: TraceContext): Future[Unit]
+
+  def closeSubscription(): Unit
+
+  /** Future which is completed when the client is not functional any more and is ready to be closed.
+    * The value with which the future is completed will indicate the reason for completion.
+    */
+  def completion: Future[SequencerClient.CloseReason]
+
+  def changeTransport(
+      newTransport: SequencerClientTransport
+  )(implicit traceContext: TraceContext): Future[Unit]
+
+  /** Returns a future that completes after asynchronous processing has completed for all events
+    * whose synchronous processing has been completed prior to this call. May complete earlier if event processing
+    * has failed.
+    */
+  @VisibleForTesting
+  def flush(): Future[Unit]
+
+  def healthComponent: HealthReporting.MutableHealthComponent
+
+  /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
+    * The client should then never subscribe for events from before this point.
+    */
+  private[client] def acknowledge(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
+
+  def acknowledgeSigned(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit]
 }
 
 /** The sequencer client facilitates access to the individual domain sequencer. A client centralizes the
   * message signing operations, as well as the handling and storage of message receipts and delivery proofs,
   * such that this functionality does not have to be duplicated throughout the participant node.
   */
-class SequencerClient(
+class SequencerClientImpl(
     val domainId: DomainId,
     val member: Member,
     sequencerClientTransport: SequencerClientTransport,
@@ -175,11 +195,17 @@ class SequencerClient(
     val loggerFactory: NamedLoggerFactory,
     initialCounterLowerBound: SequencerCounter = SequencerCounter.Genesis,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
-    extends SequencerClientSend
+    extends SequencerClient
     with FlagCloseableAsync
     with NamedLogging
     with HasFlushFuture
     with Spanning {
+
+  private val loggingTimeoutHandler: SendTimeoutHandler = msgId => {
+    // logged at debug as this is likely logged at the caller using a send callback at a higher level
+    logger.debug(s"Send with message id [$msgId] has timed out")(TraceContext.empty)
+    Future.unit
+  }
 
   private val sequencerAggregator =
     new SequencerAggregator(cryptoPureApi, config.eventInboxSize, loggerFactory)
@@ -225,12 +251,44 @@ class SequencerClient(
   def subscriptionIsHealthy: Boolean =
     currentSubscription.get().exists(!_.isFailed)
 
+  override def sendAsyncUnauthenticatedOrNot(
+      batch: Batch[DefaultOpenEnvelope],
+      sendType: SendType = SendType.Other,
+      timestampOfSigningKey: Option[CantonTimestamp] = None,
+      maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
+      messageId: MessageId = generateMessageId,
+      aggregationRule: Option[AggregationRule] = None,
+      callback: SendCallback = SendCallback.empty,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
+    member match {
+      case _: AuthenticatedMember =>
+        sendAsync(
+          batch = batch,
+          sendType = sendType,
+          timestampOfSigningKey = timestampOfSigningKey,
+          maxSequencingTime = maxSequencingTime,
+          messageId = messageId,
+          aggregationRule = aggregationRule,
+          callback = callback,
+        )
+      case _: UnauthenticatedMemberId =>
+        sendAsyncUnauthenticated(
+          batch = batch,
+          sendType = sendType,
+          maxSequencingTime = maxSequencingTime,
+          messageId = messageId,
+          callback = callback,
+        )
+    }
+  }
+
   override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
       maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
       messageId: MessageId = generateMessageId,
+      aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     for {
@@ -241,9 +299,13 @@ class SequencerClient(
           "Only authenticated members can use the authenticated send operation"
         ): SendAsyncClientError,
       )
+      // TODO(#12360): Consider validating that group addresses map to at least one member
       _ <- EitherT.cond[Future](
         timestampOfSigningKey.isEmpty || batch.envelopes.forall(
-          _.recipients.allRecipients.forall(_.isAuthenticated)
+          _.recipients.allRecipients.forall {
+            case MemberRecipient(m) => m.isAuthenticated
+            case _ => true
+          }
         ),
         (),
         SendAsyncClientError.RequestInvalid(
@@ -257,6 +319,7 @@ class SequencerClient(
         timestampOfSigningKey,
         maxSequencingTime,
         messageId,
+        aggregationRule,
         callback,
       )
     } yield result
@@ -265,7 +328,7 @@ class SequencerClient(
     * only by unauthenticated members for very specific operations that do not require authentication
     * such as requesting that a participant's topology data gets accepted by the topology manager
     */
-  def sendAsyncUnauthenticated(
+  override def sendAsyncUnauthenticated(
       batch: Batch[DefaultOpenEnvelope],
       sendType: SendType = SendType.Other,
       maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
@@ -287,17 +350,19 @@ class SequencerClient(
         None,
         maxSequencingTime,
         messageId,
+        None,
         callback,
       )
 
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],
       requiresAuthentication: Boolean,
-      sendType: SendType = SendType.Other,
-      timestampOfSigningKey: Option[CantonTimestamp] = None,
+      sendType: SendType,
+      timestampOfSigningKey: Option[CantonTimestamp],
       maxSequencingTime: CantonTimestamp,
-      messageId: MessageId = generateMessageId,
-      callback: SendCallback = SendCallback.empty,
+      messageId: MessageId,
+      aggregationRule: Option[AggregationRule],
+      callback: SendCallback,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     withSpan("SequencerClient.sendAsync") { implicit traceContext => span =>
       val request = SubmissionRequest.tryCreate(
@@ -307,7 +372,7 @@ class SequencerClient(
         Batch.closeEnvelopes(batch),
         maxSequencingTime,
         timestampOfSigningKey,
-        aggregationRule = None,
+        aggregationRule,
         protocolVersion,
       )
 
@@ -447,7 +512,6 @@ class SequencerClient(
       sequencerCounterTrackerStore: SequencerCounterTrackerStore,
       eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
       timeTracker: DomainTimeTracker,
-      timeoutHandler: SendTimeoutHandler = loggingTimeoutHandler,
       onCleanHandler: Traced[SequencerCounterCursorPrehead] => Future[Unit] = _ => Future.unit,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     sequencerCounterTrackerStore.preheadSequencerCounter.flatMap { cleanPrehead =>
@@ -465,7 +529,6 @@ class SequencerClient(
         cleanSequencerCounterTracker(eventHandler),
         timeTracker,
         PeriodicAcknowledgements.fetchCleanCounterFromStore(sequencerCounterTrackerStore),
-        timeoutHandler,
       )
     }
   }
@@ -485,7 +548,6 @@ class SequencerClient(
     * @param cleanPreheadTsO The timestamp of the clean prehead sequencer counter, if known.
     * @param eventHandler A function handling the events.
     * @param timeTracker Tracker for operations requiring the current domain time. Only updated with received events and not previously stored events.
-    * @param timeoutHandler A function receiving timeout notifications for previously made sends. Defaults to logging timeouts at warn level.
     * @param fetchCleanTimestamp A function for retrieving the latest clean timestamp to use for periodic acknowledgements
     * @return The future completes after the subscription has been established or when an error occurs before that.
     *         In particular, synchronous processing of events from the [[com.digitalasset.canton.store.SequencedEventStore]]
@@ -497,14 +559,13 @@ class SequencerClient(
       eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
       timeTracker: DomainTimeTracker,
       fetchCleanTimestamp: PeriodicAcknowledgements.FetchCleanTimestamp,
-      timeoutHandler: SendTimeoutHandler = loggingTimeoutHandler,
   )(implicit traceContext: TraceContext): Future[Unit] =
     subscribeAfterInternal(
       priorTimestamp,
       cleanPreheadTsO,
       eventHandler,
       timeTracker,
-      timeoutHandler,
+      loggingTimeoutHandler,
       fetchCleanTimestamp,
       requiresAuthentication = true,
     )
@@ -516,7 +577,6 @@ class SequencerClient(
       priorTimestamp: CantonTimestamp,
       eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
       timeTracker: DomainTimeTracker,
-      timeoutHandler: SendTimeoutHandler = loggingTimeoutHandler,
   )(implicit traceContext: TraceContext): Future[Unit] =
     subscribeAfterInternal(
       priorTimestamp,
@@ -524,7 +584,7 @@ class SequencerClient(
       cleanPreheadTsO = None,
       eventHandler,
       timeTracker,
-      timeoutHandler,
+      loggingTimeoutHandler,
       PeriodicAcknowledgements.noAcknowledgements,
       requiresAuthentication = false,
     )
@@ -691,7 +751,7 @@ class SequencerClient(
               .create(
                 config.acknowledgementInterval.underlying,
                 subscriptionIsHealthy,
-                SequencerClient.this,
+                SequencerClientImpl.this,
                 fetchCleanTimestamp,
                 clock,
                 timeouts,
@@ -721,12 +781,6 @@ class SequencerClient(
         ()
     }
     FutureUtil.logOnFailure(loggedAbortF, "Sequencer subscription failed")
-  }
-
-  private val loggingTimeoutHandler: SendTimeoutHandler = msgId => {
-    // logged at debug as this is likely logged at the caller using a send callback at a higher level
-    logger.debug(s"Send with message id [$msgId] has timed out")(TraceContext.empty)
-    Future.unit
   }
 
   private class SubscriptionHandler(
@@ -1042,7 +1096,7 @@ class SequencerClient(
     transport.acknowledge(request)
   }
 
-  private[client] def acknowledgeSigned(timestamp: CantonTimestamp)(implicit
+  def acknowledgeSigned(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] = {
     val request = AcknowledgeRequest(member, timestamp, protocolVersion)
@@ -1092,6 +1146,7 @@ class SequencerClient(
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     Seq(
+      SyncCloseable("sequencer-send-tracker", sendTracker.close()),
       // see comments above why we need two flushes
       flushCloseable("sequencer-client-flush-sync", timeouts.shutdownProcessing),
       flushCloseable("sequencer-client-flush-async", timeouts.shutdownProcessing),
@@ -1103,7 +1158,6 @@ class SequencerClient(
       SyncCloseable("sequencer-client-subscription", closeSubscription()),
       SyncCloseable("sequencer-client-transport", transport.close()),
       SyncCloseable("sequencer-client-recorder", recorderO.foreach(_.close())),
-      SyncCloseable("sequencer-send-tracker", sendTracker.close()),
       SyncCloseable("sequenced-event-store", sequencedEventStore.close()),
       SyncCloseable(
         "sequencer-client-close-reason", {
@@ -1112,6 +1166,7 @@ class SequencerClient(
             .discard
         },
       ),
+      SyncCloseable("deferred-subscription-health", deferredSubscriptionHealth.close()),
     )
   }
 
@@ -1123,369 +1178,8 @@ class SequencerClient(
   def flush(): Future[Unit] = doFlush()
 }
 
-trait SequencerClientFactory {
-  def create(
-      member: Member,
-      sequencedEventStore: SequencedEventStore,
-      sendTrackerStore: SendTrackerStore,
-      requestSigner: RequestSigner,
-      connection: SequencerConnection,
-  )(implicit
-      executionContext: ExecutionContextExecutor,
-      materializer: Materializer,
-      tracer: Tracer,
-      traceContext: TraceContext,
-  ): EitherT[Future, String, SequencerClient]
-
-}
-
-trait SequencerClientTransportFactory {
-  def makeTransport(
-      connection: SequencerConnection,
-      member: Member,
-      requestSigner: RequestSigner,
-  )(implicit
-      executionContext: ExecutionContextExecutor,
-      materializer: Materializer,
-      traceContext: TraceContext,
-  ): EitherT[Future, String, SequencerClientTransport]
-
-  def validateTransport(
-      connection: SequencerConnection,
-      logWarning: Boolean,
-  )(implicit
-      executionContext: ExecutionContextExecutor,
-      errorLoggingContext: ErrorLoggingContext,
-      closeContext: CloseContext,
-  ): EitherT[FutureUnlessShutdown, String, Unit]
-
-}
-
-object SequencerClientTransportFactory {
-  def validateTransport(
-      connection: SequencerConnection,
-      traceContextPropagation: TracingConfig.Propagation,
-      config: SequencerClientConfig,
-      logWarning: Boolean,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      executionContext: ExecutionContextExecutor,
-      errorLoggingContext: ErrorLoggingContext,
-      closeContext: CloseContext,
-  ): EitherT[FutureUnlessShutdown, String, Unit] = connection match {
-    case conn: GrpcSequencerConnection =>
-      implicit val traceContext = errorLoggingContext.traceContext
-      errorLoggingContext.logger.info(s"Validating sequencer connection ${conn}")
-      val channelBuilder = ClientChannelBuilder(loggerFactory)
-      val channel = GrpcSequencerChannelBuilder(
-        channelBuilder,
-        conn,
-        NonNegativeInt.maxValue,
-        traceContextPropagation,
-        config.keepAliveClient,
-      )
-      def closeChannel(): Unit = {
-        Lifecycle.close(
-          Lifecycle.toCloseableChannel(
-            channel,
-            errorLoggingContext.logger,
-            "sequencer-connection-test-channel",
-          )
-        )(
-          errorLoggingContext.logger
-        )
-      }
-      // clientConfig.handshakeRetryDelay.underlying.fromNow,
-      val retryMs = config.initialConnectionRetryDelay.asFiniteApproximation
-      val attempts = config.handshakeRetryDelay.underlying.toMillis / retryMs.toMillis
-      def check(): EitherT[Future, String, Unit] = {
-        channel.getState(true) match {
-          case ConnectivityState.READY =>
-            errorLoggingContext.logger.info(s"Successfully connected to sequencer at ${conn}")
-            EitherT.rightT(())
-          case other =>
-            val msg = s"Unable to connect to sequencer at ${conn}: channel is ${other}"
-            errorLoggingContext.debug(msg)
-            EitherT.leftT(msg)
-        }
-      }
-      val name = "check-valid-sequencer-connection"
-      EitherT(
-        retry
-          .Pause(
-            errorLoggingContext.logger,
-            closeContext.flagCloseable,
-            maxRetries = attempts.toInt,
-            delay = retryMs,
-            operationName = name,
-          )
-          .unlessShutdown(
-            closeContext.flagCloseable.performUnlessClosingF(name)(check().value),
-            NoExnRetryable,
-          )
-      ).thereafter { _ =>
-        closeChannel()
-      }.leftMap { res =>
-        if (logWarning) {
-          errorLoggingContext.logger.warn(res)
-        }
-        res
-      }
-  }
-}
-
 object SequencerClient {
   val healthName: String = "sequencer-client"
-
-  def apply(
-      domainId: DomainId,
-      sequencerId: SequencerId,
-      syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
-      crypto: Crypto,
-      agreedAgreementId: Option[ServiceAgreementId],
-      config: SequencerClientConfig,
-      traceContextPropagation: TracingConfig.Propagation,
-      testingConfig: TestingConfigInternal,
-      domainParameters: StaticDomainParameters,
-      processingTimeout: ProcessingTimeout,
-      clock: Clock,
-      topologyClient: DomainTopologyClient,
-      futureSupervisor: FutureSupervisor,
-      recordingConfigForMember: Member => Option[RecordingConfig],
-      replayConfigForMember: Member => Option[ReplayConfig],
-      metrics: SequencerClientMetrics,
-      loggingConfig: LoggingConfig,
-      loggerFactory: NamedLoggerFactory,
-      supportedProtocolVersions: Seq[ProtocolVersion],
-      minimumProtocolVersion: Option[ProtocolVersion],
-  ): SequencerClientFactory with SequencerClientTransportFactory =
-    new SequencerClientFactory with SequencerClientTransportFactory {
-
-      override def create(
-          member: Member,
-          sequencedEventStore: SequencedEventStore,
-          sendTrackerStore: SendTrackerStore,
-          requestSigner: RequestSigner,
-          connection: SequencerConnection,
-      )(implicit
-          executionContext: ExecutionContextExecutor,
-          materializer: Materializer,
-          tracer: Tracer,
-          traceContext: TraceContext,
-      ): EitherT[Future, String, SequencerClient] = {
-        // initialize recorder if it's been configured for the member (should only be used for testing)
-        val recorderO = recordingConfigForMember(member).map { recordingConfig =>
-          new SequencerClientRecorder(
-            recordingConfig.fullFilePath,
-            processingTimeout,
-            loggerFactory,
-          )
-        }
-        val sequencerDomainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
-          domainParameters,
-          config.overrideMaxRequestSize,
-          topologyClient,
-          futureSupervisor,
-          loggerFactory,
-        )
-
-        for {
-          transport <- makeTransport(
-            connection,
-            member,
-            requestSigner,
-          )
-          // fetch the initial set of pending sends to initialize the client with.
-          // as it owns the client that should be writing to this store it should not be racy.
-          initialPendingSends <- EitherT.right(sendTrackerStore.fetchPendingSends)
-          sendTracker = new SendTracker(
-            initialPendingSends,
-            sendTrackerStore,
-            metrics,
-            loggerFactory,
-            processingTimeout,
-          )
-          // pluggable send approach to support transitioning to the new async sends
-          validatorFactory = new SequencedEventValidatorFactory {
-            override def create(
-                initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
-                unauthenticated: Boolean,
-            )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
-              if (config.skipSequencedEventValidation) {
-                SequencedEventValidator.noValidation(domainId, sequencerId, processingTimeout)(
-                  NamedLoggingContext(loggerFactory, TraceContext.empty)
-                )
-              } else {
-                new SequencedEventValidatorImpl(
-                  initialLastEventProcessedO,
-                  unauthenticated,
-                  config.optimisticSequencedEventValidation,
-                  domainId,
-                  sequencerId,
-                  domainParameters.protocolVersion,
-                  syncCryptoApi,
-                  loggerFactory,
-                  processingTimeout,
-                )
-              }
-          }
-        } yield new SequencerClient(
-          domainId,
-          member,
-          transport,
-          config,
-          testingConfig,
-          domainParameters.protocolVersion,
-          sequencerDomainParamsLookup,
-          processingTimeout,
-          validatorFactory,
-          clock,
-          requestSigner,
-          sequencedEventStore,
-          sendTracker,
-          metrics,
-          recorderO,
-          replayConfigForMember(member).isDefined,
-          syncCryptoApi.pureCrypto,
-          loggingConfig,
-          loggerFactory,
-        )
-      }
-
-      override def makeTransport(
-          connection: SequencerConnection,
-          member: Member,
-          requestSigner: RequestSigner,
-      )(implicit
-          executionContext: ExecutionContextExecutor,
-          materializer: Materializer,
-          traceContext: TraceContext,
-      ): EitherT[Future, String, SequencerClientTransport] = {
-        def mkRealTransport: EitherT[Future, String, SequencerClientTransport] =
-          connection match {
-            case grpc: GrpcSequencerConnection => grpcTransport(grpc, member).toEitherT
-          }
-
-        val transportEitherT: EitherT[Future, String, SequencerClientTransport] =
-          replayConfigForMember(member) match {
-            case None => mkRealTransport
-            case Some(ReplayConfig(recording, SequencerEvents)) =>
-              EitherT.rightT(
-                new ReplayingEventsSequencerClientTransport(
-                  domainParameters.protocolVersion,
-                  recording.fullFilePath,
-                  metrics,
-                  processingTimeout,
-                  loggerFactory,
-                )
-              )
-            case Some(ReplayConfig(recording, replaySendsConfig: SequencerSends)) =>
-              for {
-                underlyingTransport <- mkRealTransport
-              } yield new ReplayingSendsSequencerClientTransport(
-                domainParameters.protocolVersion,
-                recording.fullFilePath,
-                replaySendsConfig,
-                member,
-                underlyingTransport,
-                requestSigner,
-                metrics,
-                processingTimeout,
-                loggerFactory,
-              )
-          }
-
-        for {
-          transport <- transportEitherT
-          // handshake to check that sequencer client supports the protocol version required by the sequencer
-          _ <- SequencerHandshake
-            .handshake(
-              supportedProtocolVersions,
-              minimumProtocolVersion,
-              transport,
-              config,
-              processingTimeout,
-              loggerFactory,
-            )
-            .leftMap { error =>
-              // make sure to close transport in case of handshake failure
-              transport.close()
-              error
-            }
-        } yield transport
-      }
-
-      private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
-          executionContext: ExecutionContextExecutor
-      ): Either[String, SequencerClientTransport] = {
-        def createChannel(conn: GrpcSequencerConnection) = {
-          val channelBuilder = ClientChannelBuilder(loggerFactory)
-          GrpcSequencerChannelBuilder(
-            channelBuilder,
-            conn,
-            NonNegativeInt.maxValue, // we set this limit only on the sequencer node, to avoid restarting the client if this value is changed
-            traceContextPropagation,
-            config.keepAliveClient,
-          )
-        }
-
-        val channel = createChannel(connection)
-        val auth = {
-          val channelPerEndpoint = connection.endpoints.map { endpoint =>
-            val subConnection = connection.copy(endpoints = NonEmpty.mk(Seq, endpoint))
-            endpoint -> createChannel(subConnection)
-          }.toMap
-          new GrpcSequencerClientAuth(
-            domainId,
-            member,
-            crypto,
-            agreedAgreementId,
-            channelPerEndpoint,
-            supportedProtocolVersions,
-            config.authToken,
-            clock,
-            processingTimeout,
-            loggerFactory,
-          )
-        }
-        val callOptions = {
-          // the wait-for-ready call option is added for when round-robin-ing through connections
-          // so that if one of them gets closed, we try the next one instead of unnecessarily failing.
-          // wait-for-ready semantics: https://github.com/grpc/grpc/blob/master/doc/wait-for-ready.md
-          // this is safe for non-idempotent RPCs.
-          if (connection.endpoints.length > 1) CallOptions.DEFAULT.withWaitForReady()
-          else CallOptions.DEFAULT
-        }
-        Right(
-          new GrpcSequencerClientTransport(
-            channel,
-            callOptions,
-            auth,
-            metrics,
-            processingTimeout,
-            loggerFactory,
-            domainParameters.protocolVersion,
-          )
-        )
-      }
-
-      def validateTransport(
-          connection: SequencerConnection,
-          logWarning: Boolean,
-      )(implicit
-          executionContext: ExecutionContextExecutor,
-          errorLoggingContext: ErrorLoggingContext,
-          closeContext: CloseContext,
-      ): EitherT[FutureUnlessShutdown, String, Unit] =
-        SequencerClientTransportFactory.validateTransport(
-          connection,
-          traceContextPropagation,
-          config,
-          logWarning,
-          loggerFactory,
-        )
-
-    }
 
   sealed trait CloseReason
 
@@ -1537,22 +1231,31 @@ object SequencerClient {
       sendDescription: String,
       errMsg: String,
       flagCloseable: FlagCloseable,
-  )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext): Future[Unit] = {
-    def doSend(): Future[Unit] = {
+  )(implicit
+      ec: ExecutionContext,
+      loggingContext: ErrorLoggingContext,
+  ): FutureUnlessShutdown[Unit] = {
+    def doSend(): FutureUnlessShutdown[Unit] = {
       val callback = new CallbackFuture()
       for {
-        _ <- EitherTUtil.toFuture(
-          EitherTUtil
-            .logOnError(sendBatch(callback), errMsg)
-            .leftMap(err => new RuntimeException(s"$errMsg: $err"))
-        )
-        _ <- callback.future.unwrap
-          .map(SendResult.toTry(sendDescription))
-          .flatMap(Future.fromTry)
+        _ <- FutureUnlessShutdown
+          .outcomeF(
+            EitherTUtil.toFuture(
+              EitherTUtil
+                .logOnError(sendBatch(callback), errMsg)
+                .leftMap(err => new RuntimeException(s"$errMsg: $err"))
+            )
+          )
+        sendResult <- callback.future
+        _ <- SendResult.toFutureUnlessShutdown(sendDescription)(sendResult)
       } yield ()
     }
     retry
       .Pause(loggingContext.logger, flagCloseable, maxRetries, delay, sendDescription)
-      .apply(doSend(), AllExnRetryable)(retry.Success.always, ec, loggingContext.traceContext)
+      .unlessShutdown(doSend(), AllExnRetryable)(
+        retry.Success.always,
+        ec,
+        loggingContext.traceContext,
+      )
   }
 }

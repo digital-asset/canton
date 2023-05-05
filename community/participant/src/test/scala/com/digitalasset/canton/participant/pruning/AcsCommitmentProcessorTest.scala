@@ -174,6 +174,7 @@ sealed trait AcsCommitmentProcessorBaseTest
         any[Option[CantonTimestamp]],
         any[CantonTimestamp],
         any[MessageId],
+        any[Option[AggregationRule]],
         any[SendCallback],
       )(anyTraceContext)
     )
@@ -528,6 +529,7 @@ class AcsCommitmentProcessorTest
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],
           any[MessageId],
+          any[Option[AggregationRule]],
           any[SendCallback],
         )(anyTraceContext)
         assert(computed.size === 2)

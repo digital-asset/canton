@@ -18,8 +18,7 @@ import com.digitalasset.canton.participant.store.TransferStore.{
 import com.digitalasset.canton.participant.store.memory.TransferCache.PendingTransferCompletion
 import com.digitalasset.canton.participant.store.{TransferLookup, TransferStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.TransferId
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.protocol.{SourceDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.google.common.annotations.VisibleForTesting
@@ -117,7 +116,7 @@ class TransferCache(transferStore: TransferStore, override val loggerFactory: Na
     }
 
   override def find(
-      filterSource: Option[DomainId],
+      filterSource: Option[SourceDomainId],
       filterRequestTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -126,14 +125,14 @@ class TransferCache(transferStore: TransferStore, override val loggerFactory: Na
       .find(filterSource, filterRequestTimestamp, filterSubmitter, limit)
       .map(_.filter(transferData => !pendingCompletions.contains(transferData.transferId)))
 
-  override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
-      traceContext: TraceContext
+  override def findAfter(requestAfter: Option[(CantonTimestamp, SourceDomainId)], limit: Int)(
+      implicit traceContext: TraceContext
   ): Future[Seq[TransferData]] = transferStore
     .findAfter(requestAfter, limit)
     .map(_.filter(transferData => !pendingCompletions.contains(transferData.transferId)))
 
   override def findInFlight(
-      sourceDomain: DomainId,
+      sourceDomain: SourceDomainId,
       onlyCompletedTransferOut: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],

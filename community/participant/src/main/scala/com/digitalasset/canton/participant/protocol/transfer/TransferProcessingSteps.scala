@@ -377,8 +377,9 @@ object TransferProcessingSteps {
 
   }
 
-  final case class NoTimeProofFromDomain(domainId: DomainId) extends TransferProcessorError {
-    override def message: String = s"Cannot fetch time proof for domain `$domainId`"
+  final case class NoTimeProofFromDomain(domainId: DomainId, reason: String)
+      extends TransferProcessorError {
+    override def message: String = s"Cannot fetch time proof for domain `$domainId`: $reason"
   }
 
   final case class ReceivedMultipleRequests[T](transferIds: NonEmpty[Seq[T]])

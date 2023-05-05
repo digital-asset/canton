@@ -298,6 +298,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   private def runningNodes: Seq[CantonNodeBootstrap[CantonNode]] = allNodes.flatMap(_.running)
 
   private def autoConnectLocalNodes(): Either[StartupError, Unit] = {
+    // TODO(#11255) extend this to x-nodes
     val activeDomains = domains.running
       .filter(_.isActive)
       .filter(_.config.topology.open)
@@ -416,7 +417,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         }
       } yield ()
     }
-
+    // TODO(#11255) implement the same for participantsX
     participants.running.traverse_(reconnect)
   }
 

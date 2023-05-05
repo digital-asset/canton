@@ -3,7 +3,15 @@
 
 package com.digitalasset.canton.participant
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
+import com.digitalasset.canton.config.{
+  ApiLoggingConfig,
+  BatchAggregatorConfig,
+  CachingConfigs,
+  DefaultProcessingTimeouts,
+  LoggingConfig,
+}
 import com.digitalasset.canton.environment.{CantonNodeParameters, HasGeneralCantonNodeParameters}
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.config.{
@@ -12,6 +20,9 @@ import com.digitalasset.canton.participant.config.{
   ParticipantStoreConfig,
   PartyNotificationConfig,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClientConfig
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.ProtocolVersion
 
 final case class ParticipantNodeParameters(
@@ -23,7 +34,6 @@ final case class ParticipantNodeParameters(
     transferTimeProofFreshnessProportion: NonNegativeInt,
     protocolConfig: ParticipantProtocolConfig,
     uniqueContractKeys: Boolean,
-    enableCausalityTracking: Boolean,
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
     maxDbConnections: Int,
     excludeInfrastructureTransactions: Boolean,
@@ -33,4 +43,46 @@ final case class ParticipantNodeParameters(
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
   override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def initialProtocolVersion: ProtocolVersion = protocolConfig.initialProtocolVersion
+}
+
+object ParticipantNodeParameters {
+  def forTestingOnly(testedProtocolVersion: ProtocolVersion) = ParticipantNodeParameters(
+    general = CantonNodeParameters.General.Impl(
+      tracing = TracingConfig(TracingConfig.Propagation.Disabled),
+      delayLoggingThreshold = NonNegativeFiniteDuration.tryOfMillis(5000),
+      enableAdditionalConsistencyChecks = true,
+      loggingConfig = LoggingConfig(api = ApiLoggingConfig(messagePayloads = Some(true))),
+      logQueryCost = None,
+      processingTimeouts = DefaultProcessingTimeouts.testing,
+      enablePreviewFeatures = false,
+      nonStandardConfig = false,
+      cachingConfigs = CachingConfigs(),
+      sequencerClient = SequencerClientConfig(),
+    ),
+    partyChangeNotification = PartyNotificationConfig.Eager,
+    adminWorkflow = AdminWorkflowConfig(
+      bongTestMaxLevel = 10,
+      retries = 10,
+      submissionTimeout = config.NonNegativeFiniteDuration.ofHours(1),
+    ),
+    maxUnzippedDarSize = 10,
+    stores = ParticipantStoreConfig(
+      maxItemsInSqlClause = PositiveNumeric.tryCreate(10),
+      maxPruningBatchSize = PositiveNumeric.tryCreate(10),
+      acsPruningInterval = config.NonNegativeFiniteDuration.ofSeconds(30),
+      dbBatchAggregationConfig = BatchAggregatorConfig.defaultsForTesting,
+    ),
+    transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
+    protocolConfig = ParticipantProtocolConfig(
+      Some(testedProtocolVersion),
+      devVersionSupport = false,
+      dontWarnOnDeprecatedPV = false,
+      initialProtocolVersion = testedProtocolVersion,
+    ),
+    uniqueContractKeys = false,
+    ledgerApiServerParameters = LedgerApiServerParametersConfig(),
+    maxDbConnections = 10,
+    excludeInfrastructureTransactions = true,
+    enableEngineStackTrace = false,
+  )
 }

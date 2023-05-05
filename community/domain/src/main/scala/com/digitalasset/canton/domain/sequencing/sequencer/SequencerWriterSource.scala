@@ -268,7 +268,8 @@ class SendEventGenerator(
 
     def validateRecipients: Future[Validated[NonEmpty[Seq[Member]], Set[SequencerMemberId]]] =
       for {
-        validatedSeq <- submission.batch.allRecipients.toSeq
+        // TODO(#12363) Support group addresses in the DB Sequencer
+        validatedSeq <- submission.batch.allMembers.toSeq
           .parTraverse(validateRecipient)
         validated = validatedSeq.traverse(_.leftMap(NonEmpty(Seq, _)))
       } yield validated.map(_.toSet)

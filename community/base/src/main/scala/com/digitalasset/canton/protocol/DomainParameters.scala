@@ -24,6 +24,7 @@ import com.digitalasset.canton.time.{
   SimClock,
 }
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.transaction.ParticipantDomainLimits
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
@@ -444,16 +445,16 @@ final case class DynamicDomainParameters(
     requiredPackages = Seq.empty,
     // TODO(#11255) add only restricted packages supported
     onlyRequiredPackagesPermitted = false,
-    defaultParticipantLimits = Some(
-      com.digitalasset.canton.protocol.v2.ParticipantDomainLimits(
-        maxRate = maxRatePerParticipant.unwrap,
-        // TODO(#11255) add topology limits
-        maxNumParties = Int.MaxValue,
-        maxNumPackages = Int.MaxValue,
-      )
-    ),
+    defaultParticipantLimits = Some(v2DefaultParticipantLimits.toProto),
     // TODO(#11255) limit number of participants that can be allocated to a given party
     defaultMaxHostingParticipantsPerParty = 0,
+  )
+
+  // TODO(#11255) add topology limits
+  def v2DefaultParticipantLimits: ParticipantDomainLimits = ParticipantDomainLimits(
+    maxRate = maxRatePerParticipant.unwrap,
+    maxNumParties = Int.MaxValue,
+    maxNumPackages = Int.MaxValue,
   )
 
   override def pretty: Pretty[DynamicDomainParameters] = {

@@ -25,7 +25,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 class TopologyStateProcessorX(
-    store: TopologyStoreX[TopologyStoreId],
+    val store: TopologyStoreX[TopologyStoreId],
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -237,6 +237,12 @@ class TopologyStateProcessorX(
     // first, merge a pending proposal with this transaction. we do this as it might
     // subsequently activate the given transaction
     val txB = fetchPendingProposalAndMerge(txA)
+    // TODO(#11255) add a check here for consistency. these checks should reject on the mediator / topology
+    //   manager, but only warn on the processor.
+    //   things we need to catch are:
+    //     - a party to participant mapping mentioning a participant who is not on the domain
+    //       (no trust certificate or no owner keys)
+    //     - a mediator or sequencer who doesn't have keys
     val ret = for {
       // we check if the transaction is properly authorized given the current topology state
       // if it is a proposal, then we demand that all signatures are appropriate (but

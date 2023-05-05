@@ -21,11 +21,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageService
-import com.digitalasset.canton.participant.domain.{
-  DomainHandle,
-  DomainRegistryError,
-  SequencerBasedRegisterTopologyTransactionHandle,
-}
+import com.digitalasset.canton.participant.domain.{DomainHandle, DomainRegistryError}
 import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
 import com.digitalasset.canton.participant.metrics.{PruningMetrics, SyncDomainMetrics}
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown
@@ -57,31 +53,16 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
 }
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.participant.topology.ParticipantTopologyDispatcherCommon
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
-import com.digitalasset.canton.participant.topology.{
-  LedgerServerPartyNotifier,
-  ParticipantTopologyDispatcher,
-}
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements
 import com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker
-import com.digitalasset.canton.sequencing.protocol.{
-  Batch,
-  ClosedEnvelope,
-  Envelope,
-  EventWithErrors,
-}
-import com.digitalasset.canton.sequencing.{
-  ApplicationHandler,
-  BoxedEnvelope,
-  DelayLogger,
-  HandlerResult,
-  PossiblyIgnoredApplicationHandler,
-  SubscriptionStart,
-}
+import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Envelope, EventWithErrors}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
@@ -91,7 +72,7 @@ import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
-  TopologyTransactionProcessor,
+  TopologyTransactionProcessorCommon,
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -127,9 +108,8 @@ class SyncDomain(
     val ephemeral: SyncDomainEphemeralState,
     val packageService: PackageService,
     domainCrypto: DomainSyncCryptoClient,
-    partyNotifier: LedgerServerPartyNotifier,
-    val topologyClient: DomainTopologyClientWithInit,
-    identityPusher: ParticipantTopologyDispatcher,
+    identityPusher: ParticipantTopologyDispatcherCommon,
+    topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
     transferCoordination: TransferCoordination,
     inFlightSubmissionTracker: InFlightSubmissionTracker,
     messageDispatcherFactory: MessageDispatcher.Factory[MessageDispatcher],
@@ -145,6 +125,7 @@ class SyncDomain(
     with TransferSubmissionHandle
     with HealthComponent {
 
+  val topologyClient: DomainTopologyClientWithInit = domainHandle.topologyClient
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
   override val name = SyncDomain.healthName
   override val initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
@@ -195,7 +176,7 @@ class SyncDomain(
   )
 
   private val transferOutProcessor: TransferOutProcessor = new TransferOutProcessor(
-    domainId,
+    SourceDomainId(domainId),
     participantId,
     damle,
     transferCoordination,
@@ -212,7 +193,7 @@ class SyncDomain(
   )
 
   private val transferInProcessor: TransferInProcessor = new TransferInProcessor(
-    domainId,
+    TargetDomainId(domainId),
     participantId,
     damle,
     transferCoordination,
@@ -221,7 +202,6 @@ class SyncDomain(
     domainCrypto,
     seedGenerator,
     sequencerClient,
-    parameters.enableCausalityTracking,
     timeouts,
     TargetProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
@@ -269,19 +249,11 @@ class SyncDomain(
     ephemeral.recordOrderPublisher.setAcsChangeListener(listener)
     listener
   }
-  val topologyProcessor = new TopologyTransactionProcessor(
-    domainId,
-    domainCrypto.pureCrypto,
-    domainHandle.domainPersistentState.topologyStore,
-    acsCommitmentProcessor.scheduleTopologyTick,
-    futureSupervisor,
-    parameters.processingTimeouts,
-    loggerFactory,
-  )
+  private val topologyProcessor =
+    topologyProcessorFactory.create(acsCommitmentProcessor.scheduleTopologyTick)
   // connect domain client to processor
   topologyProcessor.subscribe(domainHandle.topologyClient)
-  // subscribe party notifier to topology processor
-  topologyProcessor.subscribe(partyNotifier.attachToTopologyProcessor())
+
   // turn on missing key alerter such that we get notified if a key is used that we do not have
   private val missingKeysAlerter = new MissingKeysAlerter(
     participantId,
@@ -297,6 +269,7 @@ class SyncDomain(
       ephemeral,
       domainCrypto,
       sequencerClient,
+      domainId,
       participantId,
       staticDomainParameters.protocolVersion,
       timeouts,
@@ -310,19 +283,13 @@ class SyncDomain(
       loggerFactory,
     )
 
-  private val registerIdentityTransactionHandle =
-    new SequencerBasedRegisterTopologyTransactionHandle(
-      (traceContext, env) =>
-        domainHandle.sequencerClient.sendAsync(
-          Batch(List(env), staticDomainParameters.protocolVersion)
-        )(traceContext),
-      domainId,
-      participantId,
-      participantId,
-      staticDomainParameters.protocolVersion,
-      timeouts,
-      loggerFactory,
-    )
+  private val registerIdentityTransactionHandle = identityPusher.createHandler(
+    domainHandle.domainAlias,
+    domainId,
+    staticDomainParameters.protocolVersion,
+    domainHandle.topologyClient,
+    domainHandle.sequencerClient,
+  )
 
   private val messageDispatcher: MessageDispatcher =
     messageDispatcherFactory.create(
@@ -334,7 +301,6 @@ class SyncDomain(
       transferOutProcessor,
       transferInProcessor,
       registerIdentityTransactionHandle.processor,
-      ephemeral.causalityLookup,
       topologyProcessor,
       acsCommitmentProcessor.processBatch,
       ephemeral.requestCounterAllocator,
@@ -480,14 +446,6 @@ class SyncDomain(
       lastLocalOffset <- EitherT.right(
         participantNodePersistentState.value.multiDomainEventLog.lastLocalOffset(
           persistent.eventLog.id
-        )
-      )
-
-      _unit <- EitherT.right(
-        persistent.causalDependencyStore.initialize(
-          lastLocalOffset.map(lo =>
-            RequestCounter(lo.min(cleanHeadRc.asLocalOffset - 1))
-          ) // TODO(#10497) is this conversion fine?
         )
       )
 
@@ -669,19 +627,10 @@ class SyncDomain(
       // topology transactions to push for IDM approval
       _ <- waitForParticipantToBeInTopology(initializationTraceContext).onShutdown(Right(()))
       _ <-
-        identityPusher
-          .domainConnected(
-            domainHandle.domainAlias,
-            domainId,
-            staticDomainParameters.protocolVersion,
-            registerIdentityTransactionHandle,
-            domainHandle.topologyClient,
-            domainHandle.domainPersistentState.topologyStore,
-            domainCrypto.crypto,
-          )(initializationTraceContext)
+        registerIdentityTransactionHandle
+          .domainConnected()(initializationTraceContext)
           .onShutdown(Right(()))
           .leftMap[SyncDomainInitializationError](ParticipantTopologyHandshakeError)
-
     } yield {
       logger.debug(s"Started sync domain for $domainId")(initializationTraceContext)
       ephemeral.markAsRecovered()
@@ -700,8 +649,8 @@ class SyncDomain(
     val fetchLimit = 1000
 
     def completeTransfers(
-        previous: Option[(CantonTimestamp, DomainId)]
-    ): FutureUnlessShutdown[Either[Option[(CantonTimestamp, DomainId)], Unit]] = {
+        previous: Option[(CantonTimestamp, SourceDomainId)]
+    ): FutureUnlessShutdown[Either[Option[(CantonTimestamp, SourceDomainId)], Unit]] = {
       logger.debug(s"Fetch $fetchLimit pending transfers")
       val resF = for {
         pendingTransfers <- performUnlessClosingF(functionFullName)(
@@ -719,7 +668,7 @@ class SyncDomain(
               performUnlessClosingEitherU[TransferProcessorError, Unit](functionFullName)(
                 AutomaticTransferIn.perform(
                   data.transferId,
-                  domainId,
+                  TargetDomainId(domainId),
                   transferCoordination,
                   data.contract.metadata.stakeholders,
                   data.transferOutRequest.submitterMetadata,
@@ -767,9 +716,9 @@ class SyncDomain(
         )
       )
 
-      _bool <- Monad[FutureUnlessShutdown].tailRecM(None: Option[(CantonTimestamp, DomainId)])(ts =>
-        completeTransfers(ts)
-      )
+      _bool <- Monad[FutureUnlessShutdown].tailRecM(
+        None: Option[(CantonTimestamp, SourceDomainId)]
+      )(ts => completeTransfers(ts))
     } yield {
       logger.debug(s"Transfer in completion has finished")
     }
@@ -810,9 +759,8 @@ class SyncDomain(
 
   override def submitTransferOut(
       submitterMetadata: TransferSubmitterMetadata,
-      workflowId: Option[LfWorkflowId],
       contractId: LfContractId,
-      targetDomain: DomainId,
+      targetDomain: TargetDomainId,
       targetProtocolVersion: TargetProtocolVersion,
   )(implicit
       traceContext: TraceContext
@@ -832,7 +780,6 @@ class SyncDomain(
           TransferOutProcessingSteps
             .SubmissionParam(
               submitterMetadata,
-              workflowId,
               contractId,
               targetDomain,
               targetProtocolVersion,
@@ -843,7 +790,6 @@ class SyncDomain(
 
   override def submitTransferIn(
       submitterMetadata: TransferSubmitterMetadata,
-      workflowId: Option[LfWorkflowId],
       transferId: TransferId,
       sourceProtocolVersion: SourceProtocolVersion,
   )(implicit
@@ -868,7 +814,6 @@ class SyncDomain(
             .SubmissionParam(
               submitterMetadata,
               transferId,
-              workflowId,
               sourceProtocolVersion,
             )
         )
@@ -912,8 +857,9 @@ class SyncDomain(
     tracedCleanSequencerCounterPrehead.withTraceContext {
       implicit traceContext => cleanSequencerCounterPrehead =>
         val observedTime = cleanSequencerCounterPrehead.timestamp
-        inFlightSubmissionTracker.timelyReject(domainId, observedTime).valueOr {
-          case InFlightSubmissionTracker.UnknownDomain(domainId) =>
+        inFlightSubmissionTracker
+          .timelyReject(domainId, observedTime)
+          .valueOr { case InFlightSubmissionTracker.UnknownDomain(domainId) =>
             // The CantonSyncService removes the SyncDomain from the connected domains map
             // before the SyncDomain is closed. So guarding the timely rejections against the SyncDomain being closed
             // cannot eliminate this possibility.
@@ -923,7 +869,12 @@ class SyncDomain(
             logger.info(
               s"Skipping timely rejects for domain $domainId upto $observedTime because domain is being disconnected."
             )
-        }
+          }
+          .onShutdown(
+            logger.debug(
+              s"Aborted timely rejects for domain $domainId upto $observedTime due to shutdown"
+            )
+          )
     }
 }
 
@@ -982,9 +933,8 @@ object SyncDomain {
         ephemeralState: SyncDomainEphemeralState,
         packageService: PackageService,
         domainCrypto: DomainSyncCryptoClient,
-        partyNotifier: LedgerServerPartyNotifier,
-        topologyClient: DomainTopologyClientWithInit,
-        identityPusher: ParticipantTopologyDispatcher,
+        identityPusher: ParticipantTopologyDispatcherCommon,
+        topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
         transferCoordination: TransferCoordination,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
         clock: Clock,
@@ -1009,9 +959,8 @@ object SyncDomain {
         ephemeralState: SyncDomainEphemeralState,
         packageService: PackageService,
         domainCrypto: DomainSyncCryptoClient,
-        partyNotifier: LedgerServerPartyNotifier,
-        topologyClient: DomainTopologyClientWithInit,
-        identityPusher: ParticipantTopologyDispatcher,
+        identityPusher: ParticipantTopologyDispatcherCommon,
+        topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
         transferCoordination: TransferCoordination,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
         clock: Clock,
@@ -1033,9 +982,8 @@ object SyncDomain {
         ephemeralState,
         packageService,
         domainCrypto,
-        partyNotifier,
-        topologyClient,
         identityPusher,
+        topologyProcessorFactory,
         transferCoordination,
         inFlightSubmissionTracker,
         MessageDispatcher.DefaultFactory,

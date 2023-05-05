@@ -30,12 +30,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.{
-  ProcessingSteps,
-  ProtocolProcessor,
-  SingleDomainCausalTracker,
-  TransferInUpdate,
-}
+import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
@@ -50,18 +45,17 @@ import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, LfWorkflowId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
 private[transfer] class TransferInProcessingSteps(
-    domainId: DomainId,
+    domainId: TargetDomainId,
     val participantId: ParticipantId,
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
-    causalityTracking: Boolean,
     targetProtocolVersion: TargetProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -97,7 +91,6 @@ private[transfer] class TransferInProcessingSteps(
     participantId,
     engine,
     transferCoordination,
-    causalityTracking,
     targetProtocolVersion,
     loggerFactory,
   )
@@ -117,7 +110,6 @@ private[transfer] class TransferInProcessingSteps(
     val SubmissionParam(
       submitterMetadata,
       transferId,
-      workflowId,
       sourceProtocolVersion,
     ) = param
     val ipsSnapshot = recentSnapshot.ipsSnapshot
@@ -171,7 +163,6 @@ private[transfer] class TransferInProcessingSteps(
         pureCrypto,
         seed,
         submitterMetadata,
-        workflowId,
         stakeholders,
         transferData.contract,
         transferData.creatingTransactionId,
@@ -202,7 +193,7 @@ private[transfer] class TransferInProcessingSteps(
       val rootHashMessage =
         RootHashMessage(
           rootHash,
-          domainId,
+          domainId.unwrap,
           targetProtocolVersion.v,
           ViewType.TransferInViewType,
           EmptyRootHashMessagePayload,
@@ -290,11 +281,11 @@ private[transfer] class TransferInProcessingSteps(
       contractId = txInRequest.contract.contractId
 
       _ <- condUnitET[Future](
-        txInRequest.domainId == domainId,
+        txInRequest.targetDomain == domainId,
         UnexpectedDomain(
           txInRequest.transferOutResultEvent.transferId,
           targetDomain = txInRequest.domainId,
-          receivedOn = domainId,
+          receivedOn = domainId.unwrap,
         ),
       ).leftWiden[TransferProcessorError]
 
@@ -336,13 +327,16 @@ private[transfer] class TransferInProcessingSteps(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
-      causalityLookup: SingleDomainCausalTracker,
-      activenessResultFuture: Future[ActivenessResult],
+      activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, StorePendingDataAndSendResponseAndCreateTimeout] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    TransferProcessorError,
+    StorePendingDataAndSendResponseAndCreateTimeout,
+  ] = {
 
     val PendingDataAndResponseArgs(
       txInRequest,
@@ -356,25 +350,31 @@ private[transfer] class TransferInProcessingSteps(
     val transferId = txInRequest.transferOutResultEvent.transferId
 
     for {
-      _ <- transferInValidation.checkStakeholders(txInRequest)
+      _ <- transferInValidation.checkStakeholders(txInRequest).mapK(FutureUnlessShutdown.outcomeK)
 
-      hostedStks <- EitherT.liftF[Future, TransferProcessorError, List[LfPartyId]](
-        hostedStakeholders(
-          txInRequest.contract.metadata.stakeholders.toList,
-          targetCrypto.ipsSnapshot,
+      hostedStks <- EitherT.right[TransferProcessorError](
+        FutureUnlessShutdown.outcomeF(
+          hostedStakeholders(
+            txInRequest.contract.metadata.stakeholders.toList,
+            targetCrypto.ipsSnapshot,
+          )
         )
       )
 
-      transferDataO <- EitherT.right[TransferProcessorError](
-        transferLookup.lookup(transferId).toOption.value
-      )
-      validationResultO <- transferInValidation.validateTransferInRequest(
-        ts,
-        txInRequest,
-        transferDataO,
-        targetCrypto,
-        transferringParticipant,
-      )
+      transferDataO <- EitherT
+        .right[TransferProcessorError](
+          transferLookup.lookup(transferId).toOption.value
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
+      validationResultO <- transferInValidation
+        .validateTransferInRequest(
+          ts,
+          txInRequest,
+          transferDataO,
+          targetCrypto,
+          transferringParticipant,
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
 
       activenessResult <- EitherT.right[TransferProcessorError](activenessResultFuture)
       requestId = RequestId(ts)
@@ -387,15 +387,15 @@ private[transfer] class TransferInProcessingSteps(
         txInRequest.tree.rootHash,
         txInRequest.contract,
         txInRequest.submitterMetadata,
-        txInRequest.workflowId,
         txInRequest.creatingTransactionId,
         transferringParticipant,
         transferId,
         hostedStks.toSet,
         mediatorId,
       )
-      responsesAndCausalityMessages <- validationResultO match {
-        case None => EitherT.rightT[Future, TransferProcessorError]((Seq.empty, Seq.empty))
+      responses <- validationResultO match {
+        case None =>
+          EitherT.rightT[FutureUnlessShutdown, TransferProcessorError](Seq.empty)
         case Some(validationResult) =>
           val contractResult = activenessResult.contracts
           lazy val localVerdictProtocolVersion =
@@ -428,8 +428,9 @@ private[transfer] class TransferInProcessingSteps(
               throw new RuntimeException(
                 withRequestId(requestId, s"Unexpected activeness result $activenessResult")
               )
-          for {
-            transferResponse <- EitherT.fromEither[Future](
+
+          EitherT
+            .fromEither[FutureUnlessShutdown](
               MediatorResponse
                 .create(
                   requestId,
@@ -438,26 +439,17 @@ private[transfer] class TransferInProcessingSteps(
                   localVerdict,
                   txInRequest.toBeSigned,
                   validationResult.confirmingParties,
-                  domainId,
+                  domainId.id,
                   targetProtocolVersion.v,
                 )
-                .leftMap(e => FailedToCreateResponse(transferId, e): TransferProcessorError)
             )
-            causalityMessages <- transferInValidation.checkCausalityState(causalityLookup)(
-              targetCrypto,
-              validationResult.confirmingParties,
-              transferringParticipant,
-              transferId,
-            )
-          } yield Seq(transferResponse -> Recipients.cc(mediatorId)) -> causalityMessages
+            .leftMap(e => FailedToCreateResponse(transferId, e): TransferProcessorError)
+            .map(transferResponse => Seq(transferResponse -> Recipients.cc(mediatorId)))
       }
-
-      (responses, causalityMessage) = responsesAndCausalityMessages
     } yield {
       StorePendingDataAndSendResponseAndCreateTimeout(
         entry,
         responses,
-        causalityMessage,
         RejectionArgs(
           entry,
           LocalReject.TimeRejects.LocalTimeout.Reject(targetProtocolVersion.v),
@@ -477,7 +469,6 @@ private[transfer] class TransferInProcessingSteps(
       resultE: Either[MalformedMediatorRequestResult, TransferInResult],
       pendingRequestData: PendingTransferIn,
       pendingSubmissionMap: PendingSubmissions,
-      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -490,7 +481,6 @@ private[transfer] class TransferInProcessingSteps(
       rootHash,
       contract,
       submitterMetadata,
-      workflowId,
       creatingTransactionId,
       transferringParticipant,
       transferId,
@@ -523,7 +513,6 @@ private[transfer] class TransferInProcessingSteps(
             transferId,
             rootHash,
             createTransactionAccepted = !transferringParticipant,
-            workflowId,
           )
           timestampEvent = Some(
             TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
@@ -532,16 +521,6 @@ private[transfer] class TransferInProcessingSteps(
           commitSetO,
           contractsToBeStored,
           timestampEvent,
-          Some(
-            TransferInUpdate(
-              hostedStakeholders,
-              pendingRequestData.requestId.unwrap,
-              domainId,
-              requestCounter,
-              transferId,
-              targetProtocolVersion,
-            )
-          ),
         )
 
       case reasons: Verdict.ParticipantReject =>
@@ -550,10 +529,10 @@ private[transfer] class TransferInProcessingSteps(
           .fromEither[Future](
             createRejectionEvent(RejectionArgs(pendingRequestData, reasons.keyEvent))
           )
-          .map(CommitAndStoreContractsAndPublishEvent(None, Set(), _, None))
+          .map(CommitAndStoreContractsAndPublishEvent(None, Set(), _))
 
       case _: Verdict.MediatorReject =>
-        EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None, None))
+        EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None))
     }
   }
 
@@ -565,7 +544,6 @@ private[transfer] class TransferInProcessingSteps(
       transferOutId: TransferId,
       rootHash: RootHash,
       createTransactionAccepted: Boolean,
-      workflowId: Option[LfWorkflowId],
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
     val targetDomain = domainId
     val contractInst = contract.contractInstance.unversioned
@@ -622,7 +600,7 @@ private[transfer] class TransferInProcessingSteps(
       transferOutId = transferOutId,
       targetDomain = targetDomain,
       createTransactionAccepted = createTransactionAccepted,
-      workflowId = workflowId,
+      workflowId = submitterMetadata.workflowId,
     )
   }
 }
@@ -632,7 +610,6 @@ object TransferInProcessingSteps {
   final case class SubmissionParam(
       submitterMetadata: TransferSubmitterMetadata,
       transferId: TransferId,
-      workflowId: Option[LfWorkflowId],
       sourceProtocolVersion: SourceProtocolVersion,
   ) {
     val submitterLf: LfPartyId = submitterMetadata.submitter
@@ -647,7 +624,6 @@ object TransferInProcessingSteps {
       rootHash: RootHash,
       contract: SerializableContract,
       submitterMetadata: TransferSubmitterMetadata,
-      workflowId: Option[LfWorkflowId],
       creatingTransactionId: TransactionId,
       transferringParticipant: Boolean,
       transferId: TransferId,
@@ -662,11 +638,10 @@ object TransferInProcessingSteps {
       pureCrypto: CryptoPureApi,
       seed: SaltSeed,
       submitterMetadata: TransferSubmitterMetadata,
-      workflowId: Option[LfWorkflowId],
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
-      targetDomain: DomainId,
+      targetDomain: TargetDomainId,
       targetMediator: MediatorId,
       transferOutResult: DeliveredTransferOutResult,
       transferInUuid: UUID,
@@ -686,7 +661,6 @@ object TransferInProcessingSteps {
     val view = TransferInView.create(pureCrypto)(
       viewSalt,
       submitterMetadata,
-      workflowId,
       contract,
       creatingTransactionId,
       transferOutResult,

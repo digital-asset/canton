@@ -240,7 +240,12 @@ class DomainNodeBootstrap(
         .map(_.publicServer)
         .foreach(Lifecycle.close(_)(logger))
       super.onClosed()
-      Lifecycle.close(sequencerTopologyStore, mediatorTopologyStore)(logger)
+      Lifecycle.close(
+        sequencerTopologyStore,
+        mediatorTopologyStore,
+        sequencerHealth,
+        domainTopologySenderHealth,
+      )(logger)
     }
   }
 
@@ -502,7 +507,6 @@ class DomainNodeBootstrap(
             domainId,
             SequencerId(domainId.uid),
             crypto.value,
-            sequencedTopologyStore,
             // The sequencer is using the topology manager's topology client
             manager.id,
             topologyClient,
@@ -519,6 +523,7 @@ class DomainNodeBootstrap(
             arguments.metrics.sequencer,
             indexedStringStore,
             futureSupervisor,
+            None,
             loggerFactory,
             logger,
           )

@@ -62,14 +62,13 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
         }
       }
 
-      val participant = config.participants.headOption.value._2
-      participant.init.ledgerApi.maxDeduplicationDuration.duration.toSeconds shouldBe 10.minutes.toSeconds
-      participant.init.parameters.uniqueContractKeys shouldBe false
-      participant.init.parameters.unsafeEnableCausalityTracking shouldBe true
-      participant.init.identity.map(_.generateLegalIdentityCertificate) shouldBe Some(true)
-      participant.storage.parameters.failFastOnStartup shouldBe false
-      participant.storage.parameters.maxConnections shouldBe Some(10)
-      participant.storage.parameters.ledgerApiJdbcUrl shouldBe Some("yes")
+      val (_, participantConfig) = config.participants.headOption.value
+      participantConfig.init.ledgerApi.maxDeduplicationDuration.duration.toSeconds shouldBe 10.minutes.toSeconds
+      participantConfig.init.parameters.uniqueContractKeys shouldBe false
+      participantConfig.init.identity.map(_.generateLegalIdentityCertificate) shouldBe Some(true)
+      participantConfig.storage.parameters.failFastOnStartup shouldBe false
+      participantConfig.storage.parameters.maxConnections shouldBe Some(10)
+      participantConfig.storage.parameters.ledgerApiJdbcUrl shouldBe Some("yes")
 
       def domain(name: String) = config.domains
         .find(_._1.unwrap == name)

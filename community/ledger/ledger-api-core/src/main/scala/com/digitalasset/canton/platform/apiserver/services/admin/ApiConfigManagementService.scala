@@ -46,7 +46,14 @@ private[apiserver] final class ApiConfigManagementService private (
     with GrpcApiService {
   private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
 
-  override def close(): Unit = ()
+  private val synchronousResponse = new SynchronousResponse(
+    new SynchronousResponseStrategy(
+      writeService,
+      index,
+    )
+  )
+
+  override def close(): Unit = synchronousResponse.close()
 
   override def bindService(): ServerServiceDefinition =
     ConfigManagementServiceGrpc.bindService(this, executionContext)
@@ -143,17 +150,11 @@ private[apiserver] final class ApiConfigManagementService private (
 
           // Submit configuration to the ledger, and start polling for the result.
           augmentedSubmissionId = submissionIdGenerator(request.submissionId)
-          synchronousResponse = new SynchronousResponse(
-            new SynchronousResponseStrategy(
-              writeService,
-              index,
-              ledgerEndBeforeRequest,
-            ),
-            timeToLive = params.timeToLive,
-          )
           entry <- synchronousResponse.submitAndWait(
             augmentedSubmissionId,
             (params.maximumRecordTime, newConfig),
+            Some(ledgerEndBeforeRequest),
+            params.timeToLive,
           )
         } yield SetTimeModelResponse(entry.configuration.generation)
 
@@ -227,7 +228,6 @@ private[apiserver] object ApiConfigManagementService {
   private final class SynchronousResponseStrategy(
       writeConfigService: state.WriteConfigService,
       configManagementService: IndexConfigManagementService,
-      ledgerEnd: LedgerOffset.Absolute,
   )(implicit loggingContext: LoggingContext)
       extends SynchronousResponse.Strategy[
         (Time.Timestamp, Configuration),
@@ -236,9 +236,6 @@ private[apiserver] object ApiConfigManagementService {
       ] {
 
     private val logger = ContextualizedLogger.get(getClass)
-
-    override def currentLedgerEnd(): Future[Option[LedgerOffset.Absolute]] =
-      Future.successful(Some(ledgerEnd))
 
     override def submit(
         submissionId: Ref.SubmissionId,

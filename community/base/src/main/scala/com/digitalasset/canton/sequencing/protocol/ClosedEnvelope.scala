@@ -138,20 +138,35 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
   )
 
   val signaturesSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
+  val groupAddressesSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
 
   def create(
       bytes: ByteString,
       recipients: Recipients,
       signatures: Seq[Signature],
       representativeProtocolVersion: RepresentativeProtocolVersion[ClosedEnvelope.type],
-  ): Either[InvariantViolation, ClosedEnvelope] =
-    Either.cond(
-      signatures.isEmpty || representativeProtocolVersion >= signaturesSupportedSince,
-      new ClosedEnvelope(bytes, recipients, signatures)(representativeProtocolVersion),
-      InvariantViolation(
-        s"Signatures on closed envelopes are supported only from protocol version ${signaturesSupportedSince} on."
-      ),
-    )
+  ): Either[InvariantViolation, ClosedEnvelope] = {
+    for {
+      _ <- Either.cond(
+        signatures.isEmpty || representativeProtocolVersion >= signaturesSupportedSince,
+        (),
+        InvariantViolation(
+          s"Signatures on closed envelopes are supported only from protocol version ${signaturesSupportedSince} on."
+        ),
+      )
+      // TODO(#12373) Adapt when releasing BFT
+      _ <- Either.cond(
+        !recipients.allPaths.flatten.flatten.exists {
+          case _: MemberRecipient => false
+          case _ => true
+        } || representativeProtocolVersion >= groupAddressesSupportedSince,
+        (),
+        InvariantViolation(
+          s"Group addresses on closed envelopes are supported only from protocol version ${signaturesSupportedSince} on."
+        ),
+      )
+    } yield new ClosedEnvelope(bytes, recipients, signatures)(representativeProtocolVersion)
+  }
 
   def create(
       bytes: ByteString,
@@ -174,7 +189,11 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
   private[protocol] def fromProtoV0(envelopeP: v0.Envelope): ParsingResult[ClosedEnvelope] = {
     val v0.Envelope(contentP, recipientsP) = envelopeP
     for {
-      recipients <- ProtoConverter.parseRequired(Recipients.fromProtoV0, "recipients", recipientsP)
+      recipients <- ProtoConverter.parseRequired(
+        Recipients.fromProtoV0(_, supportGroupAddressing = false),
+        "recipients",
+        recipientsP,
+      )
       closedEnvelope <- ClosedEnvelope
         .create(
           contentP,
@@ -189,7 +208,11 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
   private[protocol] def fromProtoV1(envelopeP: v1.Envelope): ParsingResult[ClosedEnvelope] = {
     val v1.Envelope(contentP, recipientsP, signaturesP) = envelopeP
     for {
-      recipients <- ProtoConverter.parseRequired(Recipients.fromProtoV0, "recipients", recipientsP)
+      recipients <- ProtoConverter.parseRequired(
+        Recipients.fromProtoV0(_, supportGroupAddressing = true),
+        "recipients",
+        recipientsP,
+      )
       signatures <- signaturesP.traverse(Signature.fromProtoV0)
       closedEnvelope <- ClosedEnvelope
         .create(

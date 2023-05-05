@@ -9,7 +9,7 @@ import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -36,7 +36,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.{ProtocolVersion, VersionedMessage}
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.canton.{
+  BaseTest,
+  ProtocolVersionChecksFixtureAsyncWordSpec,
+  SequencerCounter,
+}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code.*
 import io.grpc.StatusException
@@ -51,7 +55,10 @@ import scala.collection.mutable
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.Null"))
-class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
+class GrpcSequencerServiceTest
+    extends FixtureAsyncWordSpec
+    with BaseTest
+    with ProtocolVersionChecksFixtureAsyncWordSpec {
   type Subscription = GrpcManagedSubscription
 
   sealed trait StreamItem
@@ -158,6 +165,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         sequencerSubscriptionFactory,
         domainParamLookup,
         params,
+        None,
         BaseTest.testedProtocolVersion,
       )
   }
@@ -271,9 +279,10 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
 
       def sendAndCheckError(
           request: SubmissionRequest,
-          assertion: PartialFunction[SendAsyncError, Assertion],
           authenticated: Boolean = true,
-      )(implicit env: Environment): Future[Assertion] =
+      )(assertion: PartialFunction[SendAsyncError, Assertion])(implicit
+          env: Environment
+      ): Future[Assertion] =
         send(request, authenticated).map { responseP =>
           assertion(responseP.value.error.value)
         }
@@ -323,12 +332,9 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             .modify(_.map(_.focus(_.bytes).replace(ByteString.EMPTY)))
 
           loggerFactory.assertLogs(
-            sendAndCheckError(
-              request,
-              { case SendAsyncError.RequestInvalid(message) =>
-                message shouldBe "Batch contains envelope without content."
-              },
-            ),
+            sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+              message shouldBe "Batch contains envelope without content."
+            },
             _.warningMessage should endWith(
               "is invalid: Batch contains envelope without content."
             ),
@@ -373,13 +379,8 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
 
           val alarmMsg = s"Max bytes to decompress is exceeded. The limit is 1000 bytes."
           loggerFactory.assertLogs(
-            {
-              sendAndCheckError(
-                request,
-                { case SendAsyncError.RequestInvalid(message) =>
-                  message should include(alarmMsg)
-                },
-              )
+            sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+              message should include(alarmMsg)
             },
             _.shouldBeCantonError(
               SequencerError.MaxRequestSizeExceeded,
@@ -394,14 +395,9 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             .replace(DefaultTestIdentities.participant2)
 
           loggerFactory.assertLogs(
-            {
-              sendAndCheckError(
-                request,
-                { case SendAsyncError.RequestRefused(message) =>
-                  message should (include("is not authorized to send:")
-                    and include("just tried to use sequencer on behalf of"))
-                },
-              )
+            sendAndCheckError(request) { case SendAsyncError.RequestRefused(message) =>
+              message should (include("is not authorized to send:")
+                and include("just tried to use sequencer on behalf of"))
             },
             _.warningMessage should (include("is not authorized to send:")
               and include("just tried to use sequencer on behalf of")),
@@ -414,15 +410,10 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             .replace(unauthenticatedMember)
 
           loggerFactory.assertLogs(
-            {
-              sendAndCheckError(
-                request,
-                { case SendAsyncError.RequestRefused(message) =>
-                  message should include("needs to use unauthenticated send operation")
-                },
-                authenticated = true,
-              )(new Environment(unauthenticatedMember))
-            },
+            sendAndCheckError(request, authenticated = true) {
+              case SendAsyncError.RequestRefused(message) =>
+                message should include("needs to use unauthenticated send operation")
+            }(new Environment(unauthenticatedMember)),
             _.warningMessage should include("needs to use unauthenticated send operation"),
           )
         }
@@ -445,14 +436,9 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
                 )
               )
             loggerFactory.assertLogs(
-              {
-                sendAndCheckError(
-                  request,
-                  { case SendAsyncError.RequestRefused(message) =>
-                    message should include("Member is trying to send message to unauthenticated")
-                  },
-                  authenticated = true,
-                )
+              sendAndCheckError(request, authenticated = true) {
+                case SendAsyncError.RequestRefused(message) =>
+                  message should include("Member is trying to send message to unauthenticated")
               },
               _.warningMessage should include(
                 "Member is trying to send message to unauthenticated"
@@ -521,12 +507,9 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           }
 
           def expectOverloaded(): Future[Assertion] = {
-            sendAndCheckError(
-              defaultRequest,
-              { case SendAsyncError.Overloaded(message) =>
-                message should endWith("Submission rate exceeds rate limit of 5/s.")
-              },
-            )
+            sendAndCheckError(defaultRequest) { case SendAsyncError.Overloaded(message) =>
+              message should endWith("Submission rate exceeds rate limit of 5/s.")
+            }
           }
 
           for {
@@ -541,20 +524,21 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           } yield succeed
         }
 
-        "reject sending to multiple mediators iff the sender is a participant" in { _ =>
-          val mediator1: Member = DefaultTestIdentities.mediator
-          val mediator2: Member = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
+        def multipleMediatorTestCase(
+            mediator1: RecipientsTree,
+            mediator2: RecipientsTree,
+        ): (FixtureParam => Future[Assertion]) = { _ =>
           val differentEnvelopes = Batch.fromClosed(
             testedProtocolVersion,
             ClosedEnvelope.tryCreate(
               ByteString.copyFromUtf8("message to first mediator"),
-              Recipients.cc(mediator1),
+              Recipients(NonEmpty.mk(Seq, mediator1)),
               Seq.empty,
               testedProtocolVersion,
             ),
             ClosedEnvelope.tryCreate(
               ByteString.copyFromUtf8("message to second mediator"),
-              Recipients.cc(mediator2),
+              Recipients(NonEmpty.mk(Seq, mediator2)),
               Seq.empty,
               testedProtocolVersion,
             ),
@@ -569,8 +553,8 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
                   RecipientsTree.ofMembers(
                     NonEmpty.mk(Set, participant),
                     Seq(
-                      RecipientsTree.leaf(NonEmpty.mk(Set, mediator1)),
-                      RecipientsTree.leaf(NonEmpty.mk(Set, mediator2)),
+                      mediator1,
+                      mediator2,
                     ),
                   ),
                 )
@@ -585,7 +569,10 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           val batches = Seq(differentEnvelopes, sameEnvelope)
           val badRequests = batches.map(batch => mkSubmissionRequest(batch, participant))
           val goodRequests = batches.map(batch =>
-            mkSubmissionRequest(batch, mediator1) -> mediator1
+            mkSubmissionRequest(
+              batch,
+              DefaultTestIdentities.mediator,
+            ) -> DefaultTestIdentities.mediator
           ) ++ batches.map(batch =>
             mkSubmissionRequest(
               batch,
@@ -599,14 +586,9 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
                   // create a fresh environment for each request such that the rate limiter does not complain
                   val participantEnv = new Environment(participant)
                   loggerFactory.assertLogs(
-                    {
-                      sendAndCheckError(
-                        badRequest,
-                        { case SendAsyncError.RequestRefused(message) =>
-                          message shouldBe "Batch from participant contains multiple mediators as recipients."
-                        },
-                      )(participantEnv)
-                    },
+                    sendAndCheckError(badRequest) { case SendAsyncError.RequestRefused(message) =>
+                      message shouldBe "Batch from participant contains multiple mediators as recipients."
+                    }(participantEnv),
                     _.warningMessage should include(
                       "refused: Batch from participant contains multiple mediators as recipients."
                     ),
@@ -622,6 +604,25 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             }
           } yield succeed
         }
+
+        "reject sending to multiple mediators iff the sender is a participant" in multipleMediatorTestCase(
+          RecipientsTree.leaf(NonEmpty.mk(Set, DefaultTestIdentities.mediator)),
+          RecipientsTree.leaf(
+            NonEmpty.mk(Set, MediatorId(UniqueIdentifier.tryCreate("another", "mediator")))
+          ),
+        )
+
+        // TODO(#12373) Adapt when releasing BFT
+        "reject sending to multiple mediator groups iff the sender is a participant" onlyRunWithOrGreaterThan (ProtocolVersion.dev) in multipleMediatorTestCase(
+          RecipientsTree(
+            NonEmpty.mk(Set, MediatorsOfDomain(DefaultTestIdentities.domainId, 1)),
+            Seq.empty,
+          ),
+          RecipientsTree(
+            NonEmpty.mk(Set, MediatorsOfDomain(DefaultTestIdentities.domainId, 2)),
+            Seq.empty,
+          ),
+        )
 
         "reject requests to unauthenticated members with a signing key timestamps" in {
           implicit env =>
@@ -644,16 +645,85 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
               )
 
             loggerFactory.assertLogs(
-              sendAndCheckError(
-                request,
-                { case SendAsyncError.RequestRefused(message) =>
-                  message should include(
-                    "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
-                  )
-                },
-              ),
+              sendAndCheckError(request) { case SendAsyncError.RequestRefused(message) =>
+                message should include(
+                  "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+                )
+              },
               _.warningMessage should include(
                 "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+              ),
+            )
+        }
+
+        // TODO(#12373) Adapt when releasing BFT
+        "reject unauthenticated eligible members in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          implicit env =>
+            val request = defaultRequest
+              .focus(_.aggregationRule)
+              .replace(
+                Some(
+                  AggregationRule(
+                    eligibleMembers = NonEmpty(Seq, participant, unauthenticatedMember),
+                    threshold = PositiveInt.tryCreate(1),
+                    testedProtocolVersion,
+                  )
+                )
+              )
+            loggerFactory.assertLogs(
+              sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+                message should include(
+                  "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
+                )
+              },
+              _.warningMessage should include(
+                "Eligible senders in aggregation rule must be authenticated, but found unauthenticated members"
+              ),
+            )
+        }
+
+        // TODO(#12373) Adapt when releasing BFT
+        "reject unachievable threshold in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          implicit env =>
+            val request = defaultRequest
+              .focus(_.aggregationRule)
+              .replace(
+                Some(
+                  AggregationRule(
+                    eligibleMembers = NonEmpty(Seq, participant, participant),
+                    threshold = PositiveInt.tryCreate(2),
+                    testedProtocolVersion,
+                  )
+                )
+              )
+            loggerFactory.assertLogs(
+              sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+                message should include("Threshold 2 cannot be reached")
+              },
+              _.warningMessage should include("Threshold 2 cannot be reached"),
+            )
+        }
+
+        // TODO(#12373) Adapt when releasing BFT
+        "reject uneligible sender in aggregation rule" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          implicit env =>
+            val request = defaultRequest
+              .focus(_.aggregationRule)
+              .replace(
+                Some(
+                  AggregationRule(
+                    eligibleMembers = NonEmpty(Seq, DefaultTestIdentities.participant2),
+                    threshold = PositiveInt.tryCreate(1),
+                    testedProtocolVersion,
+                  )
+                )
+              )
+            loggerFactory.assertLogs(
+              sendAndCheckError(request) { case SendAsyncError.RequestInvalid(message) =>
+                message should include("Sender is not eligible according to the aggregation rule")
+              },
+              _.warningMessage should include(
+                "Sender is not eligible according to the aggregation rule"
               ),
             )
         }
@@ -673,17 +743,12 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           .focus(_.sender)
           .replace(unauthenticatedMember)
         loggerFactory.assertLogs(
-          {
-            sendAndCheckError(
-              request,
-              { case SendAsyncError.RequestRefused(message) =>
-                message should include(
-                  "Unauthenticated member is trying to send message to members other than the domain manager"
-                )
-              },
-              authenticated = false,
-            )(new Environment(unauthenticatedMember))
-          },
+          sendAndCheckError(request, authenticated = false) {
+            case SendAsyncError.RequestRefused(message) =>
+              message should include(
+                "Unauthenticated member is trying to send message to members other than the domain manager"
+              )
+          }(new Environment(unauthenticatedMember)),
           _.warningMessage should include(
             "Unauthenticated member is trying to send message to members other than the domain manager"
           ),
@@ -696,14 +761,9 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           .replace(DefaultTestIdentities.participant1)
 
         loggerFactory.assertLogs(
-          {
-            sendAndCheckError(
-              request,
-              { case SendAsyncError.RequestRefused(message) =>
-                message should include("needs to use authenticated send operation")
-              },
-              authenticated = false,
-            )
+          sendAndCheckError(request, authenticated = false) {
+            case SendAsyncError.RequestRefused(message) =>
+              message should include("needs to use authenticated send operation")
           },
           _.warningMessage should include("needs to use authenticated send operation"),
         )
@@ -731,15 +791,12 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           )
 
         loggerFactory.assertLogs(
-          sendAndCheckError(
-            request,
-            { case SendAsyncError.RequestRefused(message) =>
+          sendAndCheckError(request, authenticated = false) {
+            case SendAsyncError.RequestRefused(message) =>
               message should include(
                 "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
               )
-            },
-            authenticated = false,
-          )(new Environment(unauthenticatedMember)),
+          }(new Environment(unauthenticatedMember)),
           _.warningMessage should include(
             "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
           ),

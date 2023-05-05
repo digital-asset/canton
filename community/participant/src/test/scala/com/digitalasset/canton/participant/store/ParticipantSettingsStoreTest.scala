@@ -9,7 +9,6 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNume
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
 import monocle.Lens
 import monocle.macros.GenLens
@@ -62,7 +61,7 @@ trait ParticipantSettingsStoreTest
           settings2 shouldBe Settings(resourceLimits = resourceLimits2)
           settings3 shouldBe Settings(resourceLimits = resourceLimits3)
           settings4 shouldBe Settings(resourceLimits = resourceLimits4)
-        }).futureValue
+        }).failOnShutdown.futureValue
       }
     }
 
@@ -74,7 +73,7 @@ trait ParticipantSettingsStoreTest
       "support a single insertion" in {
         val store = mk()
         (for {
-          _ <- store.refreshCache()
+          _ <- store.refreshCache().failOnShutdown
           settings0 = store.settings
 
           _ <- insert(store, first)
@@ -98,10 +97,10 @@ trait ParticipantSettingsStoreTest
       "not affect resource limits" in {
         val store = mk()
         (for {
-          _ <- store.writeResourceLimits(resourceLimits = resourceLimits1)
+          _ <- store.writeResourceLimits(resourceLimits = resourceLimits1).failOnShutdown
           _ <- insert(store, first)
           settings1 = store.settings
-          _ <- store.writeResourceLimits(resourceLimits4)
+          _ <- store.writeResourceLimits(resourceLimits4).failOnShutdown
           settings2 = store.settings
         } yield {
           val setter = lens.replace(first.some)
@@ -113,31 +112,32 @@ trait ParticipantSettingsStoreTest
 
     "max deduplication duration" should {
       behave like singleInsertion(maxDedupDuration, NonNegativeFiniteDuration.Zero)(
-        _.insertMaxDeduplicationDuration(_),
+        _.insertMaxDeduplicationDuration(_).failOnShutdown,
         GenLens[Settings](_.maxDeduplicationDuration),
       )
     }
 
     "unique contract keys" should {
       behave like singleInsertion(false, true)(
-        _.insertUniqueContractKeysMode(_),
+        _.insertUniqueContractKeysMode(_).failOnShutdown,
         GenLens[Settings](_.uniqueContractKeys),
       )
     }
 
     "eventually reach a consistent cache after concurrent updates" in {
       val store = mk()
-      store.refreshCache().futureValue
+      store.refreshCache().failOnShutdown.futureValue
 
       (1 until 10)
         .map(NonNegativeInt.tryCreate)
         .toList
         .parTraverse_(i => store.writeResourceLimits(ResourceLimits(Some(i), None)))
+        .failOnShutdown
         .futureValue
 
       val cachedValue = store.settings
 
-      store.refreshCache().futureValue
+      store.refreshCache().failOnShutdown.futureValue
       store.settings shouldBe cachedValue
     }
 

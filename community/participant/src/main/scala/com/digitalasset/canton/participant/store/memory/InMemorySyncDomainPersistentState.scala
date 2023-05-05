@@ -8,7 +8,12 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
-import com.digitalasset.canton.participant.store.SyncDomainPersistentState
+import com.digitalasset.canton.participant.store.{
+  SyncDomainPersistentState,
+  SyncDomainPersistentStateOld,
+  SyncDomainPersistentStateX,
+}
+import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.memory.{
   InMemorySendTrackerStore,
@@ -16,17 +21,17 @@ import com.digitalasset.canton.store.memory.{
   InMemorySequencerCounterTrackerStore,
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.topology.store.memory.{InMemoryTopologyStore, InMemoryTopologyStoreX}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
-class InMemorySyncDomainPersistentState(
+abstract class InMemorySyncDomainPersistentStateCommon(
     override val domainId: IndexedDomain,
     override val pureCryptoApi: CryptoPureApi,
     override val enableAdditionalConsistencyChecks: Boolean,
     val loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
-    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends SyncDomainPersistentState {
 
@@ -34,7 +39,7 @@ class InMemorySyncDomainPersistentState(
   val contractStore = new InMemoryContractStore(loggerFactory)
   val activeContractStore = new InMemoryActiveContractStore(loggerFactory)
   val contractKeyJournal = new InMemoryContractKeyJournal(loggerFactory)
-  val transferStore = new InMemoryTransferStore(domainId.item, loggerFactory)
+  val transferStore = new InMemoryTransferStore(TargetDomainId(domainId.item), loggerFactory)
   val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
   val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
   val acsCommitmentStore = new InMemoryAcsCommitmentStore(loggerFactory)
@@ -42,10 +47,57 @@ class InMemorySyncDomainPersistentState(
   val sequencerCounterTrackerStore =
     new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
   val sendTrackerStore = new InMemorySendTrackerStore()
-  val causalDependencyStore =
-    new InMemorySingleDomainCausalDependencyStore(domainId.item, loggerFactory)
+
+  override def isMemory(): Boolean = true
+
+  override def close(): Unit = ()
+}
+
+class InMemorySyncDomainPersistentStateOld(
+    domainId: IndexedDomain,
+    val protocolVersion: ProtocolVersion,
+    pureCryptoApi: CryptoPureApi,
+    enableAdditionalConsistencyChecks: Boolean,
+    loggerFactory: NamedLoggerFactory,
+    timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
+)(implicit ec: ExecutionContext)
+    extends InMemorySyncDomainPersistentStateCommon(
+      domainId,
+      pureCryptoApi,
+      enableAdditionalConsistencyChecks,
+      loggerFactory,
+      timeouts,
+    )
+    with SyncDomainPersistentStateOld {
+
   val topologyStore =
     new InMemoryTopologyStore(DomainStore(domainId.item), loggerFactory, timeouts, futureSupervisor)
 
-  override def close(): Unit = ()
+}
+
+class InMemorySyncDomainPersistentStateX(
+    domainId: IndexedDomain,
+    val protocolVersion: ProtocolVersion,
+    pureCryptoApi: CryptoPureApi,
+    enableAdditionalConsistencyChecks: Boolean,
+    loggerFactory: NamedLoggerFactory,
+    val timeouts: ProcessingTimeout,
+    val futureSupervisor: FutureSupervisor,
+)(implicit ec: ExecutionContext)
+    extends InMemorySyncDomainPersistentStateCommon(
+      domainId,
+      pureCryptoApi,
+      enableAdditionalConsistencyChecks,
+      loggerFactory,
+      timeouts,
+    )
+    with SyncDomainPersistentStateX {
+
+  val topologyStore =
+    new InMemoryTopologyStoreX(
+      DomainStore(domainId.item),
+      loggerFactory,
+    )
+
 }

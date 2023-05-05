@@ -58,6 +58,7 @@ class GrpcTransferService(service: TransferService, participantId: ParticipantId
         participantId.toLf,
         commandId,
         submissionId,
+        workflowId,
       )
       transferId <- mapErr(
         service.transferOut(
@@ -65,7 +66,6 @@ class GrpcTransferService(service: TransferService, participantId: ParticipantId
           contractId,
           sourceDomain,
           targetDomain,
-          workflowId,
         )
       )
     } yield AdminTransferOutResponse(transferId = Some(transferId.toProtoV0))
@@ -100,13 +100,13 @@ class GrpcTransferService(service: TransferService, participantId: ParticipantId
         participantId.toLf,
         commandId,
         submissionId,
+        workflowId,
       )
       _result <- mapErr(
         service.transferIn(
           submitterMetadata,
           targetDomain,
           transferId,
-          workflowId,
         )
       )
     } yield AdminTransferInResponse()

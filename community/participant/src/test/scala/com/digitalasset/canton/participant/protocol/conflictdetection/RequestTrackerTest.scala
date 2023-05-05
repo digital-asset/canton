@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 import cats.data.NonEmptyChain
 import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.LockedStates
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.*
@@ -618,7 +619,7 @@ private[conflictdetection] trait RequestTrackerTest {
     "addConfirmationRequest is idempotent" in {
       val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue)
       for {
-        (cdF, toF) <- enterCR(
+        (cdF, toF) <- enterCR_US(
           rt,
           RequestCounter(0),
           SequencerCounter(1),
@@ -626,7 +627,7 @@ private[conflictdetection] trait RequestTrackerTest {
           ofEpochMilli(10),
           ActivenessSet.empty,
         )
-        (cdF2, toF2) <- enterCR(
+        (cdF2, toF2) <- enterCR_US(
           rt,
           RequestCounter(0),
           SequencerCounter(1),
@@ -725,7 +726,7 @@ private[conflictdetection] trait RequestTrackerTest {
           "setting a different commit set fails",
         )
         _ = enterTick(rt, SequencerCounter(2), ofEpochMilli(100))
-        finalize1Result <- finalize1.value.value
+        finalize1Result <- finalize1.value.value.failOnShutdown
         _ = assert(finalize1Result == Right(()), "request finalized")
         _ = assert(finalize2.value == finalize1.value, "same result returned")
       } yield succeed
@@ -871,7 +872,7 @@ private[conflictdetection] trait RequestTrackerTest {
         ) // check that a missing commit set does not cause deadlock
         resCS = rt.addCommitSet(rc + 1, Success(CommitSet.empty))
         _ = assert(resCS.isRight, "adding the missing commit set succeeded")
-        res2 <- resCS.value.value
+        res2 <- resCS.value.value.failOnShutdown
         _ = assert(res2 == Right(()), "finalizing the second request succeeded")
         _ = enterTick(rt, sc + 6, ts.plusMillis(25))
         _ <- checkFinalize(rc, finalize0)
@@ -1063,7 +1064,7 @@ private[conflictdetection] trait RequestTrackerTest {
         contracts <- acs.fetchStates(Seq(coid00, coid10))
       } yield {
         commit0 shouldBe failure
-        commitF1.value.isCompleted shouldBe false
+        commitF1.value.failOnShutdown.isCompleted shouldBe false
         contracts shouldBe Map.empty // No contracts are created
       }
     }
@@ -1100,6 +1101,46 @@ private[conflictdetection] trait RequestTrackerTest {
       decisionTime: CantonTimestamp,
       activenessSet: ActivenessSet,
   ): Future[(Future[ActivenessResult], Future[TimeoutResult])] = {
+    enterCR_US(
+      rt,
+      rc,
+      sc,
+      confirmationRequestTimestamp,
+      activenessTimestamp,
+      decisionTime,
+      activenessSet,
+    ).map { case (aR, tR) =>
+      (aR.failOnShutdown("activeness result"), tR)
+    }
+  }
+
+  def enterCR_US(
+      rt: RequestTracker,
+      rc: RequestCounter,
+      sc: SequencerCounter,
+      confirmationRequestTimestamp: CantonTimestamp,
+      decisionTime: CantonTimestamp,
+      activenessSet: ActivenessSet,
+  ): Future[(FutureUnlessShutdown[ActivenessResult], Future[TimeoutResult])] =
+    enterCR_US(
+      rt,
+      rc,
+      sc,
+      confirmationRequestTimestamp,
+      confirmationRequestTimestamp,
+      decisionTime,
+      activenessSet,
+    )
+
+  def enterCR_US(
+      rt: RequestTracker,
+      rc: RequestCounter,
+      sc: SequencerCounter,
+      confirmationRequestTimestamp: CantonTimestamp,
+      activenessTimestamp: CantonTimestamp,
+      decisionTime: CantonTimestamp,
+      activenessSet: ActivenessSet,
+  ): Future[(FutureUnlessShutdown[ActivenessResult], Future[TimeoutResult])] = {
     val resCR = rt.addRequest(
       rc,
       sc,
@@ -1109,9 +1150,11 @@ private[conflictdetection] trait RequestTrackerTest {
       activenessSet,
     )
     assert(resCR.isRight, s"adding the confirmation request $rc succeeds")
-    resCR.value.map { case RequestFutures(activenessResult, timeoutResult) =>
-      (activenessResult, timeoutResult)
-    }
+    resCR.value
+      .map { case RequestFutures(activenessResult, timeoutResult) =>
+        (activenessResult, timeoutResult)
+      }
+      .failOnShutdown("add request")
   }
 
   def checkConflictResult(
@@ -1145,7 +1188,7 @@ private[conflictdetection] trait RequestTrackerTest {
       timeout <- timeoutFuture
       _ = assert(!timeout.timedOut, s"timeout promise for request $rc is kept with NoTimeout")
       resCS = rt.addCommitSet(rc, Success(commitSet))
-    } yield resCS.value.value
+    } yield resCS.value.value.failOnShutdown("add commit set")
   }
 
   def checkFinalize(

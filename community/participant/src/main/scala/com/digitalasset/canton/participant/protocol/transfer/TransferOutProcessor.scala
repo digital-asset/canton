@@ -16,15 +16,16 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.protocol.SourceDomainId
 import com.digitalasset.canton.protocol.messages.TransferOutResult
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
 class TransferOutProcessor(
-    domainId: DomainId,
+    domainId: SourceDomainId,
     override val participantId: ParticipantId,
     damle: DAMLe,
     transferCoordination: TransferCoordination,
@@ -59,6 +60,8 @@ class TransferOutProcessor(
       ephemeral,
       domainCrypto,
       sequencerClient,
+      domainId.unwrap,
+      sourceProtocolVersion.v,
       loggerFactory,
       futureSupervisor,
       skipRecipientsCheck = skipRecipientsCheck,

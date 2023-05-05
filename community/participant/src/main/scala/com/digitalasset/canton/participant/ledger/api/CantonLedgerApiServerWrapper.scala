@@ -10,17 +10,15 @@ import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
 import com.daml.tracing.DefaultOpenTelemetry
-import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.concurrent.{
+  ExecutionContextIdlenessExecutorService,
+  FutureSupervisor,
+}
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, StorageConfig}
 import com.digitalasset.canton.ledger.configuration.{LedgerId, LedgerTimeModel}
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  TracedLogger,
-}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.config.{IndexerConfig, LedgerApiServerConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
@@ -30,12 +28,10 @@ import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportK
 import com.digitalasset.canton.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
-import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LedgerParticipantId, checked}
 import io.grpc.BindableService
 
 import java.time.Duration as JDuration
-import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
@@ -107,10 +103,11 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       config: Config,
       startLedgerApiServer: Boolean,
       createExternalServices: () => List[BindableService] = () => Nil,
+      futureSupervisor: FutureSupervisor,
   )(implicit
       ec: ExecutionContextIdlenessExecutorService,
       actorSystem: ActorSystem,
-  ): EitherT[Future, LedgerApiServerError, LedgerApiServerState] = {
+  ): EitherT[FutureUnlessShutdown, LedgerApiServerError, LedgerApiServerState] = {
 
     val ledgerApiStorageE = LedgerApiStorage.fromStorageConfig(
       config.storageConfig,
@@ -118,7 +115,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     )
 
     EitherT
-      .fromEither[Future](ledgerApiStorageE)
+      .fromEither[FutureUnlessShutdown](ledgerApiStorageE)
       .flatMap { ledgerApiStorage =>
         val connectionPoolConfig = DbSupport.ConnectionPoolConfig(
           connectionPoolSize = config.storageConfig.maxConnectionsLedgerApiServer,
@@ -143,32 +140,33 @@ object CantonLedgerApiServerWrapper extends NoTracing {
               dbConfig = dbConfig,
               createExternalServices = createExternalServices,
               telemetry = new DefaultOpenTelemetry(config.tracerProvider.openTelemetry),
+              futureSupervisor = futureSupervisor,
             )
           }
 
-        val startF = for {
-          _ <- tryCreateSchema(ledgerApiStorage, config.logger)
+        val startFUS = for {
+          _ <- FutureUnlessShutdown.outcomeF(tryCreateSchema(ledgerApiStorage, config.logger))
           _ <-
             if (startLedgerApiServer)
               startableStoppableLedgerApiServer.start(overrideIndexerStartupMode =
                 Some(IndexerStartupMode.MigrateOnEmptySchemaAndStart)
               )
-            else Future.unit
+            else FutureUnlessShutdown.unit
         } yield ()
 
-        EitherT(startF.transformWith {
+        EitherT(startFUS.transformWith {
           case Success(_) =>
-            Future.successful(
+            FutureUnlessShutdown.pure(
               Either.right(
                 LedgerApiServerState(
                   ledgerApiStorage,
                   startableStoppableLedgerApiServer,
                   config.logger,
                   config.cantonParameterConfig.processingTimeouts,
-                )(ec)
+                )
               )
             )
-          case Failure(e) => Future.successful(Left(FailedToStartLedgerApiServer(e)))
+          case Failure(e) => FutureUnlessShutdown.pure(Left(FailedToStartLedgerApiServer(e)))
         })
       }
   }
@@ -221,32 +219,10 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       startableStoppableLedgerApi: StartableStoppableLedgerApiServer,
       override protected val logger: TracedLogger,
       protected override val timeouts: ProcessingTimeout,
-  )(implicit ec: ExecutionContext)
-      extends FlagCloseableAsync {
+  ) extends FlagCloseable {
 
-    override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-      implicit val loggingContext: ErrorLoggingContext =
-        ErrorLoggingContext.fromTracedLogger(logger)
-      List(
-        AsyncCloseable(
-          "ledgerApiServerWrapper",
-          (for {
-            _ <- EitherTUtil
-              .fromFuture(
-                startableStoppableLedgerApi.stop(),
-                t => FailedToStopLedgerApiServer("Failed to stop ledger API server", t),
-              )
-            _ = startableStoppableLedgerApi.close()
-            _ <- EitherT.fromEither[Future](ledgerApiStorage.close()): EitherT[
-              Future,
-              LedgerApiServerError,
-              Unit,
-            ]
-          } yield ()).valueOr(e => throw e.asRuntimeException()),
-          1.minute,
-        )
-      )
-    }
+    override protected def onClosed(): Unit =
+      Lifecycle.close(startableStoppableLedgerApi, ledgerApiStorage)(logger)
 
     override def toString: String = getClass.getSimpleName
   }

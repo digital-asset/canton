@@ -42,7 +42,6 @@ class SimpleExecutionQueue(logTaskTiming: Boolean = false)(implicit ec: Executio
     *
     * @return A future with the result of this execution or the last failure of an earlier execution
     */
-  // TODO(#6175) Consider to look for `AbortedDueToShutdown` and treat it specially.
   def executeUnlessFailed[A](execution: => Future[A], description: String)(implicit
       loggingContext: ErrorLoggingContext
   ): Future[A] =

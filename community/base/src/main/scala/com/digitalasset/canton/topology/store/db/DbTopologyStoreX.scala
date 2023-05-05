@@ -5,9 +5,12 @@ package com.digitalasset.canton.topology.store.db
 
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactionX.GenericStoredTopologyTransactionX
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
   GenericStoredTopologyTransactionsX,
   PositiveStoredTopologyTransactionsX,
@@ -16,26 +19,33 @@ import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.Gene
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactionsX,
   TimeQueryX,
+  TopologyStore,
   TopologyStoreId,
   TopologyStoreX,
+  *,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
+import com.digitalasset.canton.topology.transaction.TopologyChangeOpX.Replace
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
-import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
+import com.digitalasset.canton.topology.transaction.TopologyTransactionX.{
+  GenericTopologyTransactionX,
+  TxHash,
+}
 import com.digitalasset.canton.topology.transaction.{
+  DomainTrustCertificateX,
+  MediatorDomainStateX,
   TopologyChangeOpX,
   TopologyMappingX,
   TopologyTransactionX,
 }
-import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbTopologyStoreX[StoreId <: TopologyStoreId](
     override protected val storage: DbStorage,
     val storeId: StoreId,
-    maxItemsInSqlQuery: Int,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -78,6 +88,13 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]] = ???
 
+  override def inspectKnownParties(
+      timestamp: CantonTimestamp,
+      filterParty: String,
+      filterParticipant: String,
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Set[PartyId]] = ???
+
   override def findPositiveTransactions(
       asOf: CantonTimestamp,
       asOfInclusive: Boolean,
@@ -87,7 +104,62 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       filterNamespace: Option[Seq[Namespace]],
   )(implicit traceContext: TraceContext): Future[PositiveStoredTopologyTransactionsX] = ???
 
+  override def findFirstMediatorStateForMediator(mediatorId: MediatorId)(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransactionX[Replace, MediatorDomainStateX]]] = ???
+
+  override def findFirstTrustCertificateForParticipant(participant: ParticipantId)(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransactionX[Replace, DomainTrustCertificateX]]] = ???
+
+  override def findEssentialStateForMember(member: Member, asOfInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[GenericStoredTopologyTransactionsX] = ???
+
   override def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
       traceContext: TraceContext
   ): Future[Unit] = ???
+
+  override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Seq[TopologyStore.Change]] = ???
+
+  override def maxTimestamp()(implicit
+      traceContext: TraceContext
+  ): Future[Option[(SequencedTime, EffectiveTime)]] = ???
+
+  override def currentDispatchingWatermark(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]] = ???
+
+  override def updateDispatchingWatermark(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = ???
+
+  override def findDispatchingTransactionsAfter(
+      timestampExclusive: CantonTimestamp,
+      limit: Option[Int],
+  )(implicit
+      traceContext: TraceContext
+  ): Future[GenericStoredTopologyTransactionsX] = ???
+
+  override def findStored(
+      transaction: GenericSignedTopologyTransactionX
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[GenericStoredTopologyTransactionX]] = ???
+
+  override def findStoredForVersion(
+      transaction: GenericTopologyTransactionX,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[GenericStoredTopologyTransactionX]] = ???
+
+  override def findParticipantOnboardingTransactions(
+      participantId: ParticipantId,
+      domainId: DomainId,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransactionX]] = ???
 }

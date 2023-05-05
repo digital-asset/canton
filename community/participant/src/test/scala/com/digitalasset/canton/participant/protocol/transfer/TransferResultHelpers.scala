@@ -21,7 +21,7 @@ import scala.concurrent.{Await, ExecutionContext}
 private[transfer] object TransferResultHelpers {
 
   def transferOutResult(
-      sourceDomain: DomainId,
+      sourceDomain: SourceDomainId,
       cryptoSnapshot: SyncCryptoApi,
       participantId: ParticipantId,
   )(implicit traceContext: TraceContext): DeliveredTransferOutResult = {
@@ -37,7 +37,7 @@ private[transfer] object TransferResultHelpers {
       TransferResult.create(
         RequestId(CantonTimestamp.Epoch),
         Set(),
-        TransferOutDomainId(sourceDomain),
+        sourceDomain,
         Verdict.Approve(protocolVersion),
         protocolVersion,
       )
@@ -52,7 +52,7 @@ private[transfer] object TransferResultHelpers {
       Deliver.create(
         SequencerCounter(0),
         CantonTimestamp.Epoch,
-        sourceDomain,
+        sourceDomain.unwrap,
         Some(MessageId.tryCreate("msg-0")),
         batch,
         protocolVersion,
@@ -72,10 +72,10 @@ private[transfer] object TransferResultHelpers {
     transferOutResult
   }
 
-  def transferInResult(targetDomain: DomainId): TransferInResult = TransferResult.create(
+  def transferInResult(targetDomain: TargetDomainId): TransferInResult = TransferResult.create(
     RequestId(CantonTimestamp.Epoch),
     Set(),
-    TransferInDomainId(targetDomain),
+    targetDomain,
     Verdict.Approve(BaseTest.testedProtocolVersion),
     BaseTest.testedProtocolVersion,
   )

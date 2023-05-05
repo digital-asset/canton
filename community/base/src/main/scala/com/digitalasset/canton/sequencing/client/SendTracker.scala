@@ -76,26 +76,31 @@ class SendTracker(
       maxSequencingTime: CantonTimestamp,
       callback: SendCallback = SendCallback.empty,
   )(implicit traceContext: TraceContext): EitherT[Future, SavePendingSendError, Unit] = {
-    for {
-      _ <- store
-        .savePendingSend(messageId, maxSequencingTime)
-      _ = pendingSends.put(
-        messageId,
-        PendingSend(maxSequencingTime, callback, startedAt = Some(Instant.now())),
-      ) match {
-        case Some(previousMaxSequencingTime) =>
-          // if we were able to persist the new message id without issue but found the message id in our in-memory
-          // pending set it suggests either:
-          //  - the database has been modified by a writer other than this sequencer client (so its pending set is not in sync)
-          //  - there is a bug :-|
-          sys.error(
-            s"""The SequencerClient pending set of sends is out of sync from the database.
-                       |The database reported no send for $messageId but our pending set includes a prior send with mst of $previousMaxSequencingTime.""".stripMargin
-          )
-        case _none => // we're good
-      }
-      _ = metrics.submissions.inFlight.inc()
-    } yield ()
+    performUnlessClosing(s"track $messageId") {
+      for {
+        _ <- store
+          .savePendingSend(messageId, maxSequencingTime)
+        _ = pendingSends.put(
+          messageId,
+          PendingSend(maxSequencingTime, callback, startedAt = Some(Instant.now())),
+        ) match {
+          case Some(previousMaxSequencingTime) =>
+            // if we were able to persist the new message id without issue but found the message id in our in-memory
+            // pending set it suggests either:
+            //  - the database has been modified by a writer other than this sequencer client (so its pending set is not in sync)
+            //  - there is a bug :-|
+            sys.error(
+              s"""The SequencerClient pending set of sends is out of sync from the database.
+                 |The database reported no send for $messageId but our pending set includes a prior send with mst of $previousMaxSequencingTime.""".stripMargin
+            )
+          case _none => // we're good
+        }
+        _ = metrics.submissions.inFlight.inc()
+      } yield ()
+    }.onShutdown {
+      callback(UnlessShutdown.AbortedDueToShutdown)
+      EitherT.pure(())
+    }
   }
 
   /** Cancels a pending send without notifying any callers of the result.

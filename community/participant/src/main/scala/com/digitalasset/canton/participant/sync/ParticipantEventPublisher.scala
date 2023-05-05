@@ -7,9 +7,10 @@ import cats.Eval
 import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.option.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper
@@ -23,7 +24,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.{
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueueWithShutdown}
 import com.digitalasset.canton.{LedgerConfiguration, LedgerSubmissionId}
 import com.google.common.annotations.VisibleForTesting
 
@@ -49,14 +50,20 @@ class ParticipantEventPublisher(
     participantClock: Clock,
     maxDeduplicationDuration: Eval[Duration],
     override protected val timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync {
+    with FlagCloseable {
 
   import com.digitalasset.canton.util.ShowUtil.*
 
-  private val executionQueue = new SimpleExecutionQueue()
+  private val executionQueue = new SimpleExecutionQueueWithShutdown(
+    "participant-event-publisher-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   private def publishInternal(
       event: LedgerSyncEvent
@@ -72,7 +79,7 @@ class ParticipantEventPublisher(
       _ = logger.debug(
         s"Publishing event with local offset ${localOffset} at record time ${event.recordTime}: ${event.description}"
       )
-      _ <- participantEventLog.value.insert(timestampedEvent, None)
+      _ <- participantEventLog.value.insert(timestampedEvent)
       publicationData = PublicationData(
         participantEventLog.value.id,
         timestampedEvent,
@@ -82,7 +89,9 @@ class ParticipantEventPublisher(
     } yield ()
   }
 
-  def publish(event: LedgerSyncEvent)(implicit traceContext: TraceContext): Future[Unit] = {
+  def publish(
+      event: LedgerSyncEvent
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     ErrorUtil.requireArgument(
       event.recordTime == ParticipantEventPublisher.now.toLf,
       show"RecordTime not initialized with 'now' literal. Participant event: $event",
@@ -100,7 +109,9 @@ class ParticipantEventPublisher(
     */
   def publishWithIds(
       events: Seq[Traced[(EventId, LedgerSyncEvent)]]
-  )(implicit traceContext: TraceContext): EitherT[Future, Seq[TimestampedEvent], Unit] = EitherT {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, Seq[TimestampedEvent], Unit] = EitherT {
     def go: Future[Either[List[TimestampedEvent], Unit]] =
       for {
         insertResult <- allocateOffsetsAndInsert(events)
@@ -140,9 +151,7 @@ class ParticipantEventPublisher(
           TimestampedEvent(event, localOffset, None, eventId.some)
         })
       )
-      insertionResult <- participantEventLog.value.insertsUnlessEventIdClash(
-        timestampedEvents.map(e => TimestampedEventAndCausalChange(e, None))
-      )
+      insertionResult <- participantEventLog.value.insertsUnlessEventIdClash(timestampedEvents)
     } yield newOffsets.lazyZip(insertionResult).map { (localOffset, result) =>
       result.map { case () => localOffset }
     }
@@ -150,7 +159,7 @@ class ParticipantEventPublisher(
 
   def publishTimeModelConfigNeededUpstreamOnlyIfFirst(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     executionQueue.execute(
       for {
         maybeFirstOffset <- multiDomainEventLog.value.locateOffset(1).value
@@ -175,12 +184,8 @@ class ParticipantEventPublisher(
     )
   }
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    Seq(
-      executionQueue.asCloseable("participant-event-publisher-queue", timeouts.shutdownShort.unwrap)
-    )
-  }
+  override protected def onClosed(): Unit = Lifecycle.close(executionQueue)(logger)
+
 }
 
 object ParticipantEventPublisher {

@@ -142,7 +142,6 @@ object LfTransactionUtil {
     case _: LfNodeFetch => false
     case _: LfNodeLookupByKey => false
     case _: LfNodeRollback => false
-    case _: LfNodeAuthority => sys.error("LfNodeAuthority")
   }
 
   private[this] def suffixForDiscriminator(

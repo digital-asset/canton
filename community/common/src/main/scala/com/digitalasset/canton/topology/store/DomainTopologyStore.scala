@@ -9,6 +9,13 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
+import com.digitalasset.canton.topology.transaction.{
+  SignedTopologyTransaction,
+  SignedTopologyTransactionX,
+  TopologyChangeOp,
+  TopologyChangeOpX,
+  TopologyMappingX,
+}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, blocking}
@@ -18,7 +25,12 @@ import scala.concurrent.{ExecutionContext, blocking}
   * domain stores need the domain-id, but we only know it after init.
   * therefore, we need some data structure to manage the store
   */
-abstract class DomainTopologyStoreBase[ValidTx, T <: BaseTopologyStore[DomainStore, ValidTx]](
+abstract class DomainTopologyStoreBase[
+    ValidTx,
+    StoredTx,
+    SignedTx,
+    T <: TopologyStoreCommon[DomainStore, ValidTx, StoredTx, SignedTx],
+](
     storage: Storage,
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
@@ -62,7 +74,11 @@ class DomainTopologyStore(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-) extends DomainTopologyStoreBase[ValidatedTopologyTransaction, TopologyStore[DomainStore]](
+) extends DomainTopologyStoreBase[ValidatedTopologyTransaction, StoredTopologyTransaction[
+      TopologyChangeOp
+    ], SignedTopologyTransaction[
+      TopologyChangeOp
+    ], TopologyStore[DomainStore]](
       storage,
       timeouts,
       loggerFactory,
@@ -80,9 +96,14 @@ class DomainTopologyStoreX(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-) extends DomainTopologyStoreBase[GenericValidatedTopologyTransactionX, TopologyStoreX[
-      DomainStore
-    ]](
+) extends DomainTopologyStoreBase[
+      GenericValidatedTopologyTransactionX,
+      StoredTopologyTransactionX[TopologyChangeOpX, TopologyMappingX],
+      SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX],
+      TopologyStoreX[
+        DomainStore
+      ],
+    ](
       storage,
       timeouts,
       loggerFactory,
