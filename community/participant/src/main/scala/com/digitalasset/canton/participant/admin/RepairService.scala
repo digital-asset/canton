@@ -45,6 +45,7 @@ import com.digitalasset.canton.participant.sync.{
   LedgerSyncEvent,
   SyncDomainPersistentStateManager,
   TimestampedEvent,
+  TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
@@ -1084,13 +1085,14 @@ class RepairService(
         for {
           existingEventO <- eventLog.eventByTransactionId(transactionId).value
           _ <- existingEventO match {
-            case None => eventLog.insert(event)
-            case Some(existingEvent) if existingEvent.normalized.event == event.normalized.event =>
+            case None => eventLog.insert(event, None)
+            case Some(TimestampedEventAndCausalChange(existingEvent, updateO))
+                if existingEvent.normalized.event == event.normalized.event =>
               logger.info(
                 show"Skipping duplicate publication of event at offset ${event.localOffset} with transaction id $transactionId."
               )
               Future.unit
-            case Some(existingEvent) =>
+            case Some(TimestampedEventAndCausalChange(existingEvent, updateO)) =>
               ErrorUtil.internalError(
                 new IllegalArgumentException(
                   show"Unable to publish event at offset ${event.localOffset}, " +

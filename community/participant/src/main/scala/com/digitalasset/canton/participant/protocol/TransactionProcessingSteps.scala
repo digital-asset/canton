@@ -771,6 +771,7 @@ class TransactionProcessingSteps(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
+      tracker: SingleDomainCausalTracker,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
@@ -1002,6 +1003,7 @@ class TransactionProcessingSteps(
         StorePendingDataAndSendResponseAndCreateTimeout(
           pendingTransaction,
           responses.map(_ -> mediatorRecipient),
+          Seq.empty,
           RejectionArgs(
             pendingTransaction,
             LocalReject.TimeRejects.LocalTimeout.Reject(protocolVersion),
@@ -1285,6 +1287,15 @@ class TransactionProcessingSteps(
       Some(commitSetF),
       contractsToBeStored,
       Some(timestampedEvent),
+      Some(
+        TransactionUpdate(
+          pendingRequestData.transactionValidationResult.hostedInformeeStakeholders,
+          pendingRequestData.requestTime,
+          domainId,
+          pendingRequestData.requestCounter,
+          protocolVersion,
+        )
+      ),
     )
   }
 
@@ -1296,6 +1307,7 @@ class TransactionProcessingSteps(
       resultE: Either[MalformedMediatorRequestResult, TransactionResultMessage],
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
+      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -1310,7 +1322,7 @@ class TransactionProcessingSteps(
         event <- EitherT.fromEither[Future](
           createRejectionEvent(RejectionArgs(pendingRequestData, error))
         )
-      } yield CommitAndStoreContractsAndPublishEvent(None, Set(), event)
+      } yield CommitAndStoreContractsAndPublishEvent(None, Set(), event, None)
     }
 
     def getCommitSetAndContractsToBeStoredAndEvent()

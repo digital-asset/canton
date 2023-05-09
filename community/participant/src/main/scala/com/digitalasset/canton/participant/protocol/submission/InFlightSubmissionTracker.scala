@@ -289,13 +289,13 @@ class InFlightSubmissionTracker(
       byEventId <- multiDomainEventLog.value.lookupByEventIds(eventIds)
       (references, publications) = unsequenced.mapFilter { inFlight =>
         byEventId.get(inFlight.timelyRejectionEventId).map {
-          case (globalOffset, event, publicationTime) =>
+          case (globalOffset, timestampedEventAndCausalUpdate, publicationTime) =>
             val reference = inFlight.referenceByMessageId
             val publication = OnPublish.Publication(
               globalOffset,
               publicationTime,
               reference.some,
-              DeduplicationInfo.fromTimestampedEvent(event),
+              DeduplicationInfo.fromTimestampedEvent(timestampedEventAndCausalUpdate.tse),
             )
             reference -> publication
         }
@@ -365,7 +365,7 @@ class InFlightSubmissionTracker(
             // Instead we check the unique sequencer counters.
             val sequencerCounter = inFlight.sequencingInfo.sequencerCounter.some
             val eventO = foundLocalEvents.find { case (_localOffset, event) =>
-              event.requestSequencerCounter == sequencerCounter
+              event.tse.requestSequencerCounter == sequencerCounter
             }
             eventO match {
               case None =>
@@ -375,7 +375,7 @@ class InFlightSubmissionTracker(
                   )
                 )
               case Some((localOffset, event)) =>
-                val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
+                val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event.tse)
                 localOffsetsB += ((localOffset, inFlight, deduplicationInfo))
             }
           }

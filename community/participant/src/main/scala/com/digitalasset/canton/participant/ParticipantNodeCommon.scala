@@ -387,6 +387,7 @@ trait ParticipantNodeBootstrapCommon {
       syncDomainEphemeralStateFactory = new SyncDomainEphemeralStateFactoryImpl(
         parameterConfig.processingTimeouts,
         arguments.testingConfig,
+        parameterConfig.enableCausalityTracking,
         loggerFactory,
         futureSupervisor,
       )
@@ -412,6 +413,12 @@ trait ParticipantNodeBootstrapCommon {
       _ <- EitherT
         .right[String](
           syncDomainPersistentStateManager.initializePersistentStates()
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
+
+      multiDomainCausalityStore <- EitherT
+        .liftF(
+          MultiDomainCausalityStore.create(storage, indexedStringStore, timeouts, loggerFactory)
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
@@ -446,6 +453,7 @@ trait ParticipantNodeBootstrapCommon {
         ephemeralState,
         syncDomainPersistentStateManager,
         packageService,
+        multiDomainCausalityStore,
         topologyManager,
         topologyDispatcher,
         partyNotifier,

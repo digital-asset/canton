@@ -70,6 +70,8 @@ trait MessageDispatcher { this: NamedLogging =>
 
   protected def requestProcessors: RequestProcessors
 
+  protected def tracker: SingleDomainCausalTracker
+
   protected def topologyProcessor
       : (SequencerCounter, CantonTimestamp, Traced[List[DefaultOpenEnvelope]]) => HandlerResult
   protected def acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType
@@ -216,6 +218,7 @@ trait MessageDispatcher { this: NamedLogging =>
         } else FutureUnlessShutdown.pure(processingResultMonoid.empty)
 
       identityResult <- processTopologyTransactions(sc, ts, envelopesWithCorrectDomainId)
+      causalityProcessed <- processCausalityMessages(envelopesWithCorrectDomainId)
       acsCommitmentResult <- processAcsCommitmentEnvelope(envelopesWithCorrectDomainId, sc, ts)
       transactionTransferResult <- processTransactionAndTransferMessages(
         eventE,
@@ -228,6 +231,7 @@ trait MessageDispatcher { this: NamedLogging =>
       List(
         sanityCheck,
         identityResult,
+        causalityProcessed,
         acsCommitmentResult,
         transactionTransferResult,
         repairProcessorResult,
@@ -245,6 +249,21 @@ trait MessageDispatcher { this: NamedLogging =>
         topologyProcessor(sc, ts, Traced(envelopes))
       },
     )
+
+  protected def processCausalityMessages(
+      envelopes: List[DefaultOpenEnvelope]
+  )(implicit tc: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
+    val causalityMessages = envelopes.mapFilter(select[CausalityMessage])
+    if (causalityMessages.nonEmpty)
+      doProcess(
+        CausalityMessageKind,
+        FutureUnlessShutdown.outcomeF {
+          tracker.registerCausalityMessages(causalityMessages.map(e => e.protocolMessage))
+        },
+      )
+    else FutureUnlessShutdown.pure(processingResultMonoid.empty)
+
+  }
 
   private def processTransactionAndTransferMessages(
       eventE: Either[
@@ -682,6 +701,7 @@ private[participant] object MessageDispatcher {
         participantId: ParticipantId,
         requestTracker: RequestTracker,
         requestProcessors: RequestProcessors,
+        tracker: SingleDomainCausalTracker,
         topologyProcessor: (
             SequencerCounter,
             CantonTimestamp,
@@ -707,6 +727,7 @@ private[participant] object MessageDispatcher {
         registerTopologyTransactionResponseProcessor: Traced[
           List[DefaultOpenEnvelope]
         ] => HandlerResult,
+        tracker: SingleDomainCausalTracker,
         topologyProcessor: TopologyTransactionProcessorCommon,
         acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
         requestCounterAllocator: RequestCounterAllocator,
@@ -746,6 +767,7 @@ private[participant] object MessageDispatcher {
         participantId,
         requestTracker,
         requestProcessors,
+        tracker,
         identityProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,
@@ -765,6 +787,7 @@ private[participant] object MessageDispatcher {
         participantId: ParticipantId,
         requestTracker: RequestTracker,
         requestProcessors: RequestProcessors,
+        tracker: SingleDomainCausalTracker,
         topologyProcessor: (
             SequencerCounter,
             CantonTimestamp,
@@ -784,6 +807,7 @@ private[participant] object MessageDispatcher {
         participantId,
         requestTracker,
         requestProcessors,
+        tracker,
         topologyProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,

@@ -9,10 +9,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
+import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store.db.DbSingleDimensionEventLog
 import com.digitalasset.canton.participant.store.memory.InMemorySingleDimensionEventLog
-import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, TransactionEventId}
+import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.DomainId
@@ -30,7 +31,7 @@ import scala.concurrent.{ExecutionContext, Future}
 trait SingleDimensionEventLogLookup {
   def eventAt(offset: LocalOffset)(implicit
       traceContext: TraceContext
-  ): OptionT[Future, TimestampedEvent]
+  ): OptionT[Future, TimestampedEventAndCausalChange]
 
   def lookupEventRange(
       fromInclusive: Option[LocalOffset],
@@ -40,7 +41,7 @@ trait SingleDimensionEventLogLookup {
       limit: Option[Int],
   )(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LocalOffset, TimestampedEvent]]
+  ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]]
 }
 
 /** An event log for a single domain or for a domain-independent events (such as package uploads).
@@ -59,10 +60,10 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
     * @throws java.lang.IllegalArgumentException if a different event has already been published with the same
     *                                            [[com.digitalasset.canton.participant.LocalOffset]]
     */
-  def insertUnlessEventIdClash(event: TimestampedEvent)(implicit
-      traceContext: TraceContext
+  def insertUnlessEventIdClash(event: TimestampedEvent, causalityUpdate: Option[CausalityUpdate])(
+      implicit traceContext: TraceContext
   ): EitherT[Future, TimestampedEvent, Unit] = EitherT {
-    insertsUnlessEventIdClash(Seq(event)).map {
+    insertsUnlessEventIdClash(Seq(TimestampedEventAndCausalChange(event, causalityUpdate))).map {
       _.headOption.getOrElse(
         ErrorUtil.internalError(
           new RuntimeException(
@@ -83,7 +84,7 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
     *                                            [[com.digitalasset.canton.participant.LocalOffset]]
     *                                            as one of the events in `events`.
     */
-  def insertsUnlessEventIdClash(events: Seq[TimestampedEvent])(implicit
+  def insertsUnlessEventIdClash(events: Seq[TimestampedEventAndCausalChange])(implicit
       traceContext: TraceContext
   ): Future[Seq[Either[TimestampedEvent, Unit]]]
 
@@ -93,10 +94,10 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
     *                                            an event with the same [[com.digitalasset.canton.participant.sync.TimestampedEvent.EventId]]
     *                                            has been published with a different (unpruned) [[com.digitalasset.canton.participant.LocalOffset]].
     */
-  def insert(event: TimestampedEvent)(implicit
+  def insert(event: TimestampedEvent, causalityUpdate: Option[CausalityUpdate])(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    insertUnlessEventIdClash(event).valueOr(eventWithSameId =>
+    insertUnlessEventIdClash(event, causalityUpdate).valueOr(eventWithSameId =>
       ErrorUtil.internalError(
         new IllegalArgumentException(
           show"Unable to insert event, as the eventId id ${event.eventId.showValue} has " +
@@ -105,17 +106,19 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
       )
     )
 
+  def storeTransferUpdate(causalityUpdate: CausalityUpdate)(implicit tc: TraceContext): Future[Unit]
+
   def prune(beforeAndIncluding: LocalOffset)(implicit traceContext: TraceContext): Future[Unit]
 
   def lastOffset(implicit traceContext: TraceContext): OptionT[Future, LocalOffset]
 
   def eventById(eventId: EventId)(implicit
       traceContext: TraceContext
-  ): OptionT[Future, TimestampedEvent]
+  ): OptionT[Future, TimestampedEventAndCausalChange]
 
   def eventByTransactionId(transactionId: LedgerTransactionId)(implicit
       traceContext: TraceContext
-  ): OptionT[Future, TimestampedEvent] =
+  ): OptionT[Future, TimestampedEventAndCausalChange] =
     eventById(TransactionEventId(transactionId))
 
   /** Returns whether there exists an event in the event log with an [[com.digitalasset.canton.participant.LocalOffset]]
