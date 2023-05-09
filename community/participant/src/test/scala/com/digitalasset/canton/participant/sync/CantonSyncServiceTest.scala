@@ -73,6 +73,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     private val syncDomainPersistentStateManager = mock[SyncDomainPersistentStateManager]
     private val domainConnectionConfigStore = mock[DomainConnectionConfigStore]
     private val packageService = mock[PackageService]
+    private val causalityLookup = mock[MultiDomainCausalityStore]
     val topologyManager: ParticipantTopologyManager = mock[ParticipantTopologyManager]
 
     private val identityPusher = mock[ParticipantTopologyDispatcher]
@@ -144,6 +145,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       participantNodeEphemeralState,
       syncDomainPersistentStateManager,
       packageService,
+      causalityLookup,
       topologyManager,
       identityPusher,
       partyNotifier,

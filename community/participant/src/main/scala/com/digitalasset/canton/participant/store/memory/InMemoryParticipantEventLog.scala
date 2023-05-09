@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.store.EventLogId.ParticipantEventLogId
 import com.digitalasset.canton.participant.store.ParticipantEventLog
-import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -41,7 +41,7 @@ class InMemoryParticipantEventLog(id: ParticipantEventLogId, loggerFactory: Name
   )(implicit traceContext: TraceContext): Future[Option[TimestampedEvent]] =
     Future.successful {
       state.get().eventsByOffset.collectFirst {
-        case (localOffset, event)
+        case (localOffset, TimestampedEventAndCausalChange(event, clock))
             if event.eventId.exists(
               _.associatedDomain.contains(associatedDomain)
             ) && event.timestamp >= atOrAfter =>

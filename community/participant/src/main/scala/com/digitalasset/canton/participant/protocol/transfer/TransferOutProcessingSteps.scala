@@ -35,7 +35,12 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
+import com.digitalasset.canton.participant.protocol.{
+  ProcessingSteps,
+  ProtocolProcessor,
+  SingleDomainCausalTracker,
+  TransferOutUpdate,
+}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
@@ -310,6 +315,7 @@ class TransferOutProcessingSteps(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
+      tracker: SingleDomainCausalTracker,
       activenessF: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
@@ -410,6 +416,7 @@ class TransferOutProcessingSteps(
     } yield StorePendingDataAndSendResponseAndCreateTimeout(
       entry,
       responseOpt.map(_ -> Recipients.cc(mediatorId)).toList,
+      List.empty,
       RejectionArgs(
         entry,
         LocalReject.TimeRejects.LocalTimeout.Reject(sourceDomainProtocolVersion.v),
@@ -490,6 +497,7 @@ class TransferOutProcessingSteps(
       resultE: Either[MalformedMediatorRequestResult, TransferOutResult],
       pendingRequestData: PendingTransferOut,
       pendingSubmissionMap: PendingSubmissions,
+      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -563,6 +571,15 @@ class TransferOutProcessingSteps(
               Some(requestSequencerCounter),
             )
           ),
+          Some(
+            TransferOutUpdate(
+              hostedStakeholders,
+              requestId.unwrap,
+              transferId,
+              requestCounter,
+              sourceDomainProtocolVersion,
+            )
+          ),
         )
 
       case reasons: Verdict.ParticipantReject =>
@@ -576,14 +593,14 @@ class TransferOutProcessingSteps(
             .fromEither[Future](
               createRejectionEvent(RejectionArgs(pendingRequestData, reasons.keyEvent))
             )
-        } yield CommitAndStoreContractsAndPublishEvent(None, Set(), tsEventO)
+        } yield CommitAndStoreContractsAndPublishEvent(None, Set(), tsEventO, None)
 
       case _: MediatorReject =>
         for {
           _ <- ifThenET(transferringParticipant) {
             deleteTransfer(targetDomain, requestId)
           }
-        } yield CommitAndStoreContractsAndPublishEvent(None, Set(), None)
+        } yield CommitAndStoreContractsAndPublishEvent(None, Set(), None, None)
     }
   }
 

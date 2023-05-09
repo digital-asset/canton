@@ -430,6 +430,7 @@ trait ProcessingSteps[
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
+      causalityLookup: SingleDomainCausalTracker,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
@@ -456,6 +457,7 @@ trait ProcessingSteps[
   case class StorePendingDataAndSendResponseAndCreateTimeout(
       pendingData: requestType.PendingRequestData,
       mediatorResponses: Seq[(MediatorResponse, Recipients)],
+      causalityMessages: Seq[(CausalityMessage, Recipients)],
       rejectionArgs: RejectionArgs,
   )
 
@@ -488,6 +490,7 @@ trait ProcessingSteps[
       resultE: Either[MalformedMediatorRequestResult, Result],
       pendingRequestData: requestType.PendingRequestData,
       pendingSubmissions: PendingSubmissions,
+      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -505,6 +508,7 @@ trait ProcessingSteps[
       commitSet: Option[Future[CommitSet]],
       contractsToBeStored: Set[LfContractId],
       maybeEvent: Option[TimestampedEvent],
+      update: Option[CausalityUpdate],
   )
 
   /** Phase 7, step 4:

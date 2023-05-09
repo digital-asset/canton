@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentStateOld,
   SyncDomainPersistentStateX,
 }
-import com.digitalasset.canton.protocol.TargetDomainId
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.memory.{
   InMemorySendTrackerStore,
@@ -47,6 +47,8 @@ abstract class InMemorySyncDomainPersistentStateCommon(
   val sequencerCounterTrackerStore =
     new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
   val sendTrackerStore = new InMemorySendTrackerStore()
+  val causalDependencyStore =
+    new InMemorySingleDomainCausalDependencyStore(SourceDomainId(domainId.item), loggerFactory)
 
   override def isMemory(): Boolean = true
 

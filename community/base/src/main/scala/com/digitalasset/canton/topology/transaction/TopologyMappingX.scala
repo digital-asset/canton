@@ -8,11 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.ProtoDeserializationError.{
-  FieldNotSet,
-  UnrecognizedEnum,
-  ValueConversionError,
-}
+import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, UnrecognizedEnum}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -974,14 +970,14 @@ final case class AuthorityOfX(
     partyId: UniqueIdentifier,
     domainId: Option[UniqueIdentifier],
 )(
-    val threshold: PositiveInt,
+    val threshold: Int,
     val parties: Seq[UniqueIdentifier],
 ) extends TopologyMappingX {
 
   def toProto: v2.AuthorityOfX =
     v2.AuthorityOfX(
       party = partyId.toProtoPrimitive,
-      threshold = threshold.unwrap,
+      threshold = threshold,
       parties = parties.map(_.toProtoPrimitive),
       domain = domainId.fold("")(_.toProtoPrimitive),
     )
@@ -1020,14 +1016,7 @@ object AuthorityOfX {
   ): ParsingResult[AuthorityOfX] =
     for {
       partyId <- UniqueIdentifier.fromProtoPrimitive(value.party, "party")
-      threshold <- PositiveInt
-        .create(value.threshold)
-        .leftMap(_ =>
-          ValueConversionError(
-            "threshold",
-            s"threshold needs to be positive and not ${value.threshold}",
-          )
-        )
+      threshold = value.threshold
       parties <- value.parties.traverse(UniqueIdentifier.fromProtoPrimitive(_, "party"))
       domainId <-
         if (value.domain.nonEmpty)

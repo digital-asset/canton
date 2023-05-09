@@ -48,6 +48,7 @@ import com.digitalasset.canton.participant.sync.{
   LedgerSyncEvent,
   SyncDomainPersistentStateLookup,
   TimestampedEvent,
+  TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
@@ -68,7 +69,7 @@ class InMemoryMultiDomainEventLog(
     lookupEvent: NamedLoggingContext => (
         EventLogId,
         LocalOffset,
-    ) => Future[TimestampedEvent],
+    ) => Future[TimestampedEventAndCausalChange],
     lookupOffsetsBetween: NamedLoggingContext => EventLogId => (
         LocalOffset,
         LocalOffset,
@@ -210,8 +211,13 @@ class InMemoryMultiDomainEventLog(
       unpublishedEvents <- unpublishedOffsets.parTraverse(offset =>
         lookupEvent(namedLoggingContext)(id, offset)
       )
-    } yield unpublishedEvents.map { tse =>
-      PendingEventPublish(tse, tse.timestamp, id)
+    } yield unpublishedEvents.map { tseAndUpdate =>
+      PendingEventPublish(
+        tseAndUpdate.causalityUpdate,
+        tseAndUpdate.tse,
+        tseAndUpdate.tse.timestamp,
+        id,
+      )
     }
   }
 
@@ -258,9 +264,9 @@ class InMemoryMultiDomainEventLog(
           .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
             case (globalOffset, (id, localOffset, _processingTime)) =>
               for {
-                event <- lookupEvent(namedLoggingContext)(id, localOffset)
-              } yield globalOffset -> Traced(event.event)(
-                event.traceContext
+                eventAndCausalChange <- lookupEvent(namedLoggingContext)(id, localOffset)
+              } yield globalOffset -> Traced(eventAndCausalChange.tse.event)(
+                eventAndCausalChange.tse.traceContext
               )
           }
       },
@@ -278,7 +284,7 @@ class InMemoryMultiDomainEventLog(
 
     def eventBelongsToDomain(
         eventLogId: EventLogId,
-        timestampedEvent: TimestampedEvent,
+        timestampedEvent: TimestampedEventAndCausalChange,
     ): Boolean =
       eventLogId match {
         case EventLogId.DomainEventLogId(indexedDomain) =>
@@ -287,7 +293,7 @@ class InMemoryMultiDomainEventLog(
 
         case `participantEventLogId` =>
           // Covers CommandRejected events in the participant event log
-          timestampedEvent.eventId.exists(_.associatedDomain.exists(_ == domainId))
+          timestampedEvent.tse.eventId.exists(_.associatedDomain.exists(_ == domainId))
 
         case _ =>
           false
@@ -300,10 +306,14 @@ class InMemoryMultiDomainEventLog(
           .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
             case (globalOffset, (id, localOffset, _processingTime)) =>
               for {
-                event <- lookupEvent(namedLoggingContext)(id, localOffset)
+                eventAndCausalChange <- lookupEvent(namedLoggingContext)(id, localOffset)
               } yield {
-                if (eventBelongsToDomain(id, event))
-                  List(globalOffset -> Traced(event.event)(event.traceContext))
+                if (eventBelongsToDomain(id, eventAndCausalChange))
+                  List(
+                    globalOffset -> Traced(eventAndCausalChange.tse.event)(
+                      eventAndCausalChange.tse.traceContext
+                    )
+                  )
                 else Nil
               }
           }
@@ -315,7 +325,7 @@ class InMemoryMultiDomainEventLog(
 
   override def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = {
+  ): Future[Seq[(GlobalOffset, TimestampedEventAndCausalChange)]] = {
     val referencesInRange =
       entriesRef.get().referencesByOffset.rangeTo(upToInclusive.getOrElse(Long.MaxValue))
     val limitedReferencesInRange = limit match {
@@ -331,7 +341,7 @@ class InMemoryMultiDomainEventLog(
   override def lookupByEventIds(
       eventIds: Seq[TimestampedEvent.EventId]
   )(implicit traceContext: TraceContext): Future[
-    Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEvent, CantonTimestamp)]
+    Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
   ] = {
     eventIds
       .parTraverseFilter { eventId =>
@@ -353,7 +363,9 @@ class InMemoryMultiDomainEventLog(
     offsets
       .parTraverseFilter { localOffset =>
         OptionT(globalOffsetFor(id, localOffset)).semiflatMap { case (globalOffset, _) =>
-          lookupEvent(namedLoggingContext)(id, localOffset).map((globalOffset, _))
+          lookupEvent(namedLoggingContext)(id, localOffset).map { event =>
+            (globalOffset, event.tse)
+          }
         }.value
       }
       .map(_.sortBy { case (globalOffset, _) => globalOffset })
@@ -379,9 +391,11 @@ class InMemoryMultiDomainEventLog(
         .reverse
 
     reversedLocalOffsets.collectFirstSomeM { localOffset =>
-      lookupEvent(namedLoggingContext)(eventLogId, localOffset).map(event =>
+      lookupEvent(namedLoggingContext)(eventLogId, localOffset).map(eventAndCausalChange =>
         timestampInclusive
-          .map(ts => Option.when(event.timestamp <= ts)(localOffset))
+          .map { ts =>
+            if (eventAndCausalChange.tse.timestamp <= ts) Some(localOffset) else None
+          }
           .getOrElse(Some(localOffset))
       )
     }
@@ -541,7 +555,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
 
   private def lookupEvent(allEventLogs: => Map[EventLogId, SingleDimensionEventLog[EventLogId]])(
       namedLoggingContext: NamedLoggingContext
-  )(id: EventLogId, localOffset: LocalOffset): Future[TimestampedEvent] = {
+  )(id: EventLogId, localOffset: LocalOffset): Future[TimestampedEventAndCausalChange] = {
     implicit val loggingContext: NamedLoggingContext = namedLoggingContext
     implicit val tc: TraceContext = loggingContext.traceContext
     implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
@@ -584,7 +598,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
 
     OptionT(for {
       result <- allEventLogs.toList.parTraverseFilter { case (eventLogId, eventLog) =>
-        eventLog.eventById(eventId).map(event => eventLogId -> event.localOffset).value
+        eventLog.eventById(eventId).map(event => eventLogId -> event.tse.localOffset).value
       }
     } yield result.headOption)
   }

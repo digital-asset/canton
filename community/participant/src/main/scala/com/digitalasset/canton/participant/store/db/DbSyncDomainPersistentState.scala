@@ -15,7 +15,7 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentStateOld,
   SyncDomainPersistentStateX,
 }
-import com.digitalasset.canton.protocol.TargetDomainId
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{
   DbSequencedEventStore,
@@ -130,6 +130,13 @@ abstract class DbSyncDomainPersistentStateCommon(
     new DbSequencerCounterTrackerStore(client, storage, timeouts, loggerFactory)
   // TODO(i5660): Use the db-based send tracker store
   val sendTrackerStore = new InMemorySendTrackerStore()
+  val causalDependencyStore: DbSingleDomainCausalDependencyStore =
+    new DbSingleDomainCausalDependencyStore(
+      SourceDomainId(domainId.item),
+      storage,
+      timeouts,
+      loggerFactory,
+    )
 
   override def isMemory(): Boolean = false
 
@@ -145,6 +152,7 @@ abstract class DbSyncDomainPersistentStateCommon(
     parameterStore,
     sequencerCounterTrackerStore,
     sendTrackerStore,
+    causalDependencyStore,
   )(logger)
 }
 

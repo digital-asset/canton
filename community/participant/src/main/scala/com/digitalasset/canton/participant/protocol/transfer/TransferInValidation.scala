@@ -14,9 +14,9 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
+import com.digitalasset.canton.participant.protocol.{ProcessingSteps, SingleDomainCausalTracker}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
@@ -37,6 +37,7 @@ private[transfer] class TransferInValidation(
     participantId: ParticipantId,
     engine: DAMLe,
     transferCoordination: TransferCoordination,
+    causalityTracking: Boolean,
     targetProtocolVersion: TargetProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -82,6 +83,56 @@ private[transfer] class TransferInValidation(
         ),
       ).leftWiden[TransferProcessorError]
     } yield ()
+  }
+
+  // The transferring participant must send on the causal state at the time of the transfer-out.
+  // This state is sent to all participants hosting a party that the transferring participant confirms for.
+  def checkCausalityState(causalityLookup: SingleDomainCausalTracker)(
+      targetCrypto: DomainSnapshotSyncCryptoApi,
+      confirmFor: Set[LfPartyId],
+      transferringParticipant: Boolean,
+      transferId: TransferId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferProcessorError, List[(CausalityMessage, Recipients)]] = {
+    if (transferringParticipant && causalityTracking) {
+      val clocksF = causalityLookup.awaitAndFetchTransferOut(transferId, confirmFor)
+      for {
+        clocks <- EitherT.liftF(clocksF)
+        confirmForClocks <- {
+          val (noInfoFor, clocksList) =
+            confirmFor.toList.map(p => clocks.get(p).toRight(left = p)).separate
+
+          val either = if (noInfoFor.isEmpty) {
+            Right(clocksList)
+          } else {
+            logger.error(
+              s"Transferring participant is missing causality information for ${noInfoFor}."
+            )
+            Left(CausalityInformationMissing(transferId, missingFor = noInfoFor.toSet))
+          }
+          EitherT.fromEither[Future](either)
+        }
+
+        recipients <- EitherT.liftF {
+          confirmForClocks.parTraverse { clock =>
+            val hostedBy =
+              targetCrypto.ipsSnapshot.activeParticipantsOf(clock.partyId).map(_.keySet)
+            hostedBy.map(ptps => (clock, ptps))
+          }
+        }
+
+        causalityMessages = {
+          recipients.flatMap { case (clock, hostedBy) =>
+            val msg = CausalityMessage(domainId, targetProtocolVersion.v, transferId, clock)
+            logger.debug(
+              s"Sending causality message for $transferId with clock $clock to $hostedBy"
+            )
+            Recipients.ofSet(hostedBy).map(msg -> _).toList
+          }
+        }
+      } yield causalityMessages
+    } else EitherT.rightT[Future, TransferProcessorError](List.empty)
   }
 
   @VisibleForTesting
