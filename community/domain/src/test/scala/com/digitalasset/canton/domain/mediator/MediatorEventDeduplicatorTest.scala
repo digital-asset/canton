@@ -17,7 +17,7 @@ import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{RequestId, v0}
+import com.digitalasset.canton.protocol.{RequestId, SourceDomainId, TargetDomainId, TransferId, v0}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -34,14 +34,14 @@ import scala.util.Random
 
 class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionContext {
 
-  private val requestTime: CantonTimestamp = CantonTimestamp.Epoch
-  private val requestTime2: CantonTimestamp = requestTime.plusSeconds(1)
-  private val deduplicationTimeout: Duration = Duration.ofSeconds(10)
-  private val decisionTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(100)
+  val requestTime: CantonTimestamp = CantonTimestamp.Epoch
+  val requestTime2: CantonTimestamp = requestTime.plusSeconds(1)
+  val deduplicationTimeout: Duration = Duration.ofSeconds(10)
+  val decisionTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(100)
 
-  private val maxDelayMillis: Int = 10
+  val maxDelayMillis: Int = 10
 
-  private def mkDeduplicator()
+  def mkDeduplicator()
       : (MediatorEventDeduplicator, TestVerdictSender, MediatorDeduplicationStore) = {
     val store: MediatorDeduplicationStore =
       new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts)
@@ -65,25 +65,25 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
     DelayUtil.delay(duration.millis).map(_ => value)
   }
 
-  private lazy val uuids: Seq[UUID] = List(
+  lazy val uuids: Seq[UUID] = List(
     "51f3ffff-9248-453b-807b-91dd7ed23298",
     "c0175d4a-def2-481e-a979-ae9d335b5d35",
     "b9f66e2a-4867-465e-b51f-c727f2d0a18f",
   ).map(UUID.fromString)
 
-  private lazy val request: Seq[OpenEnvelope[MediatorRequest]] = uuids.map(mkMediatorRequest)
+  lazy val request: Seq[OpenEnvelope[MediatorRequest]] = uuids.map(mkMediatorRequest)
 
-  private def requests(is: Int*): Seq[OpenEnvelope[MediatorRequest]] = is.map(request)
+  def requests(is: Int*): Seq[OpenEnvelope[MediatorRequest]] = is.map(request)
 
-  private def deduplicationData(iAndTime: (Int, CantonTimestamp)*): Set[DeduplicationData] =
-    iAndTime.map { case (i, requestTime) =>
+  def deduplicationData(iAndTime: (Int, CantonTimestamp)*): Set[DeduplicationData] = iAndTime.map {
+    case (i, requestTime) =>
       DeduplicationData(uuids(i), requestTime, requestTime plus deduplicationTimeout)
-    }.toSet
+  }.toSet
 
-  private def deduplicationData(requestTime: CantonTimestamp, is: Int*): Set[DeduplicationData] =
+  def deduplicationData(requestTime: CantonTimestamp, is: Int*): Set[DeduplicationData] =
     deduplicationData(is.map(_ -> requestTime): _*)
 
-  private def mkMediatorRequest(uuid: UUID): OpenEnvelope[MediatorRequest] = {
+  def mkMediatorRequest(uuid: UUID): OpenEnvelope[MediatorRequest] = {
     import Pretty.*
 
     val mediatorRequest = mock[MediatorRequest]
@@ -95,10 +95,10 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
     mkDefaultOpenEnvelope(mediatorRequest)
   }
 
-  private def mkDefaultOpenEnvelope[A <: ProtocolMessage](protocolMessage: A): OpenEnvelope[A] =
+  def mkDefaultOpenEnvelope[A <: ProtocolMessage](protocolMessage: A): OpenEnvelope[A] =
     OpenEnvelope(protocolMessage, Recipients.cc(mediator))(testedProtocolVersion)
 
-  private lazy val response: DefaultOpenEnvelope = {
+  lazy val response: DefaultOpenEnvelope = {
     val message =
       SignedProtocolMessage.tryCreate(
         mock[TypedSignedProtocolMessageContent[MediatorResponse]],
@@ -108,7 +108,17 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
     mkDefaultOpenEnvelope(message)
   }
 
-  private def assertNextSentVerdict(
+  lazy val causalityEnvelope: DefaultOpenEnvelope = {
+    val message = CausalityMessage(
+      TargetDomainId(domainId),
+      testedProtocolVersion,
+      TransferId(SourceDomainId(domainId), requestTime),
+      VectorClock(SourceDomainId(domainId), requestTime, party1.toLf, Map.empty),
+    )
+    mkDefaultOpenEnvelope(message)
+  }
+
+  def assertNextSentVerdict(
       verdictSender: TestVerdictSender,
       envelope: OpenEnvelope[MediatorRequest],
       requestTime: CantonTimestamp = this.requestTime,
@@ -148,7 +158,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
     "accept non-requests" in {
       val (deduplicator, verdictSender, store) = mkDeduplicator()
 
-      val envelopes = Seq(response)
+      val envelopes = Seq(response, causalityEnvelope)
 
       val (uniqueEvents, storeF) = deduplicator.rejectDuplicates(requestTime, envelopes).futureValue
       uniqueEvents shouldBe envelopes
@@ -243,6 +253,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
               request(0),
               response,
               request(1),
+              causalityEnvelope,
             ),
           )
           .futureValue,
@@ -250,7 +261,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
         _.shouldBeCantonErrorCode(MediatorError.MalformedMessage),
         _.shouldBeCantonErrorCode(MediatorError.MalformedMessage),
       )
-      uniqueEvents2 shouldBe Seq(response, request(2), response)
+      uniqueEvents2 shouldBe Seq(response, request(2), response, causalityEnvelope)
       store
         .allData() shouldBe deduplicationData(0 -> requestTime, 1 -> requestTime, 2 -> requestTime2)
 

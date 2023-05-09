@@ -47,6 +47,7 @@ trait SyncDomainPersistentState extends NamedLogging with AutoCloseable {
   def requestJournalStore: RequestJournalStore
   def acsCommitmentStore: AcsCommitmentStore
   def parameterStore: DomainParameterStore
+  def causalDependencyStore: SingleDomainCausalDependencyStore
   def topologyStore: DomainStoreCommon
   def isMemory(): Boolean
 
@@ -55,6 +56,7 @@ trait SyncDomainPersistentState extends NamedLogging with AutoCloseable {
 trait SyncDomainPersistentStateOld extends SyncDomainPersistentState {
 
   def topologyStore: TopologyStore[DomainStore]
+
 }
 trait SyncDomainPersistentStateX extends SyncDomainPersistentState {
 

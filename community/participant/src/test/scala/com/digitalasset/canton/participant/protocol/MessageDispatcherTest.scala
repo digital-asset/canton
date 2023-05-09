@@ -29,6 +29,8 @@ import com.digitalasset.canton.protocol.{
   RequestProcessor,
   RootHash,
   SourceDomainId,
+  TargetDomainId,
+  TransferId,
   ViewHash,
   v0 as protocolv0,
 }
@@ -62,6 +64,7 @@ import com.digitalasset.canton.{
   BaseTest,
   DiscardOps,
   HasExecutorService,
+  LfPartyId,
   ProtoDeserializationError,
   RequestCounter,
   SequencerCounter,
@@ -103,6 +106,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
       badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor,
       repairProcessor: RepairProcessor,
       inFlightSubmissionTracker: InFlightSubmissionTracker,
+      causalityTracker: SingleDomainCausalTracker,
   )
 
   object Fixture {
@@ -113,6 +117,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
             ParticipantId,
             RequestTracker,
             RequestProcessors,
+            SingleDomainCausalTracker,
             (SequencerCounter, CantonTimestamp, Traced[List[DefaultOpenEnvelope]]) => HandlerResult,
             AcsCommitmentProcessor.ProcessorType,
             RequestCounterAllocator,
@@ -191,6 +196,10 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
       )
         .thenReturn(FutureUnlessShutdown.unit)
 
+      val tracker = mock[SingleDomainCausalTracker]
+      when(tracker.registerCausalityMessages(any[List[CausalityMessage]])(anyTraceContext))
+        .thenReturn(Future.unit)
+
       val requestCounterAllocator =
         new RequestCounterAllocatorImpl(initRc, cleanReplaySequencerCounter, loggerFactory)
       val recordOrderPublisher = mock[RecordOrderPublisher]
@@ -247,6 +256,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
         participantId,
         requestTracker,
         protocolProcessors,
+        tracker,
         identityProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,
@@ -269,6 +279,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
         badRootHashMessagesRequestProcessor,
         repairProcessor,
         inFlightSubmissionTracker,
+        tracker,
       )
     }
   }
@@ -336,6 +347,18 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
       dummySignature,
     )
 
+  private val causalityMessage = CausalityMessage(
+    TargetDomainId(domainId),
+    testedProtocolVersion,
+    TransferId(sourceDomain, CantonTimestamp.Epoch),
+    VectorClock(
+      sourceDomain,
+      CantonTimestamp.Epoch,
+      LfPartyId.assertFromString("Alice::domain"),
+      Map.empty,
+    ),
+  )
+
   protected def messageDispatcher(
       mkMd: (
           ProtocolVersion,
@@ -343,6 +366,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
           ParticipantId,
           RequestTracker,
           RequestProcessors,
+          SingleDomainCausalTracker,
           (SequencerCounter, CantonTimestamp, Traced[List[DefaultOpenEnvelope]]) => HandlerResult,
           AcsCommitmentProcessor.ProcessorType,
           RequestCounterAllocator,
@@ -553,6 +577,26 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
         val event =
           mkDeliver(Batch.of(testedProtocolVersion, idTx -> Recipients.cc(participantId)), sc, ts)
         handle(sut, event) {
+          checkTicks(sut, sc, ts)
+        }.futureValue
+      }
+    }
+
+    "causality messages" should {
+      "be passed to the causality tracker" in {
+        val sut = mk()
+        val sc = SequencerCounter(1)
+        val ts = CantonTimestamp.ofEpochSecond(1)
+        val event = mkDeliver(
+          Batch.of(testedProtocolVersion, causalityMessage -> Recipients.cc(participantId)),
+          sc,
+          ts,
+        )
+        handle(sut, event) {
+          verify(sut.causalityTracker)
+            .registerCausalityMessages(isEq[List[CausalityMessage]](List(causalityMessage)))(
+              anyTraceContext
+            )
           checkTicks(sut, sc, ts)
         }.futureValue
       }

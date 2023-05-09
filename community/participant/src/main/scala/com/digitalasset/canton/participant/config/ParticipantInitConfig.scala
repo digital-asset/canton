@@ -52,8 +52,10 @@ object ParticipantInitConfig {
 
   /** Init configuration of the ledger API for participant nodes
     * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
+    * @param unsafeEnableCausalityTracking Experimental. Ensures that the event ordering on the participant node is consistent even for cross domain contracts
     */
   final case class ParticipantParametersInitConfig(
-      uniqueContractKeys: Boolean = true
+      uniqueContractKeys: Boolean = true,
+      unsafeEnableCausalityTracking: Boolean = false,
   )
 }

@@ -33,6 +33,7 @@ import com.digitalasset.canton.participant.sync.{
   LedgerSyncEvent,
   SyncDomainPersistentStateLookup,
   TimestampedEvent,
+  TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -130,14 +131,14 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   /** Yields all events with offset up to `upToInclusive`. */
   def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
       traceContext: TraceContext
-  ): Future[Seq[(GlobalOffset, TimestampedEvent)]]
+  ): Future[Seq[(GlobalOffset, TimestampedEventAndCausalChange)]]
 
   /** Yields the global offset, event and publication time for all the published events with the given IDs.
     * Unpublished events are ignored.
     */
   def lookupByEventIds(eventIds: Seq[EventId])(implicit
       traceContext: TraceContext
-  ): Future[Map[EventId, (GlobalOffset, TimestampedEvent, CantonTimestamp)]]
+  ): Future[Map[EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]]
 
   /** Yields all the published events with the given IDs.
     * Unpublished events are ignored.

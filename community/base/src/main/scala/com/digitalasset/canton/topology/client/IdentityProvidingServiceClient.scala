@@ -20,11 +20,6 @@ import com.digitalasset.canton.protocol.{
   DynamicDomainParametersWithValidity,
 }
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
-  AuthorityOfDelegation,
-  AuthorityOfResponse,
-  nonConsortiumPartyDelegation,
-}
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
@@ -228,24 +223,8 @@ trait PartyTopologySnapshotClient {
     * are required for the confirmation to become valid). For normal parties returns 1.
     */
   def consortiumThresholds(parties: Set[LfPartyId]): Future[Map[LfPartyId, PositiveInt]] = {
-    authorityOf(parties).map { case AuthorityOfResponse(result) =>
-      result.map { case (partyId, AuthorityOfDelegation(_expected, threshold)) =>
-        partyId -> threshold
-      }
-    }
-  }
-
-  /** Returns the Authority-Of delegations for consortium parties. Non-consortium parties delegate to themselves
-    * with threshold one
-    */
-  def authorityOf(parties: Set[LfPartyId]): Future[AuthorityOfResponse] = {
     // TODO(i11255): this is a stub implementation for non-consortium parties
-    //   Also: shouldn't this check whether the parties are known, e.g. via inspectKnownParties?
-    Future.successful(
-      AuthorityOfResponse(
-        parties.map(partyId => partyId -> nonConsortiumPartyDelegation(partyId)).toMap
-      )
-    )
+    Future.successful(parties.map(party => party -> PositiveInt.one).toMap)
   }
 
   /** Returns true if there is at least one participant that satisfies the predicate */
@@ -287,19 +266,8 @@ trait PartyTopologySnapshotClient {
       filterParty: String,
       filterParticipant: String,
       limit: Int,
-  ): Future[
-    Set[PartyId]
-  ] // TODO(#11255): Decide on whether to standarize APIs on LfPartyId or PartyId and unify interfaces
+  ): Future[Set[PartyId]]
 
-}
-
-object PartyTopologySnapshotClient {
-  final case class AuthorityOfDelegation(expected: Set[LfPartyId], threshold: PositiveInt)
-
-  def nonConsortiumPartyDelegation(partyId: LfPartyId): AuthorityOfDelegation =
-    AuthorityOfDelegation(Set(partyId), PositiveInt.one)
-
-  final case class AuthorityOfResponse(response: Map[LfPartyId, AuthorityOfDelegation])
 }
 
 /** The subset of the topology client, providing signing and encryption key information */

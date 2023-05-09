@@ -754,7 +754,8 @@ abstract class ProtocolProcessor[
             _ <- EitherT.right(
               FutureUnlessShutdown.outcomeF(
                 unlessCleanReplay(rc)(
-                  ephemeral.recordOrderPublisher.schedulePublication(sc, rc, ts, eventO)
+                  ephemeral.recordOrderPublisher
+                    .schedulePublication(sc, rc, ts, eventO, None, steps.requestType)
                 )
               )
             )
@@ -830,9 +831,10 @@ abstract class ProtocolProcessor[
         if (isCleanReplay(rc)) {
           val pendingData = CleanReplayData(rc, sc, pendingContractIds, mediatorId)
           val responses = Seq.empty[(MediatorResponse, Recipients)]
+          val causalityMessages = Seq.empty[(CausalityMessage, Recipients)]
           val timeoutEvent = Either.right(Option.empty[TimestampedEvent])
           EitherT.pure[FutureUnlessShutdown, steps.RequestError](
-            (pendingData, responses, () => timeoutEvent)
+            (pendingData, responses, causalityMessages, () => timeoutEvent)
           )
         } else {
           for {
@@ -844,6 +846,7 @@ abstract class ProtocolProcessor[
               pendingDataAndResponseArgs,
               ephemeral.transferCache,
               ephemeral.storedContractManager,
+              ephemeral.causalityLookup,
               requestFuturesF.flatMap(_.activenessResult),
               pendingCursor,
               mediatorId,
@@ -852,6 +855,7 @@ abstract class ProtocolProcessor[
             steps.StorePendingDataAndSendResponseAndCreateTimeout(
               pendingData,
               responses,
+              causalityMessages,
               rejectionArgs,
             ) = pendingDataAndResponses
             PendingRequestData(
@@ -870,6 +874,7 @@ abstract class ProtocolProcessor[
           } yield (
             WrappedPendingRequestData(pendingData),
             responses,
+            causalityMessages,
             () => steps.createRejectionEvent(rejectionArgs),
           )
         }
@@ -877,6 +882,7 @@ abstract class ProtocolProcessor[
       (
         pendingData,
         responsesTo,
+        causalityMsgs,
         timeoutEvent,
       ) =
         pendingDataAndResponsesAndTimeoutEvent
@@ -913,8 +919,9 @@ abstract class ProtocolProcessor[
           signResponse(snapshot, response).map(_ -> recipients)
         )
       })
-
-      _ <- sendResponses(requestId, rc, signedResponsesTo)
+      messages = (signedResponsesTo: Seq[(ProtocolMessage, Recipients)]) ++
+        (causalityMsgs: Seq[(ProtocolMessage, Recipients)])
+      _ <- sendResponses(requestId, rc, messages)
         .leftMap(err => steps.embedRequestError(SequencerRequestError(err)))
         .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
@@ -1416,6 +1423,7 @@ abstract class ProtocolProcessor[
                 resultE,
                 pendingRequestData,
                 steps.pendingSubmissions(ephemeral),
+                ephemeral.causalityLookup,
                 crypto.pureCrypto,
               )
               .mapK(FutureUnlessShutdown.outcomeK)
@@ -1424,6 +1432,7 @@ abstract class ProtocolProcessor[
               commitSetOF,
               contractsToBeStored,
               eventO,
+              updateO,
             ) = commitSetAndContractsAndEvent
 
             val isApproval = verdict match {
@@ -1436,7 +1445,7 @@ abstract class ProtocolProcessor[
             if (!contractsToBeStored.subsetOf(pendingContracts))
               throw new RuntimeException("All contracts to be stored should be pending")
 
-            (commitSetOF, contractsToBeStored, eventO)
+            (commitSetOF, contractsToBeStored, eventO, updateO)
           }
         case _: CleanReplayData =>
           val commitSetOF = verdict match {
@@ -1446,12 +1455,13 @@ abstract class ProtocolProcessor[
 
           val contractsToBeStored = Set.empty[LfContractId]
           val eventO = None
+          val updateO = None
 
           EitherT.pure[FutureUnlessShutdown, steps.ResultError](
-            (commitSetOF, contractsToBeStored, eventO)
+            (commitSetOF, contractsToBeStored, eventO, updateO)
           )
       }
-      (commitSetOF, contractsToBeStored, eventO) = commitAndEvent
+      (commitSetOF, contractsToBeStored, eventO, updateO) = commitAndEvent
 
       commitTime = resultTs
       commitSetF <- signalResultToRequestTracker(
@@ -1493,6 +1503,8 @@ abstract class ProtocolProcessor[
                     requestCounter,
                     requestId.unwrap,
                     eventO,
+                    updateO,
+                    steps.requestType,
                   )
               )
             )
@@ -1672,6 +1684,8 @@ abstract class ProtocolProcessor[
                 requestCounter,
                 requestId.unwrap,
                 maybeEvent,
+                updateO = None,
+                requestType = steps.requestType,
               )
           )
           requestTimestamp = requestId.unwrap

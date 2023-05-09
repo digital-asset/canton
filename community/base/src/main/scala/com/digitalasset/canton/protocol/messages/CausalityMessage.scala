@@ -8,7 +8,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId, v0, v1}
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId, v0, v1, v2}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -27,7 +27,7 @@ import com.digitalasset.canton.version.{
   * @param transferId The ID of the transfer for which we are propagating causality information
   * @param clock The vector clock specifying causality information at the time of the transfer out
   */
-final case class CausalityMessage private (
+final case class CausalityMessage(
     targetDomain: TargetDomainId,
     transferId: TransferId,
     clock: VectorClock,
@@ -35,7 +35,8 @@ final case class CausalityMessage private (
     extends UnsignedProtocolMessage
     with PrettyPrinting
     with ProtocolMessageV0
-    with ProtocolMessageV1 {
+    with ProtocolMessageV1
+    with UnsignedProtocolMessageV2 {
 
   val domainId = targetDomain.unwrap
 
@@ -50,6 +51,9 @@ final case class CausalityMessage private (
 
   override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0))
+
+  override def toProtoSomeEnvelopeContentV2: v2.EnvelopeContent.SomeEnvelopeContent =
+    v2.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0)
 
   override def pretty: Pretty[CausalityMessage.this.type] =
     prettyOfClass(
@@ -76,7 +80,18 @@ object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] 
       case _ => None
     }
 
-  private[messages] def fromProtoV0(cmP: v0.CausalityMessage): ParsingResult[CausalityMessage] = {
+  def apply(
+      domainId: TargetDomainId,
+      protocolVersion: ProtocolVersion,
+      transferId: TransferId,
+      clock: VectorClock,
+  ): CausalityMessage = CausalityMessage(
+    domainId,
+    transferId,
+    clock,
+  )(protocolVersionRepresentativeFor(protocolVersion))
+
+  def fromProtoV0(cmP: v0.CausalityMessage): ParsingResult[CausalityMessage] = {
     val v0.CausalityMessage(domainIdP, transferIdP, clockPO) = cmP
     for {
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "target_domain_id").map(TargetDomainId(_))

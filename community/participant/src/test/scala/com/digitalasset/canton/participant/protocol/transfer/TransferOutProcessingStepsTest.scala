@@ -18,7 +18,6 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.mkActivenessSet
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -34,6 +33,11 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestV
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
   NoSubmissionPermissionOut,
   SubmittingPartyMustBeStakeholderOut,
+}
+import com.digitalasset.canton.participant.protocol.{
+  GlobalCausalOrderer,
+  ProcessingStartingPoints,
+  SingleDomainCausalTracker,
 }
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{MultiDomainEventLog, SyncDomainEphemeralState}
@@ -128,16 +132,30 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       timeouts,
       futureSupervisor,
     )
+  private val globalTracker = new GlobalCausalOrderer(
+    submittingParticipant,
+    _ => true,
+    DefaultProcessingTimeouts.testing,
+    new InMemoryMultiDomainCausalityStore(loggerFactory),
+    futureSupervisor,
+    loggerFactory,
+  )
 
   private def mkState: SyncDomainEphemeralState =
     new SyncDomainEphemeralState(
       persistentState,
       Eval.now(multiDomainEventLog),
+      new SingleDomainCausalTracker(
+        globalTracker,
+        new InMemorySingleDomainCausalDependencyStore(sourceDomain, loggerFactory),
+        loggerFactory,
+      ),
       mock[InFlightSubmissionTracker],
       ProcessingStartingPoints.default,
       _ => mock[DomainTimeTracker],
       ParticipantTestMetrics.domain,
       DefaultProcessingTimeouts.testing,
+      useCausalityTracking = true,
       loggerFactory,
       FutureSupervisor.Noop,
     )
@@ -597,6 +615,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               dataAndResponseArgs,
               state.transferCache,
               state.storedContractManager,
+              state.causalityLookup,
               FutureUnlessShutdown.pure(ActivenessResult.success),
               Future.unit,
               sourceMediator,
@@ -681,6 +700,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               Right(transferResult),
               pendingOut,
               state.pendingTransferOutSubmissions,
+              state.causalityLookup,
               pureCrypto,
             )
         )("get commit set and contract to be stored and event")

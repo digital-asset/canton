@@ -9,9 +9,10 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
+import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store.{EventLogId, SingleDimensionEventLog}
-import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
+import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
@@ -29,21 +30,22 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
     with NamedLogging {
 
   protected case class Entries(
-      eventsByOffset: SortedMap[LocalOffset, TimestampedEvent],
-      eventsByEventId: Map[EventId, TimestampedEvent],
+      eventsByOffset: SortedMap[LocalOffset, TimestampedEventAndCausalChange],
+      eventsByEventId: Map[EventId, TimestampedEventAndCausalChange],
   )
 
   protected val state = new AtomicReference(Entries(TreeMap.empty, Map.empty))
 
-  override def insertsUnlessEventIdClash(events: Seq[TimestampedEvent])(implicit
+  override def insertsUnlessEventIdClash(events: Seq[TimestampedEventAndCausalChange])(implicit
       traceContext: TraceContext
   ): Future[Seq[Either[TimestampedEvent, Unit]]] = Future.fromTry {
     events.traverse(insertUnlessEventIdClashInternal)
   }
 
   private def insertUnlessEventIdClashInternal(
-      event: TimestampedEvent
+      eventAndClock: TimestampedEventAndCausalChange
   ): Try[Either[TimestampedEvent, Unit]] = {
+    val TimestampedEventAndCausalChange(event, causalityUpdate) = eventAndClock
     implicit val traceContext: TraceContext = event.traceContext
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -56,22 +58,29 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
       ledger.get(offset) match {
         case None =>
           eventId.flatMap(byEventId.get) match {
-            case Some(existingEvent) =>
+            case Some(TimestampedEventAndCausalChange(existingEvent, existingUpdate)) =>
               eventIdClash = existingEvent.some
               oldLedger
             case None =>
               logger.trace(show"Inserted event at offset $offset.")
               Entries(
-                ledger + (offset -> event),
-                eventId.fold(byEventId)(id => byEventId + (id -> event)),
+                ledger + (offset -> eventAndClock),
+                eventId.fold(byEventId)(id => byEventId + (id -> eventAndClock)),
               )
           }
-        case Some(existingEvent) if existingEvent.normalized == event.normalized =>
+        case Some(TimestampedEventAndCausalChange(existingEvent, existingUpdate))
+            if existingEvent.normalized == event.normalized =>
+          ErrorUtil.requireState(
+            existingUpdate == causalityUpdate,
+            show"The event at offset" +
+              show" ${event.localOffset} has been re-inserted with a different causality update." +
+              show"Old value: ${existingUpdate}, new value: ${causalityUpdate}.",
+          )
           logger.info(
             s"The event to insert at offset $offset already exists in the event log. Nothing to do."
           )
           oldLedger
-        case Some(existingEvent) =>
+        case Some(TimestampedEventAndCausalChange(existingEvent, causalityUpdate)) =>
           ErrorUtil.internalError(
             new IllegalArgumentException(show"""Unable to overwrite an existing event. Aborting.
                                                |Existing event: ${existingEvent}
@@ -96,6 +105,10 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
     }
   }
 
+  def storeTransferUpdate(causalityUpdate: CausalityUpdate)(implicit
+      tc: TraceContext
+  ): Future[Unit] = Future.unit
+
   override def prune(
       beforeAndIncluding: LocalOffset
   )(implicit traceContext: TraceContext): Future[Unit] = {
@@ -116,13 +129,13 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
       limit: Option[Int],
   )(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LocalOffset, TimestampedEvent]] =
+  ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]] =
     Future.successful {
       val allEvents = state.get().eventsByOffset
       val filteredEvents = allEvents
         .rangeFrom(fromInclusive.getOrElse(Long.MinValue))
         .rangeTo(toInclusive.getOrElse(Long.MaxValue))
-        .filter { case (_, event) =>
+        .filter { case (_, TimestampedEventAndCausalChange(event, update)) =>
           fromTimestampInclusive.forall(_ <= event.timestamp) && toTimestampInclusive.forall(
             event.timestamp <= _
           )
@@ -135,7 +148,7 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
 
   override def eventAt(
       offset: LocalOffset
-  )(implicit traceContext: TraceContext): OptionT[Future, TimestampedEvent] =
+  )(implicit traceContext: TraceContext): OptionT[Future, TimestampedEventAndCausalChange] =
     OptionT(Future.successful {
       state.get().eventsByOffset.get(offset)
     })
@@ -147,15 +160,16 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
 
   override def eventById(eventId: EventId)(implicit
       traceContext: TraceContext
-  ): OptionT[Future, TimestampedEvent] =
+  ): OptionT[Future, TimestampedEventAndCausalChange] =
     OptionT(Future.successful(state.get().eventsByEventId.get(eventId)))
 
   override def existsBetween(
       timestampInclusive: CantonTimestamp,
       localOffsetInclusive: LocalOffset,
   )(implicit traceContext: TraceContext): Future[Boolean] = Future.successful {
-    state.get().eventsByOffset.rangeTo(localOffsetInclusive).exists { case (localOffset, tse) =>
-      tse.timestamp >= timestampInclusive
+    state.get().eventsByOffset.rangeTo(localOffsetInclusive).exists {
+      case (localOffset, TimestampedEventAndCausalChange(tse, _)) =>
+        tse.timestamp >= timestampInclusive
     }
   }
 
@@ -171,10 +185,12 @@ class InMemorySingleDimensionEventLog[+Id <: EventLogId](
     }
 
   private[this] def byEventIds(
-      byOffset: SortedMap[LocalOffset, TimestampedEvent]
-  ): Map[EventId, TimestampedEvent] =
+      byOffset: SortedMap[LocalOffset, TimestampedEventAndCausalChange]
+  ): Map[EventId, TimestampedEventAndCausalChange] =
     byOffset
-      .map { case (_, event) => event.eventId.map(_ -> event) }
+      .map { case (_, eventAndCausalChange) =>
+        eventAndCausalChange.tse.eventId.map(_ -> eventAndCausalChange)
+      }
       .collect { case Some(entry) => entry }
       .toMap
 }

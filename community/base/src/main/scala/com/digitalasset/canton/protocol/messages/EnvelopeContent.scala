@@ -30,7 +30,7 @@ sealed trait EnvelopeContent
   def toByteStringUnversioned: ByteString
 }
 
-sealed abstract case class EnvelopeContentV0(override val message: ProtocolMessageV0)
+final case class EnvelopeContentV0(override val message: ProtocolMessageV0)
     extends EnvelopeContent {
   override def toByteStringUnversioned: ByteString = message.toProtoEnvelopeContentV0.toByteString
 
@@ -38,7 +38,7 @@ sealed abstract case class EnvelopeContentV0(override val message: ProtocolMessa
     EnvelopeContent.representativeV0
 }
 
-sealed abstract case class EnvelopeContentV1(override val message: ProtocolMessageV1)
+final case class EnvelopeContentV1(override val message: ProtocolMessageV1)
     extends EnvelopeContent {
   override def toByteStringUnversioned: ByteString = message.toProtoEnvelopeContentV1.toByteString
 
@@ -46,7 +46,7 @@ sealed abstract case class EnvelopeContentV1(override val message: ProtocolMessa
     EnvelopeContent.representativeV1
 }
 
-sealed abstract case class EnvelopeContentV2(override val message: UnsignedProtocolMessageV2)
+final case class EnvelopeContentV2(override val message: UnsignedProtocolMessageV2)
     extends EnvelopeContent {
   override def toByteStringUnversioned: ByteString =
     v2.EnvelopeContent(message.toProtoSomeEnvelopeContentV2).toByteString
@@ -90,13 +90,13 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
     message match {
       case messageV2: UnsignedProtocolMessageV2
           if representativeProtocolVersion == EnvelopeContent.representativeV2 =>
-        Right(new EnvelopeContentV2(messageV2) {})
+        Right(EnvelopeContentV2(messageV2))
       case messageV1: ProtocolMessageV1
           if representativeProtocolVersion == EnvelopeContent.representativeV1 =>
-        Right(new EnvelopeContentV1(messageV1) {})
+        Right(EnvelopeContentV1(messageV1))
       case messageV0: ProtocolMessageV0
           if representativeProtocolVersion == EnvelopeContent.representativeV0 =>
-        Right(new EnvelopeContentV0(messageV0) {})
+        Right(EnvelopeContentV0(messageV0))
       case _ => Left(s"Cannot use message $message in protocol version $protocolVersion")
     }
   }
@@ -134,7 +134,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       case Content.CausalityMessage(messageP) => CausalityMessage.fromProtoV0(messageP)
       case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
     }): ParsingResult[ProtocolMessageV0]
-    messageE.map(message => new EnvelopeContentV0(message) {})
+    messageE.map(message => EnvelopeContentV0(message))
   }
 
   def fromProtoV1(
@@ -164,7 +164,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       case Content.CausalityMessage(messageP) => CausalityMessage.fromProtoV0(messageP)
       case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
     }): ParsingResult[ProtocolMessageV1]
-    messageE.map(message => new EnvelopeContentV1(message) {})
+    messageE.map(message => EnvelopeContentV1(message))
   }
 
   private def fromProtoV2(
@@ -190,6 +190,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
           RegisterTopologyTransactionRequest.fromProtoV0(messageP)
         case Content.RegisterTopologyTransactionResponse(messageP) =>
           RegisterTopologyTransactionResponse.fromProtoV1(messageP)
+        case Content.CausalityMessage(messageP) => CausalityMessage.fromProtoV0(messageP)
         case Content.RegisterTopologyTransactionRequestX(messageP) =>
           RegisterTopologyTransactionRequestX.fromProtoV2(messageP)
         case Content.RegisterTopologyTransactionResponseX(messageP) =>
@@ -198,7 +199,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
           AcceptedTopologyTransactionsX.fromProtoV2(messageP)
         case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
       }): ParsingResult[UnsignedProtocolMessageV2]
-    } yield new EnvelopeContentV2(content) {}
+    } yield EnvelopeContentV2(content)
   }
 
   override protected def name: String = "EnvelopeContent"
