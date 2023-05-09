@@ -5,12 +5,11 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{KillSwitches, Materializer}
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.CommonErrors
 import com.daml.lf.data.Ref
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
+import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.apiserver.services.admin.SynchronousResponse.{

@@ -201,10 +201,15 @@ object EncryptionKeyScheme {
    * (i.e. transparency).
    */
   case object EciesP256HmacSha256Aes128Cbc extends EncryptionKeyScheme {
-    override val name: String = "ECIES_P256_HMAC-SHA256_AES-CBC"
-
+    override val name: String = "ECIES-P256_HMAC256_AES128-CBC"
     override def toProtoEnum: v0.EncryptionKeyScheme =
       v0.EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc
+  }
+
+  case object Rsa2048OaepSha256 extends EncryptionKeyScheme {
+    override val name: String = "RSA2048-OAEP-SHA256"
+    override def toProtoEnum: v0.EncryptionKeyScheme =
+      v0.EncryptionKeyScheme.Rsa2048OaepSha256
   }
 
   def fromProtoEnum(
@@ -220,6 +225,8 @@ object EncryptionKeyScheme {
         Right(EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm)
       case v0.EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
         Right(EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc)
+      case v0.EncryptionKeyScheme.Rsa2048OaepSha256 =>
+        Right(EncryptionKeyScheme.Rsa2048OaepSha256)
     }
 }
 

@@ -29,7 +29,11 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   WritePartyService,
 }
 import com.digitalasset.canton.platform.LedgerApiServer
-import com.digitalasset.canton.platform.configuration.{IndexServiceConfig, ServerRole}
+import com.digitalasset.canton.platform.configuration.{
+  CommandConfiguration,
+  IndexServiceConfig,
+  ServerRole,
+}
 import com.digitalasset.canton.platform.indexer.RecoveringIndexerIntegrationSpec.*
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.{
@@ -224,6 +228,7 @@ class RecoveringIndexerIntegrationSpec
         LedgerApiServer
           .createInMemoryStateAndUpdater(
             IndexServiceConfig(),
+            CommandConfiguration.DefaultMaxCommandsInFlight,
             metrics,
             ExecutionContext.global,
           )

@@ -61,6 +61,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   RequestCounter,
   SequencerCounter,
+  TransferCounter,
 }
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -245,6 +246,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           TargetProtocolVersion(testedProtocolVersion),
           sourceIps,
           targetIps,
+          TransferCounter.Genesis,
           logger,
         )
         .value
@@ -382,6 +384,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               targetDomain = targetDomain,
               targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
               targetTimeProof = timeEvent,
+              transferCounter = TransferCounter.Genesis,
             ),
             Set(submittingParticipant, participant1, participant2, participant3, participant4),
           )
@@ -407,6 +410,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               targetDomain = targetDomain,
               targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
               targetTimeProof = timeEvent,
+              transferCounter = TransferCounter.Genesis,
             ),
             Set(submittingParticipant, participant1),
           )
@@ -503,6 +507,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       targetDomain,
       TargetProtocolVersion(testedProtocolVersion),
       timeEvent,
+      transferCounter = TransferCounter.Genesis,
     )
     val outTree = makeFullTransferOutTree(outRequest)
     val encryptedOutRequestF = for {
@@ -575,6 +580,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         targetDomain,
         TargetProtocolVersion(testedProtocolVersion),
         timeEvent,
+        transferCounter = TransferCounter.Genesis,
       )
 
       val fullTransferOutTree = makeFullTransferOutTree(outRequest)

@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
 }
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{CompletionInfo, Update}
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResult, UpdaterFlow}
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
@@ -150,8 +151,24 @@ private[platform] object InMemoryStateUpdater {
     inMemoryState.packageMetadataView.update(result.packageMetadata)
     updateCaches(inMemoryState, result.updates)
     // must be the last update: see the comment inside the method for more details
+    // must be after cache updates: see the comment inside the method for more details
     updateLedgerEnd(inMemoryState, result.lastOffset, result.lastEventSequentialId)(loggingContext)
+    // must be after LedgerEnd update because this could trigger API actions relating to this LedgerEnd
+    trackSubmissions(inMemoryState.submissionTracker, result.updates)
   }
+
+  private def trackSubmissions(
+      submissionTracker: SubmissionTracker,
+      updates: Vector[TransactionLogUpdate],
+  ): Unit =
+    updates.view
+      .collect {
+        case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, Some(completionDetails)) =>
+          completionDetails.completionStreamResponse -> completionDetails.submitters
+        case rejected: TransactionLogUpdate.TransactionRejected =>
+          rejected.completionDetails.completionStreamResponse -> rejected.completionDetails.submitters
+      }
+      .foreach(submissionTracker.onCompletion)
 
   private def updateCaches(
       inMemoryState: InMemoryState,

@@ -234,7 +234,7 @@ object DomainUsabilityChecker {
 
     override def pretty: Pretty[DomainNotSupportingMinimumProtocolVersion] = prettyOfString { _ =>
       show"The transaction uses a specific LF version $lfVersion that is supported starting protocol version: $requiredPV." +
-        show"Currently the Domain $domainId is using $currentPV"
+        show" Currently the Domain $domainId is using $currentPV."
     }
   }
 }

@@ -18,7 +18,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * By convention, the order is: the view's informees are at the head of the list, then the parent's views informees,
   * then the grandparent's, etc.
   */
-final case class Witnesses(unwrap: Seq[Set[Informee]]) {
+final case class Witnesses(unwrap: NonEmpty[Seq[Set[Informee]]]) {
   import Witnesses.*
 
   def prepend(informees: Set[Informee]) = Witnesses(informees +: unwrap)
@@ -28,24 +28,24 @@ final case class Witnesses(unwrap: Seq[Set[Informee]]) {
       topology: PartyTopologySnapshotClient
   )(implicit ec: ExecutionContext): EitherT[Future, InvalidWitnesses, Recipients] =
     for {
-      recipientsList <- unwrap.foldLeftM(Seq.empty[RecipientsTree]) { (children, informees) =>
-        for {
-          informeeParticipants <- topology
-            .activeParticipantsOfAll(informees.map(_.party).toList)
-            .leftMap(missing =>
-              InvalidWitnesses(s"Found no active participants for informees: $missing")
+      recipientsList <- unwrap.forgetNE.foldLeftM(Seq.empty[RecipientsTree]) {
+        (children, informees) =>
+          for {
+            informeeParticipants <- topology
+              .activeParticipantsOfAll(informees.map(_.party).toList)
+              .leftMap(missing =>
+                InvalidWitnesses(s"Found no active participants for informees: $missing")
+              )
+            informeeParticipantSet <- EitherT.fromOption[Future](
+              NonEmpty.from(informeeParticipants.toSet[Member]),
+              InvalidWitnesses(s"Empty set of witnesses given"),
             )
-          informeeParticipantSet <- EitherT.fromOption[Future](
-            NonEmpty.from(informeeParticipants.toSet[Member]),
-            InvalidWitnesses(s"Empty set of witnesses given"),
+          } yield Seq(
+            // TODO(#12382): support group addressing for informees
+            RecipientsTree(informeeParticipantSet.map(MemberRecipient), children)
           )
-        } yield Seq(
-          // TODO(#12382): support group addressing for informees
-          RecipientsTree(informeeParticipantSet.map(MemberRecipient), children)
-        )
       }
-      // TODO(error handling) Why is it safe to assume that the recipient list is non-empty?
-      //  It will be empty if `unwrap` is empty.
+      // recipientsList is non-empty, because unwrap is.
       recipients = Recipients(NonEmptyUtil.fromUnsafe(recipientsList))
     } yield recipients
 
@@ -54,8 +54,6 @@ final case class Witnesses(unwrap: Seq[Set[Informee]]) {
 }
 
 case object Witnesses {
-  lazy val empty: Witnesses = Witnesses(Seq.empty)
-
   final case class InvalidWitnesses(message: String) extends PrettyPrinting {
     override def pretty: Pretty[InvalidWitnesses] = prettyOfClass(unnamedParam(_.message.unquoted))
   }

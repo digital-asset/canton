@@ -9,7 +9,10 @@ import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.client.{
+  DomainTopologyClientWithInitOld,
+  DomainTopologyClientWithInitX,
+}
 import com.digitalasset.canton.topology.processing.{
   TopologyTransactionProcessor,
   TopologyTransactionProcessorCommon,
@@ -25,7 +28,7 @@ object TopologyTransactionProcessorFactory {
   /** factory used in sync domain */
   class FactoryOld(
       domainId: DomainId,
-      topologyClient: DomainTopologyClientWithInit,
+      topologyClient: DomainTopologyClientWithInitOld,
       partyNotifier: LedgerServerPartyNotifier,
       cryptoPureApi: CryptoPureApi,
       store: TopologyStore[TopologyStoreId.DomainStore],
@@ -48,7 +51,7 @@ object TopologyTransactionProcessorFactory {
       // connect domain client to processor
       topologyProcessor.subscribe(topologyClient)
       // subscribe party notifier to topology processor
-      topologyProcessor.subscribe(partyNotifier.attachToTopologyProcessor())
+      topologyProcessor.subscribe(partyNotifier.attachToTopologyProcessorOld())
       topologyProcessor
     }
   }
@@ -56,7 +59,7 @@ object TopologyTransactionProcessorFactory {
   /** factory used in sync domain */
   class FactoryX(
       domainId: DomainId,
-      topologyClient: DomainTopologyClientWithInit,
+      topologyClient: DomainTopologyClientWithInitX,
       partyNotifier: LedgerServerPartyNotifier,
       cryptoPureApi: CryptoPureApi,
       store: TopologyStoreX[TopologyStoreId.DomainStore],
@@ -79,7 +82,8 @@ object TopologyTransactionProcessorFactory {
       // connect domain client to processor
       topologyProcessor.subscribe(topologyClient)
       // subscribe party notifier to topology processor
-      topologyProcessor.subscribe(partyNotifier.attachToTopologyProcessor())
+      topologyProcessor.subscribe(partyNotifier.attachToTopologyProcessorX())
+      topologyProcessor.subscribe(topologyClient)
       topologyProcessor
     }
   }

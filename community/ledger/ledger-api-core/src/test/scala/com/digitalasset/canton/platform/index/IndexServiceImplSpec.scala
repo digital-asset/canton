@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.index
 
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Identifier
@@ -13,6 +12,7 @@ import com.digitalasset.canton.ledger.api.domain.{
   InterfaceFilter,
   TransactionFilter,
 }
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.index.IndexServiceImpl.{
   checkUnknownTemplatesOrInterfaces,

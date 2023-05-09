@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.authentication
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -24,7 +25,6 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.retry.Pause
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}

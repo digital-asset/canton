@@ -3,8 +3,8 @@
 
 package com.daml.ledger.api.benchtool.util
 
-import com.daml.error.definitions.CommonErrors
 import com.daml.error.utils.ErrorDetails
+import com.digitalasset.canton.ledger.error.CommonErrors
 import io.grpc.stub.{ClientCallStreamObserver, ClientResponseObserver}
 import org.slf4j.Logger
 
@@ -26,7 +26,7 @@ abstract class ObserverWithResult[RespT, Result](logger: Logger)
   override def onNext(value: RespT): Unit = ()
 
   override def onError(t: Throwable): Unit = {
-    logger.error(withStreamName(s"Received error: $t"))
+    logger.info(withStreamName(s"Received error: $t"))
     t match {
       case ex: io.grpc.StatusRuntimeException if isServerShuttingDownError(ex) =>
         logger.info(s"Stopping reading the stream due to the server being shut down.")

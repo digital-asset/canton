@@ -4,9 +4,11 @@
 package com
 package daml.ledger.api.benchtool.submission
 
-import daml.ledger.api.v1.value.Value
+import com.digitalasset.canton.DiscardOps
 
 import scala.collection.mutable
+
+import daml.ledger.api.v1.value.Value
 
 /** Keeps track of contract keys of contracts that haven't been used up (archived) yet.
   * Allows to select the next contract key to use up at random.
@@ -22,7 +24,7 @@ final class ActiveContractKeysPool(randomnessProvider: RandomnessProvider) {
 
   def addContractKey(templateName: String, key: Value): Unit = synchronized {
     if (!poolsPerTemplate.contains(templateName)) {
-      poolsPerTemplate.put(templateName, new DepletingUniformRandomPool(randomnessProvider))
+      poolsPerTemplate.put(templateName, new DepletingUniformRandomPool(randomnessProvider)).discard
     }
     val pool = poolsPerTemplate(templateName)
     pool.put(key)

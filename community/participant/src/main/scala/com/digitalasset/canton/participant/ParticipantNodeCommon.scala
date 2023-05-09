@@ -66,7 +66,6 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.store.PartyMetadataStore
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
@@ -242,7 +241,7 @@ trait ParticipantNodeBootstrapCommon {
       resourceManagementServiceFactory: Eval[ParticipantSettingsStore] => ResourceManagementService,
       replicationServiceFactory: Storage => ServerServiceDefinition,
       createSchedulers: ParticipantSchedulersParameters => Future[SchedulersWithPruning],
-      partyMetadataStore: PartyMetadataStore,
+      createPartyNotifierAndSubscribe: ParticipantEventPublisher => LedgerServerPartyNotifier,
       adminToken: CantonAdminToken,
       topologyManager: ParticipantTopologyManagerOps,
       componentFactory: ParticipantComponentBootstrapFactory,
@@ -391,21 +390,11 @@ trait ParticipantNodeBootstrapCommon {
         futureSupervisor,
       )
 
-      // upstream party information update generator
-      partyNotifier = new LedgerServerPartyNotifier(
-        participantId,
-        ephemeralState.participantEventPublisher,
-        partyMetadataStore,
-        clock,
-        arguments.futureSupervisor,
-        parameterConfig.processingTimeouts,
-        loggerFactory,
-      )
-
-      // Notify at participant level if eager notification is configured, else rely on notification via domain.
-      _ = if (parameterConfig.partyChangeNotification == PartyNotificationConfig.Eager) {
-        topologyManager.attachPartyNotifier(partyNotifier)
-      }
+      partyNotifier <- EitherT
+        .rightT[Future, String](
+          createPartyNotifierAndSubscribe(ephemeralState.participantEventPublisher)
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
 
       // Initialize the SyncDomain persistent states before participant recovery so that pruning recovery can re-invoke
       // an interrupted prune after a shutdown or crash, which touches the domain stores.

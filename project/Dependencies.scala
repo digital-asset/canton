@@ -95,6 +95,9 @@ object Dependencies {
 
   lazy val scopt = "com.github.scopt" %% "scopt" % "4.1.0"
 
+  lazy val akka_actor_typed = "com.typesafe.akka" %% "akka-actor-typed" % akka_version
+  lazy val akka_actor_testkit_typed =
+    "com.typesafe.akka" %% "akka-actor-testkit-typed" % akka_version
   lazy val akka_stream = "com.typesafe.akka" %% "akka-stream" % akka_version
   lazy val akka_stream_testkit = "com.typesafe.akka" %% "akka-stream-testkit" % akka_version
   lazy val akka_slf4j =
@@ -139,6 +142,7 @@ object Dependencies {
   lazy val circe_generic = "io.circe" %% "circe-generic" % circe_version
   lazy val circe_generic_extras = "io.circe" %% "circe-generic-extras" % circe_version
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
+  lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_version
 
   lazy val tink = "com.google.crypto.tink" % "tink" % "1.3.0" excludeAll (
     ExclusionRule(

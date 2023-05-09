@@ -7,8 +7,7 @@ import akka.NotUsed
 import akka.stream.scaladsl.Sink
 import akka.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.error.definitions.{CommonErrors, LedgerApiErrors}
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, ProcessedDisclosedContract, SubmittedTransaction}
 import com.daml.lf.value.Value
@@ -18,6 +17,11 @@ import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy}
 import com.digitalasset.canton.ledger.configuration.Configuration
+import com.digitalasset.canton.ledger.error.{
+  CommonErrors,
+  DamlContextualizedErrorLogger,
+  LedgerApiErrors,
+}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.ledger.sandbox.bridge.{BridgeMetrics, LedgerBridge}

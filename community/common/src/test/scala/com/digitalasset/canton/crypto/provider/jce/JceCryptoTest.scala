@@ -38,7 +38,10 @@ class JceCryptoTest
 
     behave like signingProvider(Jce.signing.supported, jceCrypto())
     behave like encryptionProvider(
-      Jce.encryption.supported,
+      // TODO(#12737): Remove the filter after RSA is implemented
+      Jce.encryption.supported.forgetNE.filter {
+        !_.isInstanceOf[EncryptionKeyScheme.Rsa2048OaepSha256.type]
+      },
       Jce.symmetric.supported,
       jceCrypto(),
     )
@@ -78,7 +81,10 @@ class JceCryptoTest
     behave like randomnessProvider(jceCrypto().map(_.pureCrypto))
     behave like javaKeyConverterProvider(
       Jce.signing.supported,
-      Jce.encryption.supported,
+      // TODO(#12737): Remove the filter after RSA is implemented
+      Jce.encryption.supported.forgetNE.filter {
+        !_.isInstanceOf[EncryptionKeyScheme.Rsa2048OaepSha256.type]
+      },
       jceCrypto(),
     )
   }

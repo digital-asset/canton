@@ -34,12 +34,7 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{
-  CheckedT,
-  ErrorUtil,
-  MonadUtil,
-  SimpleExecutionQueueWithShutdown,
-}
+import com.digitalasset.canton.util.{CheckedT, ErrorUtil, MonadUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
@@ -76,8 +71,8 @@ private[participant] class ConflictDetector(
   import LockableStates.withRC
 
   /** Execution queue to ensure that there are no concurrent accesses to the states */
-  private[this] val executionQueue: SimpleExecutionQueueWithShutdown =
-    new SimpleExecutionQueueWithShutdown(
+  private[this] val executionQueue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(
       "conflict-detector-queue",
       futureSupervisor,
       timeouts,

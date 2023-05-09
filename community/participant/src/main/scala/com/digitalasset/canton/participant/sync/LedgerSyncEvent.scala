@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.sync
 
 import com.daml.daml_lf_dev.DamlLf
+import com.daml.error.GrpcStatuses
 import com.daml.lf.data.{Bytes, ImmArray}
 import com.daml.lf.transaction.{BlindingInfo, CommittedTransaction}
-import com.digitalasset.canton.ledger.grpc.GrpcStatuses
 import com.digitalasset.canton.ledger.participant.state.v2.{
   CompletionInfo,
   DivulgedContract,

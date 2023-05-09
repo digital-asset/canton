@@ -66,7 +66,6 @@ object LfTransactionUtil {
             ),
           )
         )
-      // TODO(M40): ensure that a malicious submitter can't trigger the exception here if a key contains a contract ID
       case nx: LfNodeExercises =>
         Some(
           WithContractMetadata(

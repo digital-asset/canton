@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -52,7 +53,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.collection.mutable

@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.domain.sequencing.sequencer.store.DbSequencerStoreTest.MaxInClauseSize
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test}
 import com.digitalasset.canton.tracing.TraceContext
-import io.functionmeta.functionFullName
 
 import scala.concurrent.Future
 

@@ -173,7 +173,7 @@ trait TransferProcessingSteps[
       requestId: RequestId,
       malformedPayloads: Seq[MalformedPayload],
   )(implicit traceContext: TraceContext): Seq[MediatorResponse] =
-    // TODO(M40) This will crash the SyncDomain
+    // TODO(i12926) This will crash the SyncDomain
     ErrorUtil.internalError(
       new UnsupportedOperationException(
         s"Received a transfer out/in request with id $requestId with all payloads being malformed. Crashing..."

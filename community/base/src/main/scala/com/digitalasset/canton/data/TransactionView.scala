@@ -164,7 +164,7 @@ final case class TransactionView private (
 
   /** If the view with the given hash appears either as this view or one of its unblinded descendants,
     * replace it by the given view.
-    * TODO(M40): not stack safe unless we have limits on the depths of views.
+    * TODO(i12900): not stack safe unless we have limits on the depths of views.
     */
   def replace(h: ViewHash, v: TransactionView): TransactionView =
     if (viewHash == h) v
@@ -279,7 +279,7 @@ final case class TransactionView private (
           (fromAcc, _) =>
             // By the contract ID allocation scheme, the contract IDs in the subviews are pairwise distinct
             // and distinct from `createdCore`
-            // TODO(M40) Check this invariant somewhere
+            // TODO(i12901) Check this invariant somewhere
             ErrorUtil.internalError(
               new IllegalStateException(
                 s"Contract ${fromAcc.contract.contractId} is created multiple times in view $viewHash"
@@ -292,8 +292,6 @@ final case class TransactionView private (
         }
         val nextInputs = MapsUtil.mergeWith(accInputs, subviewNontransientInputs) {
           (fromAcc, fromSubview) =>
-            // TODO(M40) Check that `fromAcc.contract == fromSubview.contract`
-            // TODO(M40) Check that the contract is consumed either in `fromAcc` or in `fromSubview`, but not both
             fromAcc.copy(consumed = fromAcc.consumed || fromSubview.consumed)
         }
         (nextInputs, nextCreated)

@@ -4,9 +4,12 @@
 package com.digitalasset.canton.util
 
 import cats.data.EitherT
-import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
-import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SimpleExecutionQueue.TaskCell
@@ -14,54 +17,105 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
+import scala.concurrent.Future
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
 /** Functions executed with this class will only run when all previous calls have completed executing.
   * This can be used when async code should not be run concurrently.
+  *
+  * The default semantics is that a task is only executed if the previous tasks have completed successfully, i.e.,
+  * they did not fail nor was the task aborted due to shutdown.
+  *
+  * If the queue is shutdown, the tasks' execution is aborted due to shutdown too.
   */
-class SimpleExecutionQueue(logTaskTiming: Boolean = false)(implicit ec: ExecutionContext)
-    extends PrettyPrinting {
+class SimpleExecutionQueue(
+    name: String,
+    futureSupervisor: FutureSupervisor,
+    override val timeouts: ProcessingTimeout,
+    override val loggerFactory: NamedLoggerFactory,
+    logTaskTiming: Boolean = false,
+) extends PrettyPrinting
+    with NamedLogging
+    with FlagCloseableAsync {
 
-  /** Will execute the given function after all previous executions have completed and return the
+  protected val directExecutionContext: DirectExecutionContext = DirectExecutionContext(logger)
+
+  /** Will execute the given function after all previous executions have completed successfully and return the
     * future with the result of this execution.
     */
   def execute[A](execution: => Future[A], description: String)(implicit
       loggingContext: ErrorLoggingContext
-  ): Future[A] =
-    genExecute(true, execution, description)
+  ): FutureUnlessShutdown[A] =
+    genExecute(
+      runIfFailed = false,
+      FutureUnlessShutdown.outcomeF(execution)(directExecutionContext),
+      description,
+    )
 
   def executeE[A, B](
       execution: => EitherT[Future, A, B],
       description: String,
-  )(implicit loggingContext: ErrorLoggingContext): EitherT[Future, A, B] =
+  )(implicit loggingContext: ErrorLoggingContext): EitherT[FutureUnlessShutdown, A, B] =
     EitherT(execute(execution.value, description))
 
-  /** Executes the given function after all previous executions have completed successfully
-    *
-    * @return A future with the result of this execution or the last failure of an earlier execution
-    */
-  def executeUnlessFailed[A](execution: => Future[A], description: String)(implicit
+  def executeEUS[A, B](
+      execution: => EitherT[FutureUnlessShutdown, A, B],
+      description: String,
+  )(implicit loggingContext: ErrorLoggingContext): EitherT[FutureUnlessShutdown, A, B] =
+    EitherT(executeUS(execution.value, description))
+
+  def executeUS[A](execution: => FutureUnlessShutdown[A], description: String)(implicit
       loggingContext: ErrorLoggingContext
-  ): Future[A] =
-    genExecute(false, execution, description)
+  ): FutureUnlessShutdown[A] =
+    genExecute(runIfFailed = false, execution, description)
+
+  def executeUnderFailures[A](execution: => Future[A], description: String)(implicit
+      loggingContext: ErrorLoggingContext
+  ): FutureUnlessShutdown[A] =
+    genExecute(
+      runIfFailed = true,
+      FutureUnlessShutdown.outcomeF(execution)(directExecutionContext),
+      description,
+    )
+
+  def executeUnderFailuresUS[A](execution: => FutureUnlessShutdown[A], description: String)(implicit
+      loggingContext: ErrorLoggingContext
+  ): FutureUnlessShutdown[A] =
+    genExecute(runIfFailed = true, execution, description)
 
   private def genExecute[A](
       runIfFailed: Boolean,
-      execution: => Future[A],
+      execution: => FutureUnlessShutdown[A],
       description: String,
-  )(implicit loggingContext: ErrorLoggingContext): Future[A] = {
-    val next = new TaskCell(description, logTaskTiming)
+  )(implicit loggingContext: ErrorLoggingContext): FutureUnlessShutdown[A] = {
+    val next = new TaskCell(description, logTaskTiming, futureSupervisor, directExecutionContext)
     val oldHead = queueHead.getAndSet(next) // linearization point
-    next.chain(oldHead, runIfFailed, execution)
+    next.chain(
+      oldHead,
+      runIfFailed,
+      // Only run the task when the queue is not shut down
+      performUnlessClosingUSF(s"queued task: $description")(execution)(
+        directExecutionContext,
+        loggingContext.traceContext,
+      ),
+    )
   }
 
-  /** Returns a future that completes when all scheduled tasks up to now have completed. Never fails. */
-  def flush(): Future[Unit] = queueHead.get().future.transform(_ => Success(()))
+  /** Returns a future that completes when all scheduled tasks up to now have completed or after a shutdown has been initiated. Never fails. */
+  def flush(): Future[Unit] =
+    queueHead
+      .get()
+      .future
+      .onShutdown(())(directExecutionContext)
+      .recover { exception =>
+        logger.debug(s"Flush has failed, however returning success", exception)(
+          TraceContext.empty
+        )
+      }(directExecutionContext)
 
   private val queueHead: AtomicReference[TaskCell] =
-    new AtomicReference[TaskCell](TaskCell.sentinel)
+    new AtomicReference[TaskCell](TaskCell.sentinel(directExecutionContext))
 
   /** slow and in-efficient queue size, to be used for inspection */
   def queueSize: Int = {
@@ -92,34 +146,66 @@ class SimpleExecutionQueue(logTaskTiming: Boolean = false)(implicit ec: Executio
     param("queued tasks", _.queued.map(_.unquoted))
   )
 
-  /** Await all tasks to complete.
-    * Does not await tasks that are added to the queue after this method has been called.
-    *
-    * @throws scala.concurrent.TimeoutException if the tasks did not complete within the `timeout`.
-    */
-  def asCloseable(name: String, timeout: Duration)(implicit
-      loggingContext: ErrorLoggingContext
-  ): AsyncOrSyncCloseable =
-    new AsyncOrSyncCloseable {
-      override def close(): Unit = FutureUtil.noisyAwaitResult(
-        flush(),
-        show"simple execution queue ${name.unquoted} with tasks ${queued.map(_.unquoted)}",
-        timeout,
-      )
-
-      override def toString: String = s"SimpleExecutionQueueCloseable(name=${name})"
+  private def forceShutdownTasks(): Unit = {
+    @tailrec
+    def go(cell: TaskCell, nextTaskAfterRunningOne: Option[TaskCell]): Option[TaskCell] = {
+      // If the predecessor of the cell is completed, then it is the running task, in which case we stop the recursion.
+      // Indeed the predecessor of the running task is only set to None when the task has completed, so we need to
+      // access the predecessor and check if it's done. There is a potential race because by the time we reach the supposed
+      // first task after the running one and shut it down, it might already have started if the running task finished in the meantime.
+      // This is fine though because tasks are wrapped in a performUnlessShutdown so the task will be `AbortedDueToShutdown` anyway
+      // instead of actually start, so the race is benign.
+      if (cell.predecessor.exists(_.future.unwrap.isCompleted)) {
+        errorLoggingContext(TraceContext.empty).debug(
+          s"${cell.description} is still running. It will be left running but all subsequent tasks will be aborted."
+        )
+        nextTaskAfterRunningOne
+      } else {
+        cell.predecessor match {
+          case Some(predCell) => go(predCell, Some(cell))
+          case _ => None
+        }
+      }
     }
+
+    // Find the first task queued after the currently running one and shut it down, this will trigger a cascade and
+    // `AbortDueToShutdown` all subsequent tasks
+    go(queueHead.get(), None).foreach(_.shutdown())
+  }
+
+  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
+    import TraceContext.Implicits.Empty.*
+    Seq(
+      AsyncCloseable(
+        s"simple-exec-queue: $name",
+        flush(),
+        timeouts.shutdownProcessing.duration,
+        // In the event where the flush does not complete within the allocated timeout,
+        // forcibly shutdown the remaining queued tasks, except the currently running one
+        onTimeout = _ => forceShutdownTasks(),
+      )
+    )
+  }
 }
 
 object SimpleExecutionQueue {
 
   /** Implements the chaining of tasks and their descriptions. */
-  private class TaskCell(val description: String, logTaskTiming: Boolean) {
+  private class TaskCell(
+      val description: String,
+      logTaskTiming: Boolean,
+      futureSupervisor: FutureSupervisor,
+      directExecutionContext: DirectExecutionContext,
+  )(implicit errorLoggingContext: ErrorLoggingContext) {
 
     /** Completes after all earlier tasks and this task have completed.
       * Fails with the exception of the first task that failed, if any.
       */
-    private val completionPromise: Promise[Unit] = Promise[Unit]()
+    private val completionPromise: PromiseUnlessShutdown[Unit] =
+      new PromiseUnlessShutdown[Unit](description, futureSupervisor)(
+        errorLoggingContext,
+        directExecutionContext,
+      )
 
     /** `null` if no predecessor has been chained.
       * [[scala.Some$]]`(cell)` if the predecessor task is `cell` and this task is queued or running.
@@ -140,39 +226,47 @@ object SimpleExecutionQueue {
     def chain[A](
         pred: TaskCell,
         runIfFailed: Boolean,
-        execution: => Future[A],
+        execution: => FutureUnlessShutdown[A],
     )(implicit
-        ec: ExecutionContext,
-        loggingContext: ErrorLoggingContext,
-    ): Future[A] = {
+        loggingContext: ErrorLoggingContext
+    ): FutureUnlessShutdown[A] = {
       val succeed = predecessorCell.compareAndSet(null, Some(pred))
       ErrorUtil.requireState(succeed, s"Attempt to chain task $description several times.")(
         loggingContext
       )
 
-      def runTask(propagatedException: Option[Throwable]): Future[(Option[Throwable], A)] = {
+      def runTask(
+          propagatedException: Option[Throwable]
+      ): FutureUnlessShutdown[(Option[Throwable], A)] = {
         if (logTaskTiming && loggingContext.logger.underlying.isDebugEnabled) {
-          implicit val traceContext: TraceContext = loggingContext.traceContext
           val startTime = System.nanoTime()
           val waitingDelay = Duration.fromNanos(startTime - taskCreationTime)
-          loggingContext.logger.debug(
+          loggingContext.debug(
             show"Running task ${description.singleQuoted} after waiting for $waitingDelay"
           )
           execution.transform { result =>
             val finishTime = System.nanoTime()
             val runningDuration = Duration.fromNanos(finishTime - startTime)
-            loggingContext.logger.debug(
-              show"Task ${description.singleQuoted} finished after $runningDuration running time and $waitingDelay waiting time"
+            val resultStr = result match {
+              case Failure(_exception) => "failed"
+              case Success(UnlessShutdown.Outcome(_result)) => "completed"
+              case Success(UnlessShutdown.AbortedDueToShutdown) => "aborted"
+            }
+            loggingContext.debug(
+              show"Task ${description.singleQuoted} finished as $resultStr after $runningDuration running time and $waitingDelay waiting time"
             )
-            result.map(a => (propagatedException, a))
-          }
+            result.map(r => r.map(a => (propagatedException, a)))
+          }(directExecutionContext)
         } else {
-          execution.map(a => (propagatedException, a))
+          execution.map(a => (propagatedException, a))(directExecutionContext)
         }
       }
 
       val chained = pred.future.transformWith {
-        case Success(_) => runTask(None)
+        case Success(UnlessShutdown.Outcome(_result)) =>
+          runTask(None)
+        case Success(UnlessShutdown.AbortedDueToShutdown) =>
+          FutureUnlessShutdown.abortedDueToShutdown
         case Failure(ex) =>
           // Propagate the exception `ex` from an earlier task
           if (runIfFailed) runTask(Some(ex))
@@ -184,25 +278,33 @@ object SimpleExecutionQueue {
                 s"Not running task ${description.singleQuoted} due to exception after waiting for $waitingDelay"
               )(loggingContext.traceContext)
             }
-            Future.failed(ex)
+            FutureUnlessShutdown.failed(ex)
           }
-      }
+      }(directExecutionContext)
       val completed = chained.thereafter { _ =>
         // Cut the predecessor as we're now done.
         predecessorCell.set(None)
-      }
+      }(directExecutionContext)
       val propagatedException = completed.flatMap { case (earlierExceptionO, _) =>
-        earlierExceptionO.fold(Future.unit)(Future.failed)
-      }
+        earlierExceptionO.fold(FutureUnlessShutdown.unit)(FutureUnlessShutdown.failed)
+      }(directExecutionContext)
       completionPromise.completeWith(propagatedException)
-      completed.map(_._2)
+
+      // In order to be able to manually shutdown a task using its completionPromise, we semantically "check" that
+      // completionPromise hasn't already be completed with AbortedDueToShutdown, and if not we return the computation
+      // result. Note that we need to be sure that completionPromise will be fulfilled when
+      // 'completed' is, which is done just above
+      completionPromise.futureUS.transformWith {
+        case Success(AbortedDueToShutdown) => FutureUnlessShutdown.abortedDueToShutdown
+        case _ => completed.map(_._2)(directExecutionContext)
+      }(directExecutionContext)
     }
 
-    /** The returned future completes after this task has completed.
-      * If the task is not supposed to run if an earlier task has failed,
+    /** The returned future completes after this task has completed or a shutdown has occurred.
+      * If the task is not supposed to run if an earlier task has failed or was shutdown,
       * then this task completes when all earlier tasks have completed without being actually run.
       */
-    def future: Future[Unit] = completionPromise.future
+    def future: FutureUnlessShutdown[Unit] = completionPromise.futureUS
 
     /** Returns the predecessor task's cell or [[scala.None$]] if this task has already been completed. */
     def predecessor: Option[TaskCell] = {
@@ -215,15 +317,24 @@ object SimpleExecutionQueue {
       go()
     }
 
+    def shutdown(): Unit = {
+      errorLoggingContext.warn(s"Forcibly completing $description with AbortedDueToShutdown")
+      completionPromise.shutdown()
+    }
   }
 
   private object TaskCell {
 
     /** Sentinel task cell that is already completed. */
-    val sentinel: TaskCell = {
-      val cell = new TaskCell("sentinel", false)
+    def sentinel(directExecutionContext: DirectExecutionContext): TaskCell = {
+      // We don't care about the logging context here because the promise is already completed
+      import TraceContext.Implicits.Empty.*
+      val errorLoggingContext = ErrorLoggingContext.fromTracedLogger(NamedLogging.noopLogger)
+      val cell = new TaskCell("sentinel", false, FutureSupervisor.Noop, directExecutionContext)(
+        errorLoggingContext
+      )
       cell.predecessorCell.set(None)
-      cell.completionPromise.success(())
+      cell.completionPromise.outcome(())
       cell
     }
   }

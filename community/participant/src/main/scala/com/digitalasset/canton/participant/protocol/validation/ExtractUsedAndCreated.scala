@@ -216,7 +216,7 @@ private[validation] class ExtractUsedAndCreated(
           }
         }
       } else if (hostsAny(stakeholders.diff(informees))) {
-        // TODO(M40) report view participant data as malformed
+        // TODO(i12901) report view participant data as malformed
         ErrorUtil.requireArgument(
           !inputContractWithMetadata.consumed,
           s"Participant hosts non-informee stakeholder(s) of consumed ${contract.contractId}; stakeholders: $stakeholders, informees: $informees",
@@ -343,7 +343,9 @@ private[validation] class ExtractUsedAndCreated(
     // so during processing the numbers may lie outside of {-1,0,+1}.
     // At the end, however, by the assumption of internal key consistency of the submitted transaction
     // we should end up with 0 or -1 for assigned input keys and 0 or +1 for unassigned ones.
-    // TODO(M40) This assumption holds only for honest submitters
+    //
+    // This assumption holds only for honest submitters. We don't need to improve this, because this code is only
+    // called by PV2 and this protocol version need not be resilient against malicious submitters.
     //
     // Keys in this map must be locked during phase 3 even if their status does not change (i.e., maps to 0)
     // because we cannot guarantee that the transaction is committed atomically (with dishonest submitter and confirmers).
@@ -441,7 +443,6 @@ private[validation] class ExtractUsedAndCreated(
                   // However, this does not affect the condition here by the assumption of internal consistency,
                   // because these archivals from preceding non-parent views must refer to different contract IDs
                   // as the contract ID of the created node is fresh.
-                  // TODO(M40) Internal consistency can be assumed only for an honest submitter
                   updateKeyCount(key, delta = 0)
                 } else {
                   updateKeyCount(key, delta = 1)
@@ -532,7 +533,6 @@ private[validation] class ExtractUsedAndCreated(
       // As the participant receives all views that update a key it hosts a maintainer of,
       // we simply merge the active ledger states at the end of all root views for the updated keys.
       // This gives the final resolution for the key.
-      // TODO(M40,#713) validate internal key consistency
       val mergedKeys = rootViewTrees.foldLeft(Map.empty[LfGlobalKey, KeyMapping]) {
         (accKeys, rootView) => accKeys ++ rootView.view.updatedKeyValues
       }

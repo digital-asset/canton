@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.executors.InstrumentedExecutors
 import com.daml.executors.executors.{
   NamedExecutor,
@@ -17,6 +17,7 @@ import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, ReportsHealth}
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.configuration.ServerRole
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 

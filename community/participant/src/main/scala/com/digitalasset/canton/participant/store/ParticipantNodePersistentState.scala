@@ -7,6 +7,7 @@ import akka.stream.Materializer
 import cats.Eval
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{
@@ -32,7 +33,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{ErrorUtil, retry}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import io.functionmeta.functionFullName
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*

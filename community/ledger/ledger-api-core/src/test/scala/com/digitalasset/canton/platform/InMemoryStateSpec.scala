@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.{
@@ -30,7 +31,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   s"$className.initialized" should "return false if not initialized" in withTestFixture {
-    case (inMemoryState, _, _, _, _, _, _, _, _, _) =>
+    case (inMemoryState, _, _, _, _, _, _, _, _, _, _) =>
       inMemoryState.initialized shouldBe false
   }
 
@@ -45,6 +46,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
           packageMetadataView,
           updateStringInterningView,
           updatePackageMetadataView,
+          submissionTracker,
           inOrder,
         ) =>
       val initOffset = Offset.fromHexString(Ref.HexString.assertFromString("abcdef"))
@@ -75,6 +77,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
           inOrder.verify(contractStateCaches).reset(initOffset)
           inOrder.verify(inMemoryFanoutBuffer).flush()
           inOrder.verify(mutableLedgerEndCache).set(initOffset -> initEventSequentialId)
+          inOrder.verify(submissionTracker).close()
           inOrder.verify(dispatcherState).startDispatcher(initLedgerEnd.lastOffset)
 
           inMemoryState.initialized shouldBe true
@@ -143,6 +146,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
           PackageMetadataView,
           (UpdatingStringInterningView, LedgerEnd) => Future[Unit],
           PackageMetadataView => Future[Unit],
+          SubmissionTracker,
           InOrder,
       ) => Future[Assertion]
   ): Future[Assertion] = {
@@ -154,6 +158,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
     val packageMetadataView = mock[PackageMetadataView]
     val updateStringInterningView = mock[(UpdatingStringInterningView, LedgerEnd) => Future[Unit]]
     val updatePackageMetadataView = mock[PackageMetadataView => Future[Unit]]
+    val submissionTracker = mock[SubmissionTracker]
 
     // Mocks should be called in the asserted order
     val inOrderMockCalls = Mockito.inOrder(
@@ -164,6 +169,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
       dispatcherState,
       updateStringInterningView,
       updatePackageMetadataView,
+      submissionTracker,
     )
 
     val inMemoryState = new InMemoryState(
@@ -173,6 +179,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
       stringInterningView = stringInterningView,
       dispatcherState = dispatcherState,
       packageMetadataView = packageMetadataView,
+      submissionTracker = submissionTracker,
     )
 
     test(
@@ -185,6 +192,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
       packageMetadataView,
       updateStringInterningView,
       updatePackageMetadataView,
+      submissionTracker,
       inOrderMockCalls,
     )
   }

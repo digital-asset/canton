@@ -8,6 +8,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -15,11 +16,14 @@ import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.domain.{
   DomainRegistryError,
   ParticipantInitializeTopology,
   ParticipantInitializeTopologyX,
+  RegisterTopologyTransactionHandleWithProcessor,
   SequencerBasedRegisterTopologyTransactionHandle,
+  SequencerBasedRegisterTopologyTransactionHandleX,
 }
 import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
@@ -60,7 +64,6 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, DomainAlias}
-import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -76,12 +79,6 @@ trait RegisterTopologyTransactionHandleCommon[TX] extends FlagCloseable {
     RegisterTopologyTransactionResponseResult.State
   ]]
 }
-
-trait RegisterTopologyTransactionHandle
-    extends RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction]
-
-trait RegisterTopologyTransactionHandleX
-    extends RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX]
 
 trait TopologyDispatcherCommon extends NamedLogging with FlagCloseable
 
@@ -110,6 +107,7 @@ trait ParticipantTopologyDispatcherCommon extends TopologyDispatcherCommon {
   ): EitherT[FutureUnlessShutdown, String, Unit]
   def onboardToDomain(
       domainId: DomainId,
+      topologyRequestAddress: Option[TopologyRequestAddressX],
       alias: DomainAlias,
       timeTrackerConfig: DomainTimeTrackerConfig,
       sequencerConnection: SequencerConnection,
@@ -131,6 +129,7 @@ trait ParticipantTopologyDispatcherCommon extends TopologyDispatcherCommon {
   def createHandler(
       domain: DomainAlias,
       domainId: DomainId,
+      topologyRequestAddress: Option[TopologyRequestAddressX],
       protocolVersion: ProtocolVersion,
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
@@ -147,7 +146,7 @@ abstract class ParticipantTopologyDispatcherImplCommon[S <: SyncDomainPersistent
 ) extends ParticipantTopologyDispatcherCommon {
 
   /** map of active domain outboxes, i.e. where we are connected and actively try to push topology state onto the domains */
-  private[topology] val domains = new TrieMap[DomainAlias, DomainOutbox]()
+  private[topology] val domains = new TrieMap[DomainAlias, DomainOutboxCommon[?, ?, ?]]()
 
   def queueStatus: TopologyQueueStatus = {
     val (dispatcher, clients) = domains.values.foldLeft((0, 0)) { case ((disp, clts), outbox) =>
@@ -236,6 +235,7 @@ class ParticipantTopologyDispatcher(
   override def createHandler(
       domain: DomainAlias,
       domainId: DomainId,
+      maybeTopologyRequestAddress: Option[TopologyRequestAddressX],
       protocolVersion: ProtocolVersion,
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
@@ -290,6 +290,7 @@ class ParticipantTopologyDispatcher(
 
   override def onboardToDomain(
       domainId: DomainId,
+      topologyRequestAddressUnusedInNonX: Option[TopologyRequestAddressX],
       alias: DomainAlias,
       timeTrackerConfig: DomainTimeTrackerConfig,
       sequencerConnection: SequencerConnection,
@@ -300,8 +301,12 @@ class ParticipantTopologyDispatcher(
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = getState(domainId).flatMap {
-    state =>
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
+    require(
+      topologyRequestAddressUnusedInNonX.isEmpty,
+      s"Topology request address should never be set in daml 2.*, but instead found ${topologyRequestAddressUnusedInNonX}",
+    )
+    getState(domainId).flatMap { state =>
       (new ParticipantInitializeTopology(
         domainId,
         alias,
@@ -317,6 +322,7 @@ class ParticipantTopologyDispatcher(
         crypto,
         protocolVersion,
       )).run()
+    }
   }
 }
 
@@ -365,28 +371,26 @@ class ParticipantTopologyDispatcherX(
                   filterUid = Some(Seq(participantId.uid)),
                   filterNamespace = None,
                 )
-                .map { res =>
-                  val participantUid = participantId.uid
-                  val domainUid = domainId.uid
-                  res.toTopologyState.exists {
-                    case DomainTrustCertificateX(`participantUid`, `domainUid`) => true
-                    case _ => false
-                  }
-                }
+                .map(_.toTopologyState.exists {
+                  case DomainTrustCertificateX(`participantId`, `domainId`, _, _) => true
+                  case _ => false
+                })
             )
           )
       } yield alreadyTrusted
     def trustDomain(
         state: SyncDomainPersistentStateX
     ): EitherT[FutureUnlessShutdown, String, Unit] =
-      performUnlessClosingEitherU(functionFullName)(
+      performUnlessClosingEitherUSF(functionFullName)(
         manager
           .proposeAndAuthorize(
             TopologyChangeOpX.Replace,
             DomainTrustCertificateX(
-              participantId.uid,
-              domainId.uid,
-            )(transferOnlyToGivenTargetDomains = false, targetDomains = Seq.empty),
+              participantId,
+              domainId,
+              transferOnlyToGivenTargetDomains = false,
+              targetDomains = Seq.empty,
+            ),
             serial = None,
             // TODO(#11255) auto-determine signing keys
             signingKeys = Seq(participantId.uid.namespace.fingerprint),
@@ -410,6 +414,7 @@ class ParticipantTopologyDispatcherX(
 
   override def onboardToDomain(
       domainId: DomainId,
+      maybeTopologyRequestAddress: Option[TopologyRequestAddressX],
       alias: DomainAlias,
       timeTrackerConfig: DomainTimeTrackerConfig,
       sequencerConnection: SequencerConnection,
@@ -420,11 +425,15 @@ class ParticipantTopologyDispatcherX(
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = getState(domainId).flatMap {
-    state =>
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
+    val topologyRequestAddress = maybeTopologyRequestAddress.getOrElse(
+      throw new IllegalStateException("TopologyRequestAddressX needs to be set")
+    )
+    getState(domainId).flatMap { state =>
       (new ParticipantInitializeTopologyX(
         domainId,
         alias,
+        topologyRequestAddress,
         participantId,
         manager.store,
         state.topologyStore,
@@ -437,15 +446,65 @@ class ParticipantTopologyDispatcherX(
         crypto,
         protocolVersion,
       )).run()
+    }
   }
 
   override def createHandler(
       domain: DomainAlias,
       domainId: DomainId,
+      maybeTopologyRequestAddress: Option[TopologyRequestAddressX],
       protocolVersion: ProtocolVersion,
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
-  ): ParticipantTopologyDispatcherHandle = ???
+  ): ParticipantTopologyDispatcherHandle = {
+    val topologyRequestAddress = maybeTopologyRequestAddress.getOrElse(
+      throw new IllegalStateException("TopologyRequestAddressX needs to be set")
+    )
+    new ParticipantTopologyDispatcherHandle {
+      val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
+        (traceContext, env) =>
+          sequencerClient.sendAsync(
+            Batch(List(env), protocolVersion)
+          )(traceContext),
+        domainId,
+        topologyRequestAddress,
+        participantId,
+        participantId,
+        protocolVersion,
+        timeouts,
+        loggerFactory,
+      )
+
+      override def domainConnected()(implicit
+          traceContext: TraceContext
+      ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] =
+        getState(domainId)
+          .flatMap { state =>
+            val outbox = new DomainOutboxX(
+              domain,
+              domainId,
+              protocolVersion,
+              handle,
+              client,
+              manager.store,
+              state.topologyStore,
+              timeouts,
+              loggerFactory.appendUnnamedKey("domain", domain.unwrap),
+              crypto,
+            )
+            ErrorUtil.requireState(
+              !domains.contains(domain),
+              s"topology pusher for $domain already exists",
+            )
+            domains += domain -> outbox
+            outbox.startup()
+          }
+
+      override def processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = handle.processor
+
+    }
+  }
+
 }
 
 private class DomainOutbox(
@@ -512,7 +571,7 @@ private class DomainOutboxX(
     domain: DomainAlias,
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
-    val handle: RegisterTopologyTransactionHandleX,
+    val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
     targetClient: DomainTopologyClientWithInit,
     val authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
@@ -523,7 +582,7 @@ private class DomainOutboxX(
 )(implicit ec: ExecutionContext)
     extends DomainOutboxCommon[
       GenericSignedTopologyTransactionX,
-      RegisterTopologyTransactionHandleX,
+      RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
       TopologyStoreX[TopologyStoreId.DomainStore],
     ](
       domain,
@@ -977,7 +1036,7 @@ private class DomainOnboardingOutboxX(
     val domainId: DomainId,
     val protocolVersion: ProtocolVersion,
     participantId: ParticipantId,
-    val handle: RegisterTopologyTransactionHandleX,
+    val handle: RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
     val authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
     val timeouts: ProcessingTimeout,
@@ -985,7 +1044,7 @@ private class DomainOnboardingOutboxX(
     override protected val crypto: Crypto,
 ) extends DomainOutboxDispatch[
       GenericSignedTopologyTransactionX,
-      RegisterTopologyTransactionHandleX,
+      RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
       TopologyStoreX[TopologyStoreId.DomainStore],
     ]
     with DomainOutboxDispatchHelperX {
@@ -1034,10 +1093,10 @@ private class DomainOnboardingOutboxX(
   )(implicit traceContext: TraceContext): Either[DomainRegistryError, Unit] = {
     val (haveEncryptionKey, haveSigningKey) =
       initial.map(_.transaction.mapping).foldLeft((false, false)) {
-        case ((haveEncryptionKey, haveSigningKey), okm @ OwnerToKeyMappingX(`participantId`, _)) =>
+        case ((haveEncryptionKey, haveSigningKey), OwnerToKeyMappingX(`participantId`, _, keys)) =>
           (
-            haveEncryptionKey || okm.keys.exists(!_.isSigning),
-            haveSigningKey || okm.keys.exists(_.isSigning),
+            haveEncryptionKey || keys.exists(!_.isSigning),
+            haveSigningKey || keys.exists(_.isSigning),
           )
         case (acc, _) => acc
       }
@@ -1064,7 +1123,7 @@ object DomainOnboardingOutboxX {
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
       participantId: ParticipantId,
-      handle: RegisterTopologyTransactionHandleX,
+      handle: RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
       authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
       targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
       timeouts: ProcessingTimeout,
@@ -1198,8 +1257,8 @@ private sealed trait DomainOutboxDispatchHelperX
     def notAlien(tx: GenericSignedTopologyTransactionX): Boolean = {
       val mapping = tx.transaction.mapping
       mapping match {
-        case OwnerToKeyMappingX(_: ParticipantId, _) => true
-        case OwnerToKeyMappingX(owner, _) => owner.uid == domainId.unwrap
+        case OwnerToKeyMappingX(_: ParticipantId, _, _) => true
+        case OwnerToKeyMappingX(owner, _, _) => owner.uid == domainId.unwrap
         case _ => true
       }
     }

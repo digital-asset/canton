@@ -508,7 +508,8 @@ class GenTransactionTreeTest
     import GenTransactionTreeTest.*
 
     "correctly compute recipients from witnesses" in {
-      def mkWitnesses(setup: Seq[Set[Int]]): Witnesses = Witnesses(setup.map(_.map(informee)))
+      def mkWitnesses(setup: NonEmpty[Seq[Set[Int]]]): Witnesses =
+        Witnesses(setup.map(_.map(informee)))
 
       // Maps parties to participants; parties have IDs that start at 1, participants have IDs that start at 11
       def topology =
@@ -534,13 +535,7 @@ class GenTransactionTreeTest
         ).topologySnapshot()
 
       val witnesses = mkWitnesses(
-        Seq(
-          Set(1, 2),
-          Set(1, 3),
-          Set(2, 4),
-          Set(1, 2, 5),
-          Set(6),
-        )
+        NonEmpty(Seq, Set(1, 2), Set(1, 3), Set(2, 4), Set(1, 2, 5), Set(6))
       )
 
       witnesses

@@ -8,6 +8,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -31,7 +32,10 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.protocol.{LfCommittedTransaction, LfContractId, SerializableContract}
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener
-import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
+import com.digitalasset.canton.store.CursorPrehead.{
+  RequestCounterCursorPrehead,
+  SequencerCounterCursorPrehead,
+}
 import com.digitalasset.canton.store.SequencedEventStore.{
   ByTimestampRange,
   PossiblyIgnoredSequencedEvent,
@@ -47,7 +51,6 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{MonadUtil, ResourceUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LedgerTransactionId, LfPartyId, RequestCounter}
-import io.functionmeta.functionFullName
 
 import java.io.{BufferedOutputStream, File, FileOutputStream, OutputStreamWriter}
 import java.time.Instant
@@ -481,7 +484,16 @@ class SyncStateInspection(
   ): Either[String, Future[Unit]] = {
     getPersistentState(domain)
       .map(state => state.requestJournalStore.overridePreheadCleanForTesting(newHead))
-      .toRight(s"Not connected to $domain")
+      .toRight(s"Unknown domain $domain")
+  }
+
+  def forceCleanSequencerCounterPrehead(
+      newHead: Option[SequencerCounterCursorPrehead],
+      domain: DomainAlias,
+  )(implicit traceContext: TraceContext): Either[String, Future[Unit]] = {
+    getPersistentState(domain)
+      .map(state => state.sequencerCounterTrackerStore.rewindPreheadSequencerCounter(newHead))
+      .toRight(s"Unknown domain $domain")
   }
 
   def lookupCleanPrehead(domain: DomainAlias)(implicit

@@ -43,21 +43,22 @@ final case class RecipientsTree(
       case None => NonEmpty(Seq, NonEmpty(Seq, recipientGroup))
     }
 
-  def forMember(member: Member): Seq[RecipientsTree] = {
-    // TODO(#12360): The projection for a member should include all the group addresses that include this member,
-    //  using the appropriate topology snapshot for resolving the group addresses to members.
+  def forMember(
+      member: Member,
+      groupRecipients: Set[GroupRecipient],
+  ): Seq[RecipientsTree] =
     if (
       recipientGroup
-        .collect { case MemberRecipient(member) =>
-          member
+        .exists {
+          case MemberRecipient(m) => member == m
+          case g: GroupRecipient =>
+            groupRecipients.contains(g)
         }
-        .contains(member)
     ) {
       Seq(this)
     } else {
-      children.flatMap(c => c.forMember(member))
+      children.flatMap(c => c.forMember(member, groupRecipients))
     }
-  }
 
   lazy val leafRecipients: NonEmpty[Set[Recipient]] = children match {
     case NonEmpty(cs) => cs.toNEF.reduceLeftTo(_.leafRecipients)(_ ++ _.leafRecipients)

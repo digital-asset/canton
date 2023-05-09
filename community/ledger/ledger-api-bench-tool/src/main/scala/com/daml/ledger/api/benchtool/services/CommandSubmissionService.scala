@@ -4,7 +4,7 @@
 package com.daml.ledger.api.benchtool.services
 
 import com.daml.ledger.api.benchtool.AuthorizationHelper
-import com.daml.ledger.api.v1.command_submission_service._
+import com.daml.ledger.api.v1.command_submission_service.*
 import com.daml.ledger.api.v1.commands.Commands
 import com.google.protobuf.empty.Empty
 import io.grpc.Channel

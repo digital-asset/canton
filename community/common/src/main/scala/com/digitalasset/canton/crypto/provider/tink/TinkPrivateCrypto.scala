@@ -49,6 +49,8 @@ class TinkPrivateCrypto private (
               EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc
             )
           )
+        // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
+        case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
       }
       keysetHandle <- generateKey[EncryptionKeyGenerationError](
         keyTemplate,

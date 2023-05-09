@@ -109,7 +109,7 @@ class RepairService(
 
   // Ensure only one repair runs at a time. This ensures concurrent activity among repair operations does
   // not corrupt state.
-  private val executionQueue = new SimpleExecutionQueueWithShutdown(
+  private val executionQueue = new SimpleExecutionQueue(
     "repair-service-queue",
     futureSupervisor,
     timeouts,

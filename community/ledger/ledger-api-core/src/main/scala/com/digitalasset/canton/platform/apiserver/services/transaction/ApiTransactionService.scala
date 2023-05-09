@@ -6,8 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services.transaction
 import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction_service.{
@@ -18,7 +17,7 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionsResponse,
 }
 import com.daml.lf.data.Ref.Party
-import com.daml.lf.ledger.{EventId as LfEventId}
+import com.daml.lf.ledger.EventId as LfEventId
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.entries.{LoggingEntries, LoggingValue}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
@@ -34,6 +33,7 @@ import com.digitalasset.canton.ledger.api.domain.{
 import com.digitalasset.canton.ledger.api.messages.transaction.*
 import com.digitalasset.canton.ledger.api.validation.PartyNameChecker
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexTransactionsService
 import com.digitalasset.canton.platform.apiserver.services.{StreamMetrics, logging}
 import com.digitalasset.canton.platform.server.api.services.domain.TransactionService

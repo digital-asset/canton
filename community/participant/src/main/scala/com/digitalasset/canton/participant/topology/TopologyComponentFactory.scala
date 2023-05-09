@@ -10,12 +10,15 @@ import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   CachingTopologySnapshot,
   DomainTopologyClientWithInit,
+  DomainTopologyClientWithInitOld,
+  DomainTopologyClientWithInitX,
   StoreBasedDomainTopologyClient,
   StoreBasedDomainTopologyClientX,
   StoreBasedTopologySnapshot,
@@ -65,7 +68,9 @@ trait TopologyComponentFactory {
     )
 
   def createTopologyProcessorFactory(
-      partyNotifier: LedgerServerPartyNotifier
+      partyNotifier: LedgerServerPartyNotifier,
+      missingKeysAlerter: MissingKeysAlerter,
+      topologyClient: DomainTopologyClientWithInit,
   ): TopologyTransactionProcessorCommon.Factory
 
 }
@@ -139,7 +144,9 @@ class TopologyComponentFactoryOld(
   }
 
   override def createTopologyProcessorFactory(
-      partyNotifier: LedgerServerPartyNotifier
+      partyNotifier: LedgerServerPartyNotifier,
+      missingKeysAlerter: MissingKeysAlerter,
+      topologyClient: DomainTopologyClientWithInit,
   ): TopologyTransactionProcessorCommon.Factory =
     new TopologyTransactionProcessorCommon.Factory {
       override def create(
@@ -155,7 +162,16 @@ class TopologyComponentFactoryOld(
           loggerFactory,
         )
         // subscribe party notifier to topology processor
-        processor.subscribe(partyNotifier.attachToTopologyProcessor())
+        processor.subscribe(partyNotifier.attachToTopologyProcessorOld())
+        processor.subscribe(missingKeysAlerter.attachToTopologyProcessorOld())
+        // TODO(#11255) this is an ugly hack, but I don't know where we could create the individual components
+        //              and have the types align :(
+        topologyClient match {
+          case old: DomainTopologyClientWithInitOld =>
+            processor.subscribe(old)
+          case _ =>
+            throw new IllegalStateException("passed wrong type. coding bug")
+        }
         processor
       }
     }
@@ -174,7 +190,9 @@ class TopologyComponentFactoryX(
 ) extends TopologyComponentFactory {
 
   override def createTopologyProcessorFactory(
-      partyNotifier: LedgerServerPartyNotifier
+      partyNotifier: LedgerServerPartyNotifier,
+      missingKeysAlerter: MissingKeysAlerter,
+      topologyClient: DomainTopologyClientWithInit,
   ): TopologyTransactionProcessorCommon.Factory = new TopologyTransactionProcessorCommon.Factory {
     override def create(
         acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit
@@ -189,7 +207,16 @@ class TopologyComponentFactoryX(
         loggerFactory,
       )
       // subscribe party notifier to topology processor
-      processor.subscribe(partyNotifier.attachToTopologyProcessor())
+      processor.subscribe(partyNotifier.attachToTopologyProcessorX())
+      processor.subscribe(missingKeysAlerter.attachToTopologyProcessorX())
+      // TODO(#11255) this is an ugly hack, but I don't know where we could create the individual components
+      //              and have the types align :(
+      topologyClient match {
+        case x: DomainTopologyClientWithInitX =>
+          processor.subscribe(x)
+        case _ =>
+          throw new IllegalStateException("passed wrong type. coding bug")
+      }
       processor
     }
   }

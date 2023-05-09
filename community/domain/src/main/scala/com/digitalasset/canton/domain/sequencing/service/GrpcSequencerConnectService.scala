@@ -15,7 +15,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.v0.ServiceAgreement as protoServiceAgreement
 import com.digitalasset.canton.sequencing.protocol.VerifyActiveResponse
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, SequencerId}
+import com.digitalasset.canton.topology.{DomainId, MediatorGroup, ParticipantId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -26,6 +26,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class GrpcSequencerConnectService(
     domainId: DomainId,
     sequencerId: SequencerId,
+    mediatorsProcessParticipantTopologyRequests: Boolean,
     staticDomainParameters: StaticDomainParameters,
     cryptoApi: DomainSyncCryptoClient,
     agreementManager: Option[ServiceAgreementManager],
@@ -38,7 +39,32 @@ class GrpcSequencerConnectService(
   protected val serverProtocolVersion: ProtocolVersion = staticDomainParameters.protocolVersion
 
   def getDomainId(request: GetDomainId.Request): Future[GetDomainId.Response] =
-    Future.successful(GetDomainId.Response(domainId.toProtoPrimitive, sequencerId.toProtoPrimitive))
+    if (mediatorsProcessParticipantTopologyRequests) {
+      implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+      // TODO(#11255): Until we have group notifications, return first active mediator
+      cryptoApi.ips.currentSnapshotApproximation
+        .mediatorGroups()
+        .map { mgs =>
+          val maybeAddress = mgs.collectFirst { case MediatorGroup(_, firstActive +: _, _, _) =>
+            firstActive.toProtoPrimitive
+          }
+          GetDomainId
+            .Response(
+              domainId = domainId.toProtoPrimitive,
+              sequencerId = sequencerId.toProtoPrimitive,
+              topologyRequestAddress = maybeAddress.getOrElse(""),
+            )
+        }
+    } else {
+      Future.successful(
+        GetDomainId
+          .Response(
+            domainId = domainId.toProtoPrimitive,
+            sequencerId = sequencerId.toProtoPrimitive,
+            topologyRequestAddress = "", // Don't send a topology request address in daml 2.*
+          )
+      )
+    }
 
   def getDomainParameters(
       request: GetDomainParameters.Request

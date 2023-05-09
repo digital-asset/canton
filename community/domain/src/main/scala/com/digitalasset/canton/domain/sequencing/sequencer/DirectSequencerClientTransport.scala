@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.service.DirectSequencerSubscriptionFactory
@@ -27,7 +28,6 @@ import com.digitalasset.canton.sequencing.protocol.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration

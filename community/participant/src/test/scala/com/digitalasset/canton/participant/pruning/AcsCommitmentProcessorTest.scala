@@ -519,7 +519,7 @@ class AcsCommitmentProcessorTest
         _ = changes.foreach { case (ts, tb, change) =>
           processor.publish(RecordTime(ts, tb.v), change)
         }
-        _ <- processor.queue.flush()
+        _ <- processor.flush()
         computed <- store.searchComputedBetween(CantonTimestamp.Epoch, timeProofs.lastOption.value)
         received <- store.searchReceivedBetween(CantonTimestamp.Epoch, timeProofs.lastOption.value)
       } yield {
@@ -605,7 +605,7 @@ class AcsCommitmentProcessorTest
           }
           .onShutdown(fail())
 
-        _ <- processor.queue.flush()
+        _ <- processor.flush()
 
         computed <- store.searchComputedBetween(
           CantonTimestamp.Epoch,

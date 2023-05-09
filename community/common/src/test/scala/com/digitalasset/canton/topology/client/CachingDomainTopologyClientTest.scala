@@ -37,7 +37,7 @@ class CachingDomainTopologyClientTest extends AsyncWordSpecLike with BaseTest {
     val crypto = new TestingOwnerWithKeys(owner, loggerFactory, directExecutionContext)
     val mockTransaction = mock[SignedTopologyTransaction[TopologyChangeOp]]
 
-    val mockParent = mock[DomainTopologyClientWithInit]
+    val mockParent = mock[DomainTopologyClientWithInitOld]
     val mockSnapshot0 = mock[TopologySnapshotLoader]
     val mockSnapshot1 = mock[TopologySnapshotLoader]
     val mockSnapshot2 = mock[TopologySnapshotLoader]
@@ -53,7 +53,7 @@ class CachingDomainTopologyClientTest extends AsyncWordSpecLike with BaseTest {
       .thenReturn(Future.successful(KeyCollection(signingKeys = Seq(key2), Seq())))
 
     val cc =
-      new CachingDomainTopologyClient(
+      new CachingDomainTopologyClientOld(
         mock[Clock],
         mockParent,
         CachingConfigs(

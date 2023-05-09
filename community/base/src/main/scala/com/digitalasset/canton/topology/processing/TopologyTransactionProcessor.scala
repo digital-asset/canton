@@ -6,9 +6,10 @@ package com.digitalasset.canton.topology.processing
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -21,32 +22,22 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, DeliverError}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.{
+  BaseCachingDomainTopologyClient,
   CachingDomainTopologyClient,
   StoreBasedDomainTopologyClient,
 }
-import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor.subscriptionTimestamp
 import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Positive
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{DomainId, KeyOwner, TopologyManagerError}
+import com.digitalasset.canton.topology.{DomainId, KeyOwner}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{
-  ErrorUtil,
-  FutureUtil,
-  MonadUtil,
-  SimpleExecutionQueueWithShutdown,
-}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
-import io.functionmeta.functionFullName
 
-import java.util.concurrent.atomic.AtomicBoolean
-import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
 final case class EffectiveTime(value: CantonTimestamp) {
@@ -77,24 +68,6 @@ object SequencedTime {
     Ordering.by[SequencedTime, CantonTimestamp](_.value)
 }
 
-trait TopologyTransactionProcessingSubscriber {
-
-  /** Inform the subscriber about non-idm changes (mostly about the timestamp) */
-  def updateHead(
-      effectiveTimestamp: EffectiveTime,
-      approximateTimestamp: ApproximateTime,
-      potentialTopologyChange: Boolean,
-  )(implicit traceContext: TraceContext): Unit
-
-  def observed(
-      sequencedTimestamp: SequencedTime,
-      effectiveTimestamp: EffectiveTime,
-      sequencerCounter: SequencerCounter,
-      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
-
-}
-
 /** Main incoming topology transaction validation and processing
   *
   * The topology transaction processor is subscribed to the event stream and processes
@@ -114,7 +87,16 @@ class TopologyTransactionProcessor(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends TopologyTransactionProcessorCommon(timeouts, loggerFactory) {
+// TODO(#11255) gerolf: changed this back to SignedTopologyTransaction to make the existing test work again.
+//                      creating a DomainTopologyTransactionMessage seems more involved than what I want to get into now
+    extends TopologyTransactionProcessorCommonImpl[SignedTopologyTransaction[TopologyChangeOp]](
+      domainId,
+      futureSupervisor,
+      store,
+      acsCommitmentScheduleEffectiveTime,
+      timeouts,
+      loggerFactory,
+    ) {
 
   private val authValidator =
     new IncomingTopologyTransactionAuthorizationValidator(
@@ -123,111 +105,38 @@ class TopologyTransactionProcessor(
       Some(domainId),
       loggerFactory.append("role", "incoming"),
     )
-  private val listeners = ListBuffer[TopologyTransactionProcessingSubscriber]()
-  private val timeAdjuster =
-    new TopologyTimestampPlusEpsilonTracker(timeouts, loggerFactory, futureSupervisor)
-  private val serializer = new SimpleExecutionQueueWithShutdown(
-    "topology-transaction-processor-queue",
-    futureSupervisor,
-    timeouts,
-    loggerFactory,
-  )
-  private val initialised = new AtomicBoolean(false)
 
-  private def listenersUpdateHead(
-      effective: EffectiveTime,
-      approximate: ApproximateTime,
-      potentialChanges: Boolean,
-  )(implicit traceContext: TraceContext): Unit = {
-    listeners.toList.foreach(_.updateHead(effective, approximate, potentialChanges))
-  }
+  override type SubscriberType = TopologyTransactionProcessingSubscriber
 
-  private def initialise(
-      start: SubscriptionStart,
-      domainTimeTracker: DomainTimeTracker,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-
-    ErrorUtil.requireState(
-      !initialised.getAndSet(true),
-      "topology processor is already initialised",
+  override protected def epsilonForTimestamp(
+      asOfExclusive: CantonTimestamp
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[TopologyStore.Change.TopologyDelay] =
+    TopologyTimestampPlusEpsilonTracker.epsilonForTimestamp(
+      store,
+      asOfExclusive,
     )
 
-    def initClientFromSequencedTs(
-        sequencedTs: SequencedTime
-    ): FutureUnlessShutdown[Seq[(EffectiveTime, ApproximateTime)]] = for {
-      // we need to figure out any future effective time. if we had been running, there would be a clock
-      // scheduled to poke the domain client at the given time in order to adjust the approximate timestamp up to the
-      // effective time at the given point in time. we need to recover these as otherwise, we might be using outdated
-      // topology snapshots on startup. (wouldn't be tragic as by getting the rejects, we'd be updating the timestamps
-      // anyway).
-      upcoming <- performUnlessClosingF(functionFullName)(
-        store.findUpcomingEffectiveChanges(sequencedTs.value)
-        // find effective time of sequenced Ts (directly from store)
-        // merge times
-      )
-      currentEpsilon <- TopologyTimestampPlusEpsilonTracker.epsilonForTimestamp(
-        store,
-        sequencedTs.value,
-      )
-    } yield {
+  override protected def maxTimestampFromStore()(implicit
+      traceContext: TraceContext
+  ): Future[Option[(SequencedTime, EffectiveTime)]] = store.timestamp(useStateStore = true)
 
-      // we have (ts+e, ts) and quite a few te in the future, so we create list of upcoming changes and sort them
-      ((
-        EffectiveTime(sequencedTs.value.plus(currentEpsilon.epsilon.unwrap)),
-        ApproximateTime(sequencedTs.value),
-      ) +: upcoming.map(x => (x.effective, x.effective.toApproximate))).sortBy(_._1.value)
-    }
-
-    for {
-      stateStoreTsO <- performUnlessClosingF(functionFullName)(
-        store.timestamp(useStateStore = true)
-      )
-      (processorTs, clientTs) = subscriptionTimestamp(start, stateStoreTsO)
-      _ <- TopologyTimestampPlusEpsilonTracker.initialize(timeAdjuster, store, processorTs)
-
-      clientInitTimes <- clientTs match {
-        case Left(sequencedTs) =>
-          // approximate time is sequencedTs
-          initClientFromSequencedTs(sequencedTs)
-        case Right(effective) =>
-          // effective and approximate time are effective time
-          FutureUnlessShutdown.pure(Seq((effective, effective.toApproximate)))
-      }
-    } yield {
-      logger.debug(
-        s"Initializing topology processing for start=$start with effective ts ${clientInitTimes.map(_._1)}"
-      )
-      val directExecutionContext = DirectExecutionContext(logger)
-      clientInitTimes.foreach { case (effective, approximate) =>
-        // if the effective time is in the future, schedule a clock to update the time accordingly
-        domainTimeTracker.awaitTick(effective.value) match {
-          case None =>
-            // The effective time is in the past. Directly advance our approximate time to the respective effective time
-            listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)
-          case Some(tickF) =>
-            // set approximate time now and schedule task to update the approximate time to the effective time in the future
-            if (effective.value != approximate.value) {
-              listenersUpdateHead(effective, approximate, potentialChanges = true)
-            }
-            FutureUtil.doNotAwait(
-              tickF.map(_ =>
-                listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)
-              )(directExecutionContext),
-              "Notifying listeners to the topology processor's head",
-            )
-        }
-      }
-    }
-  }
+  override protected def initializeTopologyTimestampPlusEpsilonTracker(
+      processorTs: CantonTimestamp
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[EffectiveTime] =
+    TopologyTimestampPlusEpsilonTracker.initialize(timeAdjuster, store, processorTs)
 
   @VisibleForTesting
-  private[processing] def process(
+  override private[processing] def process(
       sequencingTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
       sc: SequencerCounter,
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-
+    // TODO(i4933) check signature of domain idm and don't accept any transaction other than domain uid tx until we are bootstrapped
     // start validation and change delay advancing
     val validatedF = performUnlessClosingF(functionFullName)(
       authValidator.validateAndUpdateHeadAuthState(effectiveTimestamp.value, transactions).map {
@@ -341,23 +250,6 @@ class TopologyTransactionProcessor(
         }
         applyEpsilon(changes.last1)
     }
-  }
-
-  private def tickleListeners(
-      sequencedTimestamp: SequencedTime,
-      effectiveTimestamp: EffectiveTime,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    this.performUnlessClosingF(functionFullName) {
-      Future {
-        val approximate = ApproximateTime(sequencedTimestamp.value)
-        listenersUpdateHead(effectiveTimestamp, approximate, potentialChanges = false)
-      }
-    }
-  }
-
-  /** assumption: subscribers don't do heavy lifting */
-  override def subscribe(listener: TopologyTransactionProcessingSubscriber): Unit = {
-    listeners += listener
   }
 
   /** pick the transactions which we can process using incremental updates */
@@ -521,143 +413,18 @@ class TopologyTransactionProcessor(
       } yield ()
     }
 
-  private def extractDomainTopologyTransactionMsg(
+  override protected def extractTopologyUpdates(
       envelopes: List[DefaultOpenEnvelope]
-  ): List[DomainTopologyTransactionMessage] =
+  ): List[SignedTopologyTransaction[TopologyChangeOp]] =
     envelopes
       .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
       .map(_.protocolMessage)
-
-  override def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(
-      implicit traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = initialise(start, domainTimeTracker)
-
-  /** process envelopes mostly asynchronously
-    *
-    * Here, we return a Future[Future[Unit]]. We need to ensure the outer future finishes processing
-    * before we tick the record order publisher.
-    */
-  override def processEnvelopes(
-      sc: SequencerCounter,
-      ts: CantonTimestamp,
-      envelopes: Traced[List[DefaultOpenEnvelope]],
-  ): HandlerResult =
-    envelopes.withTraceContext { implicit traceContext => env =>
-      internalProcessEnvelopes(sc, ts, extractDomainTopologyTransactionMsg(env))
-    }
-
-  private def internalProcessEnvelopes(
-      sc: SequencerCounter,
-      ts: CantonTimestamp,
-      messages: => List[DomainTopologyTransactionMessage],
-  )(implicit traceContext: TraceContext): HandlerResult = {
-    val sequencedTime = SequencedTime(ts)
-    val updatesF = performUnlessClosingF(functionFullName)(Future { messages })
-    def computeEffectiveTime(
-        updates: List[DomainTopologyTransactionMessage]
-    ): FutureUnlessShutdown[EffectiveTime] = {
-      if (updates.nonEmpty) {
-        val tmpF =
-          futureSupervisor.supervisedUS(s"adjust ts=$ts for update")(
-            timeAdjuster.adjustTimestampForUpdate(sequencedTime)
-          )
-
-        // we need to inform the acs commitment processor about the incoming change
-        tmpF.map { eft =>
-          // this is safe to do here, as the acs commitment processor `publish` method will only be
-          // invoked long after the outer future here has finished processing
-          acsCommitmentScheduleEffectiveTime(Traced(eft.value))
-          eft
-        }
-      } else {
-        futureSupervisor.supervisedUS(s"adjust ts=$ts for update")(
-          timeAdjuster.adjustTimestampForTick(sequencedTime)
-        )
-      }
-    }
-
-    for {
-      updates <- updatesF
-      _ <- ErrorUtil.requireStateAsyncShutdown(
-        initialised.get(),
-        s"Topology client for $domainId is not initialized. Cannot process sequenced event with counter ${sc} at ${ts}",
-      )
-      // compute effective time
-      effectiveTime <- computeEffectiveTime(updates)
-    } yield {
-      // the rest, we'll run asynchronously, but sequential
-      val scheduledF =
-        serializer.executeUS(
-          {
-            if (updates.nonEmpty) {
-              // TODO(i4933) check signature of domain idm and don't accept any transaction other than domain uid tx until we are bootstrapped
-              val txs = updates.flatMap { msg =>
-                msg.transactions
-              }
-              process(sequencedTime, effectiveTime, sc, txs)
-            } else {
-              tickleListeners(sequencedTime, effectiveTime)
-            }
-          },
-          "processing identity",
-        )
-      AsyncResult(scheduledF)
-    }
-  }
-
-  override def createHandler(domainId: DomainId): UnsignedProtocolEventHandler =
-    new UnsignedProtocolEventHandler {
-
-      override def name: String = s"topology-processor-$domainId"
-
-      override def apply(
-          tracedBatch: BoxedEnvelope[UnsignedEnvelopeBox, DefaultOpenEnvelope]
-      ): HandlerResult = {
-        MonadUtil.sequentialTraverseMonoid(tracedBatch.value) {
-          _.withTraceContext { implicit traceContext =>
-            {
-              case Deliver(sc, ts, _, _, batch) =>
-                logger.debug(s"Processing sequenced event with counter $sc and timestamp $ts")
-                def extractAndCheckMessages(
-                    batch: Batch[DefaultOpenEnvelope]
-                ): List[DomainTopologyTransactionMessage] = {
-                  extractDomainTopologyTransactionMsg(
-                    ProtocolMessage.filterDomainsEnvelopes(
-                      batch,
-                      domainId,
-                      (wrongMsgs: List[DefaultOpenEnvelope]) =>
-                        TopologyManagerError.TopologyManagerAlarm
-                          .Warn(
-                            s"received messages with wrong domain ids: ${wrongMsgs.map(_.protocolMessage.domainId)}"
-                          )
-                          .report(),
-                    )
-                  )
-                }
-
-                internalProcessEnvelopes(
-                  sc,
-                  ts,
-                  extractAndCheckMessages(batch),
-                )
-              case _: DeliverError => HandlerResult.done
-            }
-          }
-        }
-      }
-
-      override def subscriptionStartsAt(
-          start: SubscriptionStart,
-          domainTimeTracker: DomainTimeTracker,
-      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        TopologyTransactionProcessor.this.subscriptionStartsAt(start, domainTimeTracker)
-    }
+      .flatMap(_.transactions)
 
   override def onClosed(): Unit = {
+    super.onClosed()
     Lifecycle.close(
-      timeAdjuster,
-      store,
-      serializer,
+      store
     )(logger)
   }
 
@@ -678,7 +445,7 @@ object TopologyTransactionProcessor {
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): Future[(TopologyTransactionProcessor, CachingDomainTopologyClient)] = {
+  ): Future[(TopologyTransactionProcessor, BaseCachingDomainTopologyClient)] = {
     val topologyProcessor = new TopologyTransactionProcessor(
       domainId,
       pureCrypto,

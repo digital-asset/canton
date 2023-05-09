@@ -5,8 +5,7 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.active_contracts_service.ActiveContractsServiceGrpc.ActiveContractsService
 import com.daml.ledger.api.v1.active_contracts_service.*
@@ -16,9 +15,8 @@ import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.validation.TransactionFilterValidator
-import com.digitalasset.canton.ledger.participant.state.index.v2.{
-  IndexActiveContractsService as ACSBackend
-}
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.participant.state.index.v2.IndexActiveContractsService as ACSBackend
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.server.api.ValidationLogger

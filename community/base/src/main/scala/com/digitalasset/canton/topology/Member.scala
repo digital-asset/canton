@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.util.HexString
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ProtoDeserializationError}
 import com.google.common.annotations.VisibleForTesting
@@ -345,6 +346,11 @@ object PartyId {
       case Left(e) => throw new IllegalArgumentException(e)
     }
 
+  def fromProtoPrimitive(str: String, fieldName: String): ParsingResult[PartyId] = (for {
+    lfPartyId <- LfPartyId.fromString(str)
+    partyId <- fromLfParty(lfPartyId)
+  } yield partyId).leftMap(ValueConversionError(fieldName, _))
+
   def tryFromProtoPrimitive(str: String): PartyId = PartyId(
     UniqueIdentifier.tryFromProtoPrimitive(str)
   )
@@ -365,14 +371,19 @@ object DomainMember {
 
   /** List all domain members always including the sequencer. */
   def listAll(id: DomainId): Set[DomainMember] = list(id, includeSequencer = true)
+
 }
 
 final case class MediatorGroup(
-    index: NonNegativeInt,
+    index: MediatorGroupIndex,
     active: Seq[MediatorId],
     passive: Seq[MediatorId],
     threshold: PositiveInt,
 )
+
+object MediatorGroup {
+  type MediatorGroupIndex = NonNegativeInt
+}
 
 final case class MediatorId(uid: UniqueIdentifier) extends DomainMember with NodeIdentity {
   override def code: AuthenticatedMemberCode = MediatorId.Code
@@ -427,6 +438,12 @@ object DomainTopologyManagerId {
 
   def apply(domainId: DomainId): DomainTopologyManagerId = DomainTopologyManagerId(domainId.unwrap)
 }
+
+final case class SequencerGroup(
+    active: Seq[SequencerId],
+    passive: Seq[SequencerId],
+    threshold: PositiveInt,
+)
 
 final case class SequencerId(uid: UniqueIdentifier) extends DomainMember with NodeIdentity {
   override def code: AuthenticatedMemberCode = SequencerId.Code

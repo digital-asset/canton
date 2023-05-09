@@ -441,7 +441,7 @@ class SyncDomainPersistentStateManagerX(
               Option.when(trustCert.isEmpty)(
                 new StoreBasedDomainTopologyInitializationCallback(
                   participantId,
-                  state.topologyStore,
+                  Seq(state.topologyStore),
                 )
               )
             )

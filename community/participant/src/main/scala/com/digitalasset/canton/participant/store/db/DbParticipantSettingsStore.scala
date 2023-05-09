@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
@@ -14,8 +15,7 @@ import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settin
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueueWithShutdown}
-import io.functionmeta.functionFullName
+import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import slick.jdbc.{GetResult, SetParameter}
 import slick.sql.SqlAction
 
@@ -34,7 +34,7 @@ class DbParticipantSettingsStore(
 
   private val processingTime = storage.metrics.loadGaugeM("participant-settings-store")
 
-  private val executionQueue = new SimpleExecutionQueueWithShutdown(
+  private val executionQueue = new SimpleExecutionQueue(
     "participant-setting-store-queue",
     futureSupervisor,
     timeouts,

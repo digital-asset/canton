@@ -6,12 +6,13 @@ package com.digitalasset.canton.participant.store.memory
 import cats.data.EitherT
 import cats.implicits.catsSyntaxPartialOrder
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.protocol.transfer.TransferData
+import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
 import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -44,35 +45,54 @@ class InMemoryTransferStore(
 
     val transferId = transferData.transferId
     val newEntry = TransferEntry(transferData, None)
-    EitherT(Future.successful {
-      MapsUtil
-        .updateWithConcurrentlyM_[Checked[
-          TransferDataAlreadyExists,
-          TransferAlreadyCompleted,
-          *,
-        ], TransferId, TransferEntry](
-          transferDataMap,
-          transferId,
-          Checked.result(newEntry),
-          _.mergeWith(newEntry),
-        )
-        .toEither
-    })
+
+    val result: Either[TransferDataAlreadyExists, Unit] = MapsUtil
+      .updateWithConcurrentlyM_[Checked[
+        TransferDataAlreadyExists,
+        TransferAlreadyCompleted,
+        *,
+      ], TransferId, TransferEntry](
+        transferDataMap,
+        transferId,
+        Checked.result(newEntry),
+        _.mergeWith(newEntry),
+      )
+      .toEither
+
+    EitherT(Future.successful(result))
+  }
+
+  private def editTransferEntry(
+      transferId: TransferId,
+      updateEntry: TransferEntry => Either[TransferStoreError, TransferEntry],
+  ): EitherT[Future, TransferStoreError, Unit] = {
+    val res =
+      MapsUtil.updateWithConcurrentlyM_[Either[TransferStoreError, *], TransferId, TransferEntry](
+        transferDataMap,
+        transferId,
+        Left(UnknownTransferId(transferId)),
+        updateEntry,
+      )
+
+    EitherT(Future.successful(res))
   }
 
   override def addTransferOutResult(
       transferOutResult: DeliveredTransferOutResult
   )(implicit traceContext: TraceContext): EitherT[Future, TransferStoreError, Unit] = {
     val transferId = transferOutResult.transferId
-    EitherT(Future.successful {
-      MapsUtil.updateWithConcurrentlyM_[Either[TransferStoreError, *], TransferId, TransferEntry](
-        transferDataMap,
-        transferId,
-        Left(UnknownTransferId(transferId)),
-        _.addTransferOutResult(transferOutResult),
-      )
-    })
+    editTransferEntry(transferId, _.addTransferOutResult(transferOutResult))
   }
+
+  override def addTransferOutGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferStoreError, Unit] =
+    editTransferEntry(transferId, _.addTransferOutGlobalOffset(offset))
+
+  override def addTransferInGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferStoreError, Unit] =
+    editTransferEntry(transferId, _.addTransferInGlobalOffset(offset))
 
   override def completeTransfer(transferId: TransferId, timeOfCompletion: TimeOfChange)(implicit
       traceContext: TraceContext
@@ -147,7 +167,7 @@ class InMemoryTransferStore(
       def filter(entry: TransferEntry): Boolean =
         entry.timeOfCompletion.isEmpty && // Always filter out completed transfer-in
           filterSource.forall(source => entry.transferData.sourceDomain == source) &&
-          filterTimestamp.forall(ts => entry.transferData.transferId.requestTimestamp == ts) &&
+          filterTimestamp.forall(ts => entry.transferData.transferId.transferOutTimestamp == ts) &&
           filterSubmitter.forall(party => entry.transferData.transferOutRequest.submitter == party)
 
       transferDataMap.values.to(LazyList).filter(filter).take(limit).map(_.transferData)
@@ -166,14 +186,14 @@ class InMemoryTransferStore(
     def filter(entry: TransferEntry): Boolean =
       entry.timeOfCompletion.isEmpty && // Always filter out completed transfer-in
         requestAfter.forall(ts =>
-          (entry.transferData.transferId.requestTimestamp, entry.transferData.sourceDomain) > ts
+          (entry.transferData.transferId.transferOutTimestamp, entry.transferData.sourceDomain) > ts
         )
 
     transferDataMap.values
       .to(LazyList)
       .filter(filter)
       .map(_.transferData)
-      .sortBy(t => (t.transferId.requestTimestamp, t.transferId.sourceDomain))(
+      .sortBy(t => (t.transferId.transferOutTimestamp, t.transferId.sourceDomain))(
         // Explicitly use the standard ordering on two-tuples here
         // As Scala does not seem to infer the right implicits to use here
         Ordering.Tuple2(
@@ -189,7 +209,7 @@ class InMemoryTransferStore(
       onlyCompletedTransferOut: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
-      limit: Int,
+      limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] = {
     def filter(entry: TransferEntry): Boolean = {
       entry.transferData.sourceDomain == sourceDomain &&
@@ -203,8 +223,42 @@ class InMemoryTransferStore(
       .to(LazyList)
       .filter(filter)
       .sortBy(_.transferData.transferOutTimestamp)
-      .take(limit)
+      .take(limit.unwrap)
       .map(_.transferData)
+
+    Future.successful(values)
+  }
+
+  override def findIncomplete(
+      sourceDomain: SourceDomainId,
+      validAt: GlobalOffset,
+      stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+      limit: NonNegativeInt,
+  )(implicit traceContext: TraceContext): Future[Seq[IncompleteTransferData]] = {
+    def onlyTransferOutCompleted(entry: TransferEntry): Boolean =
+      entry.transferData.transferOutGlobalOffset.exists(_ <= validAt) &&
+        entry.transferData.transferInGlobalOffset.forall(_ > validAt)
+
+    def onlyTransferInCompleted(entry: TransferEntry): Boolean =
+      entry.transferData.transferInGlobalOffset.exists(_ <= validAt) &&
+        entry.transferData.transferOutGlobalOffset.forall(_ > validAt)
+
+    def incompleteTransfer(entry: TransferEntry): Boolean =
+      onlyTransferOutCompleted(entry) || onlyTransferInCompleted(entry)
+
+    def filter(entry: TransferEntry): Boolean = {
+      entry.transferData.sourceDomain == sourceDomain &&
+      incompleteTransfer(entry) &&
+      stakeholders.forall(_.exists(entry.transferData.contract.metadata.stakeholders))
+    }
+
+    val values = transferDataMap.values
+      .to(LazyList)
+      .collect {
+        case entry if filter(entry) => IncompleteTransferData.tryCreate(entry.transferData, validAt)
+      }
+      .sortBy(_.queryOffset)
+      .take(limit.unwrap)
 
     Future.successful(values)
   }

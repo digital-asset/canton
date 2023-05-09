@@ -11,8 +11,12 @@ import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
-import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
+import com.digitalasset.canton.participant.topology.{
+  DomainOnboardingOutbox,
+  DomainOnboardingOutboxX,
+}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RequestSigner.UnauthenticatedRequestSigner
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
@@ -160,11 +164,9 @@ abstract class ParticipantInitializeTopologyCommon[TX](
 
       success <- {
         def closeEverything(): Future[Unit] = {
-          unauthenticatedSequencerClient.closeSubscription()
+          unauthenticatedSequencerClient.close()
           domainTimeTracker.close()
-          unauthenticatedSequencerClient.completion.transform { _ =>
-            Success(unauthenticatedSequencerClient.close())
-          }
+          Future.unit
         }
 
         EitherT {
@@ -260,6 +262,7 @@ class ParticipantInitializeTopology(
 class ParticipantInitializeTopologyX(
     domainId: DomainId,
     alias: DomainAlias,
+    topologyRequestAddress: TopologyRequestAddressX,
     participantId: ParticipantId,
     authorizedStore: TopologyStoreX[AuthorizedStore],
     targetStore: TopologyStoreX[DomainStore],
@@ -296,6 +299,7 @@ class ParticipantInitializeTopologyX(
           Batch(List(env), protocolVersion)
         )(traceContext),
       domainId,
+      topologyRequestAddress,
       participantId,
       member,
       protocolVersion,
@@ -309,6 +313,18 @@ class ParticipantInitializeTopologyX(
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
-    ???
+    DomainOnboardingOutboxX
+      .initiateOnboarding(
+        alias,
+        domainId,
+        protocolVersion,
+        participantId,
+        handle,
+        authorizedStore,
+        targetStore,
+        processingTimeout,
+        loggerFactory,
+        crypto,
+      )
 
 }

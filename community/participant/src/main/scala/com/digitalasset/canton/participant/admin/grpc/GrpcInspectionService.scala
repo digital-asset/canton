@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.admin.grpc
 
+import cats.syntax.either.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.SyncStateInspection
@@ -15,6 +17,7 @@ import com.digitalasset.canton.participant.admin.v0.{
 }
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.util.FutureInstances.*
 import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -27,14 +30,25 @@ class GrpcInspectionService(syncStateInspection: SyncStateInspection)(implicit
       request: LookupContractDomain.Request
   ): Future[LookupContractDomain.Response] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    // TODO(error handling): Properly treat malformed contract ID strings
-    syncStateInspection
-      .lookupContractDomain(request.contractId.map(LfContractId.assertFromString).toSet)
-      .map { results =>
-        LookupContractDomain.Response(
-          results.map { case (contractId, alias) => contractId.coid -> alias.unwrap }
+
+    for {
+      contractIds <- request.contractId.parTraverse(cid =>
+        Future.successful( // Future, because GRPC expects a failed future in case of an error
+          LfContractId
+            .fromString(cid)
+            .valueOr(err =>
+              throw Status.INVALID_ARGUMENT
+                .withDescription(err)
+                .asRuntimeException()
+            )
         )
-      }
+      )
+      domainsByContractId <- syncStateInspection.lookupContractDomain(contractIds.toSet)
+    } yield {
+      LookupContractDomain.Response(
+        domainsByContractId.map { case (contractId, alias) => contractId.coid -> alias.unwrap }
+      )
+    }
   }
 
   override def lookupTransactionDomain(

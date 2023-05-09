@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.syntax.traverse.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String68
@@ -38,10 +39,9 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueueWithShutdown}
+import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
-import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter, TransactionIsolation}
 
@@ -66,7 +66,7 @@ class DbAcsCommitmentStore(
 
   override protected[this] val pruning_status_table = "commitment_pruning"
 
-  private val markSafeQueue = new SimpleExecutionQueueWithShutdown(
+  private val markSafeQueue = new SimpleExecutionQueue(
     "db-acs-commitment-store-queue",
     futureSupervisor,
     timeouts,

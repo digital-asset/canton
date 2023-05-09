@@ -4,7 +4,7 @@
 package com.daml.ledger.api.benchtool.services
 
 import com.daml.ledger.api.benchtool.AuthorizationHelper
-import com.daml.ledger.api.v1.package_service._
+import com.daml.ledger.api.v1.package_service.*
 import io.grpc.Channel
 
 import scala.concurrent.Future

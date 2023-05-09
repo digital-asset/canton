@@ -11,6 +11,7 @@ import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
@@ -32,7 +33,6 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
-import io.functionmeta.functionFullName
 
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.{ExecutionContext, Future}
@@ -193,32 +193,34 @@ class InFlightSubmissionTracker(
     */
   def timelyReject(domainId: DomainId, upToInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, UnknownDomain, Unit] = {
-    domainStateFor(domainId).mapK(FutureUnlessShutdown.outcomeK).semiflatMap { domainState =>
-      for {
-        // Increase the watermark for two reasons:
-        // 1. Below, we publish an event via the ParticipantEventPublisher. This will then call the
-        //    onPublishListener, which deletes the entry from the store. So we must make sure that the deletion
-        //    cannot interfere with a concurrent insertion.
-        // 2. Timestamps are also observed via the RecordOrderPublisher. If the RecordOrderPublisher
-        //    does not advance due to a long-running request-response-result cycle, we get here
-        //    a second chance of observing the timestamp when the sequencer counter becomes clean.
-        _ <- FutureUnlessShutdown
-          .outcomeF(domainState.observedTimestampTracker.increaseWatermark(upToInclusive))
-        timelyRejects <- FutureUnlessShutdown
-          .outcomeF(store.value.lookupUnsequencedUptoUnordered(domainId, upToInclusive))
-        events = timelyRejects.map(timelyRejectionEventFor)
-        skippedE <- participantEventPublisher.publishWithIds(events).value
-      } yield {
-        skippedE.valueOr { skipped =>
-          logger.info(
-            show"Skipping publication of timely rejections with IDs ${skipped
-                .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped.map(_.localOffset)}"
-          )
+  ): EitherT[FutureUnlessShutdown, UnknownDomain, Unit] =
+    performUnlessClosingEitherUSF(functionFullName) {
+      domainStateFor(domainId).mapK(FutureUnlessShutdown.outcomeK).semiflatMap { domainState =>
+        for {
+          // Increase the watermark for two reasons:
+          // 1. Below, we publish an event via the ParticipantEventPublisher. This will then call the
+          //    onPublishListener, which deletes the entry from the store. So we must make sure that the deletion
+          //    cannot interfere with a concurrent insertion.
+          // 2. Timestamps are also observed via the RecordOrderPublisher. If the RecordOrderPublisher
+          //    does not advance due to a long-running request-response-result cycle, we get here
+          //    a second chance of observing the timestamp when the sequencer counter becomes clean.
+          _ <- FutureUnlessShutdown
+            .outcomeF(domainState.observedTimestampTracker.increaseWatermark(upToInclusive))
+          timelyRejects <- FutureUnlessShutdown
+            .outcomeF(store.value.lookupUnsequencedUptoUnordered(domainId, upToInclusive))
+          events = timelyRejects.map(timelyRejectionEventFor)
+          skippedE <- participantEventPublisher.publishWithIds(events).value
+        } yield {
+          skippedE.valueOr { skipped =>
+            logger.info(
+              show"Skipping publication of timely rejections with IDs ${skipped
+                  .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped
+                  .map(_.localOffset)}"
+            )
+          }
         }
       }
     }
-  }
 
   private[this] def timelyRejectionEventFor(
       inFlight: InFlightSubmission[UnsequencedSubmission]

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.lf.data.Ref.PackageId
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -26,15 +27,12 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
 trait ParticipantTopologyManagerOps {
-
-  def attachPartyNotifier(partyNotifier: LedgerServerPartyNotifier): Unit
 
   def vetPackages(packages: Seq[PackageId], synchronize: Boolean)(implicit
       traceContext: TraceContext
@@ -432,9 +430,6 @@ class ParticipantTopologyManager(
       }
     }
   }
-
-  override def attachPartyNotifier(partyNotifier: LedgerServerPartyNotifier): Unit =
-    this.addObserver(partyNotifier.attachToIdentityManager())
 
   override def allocateParty(
       validatedSubmissionId: String255,

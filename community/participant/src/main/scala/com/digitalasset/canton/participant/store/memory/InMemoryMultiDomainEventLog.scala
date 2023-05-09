@@ -58,7 +58,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueueWithShutdown}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.{SortedMap, TreeMap}
@@ -107,13 +107,13 @@ class InMemoryMultiDomainEventLog(
       )
     )
 
-  private val dispatcher: Dispatcher[GlobalOffset] = Dispatcher[GlobalOffset](
+  override protected val dispatcher: Dispatcher[GlobalOffset] = Dispatcher[GlobalOffset](
     loggerFactory.name,
     ledgerFirstOffset - 1, // start index is exclusive
     ledgerFirstOffset - 1, // end index is inclusive
   )
 
-  private val executionQueue = new SimpleExecutionQueueWithShutdown(
+  private val executionQueue = new SimpleExecutionQueue(
     "in-mem-multi-domain-event-log-queue",
     futureSupervisor,
     timeouts,
@@ -289,8 +289,7 @@ class InMemoryMultiDomainEventLog(
           // Covers CommandRejected events in the participant event log
           timestampedEvent.eventId.exists(_.associatedDomain.exists(_ == domainId))
 
-        case _ =>
-          false
+        case _ => false
       }
 
     dispatcher.startingAt(

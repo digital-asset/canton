@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministrationServiceGrpc
 import com.digitalasset.canton.domain.config.DomainConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
+import com.digitalasset.canton.domain.sequencing.authentication.MemberAuthenticationServiceFactory
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommunityDatabaseSequencerFactory,
   CommunitySequencerConfig,
@@ -26,7 +27,6 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
 import com.digitalasset.canton.topology.{DomainId, DomainMember, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -49,7 +49,6 @@ trait SequencerRuntimeFactory {
       crypto: Crypto,
       topologyClientMember: Member,
       topologyClient: DomainTopologyClientWithInit,
-      topologyProcessor: TopologyTransactionProcessor,
       storage: Storage,
       clock: Clock,
       domainConfig: DomainConfig,
@@ -58,6 +57,7 @@ trait SequencerRuntimeFactory {
       processingTimeout: ProcessingTimeout,
       auditLogger: TracedLogger,
       agreementManager: Option[ServiceAgreementManager],
+      memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
       localParameters: CantonNodeWithSequencerParameters,
       metrics: SequencerMetrics,
       indexedStringStore: IndexedStringStore,
@@ -83,7 +83,6 @@ object SequencerRuntimeFactory {
         crypto: Crypto,
         topologyClientMember: Member,
         topologyClient: DomainTopologyClientWithInit,
-        topologyProcessor: TopologyTransactionProcessor,
         storage: Storage,
         clock: Clock,
         domainConfig: DomainConfig,
@@ -92,6 +91,7 @@ object SequencerRuntimeFactory {
         processingTimeout: ProcessingTimeout,
         auditLogger: TracedLogger,
         agreementManager: Option[ServiceAgreementManager],
+        memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
         localParameters: CantonNodeWithSequencerParameters,
         metrics: SequencerMetrics,
         indexedStringStore: IndexedStringStore,
@@ -124,7 +124,6 @@ object SequencerRuntimeFactory {
         domainId,
         crypto,
         topologyClient,
-        topologyProcessor,
         storage,
         clock,
         auditLogger,
@@ -142,6 +141,7 @@ object SequencerRuntimeFactory {
           .toList, // the community sequencer is always an embedded single sequencer
         futureSupervisor,
         agreementManager,
+        memberAuthenticationServiceFactory,
         topologyStateForInitializationService,
         loggerFactory,
       )

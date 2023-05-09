@@ -4,13 +4,13 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedString, PrunableByTime}
 import com.digitalasset.canton.tracing.TraceContext
-import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
 import scala.concurrent.{ExecutionContext, Future}

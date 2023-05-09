@@ -3,12 +3,15 @@
 
 package com.daml.ledger.api.benchtool.submission
 
-import com.daml.ledger.api.v1.commands.Command
-import com.daml.ledger.api.v1.value.Value
+import com.daml.ledger.api.benchtool.infrastructure.TestDars
+import com.daml.ledger.api.v1.commands.{Command, CreateCommand}
+import com.daml.ledger.api.v1.value.{Record, RecordField, Value}
 import com.daml.ledger.client.binding.Primitive
-import com.daml.ledger.test.benchtool.Foo.Divulger
+import com.daml.lf.data.Ref
 
 object FooDivulgerCommandGenerator {
+
+  private val packageId: Ref.PackageId = TestDars.benchtoolDarPackageId
 
   /** Builds a create Divulger command for each non-empty subset of divulgees
     * such that the created Divulger contract can be used to divulge (by immediate divulgence) Foo1, Foo2 or Foo3 contracts
@@ -37,7 +40,7 @@ object FooDivulgerCommandGenerator {
             sub ::: sub2
         }
       }
-      import scalaz.syntax.tag._
+      import scalaz.syntax.tag.*
       iter(divulgees)
         .collect {
           case parties if parties.nonEmpty => parties.sortBy(_.unwrap)
@@ -46,11 +49,11 @@ object FooDivulgerCommandGenerator {
 
     def createDivulgerFor(divulgees: List[Primitive.Party]): (Command, Value) = {
       val keyId = "divulger-" + FooCommandGenerator.nextContractNumber.getAndIncrement()
-      val createDivulgerCmd = Divulger(
+      val createDivulgerCmd: Command = makeCreateDivulgerCommand(
         divulgees = divulgees,
         divulger = divulgingParty,
         keyId = keyId,
-      ).create.command
+      )
       val divulgerKey: Value = FooCommandGenerator.makeContractKeyValue(divulgingParty, keyId)
       (createDivulgerCmd, divulgerKey)
     }
@@ -62,6 +65,49 @@ object FooDivulgerCommandGenerator {
     }.unzip3
     val divulgeesToContractKeysMap = divulgeeSets.zip(keys).toMap
     (commands, divulgeesToContractKeysMap)
+  }
+
+  private def makeCreateDivulgerCommand(
+      keyId: String,
+      divulger: Primitive.Party,
+      divulgees: List[Primitive.Party],
+  ) = {
+    val createArguments: Option[Record] = Some(
+      Record(
+        None,
+        Seq(
+          RecordField(
+            label = "divulger",
+            value = Some(Value(Value.Sum.Party(divulger.toString))),
+          ),
+          RecordField(
+            label = "divulgees",
+            value = Some(
+              Value(
+                Value.Sum.List(
+                  com.daml.ledger.api.v1.value.List(
+                    divulgees.map(d => Value(Value.Sum.Party(d.toString)))
+                  )
+                )
+              )
+            ),
+          ),
+          RecordField(
+            label = "keyId",
+            value = Some(Value(Value.Sum.Text(keyId))),
+          ),
+        ),
+      )
+    )
+    val c: Command = Command(
+      command = Command.Command.Create(
+        CreateCommand(
+          templateId = Some(FooTemplateDescriptor.divulgerTemplateId(packageId = packageId)),
+          createArguments = createArguments,
+        )
+      )
+    )
+    c
   }
 
 }

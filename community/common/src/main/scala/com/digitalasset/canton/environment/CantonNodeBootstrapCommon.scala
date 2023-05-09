@@ -37,6 +37,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
+import com.digitalasset.canton.util.SimpleExecutionQueue
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
 
@@ -133,6 +134,12 @@ abstract class CantonNodeBootstrapCommon[
   protected val tracerProvider =
     TracerProvider.Factory(arguments.configuredOpenTelemetry, name.unwrap)
   protected implicit val tracer: Tracer = tracerProvider.tracer
+  protected val initQueue: SimpleExecutionQueue = new SimpleExecutionQueue(
+    s"init-queue-${arguments.name}",
+    arguments.futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
 
   // This absolutely must be a "def", because it is used during class initialization.
   protected def connectionPoolForParticipant: Boolean = false

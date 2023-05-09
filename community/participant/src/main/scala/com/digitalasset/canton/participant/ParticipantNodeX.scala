@@ -9,6 +9,7 @@ import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes
@@ -27,7 +28,7 @@ import com.digitalasset.canton.participant.admin.{
   PackageService,
   ResourceManagementService,
 }
-import com.digitalasset.canton.participant.config.LocalParticipantConfig
+import com.digitalasset.canton.participant.config.{LocalParticipantConfig, PartyNotificationConfig}
 import com.digitalasset.canton.participant.domain.DomainAliasResolution
 import com.digitalasset.canton.participant.ledger.api.*
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -35,6 +36,7 @@ import com.digitalasset.canton.participant.scheduler.ParticipantSchedulersParame
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{
   CantonSyncService,
+  ParticipantEventPublisher,
   SyncDomainPersistentStateManager,
   SyncDomainPersistentStateManagerX,
 }
@@ -51,7 +53,6 @@ import com.digitalasset.canton.topology.store.PartyMetadataStore
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.ScheduledExecutorService
@@ -167,11 +168,6 @@ class ParticipantNodeBootstrapX(
     }
 
     private val participantOps = new ParticipantTopologyManagerOps {
-      override def attachPartyNotifier(partyNotifier: LedgerServerPartyNotifier): Unit = {
-        // TODO(#11255) attach properly to topology manager (requires us to rewrite partyNotifier.attachToIdentityManager()
-        //     and make it agnostic)
-        //     right now, we won't observe parties on the ledger-api server
-      }
       override def vetPackages(packages: Seq[PackageId], synchronize: Boolean)(implicit
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
@@ -197,12 +193,14 @@ class ParticipantNodeBootstrapX(
         )
         for {
           current <- EitherT.right(currentF)
-          _ <- performUnlessClosingEitherU(functionFullName)(
+          _ <- performUnlessClosingEitherUSF(functionFullName)(
             topologyManager
               .proposeAndAuthorize(
                 TopologyChangeOpX.Replace,
-                VettedPackagesX(participantId = participantId.uid, domainId = None)(
-                  (current ++ packages).distinct
+                VettedPackagesX(
+                  participantId = participantId,
+                  domainId = None,
+                  (current ++ packages).distinct,
                 ),
                 serial = None,
                 // TODO(#11255) auto-determine signing keys
@@ -226,17 +224,16 @@ class ParticipantNodeBootstrapX(
       ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
         // TODO(#11255) make this "extend" / not replace
         //    this will also be potentially racy!
-        performUnlessClosingEitherU(functionFullName)(
+        performUnlessClosingEitherUSF(functionFullName)(
           topologyManager
             .proposeAndAuthorize(
               TopologyChangeOpX.Replace,
               PartyToParticipantX(
-                partyId.uid,
+                partyId,
                 None,
-              )(
                 threshold = 1,
                 participants =
-                  Seq(HostingParticipant(participantId.uid, ParticipantPermissionX.Submission)),
+                  Seq(HostingParticipant(participantId, ParticipantPermissionX.Submission)),
                 groupAddressing = false,
               ),
               serial = None,
@@ -267,6 +264,25 @@ class ParticipantNodeBootstrapX(
         PartyMetadataStore(storage, parameterConfig.processingTimeouts, loggerFactory)
       addCloseable(partyMetadataStore)
       val adminToken = CantonAdminToken.create(crypto.pureCrypto)
+      // upstream party information update generator
+
+      val partyNotifierFactory = (eventPublisher: ParticipantEventPublisher) => {
+        val partyNotifier = new LedgerServerPartyNotifier(
+          participantId,
+          eventPublisher,
+          partyMetadataStore,
+          clock,
+          arguments.futureSupervisor,
+          parameterConfig.processingTimeouts,
+          loggerFactory,
+        )
+        // Notify at participant level if eager notification is configured, else rely on notification via domain.
+        if (parameterConfig.partyChangeNotification == PartyNotificationConfig.Eager) {
+          topologyManager.addObserver(partyNotifier.attachToIdentityManagerX())
+        }
+        partyNotifier
+      }
+
       createParticipantServices(
         participantId,
         crypto,
@@ -280,7 +296,7 @@ class ParticipantNodeBootstrapX(
         resourceManagementServiceFactory,
         replicationServiceFactory,
         createSchedulers,
-        partyMetadataStore,
+        partyNotifierFactory,
         adminToken,
         participantOps,
         componentFactory,

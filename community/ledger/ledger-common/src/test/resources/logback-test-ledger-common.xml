@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <!-- TODO(#12063) unify with Canton -->
+    <!-- TODO(#12133) remove this file -->
     <appender name="FILE" class="ch.qos.logback.core.FileAppender">
         <file>log/ledger_api_test.log</file>
         <encoder>
@@ -68,14 +69,6 @@
 
     <logger name="com.zaxxer.hikari" level="INFO">
         <appender-ref ref="IndexerStabilitySpecAppender"/>
-    </logger>
-
-    <appender name="ErrorCodeLogCollector" class="com.digitalasset.canton.testing.TestingLogCollector">
-        <test>com.daml.error.ErrorCodeSpec</test>
-    </appender>
-
-    <logger name="com.daml.error.ErrorCodeSpec" level="INFO">
-        <appender-ref ref="ErrorCodeLogCollector"/>
     </logger>
 
     <appender name="RecoveringIndexerLogCollector" class="com.digitalasset.canton.testing.TestingLogCollector">

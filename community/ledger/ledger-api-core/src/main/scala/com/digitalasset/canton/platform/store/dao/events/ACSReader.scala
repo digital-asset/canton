@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.store.dao.events
 import akka.NotUsed
 import akka.stream.Attributes
 import akka.stream.scaladsl.Source
-import com.daml.error.DamlContextualizedErrorLogger
 import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
 import com.daml.ledger.api.v1.event.Event
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
@@ -14,6 +13,7 @@ import com.daml.metrics.{Metrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.{SpanAttribute, Spans}
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.configuration.AcsStreamsConfig

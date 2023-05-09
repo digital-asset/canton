@@ -10,7 +10,6 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.lf.data.ImmArray
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
@@ -21,6 +20,7 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -293,17 +293,6 @@ class TransactionProcessingSteps(
       val result = for {
         _ <-
           if (staticDomainParameters.uniqueContractKeys) {
-            // Daml engine does not check in UCK mode whether there are contract key inconsistencies
-            // coming from non-byKey nodes. This is safe for computing the resolved keys for the `ViewParticipantData`
-            // because the resolved keys are constrained to byKey nodes.
-            // Yet, there is no point in submitting the transaction in the first place to a UCK domain
-            // because either some input contracts have already been archived or there is a duplicate contract key conflict.
-            // Unfortunately, we cannot distinguish inactive inputs from duplicate contract keys at this point
-            // and therefore return a generic contract key consistency error.
-            //
-            // TODO(M40) As this is merely an optimization, ensure that we test validation with transactions
-            //  that fail this check.
-
             val result = wfTransaction.withoutVersion.contractKeyInputs match {
               case Left(Right(LfTransaction.DuplicateContractKey(key))) =>
                 causeWithTemplate(
@@ -551,7 +540,7 @@ class TransactionProcessingSteps(
       // because the participant is an informee of the view, or indirectly, because the participant is an informee on an
       // ancestor view and it has derived the view randomness using the HKDF.
 
-      // TODO(M40): a malicious submitter can send a bogus view whose randomness cannot be decrypted/derived,
+      // TODO(i12911): a malicious submitter can send a bogus view whose randomness cannot be decrypted/derived,
       //  crashing the SyncDomain
       val randomnessMap =
         batch.foldLeft(Map.empty[ViewHash, Promise[SecureRandomness]]) { case (m, evt) =>
@@ -613,7 +602,7 @@ class TransactionProcessingSteps(
             case Some(promise) =>
               promise.tryComplete(Success(subviewRandomness)).discard
             case None =>
-              // TODO(M40): make sure to not approve the request
+              // TODO(i12911): make sure to not approve the request
               SyncServiceAlarm
                 .Warn(
                   s"View ${viewMessage.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
@@ -709,7 +698,6 @@ class TransactionProcessingSteps(
           )
       }
 
-    // TODO(M40): don't die on a malformed light transaction list. Moreover, pick out the views that are valid
     val rootViewTrees = LightTransactionViewTree
       .toToplevelFullViewTrees(protocolVersion, crypto.pureCrypto)(lightViewTrees)
       .valueOr(e =>
@@ -721,7 +709,7 @@ class TransactionProcessingSteps(
       )
       .map { viewTree => (viewTree, tryFindViewSignature(viewTree)) }
 
-    // TODO(M40): check that all non-root lightweight trees can be decrypted with the expected (derived) randomness
+    // TODO(i12911): check that all non-root lightweight trees can be decrypted with the expected (derived) randomness
     //   Also, check that all the view's informees received the derived randomness
 
     val usedAndCreatedF = ExtractUsedAndCreated(
@@ -736,7 +724,6 @@ class TransactionProcessingSteps(
       val enrichedTransaction =
         EnrichedTransaction(policy, usedAndCreated, workflowIdO, submitterMetaO)
 
-      // TODO(M40): Check that the creations don't overlap with archivals
       val activenessSet = usedAndCreated.activenessSet
 
       val pendingContracts =
@@ -1031,7 +1018,7 @@ class TransactionProcessingSteps(
     * [[com.digitalasset.canton.participant.store.ContractKeyJournal]] and the
     * [[com.digitalasset.canton.participant.store.ActiveContractStore]].
     */
-  // TODO(M40) Internal consistency checks should give the answer whether this is maliciousness or a corrupted store.
+  // TODO(i12925) Internal consistency checks should give the answer whether this is maliciousness or a corrupted store.
   private def crashOnUnknownKeys(
       result: ActivenessResult
   )(implicit traceContext: TraceContext): Unit = {
@@ -1200,7 +1187,6 @@ class TransactionProcessingSteps(
       s"Cannot handle contract-inconsistent transaction $transactionId: $contractConsistencyE",
     )
 
-    // TODO(M40): Do not discard the view validation results
     validation.PendingTransaction(
       transactionId,
       modelConformanceResultE,
@@ -1344,7 +1330,6 @@ class TransactionProcessingSteps(
           )
 
         case (reasons: Verdict.ParticipantReject, _) =>
-          // TODO(M40): Implement checks against malicious rejections and scrutinize the reasons such that an alarm is raised if necessary
           rejected(reasons.keyEvent)
         case (reject: Verdict.MediatorReject, _) =>
           rejected(reject)

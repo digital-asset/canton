@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.ledger.api.v1.admin.{identity_provider_config_service as proto}
+import com.daml.ledger.api.v1.admin.identity_provider_config_service as proto
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiIdentityProviderConfigService.toProto
 import com.digitalasset.canton.platform.apiserver.update

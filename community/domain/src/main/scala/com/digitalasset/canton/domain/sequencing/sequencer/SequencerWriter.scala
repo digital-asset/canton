@@ -11,6 +11,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
@@ -37,7 +38,6 @@ import com.digitalasset.canton.util.retry.{Pause, Success}
 import com.digitalasset.canton.util.{AkkaUtil, EitherTUtil, FutureUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration.*

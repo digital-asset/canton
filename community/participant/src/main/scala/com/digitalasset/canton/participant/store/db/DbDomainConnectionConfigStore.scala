@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -22,7 +23,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
 import scala.collection.concurrent.TrieMap

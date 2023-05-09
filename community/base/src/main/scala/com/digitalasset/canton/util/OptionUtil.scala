@@ -16,6 +16,12 @@ object OptionUtil {
       case (Some(x), Some(y)) => f(x, y).map(Some(_))
     }
 
+  /** Return None iff both `left` and `right` are defined and not equal.
+    *
+    * Otherwise, return
+    *  - Some(left), if only left is defined
+    *  - Some(right), if right is defined
+    */
   def mergeEqual[A](left: Option[A], right: Option[A]): Option[Option[A]] = {
     if (left eq right) Some(left)
     else

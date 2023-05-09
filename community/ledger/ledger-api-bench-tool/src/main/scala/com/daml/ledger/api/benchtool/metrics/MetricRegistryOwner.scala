@@ -3,8 +3,6 @@
 
 package com.daml.ledger.api.benchtool.metrics
 
-import java.util.concurrent.TimeUnit
-
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.api.opentelemetry.Slf4jMetricExporter
 import com.daml.metrics.api.reporters.MetricsReporter
@@ -14,6 +12,7 @@ import io.opentelemetry.sdk.metrics.SdkMeterProvider
 import io.opentelemetry.sdk.metrics.`export`.PeriodicMetricReader
 import org.slf4j.Logger
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.Duration
 
 class MetricRegistryOwner(

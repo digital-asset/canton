@@ -6,10 +6,10 @@ package com.digitalasset.canton.participant.store.memory
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.protocol.transfer.TransferData
+import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
 import com.digitalasset.canton.participant.store.TransferStore.{
   TransferAlreadyCompleted,
   TransferCompleted,
@@ -18,6 +18,7 @@ import com.digitalasset.canton.participant.store.TransferStore.{
 import com.digitalasset.canton.participant.store.memory.TransferCache.PendingTransferCompletion
 import com.digitalasset.canton.participant.store.{TransferLookup, TransferStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.protocol.{SourceDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
@@ -136,7 +137,7 @@ class TransferCache(transferStore: TransferStore, override val loggerFactory: Na
       onlyCompletedTransferOut: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
-      limit: Int,
+      limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
     transferStore
       .findInFlight(
@@ -147,6 +148,21 @@ class TransferCache(transferStore: TransferStore, override val loggerFactory: Na
         limit,
       )
       .map(_.filter(transferData => !pendingCompletions.contains(transferData.transferId)))
+
+  /** Transfer-out/in global offsets will be updated upon publication in the multi-domain event log, when
+    * the global offset is assigned to the event.
+    * In order to avoid race conditions, the multi-domain event log will wait for the calls to
+    * [[TransferStore.addTransferOutGlobalOffset]] and [[TransferStore.addTransferInGlobalOffset]] to complete
+    * before updating ledger end. Hence, we don't need additional synchronization here and we can directly
+    * query the store.
+    */
+  override def findIncomplete(
+      sourceDomain: SourceDomainId,
+      validAt: GlobalOffset,
+      stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+      limit: NonNegativeInt,
+  )(implicit traceContext: TraceContext): Future[Seq[IncompleteTransferData]] =
+    transferStore.findIncomplete(sourceDomain, validAt, stakeholders, limit)
 }
 
 object TransferCache {

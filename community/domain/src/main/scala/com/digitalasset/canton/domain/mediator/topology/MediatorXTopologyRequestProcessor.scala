@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.mediator.topology
 
 import cats.data.EitherT
 import cats.syntax.functor.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -24,7 +25,6 @@ import com.digitalasset.canton.topology.{DomainId, TopologyStateProcessorX}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}

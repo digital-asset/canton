@@ -221,7 +221,7 @@ final class CliConfigSpec
       )
         .getOrElse(parsingFailure())
 
-    config.commandConfig.trackerRetentionPeriod should be(expectedPeriod)
+    config.commandConfig.maxTrackingTimeout should be(expectedPeriod)
   }
 
   it should "set the client-auth parameter when provided" in new TestScope {

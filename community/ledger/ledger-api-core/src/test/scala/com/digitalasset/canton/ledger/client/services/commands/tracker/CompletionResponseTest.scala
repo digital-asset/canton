@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.ledger.client.services.commands.tracker
 
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.{ContextualizedErrorLogger, GrpcStatuses}
 import com.daml.grpc.GrpcStatus
 import com.daml.ledger.api.v1.completion.Completion
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.*
-import com.digitalasset.canton.ledger.grpc.GrpcStatuses
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.google.protobuf.any.Any
 import com.google.rpc.error_details.{ErrorInfo, RequestInfo}
 import com.google.rpc.status.Status

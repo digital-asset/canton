@@ -7,9 +7,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.daml.api.util.TimestampConversion
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.error.definitions.PackageServiceError.Validation
-import com.daml.error.definitions.{DamlError, LedgerApiErrors}
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.{ContextualizedErrorLogger, DamlError}
 import com.daml.ledger.api.v1.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementService
 import com.daml.ledger.api.v1.admin.package_management_service.*
 import com.daml.lf.archive.{Dar, DarParser, Decode, GenDarReader}
@@ -19,11 +17,13 @@ import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
+import com.digitalasset.canton.ledger.error.PackageServiceError.Validation
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
   IndexTransactionsService,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPackageManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging

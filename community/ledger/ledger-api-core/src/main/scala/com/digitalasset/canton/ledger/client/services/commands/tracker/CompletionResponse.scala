@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.ledger.client.services.commands.tracker
 
-import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.CommonErrors
+import com.daml.error.{ContextualizedErrorLogger, GrpcStatuses}
 import com.daml.grpc.GrpcStatus
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint
 import com.daml.ledger.api.v1.completion.Completion
-import com.digitalasset.canton.ledger.grpc.GrpcStatuses
-import com.google.rpc.status.{Status as StatusProto}
-import com.google.rpc.{Status as StatusJavaProto}
+import com.digitalasset.canton.ledger.error.CommonErrors
+import com.google.rpc.status.Status as StatusProto
+import com.google.rpc.Status as StatusJavaProto
 import io.grpc.Status.Code
 import io.grpc.{StatusRuntimeException, protobuf}
 

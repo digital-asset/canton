@@ -8,7 +8,7 @@ import better.files.*
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
+import com.daml.error.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, InitConfigBase}
@@ -31,19 +31,14 @@ import com.digitalasset.canton.domain.mediator.{
   MediatorRuntimeFactory,
 }
 import com.digitalasset.canton.domain.metrics.DomainMetrics
+import com.digitalasset.canton.domain.sequencing.authentication.MemberAuthenticationServiceFactory
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerVersionService
 import com.digitalasset.canton.domain.sequencing.{SequencerRuntime, SequencerRuntimeFactory}
 import com.digitalasset.canton.domain.server.DynamicDomainGrpcServer
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.topology.*
-import com.digitalasset.canton.environment.{
-  CantonNode,
-  CantonNodeBootstrapBase,
-  CantonNodeBootstrapCommon,
-  CantonNodeBootstrapCommonArguments,
-  NodeFactoryArguments,
-}
+import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.HealthReporting
 import com.digitalasset.canton.health.HealthReporting.{
@@ -354,7 +349,7 @@ class DomainNodeBootstrap(
     * arrive. If they are not immediately available, we add an observer to the topology manager which will be triggered after
     * every change to the topology manager. If after one of these changes we find that the domain manager has the keys it
     * requires to be initialized we will then start the domain.
-    * TODO(error handling): if we defer startup of the domain the initialization check and eventual domain startup will
+    * TODO(i12893): if we defer startup of the domain the initialization check and eventual domain startup will
     *                       occur within the topology manager transaction observer. currently exceptions will bubble
     *                       up into the topology transaction processor however if a error is encountered it is just
     *                       logged here leaving the domain in a dangling state. Ideally this would trigger a managed
@@ -502,6 +497,16 @@ class DomainNodeBootstrap(
               )
           }
           .toEitherT[Future]
+
+        memberAuthFactory = MemberAuthenticationServiceFactory.forOld(
+          domainId,
+          clock,
+          nonceExpirationTime = config.publicApi.nonceExpirationTime.asJava,
+          tokenExpirationTime = config.publicApi.tokenExpirationTime.asJava,
+          timeouts = parameters.processingTimeouts,
+          loggerFactory,
+          topologyProcessor,
+        )
         sequencerRuntime <- sequencerRuntimeFactory
           .create(
             domainId,
@@ -510,7 +515,6 @@ class DomainNodeBootstrap(
             // The sequencer is using the topology manager's topology client
             manager.id,
             topologyClient,
-            topologyProcessor,
             storage,
             clock,
             config,
@@ -519,6 +523,7 @@ class DomainNodeBootstrap(
             parameters.processingTimeouts,
             auditLogger,
             agreementManager,
+            memberAuthFactory,
             parameters,
             arguments.metrics.sequencer,
             indexedStringStore,

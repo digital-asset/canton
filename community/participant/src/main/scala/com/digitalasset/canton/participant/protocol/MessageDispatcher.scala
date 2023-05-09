@@ -175,21 +175,6 @@ trait MessageDispatcher { this: NamedLogging =>
     *   </li>
     * </ul>
     */
-  /* TODO(M40): If the participant does not process the request at all,
-   *  this participant's conflict detection state may get desynchronized from other participants' conflict detection state
-   *  until the mediator's rejection arrives.
-   *  This can lead to requests being accepted that other participants would have rejected during Phase 3.
-   *  For example, suppose that party `A` is hosted on participants `P1` and `P2`
-   *  and an informee of a consuming exercise action `act` on a contract `c`.
-   *  The dishonest submitter of a transaction `tx1` involving `act` sends a root hash message only for `P1` but not for `P2`.
-   *  `P2` thus does not process `tx1` at all, whereas `P1` does process `tx1` and locks `c` for deactivation.
-   *  Then, another transaction `tx2`, which uses `c`, arrives before the mediator has rejected `tx1`.
-   *  `P2` approves `tx2` on behalf of `A` as `c` is not locked on `P2`.
-   *  In contrast, `P1` rejects `tx2` on behalf of `A` as `c` is locked on `P1`.
-   *  If `P2`'s approval arrives before `P1`'s rejection at the mediator, the mediator approves `tx2`.
-   *  When `P1` receives the mediator approval for `tx2`, it crashes because a request that failed the activeness check is to be committed.
-   *  Conversely, if `P1`'s rejection arrives before `P2`'s approval, the mediator may raise an alarm when it receives the approval.
-   */
   protected def processBatch(
       eventE: Either[
         EventWithErrors[Deliver[DefaultOpenEnvelope]],
@@ -358,8 +343,6 @@ trait MessageDispatcher { this: NamedLogging =>
         }
       case Left(SendMalformedAndExpectMediatorResult(rootHash, mediatorId, reason)) =>
         // The request is malformed from this participant's point of view, but not necessarily from the mediator's.
-        // TODO(M40): This needs to be addressed properly as part of the transparency guarantees.
-        //  It is not clear that the mediator will process the rejection.
         withNewRequestCounter { rc =>
           doProcess(
             UnspecifiedMessageKind,

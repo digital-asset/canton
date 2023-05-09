@@ -31,6 +31,7 @@ import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,
   PartyRecordStore,
@@ -50,6 +51,7 @@ object ApiServiceOwner {
 
   def apply(
       indexService: IndexService,
+      submissionTracker: SubmissionTracker,
       userManagementStore: UserManagementStore,
       identityProviderConfigStore: IdentityProviderConfigStore,
       partyRecordStore: PartyRecordStore,
@@ -127,6 +129,7 @@ object ApiServiceOwner {
           timeServiceBackend.fold[TimeProviderType](TimeProviderType.WallClock)(_ =>
             TimeProviderType.Static
           ),
+        submissionTracker = submissionTracker,
         configurationLoadTimeout = config.configurationLoadTimeout,
         initialLedgerConfiguration = config.initialLedgerConfiguration,
         commandConfig = config.command,

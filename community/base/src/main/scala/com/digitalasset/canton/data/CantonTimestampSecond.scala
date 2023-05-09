@@ -117,8 +117,6 @@ object CantonTimestampSecond {
     if (ts.microsOverSecond() == 0) CantonTimestampSecond(ts.underlying)
     else CantonTimestampSecond.ofEpochSecond(ts.getEpochSecond + 1)
 
-  // TODO(error handling) these throw an IllegalArgumentException with the error message "cannot interpret ... as Timestamp"
-  // Consider changing the error message or removing these methods
   def assertFromInstant(i: Instant) = CantonTimestampSecond(LfTimestamp.assertFromInstant(i))
   def assertFromLong(micros: Long) = CantonTimestampSecond(LfTimestamp.assertFromLong(micros))
 

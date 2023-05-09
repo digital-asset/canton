@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
@@ -11,7 +12,6 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
-import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future

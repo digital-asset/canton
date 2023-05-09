@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -20,8 +19,6 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
@@ -130,7 +127,7 @@ private[transfer] class TransferInValidation(
             sourceDomain.unwrap,
             transferOutTimestamp,
           )
-          // TODO(M40): Check the signatures of the mediator and the sequencer
+          // TODO(i12926): Check the signatures of the mediator and the sequencer
 
           _ <- condUnitET[Future](
             txOutResultEvent.content.timestamp <= transferData.transferOutDecisionTime,
@@ -141,8 +138,8 @@ private[transfer] class TransferInValidation(
             ),
           )
 
-          // TODO(M40): Validate the shipped transfer-out result w.r.t. stakeholders
-          // TODO(M40): Validate that the transfer-out result received matches the transfer-out result in transferData
+          // TODO(i12926): Validate the shipped transfer-out result w.r.t. stakeholders
+          // TODO(i12926): Validate that the transfer-out result received matches the transfer-out result in transferData
 
           _ <- condUnitET[Future](
             transferInRequest.contract == transferData.contract,
@@ -152,7 +149,7 @@ private[transfer] class TransferInValidation(
           transferOutSubmitter = transferData.transferOutRequest.submitter
           targetTimeProof = transferData.transferOutRequest.targetTimeProof.timestamp
 
-          // TODO(M40): Check that transferData.transferOutRequest.targetTimeProof.timestamp is in the past
+          // TODO(i12926): Check that transferData.transferOutRequest.targetTimeProof.timestamp is in the past
           cryptoSnapshot <- transferCoordination
             .cryptoSnapshot(transferData.targetDomain.unwrap, targetTimeProof)
 

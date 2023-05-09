@@ -19,8 +19,10 @@ import com.digitalasset.canton.ledger.api.health.HealthChecks.ComponentName
 import com.digitalasset.canton.ledger.api.health.{HealthChecks, ReportsHealth}
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.LimitResultCheck
-import com.digitalasset.canton.platform.apiserver.services.GrpcClientResource
-import com.digitalasset.canton.platform.server.api.services.grpc.GrpcHealthService
+import com.digitalasset.canton.platform.server.api.services.grpc.{
+  GrpcClientResource,
+  GrpcHealthService,
+}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import io.grpc.*

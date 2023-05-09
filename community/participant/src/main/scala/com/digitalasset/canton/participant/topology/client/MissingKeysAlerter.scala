@@ -11,6 +11,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.*
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -23,28 +24,10 @@ class MissingKeysAlerter(
     participantId: ParticipantId,
     domainId: DomainId,
     client: DomainTopologyClient,
-    processor: TopologyTransactionProcessorCommon,
     cryptoPrivateStore: CryptoPrivateStore,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
-
-  processor.subscribe(new TopologyTransactionProcessingSubscriber {
-    override def observed(
-        sequencerTimestamp: SequencedTime,
-        effectiveTimestamp: EffectiveTime,
-        sequencerCounter: SequencerCounter,
-        transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-      FutureUnlessShutdown.pure(
-        processTransactions(effectiveTimestamp.value, transactions)
-      )
-    override def updateHead(
-        effectiveTimestamp: EffectiveTime,
-        approximateTimestamp: ApproximateTime,
-        potentialTopologyChange: Boolean,
-    )(implicit traceContext: TraceContext): Unit = {}
-  })
 
   def init()(implicit traceContext: TraceContext): Future[Unit] = {
     for {
@@ -55,6 +38,44 @@ class MissingKeysAlerter(
       signingKeys.foreach(key => alertOnMissingKey(key.fingerprint, KeyPurpose.Signing))
     }
   }
+
+  def attachToTopologyProcessorOld(): TopologyTransactionProcessingSubscriber =
+    new TopologyTransactionProcessingSubscriber {
+      override def updateHead(
+          effectiveTimestamp: EffectiveTime,
+          approximateTimestamp: ApproximateTime,
+          potentialTopologyChange: Boolean,
+      )(implicit traceContext: TraceContext): Unit = ()
+
+      override def observed(
+          sequencedTimestamp: SequencedTime,
+          effectiveTimestamp: EffectiveTime,
+          sequencerCounter: SequencerCounter,
+          transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+        FutureUnlessShutdown.pure(
+          processTransactions(effectiveTimestamp.value, transactions)
+        )
+    }
+
+  def attachToTopologyProcessorX(): TopologyTransactionProcessingSubscriberX =
+    new TopologyTransactionProcessingSubscriberX {
+      override def updateHead(
+          effectiveTimestamp: EffectiveTime,
+          approximateTimestamp: ApproximateTime,
+          potentialTopologyChange: Boolean,
+      )(implicit traceContext: TraceContext): Unit = ()
+
+      override def observed(
+          sequencedTimestamp: SequencedTime,
+          effectiveTimestamp: EffectiveTime,
+          sequencerCounter: SequencerCounter,
+          transactions: Seq[GenericSignedTopologyTransactionX],
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+        FutureUnlessShutdown.pure(
+          processTransactionsX(effectiveTimestamp.value, transactions)
+        )
+    }
 
   private def processTransactions(
       timestamp: CantonTimestamp,
@@ -72,6 +93,32 @@ class MissingKeysAlerter(
           )
         case okm @ OwnerToKeyMapping(`participantId`, _) =>
           alertOnMissingKey(okm.key.fingerprint, okm.key.purpose)
+        case _ => ()
+      }
+  }
+
+  private def processTransactionsX(
+      timestamp: CantonTimestamp,
+      transactions: Seq[GenericSignedTopologyTransactionX],
+  )(implicit traceContext: TraceContext): Unit = {
+    // scan state and alarm if the domain suggest that I use a key which I don't have
+    transactions.view
+      .filter(tx => tx.operation == TopologyChangeOpX.Replace && !tx.isProposal)
+      .map(_.transaction.mapping)
+      .foreach {
+        case ParticipantDomainPermissionX(
+              `domainId`,
+              `participantId`,
+              permission,
+              trustLevel,
+              _,
+              _,
+            ) =>
+          logger.info(
+            s"Domain $domainId update my participant permission as of $timestamp to ${permission}, ${trustLevel}"
+          )
+        case OwnerToKeyMappingX(`participantId`, _, keys) =>
+          keys.foreach(k => alertOnMissingKey(k.fingerprint, k.purpose))
         case _ => ()
       }
   }

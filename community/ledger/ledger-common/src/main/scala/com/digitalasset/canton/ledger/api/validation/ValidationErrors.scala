@@ -4,7 +4,7 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import io.grpc.StatusRuntimeException
 
 object ValidationErrors {

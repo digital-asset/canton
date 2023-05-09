@@ -113,6 +113,8 @@ class JcePrivateCrypto(
               }
             )
             .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
+        // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
+        case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
       }).map(convertJavaKeyPair)
     }
   }

@@ -15,7 +15,10 @@ trait Envelope[+M] extends PrettyPrinting {
 
   def recipients: Recipients
 
-  def forRecipient(member: Member): Option[Envelope[M]]
+  def forRecipient(
+      member: Member,
+      groupAddresses: Set[GroupRecipient],
+  ): Option[Envelope[M]]
 
   /** Closes the envelope by serializing the contents if necessary */
   def closeEnvelope: ClosedEnvelope

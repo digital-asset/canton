@@ -5,19 +5,20 @@ package com.daml.ledger.api.benchtool.config
 
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.metrics.api.reporters.MetricsReporter
-import scopt.{OptionDef, OptionParser, Read}
+import com.digitalasset.canton.DiscardOps
+import scopt.{OptionParser, Read}
+
 import java.io.File
 import java.nio.file.Paths
-
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.util.{Failure, Success, Try}
 
 object Cli {
   private val ProgramName: String = "ledger-api-bench-tool"
   private val parser: OptionParser[Config] = new OptionParser[Config](ProgramName) {
-    import Reads._
+    import Reads.*
 
-    head("A tool for measuring transaction streaming performance of a ledger.")
+    head("A tool for measuring transaction streaming performance of a ledger.").discard
 
     opt[(String, Int)]("endpoint")(endpointRead)
       .abbr("e")
@@ -27,11 +28,13 @@ object Cli {
       .action { case ((hostname, port), config) =>
         config.copy(ledger = config.ledger.copy(hostname = hostname, port = port))
       }
+      .discard
 
     opt[String]("indexdb-jdbc-url")
       .text("JDBC url to an IndexDB instance")
       .optional()
       .action { case (url, config) => config.withLedgerConfig(_.copy(indexDbJdbcUrlO = Some(url))) }
+      .discard
 
     opt[WorkflowConfig.StreamConfig]("consume-stream")
       .abbr("s")
@@ -47,6 +50,7 @@ object Cli {
         config
           .copy(workflow = config.workflow.copy(streams = config.workflow.streams :+ streamConfig))
       }
+      .discard
 
     opt[File]("workflow-config")
       .hidden() // TODO: uncomment when production-ready
@@ -58,6 +62,7 @@ object Cli {
       .action { case (workflowConfigFile, config) =>
         config.copy(workflowConfigFile = Some(workflowConfigFile))
       }
+      .discard
 
     opt[Int]("max-in-flight-commands")
       .hidden() // TODO: uncomment when production-ready
@@ -66,11 +71,13 @@ object Cli {
       .action { case (size, config) =>
         config.copy(maxInFlightCommands = size)
       }
+      .discard
 
     opt[Unit]("latency-test")
       .text("Run a SubmitAndWait latency benchmark")
       .optional()
       .action { case (_, config) => config.copy(latencyTest = true) }
+      .discard
 
     opt[Long]("max-latency-millis")
       .text(
@@ -80,6 +87,7 @@ object Cli {
       .action { case (maxLatencyMillis, config) =>
         config.copy(maxLatencyObjectiveMillis = maxLatencyMillis)
       }
+      .discard
 
     opt[Int]("submission-batch-size")
       .hidden() // TODO: uncomment when production-ready
@@ -88,11 +96,13 @@ object Cli {
       .action { case (size, config) =>
         config.copy(submissionBatchSize = size)
       }
+      .discard
 
     opt[FiniteDuration]("log-interval")
       .abbr("r")
       .text("Stream metrics log interval.")
       .action { case (period, config) => config.copy(reportingPeriod = period) }
+      .discard
 
     opt[Int]("core-pool-size")
       .text("Initial size of the worker thread pool.")
@@ -100,6 +110,7 @@ object Cli {
       .action { case (size, config) =>
         config.copy(concurrency = config.concurrency.copy(corePoolSize = size))
       }
+      .discard
 
     opt[Int]("max-pool-size")
       .text("Maximum size of the worker thread pool.")
@@ -107,11 +118,13 @@ object Cli {
       .action { case (size, config) =>
         config.copy(concurrency = config.concurrency.copy(maxPoolSize = size))
       }
+      .discard
 
     opt[MetricsReporter]("metrics-reporter")
       .optional()
       .text(s"Start a metrics reporter. ${MetricsReporter.cliHint}")
       .action((reporter, config) => config.copy(metricsReporter = reporter))
+      .discard
 
     opt[String]("user-based-authorization-secret")
       .optional()
@@ -119,6 +132,7 @@ object Cli {
         "Enables user based authorization. The value is used for signing authorization tokens with HMAC256."
       )
       .action((secret, config) => config.copy(authorizationTokenSecret = Some(secret)))
+      .discard
 
     opt[String]("pem")
       .optional()
@@ -129,6 +143,7 @@ object Cli {
           config.tls.copy(enabled = true, privateKeyFile = Some(Paths.get(path).toFile))
         )
       }
+      .discard
 
     opt[String]("crt")
       .optional()
@@ -140,6 +155,7 @@ object Cli {
         config
           .copy(tls = config.tls.copy(enabled = true, certChainFile = Some(Paths.get(path).toFile)))
       }
+      .discard
 
     opt[String]("cacrt")
       .optional()
@@ -150,6 +166,7 @@ object Cli {
           config.tls.copy(enabled = true, trustCollectionFile = Some(Paths.get(path).toFile))
         )
       }
+      .discard
 
     // allows you to enable tls without any special certs,
     // i.e., tls without client auth with the default root certs.
@@ -159,24 +176,25 @@ object Cli {
       .optional()
       .text("TLS: Enable tls. This is redundant if --pem, --crt or --cacrt are set")
       .action { (_, config) => config.copy(tls = config.tls.copy(enabled = true)) }
+      .discard
 
     checkConfig(c =>
       if (c.latencyTest && c.workflow.streams.nonEmpty)
         Left("Latency test cannot have configured streams")
       else Right(())
-    )
+    ).discard
 
     private def validatePath(path: String, message: String): Either[String, Unit] = {
       val valid = Try(Paths.get(path).toFile.canRead).getOrElse(false)
       if (valid) Right(()) else Left(message)
     }
 
-    help("help").text("Prints this information")
+    help("help").text("Prints this information").discard
 
-    private def note(level: Int, param: String, desc: String = ""): OptionDef[Unit, Config] = {
+    private def note(level: Int, param: String, desc: String = ""): Unit = {
       val paddedParam = s"${" " * level * 2}$param"
       val internalPadding = math.max(1, 50 - paddedParam.length)
-      note(s"$paddedParam${" " * internalPadding}$desc")
+      note(s"$paddedParam${" " * internalPadding}$desc").discard
     }
 
     note(0, "")

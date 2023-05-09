@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.service.store.db
 
 import cats.data.EitherT
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
@@ -17,7 +18,6 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -48,8 +48,8 @@ class DbServiceAgreementAcceptanceStore(
       storage.profile match {
         case _: DbStorage.Profile.Oracle =>
           sqlu"""insert /*+  ignore_row_on_dupkey_index ( service_agreement_acceptances ( agreement_id, participant_id ) ) */
-                into service_agreement_acceptances 
-                 (agreement_id, participant_id, signature, ts) 
+                into service_agreement_acceptances
+                 (agreement_id, participant_id, signature, ts)
                 values (${acceptance.agreementId}, ${acceptance.participantId}, ${acceptance.signature}, ${acceptance.timestamp})"""
         case _ =>
           sqlu"""insert into service_agreement_acceptances(agreement_id, participant_id, signature, ts)

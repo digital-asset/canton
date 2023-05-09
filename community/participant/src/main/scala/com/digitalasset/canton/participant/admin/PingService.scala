@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin
 
 import cats.implicits.toFoldableOps
 import cats.syntax.parallel.*
-import com.daml.error.definitions.LedgerApiErrors.ConsistencyErrors.ContractNotFound
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.api.v1.commands.Command as ScalaCommand
 import com.daml.ledger.api.v1.event.CreatedEvent
@@ -17,6 +16,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.error.ErrorCodeUtils
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.ConsistencyErrors.ContractNotFound
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -40,12 +40,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{
-  BatchAggregator,
-  FutureUtil,
-  LoggerUtil,
-  SimpleExecutionQueueWithShutdown,
-}
+import com.digitalasset.canton.util.{BatchAggregator, FutureUtil, LoggerUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 
@@ -111,7 +106,7 @@ class PingService(
   private val vacuumWorkflowId = WorkflowId("vacuuming")
 
   // Execution queue for the vacuuming tasks
-  private val vacuumQueue = new SimpleExecutionQueueWithShutdown(
+  private val vacuumQueue = new SimpleExecutionQueue(
     "ping-service-queue",
     futureSupervisor,
     timeouts,

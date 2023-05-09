@@ -4,9 +4,9 @@
 package com.digitalasset.canton.platform.server.api.validation
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import io.grpc.StatusRuntimeException
 
 import java.time.Duration

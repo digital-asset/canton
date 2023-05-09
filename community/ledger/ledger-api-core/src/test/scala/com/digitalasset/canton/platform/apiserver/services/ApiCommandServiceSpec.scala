@@ -3,21 +3,26 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.RpcProtoExtractors
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandService
 import com.daml.ledger.api.v1.command_service.{CommandServiceGrpc, SubmitAndWaitRequest}
+import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.ledger.api.v1.commands.{Command, Commands, CreateCommand}
 import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.logging.LoggingContext
-import com.digitalasset.canton.ledger.client.services.commands.CommandSubmission
-import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandServiceSpec.*
-import com.digitalasset.canton.platform.apiserver.services.tracking.Tracker
+import com.digitalasset.canton.platform.apiserver.services.tracking.{
+  CompletionResponse,
+  SubmissionTracker,
+}
+import com.google.protobuf.empty.Empty
 import com.google.rpc.Code
-import com.google.rpc.status.{Status as StatusProto}
+import com.google.rpc.status.Status as StatusProto
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.{Deadline, Status}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
@@ -39,44 +44,43 @@ class ApiCommandServiceSpec
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   s"the command service" should {
-    val completionSuccess = CompletionResponse.CompletionSuccess(
-      Completion(
+    val trackerCompletionResponse = tracking.CompletionResponse(
+      completion = Completion(
         commandId = "command ID",
         status = Some(OkStatus),
         transactionId = "transaction ID",
       ),
-      Some(
-        Checkpoint(offset = Some(LedgerOffset(LedgerOffset.Value.Absolute("offset"))))
-      ),
+      checkpoint =
+        Some(Checkpoint(offset = Some(LedgerOffset(LedgerOffset.Value.Absolute("offset"))))),
     )
-    "submit a request, and wait for a response" in {
-      val commands = someCommands()
-      val submissionTracker = mock[Tracker]
-      when(
-        submissionTracker.track(any[CommandSubmission])(
-          any[ExecutionContext],
-          any[LoggingContext],
-        )
-      ).thenReturn(
-        Future.successful(
-          Right(completionSuccess)
-        )
+    val commands = someCommands()
+    val submissionTracker = mock[SubmissionTracker]
+    val submit = mock[SubmitRequest => Future[Empty]]
+    when(
+      submissionTracker.track(eqTo(commands), any[Duration], eqTo(submit))(
+        any[LoggingContext],
+        any[ContextualizedErrorLogger],
       )
+    ).thenReturn(Future.successful(trackerCompletionResponse))
 
+    "submit a request, and wait for a response" in {
       openChannel(
         new ApiCommandService(
           UnimplementedTransactionServices,
           submissionTracker,
+          submit,
+          Duration.ofSeconds(1000L),
         )
       ).use { stub =>
         val request = SubmitAndWaitRequest.of(Some(commands))
         stub.submitAndWaitForTransactionId(request).map { response =>
+          verify(submissionTracker).track(
+            eqTo(commands),
+            eqTo(Duration.ofSeconds(1000L)),
+            eqTo(submit),
+          )(any[LoggingContext], any[ContextualizedErrorLogger])
           response.transactionId should be("transaction ID")
           response.completionOffset shouldBe "offset"
-          verify(submissionTracker).track(
-            eqTo(CommandSubmission(commands))
-          )(any[ExecutionContext], any[LoggingContext])
-          succeed
         }
       }
     }
@@ -88,63 +92,54 @@ class ApiCommandServiceSpec
           now.getEpochSecond * TimeUnit.SECONDS.toNanos(1) + now.getNano
       }
 
-      val commands = someCommands()
-      val submissionTracker = mock[Tracker]
-      when(
-        submissionTracker.track(any[CommandSubmission])(
-          any[ExecutionContext],
-          any[LoggingContext],
-        )
-      ).thenReturn(
-        Future.successful(
-          Right(completionSuccess)
-        )
-      )
-
       openChannel(
         new ApiCommandService(
           UnimplementedTransactionServices,
           submissionTracker,
+          submit,
+          Duration.ofSeconds(1L),
         ),
         deadlineTicker,
       ).use { stub =>
         val request = SubmitAndWaitRequest.of(Some(commands))
         stub
-          .withDeadline(Deadline.after(30, TimeUnit.SECONDS, deadlineTicker))
+          .withDeadline(Deadline.after(3600L, TimeUnit.SECONDS, deadlineTicker))
           .submitAndWaitForTransactionId(request)
           .map { response =>
-            response.transactionId should be("transaction ID")
             verify(submissionTracker).track(
-              eqTo(CommandSubmission(commands, timeout = Some(Duration.ofSeconds(30))))
-            )(any[ExecutionContext], any[LoggingContext])
+              eqTo(commands),
+              eqTo(Duration.ofSeconds(3600L)),
+              eqTo(submit),
+            )(any[LoggingContext], any[ContextualizedErrorLogger])
+            response.transactionId should be("transaction ID")
             succeed
           }
       }
     }
 
     "time out if the tracker times out" in {
-      val commands = someCommands()
-      val submissionTracker = mock[Tracker]
       when(
-        submissionTracker.track(any[CommandSubmission])(
-          any[ExecutionContext],
+        submissionTracker.track(eqTo(commands), any[Duration], eqTo(submit))(
           any[LoggingContext],
+          any[ContextualizedErrorLogger],
         )
       ).thenReturn(
-        Future.successful(
-          Left(
-            CompletionResponse.QueueCompletionFailure(
-              CompletionResponse.TimeoutResponse("command ID")
-            )
+        Future.fromTry(
+          CompletionResponse.timeout("some-cmd-id", "some-submission-id")(
+            DamlContextualizedErrorLogger.forTesting(getClass)
           )
         )
       )
 
+      val service = new ApiCommandService(
+        UnimplementedTransactionServices,
+        submissionTracker,
+        submit,
+        Duration.ofSeconds(1337L),
+      )
+
       openChannel(
-        new ApiCommandService(
-          UnimplementedTransactionServices,
-          submissionTracker,
-        )
+        service
       ).use { stub =>
         val request = SubmitAndWaitRequest.of(Some(commands))
         stub.submitAndWaitForTransactionId(request).failed.map {
@@ -156,10 +151,12 @@ class ApiCommandServiceSpec
     }
 
     "close the supplied tracker when closed" in {
-      val submissionTracker = mock[Tracker]
+      val submissionTracker = mock[SubmissionTracker]
       val service = new ApiCommandService(
         UnimplementedTransactionServices,
         submissionTracker,
+        submit,
+        Duration.ofSeconds(1337L),
       )
 
       verifyZeroInteractions(submissionTracker)

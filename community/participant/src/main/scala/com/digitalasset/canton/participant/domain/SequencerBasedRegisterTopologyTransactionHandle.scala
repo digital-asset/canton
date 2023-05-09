@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.domain
 import cats.data.EitherT
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.CantonRequireTypes.String255
@@ -13,6 +14,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.mapErr
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.topology.RegisterTopologyTransactionHandleCommon
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.HandlerResult
@@ -25,7 +27,6 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -91,6 +92,7 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
         OpenEnvelope[ProtocolMessage],
     ) => EitherT[Future, SendAsyncClientError, Unit],
     domainId: DomainId,
+    topologyRequestAddress: TopologyRequestAddressX,
     participantId: ParticipantId,
     requestedBy: Member,
     protocolVersion: ProtocolVersion,
@@ -103,7 +105,14 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     with NamedLogging {
 
   private val service =
-    new ParticipantDomainTopologyServiceX(domainId, send, protocolVersion, timeouts, loggerFactory)
+    new ParticipantDomainTopologyServiceX(
+      domainId,
+      topologyRequestAddress,
+      send,
+      protocolVersion,
+      timeouts,
+      loggerFactory,
+    )
 
   // must be used by the event handler of a sequencer subscription in order to complete the promises of requests sent with the given sequencer client
   val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = service.processor
@@ -277,6 +286,7 @@ class ParticipantDomainTopologyServiceX[
     Result,
 ](
     domainId: DomainId,
+    topologyRequestAddress: TopologyRequestAddressX,
     send: (
         TraceContext,
         OpenEnvelope[ProtocolMessage],
@@ -292,8 +302,8 @@ class ParticipantDomainTopologyServiceX[
       Seq[RegisterTopologyTransactionResponseResult.State],
     ](
       send,
-      // TODO(#11255) get the mediator id via connect client temporarily until we have group notifications
-      Recipients.cc(DomainTopologyManagerId(domainId)),
+      // TODO(#11255) replace with mediator group(s) once we have group notifications
+      Recipients.cc(topologyRequestAddress.mediatorId),
       protocolVersion,
       timeouts,
       loggerFactory,

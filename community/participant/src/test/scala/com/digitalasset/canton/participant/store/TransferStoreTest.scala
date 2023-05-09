@@ -6,11 +6,17 @@ package com.digitalasset.canton.participant.store
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
-import com.digitalasset.canton.participant.protocol.transfer.{TransferData, TransferOutRequest}
+import com.digitalasset.canton.participant.protocol.transfer.{
+  IncompleteTransferData,
+  TransferData,
+  TransferOutRequest,
+}
 import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
@@ -45,7 +51,9 @@ import com.digitalasset.canton.{
   LfPartyId,
   RequestCounter,
   SequencerCounter,
+  TransferCounter,
 }
+import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -64,9 +72,18 @@ trait TransferStoreTest {
       10.seconds,
     )
 
-    def transferDataFor(transferId: TransferId, contract: SerializableContract) =
+    def transferDataFor(
+        transferId: TransferId,
+        contract: SerializableContract,
+        transferOutGlobalOffset: Option[GlobalOffset] = None,
+    ) =
       FutureUtil.noisyAwaitResult(
-        mkTransferData(transferId, mediator1, contract = contract),
+        mkTransferData(
+          transferId,
+          mediator1,
+          contract = contract,
+          transferOutGlobalOffset = transferOutGlobalOffset,
+        ),
         "make transfer data",
         10.seconds,
       )
@@ -265,7 +282,8 @@ trait TransferStoreTest {
           transfers <- populate(store)
           List(transfer1, transfer2, transfer3, transfer4) = transfers: @unchecked
           lookup <- store.findAfter(
-            requestAfter = Some(transfer2.transferId.requestTimestamp -> transfer2.sourceDomain),
+            requestAfter =
+              Some(transfer2.transferId.transferOutTimestamp -> transfer2.sourceDomain),
             10,
           )
         } yield {
@@ -310,14 +328,366 @@ trait TransferStoreTest {
       }
     }
 
+    "add transfer-out/in global offset" should {
+
+      val transferId = transferData.transferId
+
+      val transferOutOffset = 10L
+      val transferInOffset = 15L
+
+      val transferDataOnlyOut = transferData.copy(transferOutGlobalOffset = Some(transferOutOffset))
+      val transferDataTransferComplete =
+        transferDataOnlyOut.copy(transferInGlobalOffset = Some(transferInOffset))
+
+      "be idempotent" in {
+        val store = mk(targetDomain)
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add")
+
+          _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
+            "add transfer-out offset 1"
+          )
+
+          lookupOnlyTransferOut1 <- valueOrFail(store.lookup(transferId))("lookup transfer data")
+
+          _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
+            "add transfer-out offset 2"
+          )
+
+          lookupOnlyTransferOut2 <- valueOrFail(store.lookup(transferId))("lookup transfer data")
+
+          _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
+            "add transfer-in offset 1"
+          )
+
+          lookup1 <- valueOrFail(store.lookup(transferId))("lookup transfer data")
+
+          _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
+            "add transfer-in offset 2"
+          )
+
+          lookup2 <- valueOrFail(store.lookup(transferId))("lookup transfer data")
+
+        } yield {
+          lookupOnlyTransferOut1 shouldBe transferDataOnlyOut
+          lookupOnlyTransferOut2 shouldBe transferDataOnlyOut
+
+          lookup1 shouldBe transferDataTransferComplete
+          lookup2 shouldBe transferDataTransferComplete
+        }
+      }
+
+      "return an error if transfer-in offset is the same as the transfer-out" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add")
+
+          _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
+            "add transfer-out offset"
+          )
+
+          failedAdd <- store.addTransferInGlobalOffset(transferId, transferOutOffset).value
+        } yield {
+          failedAdd.left.value shouldBe TransferOutInSameGlobalOffset(transferId, transferOutOffset)
+        }
+      }
+
+      "return an error if transfer-out offset is the same as the transfer-in" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add")
+
+          _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
+            "add transfer-in offset"
+          )
+
+          failedAdd <- store.addTransferOutGlobalOffset(transferId, transferInOffset).value
+        } yield {
+          failedAdd.left.value shouldBe TransferOutInSameGlobalOffset(transferId, transferInOffset)
+        }
+      }
+
+      "return an error if the new value differs from the old one" in {
+        val store = mk(targetDomain)
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add")
+
+          _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
+            "add transfer-out offset 1"
+          )
+
+          _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
+            "add transfer-out offset 2"
+          )
+
+          lookup1 <- valueOrFail(store.lookup(transferId))("lookup transfer data")
+
+          successfulAddOutOffset <- store
+            .addTransferOutGlobalOffset(transferId, transferOutOffset)
+            .value
+          failedAddOutOffset <- store
+            .addTransferOutGlobalOffset(transferId, transferOutOffset - 1)
+            .value
+
+          successfulAddInOffset <- store
+            .addTransferInGlobalOffset(transferId, transferInOffset)
+            .value
+          failedAddInOffset <- store
+            .addTransferInGlobalOffset(transferId, transferInOffset - 1)
+            .value
+
+          lookup2 <- valueOrFail(store.lookup(transferId))("lookup transfer data")
+
+        } yield {
+          successfulAddOutOffset.value shouldBe ()
+          failedAddOutOffset.left.value shouldBe TransferStore.TransferOutGlobalOffsetAlreadyExists(
+            transferId,
+            transferOutOffset,
+            transferOutOffset - 1,
+          )
+
+          successfulAddInOffset.value shouldBe ()
+          failedAddInOffset.left.value shouldBe TransferStore.TransferInGlobalOffsetAlreadyExists(
+            transferId,
+            transferInOffset,
+            transferInOffset - 1,
+          )
+
+          lookup1 shouldBe transferDataTransferComplete
+          lookup2 shouldBe transferDataTransferComplete
+        }
+      }
+    }
+
+    "incomplete" should {
+      val limit = NonNegativeInt.tryCreate(10)
+
+      def assertIsIncomplete(
+          incompletes: Seq[IncompleteTransferData],
+          expectedTransferData: TransferData,
+      ): Assertion =
+        incompletes.map(_.toTransferData) shouldBe Seq(expectedTransferData)
+
+      "list incomplete transfers (transfer-out done)" in {
+        val store = mk(targetDomain)
+        val transferId = transferData.transferId
+
+        val transferOutOffset = 10L
+        val transferInOffset = 20L
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+          lookupNoOffset <- store.findIncomplete(sourceDomain1, Long.MaxValue, None, limit)
+
+          _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
+            "add transfer-out offset failed"
+          )
+          lookupBeforeTransferOut <- store.findIncomplete(
+            sourceDomain1,
+            transferOutOffset - 1,
+            None,
+            limit,
+          )
+          lookupAtTransferOut <- store.findIncomplete(sourceDomain1, transferOutOffset, None, limit)
+
+          _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
+            "add transfer-in offset failed"
+          )
+
+          lookupBeforeTransferIn <- store.findIncomplete(
+            sourceDomain1,
+            transferInOffset - 1,
+            None,
+            limit,
+          )
+          lookupAtTransferIn <- store.findIncomplete(sourceDomain1, transferInOffset, None, limit)
+          lookupAfterTransferIn <- store.findIncomplete(
+            sourceDomain1,
+            transferInOffset,
+            None,
+            limit,
+          )
+        } yield {
+          lookupNoOffset shouldBe empty
+
+          lookupBeforeTransferOut shouldBe empty
+
+          assertIsIncomplete(
+            lookupAtTransferOut,
+            transferData.copy(transferOutGlobalOffset = Some(transferOutOffset)),
+          )
+
+          assertIsIncomplete(
+            lookupBeforeTransferIn,
+            transferData.copy(transferOutGlobalOffset = Some(transferOutOffset)),
+          )
+
+          lookupAtTransferIn shouldBe empty
+          lookupAfterTransferIn shouldBe empty
+        }
+      }
+
+      "list incomplete transfers (transfer-in done)" in {
+        val store = mk(targetDomain)
+        val transferId = transferData.transferId
+
+        val transferInOffset = 10L
+        val transferOutOffset = 20L
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add failed")
+          lookupNoOffset <- store.findIncomplete(sourceDomain1, Long.MaxValue, None, limit)
+
+          _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
+            "add transfer-in offset failed"
+          )
+          lookupBeforeTransferIn <- store.findIncomplete(
+            sourceDomain1,
+            transferInOffset - 1,
+            None,
+            limit,
+          )
+          lookupAtTransferIn <- store.findIncomplete(sourceDomain1, transferInOffset, None, limit)
+
+          _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
+            "add transfer-out offset failed"
+          )
+
+          lookupBeforeTransferOut <- store.findIncomplete(
+            sourceDomain1,
+            transferOutOffset - 1,
+            None,
+            limit,
+          )
+          lookupAtTransferOut <- store.findIncomplete(sourceDomain1, transferOutOffset, None, limit)
+          lookupAfterTransferOut <- store.findIncomplete(
+            sourceDomain1,
+            transferOutOffset,
+            None,
+            limit,
+          )
+        } yield {
+          lookupNoOffset shouldBe empty
+
+          lookupBeforeTransferIn shouldBe empty
+
+          assertIsIncomplete(
+            lookupAtTransferIn,
+            transferData.copy(transferInGlobalOffset = Some(transferInOffset)),
+          )
+
+          assertIsIncomplete(
+            lookupBeforeTransferOut,
+            transferData.copy(transferInGlobalOffset = Some(transferInOffset)),
+          )
+
+          lookupAtTransferOut shouldBe empty
+          lookupAfterTransferOut shouldBe empty
+        }
+      }
+
+      "take stakeholders filter into account" in {
+        val store = mk(targetDomain)
+
+        val alice = TransferStoreTest.alice
+        val bob = TransferStoreTest.bob
+
+        val aliceContract = TransferStoreTest.contract(TransferStoreTest.coidAbs1, alice)
+        val bobContract = TransferStoreTest.contract(TransferStoreTest.coidAbs2, bob)
+
+        val transferOutOffset = 42L
+
+        val contracts = Seq(aliceContract, bobContract, aliceContract, bobContract)
+        val transfersData = contracts.zipWithIndex.map { case (contract, idx) =>
+          val transferId =
+            TransferId(sourceDomain1, CantonTimestamp.Epoch.plusSeconds(idx.toLong))
+
+          transferDataFor(
+            transferId,
+            contract,
+            transferOutGlobalOffset = Some(transferOutOffset),
+          )
+        }
+        val stakeholders = contracts.map(_.metadata.stakeholders)
+
+        val addTransfersET = transfersData.parTraverse(store.addTransfer)
+
+        def lift(stakeholder: LfPartyId, others: LfPartyId*): Option[NonEmpty[Set[LfPartyId]]] =
+          Option(NonEmpty(Set, stakeholder, others: _*))
+
+        def stakeholdersOf(incompleteTransfers: Seq[IncompleteTransferData]): Seq[Set[LfPartyId]] =
+          incompleteTransfers.map(_.contract.metadata.stakeholders)
+
+        for {
+          _ <- valueOrFail(addTransfersET)("add failed")
+
+          lookupNone <- store.findIncomplete(sourceDomain1, transferOutOffset, None, limit)
+          lookupAll <- store.findIncomplete(
+            sourceDomain1,
+            transferOutOffset,
+            lift(alice, bob),
+            limit,
+          )
+
+          lookupAlice <- store.findIncomplete(sourceDomain1, transferOutOffset, lift(alice), limit)
+          lookupBob <- store.findIncomplete(sourceDomain1, transferOutOffset, lift(bob), limit)
+        } yield {
+          stakeholdersOf(lookupNone) should contain theSameElementsAs stakeholders
+          stakeholdersOf(lookupAll) should contain theSameElementsAs stakeholders
+          stakeholdersOf(lookupAlice) should contain theSameElementsAs Seq(Set(alice), Set(alice))
+          stakeholdersOf(lookupBob) should contain theSameElementsAs Seq(Set(bob), Set(bob))
+        }
+      }
+
+      "take domainId filter into account" in {
+        val store = mk(targetDomain)
+        val offset = 10L
+
+        val transfer = transferData.copy(transferInGlobalOffset = Some(offset))
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transfer))("add")
+
+          lookup1a <- store.findIncomplete(sourceDomain2, offset, None, limit) // Wrong domain
+          lookup1b <- store.findIncomplete(sourceDomain1, offset, None, limit)
+        } yield {
+          lookup1a shouldBe empty
+          assertIsIncomplete(lookup1b, transfer)
+        }
+      }
+
+      "limit the results" in {
+        val store = mk(targetDomain)
+        val offset = 42L
+
+        for {
+          _ <- valueOrFail(store.addTransfer(transferData))("add")
+          _ <- valueOrFail(store.addTransferOutGlobalOffset(transferData.transferId, offset))(
+            "add out offset"
+          )
+
+          lookup0 <- store.findIncomplete(sourceDomain1, offset, None, NonNegativeInt.zero)
+          lookup1 <- store.findIncomplete(sourceDomain1, offset, None, NonNegativeInt.one)
+
+        } yield {
+          lookup0 shouldBe empty
+          lookup1 should have size 1
+        }
+      }
+    }
+
     "findInFlight" should {
+      val limit = NonNegativeInt.tryCreate(10)
 
       "not return transfer being transferred-out" in {
         val store = mk(targetDomain)
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
+          lookup <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
         } yield {
           lookup shouldBe empty
         }
@@ -344,16 +714,22 @@ trait TransferStoreTest {
         val addTransfersET = transfersData.parTraverse(store.addTransfer)
 
         def lift(stakeholder: LfPartyId, others: LfPartyId*): Option[NonEmpty[Set[LfPartyId]]] =
-          Option(NonEmpty.mk(Set, stakeholder, others: _*))
+          Option(NonEmpty(Set, stakeholder, others: _*))
 
         for {
           _ <- valueOrFail(addTransfersET)("add failed")
 
-          lookupNone <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
-          lookupAll <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(alice, bob), 10)
+          lookupNone <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
+          lookupAll <- store.findInFlight(
+            sourceDomain1,
+            false,
+            Long.MaxValue,
+            lift(alice, bob),
+            limit,
+          )
 
-          lookupAlice <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(alice), 10)
-          lookupBob <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(bob), 10)
+          lookupAlice <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(alice), limit)
+          lookupBob <- store.findInFlight(sourceDomain1, false, Long.MaxValue, lift(bob), limit)
         } yield {
 
           lookupNone shouldBe transfersData
@@ -370,12 +746,12 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup1a <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
-          lookup1b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
+          lookup1a <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
+          lookup1b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup2a <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
-          lookup2b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 10)
+          lookup2a <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
+          lookup2b <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, limit)
         } yield {
           lookup1a shouldBe Seq(transferData)
           lookup1b shouldBe Seq()
@@ -395,8 +771,14 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
 
-          lookup1a <- store.findInFlight(sourceDomain1, false, transferOutLocalOffset - 1, None, 10)
-          lookup1b <- store.findInFlight(sourceDomain1, false, transferOutLocalOffset, None, 10)
+          lookup1a <- store.findInFlight(
+            sourceDomain1,
+            false,
+            transferOutLocalOffset - 1,
+            None,
+            limit,
+          )
+          lookup1b <- store.findInFlight(sourceDomain1, false, transferOutLocalOffset, None, limit)
         } yield {
           lookup1a shouldBe Seq()
           lookup1b shouldBe Seq(transferData)
@@ -409,8 +791,8 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
 
-          lookup1a <- store.findInFlight(sourceDomain2, false, Long.MaxValue, None, 10)
-          lookup1b <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
+          lookup1a <- store.findInFlight(sourceDomain2, false, Long.MaxValue, None, limit)
+          lookup1b <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
         } yield {
           lookup1a shouldBe Seq()
           lookup1b shouldBe Seq(transferData)
@@ -422,13 +804,13 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup1 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
+          lookup1 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup2 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
+          lookup2 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
 
           _ <- store.completeTransfer(transferData.transferId, toc).value
-          lookup3 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 10)
+          lookup3 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, limit)
         } yield {
           lookup1 shouldBe Seq(transferData)
 
@@ -444,12 +826,36 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookup11 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 1)
-          lookup10 <- store.findInFlight(sourceDomain1, false, Long.MaxValue, None, 0)
+          lookup11 <- store.findInFlight(
+            sourceDomain1,
+            false,
+            Long.MaxValue,
+            None,
+            NonNegativeInt.one,
+          )
+          lookup10 <- store.findInFlight(
+            sourceDomain1,
+            false,
+            Long.MaxValue,
+            None,
+            NonNegativeInt.zero,
+          )
 
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
-          lookup21 <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 1)
-          lookup20 <- store.findInFlight(sourceDomain1, true, Long.MaxValue, None, 0)
+          lookup21 <- store.findInFlight(
+            sourceDomain1,
+            true,
+            Long.MaxValue,
+            None,
+            NonNegativeInt.one,
+          )
+          lookup20 <- store.findInFlight(
+            sourceDomain1,
+            true,
+            Long.MaxValue,
+            None,
+            NonNegativeInt.zero,
+          )
         } yield {
           lookup11 shouldBe Seq(transferData)
           lookup10 shouldBe Seq()
@@ -861,6 +1267,7 @@ object TransferStoreTest {
       submittingParty: LfPartyId = LfPartyId.assertFromString("submitter"),
       targetDomainId: TargetDomainId,
       contract: SerializableContract = contract,
+      transferOutGlobalOffset: Option[GlobalOffset] = None,
   ): Future[TransferData] = {
 
     /*
@@ -887,6 +1294,7 @@ object TransferStoreTest {
         timestamp = CantonTimestamp.Epoch,
         targetDomain = targetDomainId,
       ),
+      TransferCounter.Genesis,
     )
     val uuid = new UUID(10L, 0L)
     val seed = seedGenerator.generateSaltSeed()
@@ -899,14 +1307,17 @@ object TransferStoreTest {
       )
     Future.successful(
       TransferData(
-        SourceProtocolVersion(protocolVersion),
-        transferId.requestTimestamp,
-        RequestCounter(0),
-        fullTransferOutViewTree,
-        CantonTimestamp.ofEpochSecond(10),
-        contract,
-        transactionId1,
-        None,
+        sourceProtocolVersion = SourceProtocolVersion(protocolVersion),
+        transferOutTimestamp = transferId.transferOutTimestamp,
+        transferOutRequestCounter = RequestCounter(0),
+        transferOutRequest = fullTransferOutViewTree,
+        transferOutDecisionTime = CantonTimestamp.ofEpochSecond(10),
+        contract = contract,
+        transferCounter = TransferCounter.Genesis,
+        creatingTransactionId = transactionId1,
+        transferOutResult = None,
+        transferOutGlobalOffset = transferOutGlobalOffset,
+        transferInGlobalOffset = None,
       )
     )
   }
@@ -916,8 +1327,16 @@ object TransferStoreTest {
       sourceMediator: MediatorId,
       submitter: LfPartyId = LfPartyId.assertFromString("submitter"),
       contract: SerializableContract = contract,
+      transferOutGlobalOffset: Option[GlobalOffset] = None,
   ) =
-    mkTransferDataForDomain(transferId, sourceMediator, submitter, targetDomain, contract)
+    mkTransferDataForDomain(
+      transferId,
+      sourceMediator,
+      submitter,
+      targetDomain,
+      contract,
+      transferOutGlobalOffset,
+    )
 
   def mkTransferOutResult(transferData: TransferData): DeliveredTransferOutResult =
     DeliveredTransferOutResult {

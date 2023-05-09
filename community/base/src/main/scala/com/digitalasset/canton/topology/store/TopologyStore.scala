@@ -39,11 +39,10 @@ import com.digitalasset.canton.topology.store.memory.{
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -261,11 +260,6 @@ trait TopologyStoreCommon[+StoreID <: TopologyStoreId, ValidTx, StoredTx, Signed
 
   protected implicit def ec: ExecutionContext
 
-  private val monotonicityCheck = new AtomicReference[Option[CantonTimestamp]](None)
-
-  protected def monotonicityTimeCheckUpdate(ts: CantonTimestamp): Option[CantonTimestamp] =
-    monotonicityCheck.getAndSet(Some(ts))
-
   def storeId: StoreID
 
   /** fetch the effective time updates greater than or equal to a certain timestamp
@@ -329,21 +323,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       transactions: Seq[ValidatedTopologyTransaction],
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
-    monotonicityTimeCheckUpdate(effective.value).foreach { prev =>
-      ErrorUtil.requireState(
-        prev < effective.value,
-        s"Append is not monotonically increasing. However, the topology store is based on this assumption. Previous: $prev, Next: $effective",
-      )
-    }
-    doAppend(sequenced, effective, transactions)
-  }
-
-  private[topology] def doAppend(
-      sequenced: SequencedTime,
-      effective: EffectiveTime,
-      transactions: Seq[ValidatedTopologyTransaction],
-  )(implicit traceContext: TraceContext): Future[Unit]
+  ): Future[Unit]
 
   /** returns transactions that should be dispatched to the domain */
   def findDispatchingTransactionsAfter(
@@ -421,7 +401,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
         case ((sequenced, effective), transactions) =>
           val txs = transactions.map(tx => ValidatedTopologyTransaction(tx.transaction, None))
           for {
-            _ <- doAppend(sequenced, effective, txs)
+            _ <- append(sequenced, effective, txs)
             _ <- updateState(
               sequenced,
               effective,

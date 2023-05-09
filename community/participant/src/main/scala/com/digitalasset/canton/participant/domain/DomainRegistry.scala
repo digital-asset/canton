@@ -9,6 +9,7 @@ import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.store.SyncDomainPersistentState
 import com.digitalasset.canton.participant.sync.SyncServiceError.DomainRegistryErrorGroup
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
@@ -341,5 +342,7 @@ trait DomainHandle extends AutoCloseable {
   def domainPersistentState: SyncDomainPersistentState
 
   def topologyFactory: TopologyComponentFactory
+
+  def topologyRequestAddress: Option[TopologyRequestAddressX]
 
 }

@@ -96,7 +96,6 @@ private[mediator] class MediatorEventsProcessor(
     ) => HandlerResult,
     protocolVersion: ProtocolVersion,
     deduplicator: MediatorEventDeduplicator,
-    readyCheck: MediatorReadyCheck,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -125,15 +124,11 @@ private[mediator] class MediatorEventsProcessor(
       (uniqueEnvelopesByEvent, storeF) = deduplicatorResult
 
       determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(uniqueEnvelopesByEvent))
-      (hasIdentityUpdates, stages) = determinedStages
-      _ <- MonadUtil.sequentialTraverseMonoid(stages)(executeStage(traceContext))
+      _ <- MonadUtil.sequentialTraverseMonoid(determinedStages)(executeStage(traceContext))
 
       resultIdentity <- identityF
       resultTopologyRequest <- topologyRequestF
     } yield {
-      // reset the ready check if there was an identity update.
-      if (hasIdentityUpdates)
-        readyCheck.reset()
       Monoid[AsyncResult]
         .combine(resultIdentity, resultTopologyRequest)
         .andThenF(_ => FutureUnlessShutdown.outcomeF(storeF))
@@ -152,13 +147,7 @@ private[mediator] class MediatorEventsProcessor(
   private case class EventProcessingStages(
       pendingRequests: List[RequestId],
       stages: List[MediatorEventStage] = List.empty,
-      hasIdentityUpdate: Boolean = false,
   ) {
-
-    def withIdentityUpdate(
-        foundIdentityUpdate: => Boolean
-    ): MediatorEventsProcessor.this.EventProcessingStages =
-      copy(hasIdentityUpdate = hasIdentityUpdate || foundIdentityUpdate)
 
     def addStage(stage: MediatorEventStage): EventProcessingStages =
       addStage(stage, pendingRequests)
@@ -226,7 +215,6 @@ private[mediator] class MediatorEventsProcessor(
           }
         }
 
-    def complete: (Boolean, List[MediatorEventStage]) = (hasIdentityUpdate, stages)
   }
 
   private def envelopesGroupedByEvent(
@@ -252,10 +240,10 @@ private[mediator] class MediatorEventsProcessor(
 
   private def determineStages(
       envelopesByEvent: Seq[(TracedProtocolEvent, Seq[OpenEnvelope[ProtocolMessage]])]
-  ): Future[(Boolean, List[MediatorEventStage])] = {
+  ): Future[List[MediatorEventStage]] = {
     NonEmpty
       .from(envelopesByEvent)
-      .fold(Future.successful((false, List.empty[MediatorEventStage]))) { envelopesByEventNE =>
+      .fold(Future.successful(List.empty[MediatorEventStage])) { envelopesByEventNE =>
         // work out requests that will timeout during this range of events
         // (keep in mind that they may receive a result during this time, in which case the timeout will be ignored)
         val (lastEvent, _) = envelopesByEventNE.last1
@@ -276,14 +264,10 @@ private[mediator] class MediatorEventsProcessor(
                     ) { case (acc, stage) => acc.map(_.addStage(stage)) }
 
                   stagesWithTimeouts <- stages.addTimeouts(event.counter, event.timestamp)
-                } yield stagesWithTimeouts.withIdentityUpdate(
-                  envelopes
-                    .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
-                    .nonEmpty
-                )
+                } yield stagesWithTimeouts
               }
           }
-        stagesF.map(_.complete)
+        stagesF.map(_.stages)
       }
   }
 
@@ -336,7 +320,6 @@ private[mediator] object MediatorEventsProcessor {
       confirmationResponseProcessor: ConfirmationResponseProcessor,
       mediatorEventDeduplicator: MediatorEventDeduplicator,
       protocolVersion: ProtocolVersion,
-      readyCheck: MediatorReadyCheck,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): MediatorEventsProcessor = {
     new MediatorEventsProcessor(
@@ -347,7 +330,6 @@ private[mediator] object MediatorEventsProcessor {
       confirmationResponseProcessor.handleRequestEvents,
       protocolVersion,
       mediatorEventDeduplicator,
-      readyCheck,
       loggerFactory,
     )
   }

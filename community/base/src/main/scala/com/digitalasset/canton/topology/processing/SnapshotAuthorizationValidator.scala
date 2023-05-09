@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.processing
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,8 +18,7 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SimpleExecutionQueueWithShutdown
-import io.functionmeta.functionFullName
+import com.digitalasset.canton.util.SimpleExecutionQueue
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -34,7 +34,7 @@ class SnapshotAuthorizationValidator(
     with NamedLogging
     with FlagCloseable {
 
-  private val sequential = new SimpleExecutionQueueWithShutdown(
+  private val sequential = new SimpleExecutionQueue(
     "snapshot-authorization-validator-queue",
     futureSupervisor,
     timeouts,

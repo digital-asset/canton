@@ -28,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, WriteSe
 import com.digitalasset.canton.platform.apiserver.*
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.platform.apiserver.ratelimiting.RateLimitingInterceptor
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.config.ParticipantConfig
 import com.digitalasset.canton.platform.configuration.{IndexServiceConfig, ServerRole}
 import com.digitalasset.canton.platform.index.{InMemoryStateUpdater, IndexServiceOwner}
@@ -72,6 +73,7 @@ class LedgerApiServer(
         (inMemoryState, inMemoryStateUpdaterFlow) <-
           LedgerApiServer.createInMemoryStateAndUpdater(
             participantConfig.indexService,
+            participantConfig.apiServer.command.maxCommandsInFlight,
             metrics,
             servicesExecutionContext,
           )
@@ -123,6 +125,7 @@ class LedgerApiServer(
           engine,
           authorityResolver,
           indexService,
+          inMemoryState.submissionTracker,
           metrics,
           servicesExecutionContext,
           new TimedWriteService(writeService, metrics),
@@ -145,6 +148,7 @@ class LedgerApiServer(
       sharedEngine: Engine,
       authorityResolver: AuthorityResolver,
       indexService: IndexService,
+      submissionTracker: SubmissionTracker,
       metrics: Metrics,
       servicesExecutionContext: ExecutionContextExecutorService,
       writeService: WriteService,
@@ -175,6 +179,7 @@ class LedgerApiServer(
       .discard
 
     ApiServiceOwner(
+      submissionTracker = submissionTracker,
       indexService = indexService,
       ledgerId = ledgerId,
       config = apiServerConfig,
@@ -217,6 +222,7 @@ class LedgerApiServer(
 object LedgerApiServer {
   def createInMemoryStateAndUpdater(
       indexServiceConfig: IndexServiceConfig,
+      maxCommandsInFlight: Int,
       metrics: Metrics,
       executionContext: ExecutionContext,
   )(implicit
@@ -231,6 +237,7 @@ object LedgerApiServer {
         maxTransactionsInMemoryFanOutBufferSize =
           indexServiceConfig.maxTransactionsInMemoryFanOutBufferSize,
         executionContext = executionContext,
+        maxCommandsInFlight = maxCommandsInFlight,
         metrics = metrics,
       )
 

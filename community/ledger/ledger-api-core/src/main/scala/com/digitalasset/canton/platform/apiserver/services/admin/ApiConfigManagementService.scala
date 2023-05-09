@@ -6,8 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.daml.api.util.{DurationConversion, TimeProvider, TimestampConversion}
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.config_management_service.ConfigManagementServiceGrpc.ConfigManagementService
 import com.daml.ledger.api.v1.admin.config_management_service.*
 import com.daml.lf.data.{Ref, Time}
@@ -18,8 +17,9 @@ import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiConfigManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging

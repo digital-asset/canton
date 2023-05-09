@@ -40,6 +40,9 @@ object SubscriptionCloseReason {
 
   /** The subscription was closed by the client. */
   case object Closed extends SubscriptionCloseReason[Nothing]
+
+  /** The subscription was closed due to an ongoing shutdown procedure. */
+  case object Shutdown extends SubscriptionCloseReason[Nothing]
 }
 
 /** A running subscription to a sequencer.

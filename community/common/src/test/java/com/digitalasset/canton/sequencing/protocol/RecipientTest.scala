@@ -3,18 +3,18 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId, UniqueIdentifier}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import org.scalatest.wordspec.AnyWordSpec
 
 class RecipientTest extends AnyWordSpec with BaseTest {
   val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"alice::party"))
-  val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::da"))
 
   val memberRecipient = MemberRecipient(ParticipantId("participant1"))
   val participantsOfParty = ParticipantsOfParty(alice)
-  val sequencersOfDomain = SequencersOfDomain(domainId)
-  val mediatorsOfDomain = MediatorsOfDomain(domainId, 99312312)
+  val sequencersOfDomain = SequencersOfDomain
+  val mediatorsOfDomain = MediatorsOfDomain(NonNegativeInt.tryCreate(99312312))
 
   "recipient test serialization" should {
     "be able to convert back and forth" in {
@@ -50,11 +50,10 @@ class RecipientTest extends AnyWordSpec with BaseTest {
           "POP::incomplete",
           "POP::incomplete::",
           "POP,,alice::party",
-          "MOD::99312312",
           "MOD::99312312::",
-          "MOD::99312312::incomplete",
-          "MOD::not-a-number::domain::da",
-          "MOD::99312312993123129931231299312312::domain::da",
+          "MOD::99312312::gibberish",
+          "MOD::not-a-number",
+          "MOD::99312312993123129931231299312312",
         )
       ) { str =>
         Recipient

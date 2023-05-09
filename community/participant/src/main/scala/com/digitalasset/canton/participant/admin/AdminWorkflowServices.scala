@@ -8,8 +8,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.daml.error.definitions.DamlError
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{DamlError, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.refinements.ApiTypes as A
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset

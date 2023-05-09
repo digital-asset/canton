@@ -6,16 +6,12 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{
-  AsyncOrSyncCloseable,
-  FlagCloseableAsync,
-  FutureUnlessShutdown,
-  SyncCloseable,
-}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -46,13 +42,20 @@ class TopologyManagerX(
     val store: TopologyStoreX[AuthorizedStore],
     val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync {
+    with FlagCloseable {
 
   // sequential queue to run all the processing that does operate on the state
-  protected val sequentialQueue = new SimpleExecutionQueue()
+  protected val sequentialQueue = new SimpleExecutionQueue(
+    "topology-manager-x-queue",
+    futureSupervisor,
+    timeouts,
+    loggerFactory,
+  )
+
   private val processor = new TopologyStateProcessorX(store, loggerFactory)
 
   def queueSize: Int = sequentialQueue.queueSize
@@ -81,11 +84,12 @@ class TopologyManagerX(
       force: Boolean = false,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, GenericSignedTopologyTransactionX] = {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
     logger.debug(show"Attempting to build, sign, and ${op} ${mapping}")
     for {
-      tx <- build(op, mapping, serial = serial, protocolVersion)
+      tx <- build(op, mapping, serial = serial, protocolVersion).mapK(FutureUnlessShutdown.outcomeK)
       signedTx <- signTransaction(tx, signingKeys, isProposal = !expectFullAuthorization)
+        .mapK(FutureUnlessShutdown.outcomeK)
       _ <- add(Seq(signedTx), force = force, expectFullAuthorization)
     } yield signedTx
   }
@@ -108,19 +112,23 @@ class TopologyManagerX(
       expectFullAuthorization: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, GenericSignedTopologyTransactionX] = {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
     // TODO(#11255): check that there is an existing topology transaction with the hash of the unique key
     for {
-      proposals <- EitherT.right[TopologyManagerError](
-        store.findProposalsByTxHash(EffectiveTime(clock.now), Seq(transactionHash))
-      )
+      proposals <- EitherT
+        .right[TopologyManagerError](
+          store.findProposalsByTxHash(EffectiveTime(clock.now), Seq(transactionHash))
+        )
+        .mapK(FutureUnlessShutdown.outcomeK)
       existingTransaction =
         (proposals match {
           case Seq() => ??? // TODO(#11255) proper error
           case Seq(tx) => tx
           case _otherwise => ??? // TODO(#11255) proper error
         })
-      extendedTransaction <- extendSignature(existingTransaction, signingKeys)
+      extendedTransaction <- extendSignature(existingTransaction, signingKeys).mapK(
+        FutureUnlessShutdown.outcomeK
+      )
       _ <- add(
         Seq(extendedTransaction),
         force = force,
@@ -219,7 +227,9 @@ class TopologyManagerX(
       force: Boolean,
       expectFullAuthorization: Boolean,
       abortOnError: Boolean = true,
-  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     sequentialQueue.executeE(
       {
         val ts = clock.uniqueTime()
@@ -257,15 +267,6 @@ class TopologyManagerX(
     )
     .map(_ => ())
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
-    Seq(
-      SyncCloseable("topology-manager-store", store.close()),
-      sequentialQueue.asCloseable(
-        "topology-manager-sequential-queue",
-        timeouts.shutdownProcessing.unwrap,
-      ),
-    )
-  }
+  override protected def onClosed(): Unit = Lifecycle.close(store, sequentialQueue)(logger)
 
 }

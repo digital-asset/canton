@@ -167,6 +167,7 @@ class GrpcSequencerServiceTest
         params,
         None,
         BaseTest.testedProtocolVersion,
+        enableMediatorUnauthenticatedMessages = false,
       )
   }
 
@@ -615,11 +616,17 @@ class GrpcSequencerServiceTest
         // TODO(#12373) Adapt when releasing BFT
         "reject sending to multiple mediator groups iff the sender is a participant" onlyRunWithOrGreaterThan (ProtocolVersion.dev) in multipleMediatorTestCase(
           RecipientsTree(
-            NonEmpty.mk(Set, MediatorsOfDomain(DefaultTestIdentities.domainId, 1)),
+            NonEmpty.mk(
+              Set,
+              MediatorsOfDomain(NonNegativeInt.tryCreate(1)),
+            ),
             Seq.empty,
           ),
           RecipientsTree(
-            NonEmpty.mk(Set, MediatorsOfDomain(DefaultTestIdentities.domainId, 2)),
+            NonEmpty.mk(
+              Set,
+              MediatorsOfDomain(NonNegativeInt.tryCreate(2)),
+            ),
             Seq.empty,
           ),
         )

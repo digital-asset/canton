@@ -73,31 +73,6 @@ class CommandMetrics(
   val validSubmissions: Meter = factory.meter(prefix :+ "valid_submissions")
 
   @MetricDoc.Tag(
-    summary = "The number of the currently pending Daml commands.",
-    description = "The number of the currently pending Daml Commands in the Command Service.",
-    qualification = Debug,
-  )
-  @nowarn("cat=deprecation")
-  val inputBufferLength: Counter = factory.counter(prefix :+ "input_buffer_length")
-
-  @MetricDoc.Tag(
-    summary = "The capacity of the Daml commands queue.",
-    description = """The maximum number of elements that can be kept in the queue of Daml commands
-                    |in the Command Service.""",
-    qualification = Debug,
-  )
-  @nowarn("cat=deprecation")
-  val inputBufferCapacity: Counter = factory.counter(prefix :+ "input_buffer_capacity")
-
-  @MetricDoc.Tag(
-    summary = "The queuing delay for the Daml command queue.",
-    description = "The queuing delay for the pending Daml commands in the Command Service.",
-    qualification = Debug,
-  )
-  @nowarn("cat=deprecation")
-  val inputBufferDelay: Timer = factory.timer(prefix :+ "input_buffer_delay")
-
-  @MetricDoc.Tag(
     summary = "The number of the Daml commands awaiting completion.",
     description =
       "The number of the currently Daml commands awaiting completion in the Command Service.",

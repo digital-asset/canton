@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.OptionT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -26,8 +27,7 @@ import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.WriteOnly
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SimpleExecutionQueueWithShutdown
-import io.functionmeta.functionFullName
+import com.digitalasset.canton.util.SimpleExecutionQueue
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -48,7 +48,7 @@ class DbDamlPackageStore(
 
   // writeQueue is used to protect against concurrent insertions and deletions to/from the `dars` or `daml_packages` tables,
   // which might otherwise data corruption or constraint violations.
-  private val writeQueue = new SimpleExecutionQueueWithShutdown(
+  private val writeQueue = new SimpleExecutionQueue(
     "db-daml-package-store-queue",
     futureSupervisor,
     timeouts,

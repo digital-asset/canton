@@ -12,32 +12,33 @@ import com.daml.ledger.api.benchtool.config.WorkflowConfig.StreamConfig.{
   TransactionTreesStreamConfig,
   TransactionsStreamConfig,
 }
-import com.daml.ledger.api.benchtool.submission.{AllocatedParties, BenchtoolTestsPackageInfo}
-import com.daml.ledger.client.binding.Primitive.TemplateId
-import com.daml.ledger.test.benchtool.Foo.{Foo1, Foo2, Foo3}
-import com.daml.ledger.test.benchtool.InterfaceSubscription.{FooI1, FooI2, FooI3}
-import scalaz.syntax.tag._
+import com.daml.ledger.api.benchtool.submission.{
+  AllocatedParties,
+  BenchtoolTestsPackageInfo,
+  FooTemplateDescriptor,
+}
+import com.daml.ledger.api.v1.value.Identifier
+import scalaz.syntax.tag.*
 
 class ConfigEnricher(
     allocatedParties: AllocatedParties,
     packageInfo: BenchtoolTestsPackageInfo,
 ) {
 
-  private def toTemplateId[T](templateId: TemplateId[T]): (String, String) = {
-    val id = templateId.unwrap
-    id.entityName -> s"${packageInfo.packageId}:${id.moduleName}:${id.entityName}"
+  private def toTemplateId[T](templateId: Identifier): (String, String) = {
+    templateId.entityName -> s"${packageInfo.packageId}:${templateId.moduleName}:${templateId.entityName}"
   }
 
   private val interfaceNameToFullyQualifiedNameMap: Map[String, String] = List(
-    FooI1.id,
-    FooI2.id,
-    FooI3.id,
+    FooTemplateDescriptor.fooI1TemplateId(packageInfo.packageId),
+    FooTemplateDescriptor.fooI2TemplateId(packageInfo.packageId),
+    FooTemplateDescriptor.fooI3TemplateId(packageInfo.packageId),
   ).map(toTemplateId).toMap
 
   private val templateNameToFullyQualifiedNameMap: Map[String, String] = List(
-    Foo1.id,
-    Foo2.id,
-    Foo3.id,
+    FooTemplateDescriptor.Foo1(packageInfo.packageId).templateId,
+    FooTemplateDescriptor.Foo2(packageInfo.packageId).templateId,
+    FooTemplateDescriptor.Foo3(packageInfo.packageId).templateId,
   ).map(toTemplateId).toMap
 
   def enrichStreamConfig(

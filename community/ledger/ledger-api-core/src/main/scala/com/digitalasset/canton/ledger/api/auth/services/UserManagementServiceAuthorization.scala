@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.ledger.api.auth.services
 
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.user_management_service.*
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.auth.*
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.server.api.ProxyCloseable
 import io.grpc.ServerServiceDefinition

@@ -18,6 +18,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.util.Try
 
 class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactory)
     extends RequestJournalStore
@@ -31,7 +32,7 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
     new InMemoryCursorPreheadStore[RequestCounterDiscriminator](loggerFactory)
 
   override def insert(data: RequestData)(implicit traceContext: TraceContext): Future[Unit] =
-    MapsUtil.putAndCheckExisting(requestTable, data.rc, data)
+    Future.fromTry(Try(MapsUtil.tryPutIdempotent(requestTable, data.rc, data)))
 
   override def query(rc: RequestCounter)(implicit
       traceContext: TraceContext

@@ -304,6 +304,23 @@ class ParticipantNodeBootstrap(
       }
     }
 
+    val partyNotifierFactory = (eventPublisher: ParticipantEventPublisher) => {
+      val partyNotifier = new LedgerServerPartyNotifier(
+        participantId,
+        eventPublisher,
+        partyMetadataStore,
+        clock,
+        arguments.futureSupervisor,
+        parameterConfig.processingTimeouts,
+        loggerFactory,
+      )
+      // Notify at participant level if eager notification is configured, else rely on notification via domain.
+      if (parameterConfig.partyChangeNotification == PartyNotificationConfig.Eager) {
+        topologyManager.addObserver(partyNotifier.attachToIdentityManagerOld())
+      }
+      partyNotifier
+    }
+
     createParticipantServices(
       participantId,
       crypto.value,
@@ -317,7 +334,7 @@ class ParticipantNodeBootstrap(
       resourceManagementServiceFactory,
       replicationServiceFactory,
       createSchedulers,
-      partyMetadataStore,
+      partyNotifierFactory,
       adminToken,
       topologyManager,
       componentFactory,

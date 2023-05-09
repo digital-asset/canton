@@ -15,7 +15,11 @@ object EncryptionKeyScheme {
   }
 
   case object EciesP256HmacSha256Aes128Cbc extends EncryptionKeyScheme {
-    override val name: String = "ECIES_P256_HMAC-SHA256_AES-CBC"
+    override val name: String = "ECIES-P256_HMAC256_AES128-CBC"
+  }
+
+  case object Rsa2048OaepSha256 extends EncryptionKeyScheme {
+    override val name: String = "RSA2048-OAEP-SHA256"
   }
 }
 

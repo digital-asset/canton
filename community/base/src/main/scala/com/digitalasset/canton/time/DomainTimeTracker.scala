@@ -4,6 +4,7 @@
 package com.digitalasset.canton.time
 
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
@@ -19,7 +20,6 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicReference
@@ -254,7 +254,6 @@ class DomainTimeTracker(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[A] =
     performUnlessClosing(functionFullName) {
       val now = clock.now
-      // TODO(error handling): This could underflow and throw an exception if we specify a very large freshness bound duration like 10000 years.
       val receivedWithin = now.minus(freshnessBound.unwrap)
 
       val (future, needUpdate) = withLock {

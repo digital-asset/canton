@@ -169,16 +169,16 @@ object RequestId {
 }
 
 /** A transfer is identified by the source domain and the sequencer timestamp on the transfer-out request. */
-final case class TransferId(sourceDomain: SourceDomainId, requestTimestamp: CantonTimestamp)
+final case class TransferId(sourceDomain: SourceDomainId, transferOutTimestamp: CantonTimestamp)
     extends PrettyPrinting {
   def toProtoV0: v0.TransferId =
     v0.TransferId(
       originDomain = sourceDomain.toProtoPrimitive,
-      timestamp = Some(requestTimestamp.toProtoPrimitive),
+      timestamp = Some(transferOutTimestamp.toProtoPrimitive),
     )
 
   override def pretty: Pretty[TransferId] = prettyOfClass(
-    param("ts", _.requestTimestamp),
+    param("ts", _.transferOutTimestamp),
     param("source", _.sourceDomain),
   )
 

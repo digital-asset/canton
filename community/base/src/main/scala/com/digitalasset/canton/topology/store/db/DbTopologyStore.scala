@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.store.db
 
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.CantonRequireTypes.{
@@ -31,7 +32,6 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 import slick.jdbc.canton.SQLActionBuilder
 
@@ -227,7 +227,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
 
   }
 
-  override private[topology] def doAppend(
+  override def append(
       sequenced: SequencedTime,
       effective: EffectiveTime,
       transactions: Seq[ValidatedTopologyTransaction],

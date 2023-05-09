@@ -7,13 +7,13 @@ import akka.actor.{Cancellable, Scheduler}
 import akka.stream.scaladsl.{Keep, RestartSource, Sink}
 import akka.stream.{KillSwitches, Materializer, RestartSettings, UniqueKillSwitch}
 import akka.{Done, NotUsed}
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 import com.digitalasset.canton.ledger.configuration.Configuration
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscriptionFromIndex.*
 

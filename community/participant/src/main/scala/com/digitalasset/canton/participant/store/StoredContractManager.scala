@@ -67,7 +67,7 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
     *         In particular, this implies that those contracts are already pending or in the backing [[ContractStore]]
     *         with a request counter.
     */
-  // TODO(M40) Make the checks against the store atomic with the additions to pending.
+  // TODO(i12908) Make the checks against the store atomic with the additions to pending.
   def addPendingContracts(
       requestCounter: RequestCounter,
       contracts: Seq[WithTransactionId[SerializableContract]],

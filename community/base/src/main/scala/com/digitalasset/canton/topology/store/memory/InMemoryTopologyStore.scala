@@ -151,7 +151,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   // contains only (Add, Replace) transactions that are authorized
   private val topologyStateStore = ArrayBuffer[TopologyStoreEntry[Positive]]()
 
-  private[topology] override def doAppend(
+  override def append(
       sequenced: SequencedTime,
       effective: EffectiveTime,
       transactions: Seq[ValidatedTopologyTransaction],

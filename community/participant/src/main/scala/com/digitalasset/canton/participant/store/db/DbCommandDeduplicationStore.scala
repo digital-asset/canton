@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.OptionT
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
@@ -25,7 +26,6 @@ import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{ApplicationId, CommandId}
-import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
 import scala.concurrent.{ExecutionContext, Future}

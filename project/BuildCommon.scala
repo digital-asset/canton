@@ -21,7 +21,6 @@ import scoverage.ScoverageKeys._
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport._
 
-import java.nio.file.{Files, StandardCopyOption}
 import scala.language.postfixOps
 
 object BuildCommon {
@@ -85,7 +84,6 @@ object BuildCommon {
       //  Global / concurrentRestrictions += Tags.limitAll(1), // re-enable if you want to serialize compilation (to not mess up the Ystatistics output)
       Global / excludeLintKeys += Compile / damlBuildOrder,
       Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
-      Global / excludeLintKeys += `functionmeta` / wartremoverErrors,
       Global / excludeLintKeys ++= (CommunityProjects.allProjects ++ DamlProjects.allProjects)
         .map(
           _ / autoAPIMappings
@@ -468,6 +466,7 @@ object BuildCommon {
 
     lazy val allProjects = Set(
       `util-external`,
+      `util-logging`,
       `community-app`,
       `community-app-base`,
       `community-base`,
@@ -479,12 +478,13 @@ object BuildCommon {
       `sequencer-driver-api`,
       `sequencer-driver-lib`,
       blake2b,
-      functionmeta,
       `slick-fork`,
       `wartremover-extension`,
       `akka-fork`,
       `demo`,
+      `daml-errors`,
       `ledger-common`,
+      `ledger-api-bench-tool`,
       `ledger-api-core`,
       `ledger-api-it`,
       `ledger-api-tools`,
@@ -496,25 +496,40 @@ object BuildCommon {
       .in(file("community/util-external"))
       .dependsOn(
         `akka-fork`,
-        `wartremover-extension` % "compile->compile;test->test",
         `ledger-common`,
+        `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
-          logback_classic,
-          logback_core,
-          scala_logging,
           scala_collection_contrib,
           scalatest % Test,
           mockito_scala % Test,
           scalatestMockito % Test,
           cats,
           jul_to_slf4j % Test,
-          log4j_core,
-          log4j_api,
           monocle_macro, // Include it here, even if unused, so that it can be used everywhere
           pureconfig, // Only dependencies may be needed, but it is simplest to include it like this
+        ),
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    lazy val `util-logging` = project
+      .in(file("community/util-logging"))
+      .dependsOn(
+        `daml-errors`,
+        `wartremover-extension` % "compile->compile;test->test",
+        DamlProjects.`daml-copy-common`,
+      )
+      .settings(
+        sharedSettings ++ cantonWarts,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        libraryDependencies ++= Seq(
+          logback_classic,
+          logback_core,
+          scala_logging,
+          log4j_core,
+          log4j_api,
           opentelemetry_api,
           opentelemetry_sdk,
           opentelemetry_sdk_autoconfigure,
@@ -523,6 +538,7 @@ object BuildCommon {
           opentelemetry_jaeger,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
+        coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
@@ -603,7 +619,6 @@ object BuildCommon {
       .in(file("community/base"))
       .enablePlugins(BuildInfoPlugin)
       .dependsOn(
-        functionmeta,
         `slick-fork`,
         `util-external`,
         DamlProjects.`daml-copy-common`,
@@ -917,76 +932,14 @@ object BuildCommon {
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         JvmRulesPlugin.damlRepoHeaderSettings,
-        sequencerDriverAssemblySettings,
+        UberLibrary.assemblySettings("sequencer-driver-lib"),
       )
 
-    val sequencerDriverAssemblySettings = Seq(
-      // Conforming to the Maven dependency naming convention.
-      assembly / assemblyJarName := s"sequencer-driver-lib_$scala_version_short-${version.value}.jar",
-      // Do not assembly dependencies other than local projects.
-      assemblyPackageDependency / assembleArtifact := false,
-      assemblyPackageScala / assembleArtifact := false,
-    )
-
-    /** The project below is a ~proxy project made for the purpose of the Drivers team.
-      * It is intented to be a temporary solution once canton repo gets reorganized. This project
-      * contains sequencer driver API, it's dependencies and utilities - all required by existing drivers.
-      * Now, in order to split repositories we have to publish minimal dependency set to artifactory
-      * (see here: https://github.com/sbt/sbt-assembly#q-despite-the-concerned-friends-i-still-want-publish-%C3%BCber-jars-what-advice-do-you-have).
-      * However, the problem arises from the fact that sequencer-driver is using util-external which
-      * is using daml-copy-common, akka-fork etc. This chain of internal dependencies is causing the
-      * need to publish more and more jars to the artifactory which we do not want to do (at least
-      * now, since there's no 'publish' infrastructure ready yet). Ad hoc solution, which we've
-      * found, is to create (and publish) a 'fat jar' (which is not so fat - 15MB...) with all the
-      * internal deps placed inside of it. Otherwise, we would have to republish e.g. bunch of Daml classes
-      * already present elsewhere in the Artifactory (daml-copy-common module).
-      * Unfortunatelly, we also need to manually create a pom file for such a jar.
-      * That means we have to traverse all the internal dependencies of `sequencer-driver-api`
-      * and obtain their 'libraryDependencies' which should land in the final pom
-      * file. Sbt doesn't allow to do that - it throws the exception when evaluating macros
-      * (https://github.com/sbt/sbt/issues/6792).
-      * The final solution is using `projectDependencies` task to setup all the transitive
-      * external dependencies (libraryDependencies is a settingKey which has to be evaluated
-      * during load phase, therefore cannot be used here). However, `projectDescriptors` (used here)
-      * still contains internal deps which we're filtering out here (by organization (e.g.
-      * com.digitalasset.canton) and version (e.g. 2.6.0-SNAPSHOT)).
-      */
-    lazy val `sequencer-driver-lib`: Project = project
-      .settings(
-        sharedCantonSettings,
-        projectDependencies := {
-          val thisOrg = (`sequencer-driver-api` / organization).value
-          val thisVer = (`sequencer-driver-api` / version).value
-          for {
-            moduleDescriptor <- (`sequencer-driver-api` / projectDescriptors).value.values.toList
-            dependency <- moduleDescriptor.getDependencies.toList
-            revisionId = dependency.getDependencyRevisionId
-            org = revisionId.getOrganisation if org != thisOrg
-            name = revisionId.getName
-            version = revisionId.getRevision() if version != thisVer
-          } yield ModuleID(org, name, version)
-        },
-        Compile / packageBin := Def.task {
-          val src = (`sequencer-driver-api` / assembly).value.toPath
-          val dest = (Compile / packageBin / artifactPath).value.toPath
-          Files.createDirectories(dest.getParent())
-          Files
-            .copy(src, dest, StandardCopyOption.REPLACE_EXISTING)
-            .toFile()
-        }.value,
-        Compile / packageSrc := Def.task {
-          val src = (`sequencer-driver-api` / Compile / packageSrc).value.toPath
-          val dest = (Compile / packageSrc / artifactPath).value.toPath
-          Files.deleteIfExists(dest)
-          Files.copy(src, dest).toFile()
-        }.value,
-        Compile / packageDoc := Def.task {
-          val src = (`sequencer-driver-api` / Compile / packageDoc).value.toPath
-          val dest = (Compile / packageDoc / artifactPath).value.toPath
-          Files.deleteIfExists(dest)
-          Files.copy(src, dest).toFile()
-        }.value,
-      )
+    // TODO(i12761): package individual libraries instead of fat JARs for external consumption
+    lazy val `sequencer-driver-lib`: Project =
+      project
+        .settings(sharedCantonSettings)
+        .settings(UberLibrary.of(`sequencer-driver-api`))
 
     lazy val blake2b = project
       .in(file("community/lib/Blake2b"))
@@ -999,21 +952,6 @@ object BuildCommon {
         ),
         // Exclude to apply our license header to any Java files
         headerSources / excludeFilter := "*.java",
-        coverageEnabled := false,
-      )
-
-    lazy val functionmeta = project
-      .in(file("community/lib/functionmeta"))
-      .disablePlugins(ScalafmtPlugin, WartRemover)
-      .settings(
-        sharedSettings,
-        libraryDependencies ++= Seq(
-          scala_reflect,
-          scalatest % Test,
-          shapeless % Test,
-        ),
-        // Exclude to apply our license header to any Scala files
-        headerSources / excludeFilter := "*.scala",
         coverageEnabled := false,
       )
 
@@ -1102,6 +1040,25 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
+    lazy val `daml-errors` = project
+      .in(file("daml-common-staging/daml-errors"))
+      .dependsOn(
+        DamlProjects.`google-common-protos-scala`,
+        `wartremover-extension` % "compile->compile;test->test",
+      )
+      .settings(
+        sharedSettings ++ cantonWarts,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        libraryDependencies ++= Seq(
+          slf4j_api,
+          grpc_api,
+          reflections,
+          scalatest % Test,
+        ),
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
     lazy val `ledger-common` = project
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
@@ -1110,6 +1067,8 @@ object BuildCommon {
         DamlProjects.`daml-copy-protobuf-java`,
         DamlProjects.`daml-copy-common`,
         DamlProjects.`daml-copy-testing` % "test",
+        `daml-errors` % "compile->compile;test->test",
+        `util-logging`,
         `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
@@ -1236,7 +1195,29 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
-    // TODO(#12060) This sbt project relies on the deprecated Sandbox-on-X sources
+    lazy val `ledger-api-bench-tool` = project
+      .in(file("community/ledger/ledger-api-bench-tool"))
+      .dependsOn(
+        `ledger-api-core`,
+        `ledger-common` % "compile->compile;compile->test",
+        `community-base`,
+        `ledger-api-it` % "test->test",
+      )
+      .disablePlugins(WartRemover) // TODO(i12064): enable WartRemover
+      .settings(
+        libraryDependencies ++= Seq(
+          akka_actor_typed,
+          akka_actor_testkit_typed % Test,
+          circe_yaml,
+        ),
+        sharedSettings,
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+        Test / fork := true,
+        Test / javaOptions += s"-Dlogback.configurationFile=${(Test / resourceDirectory).value.getAbsolutePath}/logback-test-benchtool.xml",
+      )
+
+    // TODO(i12448) This sbt project relies on the deprecated Sandbox-on-X sources
     //              for ensuring test coverage only.
     //              Once a Canton-based SandboxFixture is available,
     //              use it to run the integration tests in this module
@@ -1314,7 +1295,7 @@ object BuildCommon {
           scala_compiler,
         ),
         Compile / unmanagedSourceDirectories ++=
-          Seq( // TODO(#10852) same purpose as function meta
+          Seq(
             "libs-scala/nameof/src/main/scala"
           ).map(f => damlFolder.value / f),
         coverageEnabled := false,

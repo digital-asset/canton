@@ -4,12 +4,12 @@
 package com.digitalasset.canton.resource
 
 import cats.syntax.either.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.util.LoggerUtil
-import io.functionmeta.functionFullName
 import org.slf4j.event.Level
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.actionBasedSQLInterpolationCanton

@@ -7,6 +7,7 @@ import cats.data.{Chain, EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.{Functor, Monad}
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
@@ -47,7 +48,6 @@ import com.google.protobuf.ByteString
 import com.typesafe.config.{Config, ConfigValueFactory}
 import com.typesafe.scalalogging.Logger
 import com.zaxxer.hikari.pool.HikariPool.PoolInitializationException
-import io.functionmeta.functionFullName
 import org.slf4j.event.Level
 import slick.SlickException
 import slick.dbio.*

@@ -8,6 +8,8 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v1.completion.Completion
 import com.daml.lf.crypto
 import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.data.Time.Timestamp
@@ -19,6 +21,8 @@ import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update.CommandRejected.FinalReason
 import com.digitalasset.canton.ledger.participant.state.v2.{CompletionInfo, TransactionMeta, Update}
+import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.PrepareResult
 import com.digitalasset.canton.platform.index.InMemoryStateUpdaterSpec.{
   Scope,
@@ -32,19 +36,33 @@ import com.digitalasset.canton.platform.index.InMemoryStateUpdaterSpec.{
   update6,
 }
 import com.digitalasset.canton.platform.indexer.ha.EndlessReadService.configuration
+import com.digitalasset.canton.platform.store.cache.{
+  ContractStateCaches,
+  InMemoryFanoutBuffer,
+  MutableLedgerEndCache,
+}
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.platform.store.interning.StringInterningView
+import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
+import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
+import org.mockito.{InOrder, MockitoSugar}
 import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 import scala.util.chaining.*
 
-class InMemoryStateUpdaterSpec extends AnyFlatSpec with Matchers with AkkaBeforeAndAfterAll {
+class InMemoryStateUpdaterSpec
+    extends AnyFlatSpec
+    with Matchers
+    with AkkaBeforeAndAfterAll
+    with MockitoSugar {
 
   "flow" should "correctly process updates in order" in new Scope {
     runFlow(
@@ -126,11 +144,44 @@ class InMemoryStateUpdaterSpec extends AnyFlatSpec with Matchers with AkkaBefore
       PackageMetadata(templates = Set(templateId, templateId2)),
     )
   }
+
+  "update" should "update the in-memory state" in new Scope {
+    InMemoryStateUpdater.update(inMemoryState, loggingContext)(prepareResult)
+
+    inOrder.verify(packageMetadataView).update(packageMetadata)
+    // TODO(i12283) LLP: Unit test contract state event conversion and cache updating
+
+    inOrder
+      .verify(inMemoryFanoutBuffer)
+      .push(
+        tx_accepted_withCompletionDetails_offset,
+        tx_accepted_withCompletionDetails,
+      )
+    inOrder
+      .verify(inMemoryFanoutBuffer)
+      .push(tx_accepted_withoutCompletionDetails_offset, tx_accepted_withoutCompletionDetails)
+    inOrder.verify(inMemoryFanoutBuffer).push(tx_rejected_offset, tx_rejected)
+
+    inOrder.verify(ledgerEndCache).set(lastOffset -> lastEventSeqId)
+    inOrder.verify(dispatcher).signalNewHead(lastOffset)
+    inOrder
+      .verify(submissionTracker)
+      .onCompletion(
+        tx_accepted_completionDetails.completionStreamResponse -> tx_accepted_submitters
+      )
+
+    inOrder
+      .verify(submissionTracker)
+      .onCompletion(
+        tx_rejected_completionDetails.completionStreamResponse -> tx_rejected_submitters
+      )
+
+    inOrder.verifyNoMoreInteractions()
+  }
 }
 
 object InMemoryStateUpdaterSpec {
-  trait Scope extends Matchers with ScalaFutures with IntegrationPatience {
-
+  trait Scope extends Matchers with ScalaFutures with IntegrationPatience with MockitoSugar {
     val templateId = Identifier.assertFromString("noPkgId:Mod:I")
     val templateId2 = Identifier.assertFromString("noPkgId:Mod:I2")
 
@@ -138,9 +189,6 @@ object InMemoryStateUpdaterSpec {
     val cacheUpdates = ArrayBuffer.empty[PrepareResult]
     val cachesUpdateCaptor =
       (v: PrepareResult) => cacheUpdates.addOne(v).pipe(_ => ())
-
-    def result(lastEventSequentialId: Long) =
-      PrepareResult(Vector.empty, offset(1L), lastEventSequentialId, PackageMetadata())
 
     val inMemoryStateUpdater = InMemoryStateUpdaterFlow(
       2,
@@ -162,6 +210,116 @@ object InMemoryStateUpdaterSpec {
       events = Vector(),
       completionDetails = None,
     )
+
+    val ledgerEndCache: MutableLedgerEndCache = mock[MutableLedgerEndCache]
+    val contractStateCaches: ContractStateCaches = mock[ContractStateCaches]
+    val inMemoryFanoutBuffer: InMemoryFanoutBuffer = mock[InMemoryFanoutBuffer]
+    val stringInterningView: StringInterningView = mock[StringInterningView]
+    val dispatcherState: DispatcherState = mock[DispatcherState]
+    val packageMetadataView: PackageMetadataView = mock[PackageMetadataView]
+    val submissionTracker: SubmissionTracker = mock[SubmissionTracker]
+    val dispatcher: Dispatcher[Offset] = mock[Dispatcher[Offset]]
+
+    val inOrder: InOrder = inOrder(
+      ledgerEndCache,
+      contractStateCaches,
+      inMemoryFanoutBuffer,
+      stringInterningView,
+      dispatcherState,
+      packageMetadataView,
+      submissionTracker,
+      dispatcher,
+    )
+
+    when(dispatcherState.getDispatcher).thenReturn(dispatcher)
+
+    val inMemoryState = new InMemoryState(
+      ledgerEndCache = ledgerEndCache,
+      contractStateCaches = contractStateCaches,
+      inMemoryFanoutBuffer = inMemoryFanoutBuffer,
+      stringInterningView = stringInterningView,
+      dispatcherState = dispatcherState,
+      packageMetadataView = packageMetadataView,
+      submissionTracker = submissionTracker,
+    )(ExecutionContext.global)
+
+    val loggingContext: LoggingContext = LoggingContext.ForTesting
+    val tx_accepted_commandId = "cAccepted"
+    val tx_accepted_transactionId = "tAccepted"
+    val tx_accepted_submitters: Set[String] = Set("p1", "p2")
+
+    val tx_rejected_transactionId = "tRejected"
+    val tx_rejected_submitters: Set[String] = Set("p3", "p4")
+
+    val tx_accepted_completion: Completion = Completion(
+      commandId = tx_accepted_commandId,
+      applicationId = "appId",
+      transactionId = tx_accepted_transactionId,
+      submissionId = "submissionId",
+      actAs = Seq.empty,
+    )
+    val tx_rejected_completion: Completion =
+      tx_accepted_completion.copy(transactionId = tx_rejected_transactionId)
+    val tx_accepted_completionDetails: TransactionLogUpdate.CompletionDetails =
+      TransactionLogUpdate.CompletionDetails(
+        completionStreamResponse =
+          CompletionStreamResponse(completions = Seq(tx_accepted_completion)),
+        submitters = tx_accepted_submitters,
+      )
+
+    val tx_rejected_completionDetails: TransactionLogUpdate.CompletionDetails =
+      TransactionLogUpdate.CompletionDetails(
+        completionStreamResponse =
+          CompletionStreamResponse(completions = Seq(tx_rejected_completion)),
+        submitters = tx_rejected_submitters,
+      )
+
+    val tx_accepted_withCompletionDetails_offset: Offset =
+      Offset.fromHexString(Ref.HexString.assertFromString("aaaa"))
+
+    val tx_accepted_withoutCompletionDetails_offset: Offset =
+      Offset.fromHexString(Ref.HexString.assertFromString("bbbb"))
+
+    val tx_rejected_offset: Offset =
+      Offset.fromHexString(Ref.HexString.assertFromString("cccc"))
+
+    val tx_accepted_withCompletionDetails: TransactionLogUpdate.TransactionAccepted =
+      TransactionLogUpdate.TransactionAccepted(
+        transactionId = tx_accepted_transactionId,
+        commandId = tx_accepted_commandId,
+        workflowId = "wAccepted",
+        effectiveAt = Timestamp.assertFromLong(1L),
+        offset = tx_accepted_withCompletionDetails_offset,
+        events = (1 to 3).map(_ => mock[TransactionLogUpdate.Event]).toVector,
+        completionDetails = Some(tx_accepted_completionDetails),
+      )
+
+    val tx_accepted_withoutCompletionDetails: TransactionLogUpdate.TransactionAccepted =
+      tx_accepted_withCompletionDetails.copy(
+        completionDetails = None,
+        offset = tx_accepted_withoutCompletionDetails_offset,
+      )
+
+    val tx_rejected: TransactionLogUpdate.TransactionRejected =
+      TransactionLogUpdate.TransactionRejected(
+        offset = tx_rejected_offset,
+        completionDetails = tx_rejected_completionDetails,
+      )
+    val packageMetadata: PackageMetadata = PackageMetadata(templates = Set(templateId))
+
+    val lastOffset: Offset = tx_rejected_offset
+    val lastEventSeqId = 123L
+    val updates: Vector[TransactionLogUpdate] =
+      Vector(tx_accepted_withCompletionDetails, tx_accepted_withoutCompletionDetails, tx_rejected)
+    val prepareResult: PrepareResult = PrepareResult(
+      updates = updates,
+      lastOffset = lastOffset,
+      lastEventSequentialId = lastEventSeqId,
+      packageMetadata = packageMetadata,
+    )
+
+    def result(lastEventSequentialId: Long): PrepareResult =
+      PrepareResult(Vector.empty, offset(1L), lastEventSequentialId, PackageMetadata())
 
     def runFlow(input: Seq[(Vector[(Offset, Update)], Long)])(implicit mat: Materializer): Done =
       Source(input)

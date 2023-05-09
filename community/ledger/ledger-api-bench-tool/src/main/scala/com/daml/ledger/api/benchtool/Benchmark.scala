@@ -14,7 +14,7 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionTreesResponse,
   GetTransactionsResponse,
 }
-import com.daml.metrics.api.MetricHandle.MetricsFactory
+import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.timer.Delayed
 import org.slf4j.LoggerFactory
 
@@ -28,7 +28,7 @@ object Benchmark {
       streamConfigs: List[StreamConfig],
       reportingPeriod: FiniteDuration,
       apiServices: LedgerApiServices,
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
       system: ActorSystem[SpawnProtocol.Command],
   )(implicit ec: ExecutionContext): Future[Either[String, Unit]] =
     Future

@@ -68,6 +68,25 @@ object Policy {
       loggingContext: ErrorLoggingContext,
       executionContext: ExecutionContext,
   ): FutureUnlessShutdown[A] =
+    noisyInfiniteRetryUS(
+      FutureUnlessShutdown.outcomeF(task),
+      flagCloseable,
+      retryInterval,
+      operationName,
+      actionable,
+    )
+
+  /** Repeatedly execute the task until it returns an abort due to shutdown, doesn't throw an exception, or the `flagCloseable` is closing. */
+  def noisyInfiniteRetryUS[A](
+      task: => FutureUnlessShutdown[A],
+      flagCloseable: FlagCloseable,
+      retryInterval: FiniteDuration,
+      operationName: String,
+      actionable: String,
+  )(implicit
+      loggingContext: ErrorLoggingContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[A] =
     Pause(
       loggingContext.logger,
       flagCloseable,
@@ -75,7 +94,7 @@ object Policy {
       retryInterval,
       operationName = operationName,
       actionable = Some(actionable),
-    ).unlessShutdown(FutureUnlessShutdown.outcomeF(task), AllExnRetryable)(
+    ).unlessShutdown(task, AllExnRetryable)(
       Success.always,
       executionContext,
       loggingContext.traceContext,

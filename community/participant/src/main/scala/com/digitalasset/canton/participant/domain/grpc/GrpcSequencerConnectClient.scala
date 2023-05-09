@@ -17,7 +17,11 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
 import com.digitalasset.canton.participant.domain.SequencerConnectClient
-import com.digitalasset.canton.participant.domain.SequencerConnectClient.Error
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.{
+  DomainClientBootstrapInfo,
+  Error,
+  TopologyRequestAddressX,
+}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
@@ -48,37 +52,42 @@ class GrpcSequencerConnectClient(
   private val builder =
     sequencerConnection.mkChannelBuilder(clientChannelBuilder, traceContextPropagation)
 
-  override def getDomainIdSequencerId(
+  override def getDomainClientBootstrapInfo(
       domainAlias: DomainAlias
-  )(implicit traceContext: TraceContext): EitherT[Future, Error, (DomainId, SequencerId)] = for {
-    response <- CantonGrpcUtil
-      .sendSingleGrpcRequest(
-        serverName = domainAlias.unwrap,
-        requestDescription = "get domain id and sequencer id",
-        channel = builder.build(),
-        stubFactory = v0.SequencerConnectServiceGrpc.stub,
-        timeout = timeouts.network.unwrap,
-        logger = logger,
-        logPolicy = CantonGrpcUtil.silentLogPolicy,
-        retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
-      )(_.getDomainId(v0.SequencerConnect.GetDomainId.Request()))
-      .leftMap(err => Error.Transport(err.toString))
+  )(implicit traceContext: TraceContext): EitherT[Future, Error, DomainClientBootstrapInfo] =
+    for {
+      response <- CantonGrpcUtil
+        .sendSingleGrpcRequest(
+          serverName = domainAlias.unwrap,
+          requestDescription = "get domain id and sequencer id",
+          channel = builder.build(),
+          stubFactory = v0.SequencerConnectServiceGrpc.stub,
+          timeout = timeouts.network.unwrap,
+          logger = logger,
+          logPolicy = CantonGrpcUtil.silentLogPolicy,
+          retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
+        )(_.getDomainId(v0.SequencerConnect.GetDomainId.Request()))
+        .leftMap(err => Error.Transport(err.toString))
 
-    domainId = DomainId
-      .fromProtoPrimitive(response.domainId, "domainId")
-      .leftMap[Error](err => Error.DeserializationFailure(err.toString))
+      domainId = DomainId
+        .fromProtoPrimitive(response.domainId, "domainId")
+        .leftMap[Error](err => Error.DeserializationFailure(err.toString))
 
-    domainId <- EitherT.fromEither[Future](domainId)
+      domainId <- EitherT.fromEither[Future](domainId)
 
-    sequencerId =
-      if (response.sequencerId.isEmpty) Right(SequencerId(domainId.unwrap))
-      else
-        SequencerId
-          .fromProtoPrimitive(response.sequencerId, "sequencerId")
-          .leftMap[Error](err => Error.DeserializationFailure(err.toString))
+      sequencerId =
+        if (response.sequencerId.isEmpty) Right(SequencerId(domainId.unwrap))
+        else
+          SequencerId
+            .fromProtoPrimitive(response.sequencerId, "sequencerId")
+            .leftMap[Error](err => Error.DeserializationFailure(err.toString))
 
-    sequencerId <- EitherT.fromEither[Future](sequencerId)
-  } yield (domainId, sequencerId)
+      sequencerId <- EitherT.fromEither[Future](sequencerId)
+
+      topologyRequestAddress <- EitherT.fromEither[Future](
+        TopologyRequestAddressX.fromProto(response.topologyRequestAddress)
+      )
+    } yield DomainClientBootstrapInfo(domainId, sequencerId, topologyRequestAddress)
 
   override def getDomainParameters(
       domainAlias: DomainAlias

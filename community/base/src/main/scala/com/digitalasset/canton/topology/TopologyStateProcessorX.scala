@@ -64,7 +64,9 @@ class TopologyStateProcessorX(
       expectFullAuthorization: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, Seq[GenericValidatedTopologyTransactionX], Unit] = {
+  ): EitherT[Future, Seq[GenericValidatedTopologyTransactionX], Seq[
+    GenericValidatedTopologyTransactionX
+  ]] = {
 
     type Lft = Seq[GenericValidatedTopologyTransactionX]
 
@@ -119,7 +121,7 @@ class TopologyStateProcessorX(
         logger.info(
           "Persisted topology transactions:\n  " + success.mkString("\n  ")
         )
-        ()
+        success
       },
     )
   }
@@ -243,6 +245,7 @@ class TopologyStateProcessorX(
     //     - a party to participant mapping mentioning a participant who is not on the domain
     //       (no trust certificate or no owner keys)
     //     - a mediator or sequencer who doesn't have keys
+    //     - a domain parameter change (in particular changes to the topology change delay) that coudl confuse the future dating logic.
     val ret = for {
       // we check if the transaction is properly authorized given the current topology state
       // if it is a proposal, then we demand that all signatures are appropriate (but

@@ -284,7 +284,7 @@ object LightTransactionViewTree
                       )
                     )
                   case Some(remainingNE) =>
-                    // TODO(M40): the recursion may blow the stack here
+                    // TODO(i12900): the recursion may blow the stack here
                     toFullView(remainingNE).map { case (fv, newRemaining) =>
                       (fv +: leftSiblings) -> newRemaining
                     }

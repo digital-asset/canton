@@ -9,7 +9,6 @@ import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.concurrent.*
 import com.digitalasset.canton.config.*
@@ -27,6 +26,7 @@ import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunctio
 import com.digitalasset.canton.environment.Environment.*
 import com.digitalasset.canton.environment.ParticipantNodes.{ParticipantNodesOld, ParticipantNodesX}
 import com.digitalasset.canton.health.{HealthCheck, HealthServer}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsConfig.Prometheus

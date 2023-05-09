@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.service.SubscriptionPool.{
@@ -15,7 +16,6 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import io.functionmeta.functionFullName
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable

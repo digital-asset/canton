@@ -24,7 +24,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.{
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueueWithShutdown}
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{LedgerConfiguration, LedgerSubmissionId}
 import com.google.common.annotations.VisibleForTesting
 
@@ -58,7 +58,7 @@ class ParticipantEventPublisher(
 
   import com.digitalasset.canton.util.ShowUtil.*
 
-  private val executionQueue = new SimpleExecutionQueueWithShutdown(
+  private val executionQueue = new SimpleExecutionQueue(
     "participant-event-publisher-queue",
     futureSupervisor,
     timeouts,

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,7 +14,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Stor
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import io.functionmeta.functionFullName
 
 import java.time.Duration
 import scala.collection.mutable

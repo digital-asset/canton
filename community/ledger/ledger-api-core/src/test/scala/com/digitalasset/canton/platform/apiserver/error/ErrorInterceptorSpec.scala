@@ -7,7 +7,6 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.{Flow, Source}
 import ch.qos.logback.classic.Level
 import com.daml.error.*
-import com.daml.error.definitions.{CommonErrors, DamlError}
 import com.daml.error.utils.ErrorDetails
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.sampleservice.HelloServiceResponding
@@ -16,6 +15,7 @@ import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.platform.hello.HelloServiceGrpc.HelloService
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.platform.testing.StreamConsumer
+import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
 import com.digitalasset.canton.platform.server.api.services.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.testing.TestingLogCollector.ThrowableEntry
 import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}

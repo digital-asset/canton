@@ -45,7 +45,13 @@ import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{
+  LfPartyId,
+  RequestCounter,
+  SequencerCounter,
+  TransferCounter,
+  checked,
+}
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -165,6 +171,7 @@ private[transfer] class TransferInProcessingSteps(
         submitterMetadata,
         stakeholders,
         transferData.contract,
+        transferData.transferCounter,
         transferData.creatingTransactionId,
         targetDomain,
         mediatorId,
@@ -271,7 +278,7 @@ private[transfer] class TransferInProcessingSteps(
     val correctRootHashes = decryptedViewsWithSignatures.map { case (rootHashes, _) =>
       rootHashes.unwrap
     }
-    // TODO(M40): Send a rejection if malformedPayloads is non-empty
+    // TODO(i12926): Send a rejection if malformedPayloads is non-empty
     for {
       txInRequest <- EitherT.cond[Future](
         correctRootHashes.toList.sizeCompare(1) == 0,
@@ -288,8 +295,6 @@ private[transfer] class TransferInProcessingSteps(
           receivedOn = domainId.unwrap,
         ),
       ).leftWiden[TransferProcessorError]
-
-      // TODO(M40): check recipients
 
       transferringParticipant = txInRequest.transferOutResultEvent.unwrap.informees
         .contains(participantId.adminParty.toLf)
@@ -473,7 +478,6 @@ private[transfer] class TransferInProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CommitAndStoreContractsAndPublishEvent] = {
-    // TODO(M40): Check that the notification tree is as expected
     val PendingTransferIn(
       requestId,
       requestCounter,
@@ -524,7 +528,6 @@ private[transfer] class TransferInProcessingSteps(
         )
 
       case reasons: Verdict.ParticipantReject =>
-        // TODO(M40): Implement checks against malicious rejections and scrutinize the reasons such that an alarm is raised if necessary
         EitherT
           .fromEither[Future](
             createRejectionEvent(RejectionArgs(pendingRequestData, reasons.keyEvent))
@@ -640,6 +643,7 @@ object TransferInProcessingSteps {
       submitterMetadata: TransferSubmitterMetadata,
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
+      transferCounter: TransferCounter,
       creatingTransactionId: TransactionId,
       targetDomain: TargetDomainId,
       targetMediator: MediatorId,
@@ -656,6 +660,7 @@ object TransferInProcessingSteps {
       targetMediator,
       stakeholders,
       transferInUuid,
+      transferCounter,
       targetProtocolVersion,
     )
     val view = TransferInView.create(pureCrypto)(

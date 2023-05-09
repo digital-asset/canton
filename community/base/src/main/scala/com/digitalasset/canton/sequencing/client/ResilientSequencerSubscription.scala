@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.sequencing.client
 
+import akka.stream.AbruptStageTerminationException
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
@@ -33,7 +35,6 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.{DelayUtil, FutureUtil, LoggerUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
@@ -131,6 +132,9 @@ class ResilientSequencerSubscription[HandlerError](
               giveUp(error)
             }
 
+          case Failure(_: AbruptStageTerminationException) if isClosing =>
+            giveUp(Success(SubscriptionCloseReason.Shutdown))
+
           case Failure(exn) =>
             val canRetry = retryPolicy.retryOnException(exn, logger)
 
@@ -227,6 +231,8 @@ class ResilientSequencerSubscription[HandlerError](
     reason match {
       case Success(SubscriptionCloseReason.Closed) =>
         logger.trace("Sequencer subscription is being closed")
+      case Success(SubscriptionCloseReason.Shutdown) =>
+        logger.info("Sequencer subscription is being closed due to an ongoing shutdown")
       case Success(SubscriptionCloseReason.HandlerError(_: ApplicationHandlerShutdown.type)) =>
         logger.info("Sequencer subscription is being closed due to handler shutdown")
       case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(reason))) =>

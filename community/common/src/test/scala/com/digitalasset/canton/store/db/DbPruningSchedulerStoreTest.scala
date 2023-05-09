@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.PruningSchedulerStoreTest
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future

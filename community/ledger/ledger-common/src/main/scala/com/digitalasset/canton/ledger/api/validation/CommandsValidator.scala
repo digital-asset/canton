@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.api.util.{DurationConversion, TimestampConversion}
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.api.v1.commands
 import com.daml.ledger.api.v1.commands.Command.Command.{
   Create as ProtoCreate,
@@ -24,6 +23,7 @@ import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
   effectiveSubmitters,
 }
 import com.digitalasset.canton.ledger.api.{DeduplicationPeriod, domain}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.server.api.validation.{
   DeduplicationPeriodValidator,

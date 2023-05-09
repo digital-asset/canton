@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
+import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
@@ -28,7 +29,7 @@ final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: Top
     _.result
   )
 
-  def toTopologyState: List[TopologyMappingX] =
+  def toTopologyState: List[M] =
     result.map(_.transaction.transaction.mapping).toList
 
   // note, we are reusing v0, as v0 just expects bytestrings ...
@@ -52,6 +53,16 @@ final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: Top
   def collectOfMapping[T <: TopologyMappingX: ClassTag]: StoredTopologyTransactionsX[Op, T] =
     StoredTopologyTransactionsX(
       result.mapFilter(_.selectMapping[T])
+    )
+
+  def collectLatestByUniqueKey: StoredTopologyTransactionsX[Op, M] =
+    StoredTopologyTransactionsX(
+      result
+        .groupBy1(_.transaction.transaction.mapping.uniqueKey)
+        .view
+        .mapValues(_.last1)
+        .values
+        .toSeq
     )
 
   /** Split transactions into certificates and everything else (used when uploading to a participant) */

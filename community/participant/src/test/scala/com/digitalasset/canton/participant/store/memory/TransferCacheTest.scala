@@ -6,13 +6,14 @@ package com.digitalasset.canton.participant.store.memory
 import cats.data.{Chain, EitherT}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.protocol.transfer.TransferData
+import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
 import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.store.memory.TransferCacheTest.HookTransferStore
 import com.digitalasset.canton.participant.store.{TransferStore, TransferStoreTest}
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SourceDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -262,6 +263,16 @@ object TransferCacheTest {
     ): EitherT[Future, TransferStoreError, Unit] =
       baseStore.addTransferOutResult(transferOutResult)
 
+    override def addTransferOutGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, TransferStoreError, Unit] =
+      baseStore.addTransferOutGlobalOffset(transferId, offset)
+
+    override def addTransferInGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, TransferStoreError, Unit] =
+      baseStore.addTransferInGlobalOffset(transferId, offset)
+
     override def completeTransfer(transferId: TransferId, timeOfCompletion: TimeOfChange)(implicit
         traceContext: TraceContext
     ): CheckedT[Future, Nothing, TransferStoreError, Unit] = {
@@ -298,7 +309,7 @@ object TransferCacheTest {
         onlyCompletedTransferOut: Boolean,
         transferOutRequestNotAfter: LocalOffset,
         stakeholders: Option[NonEmpty[Set[LfPartyId]]],
-        limit: Int,
+        limit: NonNegativeInt,
     )(implicit traceContext: TraceContext): Future[Seq[TransferData]] = baseStore.findInFlight(
       sourceDomain,
       onlyCompletedTransferOut,
@@ -306,6 +317,14 @@ object TransferCacheTest {
       stakeholders,
       limit,
     )
+
+    override def findIncomplete(
+        sourceDomain: SourceDomainId,
+        validAt: GlobalOffset,
+        stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+        limit: NonNegativeInt,
+    )(implicit traceContext: TraceContext): Future[Seq[IncompleteTransferData]] =
+      baseStore.findIncomplete(sourceDomain, validAt, stakeholders, limit)
 
     override def lookup(transferId: TransferId)(implicit
         traceContext: TraceContext

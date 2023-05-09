@@ -189,8 +189,11 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       // matches a party to participant mapping (with appropriate filters)
       (entry.transaction.transaction.mapping match {
         case ptp: PartyToParticipantX =>
-          ptp.maybeUid.exists(_.toProtoPrimitive.startsWith(filterParty)) &&
+          ptp.partyId.toProtoPrimitive.startsWith(filterParty) &&
           ptp.participants.exists(_.participantId.toProtoPrimitive.startsWith(filterParticipant))
+        case cert: DomainTrustCertificateX =>
+          cert.participantId.adminParty.toProtoPrimitive.startsWith(filterParty) &&
+          cert.participantId.toProtoPrimitive.startsWith(filterParticipant)
         case _ => false
       })
     }
@@ -338,7 +341,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
           entry.transaction.transaction.op == TopologyChangeOpX.Replace &&
           entry.transaction.transaction.mapping
             .select[DomainTrustCertificateX]
-            .exists(m => m.participantId == participant.uid),
+            .exists(_.participantId == participant),
     ).map(
       _.collectOfType[TopologyChangeOpX.Replace]
         .collectOfMapping[DomainTrustCertificateX]
@@ -356,16 +359,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       asOf = asOfInclusive,
       asOfInclusive = true,
       isProposal = false,
-      types = Seq(
-        NamespaceDelegationX.code,
-        UnionspaceDefinitionX.code,
-        IdentifierDelegationX.code,
-        OwnerToKeyMappingX.code,
-        DomainTrustCertificateX.code,
-        MediatorDomainStateX.code,
-        SequencerDomainStateX.code,
-        DomainParametersStateX.code,
-      ),
+      types = TopologyMappingX.Code.all,
       filterUid = None,
       filterNamespace = None,
     )

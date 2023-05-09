@@ -497,7 +497,6 @@ class DomainSnapshotSyncCryptoApi(
             )
         }
     )
-      // TODO (error handling) better alert / error message if given key does not exist locally
       .flatMap(key =>
         crypto.privateCrypto
           .decrypt(AsymmetricEncrypted(encryptedMessage.ciphertext, key.fingerprint))(
@@ -534,7 +533,6 @@ class DomainSnapshotSyncCryptoApi(
               KeyNotAvailable(owner, KeyPurpose.Encryption, ipsSnapshot.timestamp, Seq.empty)
             )
             .flatMap(k =>
-              // TODO (error handling): better error message if given key does not exist locally
               crypto.pureCrypto
                 .encryptWith(message, k, version)
                 .leftMap(SyncCryptoEncryptionError)

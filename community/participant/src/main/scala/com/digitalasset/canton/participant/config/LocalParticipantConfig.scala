@@ -635,24 +635,21 @@ final case class TreeTransactionStreamsConfig(
 
 /** Ledger api command service specific configurations
   *
-  * @param trackerRetentionPeriod maximum command tracking duration
-  * @param inputBufferSize        maximum number of commands queued for submission for each distinct set of parties
-  * @param maxCommandsInFlight    maximum number of submitted commands waiting to be completed for each distinct set of parties
+  * @param maxTrackingTimeout maximum command tracking duration
+  * @param maxCommandsInFlight    maximum number of submitted commands waiting to be completed
   */
 final case class CommandServiceConfig(
-    trackerRetentionPeriod: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-      CommandConfiguration.Default.trackerRetentionPeriod
+    maxTrackingTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
+      CommandConfiguration.Default.maxTrackingTimeout
     ),
-    inputBufferSize: Int = CommandConfiguration.Default.inputBufferSize,
     maxCommandsInFlight: Int = CommandConfiguration.Default.maxCommandsInFlight,
 ) {
   // This helps us detect if any CommandService configuration are added in the daml repo.
   private def _completenessCheck(config: CommandConfiguration): CommandServiceConfig =
     config match {
-      case CommandConfiguration(inputBufferSize, maxCommandsInFlight, trackerRetentionPeriod) =>
+      case CommandConfiguration(maxTrackingTimeout, maxCommandsInFlight) =>
         CommandServiceConfig(
-          trackerRetentionPeriod = NonNegativeFiniteDuration(trackerRetentionPeriod),
-          inputBufferSize = inputBufferSize,
+          maxTrackingTimeout = NonNegativeFiniteDuration(maxTrackingTimeout),
           maxCommandsInFlight = maxCommandsInFlight,
         )
     }
@@ -668,8 +665,8 @@ object CommandServiceConfig {
       .into[CommandServiceConfig]
       .disableDefaultValues
       .withFieldComputed(
-        _.trackerRetentionPeriod,
-        c => NonNegativeFiniteDuration(c.trackerRetentionPeriod),
+        _.maxTrackingTimeout,
+        c => NonNegativeFiniteDuration(c.maxTrackingTimeout),
       )
       .transform
   }

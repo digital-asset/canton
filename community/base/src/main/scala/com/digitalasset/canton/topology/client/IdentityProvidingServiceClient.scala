@@ -19,6 +19,7 @@ import com.digitalasset.canton.protocol.{
   DynamicDomainParameters,
   DynamicDomainParametersWithValidity,
 }
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
   AuthorityOfDelegation,
@@ -29,6 +30,7 @@ import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
   TopologyTransactionProcessingSubscriber,
+  TopologyTransactionProcessingSubscriberX,
 }
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
@@ -355,6 +357,33 @@ trait MediatorDomainStateClient {
 
   def isMediatorActive(mediatorId: MediatorId): Future[Boolean] =
     mediatorGroups().map(_.exists(_.active.contains(mediatorId)))
+
+  def mediatorGroupsOfAll(
+      groups: Seq[MediatorGroupIndex]
+  ): EitherT[Future, Seq[MediatorGroupIndex], Seq[MediatorGroup]] =
+    if (groups.isEmpty) EitherT.rightT(Seq.empty)
+    else
+      EitherT(
+        mediatorGroups()
+          .map { mediatorGroups =>
+            val existingGroupIndices = mediatorGroups.map(_.index)
+            val nonExisting = groups.filterNot(existingGroupIndices.contains)
+            Either.cond(
+              nonExisting.isEmpty,
+              mediatorGroups.filter(g => groups.contains(g.index)),
+              nonExisting,
+            )
+          }
+      )
+
+}
+
+/** The subset of the topology client providing sequencer state information */
+trait SequencerDomainStateClient {
+  this: BaseTopologySnapshotClient =>
+
+  /** returns the sequencer group */
+  def sequencerGroup(): Future[Option[SequencerGroup]]
 }
 
 // this can be removed with 3.0
@@ -435,14 +464,22 @@ trait TopologySnapshot
     with CertificateSnapshotClient
     with VettedPackagesSnapshotClient
     with MediatorDomainStateClient
+    with SequencerDomainStateClient
     with DomainGovernanceSnapshotClient { this: BaseTopologySnapshotClient with NamedLogging => }
 
 // architecture-handbook-entry-end: IdentityProvidingServiceClient
 
+trait DomainTopologyClientWithInitOld
+    extends DomainTopologyClientWithInit
+    with TopologyTransactionProcessingSubscriber
+
+trait DomainTopologyClientWithInitX
+    extends DomainTopologyClientWithInit
+    with TopologyTransactionProcessingSubscriberX
+
 /** The internal domain topology client interface used for initialisation and efficient processing */
 trait DomainTopologyClientWithInit
     extends DomainTopologyClient
-    with TopologyTransactionProcessingSubscriber
     with HasFutureSupervision
     with NamedLogging {
 

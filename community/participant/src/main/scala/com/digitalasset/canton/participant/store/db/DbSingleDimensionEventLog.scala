@@ -7,6 +7,7 @@ import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -23,7 +24,6 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import io.functionmeta.functionFullName
 import slick.jdbc.*
 
 import scala.collection.{SortedMap, mutable}

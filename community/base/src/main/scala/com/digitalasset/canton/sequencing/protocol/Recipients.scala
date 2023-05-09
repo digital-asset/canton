@@ -24,8 +24,11 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
 
   def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] = trees.flatMap(_.allPaths)
 
-  def forMember(member: Member): Option[Recipients] = {
-    val ts = trees.forgetNE.flatMap(t => t.forMember(member))
+  def forMember(
+      member: Member,
+      groupRecipients: Set[GroupRecipient],
+  ): Option[Recipients] = {
+    val ts = trees.forgetNE.flatMap(t => t.forMember(member, groupRecipients))
     val optTs = NonEmpty.from(ts)
     optTs.map(Recipients(_))
   }

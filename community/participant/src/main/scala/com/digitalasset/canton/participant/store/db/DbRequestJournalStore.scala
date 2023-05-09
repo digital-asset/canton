@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -32,7 +33,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
 import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 import slick.jdbc.*
 
 import java.util.ConcurrentModificationException

@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.server.api.services.grpc
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.DamlContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.command_completion_service.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
@@ -13,6 +12,7 @@ import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.validation.CompletionServiceRequestValidator
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.server.api.ValidationLogger
 import com.digitalasset.canton.platform.server.api.services.domain.CommandCompletionService
 import com.digitalasset.canton.platform.server.api.services.grpc.Logging.traceId

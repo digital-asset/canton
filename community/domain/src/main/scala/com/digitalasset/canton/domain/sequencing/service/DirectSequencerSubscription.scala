@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
-import akka.stream.Materializer
 import akka.stream.scaladsl.{Keep, Sink}
+import akka.stream.{AbruptStageTerminationException, Materializer}
 import cats.syntax.either.*
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -17,6 +17,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing.*
+import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.ApplicationHandlerShutdown
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -67,20 +68,37 @@ private[service] class DirectSequencerSubscription[E](
   )
 
   FutureUtil.doNotAwait(
-    done.thereafter {
-      case Success(None) =>
-        logger.debug(show"Subscription flow for $member has completed")
-        closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed).discard[Boolean]
-      case Success(Some(SubscriptionCloseReason.TransportChange)) =>
-        logger.debug(show"Subscription flow for $member has completed due to transport change")
-        closeReasonPromise.trySuccess(SubscriptionCloseReason.TransportChange).discard[Boolean]
-      case Success(Some(error)) =>
-        logger.warn(s"Subscription handler returned error: $error")
-        closeReasonPromise.trySuccess(error).discard[Boolean]
-      case Failure(ex) =>
-        logger.warn(show"Subscription flow for $member has failed", ex)
-        closeReasonPromise.tryFailure(ex).discard[Boolean]
-    },
+    done
+      .recover {
+        // recovering here instead of just in the thereafter block below, so that FutureUtil.doNotAwait
+        // doesn't actually log the failureMessage on error level
+        case _: AbruptStageTerminationException if isClosing =>
+          Some(SubscriptionCloseReason.Shutdown)
+      }
+      .thereafter {
+        case Success(None) =>
+          logger.debug(show"Subscription flow for $member has completed")
+          closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed).discard[Boolean]
+        case Success(Some(SubscriptionCloseReason.TransportChange)) =>
+          logger.debug(show"Subscription flow for $member has completed due to transport change")
+          closeReasonPromise.trySuccess(SubscriptionCloseReason.TransportChange).discard[Boolean]
+        case Success(
+              Some(
+                SubscriptionCloseReason.Shutdown |
+                SubscriptionCloseReason.HandlerError(_: ApplicationHandlerShutdown.type)
+              )
+            ) =>
+          logger.info(
+            show"Subscription flow for $member was terminated due to an ongoing shutdown"
+          )
+          closeReasonPromise.trySuccess(SubscriptionCloseReason.Shutdown).discard[Boolean]
+        case Success(Some(error)) =>
+          logger.warn(s"Subscription handler returned error: $error")
+          closeReasonPromise.trySuccess(error).discard[Boolean]
+        case Failure(ex) =>
+          logger.warn(show"Subscription flow for $member has failed", ex)
+          closeReasonPromise.tryFailure(ex).discard[Boolean]
+      },
     s"DirectSequencerSubscription for $member failed",
   )
 

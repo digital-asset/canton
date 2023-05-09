@@ -9,6 +9,7 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.{Eval, Monad}
 import com.daml.lf.engine.Engine
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -69,6 +70,7 @@ import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequence
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.AuthorityOfResponse
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
@@ -80,7 +82,6 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -110,6 +111,7 @@ class SyncDomain(
     domainCrypto: DomainSyncCryptoClient,
     identityPusher: ParticipantTopologyDispatcherCommon,
     topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
+    missingKeysAlerter: MissingKeysAlerter,
     transferCoordination: TransferCoordination,
     inFlightSubmissionTracker: InFlightSubmissionTracker,
     messageDispatcherFactory: MessageDispatcher.Factory[MessageDispatcher],
@@ -251,18 +253,6 @@ class SyncDomain(
   }
   private val topologyProcessor =
     topologyProcessorFactory.create(acsCommitmentProcessor.scheduleTopologyTick)
-  // connect domain client to processor
-  topologyProcessor.subscribe(domainHandle.topologyClient)
-
-  // turn on missing key alerter such that we get notified if a key is used that we do not have
-  private val missingKeysAlerter = new MissingKeysAlerter(
-    participantId,
-    domainId,
-    topologyClient,
-    topologyProcessor,
-    domainCrypto.crypto.cryptoPrivateStore,
-    loggerFactory,
-  )
 
   private val badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor =
     new BadRootHashMessagesRequestProcessor(
@@ -286,6 +276,7 @@ class SyncDomain(
   private val registerIdentityTransactionHandle = identityPusher.createHandler(
     domainHandle.domainAlias,
     domainId,
+    domainHandle.topologyRequestAddress,
     staticDomainParameters.protocolVersion,
     domainHandle.topologyClient,
     domainHandle.sequencerClient,
@@ -310,6 +301,11 @@ class SyncDomain(
       inFlightSubmissionTracker,
       loggerFactory,
     )
+
+  def authorityOfInSnapshotApproximation(requestingAuthority: Set[LfPartyId])(implicit
+      traceContext: TraceContext
+  ): Future[AuthorityOfResponse] =
+    topologyClient.currentSnapshotApproximation.authorityOf(requestingAuthority)
 
   private def initialize(implicit
       traceContext: TraceContext
@@ -687,7 +683,7 @@ class SyncDomain(
           case Right(()) => ()
         }
 
-        pendingTransfers.lastOption.map(t => t.transferId.requestTimestamp -> t.sourceDomain)
+        pendingTransfers.lastOption.map(t => t.transferId.transferOutTimestamp -> t.sourceDomain)
       }
 
       resF.map {
@@ -832,9 +828,9 @@ class SyncDomain(
         Lifecycle.close(
           // Close the domain crypto client first to stop waiting for snapshots that may block the sequencer subscription
           domainCrypto,
-          // Close the sequencer subscription so that the processors won't receive or handle events when
+          // Close the sequencer client so that the processors won't receive or handle events when
           // their shutdown is initiated.
-          () => domainHandle.sequencerClient.closeSubscription(),
+          domainHandle.sequencerClient,
           pruneObserver,
           acsCommitmentProcessor,
           transactionProcessor,
@@ -935,6 +931,7 @@ object SyncDomain {
         domainCrypto: DomainSyncCryptoClient,
         identityPusher: ParticipantTopologyDispatcherCommon,
         topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
+        missingKeysAlerter: MissingKeysAlerter,
         transferCoordination: TransferCoordination,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
         clock: Clock,
@@ -961,6 +958,7 @@ object SyncDomain {
         domainCrypto: DomainSyncCryptoClient,
         identityPusher: ParticipantTopologyDispatcherCommon,
         topologyProcessorFactory: TopologyTransactionProcessorCommon.Factory,
+        missingKeysAlerter: MissingKeysAlerter,
         transferCoordination: TransferCoordination,
         inFlightSubmissionTracker: InFlightSubmissionTracker,
         clock: Clock,
@@ -984,6 +982,7 @@ object SyncDomain {
         domainCrypto,
         identityPusher,
         topologyProcessorFactory,
+        missingKeysAlerter,
         transferCoordination,
         inFlightSubmissionTracker,
         MessageDispatcher.DefaultFactory,

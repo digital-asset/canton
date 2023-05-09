@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import com.daml.lf.data.Ref.PackageId
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -25,12 +26,12 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
-import io.functionmeta.functionFullName
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
@@ -115,6 +116,30 @@ trait TopologyAwaiter extends FlagCloseable {
   }
 }
 
+abstract class BaseDomainTopologyClientOld
+    extends BaseDomainTopologyClient
+    with DomainTopologyClientWithInitOld {
+  override def observed(
+      sequencedTimestamp: SequencedTime,
+      effectiveTimestamp: EffectiveTime,
+      sequencerCounter: SequencerCounter,
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    observedInternal(sequencedTimestamp, effectiveTimestamp)
+}
+
+abstract class BaseDomainTopologyClientX
+    extends BaseDomainTopologyClient
+    with DomainTopologyClientWithInitX {
+  override def observed(
+      sequencedTimestamp: SequencedTime,
+      effectiveTimestamp: EffectiveTime,
+      sequencerCounter: SequencerCounter,
+      transactions: Seq[GenericSignedTopologyTransactionX],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    observedInternal(sequencedTimestamp, effectiveTimestamp)
+}
+
 abstract class BaseDomainTopologyClient
     extends DomainTopologyClientWithInit
     with TopologyAwaiter
@@ -167,11 +192,9 @@ abstract class BaseDomainTopologyClient
 
   override def numPendingChanges: Int = pendingChanges.get()
 
-  override def observed(
+  protected def observedInternal(
       sequencedTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
-      sequencerCounter: SequencerCounter,
-      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
     // we update the head timestamp approximation with the current sequenced timestamp, right now
@@ -295,7 +318,7 @@ class StoreBasedDomainTopologyClient(
     val loggerFactory: NamedLoggerFactory,
     useStateTxs: Boolean = true,
 )(implicit val executionContext: ExecutionContext)
-    extends BaseDomainTopologyClient
+    extends BaseDomainTopologyClientOld
     with NamedLogging {
 
   override def trySnapshot(
@@ -752,6 +775,17 @@ class StoreBasedTopologySnapshot(
       )
     )
   }
+
+  /** returns the current sequencer group if known
+    * TODO(#11255): Decide whether it is advantageous e.g. for testing to expose a sequencer-group on daml 2.*
+    *   perhaps we cook up a SequencerId based on the domainId assuming that the sequencer (or sequencers all with the
+    *   same sequencerId) is/are active
+    */
+  override def sequencerGroup(): Future[Option[SequencerGroup]] = Future.failed(
+    new UnsupportedOperationException(
+      s"SequencerGroup lookup not supported by StoreBasedDomainTopologyClient. This is a coding bug."
+    )
+  )
 
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext

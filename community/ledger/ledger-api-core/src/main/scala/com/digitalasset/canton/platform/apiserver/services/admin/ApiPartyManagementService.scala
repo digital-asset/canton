@@ -5,9 +5,7 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.ledger.api.v1.admin.object_meta.{ObjectMeta as ProtoObjectMeta}
+import com.daml.ledger.api.v1.admin.object_meta.ObjectMeta as ProtoObjectMeta
 import com.daml.ledger.api.v1.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementService
 import com.daml.ledger.api.v1.admin.party_management_service.{
   AllocatePartyRequest,
@@ -36,8 +34,9 @@ import com.digitalasset.canton.ledger.api.domain.{
   PartyDetails,
 }
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging

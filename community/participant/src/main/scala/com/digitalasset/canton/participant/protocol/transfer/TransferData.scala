@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
+import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{
   SerializableContract,
@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
+import com.digitalasset.canton.{RequestCounter, TransferCounter}
 
 /** Stores the data for a transfer that needs to be passed from the source domain to the target domain. */
 final case class TransferData(
@@ -25,8 +26,11 @@ final case class TransferData(
     transferOutRequest: FullTransferOutTree,
     transferOutDecisionTime: CantonTimestamp,
     contract: SerializableContract,
+    transferCounter: TransferCounter,
     creatingTransactionId: TransactionId,
     transferOutResult: Option[DeliveredTransferOutResult],
+    transferOutGlobalOffset: Option[GlobalOffset],
+    transferInGlobalOffset: Option[GlobalOffset],
 ) {
 
   require(
@@ -45,6 +49,12 @@ final case class TransferData(
   def addTransferOutResult(result: DeliveredTransferOutResult): Option[TransferData] =
     mergeTransferOutResult(Some(result))
 
+  def addTransferOutGlobalOffset(offset: GlobalOffset): Option[TransferData] =
+    mergeTransferOutGlobalOffset(Some(offset))
+
+  def addTransferInGlobalOffset(offset: GlobalOffset): Option[TransferData] =
+    mergeTransferInGlobalOffset(Some(offset))
+
   def mergeWith(other: TransferData): Option[TransferData] = {
     if (this eq other) Some(this)
     else
@@ -56,10 +66,15 @@ final case class TransferData(
               `transferOutRequest`,
               `transferOutDecisionTime`,
               `contract`,
+              `transferCounter`,
               `creatingTransactionId`,
               otherResult,
+              otherTransferOutGlobalOffset,
+              otherTransferInGlobalOffset,
             ) =>
           mergeTransferOutResult(otherResult)
+            .flatMap(_.mergeTransferOutGlobalOffset(otherTransferOutGlobalOffset))
+            .flatMap(_.mergeTransferInGlobalOffset(otherTransferInGlobalOffset))
         case _ => None
       }
   }
@@ -71,5 +86,23 @@ final case class TransferData(
     OptionUtil
       .mergeEqual(oldResult, result)
       .map(merged => if (merged eq oldResult) this else this.copy(transferOutResult = merged))
+  }
+
+  private def mergeTransferOutGlobalOffset(
+      offset: Option[GlobalOffset]
+  ): Option[TransferData] = {
+    val oldResult = this.transferOutGlobalOffset
+    OptionUtil
+      .mergeEqual(oldResult, offset)
+      .map(merged => if (merged eq oldResult) this else this.copy(transferOutGlobalOffset = merged))
+  }
+
+  private def mergeTransferInGlobalOffset(
+      offset: Option[GlobalOffset]
+  ): Option[TransferData] = {
+    val oldResult = this.transferInGlobalOffset
+    OptionUtil
+      .mergeEqual(oldResult, offset)
+      .map(merged => if (merged eq oldResult) this else this.copy(transferInGlobalOffset = merged))
   }
 }

@@ -13,7 +13,6 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 
 import scala.annotation.tailrec
 import scala.collection.{concurrent, mutable}
-import scala.concurrent.Future
 
 object MapsUtil {
 
@@ -187,20 +186,17 @@ object MapsUtil {
 
   /** Insert the pair (key, value) to `map` if not already present.
     * Assert that any existing element for `key` is equal to `value`.
+    * @throws java.lang.IllegalStateException if the assertion fails
     */
-  def putAndCheckExisting[K, V](map: concurrent.Map[K, V], key: K, value: V)(implicit
+  def tryPutIdempotent[K, V](map: concurrent.Map[K, V], key: K, value: V)(implicit
       loggingContext: ErrorLoggingContext
-  ): Future[Unit] = {
-    map.putIfAbsent(key, value) match {
-      case None =>
-        Future.unit
-      case Some(oldValue) =>
-        ErrorUtil.requireStateAsync(
-          oldValue == value,
-          s"Map key $key already has value $oldValue assigned to it. Cannot insert $value.",
-        )
+  ): Unit =
+    map.putIfAbsent(key, value).foreach { oldValue =>
+      ErrorUtil.requireState(
+        oldValue == value,
+        s"Map key $key already has value $oldValue assigned to it. Cannot insert $value.",
+      )
     }
-  }
 
   def mergeWith[K, V](map1: Map[K, V], map2: Map[K, V])(f: (V, V) => V): Map[K, V] = {
     // We don't need `f`'s associativity when we merge maps
@@ -220,6 +216,16 @@ object MapsUtil {
       }.discard[Option[V]]
     }
   }
+
+  def extendedMapWith[K, V](m: Map[K, V], extendWith: IterableOnce[(K, V)])(
+      merge: (V, V) => V
+  ): Map[K, V] =
+    extendWith.iterator.foldLeft(m) { case (acc, (k, v)) =>
+      acc.updatedWith(k) {
+        case None => Some(v)
+        case Some(mv) => Some(merge(mv, v))
+      }
+    }
 
   /** Return all key-value pairs in minuend that are different / missing in subtrahend
     *

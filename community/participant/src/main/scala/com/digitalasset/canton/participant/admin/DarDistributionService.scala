@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.implicits.toFoldableOps
-import com.daml.error.definitions.DamlError
+import com.daml.error.DamlError
 import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.client.binding.{Contract, Primitive as P}

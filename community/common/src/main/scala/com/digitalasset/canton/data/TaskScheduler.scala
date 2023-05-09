@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import com.daml.metrics.api.MetricHandle.Counter
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
@@ -13,10 +14,9 @@ import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueueWithShutdown}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, SequencerCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
@@ -92,8 +92,8 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
 
   /** The queue controlling the sequential execution of tasks within the scheduler.
     */
-  private[this] val queue: SimpleExecutionQueueWithShutdown =
-    new SimpleExecutionQueueWithShutdown(
+  private[this] val queue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(
       "task-scheduler",
       futureSupervisor,
       timeouts,

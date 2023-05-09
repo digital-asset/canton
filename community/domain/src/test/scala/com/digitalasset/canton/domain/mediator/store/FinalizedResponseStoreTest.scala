@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.mediator.store
 
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -19,7 +20,6 @@ import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityF
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
-import io.functionmeta.functionFullName
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AsyncWordSpec
 

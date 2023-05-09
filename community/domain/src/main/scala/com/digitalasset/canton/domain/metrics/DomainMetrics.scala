@@ -50,7 +50,9 @@ class SequencerMetrics(
   @MetricDoc.Tag(
     summary = "Number of message bytes processed by the sequencer",
     description =
-      """This metric measures the total number of message bytes processed by the sequencer.""",
+      """This metric measures the total number of message bytes processed by the sequencer.
+        |If the message received by the sequencer contains duplicate or irrelevant fields,
+        |the contents of these fields do not contribute to this metric.""",
     qualification = Debug,
   )
   val bytesProcessed: Meter = metricsFactory.meter(prefix :+ "processed-bytes")

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import com.daml.error.definitions.{DamlError, PackageServiceError}
+import com.daml.error.DamlError
 import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.api.v1.commands.Command
@@ -17,6 +17,7 @@ import com.daml.ledger.client.binding.Primitive as P
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.ledger.error.PackageServiceError
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}

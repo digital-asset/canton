@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -18,7 +19,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RequestCounter, SequencerCounter, checked}
-import io.functionmeta.functionFullName
 
 import scala.concurrent.ExecutionContext
 

@@ -33,6 +33,12 @@ import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenMana
   *                                     therefore, unless you know what you are doing, you shouldn't touch this setting.
   * @param overrideMaxRequestSize overrides the maxRequestSize configured in the dynamic domain parameters. If overrideMaxRequestSize,
   *                               is set, modifying the maxRequestSize won't have any effect.
+  * @param maximumInFlightEventBatches The maximum number of event batches that the system will process concurrently.
+  * Setting the `maximumInFlightEventBatches` parameter limits the number of event batches that the system will process
+  * simultaneously, preventing overload and ensuring that the system can handle the workload effectively. A higher value
+  * of `maximumInFlightEventBatches` can lead to increased throughput, but at the cost of higher memory consumption and
+  * longer processing times for each batch. A lower value of `maximumInFlightEventBatches` may limit throughput, but can
+  * result in more stable and predictable system behavior.
   */
 final case class SequencerClientConfig(
     eventInboxSize: PositiveInt = PositiveInt.tryCreate(100),
@@ -51,4 +57,5 @@ final case class SequencerClientConfig(
     optimisticSequencedEventValidation: Boolean = true,
     skipSequencedEventValidation: Boolean = false,
     overrideMaxRequestSize: Option[NonNegativeInt] = None,
+    maximumInFlightEventBatches: PositiveInt = PositiveInt.tryCreate(20),
 )

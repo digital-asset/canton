@@ -9,6 +9,7 @@ import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Keep, MergePreferred, Si
 import akka.stream.{FlowShape, KillSwitches, Materializer, OverflowStrategy}
 import com.daml.ledger.api.v1.commands.Commands
 import com.daml.ledger.api.v1.completion.Completion
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.util.Ctx
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error
@@ -26,7 +27,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status
-import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future, Promise}

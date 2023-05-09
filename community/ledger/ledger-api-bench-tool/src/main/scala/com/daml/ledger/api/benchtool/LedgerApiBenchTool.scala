@@ -3,8 +3,6 @@
 
 package com.daml.ledger.api.benchtool
 
-import java.util.concurrent._
-
 import akka.actor.typed.{ActorSystem, SpawnProtocol}
 import com.daml.ledger.api.benchtool.config.WorkflowConfig.{
   FibonacciSubmissionConfig,
@@ -19,27 +17,26 @@ import com.daml.ledger.api.benchtool.metrics.{
   MetricsManager,
 }
 import com.daml.ledger.api.benchtool.services.LedgerApiServices
-import com.daml.ledger.api.benchtool.submission._
+import com.daml.ledger.api.benchtool.submission.*
 import com.daml.ledger.api.benchtool.submission.foo.RandomPartySelecting
 import com.daml.ledger.api.benchtool.util.TypedActorSystemResourceOwner
-import com.daml.ledger.api.tls.TlsConfiguration
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
-import com.daml.metrics.api.MetricHandle.MetricsFactory
+import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
-import com.daml.platform.localstore.api.UserManagementStore
+import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
+import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import io.grpc.Channel
 import io.grpc.netty.{NegotiationType, NettyChannelBuilder}
 import io.opentelemetry.api.metrics.MeterProvider
 import org.slf4j.{Logger, LoggerFactory}
 
-import scala.concurrent.duration._
+import java.util.concurrent.*
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.control.NonFatal
 
 /** Runs a submission step followed by a benchmark step.
   * Either step is optional.
-  *
-  * Uses "benchtool" ([[Names.benchtoolApplicationId]]) applicationId for both steps.
   */
 object LedgerApiBenchTool {
   private val printer = pprint.PPrinter.BlackWhite
@@ -230,7 +227,7 @@ class LedgerApiBenchTool(
   private def benchmarkStreams(
       regularUserServices: LedgerApiServices,
       streamConfigs: List[WorkflowConfig.StreamConfig],
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
       actorSystem: ActorSystem[SpawnProtocol.Command],
   )(implicit ec: ExecutionContext): Future[Either[String, Unit]] =
     if (streamConfigs.isEmpty) {
@@ -250,7 +247,7 @@ class LedgerApiBenchTool(
       regularUserServices: LedgerApiServices,
       adminServices: LedgerApiServices,
       submissionConfigO: Option[WorkflowConfig.SubmissionConfig],
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
       allocatedParties: AllocatedParties,
       actorSystem: ActorSystem[SpawnProtocol.Command],
       maxLatencyObjectiveMillis: Long,
@@ -321,7 +318,7 @@ class LedgerApiBenchTool(
       regularUserServices: LedgerApiServices,
       adminServices: LedgerApiServices,
       submissionConfig: WorkflowConfig.SubmissionConfig,
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
       partyAllocating: PartyAllocating,
   )(implicit
       ec: ExecutionContext
@@ -404,7 +401,7 @@ class LedgerApiBenchTool(
       .usePlaintext()
 
     if (tls.enabled) {
-      tls.client().map { sslContext =>
+      tls.client().foreach { sslContext =>
         logger.info(s"Setting up a managed channel with transport security...")
         channelBuilder
           .useTransportSecurity()

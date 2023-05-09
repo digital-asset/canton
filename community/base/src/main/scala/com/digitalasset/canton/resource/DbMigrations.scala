@@ -5,6 +5,7 @@ package com.digitalasset.canton.resource
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout}
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{CloseContext, UnlessShutdown}
@@ -15,7 +16,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.{LoggerUtil, ResourceUtil}
-import io.functionmeta.functionFullName
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.FlywayException
 import slick.jdbc.JdbcBackend.Database

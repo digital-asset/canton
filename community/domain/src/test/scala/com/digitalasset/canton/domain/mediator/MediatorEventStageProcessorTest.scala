@@ -39,7 +39,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
   private lazy val participantResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(10)
   private lazy val factory = new ExampleTransactionFactory()(domainId = domainId)
   private lazy val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
-  private lazy val alwaysReadyCheck = MediatorReadyCheck.alwaysReady(loggerFactory)
 
   private lazy val initialDomainParameters = TestDomainParameters.defaultDynamic
 
@@ -97,7 +96,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       },
       testedProtocolVersion,
       noopDeduplicator,
-      alwaysReadyCheck,
       loggerFactory,
     )
 

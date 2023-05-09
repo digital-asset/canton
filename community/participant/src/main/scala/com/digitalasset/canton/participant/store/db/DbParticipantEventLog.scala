@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -15,7 +16,6 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 

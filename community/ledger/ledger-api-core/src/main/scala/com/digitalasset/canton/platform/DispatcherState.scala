@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.platform
 
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.CommonErrors
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.timer.Timeout.*
+import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.DispatcherState.{
   DispatcherNotRunning,

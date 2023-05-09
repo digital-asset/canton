@@ -513,6 +513,8 @@ class JcePureCrypto(
           publicKey,
           JceSecureRandom.random.get(),
         )
+      // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
+      case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
     }
 
   override def encryptDeterministicWith[M <: HasVersionedToByteString](
@@ -539,6 +541,8 @@ class JcePureCrypto(
           publicKey,
           deterministicRandomGenerator,
         )
+      // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
+      case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
     }
 
   override protected def decryptWithInternal[M](
@@ -644,6 +648,8 @@ class JcePureCrypto(
           message <- deserialize(ByteString.copyFrom(plaintext))
             .leftMap(DecryptionError.FailedToDeserialize)
         } yield message
+      // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
+      case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
     }
   }
 

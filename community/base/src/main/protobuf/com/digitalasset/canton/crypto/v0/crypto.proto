@@ -153,6 +153,10 @@ enum EncryptionKeyScheme {
 
     // ECIES with ECDH over NIST P-256, AES128 CBC, and HKDF and authentication with HMAC-SHA256
     EciesP256HmacSha256Aes128Cbc = 2;
+
+    /* RSA with a 2048 bit key with OAEP Padding,
+    using SHA-256 for both the hash and in the MGF1 mask generation function along with an empty label. */
+    Rsa2048OaepSha256 = 3;
 }
 
 message CryptoKeyPair {

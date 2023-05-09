@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.dao
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.error.definitions.IndexErrors
+import com.digitalasset.canton.ledger.error.IndexErrors
 import io.grpc.StatusRuntimeException
 import org.h2.jdbc.JdbcSQLIntegrityConstraintViolationException
 import org.postgresql.util.PSQLException
