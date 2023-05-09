@@ -15,7 +15,6 @@ import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree, TransferSubmitterMetadata}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.mkActivenessSet
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -30,6 +29,11 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
   ReceivedMultipleRequests,
   StakeholdersMismatch,
   SubmittingPartyMustBeStakeholderIn,
+}
+import com.digitalasset.canton.participant.protocol.{
+  GlobalCausalOrderer,
+  ProcessingStartingPoints,
+  SingleDomainCausalTracker,
 }
 import com.digitalasset.canton.participant.store.TransferStoreTest.{
   coidAbs1,
@@ -114,6 +118,14 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
   private val pureCrypto = TestingIdentityFactory.pureCrypto()
 
   private val seedGenerator = new SeedGenerator(pureCrypto)
+  private val globalTracker = new GlobalCausalOrderer(
+    participant,
+    _ => true,
+    DefaultProcessingTimeouts.testing,
+    new InMemoryMultiDomainCausalityStore(loggerFactory),
+    futureSupervisor,
+    loggerFactory,
+  )
 
   private val transferInProcessingSteps =
     testInstance(targetDomain, Set(party1), Set(party1), cryptoSnapshot, None)
@@ -137,11 +149,17 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       val state = new SyncDomainEphemeralState(
         persistentState,
         Eval.now(multiDomainEventLog),
+        new SingleDomainCausalTracker(
+          globalTracker,
+          new InMemorySingleDomainCausalDependencyStore(sourceDomain, loggerFactory),
+          loggerFactory,
+        ),
         mock[InFlightSubmissionTracker],
         ProcessingStartingPoints.default,
         _ => mock[DomainTimeTracker],
         ParticipantTestMetrics.domain,
         DefaultProcessingTimeouts.testing,
+        useCausalityTracking = true,
         loggerFactory = loggerFactory,
         FutureSupervisor.Noop,
       )
@@ -542,6 +560,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
               pendingDataAndResponseArgs2,
               transferLookup,
               contractLookup,
+              ephemeralState.causalityLookup,
               FutureUnlessShutdown.pure(ActivenessResult.success),
               Future.unit,
               targetMediator,
@@ -580,12 +599,21 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           transferringParticipant = true,
         )
 
+        _unit = ephemeralState.causalityLookup.globalCausalOrderer.domainCausalityStore
+          .registerTransferOut(
+            fullTransferInTree.transferOutResultEvent.transferId,
+            Set(
+              VectorClock(sourceDomain, CantonTimestamp.MinValue.plusSeconds(1L), party1, Map.empty)
+            ),
+          )
+
         result <- valueOrFail(
           transferInProcessingSteps
             .constructPendingDataAndResponse(
               pendingDataAndResponseArgs,
               transferLookup,
               contractLookup,
+              ephemeralState.causalityLookup,
               FutureUnlessShutdown.pure(ActivenessResult.success),
               Future.unit,
               targetMediator,
@@ -639,6 +667,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             Right(inRes),
             pendingRequestData,
             state.pendingTransferInSubmissions,
+            state.causalityLookup,
             pureCrypto,
           )
         )("get commit set and contracts to be stored and event failed")
@@ -670,6 +699,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         loggerFactory,
       ),
       seedGenerator,
+      causalityTracking = true,
       TargetProtocolVersion(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )

@@ -185,6 +185,7 @@ class SyncDomain(
     domainCrypto,
     seedGenerator,
     sequencerClient,
+    staticDomainParameters.protocolVersion,
     timeouts,
     SourceProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
@@ -202,6 +203,8 @@ class SyncDomain(
     domainCrypto,
     seedGenerator,
     sequencerClient,
+    staticDomainParameters.protocolVersion,
+    parameters.enableCausalityTracking,
     timeouts,
     TargetProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
@@ -301,6 +304,7 @@ class SyncDomain(
       transferOutProcessor,
       transferInProcessor,
       registerIdentityTransactionHandle.processor,
+      ephemeral.causalityLookup,
       topologyProcessor,
       acsCommitmentProcessor.processBatch,
       ephemeral.requestCounterAllocator,
@@ -446,6 +450,14 @@ class SyncDomain(
       lastLocalOffset <- EitherT.right(
         participantNodePersistentState.value.multiDomainEventLog.lastLocalOffset(
           persistent.eventLog.id
+        )
+      )
+
+      _unit <- EitherT.right(
+        persistent.causalDependencyStore.initialize(
+          lastLocalOffset.map(lo =>
+            RequestCounter(lo.min(cleanHeadRc.asLocalOffset - 1))
+          ) // TODO(#10497) is this conversion fine?
         )
       )
 

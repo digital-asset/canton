@@ -79,7 +79,7 @@ class ParticipantEventPublisher(
       _ = logger.debug(
         s"Publishing event with local offset ${localOffset} at record time ${event.recordTime}: ${event.description}"
       )
-      _ <- participantEventLog.value.insert(timestampedEvent)
+      _ <- participantEventLog.value.insert(timestampedEvent, None)
       publicationData = PublicationData(
         participantEventLog.value.id,
         timestampedEvent,
@@ -151,7 +151,9 @@ class ParticipantEventPublisher(
           TimestampedEvent(event, localOffset, None, eventId.some)
         })
       )
-      insertionResult <- participantEventLog.value.insertsUnlessEventIdClash(timestampedEvents)
+      insertionResult <- participantEventLog.value.insertsUnlessEventIdClash(
+        timestampedEvents.map(e => TimestampedEventAndCausalChange(e, None))
+      )
     } yield newOffsets.lazyZip(insertionResult).map { (localOffset, result) =>
       result.map { case () => localOffset }
     }

@@ -32,6 +32,7 @@ trait SyncDomainEphemeralStateFactory {
   def createFromPersistent(
       persistentState: SyncDomainPersistentState,
       multiDomainEventLog: Eval[MultiDomainEventLog],
+      globalCausalOrderer: GlobalCausalOrderer,
       inFlightSubmissionTracker: InFlightSubmissionTracker,
       createTimeTracker: NamedLoggerFactory => DomainTimeTracker,
       metrics: SyncDomainMetrics,
@@ -42,6 +43,7 @@ trait SyncDomainEphemeralStateFactory {
 class SyncDomainEphemeralStateFactoryImpl(
     timeouts: ProcessingTimeout,
     testingConfigInternal: TestingConfigInternal,
+    useCausalityTracking: Boolean,
     override val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
@@ -51,6 +53,7 @@ class SyncDomainEphemeralStateFactoryImpl(
   override def createFromPersistent(
       persistentState: SyncDomainPersistentState,
       multiDomainEventLog: Eval[MultiDomainEventLog],
+      globalCausalOrderer: GlobalCausalOrderer,
       inFlightSubmissionTracker: InFlightSubmissionTracker,
       createTimeTracker: NamedLoggerFactory => DomainTimeTracker,
       metrics: SyncDomainMetrics,
@@ -70,11 +73,17 @@ class SyncDomainEphemeralStateFactoryImpl(
       new SyncDomainEphemeralState(
         persistentState,
         multiDomainEventLog,
+        new SingleDomainCausalTracker(
+          globalCausalOrderer,
+          persistentState.causalDependencyStore,
+          loggerFactory,
+        ),
         inFlightSubmissionTracker,
         startingPoints,
         createTimeTracker,
         metrics,
         timeouts,
+        useCausalityTracking,
         persistentState.loggerFactory,
         futureSupervisor,
       )

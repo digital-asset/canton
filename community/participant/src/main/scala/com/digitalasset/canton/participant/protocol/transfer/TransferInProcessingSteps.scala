@@ -30,7 +30,12 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
+import com.digitalasset.canton.participant.protocol.{
+  ProcessingSteps,
+  ProtocolProcessor,
+  SingleDomainCausalTracker,
+  TransferInUpdate,
+}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
@@ -56,6 +61,7 @@ private[transfer] class TransferInProcessingSteps(
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
+    causalityTracking: Boolean,
     targetProtocolVersion: TargetProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -91,6 +97,7 @@ private[transfer] class TransferInProcessingSteps(
     participantId,
     engine,
     transferCoordination,
+    causalityTracking,
     targetProtocolVersion,
     loggerFactory,
   )
@@ -327,6 +334,7 @@ private[transfer] class TransferInProcessingSteps(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
       transferLookup: TransferLookup,
       contractLookup: ContractLookup,
+      causalityLookup: SingleDomainCausalTracker,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediatorId: MediatorId,
@@ -393,9 +401,9 @@ private[transfer] class TransferInProcessingSteps(
         hostedStks.toSet,
         mediatorId,
       )
-      responses <- validationResultO match {
+      responsesAndCausalityMessages <- validationResultO match {
         case None =>
-          EitherT.rightT[FutureUnlessShutdown, TransferProcessorError](Seq.empty)
+          EitherT.rightT[FutureUnlessShutdown, TransferProcessorError]((Seq.empty, Seq.empty))
         case Some(validationResult) =>
           val contractResult = activenessResult.contracts
           lazy val localVerdictProtocolVersion =
@@ -428,9 +436,8 @@ private[transfer] class TransferInProcessingSteps(
               throw new RuntimeException(
                 withRequestId(requestId, s"Unexpected activeness result $activenessResult")
               )
-
-          EitherT
-            .fromEither[FutureUnlessShutdown](
+          for {
+            transferResponse <- EitherT.fromEither[FutureUnlessShutdown](
               MediatorResponse
                 .create(
                   requestId,
@@ -442,14 +449,25 @@ private[transfer] class TransferInProcessingSteps(
                   domainId.id,
                   targetProtocolVersion.v,
                 )
+                .leftMap(e => FailedToCreateResponse(transferId, e): TransferProcessorError)
             )
-            .leftMap(e => FailedToCreateResponse(transferId, e): TransferProcessorError)
-            .map(transferResponse => Seq(transferResponse -> Recipients.cc(mediatorId)))
+            causalityMessages <- transferInValidation
+              .checkCausalityState(causalityLookup)(
+                targetCrypto,
+                validationResult.confirmingParties,
+                transferringParticipant,
+                transferId,
+              )
+              .mapK(FutureUnlessShutdown.outcomeK)
+          } yield Seq(transferResponse -> Recipients.cc(mediatorId)) -> causalityMessages
       }
+
+      (responses, causalityMessage) = responsesAndCausalityMessages
     } yield {
       StorePendingDataAndSendResponseAndCreateTimeout(
         entry,
         responses,
+        causalityMessage,
         RejectionArgs(
           entry,
           LocalReject.TimeRejects.LocalTimeout.Reject(targetProtocolVersion.v),
@@ -469,6 +487,7 @@ private[transfer] class TransferInProcessingSteps(
       resultE: Either[MalformedMediatorRequestResult, TransferInResult],
       pendingRequestData: PendingTransferIn,
       pendingSubmissionMap: PendingSubmissions,
+      tracker: SingleDomainCausalTracker,
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -521,6 +540,16 @@ private[transfer] class TransferInProcessingSteps(
           commitSetO,
           contractsToBeStored,
           timestampEvent,
+          Some(
+            TransferInUpdate(
+              hostedStakeholders,
+              pendingRequestData.requestId.unwrap,
+              domainId,
+              requestCounter,
+              transferId,
+              targetProtocolVersion,
+            )
+          ),
         )
 
       case reasons: Verdict.ParticipantReject =>
@@ -529,10 +558,10 @@ private[transfer] class TransferInProcessingSteps(
           .fromEither[Future](
             createRejectionEvent(RejectionArgs(pendingRequestData, reasons.keyEvent))
           )
-          .map(CommitAndStoreContractsAndPublishEvent(None, Set(), _))
+          .map(CommitAndStoreContractsAndPublishEvent(None, Set(), _, None))
 
       case _: Verdict.MediatorReject =>
-        EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None))
+        EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None, None))
     }
   }
 

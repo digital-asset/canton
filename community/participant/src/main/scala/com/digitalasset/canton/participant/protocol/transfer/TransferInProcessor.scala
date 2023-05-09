@@ -20,6 +20,7 @@ import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.protocol.messages.TransferInResult
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.TargetProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -34,6 +35,8 @@ class TransferInProcessor(
     domainCrypto: DomainSyncCryptoClient,
     seedGenerator: SeedGenerator,
     sequencerClient: SequencerClient,
+    protocolVersion: ProtocolVersion,
+    causalityTracking: Boolean,
     override protected val timeouts: ProcessingTimeout,
     targetProtocolVersion: TargetProtocolVersion,
     loggerFactory: NamedLoggerFactory,
@@ -53,6 +56,7 @@ class TransferInProcessor(
         damle,
         transferCoordination,
         seedGenerator,
+        causalityTracking,
         targetProtocolVersion,
         loggerFactory,
       ),
@@ -61,7 +65,7 @@ class TransferInProcessor(
       domainCrypto,
       sequencerClient,
       domainId.unwrap,
-      targetProtocolVersion.v,
+      protocolVersion,
       loggerFactory,
       futureSupervisor,
       skipRecipientsCheck = skipRecipientsCheck,

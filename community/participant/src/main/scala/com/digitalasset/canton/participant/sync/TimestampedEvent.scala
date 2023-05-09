@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.LocalOffset
+import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightByMessageId
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.sequencing.protocol.MessageId
@@ -184,5 +185,19 @@ object TimestampedEvent {
       param("domain ID", _.domainId),
       param("UUID", _.uuid),
     )
+  }
+}
+final case class TimestampedEventAndCausalChange(
+    tse: TimestampedEvent,
+    causalityUpdate: Option[CausalityUpdate],
+)
+
+object TimestampedEventAndCausalChange {
+  implicit def getResultTimestampedEventAndCausalChange(implicit
+      getTuple: GetResult[(TimestampedEvent, Option[CausalityUpdate])]
+  ): GetResult[TimestampedEventAndCausalChange] = {
+    getTuple.andThen { case (event, maybeUpdate) =>
+      TimestampedEventAndCausalChange(event, maybeUpdate)
+    }
   }
 }

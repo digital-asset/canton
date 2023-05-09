@@ -55,6 +55,7 @@ import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
+import com.digitalasset.canton.participant.protocol.GlobalCausalOrderer
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
 import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter
@@ -122,6 +123,7 @@ class CantonSyncService(
     participantNodeEphemeralState: ParticipantNodeEphemeralState,
     private[canton] val syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     private[canton] val packageService: PackageService,
+    domainCausalityStore: MultiDomainCausalityStore,
     topologyManagerOps: ParticipantTopologyManagerOps,
     identityPusher: ParticipantTopologyDispatcherCommon,
     partyNotifier: LedgerServerPartyNotifier,
@@ -247,6 +249,16 @@ class CantonSyncService(
 
   private val connectedDomainsLookup: ConnectedDomainsLookup =
     ConnectedDomainsLookup.create(connectedDomainsMap)
+
+  private val globalTracker =
+    new GlobalCausalOrderer(
+      participantId,
+      connectedDomainsLookup.isConnected,
+      parameters.processingTimeouts,
+      domainCausalityStore,
+      futureSupervisor,
+      loggerFactory,
+    )
 
   private val domainRouter =
     DomainRouter(
@@ -687,13 +699,13 @@ class CantonSyncService(
           None,
         )
         unpublishedEvents = unpublished.mapFilter {
-          case RecordOrderPublisher.PendingTransferPublish(rc, ts, eventLogId) =>
+          case RecordOrderPublisher.PendingTransferPublish(rc, updateS, ts, eventLogId) =>
             logger.error(
               s"Pending transfer event with rc $rc timestamp $ts found in participant event log " +
                 s"$participantEventLogId. Participant event log should not contain transfers."
             )
             None
-          case RecordOrderPublisher.PendingEventPublish(tse, _ts, _eventLogId) => Some(tse)
+          case RecordOrderPublisher.PendingEventPublish(update, tse, ts, eventLogId) => Some(tse)
         }
 
         _units <- MonadUtil.sequentialTraverse(unpublishedEvents) { tse =>
@@ -1140,6 +1152,7 @@ class CantonSyncService(
               .createFromPersistent(
                 persistent,
                 participantNodePersistentState.map(_.multiDomainEventLog),
+                globalTracker,
                 inFlightSubmissionTracker,
                 (loggerFactory: NamedLoggerFactory) =>
                   DomainTimeTracker(
@@ -1422,6 +1435,7 @@ class CantonSyncService(
       domainRegistry,
       inFlightSubmissionTracker,
       domainConnectionConfigStore,
+      domainCausalityStore,
       syncDomainPersistentStateManager,
       participantNodePersistentState.value,
       syncDomainHealth,
@@ -1446,6 +1460,7 @@ object CantonSyncService {
         participantNodeEphemeralState: ParticipantNodeEphemeralState,
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
         packageService: PackageService,
+        multiDomainCausalityStore: MultiDomainCausalityStore,
         topologyManagerOps: ParticipantTopologyManagerOps,
         identityPusher: ParticipantTopologyDispatcherCommon,
         partyNotifier: LedgerServerPartyNotifier,
@@ -1476,6 +1491,7 @@ object CantonSyncService {
         participantNodeEphemeralState: ParticipantNodeEphemeralState,
         syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
         packageService: PackageService,
+        multiDomainCausalityStore: MultiDomainCausalityStore,
         topologyManagerOps: ParticipantTopologyManagerOps,
         identityPusher: ParticipantTopologyDispatcherCommon,
         partyNotifier: LedgerServerPartyNotifier,
@@ -1507,6 +1523,7 @@ object CantonSyncService {
         participantNodeEphemeralState,
         syncDomainPersistentStateManager,
         packageService,
+        multiDomainCausalityStore,
         topologyManagerOps,
         identityPusher,
         partyNotifier,

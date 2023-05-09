@@ -412,6 +412,7 @@ trait CantonConfig {
           initialProtocolVersion = participantParameters.initialProtocolVersion.unwrap,
         ),
         participantConfig.init.parameters.uniqueContractKeys,
+        participantConfig.init.parameters.unsafeEnableCausalityTracking,
         participantParameters.ledgerApiServerParameters,
         maxDbConnections = participantConfig.storage.maxConnectionsCanton(true, false, false).value,
         participantParameters.excludeInfrastructureTransactions,

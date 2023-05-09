@@ -336,7 +336,9 @@ class SyncStateInspection(
       timeouts.inspection.await("finding events in the multi-domain event log")(
         participantNodePersistentState.value.multiDomainEventLog
           .lookupEventRange(None, limit)
-          .map(_.map { case (offset, event) => (offset.toString, event) })
+          .map(_.map { case (offset, eventAndCausalChange) =>
+            (offset.toString, eventAndCausalChange.tse)
+          })
       )
     else {
       timeouts.inspection
@@ -345,7 +347,9 @@ class SyncStateInspection(
             .lookupEventRange(None, None, from, to, limit)
         )
         .toSeq
-        .map { case (offset, event) => (offset.toString, event) }
+        .map { case (offset, eventAndCausalChange) =>
+          (offset.toString, eventAndCausalChange.tse)
+        }
     }
 
   private def tryGetProtocolVersion(

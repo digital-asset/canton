@@ -229,6 +229,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         Some(awaitTimestampOverride),
         loggerFactory,
       ),
+      causalityTracking = true,
       TargetProtocolVersion(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )

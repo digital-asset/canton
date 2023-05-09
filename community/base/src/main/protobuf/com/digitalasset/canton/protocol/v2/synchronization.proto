@@ -10,6 +10,7 @@ import "com/digitalasset/canton/protocol/v1/participant_transfer.proto";
 import "com/digitalasset/canton/protocol/v0/topology.proto";
 import "com/digitalasset/canton/protocol/v1/topology.proto";
 import "com/digitalasset/canton/protocol/v2/topology.proto";
+import "com/digitalasset/canton/protocol/v0/causality.proto";
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 import "com/digitalasset/canton/protocol/v1/sequencing.proto";
 import "scalapb/scalapb.proto";
@@ -31,7 +32,7 @@ message EnvelopeContent {
     // TODO(#11255) remove before 3.0
     v0.RegisterTopologyTransactionRequest register_topology_transaction_request = 9;
     v1.RegisterTopologyTransactionResponse register_topology_transaction_response = 10;
-    // Removed field causality_update in v2
+    v0.CausalityMessage causality_message = 11;
     v2.RegisterTopologyTransactionRequestX register_topology_transaction_request_x = 12;
     v2.RegisterTopologyTransactionResponseX register_topology_transaction_response_x = 13;
     v2.AcceptedTopologyTransactionsX accepted_topology_transactions = 14;

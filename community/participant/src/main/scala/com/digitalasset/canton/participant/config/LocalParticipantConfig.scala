@@ -78,6 +78,10 @@ object LocalParticipantConfig {
             "parameters.unique-contract-keys",
             "init.parameters.unique-contract-keys",
           ),
+          DeprecatedConfigUtils.MovedConfigPath(
+            "parameters.enable-causality-tracking",
+            "init.parameters.unsafe-enable-causality-tracking",
+          ),
         ) ++ deprecatedLocalNodeConfig.movedFields
       }
   }

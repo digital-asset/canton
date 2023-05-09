@@ -204,6 +204,21 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         )
         .failOnShutdown
     )
+    val globalTracker =
+      new GlobalCausalOrderer(
+        participant,
+        _ => true,
+        DefaultProcessingTimeouts.testing,
+        new InMemoryMultiDomainCausalityStore(loggerFactory),
+        futureSupervisor,
+        loggerFactory,
+      )
+    val domainCausalTracker =
+      new SingleDomainCausalTracker(
+        globalTracker,
+        persistentState.causalDependencyStore,
+        loggerFactory,
+      )
 
     val mdel = InMemoryMultiDomainEventLog(
       syncDomainPersistentStates,
@@ -245,11 +260,13 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       new SyncDomainEphemeralState(
         persistentState,
         Eval.now(multiDomainEventLog),
+        domainCausalTracker,
         inFlightSubmissionTracker,
         startingPoints,
         _ => timeTracker,
         ParticipantTestMetrics.domain,
         timeouts,
+        useCausalityTracking = true,
         loggerFactory,
         FutureSupervisor.Noop,
       )
