@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentStoreTest,
   CommitmentQueueTest,
@@ -11,7 +12,6 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 

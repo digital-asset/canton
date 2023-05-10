@@ -207,7 +207,7 @@ abstract class SequencerApiTest
           SequencerCounter.Genesis,
           member,
           Option.when(member == sender)(request.messageId),
-          EnvelopeDetails(messageContent, recipients.forMember(member).value),
+          EnvelopeDetails(messageContent, recipients.forMember(member, Set.empty).value),
         )
       }
 
@@ -759,8 +759,13 @@ abstract class SequencerApiTest
         testedProtocolVersion,
       )
 
-    override def forRecipient(member: Member): Option[Envelope[String]] = {
-      recipients.forMember(member).map(recipients => TestingEnvelope(content, recipients))
+    override def forRecipient(
+        member: Member,
+        groupAddresses: Set[GroupRecipient],
+    ): Option[Envelope[String]] = {
+      recipients
+        .forMember(member, groupAddresses)
+        .map(recipients => TestingEnvelope(content, recipients))
     }
 
     override def pretty: Pretty[TestingEnvelope] = adHocPrettyInstance

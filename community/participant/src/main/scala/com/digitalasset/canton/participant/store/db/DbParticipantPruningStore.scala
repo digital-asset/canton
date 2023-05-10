@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.String36
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -13,7 +14,6 @@ import com.digitalasset.canton.participant.store.ParticipantPruningStore.Partici
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
-import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 
 import scala.concurrent.{ExecutionContext, Future}

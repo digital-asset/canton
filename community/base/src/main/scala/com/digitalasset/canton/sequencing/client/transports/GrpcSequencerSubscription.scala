@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client.transports
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
@@ -25,7 +26,6 @@ import com.digitalasset.canton.tracing.TraceContext.withTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureUtil
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 import io.grpc.Context.CancellableContext
 import io.grpc.Status.Code.CANCELLED
 import io.grpc.stub.StreamObserver

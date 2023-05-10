@@ -55,7 +55,7 @@ object ConsoleCommandResult {
         case (instance, Success(err: CommandError)) =>
           Left(
             s"(failure on ${instance.name}): ${err.cause}"
-          ) // TODO(error handling): this will discard fields other than cause.
+          )
         case (instance, Failure(t)) =>
           Left(s"(exception on ${instance.name}: ${ErrorUtil.messageWithStacktrace(t)}")
       }

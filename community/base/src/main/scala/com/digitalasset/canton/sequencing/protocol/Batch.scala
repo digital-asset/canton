@@ -183,16 +183,18 @@ object Batch extends HasProtocolVersionedCompanion2[Batch[Envelope[_]], Batch[Cl
   def filterClosedEnvelopesFor(
       batch: Batch[ClosedEnvelope],
       member: Member,
+      groupRecipients: Set[GroupRecipient],
   ): Batch[ClosedEnvelope] = {
-    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member))
+    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member, groupRecipients))
     Batch(newEnvs)(batch.representativeProtocolVersion)
   }
 
   def filterOpenEnvelopesFor[T <: ProtocolMessage](
       batch: Batch[OpenEnvelope[T]],
       member: Member,
+      groupRecipients: Set[GroupRecipient],
   ): Batch[OpenEnvelope[T]] = {
-    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member))
+    val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member, groupRecipients))
     Batch(newEnvs)(batch.representativeProtocolVersion)
   }
 

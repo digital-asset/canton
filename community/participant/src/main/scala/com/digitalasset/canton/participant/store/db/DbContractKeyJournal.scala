@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -25,7 +26,6 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.DbPrunableByTimeDomain
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 

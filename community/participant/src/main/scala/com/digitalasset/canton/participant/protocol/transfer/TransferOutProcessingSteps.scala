@@ -54,7 +54,13 @@ import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{
+  LfPartyId,
+  RequestCounter,
+  SequencerCounter,
+  TransferCounter,
+  checked,
+}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -155,6 +161,7 @@ class TransferOutProcessingSteps(
           targetProtocolVersion,
           sourceRecentSnapshot.ipsSnapshot,
           targetCrypto.ipsSnapshot,
+          TransferCounter.Genesis, // TODO(#12286): replace by the value from the stored contract
           logger,
         )
         .mapK(FutureUnlessShutdown.outcomeK)
@@ -270,7 +277,7 @@ class TransferOutProcessingSteps(
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
     val correctRootHashes = decryptedViewsWithSignatures.map { case (rootHashes, _) => rootHashes }
-    // TODO(M40): Send a rejection if malformedPayloads is non-empty
+    // TODO(i12926): Send a rejection if malformedPayloads is non-empty
     for {
       txOutRequestAndRecipients <- EitherT.cond[Future](
         correctRootHashes.toList.sizeCompare(1) == 0,
@@ -386,8 +393,12 @@ class TransferOutProcessingSteps(
         transferOutRequest = fullTree,
         transferOutDecisionTime = transferOutDecisionTime,
         contract = storedContract.contract,
+        transferCounter =
+          TransferCounter.Genesis, // TODO(#12286) add a transfer counter to the StoredContract
         creatingTransactionId = creatingTransactionId,
         transferOutResult = None,
+        transferOutGlobalOffset = None,
+        transferInGlobalOffset = None,
       )
       _ <- ifThenET(transferringParticipant) {
         transferCoordination.addTransferOutRequest(transferData).mapK(FutureUnlessShutdown.outcomeK)
@@ -460,13 +471,13 @@ class TransferOutProcessingSteps(
            * With parallel processing of messages, deadlocks cannot occur as this waiting runs in parallel with
            * the request tracker, so time progresses on the target domain and eventually reaches the timestamp.
            */
-          // TODO(M40): Prevent deadlocks. Detect non-sensible timestamps.
+          // TODO(i12926): Prevent deadlocks. Detect non-sensible timestamps.
           _ <- EitherT.right(awaitO.getOrElse(Future.unit))
           targetCrypto <- transferCoordination.cryptoSnapshot(
             txOutRequest.targetDomain.unwrap,
             targetTimestamp,
           )
-          // TODO(M40): Verify sequencer signature on time proof
+          // TODO(i12926): Verify sequencer signature on time proof
         } yield Some(targetCrypto.ipsSnapshot)
       } else EitherT.pure[Future, TransferProcessorError](None)
 
@@ -571,7 +582,6 @@ class TransferOutProcessingSteps(
             deleteTransfer(targetDomain, requestId)
           }
 
-          // TODO(M40): Implement checks against malicious rejections and scrutinize the reasons such that an alarm is raised if necessary
           tsEventO <- EitherT
             .fromEither[Future](
               createRejectionEvent(RejectionArgs(pendingRequestData, reasons.keyEvent))
@@ -855,6 +865,7 @@ object TransferOutProcessingSteps {
       targetProtocolVersion: TargetProtocolVersion,
       sourceIps: TopologySnapshot,
       targetIps: TopologySnapshot,
+      transferCounter: TransferCounter,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext,
@@ -883,6 +894,7 @@ object TransferOutProcessingSteps {
         targetDomain,
         targetProtocolVersion,
         timeProof,
+        transferCounter,
       )
 
       (transferOutRequest, adminPartiesAndRecipients.participants)

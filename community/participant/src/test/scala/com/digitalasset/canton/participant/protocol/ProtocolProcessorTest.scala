@@ -120,7 +120,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
                 CantonTimestamp.Epoch,
                 domain,
                 Some(messageId),
-                Batch.filterOpenEnvelopesFor(batch, participant),
+                Batch.filterOpenEnvelopesFor(batch, participant, Set.empty),
                 testedProtocolVersion,
               )
             )

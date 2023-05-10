@@ -6,8 +6,6 @@ package com.digitalasset.canton.platform.store.dao
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.lf.archive.ArchiveParser
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
@@ -20,13 +18,14 @@ import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.configuration.Configuration
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexerPartyDetails,
   PackageDetails,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.configuration.{
   AcsStreamsConfig,
   TransactionFlatStreamsConfig,
@@ -36,7 +35,7 @@ import com.digitalasset.canton.platform.store.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
-import com.digitalasset.canton.platform.store.dao.events.{TransactionsFlatStreamReader, *}
+import com.digitalasset.canton.platform.store.dao.events.*
 import com.digitalasset.canton.platform.store.entries.{
   ConfigurationEntry,
   PackageLedgerEntry,

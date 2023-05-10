@@ -23,6 +23,7 @@ import com.digitalasset.canton.domain.sequencing.authentication.grpc.{
 }
 import com.digitalasset.canton.domain.sequencing.authentication.{
   MemberAuthenticationService,
+  MemberAuthenticationServiceFactory,
   MemberAuthenticationStore,
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.*
@@ -44,7 +45,6 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
 import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
@@ -81,7 +81,6 @@ class SequencerRuntime(
     val domainId: DomainId,
     crypto: Crypto,
     topologyClient: DomainTopologyClientWithInit,
-    topologyProcessor: TopologyTransactionProcessorCommon,
     storage: Storage,
     clock: Clock,
     auditLogger: TracedLogger,
@@ -90,6 +89,7 @@ class SequencerRuntime(
     staticMembersToRegister: Seq[Member],
     futureSupervisor: FutureSupervisor,
     agreementManager: Option[ServiceAgreementManager],
+    memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
     topologyStateForInitializationService: Option[TopologyStateForInitializationService],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -176,6 +176,11 @@ class SequencerRuntime(
       loggerFactory,
     )
 
+  /** Only SequencerXs expect MediatorXs to expose "topology_request_address" and
+    * allow corresponding unauthenticated messages upon initial bootstrap.
+    */
+  protected def mediatorsProcessParticipantTopologyRequests: Boolean = false
+
   private val sequencerService = GrpcSequencerService(
     sequencer,
     metrics,
@@ -186,6 +191,7 @@ class SequencerRuntime(
     localNodeParameters,
     staticDomainParameters.protocolVersion,
     topologyStateForInitializationService,
+    mediatorsProcessParticipantTopologyRequests,
     loggerFactory,
   )
 
@@ -209,25 +215,18 @@ class SequencerRuntime(
   )
 
   private val authenticationServices = {
-    val authenticationService = new MemberAuthenticationService(
-      domainId,
+    val authenticationService = memberAuthenticationServiceFactory.createAndSubscribe(
       syncCrypto,
       MemberAuthenticationStore(storage, timeouts, loggerFactory, closeContext),
-      authenticationConfig.agreementManager,
-      clock,
-      authenticationConfig.nonceExpirationTime.asJava,
-      authenticationConfig.tokenExpirationTime.asJava,
+      agreementManager,
       // closing the subscription when the token expires will force the client to try to reconnect
       // immediately and notice it is unauthenticated, which will cause it to also start reauthenticating
       // it's important to disconnect the member AFTER we expired the token, as otherwise, the member
       // can still re-subscribe with the token just before we removed it
       Traced.lift(sequencerService.disconnectMember(_)(_)),
       isTopologyInitializedPromise.future,
-      localNodeParameters.processingTimeouts,
-      loggerFactory,
       auditLogger,
     )
-    topologyProcessor.subscribe(authenticationService)
 
     val sequencerAuthenticationService =
       new GrpcSequencerAuthenticationService(
@@ -288,6 +287,7 @@ class SequencerRuntime(
           new GrpcSequencerConnectService(
             domainId,
             sequencerId,
+            mediatorsProcessParticipantTopologyRequests,
             staticDomainParameters,
             syncCrypto,
             agreementManager,
@@ -322,6 +322,7 @@ class SequencerRuntime(
 
   override def onClosed(): Unit =
     Lifecycle.close(
+      topologyClient,
       sequencerService,
       authenticationServices.memberAuthenticationService,
       sequencer,

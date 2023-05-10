@@ -33,7 +33,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class BaseDomainTopologyClientTest extends BaseTestWordSpec {
 
-  private class TestClient() extends BaseDomainTopologyClient {
+  private class TestClient() extends BaseDomainTopologyClientOld {
 
     override def protocolVersion: ProtocolVersion = testedProtocolVersion
 

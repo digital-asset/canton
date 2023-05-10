@@ -17,7 +17,6 @@ import com.digitalasset.canton.ledger.api.auth.Authorizer
 import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.health.HealthChecks
-import com.digitalasset.canton.ledger.client.services.commands.CommandSubmissionFlow
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.{v2 as state}
 import com.digitalasset.canton.platform.apiserver.configuration.{
@@ -34,6 +33,7 @@ import com.digitalasset.canton.platform.apiserver.execution.{
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.apiserver.services.*
 import com.digitalasset.canton.platform.apiserver.services.admin.*
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.apiserver.services.transaction.{
   ApiEventQueryService,
   ApiTransactionService,
@@ -48,7 +48,6 @@ import com.digitalasset.canton.platform.localstore.api.{
   PartyRecordStore,
   UserManagementStore,
 }
-import com.digitalasset.canton.platform.server.api.services.domain.CommandCompletionService
 import com.digitalasset.canton.platform.server.api.services.grpc.{
   GrpcHealthService,
   GrpcTransactionService,
@@ -91,6 +90,7 @@ object ApiServices {
       authorityResolver: AuthorityResolver,
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
+      submissionTracker: SubmissionTracker,
       configurationLoadTimeout: Duration,
       initialLedgerConfiguration: Option[InitialLedgerConfiguration],
       commandConfig: CommandConfiguration,
@@ -186,7 +186,7 @@ object ApiServices {
       val apiConfigurationService =
         ApiLedgerConfigurationService.create(ledgerId, configurationService)
 
-      val (completionService, grpcCompletionService) =
+      val apiCompletionService =
         ApiCommandCompletionService.create(
           ledgerId,
           completionsService,
@@ -213,7 +213,6 @@ object ApiServices {
         intitializeWriteServiceBackedApiServices(
           ledgerId,
           ledgerConfigurationSubscription,
-          completionService,
           apiTransactionService,
           checkOverloaded,
         )
@@ -254,7 +253,7 @@ object ApiServices {
           new LedgerConfigurationServiceAuthorization(apiConfigurationService, authorizer),
           new TransactionServiceAuthorization(apiTransactionService, authorizer),
           new EventQueryServiceAuthorization(apiEventQueryService, authorizer),
-          new CommandCompletionServiceAuthorization(grpcCompletionService, authorizer),
+          new CommandCompletionServiceAuthorization(apiCompletionService, authorizer),
           new ActiveContractsServiceAuthorization(apiActiveContractsService, authorizer),
           apiReflectionService,
           apiHealthService,
@@ -266,7 +265,6 @@ object ApiServices {
     private def intitializeWriteServiceBackedApiServices(
         ledgerId: LedgerId,
         ledgerConfigurationSubscription: LedgerConfigurationSubscription,
-        apiCompletionService: CommandCompletionService,
         apiTransactionService: GrpcTransactionService,
         checkOverloaded: TelemetryContext => Option[state.SubmissionResult],
     )(implicit executionContext: ExecutionContext): List[BindableService] = {
@@ -306,23 +304,19 @@ object ApiServices {
         // services internally. These connections do not use authorization, authorization wrappers are
         // only added here to all exposed services.
         val apiCommandService = ApiCommandService.create(
+          submissionTracker = submissionTracker,
+          // Using local services skips the gRPC layer, improving performance.
+          submit = apiSubmissionService.submit,
           configuration = ApiCommandService.Configuration(
             ledgerId,
-            commandConfig.inputBufferSize,
-            commandConfig.maxCommandsInFlight,
-            commandConfig.trackerRetentionPeriod,
+            commandConfig.maxTrackingTimeout,
           ),
-          // Using local services skips the gRPC layer, improving performance.
-          submissionFlow =
-            CommandSubmissionFlow(apiSubmissionService.submit, commandConfig.maxCommandsInFlight),
-          completionServices = apiCompletionService,
           transactionServices = new ApiCommandService.TransactionServices(
             getTransactionById = apiTransactionService.getTransactionById,
             getFlatTransactionById = apiTransactionService.getFlatTransactionById,
           ),
           timeProvider = timeProvider,
           ledgerConfigurationSubscription = ledgerConfigurationSubscription,
-          metrics = metrics,
           explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
         )
 

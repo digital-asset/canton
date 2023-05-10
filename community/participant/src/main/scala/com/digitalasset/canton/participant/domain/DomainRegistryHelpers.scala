@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.domain
 import akka.stream.Materializer
 import cats.Eval
 import cats.data.EitherT
+import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.lf.data.Ref.PackageId
@@ -18,6 +19,10 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainRegistryError.HandshakeErrors.DomainIdMismatch
 import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.DomainHandle
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.{
+  DomainClientBootstrapInfo,
+  TopologyRequestAddressX,
+}
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.store.{
   ParticipantSettingsLookup,
@@ -36,6 +41,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
 import io.opentelemetry.api.trace.Tracer
 
@@ -75,10 +81,10 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, DomainHandle] = {
     for {
-      domainIdSequencerId <- getDomainId(config.domain, sequencerConnectClient).mapK(
+      domainInfo <- getDomainInfo(config.domain, sequencerConnectClient).mapK(
         FutureUnlessShutdown.outcomeK
       )
-      (domainId, sequencerId) = domainIdSequencerId
+      DomainClientBootstrapInfo(domainId, sequencerId, topologyRequestAddress) = domainInfo
       indexedDomainId <- EitherT
         .right(syncDomainPersistentStateManager.indexedDomainId(domainId))
         .mapK(FutureUnlessShutdown.outcomeK)
@@ -230,6 +236,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           for {
             success <- topologyDispatcher.onboardToDomain(
               domainId,
+              topologyRequestAddress,
               config.domain,
               config.timeTracker,
               sequencerConnection,
@@ -281,6 +288,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       sequencerClient,
       topologyClient,
       topologyFactory,
+      topologyRequestAddress,
       persistentState,
       timeouts,
     )
@@ -323,8 +331,10 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
             performUnlessClosingEitherU(
               "downloading-essential-topology-state"
             )(
-              topologyInitializationCallback
-                .callback(topologyClient, transport, protocolVersion)
+              ResourceUtil.withResourceM(transport)(
+                topologyInitializationCallback
+                  .callback(topologyClient, _, protocolVersion)
+              )
             )
           )
           .leftMap[DomainRegistryError](
@@ -333,11 +343,14 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
     }
   }
 
-  private def getDomainId(domainAlias: DomainAlias, sequencerConnectClient: SequencerConnectClient)(
-      implicit traceContext: TraceContext
-  ): EitherT[Future, DomainRegistryError, (DomainId, SequencerId)] =
+  private def getDomainInfo(
+      domainAlias: DomainAlias,
+      sequencerConnectClient: SequencerConnectClient,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainRegistryError, DomainClientBootstrapInfo] =
     sequencerConnectClient
-      .getDomainIdSequencerId(domainAlias)
+      .getDomainClientBootstrapInfo(domainAlias)
       .leftMap(DomainRegistryHelpers.toDomainRegistryError(domainAlias))
 
   private def performHandshake(
@@ -447,6 +460,7 @@ object DomainRegistryHelpers {
       sequencer: SequencerClient,
       topologyClient: DomainTopologyClientWithInit,
       topologyFactory: TopologyComponentFactory,
+      topologyRequestAddress: Option[TopologyRequestAddressX],
       domainPersistentState: SyncDomainPersistentState,
       timeouts: ProcessingTimeout,
   )

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.topology.store
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -11,7 +12,6 @@ import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResp
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingIdentityFactory}
-import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future

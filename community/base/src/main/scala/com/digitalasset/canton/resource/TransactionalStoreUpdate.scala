@@ -6,11 +6,11 @@ package com.digitalasset.canton.resource
 import cats.syntax.alternative.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.tracing.TraceContext
-import io.functionmeta.functionFullName
 import slick.dbio.{DBIOAction, Effect, NoStream}
 
 import scala.annotation.tailrec

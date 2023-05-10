@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -11,7 +12,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, TransactionalStoreU
 import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
@@ -76,7 +76,7 @@ class DbCursorPreheadStore[Discr](
           case _: DbStorage.Profile.Oracle =>
             sqlu"""merge into #$cursorTable ct
                    using (
-                    select 
+                    select
                       $client client,
                       $counter counter,
                       $timestamp ts
@@ -148,7 +148,7 @@ class DbCursorPreheadStore[Discr](
       case Some(CursorPrehead(counter, timestamp)) =>
         val query =
           sqlu"""
-            update #$cursorTable 
+            update #$cursorTable
             set prehead_counter = $counter, ts = $timestamp
             where client = $client and prehead_counter > $counter"""
         storage.update_(query, "rewind prehead")

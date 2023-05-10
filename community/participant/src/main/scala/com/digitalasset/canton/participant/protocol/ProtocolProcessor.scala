@@ -8,6 +8,7 @@ import cats.implicits.catsStdInstancesForFuture
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{
@@ -63,7 +64,6 @@ import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil, MonadUt
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -817,7 +817,7 @@ abstract class ProtocolProcessor[
           ephemeral.storedContractManager.addPendingContracts(rc, pendingContracts)
         )
       )
-      // TODO(M40): This check may evaluate differently during a replay. Should not cause a hard failure
+      // TODO(i12908): This check may evaluate differently during a replay. Should not cause a hard failure
       //  E.g., if the contract has been written to the store in between with different contract data or metadata.
       _ <- condUnitET[FutureUnlessShutdown](
         conflictingContracts.isEmpty,
@@ -1174,9 +1174,18 @@ abstract class ProtocolProcessor[
       traceContext: TraceContext
   ): EitherT[Future, steps.ResultError, EitherT[FutureUnlessShutdown, steps.ResultError, Unit]] = {
     ephemeral.recordOrderPublisher.tick(sc, resultTs)
+
+    val snapshotTs =
+      if (protocolVersion >= ProtocolVersion.v5) requestId.unwrap
+      else {
+        // Keeping legacy behavior to enforce a consistent behavior in old protocol versions.
+        // If different participants pick different values, this could result in a ledger fork.
+        resultTs
+      }
+
     for {
       snapshot <- EitherT.right(
-        crypto.ips.awaitSnapshotSupervised(s"await crypto snapshot $resultTs")(resultTs)
+        crypto.ips.awaitSnapshotSupervised(s"await crypto snapshot $resultTs")(snapshotTs)
       )
 
       domainParameters <- EitherT(

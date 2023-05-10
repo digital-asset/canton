@@ -35,7 +35,7 @@ final case class AcsChange(
 object AcsChange {
   val empty: AcsChange = AcsChange(Map.empty, Map.empty)
 
-  // TODO(M40) The ACS commitments processor expects the caller to ensure that the activations/deactivations passed to
+  // TODO(i12904) The ACS commitments processor expects the caller to ensure that the activations/deactivations passed to
   //  it really describe a set of contracts. Double activations or double deactivations for a contract (due to a bug
   //  or maliciousness) will violate this expectation.
   //  Examples of malicious cases we need to handle:

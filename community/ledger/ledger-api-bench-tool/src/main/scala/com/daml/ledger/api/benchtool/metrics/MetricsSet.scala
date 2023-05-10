@@ -3,9 +3,7 @@
 
 package com.daml.ledger.api.benchtool.metrics
 
-import java.time.{Clock, Duration}
-
-import com.daml.ledger.api.benchtool.config.WorkflowConfig.StreamConfig._
+import com.daml.ledger.api.benchtool.config.WorkflowConfig.StreamConfig.*
 import com.daml.ledger.api.benchtool.metrics.metrics.TotalRuntimeMetric
 import com.daml.ledger.api.benchtool.metrics.metrics.TotalRuntimeMetric.MaxDurationObjective
 import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
@@ -14,9 +12,10 @@ import com.daml.ledger.api.v1.transaction_service.{
   GetTransactionTreesResponse,
   GetTransactionsResponse,
 }
-import com.daml.metrics.api.MetricHandle.MetricsFactory
+import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.google.protobuf.timestamp.Timestamp
 
+import java.time.{Clock, Duration}
 import scala.concurrent.duration.FiniteDuration
 
 object MetricsSet {
@@ -35,7 +34,7 @@ object MetricsSet {
 
   def transactionExposedMetrics(
       streamName: String,
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
   ): ExposedMetrics[GetTransactionsResponse] =
     ExposedMetrics[GetTransactionsResponse](
       streamName = streamName,
@@ -61,7 +60,7 @@ object MetricsSet {
 
   def transactionTreesExposedMetrics(
       streamName: String,
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
   ): ExposedMetrics[GetTransactionTreesResponse] =
     ExposedMetrics[GetTransactionTreesResponse](
       streamName = streamName,
@@ -95,7 +94,7 @@ object MetricsSet {
 
   def activeContractsExposedMetrics(
       streamName: String,
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
   ): ExposedMetrics[GetActiveContractsResponse] =
     ExposedMetrics[GetActiveContractsResponse](
       streamName = streamName,
@@ -127,7 +126,7 @@ object MetricsSet {
 
   def completionsExposedMetrics(
       streamName: String,
-      metricsFactory: MetricsFactory,
+      metricsFactory: LabeledMetricsFactory,
   ): ExposedMetrics[CompletionStreamResponse] =
     ExposedMetrics[CompletionStreamResponse](
       streamName = streamName,

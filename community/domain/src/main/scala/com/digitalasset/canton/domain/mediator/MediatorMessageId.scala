@@ -18,8 +18,9 @@ import scala.util.Try
 private[mediator] sealed trait MediatorMessageId {
   def toMessageId: MessageId
 }
-
+// TODO(#9014) remove me with 3.0
 private[mediator] object MediatorMessageId {
+  @Deprecated(since = "3.0, remove me once we can break compatibility with old proto versions")
   final case class VerdictMessageId(requestId: RequestId) extends MediatorMessageId {
     val toMessageId: MessageId =
       mkMessageId(verdictPrefix)(requestId.unwrap.toLf.micros)

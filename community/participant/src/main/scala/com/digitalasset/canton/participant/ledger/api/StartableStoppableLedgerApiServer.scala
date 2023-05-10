@@ -14,6 +14,7 @@ import com.daml.ledger.api.v1.experimental_features.{
 }
 import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.ports.Port
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.concurrent.{
@@ -69,8 +70,7 @@ import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueueWithShutdown}
-import io.functionmeta.functionFullName
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 import io.grpc.{BindableService, ServerInterceptor}
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 import io.scalaland.chimney.dsl.*
@@ -105,7 +105,7 @@ class StartableStoppableLedgerApiServer(
     with NamedLogging {
 
   // Use a simple execution queue as locking to ensure only one start and stop run at a time.
-  private val execQueue = new SimpleExecutionQueueWithShutdown(
+  private val execQueue = new SimpleExecutionQueue(
     "start-stop-ledger-api-server-queue",
     futureSupervisor,
     timeouts,
@@ -242,6 +242,7 @@ class StartableStoppableLedgerApiServer(
       (inMemoryState, inMemoryStateUpdaterFlow) <-
         LedgerApiServer.createInMemoryStateAndUpdater(
           indexServiceConfig,
+          config.serverConfig.commandService.maxCommandsInFlight,
           config.metrics,
           executionContext,
         )
@@ -288,6 +289,7 @@ class StartableStoppableLedgerApiServer(
 
       timedWriteService = new TimedWriteService(config.syncService, config.metrics)
       _ <- ApiServiceOwner(
+        submissionTracker = inMemoryState.submissionTracker,
         indexService = indexService,
         userManagementStore = userManagementStore,
         identityProviderConfigStore = getIdentityProviderConfigStore(dbSupport, apiServerConfig),

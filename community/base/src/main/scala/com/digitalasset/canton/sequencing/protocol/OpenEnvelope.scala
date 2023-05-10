@@ -34,8 +34,11 @@ final case class OpenEnvelope[+M <: ProtocolMessage](
   override def pretty: Pretty[DefaultOpenEnvelope] =
     prettyOfClass(unnamedParam(_.protocolMessage), param("recipients", _.recipients))
 
-  override def forRecipient(member: Member): Option[OpenEnvelope[M]] = {
-    val subtrees = recipients.forMember(member)
+  override def forRecipient(
+      member: Member,
+      groupAddresses: Set[GroupRecipient],
+  ): Option[OpenEnvelope[M]] = {
+    val subtrees = recipients.forMember(member, groupAddresses)
     subtrees.map(s => this.copy(recipients = s))
   }
 

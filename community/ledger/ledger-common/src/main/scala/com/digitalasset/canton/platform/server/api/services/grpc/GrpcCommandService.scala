@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.server.api.services.grpc
 
-import com.daml.error.DamlContextualizedErrorLogger
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandService
 import com.daml.ledger.api.v1.command_service.*
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
@@ -13,6 +12,7 @@ import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
   SubmitAndWaitRequestValidator,
 }
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.server.api.{ProxyCloseable, ValidationLogger}
 import com.google.protobuf.empty.Empty

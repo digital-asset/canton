@@ -79,8 +79,11 @@ final case class ClosedEnvelope private (
 
   override def pretty: Pretty[ClosedEnvelope] = prettyOfClass(param("recipients", _.recipients))
 
-  override def forRecipient(member: Member): Option[ClosedEnvelope] =
-    recipients.forMember(member).map(r => this.copy(recipients = r))
+  override def forRecipient(
+      member: Member,
+      groupRecipients: Set[GroupRecipient],
+  ): Option[ClosedEnvelope] =
+    recipients.forMember(member, groupRecipients).map(r => this.copy(recipients = r))
 
   override def closeEnvelope: this.type = this
 
@@ -156,10 +159,11 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
       )
       // TODO(#12373) Adapt when releasing BFT
       _ <- Either.cond(
-        !recipients.allPaths.flatten.flatten.exists {
-          case _: MemberRecipient => false
-          case _ => true
-        } || representativeProtocolVersion >= groupAddressesSupportedSince,
+        representativeProtocolVersion >= groupAddressesSupportedSince || !recipients.allRecipients
+          .exists {
+            case _: MemberRecipient => false
+            case _ => true
+          },
         (),
         InvariantViolation(
           s"Group addresses on closed envelopes are supported only from protocol version ${signaturesSupportedSince} on."

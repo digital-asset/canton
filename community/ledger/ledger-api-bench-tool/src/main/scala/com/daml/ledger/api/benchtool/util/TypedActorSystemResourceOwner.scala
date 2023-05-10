@@ -3,8 +3,8 @@
 
 package com.daml.ledger.api.benchtool.util
 
-import akka.actor.typed.{ActorSystem, Behavior, SpawnProtocol}
 import akka.actor.typed.scaladsl.Behaviors
+import akka.actor.typed.{ActorSystem, Behavior, SpawnProtocol}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.resources.{AbstractResourceOwner, ReleasableResource, Resource}
 

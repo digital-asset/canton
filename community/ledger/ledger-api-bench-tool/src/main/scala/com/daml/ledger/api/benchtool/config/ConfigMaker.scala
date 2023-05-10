@@ -40,6 +40,6 @@ object ConfigMaker {
     }
   }
 
-    final case class ConfigurationError(details: String)
+  final case class ConfigurationError(details: String)
 
 }

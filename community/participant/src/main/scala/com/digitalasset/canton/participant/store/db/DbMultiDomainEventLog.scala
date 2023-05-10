@@ -11,6 +11,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -54,7 +55,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{DiscardOps, LedgerTransactionId, RequestCounter}
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.collection.concurrent.TrieMap
@@ -107,17 +107,10 @@ class DbMultiDomainEventLog private[db] (
   import storage.api.*
   import storage.converters.*
 
-  /*
-    This caches the ledger end, which is queried with `lastGlobalOffset(None)`
-    Cache is invalidated on write and prune and populated on read.
-   */
-  private val lastGlobalOffsetCache: AtomicReference[Option[GlobalOffset]] =
-    new AtomicReference[Option[GlobalOffset]](initialLastGlobalOffset)
-
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("multi-domain-event-log")
 
-  private val dispatcher: Dispatcher[GlobalOffset] =
+  override protected val dispatcher: Dispatcher[GlobalOffset] =
     Dispatcher(
       loggerFactory.name,
       MultiDomainEventLog.ledgerFirstOffset - 1, // start index is exclusive
@@ -163,17 +156,6 @@ class DbMultiDomainEventLog private[db] (
       ),
       publicationFlow,
     )
-
-  @VisibleForTesting
-  private[db] def getLastGlobalOffsetCache: Option[GlobalOffset] = lastGlobalOffsetCache.get()
-
-  private def updateCache(newLastGlobalOffset: GlobalOffset): Unit =
-    lastGlobalOffsetCache.getAndUpdate { currentCacheValueO =>
-      Some(
-        currentCacheValueO
-          .fold(newLastGlobalOffset)(_.max(newLastGlobalOffset))
-      )
-    }.discard
 
   override def publish(data: PublicationData): Future[Unit] = {
     implicit val traceContext: TraceContext = data.traceContext
@@ -273,8 +255,6 @@ class DbMultiDomainEventLog private[db] (
       newGlobalOffsetO match {
         case Some(newGlobalOffset) =>
           logger.debug(show"Signalling global offset $newGlobalOffset.")
-
-          updateCache(newGlobalOffset)
 
           dispatcher.signalNewHead(newGlobalOffset)
 
@@ -419,18 +399,6 @@ class DbMultiDomainEventLog private[db] (
           sqlu"delete from linearized_event_log where global_offset <= $upToInclusive",
           functionFullName,
         )
-        .map { _ =>
-          lastGlobalOffsetCache.getAndUpdate { cachedValueO =>
-            cachedValueO.flatMap { cachedValue =>
-              /*
-                If the pruning bound is before the current cache value, we don't update `lastGlobalOffsetCache`.
-                Otherwise, we invalidate the cache. In that case, the cache will be updated only by the next
-                write.
-               */
-              if (upToInclusive < cachedValue) Some(cachedValue) else None
-            }
-          }.discard
-        }
     }
   }
 
@@ -740,10 +708,8 @@ class DbMultiDomainEventLog private[db] (
       case Some(upToInclusive) => OptionT(query(upToInclusive))
 
       case None =>
-        lastGlobalOffsetCache.get() match {
-          case Some(cachedValue) => OptionT.pure[Future](cachedValue)
-          case None => OptionT(query(Long.MaxValue))
-        }
+        val head = dispatcher.getHead()
+        OptionT.fromOption(Option.when(head > MultiDomainEventLog.ledgerFirstOffset)(head))
     }
   }
 

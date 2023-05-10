@@ -8,17 +8,19 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.daml_lf_dev.DamlLf
-import com.daml.error.definitions.{DamlError, PackageServiceError}
+import com.daml.error.DamlError
 import com.daml.lf.archive
 import com.daml.lf.archive.{DarParser, Decode, Error as LfArchiveError}
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
 import com.daml.lf.language.Ast.Package
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.DarName
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String256M}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
+import com.digitalasset.canton.ledger.error.PackageServiceError
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode
@@ -39,7 +41,6 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PathUtils
 import com.github.blemale.scaffeine.Scaffeine
 import com.google.protobuf.ByteString
-import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 
 import java.io.*

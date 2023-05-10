@@ -128,13 +128,33 @@ object EnterpriseSequencerAdminCommands {
       ): Future[v0.InitResponse] =
         service.initV1(request)
     }
+
+    final case class V2(
+        domainId: DomainId,
+        topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
+        domainParameters: StaticDomainParameters,
+        snapshotO: Option[SequencerSnapshot],
+    ) extends Initialize[v2.InitRequest] {
+
+      override protected def serializer: InitializeSequencerRequest => v2.InitRequest = _.toProtoV2
+
+      override def submitRequest(
+          service: v0.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
+          request: v2.InitRequest,
+      ): Future[v0.InitResponse] =
+        service.initV2(request)
+    }
+
     def apply(
         domainId: DomainId,
         topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
         domainParameters: StaticDomainParameters,
         snapshotO: Option[SequencerSnapshot] = None,
     ): Initialize[_] = {
-      if (domainParameters.protocolVersion >= ProtocolVersion.v4)
+      // TODO(#12373) Adapt when releasing BFT
+      if (domainParameters.protocolVersion >= ProtocolVersion.dev)
+        V2(domainId, topologySnapshot, domainParameters, snapshotO)
+      else if (domainParameters.protocolVersion >= ProtocolVersion.v4)
         V1(domainId, topologySnapshot, domainParameters, snapshotO)
       else V0(domainId, topologySnapshot, domainParameters, snapshotO)
     }
@@ -197,6 +217,8 @@ object EnterpriseSequencerAdminCommands {
         case v0.Snapshot.Response.Value.Failure(v0.Snapshot.Failure(reason)) => Left(reason)
         case v0.Snapshot.Response.Value.Success(v0.Snapshot.Success(Some(result))) =>
           SequencerSnapshot.fromProtoV0(result).leftMap(_.toString)
+        case v0.Snapshot.Response.Value.VersionedSuccess(v0.Snapshot.VersionedSuccess(snapshot)) =>
+          SequencerSnapshot.fromByteString(snapshot).leftMap(_.toString)
         case _ => Left("response is empty")
       }
 

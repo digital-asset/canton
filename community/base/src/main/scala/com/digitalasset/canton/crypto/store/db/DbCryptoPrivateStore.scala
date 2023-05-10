@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.store.db
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
@@ -20,7 +21,6 @@ import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
-import io.functionmeta.functionFullName
 import slick.dbio.DBIOAction
 import slick.jdbc.GetResult
 import slick.sql.SqlAction

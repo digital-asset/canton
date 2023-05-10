@@ -70,7 +70,7 @@ private[mediator] class ConfirmationResponseProcessor(
     val requestTs = requestId.unwrap
 
     val future = for {
-      // FIXME(M40): do not block if requestId is far in the future
+      // FIXME(i12903): do not block if requestId is far in the future
       snapshot <- crypto.ips.awaitSnapshot(requestId.unwrap)(callerTraceContext)
 
       domainParameters <- snapshot

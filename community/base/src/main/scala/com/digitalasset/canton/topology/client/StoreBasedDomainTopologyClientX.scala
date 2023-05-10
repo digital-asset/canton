@@ -32,6 +32,7 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect.ClassTag
 
 /** The domain topology client that reads data from a topology store
   *
@@ -48,7 +49,7 @@ class StoreBasedDomainTopologyClientX(
     override protected val futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext)
-    extends BaseDomainTopologyClient
+    extends BaseDomainTopologyClientX
     with NamedLogging {
 
   override def trySnapshot(
@@ -224,41 +225,83 @@ class StoreBasedTopologySnapshotX(
       parties: Seq[PartyId],
       loadParticipantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
   ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] = {
+
+    def collectLatestByType[M <: TopologyMappingX: ClassTag](
+        storedTransactions: StoredTopologyTransactionsX[
+          TopologyChangeOpX.Replace,
+          TopologyMappingX,
+        ],
+        code: TopologyMappingX.Code,
+    ): Seq[M] = {
+      storedTransactions
+        .collectOfMapping[M]
+        .result
+        .groupBy(_.transaction.transaction.mapping.uniqueKey)
+        .map { case (_, seq) =>
+          collectLatestMapping[M](
+            code,
+            seq.sortBy(_.validFrom),
+          ).getOrElse(
+            throw new IllegalStateException(
+              "Group-by would not have produced empty PartyToParticipantX seq"
+            )
+          )
+        }
+        .toSeq
+    }
     for {
       // get all party to participant mappings and also participant states for this uid (latter to mix in admin parties)
-      partyToParticipantMap <- findTransactions(
+      partyData <- findTransactions(
         asOfInclusive = false,
-        types = Seq(TopologyMappingX.Code.PartyToParticipantX),
+        types = Seq(
+          TopologyMappingX.Code.PartyToParticipantX,
+          TopologyMappingX.Code.DomainTrustCertificateX,
+        ),
         filterUid = Some(parties.map(_.uid)),
         filterNamespace = None,
-      ).map(
-        _.collectOfMapping[PartyToParticipantX].result
-          .groupBy(_.transaction.transaction.mapping.partyId)
-          .map { case (partyId, seq) =>
-            val ptp =
-              collectLatestMapping(
-                TopologyMappingX.Code.PartyToParticipantX,
-                seq.sortBy(_.validFrom),
-              )
-                .getOrElse(
-                  throw new IllegalStateException("Group-by would not have produced empty seq")
-                )
-            PartyId(partyId) -> ptp.participants.map {
-              case HostingParticipant(participantId, partyPermission) =>
-                ParticipantId(participantId) -> partyPermission.toNonX
-            }.toMap
-          }
-      )
+      ).map { storedTransactions =>
+        // find normal party declarations
+        val partyToParticipantMappings = collectLatestByType[PartyToParticipantX](
+          storedTransactions,
+          TopologyMappingX.Code.PartyToParticipantX,
+        ).map { ptp =>
+          ptp.partyId -> ptp.participants.map {
+            case HostingParticipant(participantId, partyPermission) =>
+              participantId -> partyPermission.toNonX
+          }.toMap
+        }.toMap
 
-      participantIds = partyToParticipantMap.values.flatMap(_.keys).toSeq
+        // admin parties are implicitly defined by the fact that a participant is available on a domain.
+        // admin parties have the same UID as their participant
+        val domainTrustCerts = collectLatestByType[DomainTrustCertificateX](
+          storedTransactions,
+          TopologyMappingX.Code.DomainTrustCertificateX,
+        ).map(cert => cert.participantId)
+
+        (partyToParticipantMappings, domainTrustCerts)
+      }
+      (partyToParticipantMap, adminPartyParticipants) = partyData
+
+      // fetch all admin parties
+      participantIds = partyToParticipantMap.values
+        .flatMap(_.keys)
+        .toSeq ++ adminPartyParticipants
 
       participantToAttributesMap <- loadParticipantStates(participantIds)
+
+      adminPartiesMap = adminPartyParticipants
+        .mapFilter(participantId =>
+          participantToAttributesMap
+            .get(participantId)
+            .map(attrs => participantId.adminParty -> Map(participantId -> attrs))
+        )
+        .toMap
 
       // In case the party->participant mapping contains participants missing from map returned
       // by loadParticipantStates, filter out participants with "empty" permissions and transitively
       // parties whose participants have all been filtered out this way.
       // this can only affect participants that have left the domain
-      result = partyToParticipantMap.toSeq.mapFilter {
+      result = adminPartiesMap ++ partyToParticipantMap.toSeq.mapFilter {
         case (partyId, participantToPermissionsMap) =>
           val participantIdToAttribs = participantToPermissionsMap.toSeq.mapFilter {
             case (participantId, partyPermission) =>
@@ -300,6 +343,18 @@ class StoreBasedTopologySnapshotX(
       .toSeq
   )
 
+  override def sequencerGroup(): Future[Option[SequencerGroup]] = findTransactions(
+    asOfInclusive = false,
+    types = Seq(TopologyMappingX.Code.SequencerDomainStateX),
+    filterUid = None,
+    filterNamespace = None,
+  ).map { transactions =>
+    collectLatestMapping(
+      TopologyMappingX.Code.SequencerDomainStateX,
+      transactions.collectOfMapping[SequencerDomainStateX].result,
+    ).map { sds: SequencerDomainStateX => SequencerGroup(sds.active, sds.observers, sds.threshold) }
+  }
+
   /** Returns a list of all known parties on this domain */
   override def inspectKnownParties(
       filterParty: String,
@@ -321,7 +376,7 @@ class StoreBasedTopologySnapshotX(
         .result
         .groupBy(_.transaction.transaction.mapping.partyId)
         .collect {
-          case (partyId, seq) if parties.contains(PartyId(partyId).toLf) =>
+          case (partyId, seq) if parties.contains(partyId.toLf) =>
             val authorityOf = collectLatestMapping(
               TopologyMappingX.Code.AuthorityOfX,
               seq.sortBy(_.validFrom),
@@ -329,8 +384,8 @@ class StoreBasedTopologySnapshotX(
               .getOrElse(
                 throw new IllegalStateException("Group-by would not have produced empty seq")
               )
-            PartyId(partyId).toLf -> AuthorityOfDelegation(
-              authorityOf.parties.map(PartyId(_).toLf).toSet,
+            partyId.toLf -> AuthorityOfDelegation(
+              authorityOf.parties.map(_.toLf).toSet,
               authorityOf.threshold,
             )
         }
@@ -415,7 +470,7 @@ class StoreBasedTopologySnapshotX(
       _.collectOfMapping[DomainTrustCertificateX].result
         .groupBy(_.transaction.transaction.mapping.participantId)
         .collect {
-          case (pid, seq) if participantsFilter.forall(_.contains(ParticipantId(pid))) =>
+          case (pid, seq) if participantsFilter.forall(_.contains(pid)) =>
             // invoke collectLatestMapping only to warn in case a participantId's domain trust certificate is not unique
             collectLatestMapping(
               TopologyMappingX.Code.DomainTrustCertificateX,
@@ -429,18 +484,19 @@ class StoreBasedTopologySnapshotX(
     participantsWithCertAndKeys <- findTransactions(
       asOfInclusive = false,
       types = Seq(TopologyMappingX.Code.OwnerToKeyMappingX),
-      filterUid = Some(participantsWithCertificates),
+      filterUid = Some(participantsWithCertificates.map(_.uid)),
       filterNamespace = None,
     ).map(
       _.collectOfMapping[OwnerToKeyMappingX].result
-        .groupBy(_.transaction.transaction.mapping.member.uid)
-        .filter { case (pid, seq) =>
-          collectLatestMapping(
-            TopologyMappingX.Code.OwnerToKeyMappingX,
-            seq.sortBy(_.validFrom),
-          ).nonEmpty
+        .groupBy(_.transaction.transaction.mapping.member)
+        .collect {
+          case (pid: ParticipantId, seq)
+              if collectLatestMapping(
+                TopologyMappingX.Code.OwnerToKeyMappingX,
+                seq.sortBy(_.validFrom),
+              ).nonEmpty =>
+            pid
         }
-        .keys
     )
     // Warn about participants with cert but no keys
     _ = (participantsWithCertificates.toSet -- participantsWithCertAndKeys.toSet).foreach { pid =>
@@ -474,10 +530,10 @@ class StoreBasedTopologySnapshotX(
     // 4. Apply default permissions/trust of submission/ordinary if missing participant domain permission and
     // grab rate limits from dynamic domain parameters if not specified
     participantIdDomainPermissionsMap = participantsWithCertAndKeys.map { pid =>
-      ParticipantId(pid) -> participantDomainPermissions
+      pid -> participantDomainPermissions
         .getOrElse(
           pid,
-          ParticipantDomainPermissionX.default(domainParametersState.domain.uid, pid),
+          ParticipantDomainPermissionX.default(domainParametersState.domain, pid),
         )
         .setDefaultLimitIfNotSet(domainParametersState.parameters.v2DefaultParticipantLimits)
     }.toMap

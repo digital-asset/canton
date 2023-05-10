@@ -7,26 +7,20 @@ import java.time.Duration
 
 /** Configuration for the Ledger API Command Service.
   *
-  * @param inputBufferSize
-  *        Maximum number of commands waiting to be submitted for each distinct set of parties,
-  *        as specified by the `act_as` property of the command. Reaching this limit will cause the
-  *        server to signal backpressure using the ``RESOURCE_EXHAUSTED`` gRPC status code.
+  * @param maxTrackingTimeout
+  *        The duration that the command service will keep tracking an active command. This value will be used
+  *        if a timeout is not specified on a gRPC request, or the specified one is shorter.
   * @param maxCommandsInFlight
-  *        Maximum number of submitted commands waiting to be completed in parallel, for each
-  *        distinct set of parties, as specified by the `act_as` property of the command. Reaching
-  *        this limit will cause new submissions to wait in the queue before being submitted.
-  * @param trackerRetentionPeriod
-  *        The duration that the command service will keep an active command tracker for a given set
-  *        of parties. A longer period cuts down on the tracker instantiation cost for a party that
-  *        seldom acts. A shorter period causes a quick removal of unused trackers.
+  *        Maximum number of submitted commands waiting to be completed in parallel.
+  *        Commands submitted after this limit is reached will be rejected.
   */
 final case class CommandConfiguration(
-    inputBufferSize: Int = 512,
-    maxCommandsInFlight: Int = 256,
-    trackerRetentionPeriod: Duration = CommandConfiguration.DefaultTrackerRetentionPeriod,
+    maxTrackingTimeout: Duration = CommandConfiguration.DefaultMaxTrackingTimeout,
+    maxCommandsInFlight: Int = CommandConfiguration.DefaultMaxCommandsInFlight,
 )
 
 object CommandConfiguration {
-  val DefaultTrackerRetentionPeriod: Duration = Duration.ofMinutes(5)
+  val DefaultMaxTrackingTimeout: Duration = Duration.ofMinutes(5)
+  val DefaultMaxCommandsInFlight: Int = 256
   lazy val Default: CommandConfiguration = CommandConfiguration()
 }

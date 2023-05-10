@@ -11,6 +11,7 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import cats.syntax.validated.*
 import com.daml.error.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -45,7 +46,6 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
@@ -192,9 +192,20 @@ class AcsCommitmentProcessor(
   private val timestampsWithPotentialTopologyChanges =
     new AtomicReference[List[Traced[CantonTimestamp]]](List())
 
-  private[pruning] val queue: SimpleExecutionQueueWithShutdown =
-    new SimpleExecutionQueueWithShutdown(
+  /** Queue to serialize the access to the DB, to avoid serialization failures at SERIALIZABLE level */
+  private val dbQueue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(
       "acs-commitment-processor-queue",
+      futureSupervisor,
+      timeouts,
+      loggerFactory,
+      logTaskTiming = true,
+    )
+
+  /** Queue to serialize the publication of ACS changes */
+  private val publishQueue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(
+      "acs-commitment-processor-publish-queue",
       futureSupervisor,
       timeouts,
       loggerFactory,
@@ -211,7 +222,7 @@ class AcsCommitmentProcessor(
   // completed by the time we return - only that no other task is queued before initialization.
   private[this] val initFuture: FutureUnlessShutdown[Unit] = {
     import TraceContext.Implicits.Empty.*
-    val executed = queue.executeUS(
+    val executed = dbQueue.executeUS(
       performUnlessClosingF("acs-commitment-processor-init") {
         for {
           lastComputed <- store.lastComputedAndSent
@@ -346,66 +357,77 @@ class AcsCommitmentProcessor(
       }
     }
 
-    def performPublish(): Future[Unit] = {
+    def performPublish(
+        snapshot: RunningCommitments,
+        reconciliationIntervals: SortedReconciliationIntervals,
+    ): FutureUnlessShutdown[Unit] = {
+      // Check whether this change pushes us to a new commitment period; if so, the previous one is completed
+      val optCompletedPeriod = reconciliationIntervals
+        .commitmentPeriodPreceding(endOfLastProcessedPeriod)(toc.timestamp)
+        .tapLeft { err =>
+          logger.info(
+            s"Unable to compute commitment period preceding ${toc.timestamp}: $err. Keeping the current period"
+          )
+        }
+        .getOrElse(None)
+
       for {
-        snapshot <- performUnlessClosingF(functionFullName)(runningCommitments)
-        reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
-        _ <-
+        // Important invariant:
+        // - let t be the tick of [[com.digitalasset.canton.participant.store.AcsCommitmentStore#lastComputedAndSent]];
+        //   assume that t is not None
+        // - then, we must have already computed and stored the local commitments at t
+        // - let t' be the next tick after t; then the watermark of the running commitments must never move beyond t';
+        //   otherwise, we lose the ability to compute the commitments at t'
+        // Hence, the order here is critical for correctness; if the change moves us beyond t', first compute
+        // the commitments at t', and only then update the snapshot
+        _ <- optCompletedPeriod.traverse_(commitmentPeriod =>
+          performUnlessClosingF(functionFullName)(
+            processCompletedPeriod(snapshot)(commitmentPeriod)
+          )
+        )
+
+        _ <- FutureUnlessShutdown.outcomeF(updateSnapshot(toc, acsChange))
+      } yield ()
+    }
+
+    // On the `publishQueue`, obtain the running commitment and the reconciliation parameters on the `publishQueue`
+    // and check whether this is a replay of something we've already seen. If not, then do publish the change,
+    // which runs on the `dbQueue`.
+    val fut = publishQueue
+      .executeUS(
+        for {
+          snapshot <- performUnlessClosingF(functionFullName)(runningCommitments)
+          reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
+        } yield {
           if (snapshot.watermark >= toc) {
             logger.debug(s"ACS change at $toc is a replay, treating it as a no-op")
             // This is a replay of an already processed ACS change, ignore
             FutureUnlessShutdown.unit
           } else {
-            // Check whether this change pushes us to a new commitment period; if so, the previous one is completed
-            val optCompletedPeriod = reconciliationIntervals
-              .commitmentPeriodPreceding(endOfLastProcessedPeriod)(toc.timestamp)
-              .tapLeft { err =>
-                logger.info(
-                  s"Unable to compute commitment period preceding ${toc.timestamp}: $err. Keeping the current period"
-                )
-              }
-              .getOrElse(None)
-
-            for {
-              // Important invariant:
-              // - let t be the tick of [[com.digitalasset.canton.participant.store.AcsCommitmentStore#lastComputedAndSent]];
-              //   assume that t is not None
-              // - then, we must have already computed and stored the local commitments at t
-              // - let t' be the next tick after t; then the watermark of the running commitments must never move beyond t';
-              //   otherwise, we lose the ability to compute the commitments at t'
-              // Hence, the order here is critical for correctness; if the change moves us beyond t', first compute
-              // the commitments at t', and only then update the snapshot
-              _ <- optCompletedPeriod.traverse_(commitmentPeriod =>
-                performUnlessClosingF(functionFullName)(
-                  processCompletedPeriod(snapshot)(commitmentPeriod)
-                )
-              )
-
-              _ <- FutureUnlessShutdown.outcomeF(updateSnapshot(toc, acsChange))
-            } yield ()
+            // Serialize the access to the DB only after having obtained the reconciliation interval.
+            // During crash recovery, the topology client may only be able to serve the intervals
+            // for re-published ACS changes after some messages have been processed,
+            // which may include ACS commitments that go through the same queue.
+            dbQueue.executeUS(
+              Policy.noisyInfiniteRetryUS(
+                performPublish(snapshot, reconciliationIntervals),
+                this,
+                timeouts.storageMaxRetryInterval.asFiniteApproximation,
+                s"publish ACS change at $toc",
+                s"Disconnect and reconnect to the domain $domainId if this error persists.",
+              ),
+              s"publish ACS change at $toc",
+            )
           }
-      } yield ()
-    }.onShutdown {
-      // TODO(#6175) maybe stop the queue instead?
-      logger.info(s"Not processing ACS change at $toc due to shutdown")
-    }
+        },
+        s"publish ACS change at $toc",
+      )
+      .flatten
 
     FutureUtil.doNotAwait(
-      queue
-        .executeUS(
-          Policy
-            .noisyInfiniteRetry(
-              performPublish(),
-              this,
-              timeouts.storageMaxRetryInterval.asFiniteApproximation,
-              s"publish ACS change at $toc",
-              s"Disconnect and reconnect to the domain $domainId if this error persists.",
-            ),
-          s"publish ACS change at $toc",
-        )
-        .onShutdown(
-          logger.info("Giving up on producing ACS commitment due to shutdown")
-        ),
+      fut.onShutdown(
+        logger.info("Giving up on producing ACS commitment due to shutdown")
+      ),
       failureMessage = s"Producing ACS commitments failed.",
       // If this happens, then the failure is fatal or there is some bug in the queuing or retrying.
       // Unfortunately, we can't do anything anymore to reliably prevent corruption of the running snapshot in the DB,
@@ -588,7 +610,7 @@ class AcsCommitmentProcessor(
   private def checkCommitment(
       commitment: AcsCommitment
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    queue
+    dbQueue
       .execute(
         // Make sure that the ready-for-remote check is atomic with buffering the commitment
         {
@@ -768,8 +790,14 @@ class AcsCommitmentProcessor(
     )
 
   override protected def onClosed(): Unit = {
-    Lifecycle.close(queue)(logger)
+    Lifecycle.close(dbQueue, publishQueue)(logger)
   }
+
+  @VisibleForTesting
+  private[pruning] def flush(): Future[Unit] =
+    // flatMap instead of zip because the `publishQueue` pushes tasks into the `queue`,
+    // so we must call `queue.flush()` only after everything in the `publishQueue` has been flushed.
+    publishQueue.flush().flatMap(_ => dbQueue.flush())
 }
 
 object AcsCommitmentProcessor extends HasLoggerName {

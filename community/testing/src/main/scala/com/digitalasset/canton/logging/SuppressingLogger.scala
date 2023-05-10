@@ -12,6 +12,7 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import org.scalactic.source
 import org.scalatest.AppendedClues.*
 import org.scalatest.Assertion
+import org.scalatest.Checkpoints.Checkpoint
 import org.scalatest.Inside.*
 import org.scalatest.Inspectors.*
 import org.scalatest.matchers.should.Matchers.*
@@ -525,6 +526,37 @@ class SuppressingLogger private[logging] (
 
     () => activeSuppressionRule.set(SuppressionRule.NoSuppression)
   }
+
+  def assertSingleErrorLogEntry[A](
+      within: => A,
+      expectedMsg: String,
+      expectedMDC: Map[String, String],
+      expectedThrowable: Option[Throwable],
+  ): A =
+    assertLogs(
+      within,
+      logEntry => {
+
+        val cp = new Checkpoint
+
+        cp {
+          logEntry.errorMessage shouldBe expectedMsg
+        }
+
+        val mdc = logEntry.mdc.map { case (k, v) =>
+          (k, v.replaceAll("\\.scala:\\d+", ".scala:<line-number>"))
+        }
+        cp {
+          forEvery(expectedMDC)(entry => mdc should contain(entry))
+        }
+
+        cp {
+          logEntry.throwable.map(_.toString) shouldBe expectedThrowable.map(_.toString)
+        }
+        cp.reportAll()
+        succeed
+      },
+    )
 }
 
 object SuppressingLogger {

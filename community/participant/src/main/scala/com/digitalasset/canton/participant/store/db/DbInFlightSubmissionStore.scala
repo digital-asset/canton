@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -34,7 +35,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, OptionUtil, SingleUseCell, retry}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
 import java.util.concurrent.atomic.AtomicReference

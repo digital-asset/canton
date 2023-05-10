@@ -4,6 +4,7 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -14,7 +15,6 @@ import com.digitalasset.canton.scheduler.{Cron, PruningSchedule}
 import com.digitalasset.canton.store.PruningSchedulerStore
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.tracing.TraceContext
-import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 

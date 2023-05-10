@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.topology.processing
 
+import cats.syntax.functorFilter.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -11,19 +13,23 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.protocol.{Deliver, DeliverError}
-import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.protocol.messages.{
+  AcceptedTopologyTransactionsX,
+  DefaultOpenEnvelope,
+  ProtocolMessage,
+}
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.client.{
-  DomainTopologyClientWithInit,
+  DomainTopologyClientWithInitX,
   StoreBasedDomainTopologyClient,
   StoreBasedDomainTopologyClientX,
 }
+import com.digitalasset.canton.topology.store.TopologyStore.Change
+import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
 import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreX}
+import com.digitalasset.canton.topology.transaction.{DomainParametersStateX, TopologyChangeOpX}
 import com.digitalasset.canton.topology.{DomainId, TopologyStateProcessorX}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,59 +43,131 @@ class TopologyTransactionProcessorX(
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends TopologyTransactionProcessorCommon(timeouts, loggerFactory) {
+    extends TopologyTransactionProcessorCommonImpl[AcceptedTopologyTransactionsX](
+      domainId,
+      futureSupervisor,
+      store,
+      acsCommitmentScheduleEffectiveTime,
+      timeouts,
+      loggerFactory,
+    ) {
 
-  // TODO(#11255) don't close store here
+  override type SubscriberType = TopologyTransactionProcessingSubscriberX
 
   private val stateProcessor = new TopologyStateProcessorX(store, loggerFactory)
 
-  def subscriptionStartsAt(
-      start: SubscriptionStart,
-      domainTimeTracker: DomainTimeTracker,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
+  override def onClosed(): Unit = {
+    super.onClosed()
+  }
 
-  override def createHandler(domainId: DomainId): UnsignedProtocolEventHandler =
-    new UnsignedProtocolEventHandler {
+  override protected def epsilonForTimestamp(asOfExclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Change.TopologyDelay] = FutureUnlessShutdown.pure(
+    Change.TopologyDelay(
+      SequencedTime(CantonTimestamp.Epoch),
+      EffectiveTime(CantonTimestamp.Epoch),
+      epsilon = NonNegativeFiniteDuration.tryOfMillis(250),
+    )
+  )
 
-      override def name: String = s"topology-processor-$domainId"
+  override protected def maxTimestampFromStore()(implicit
+      traceContext: TraceContext
+  ): Future[Option[(SequencedTime, EffectiveTime)]] = store.maxTimestamp()
 
-      override def apply(
-          tracedBatch: BoxedEnvelope[UnsignedEnvelopeBox, DefaultOpenEnvelope]
-      ): HandlerResult = {
-        MonadUtil.sequentialTraverseMonoid(tracedBatch.value) {
-          _.withTraceContext { implicit traceContext =>
-            {
-              case Deliver(sc, ts, _, _, _) =>
-                logger.debug(s"Processing sequenced event with counter $sc and timestamp $ts")
-                // TODO(#11255) wire up state processor
-                HandlerResult.done
-              case _: DeliverError => HandlerResult.done
-            }
-          }
-        }
+  override protected def initializeTopologyTimestampPlusEpsilonTracker(
+      processorTs: CantonTimestamp
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[EffectiveTime] =
+    TopologyTimestampPlusEpsilonTracker.initializeX(timeAdjuster, store, processorTs)
+
+  override protected def extractTopologyUpdates(
+      envelopes: List[DefaultOpenEnvelope]
+  ): List[AcceptedTopologyTransactionsX] = {
+    envelopes
+      .mapFilter(ProtocolMessage.select[AcceptedTopologyTransactionsX])
+      .map(_.protocolMessage)
+  }
+
+  override private[processing] def process(
+      sequencingTimestamp: SequencedTime,
+      effectiveTimestamp: EffectiveTime,
+      sc: SequencerCounter,
+      messages: List[AcceptedTopologyTransactionsX],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val tx = messages.flatMap(_.accepted).flatMap(_.transactions)
+    performUnlessClosingEitherU("process-topology-transaction")(
+      stateProcessor
+        .validateAndApplyAuthorization(
+          sequencingTimestamp,
+          effectiveTimestamp,
+          tx,
+          abortIfCascading = false,
+          abortOnError = false,
+          expectFullAuthorization = false,
+        )
+    ).merge
+      .flatMap { validated =>
+        inspectAndAdvanceTopologyTransactionDelay(
+          sequencingTimestamp,
+          effectiveTimestamp,
+          validated,
+        )
+        import cats.syntax.parallel.*
+        performUnlessClosingUSF("notify-topology-transaction-observers")(
+          listeners.toList.parTraverse_(
+            _.observed(
+              sequencingTimestamp,
+              effectiveTimestamp,
+              sc,
+              validated.collect { case tx if tx.rejectionReason.isEmpty => tx.transaction },
+            )
+          )
+        )
       }
+  }
 
-      override def subscriptionStartsAt(
-          start: SubscriptionStart,
-          domainTimeTracker: DomainTimeTracker,
-      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        TopologyTransactionProcessorX.this.subscriptionStartsAt(start, domainTimeTracker)
+  private def inspectAndAdvanceTopologyTransactionDelay(
+      sequencingTimestamp: SequencedTime,
+      effectiveTimestamp: EffectiveTime,
+      validated: Seq[GenericValidatedTopologyTransactionX],
+  )(implicit traceContext: TraceContext): Unit = {
+    def applyEpsilon(mapping: DomainParametersStateX) = {
+      timeAdjuster
+        .adjustEpsilon(
+          effectiveTimestamp,
+          sequencingTimestamp,
+          mapping.parameters.topologyChangeDelay,
+        )
+        .foreach { previous =>
+          logger.info(
+            s"Updated topology change delay from=${previous} to ${mapping.parameters.topologyChangeDelay}"
+          )
+        }
+      timeAdjuster.effectiveTimeProcessed(effectiveTimestamp)
     }
 
-  /** process envelopes mostly asynchronously
-    *
-    * Here, we return a Future[Future[Unit]]. We need to ensure the outer future finishes processing
-    * before we tick the record order publisher.
-    */
-  override def processEnvelopes(
-      sc: SequencerCounter,
-      ts: CantonTimestamp,
-      envelopes: Traced[List[DefaultOpenEnvelope]],
-  ): HandlerResult = ???
+    val domainParamChanges = validated.flatMap(
+      _.collectOf[TopologyChangeOpX.Replace, DomainParametersStateX]
+        .filter(
+          _.rejectionReason.isEmpty
+        )
+        .map(_.transaction.transaction.mapping)
+    )
 
-  override def subscribe(listener: TopologyTransactionProcessingSubscriber): Unit = {
-    // TODO(#11255)
+    NonEmpty.from(domainParamChanges) match {
+      // normally, we shouldn't have any adjustment
+      case None => timeAdjuster.effectiveTimeProcessed(effectiveTimestamp)
+      case Some(changes) =>
+        // if there is one, there should be exactly one
+        // If we have several, let's panic now. however, we just pick the last and try to keep working
+        if (changes.lengthCompare(1) > 0) {
+          logger.error(
+            s"Broken or malicious domain topology manager has sent (${changes.length}) domain parameter adjustments at $effectiveTimestamp, will ignore all of them except the last"
+          )
+        }
+        applyEpsilon(changes.last1)
+    }
   }
+
 }
 
 object TopologyTransactionProcessorX {
@@ -104,7 +182,7 @@ object TopologyTransactionProcessorX {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext
-  ): Future[(TopologyTransactionProcessorX, DomainTopologyClientWithInit)] = {
+  ): Future[(TopologyTransactionProcessorX, DomainTopologyClientWithInitX)] = {
     val processor = new TopologyTransactionProcessorX(
       domainId,
       pureCrypto,

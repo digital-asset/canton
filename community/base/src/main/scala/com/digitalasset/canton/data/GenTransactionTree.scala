@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.MerkleTree.*
@@ -190,15 +191,17 @@ final case class GenTransactionTree private (
         Map.empty[ViewPosition, (Witnesses, SecureRandomness)]
       ) { case (ws, tvt) =>
         val parentPosition = ViewPosition(tvt.viewPosition.position.drop(1))
-        val (parentWitnesses, parentSeed) = ws.getOrElse(
-          parentPosition,
-          if (parentPosition.position.isEmpty) (Witnesses.empty -> initSeed)
-          else
+        val (witnesses, parentSeed) = ws.get(parentPosition) match {
+          case Some((parentWitnesses, parentSeed)) =>
+            parentWitnesses.prepend(tvt.informees) -> parentSeed
+          case None if (parentPosition.position.isEmpty) =>
+            Witnesses(NonEmpty(Seq, tvt.informees)) -> initSeed
+          case None =>
             throw new IllegalStateException(
               s"Can't find the parent witnesses for position ${tvt.viewPosition}"
-            ),
-        )
-        val witnesses = parentWitnesses.prepend(tvt.informees)
+            )
+        }
+
         val viewIndex =
           tvt.viewPosition.position.headOption
             .getOrElse(throw new IllegalStateException("View with no position"))

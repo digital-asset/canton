@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CommunityDbConfig.{H2, Postgres}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -20,7 +21,6 @@ import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.NoTracing
 import com.typesafe.config.{Config, ConfigFactory}
-import io.functionmeta.functionFullName
 import org.postgresql.util.PSQLException
 import org.scalatest.Assertions.fail
 import org.testcontainers.containers.PostgreSQLContainer

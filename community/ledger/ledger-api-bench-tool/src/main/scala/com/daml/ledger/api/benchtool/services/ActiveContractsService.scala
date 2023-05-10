@@ -6,7 +6,7 @@ package com.daml.ledger.api.benchtool.services
 import com.daml.ledger.api.benchtool.AuthorizationHelper
 import com.daml.ledger.api.benchtool.config.WorkflowConfig
 import com.daml.ledger.api.benchtool.util.ObserverWithResult
-import com.daml.ledger.api.v1.active_contracts_service._
+import com.daml.ledger.api.v1.active_contracts_service.*
 import io.grpc.Channel
 import org.slf4j.LoggerFactory
 

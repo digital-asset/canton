@@ -4,10 +4,11 @@
 package com.daml.ledger.api.benchtool.submission
 
 import com.daml.ledger.api.benchtool.config.WorkflowConfig.FibonacciSubmissionConfig
+import com.daml.ledger.api.benchtool.infrastructure.TestDars
 import com.daml.ledger.api.v1.commands.{Command, CreateAndExerciseCommand}
-import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
+import com.daml.ledger.api.v1.value.{Record, RecordField, Value}
 import com.daml.ledger.client.binding.Primitive
-import com.daml.ledger.test.benchtool.Bench.InefficientFibonacci.toNamedArguments
+import com.daml.lf.data.Ref
 
 import scala.util.{Success, Try}
 
@@ -17,25 +18,31 @@ final class FibonacciCommandGenerator(
     names: Names,
 ) extends CommandGenerator {
 
+  private val packageId: Ref.PackageId = TestDars.benchtoolDarPackageId
+
   override def nextApplicationId(): String = names.benchtoolApplicationId
 
   override def nextExtraCommandSubmitters(): List[Primitive.Party] = List.empty
 
   def next(): Try[Seq[Command]] = {
+    val createArguments: Option[Record] = Some(
+      Record(
+        None,
+        Seq(
+          RecordField(
+            label = "owner",
+            value = Some(Value(Value.Sum.Party(signatory.toString))),
+          )
+        ),
+      )
+    )
     Success(
       Seq(
         Command(
           Command.Command.CreateAndExercise(
             CreateAndExerciseCommand(
-              templateId = Some(
-                com.daml.ledger.test.benchtool.Bench.InefficientFibonacci.id
-                  .asInstanceOf[Identifier]
-              ),
-              createArguments = Some(
-                toNamedArguments(
-                  com.daml.ledger.test.benchtool.Bench.InefficientFibonacci(signatory)
-                )
-              ),
+              templateId = Some(FooTemplateDescriptor.inefficientFibonacciTemplateId(packageId)),
+              createArguments = createArguments,
               choice = "InefficientFibonacci_Compute",
               choiceArgument = Some(
                 Value(

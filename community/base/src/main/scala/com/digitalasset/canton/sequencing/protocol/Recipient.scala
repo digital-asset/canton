@@ -5,21 +5,16 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.{
+  InvariantViolation,
   StringConversionError,
   ValueConversionError,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.{String3, String300}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{
-  DomainId,
-  Member,
-  PartyId,
-  SafeSimpleString,
-  UniqueIdentifier,
-}
-
-import scala.util.matching.Regex
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.{Member, PartyId, SafeSimpleString, UniqueIdentifier}
 
 sealed trait Recipient extends Product with Serializable with PrettyPrinting {
   def toProtoPrimitive: String = toLengthLimitedString.unwrap
@@ -28,8 +23,6 @@ sealed trait Recipient extends Product with Serializable with PrettyPrinting {
 }
 
 object Recipient {
-  private val mediatorsOfDomainPattern: Regex = """^(\d+)::(.*)$""".r
-
   def fromProtoPrimitive(
       recipient: String,
       fieldName: String,
@@ -46,7 +39,7 @@ object Recipient {
     else
       for {
         _ <- Either.cond(
-          recipient.length > 3 + (2 * dlen),
+          recipient.length >= 3 + dlen,
           (),
           ValueConversionError(
             fieldName,
@@ -69,28 +62,21 @@ object Recipient {
               .map(PartyId(_))
               .map(ParticipantsOfParty(_))
           case SequencersOfDomain.Code =>
-            UniqueIdentifier
-              .fromProtoPrimitive(rest, fieldName)
-              .map(DomainId(_))
-              .map(SequencersOfDomain(_))
+            Right(SequencersOfDomain)
           case MediatorsOfDomain.Code =>
-            rest match {
-              case mediatorsOfDomainPattern(number, uid) =>
-                for {
-                  group <-
-                    Either
-                      .catchOnly[NumberFormatException](number.toInt)
-                      .leftMap(e =>
-                        StringConversionError(
-                          s"Cannot parse group number $number, error ${e.getMessage}"
-                        )
-                      )
-                  domain <- UniqueIdentifier
-                    .fromProtoPrimitive(uid, fieldName)
-                    .map(DomainId(_))
-                } yield MediatorsOfDomain(domain, group)
-              case _ => Left(StringConversionError(s"Mediators of domain string $rest is invalid"))
-            }
+            for {
+              groupInt <-
+                Either
+                  .catchOnly[NumberFormatException](rest.toInt)
+                  .leftMap(e =>
+                    StringConversionError(
+                      s"Cannot parse group number $rest, error ${e.getMessage}"
+                    )
+                  )
+              group <- NonNegativeInt
+                .create(groupInt)
+                .leftMap(e => InvariantViolation(e.message))
+            } yield MediatorsOfDomain(group)
         }
       } yield groupRecipient
   }
@@ -119,7 +105,7 @@ object GroupRecipientCode {
     fromProtoPrimitive_(code).leftMap(ValueConversionError(field, _))
 }
 
-trait GroupRecipient extends Recipient {
+sealed trait GroupRecipient extends Recipient {
   def code: GroupRecipientCode
   def suffix: String
 
@@ -155,33 +141,28 @@ object ParticipantsOfParty {
   }
 }
 
-final case class SequencersOfDomain(domain: DomainId) extends GroupRecipient {
-  override def pretty: Pretty[SequencersOfDomain] =
-    prettyOfClass(
-      unnamedParam(_.domain)
-    )
+final case object SequencersOfDomain extends GroupRecipient {
+  override def pretty: Pretty[SequencersOfDomain.type] =
+    prettyOfObject[SequencersOfDomain.type]
 
   override def code: GroupRecipientCode = SequencersOfDomain.Code
 
-  override def suffix: String = domain.toProtoPrimitive
-}
+  override def suffix: String = ""
 
-object SequencersOfDomain {
   object Code extends GroupRecipientCode {
     val threeLetterId: String3 = String3.tryCreate("SOD")
   }
 }
 
-final case class MediatorsOfDomain(domain: DomainId, group: Int) extends GroupRecipient {
+final case class MediatorsOfDomain(group: MediatorGroupIndex) extends GroupRecipient {
   override def pretty: Pretty[MediatorsOfDomain] =
     prettyOfClass(
-      param("domain", _.domain),
-      param("group", _.group),
+      param("group", _.group)
     )
 
   override def code: GroupRecipientCode = MediatorsOfDomain.Code
 
-  override def suffix: String = s"$group${SafeSimpleString.delimiter}${domain.toProtoPrimitive}"
+  override def suffix: String = group.toString
 }
 
 object MediatorsOfDomain {

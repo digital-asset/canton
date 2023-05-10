@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.error.DamlContextualizedErrorLogger
 import com.daml.ledger.api.v1.event.{CreatedEvent, ExercisedEvent, InterfaceView}
 import com.daml.ledger.api.v1.value.{
   Identifier as ApiIdentifier,
@@ -16,9 +15,10 @@ import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.VersionedValue
-import com.daml.lf.{engine as LfEngine}
+import com.daml.lf.engine as LfEngine
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{Metrics, Timed}
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.apiserver.services.{ErrorCause, RejectionGenerators}
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
@@ -39,7 +39,7 @@ import com.digitalasset.canton.platform.{
 }
 import com.google.protobuf
 import com.google.rpc.Status
-import com.google.rpc.status.{Status as ProtoStatus}
+import com.google.rpc.status.Status as ProtoStatus
 import io.grpc.Status.Code
 
 import java.io.ByteArrayInputStream

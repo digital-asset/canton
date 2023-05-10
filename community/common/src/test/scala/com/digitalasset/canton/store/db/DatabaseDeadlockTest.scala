@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CommunityDbConfig.Postgres
 import com.digitalasset.canton.config.DbParametersConfig
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
-import io.functionmeta.functionFullName
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.scalatest.{Assertion, BeforeAndAfterAll}
 import slick.jdbc.PositionedParameters

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.time
 
 import cats.data.EitherT
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.{ProcessingTimeout, TimeProofRequestConfig}
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -14,7 +15,6 @@ import com.digitalasset.canton.util.retry.{Backoff, Success}
 import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}

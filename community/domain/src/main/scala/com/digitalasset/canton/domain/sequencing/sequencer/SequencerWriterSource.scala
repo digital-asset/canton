@@ -367,7 +367,6 @@ object SequenceWritesFlow {
             Either.cond(
               timestamp <= maxSequencingTime,
               event,
-              // TODO(Error handling) Revisit whether this should be logged at WARN
               s"The sequencer time [$timestamp] has exceeded the max-sequencing-time of the send request [$maxSequencingTime]: ${event.event.description}",
             )
           }

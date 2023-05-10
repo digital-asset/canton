@@ -44,6 +44,7 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfPartyId,
   LfWorkflowId,
+  TransferCounter,
 }
 import com.google.protobuf.ByteString
 
@@ -122,6 +123,7 @@ object TransferInViewTree
   * @param targetMediator The mediator that coordinates the transfer-in request on the target domain
   * @param stakeholders The stakeholders of the transferred contract
   * @param uuid The uuid of the transfer-in request
+  * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract
   */
 final case class TransferInCommonData private (
     override val salt: Salt,
@@ -129,6 +131,7 @@ final case class TransferInCommonData private (
     targetMediator: MediatorId,
     stakeholders: Set[LfPartyId],
     uuid: UUID,
+    transferCounter: TransferCounter,
 )(
     hashOps: HashOps,
     val targetProtocolVersion: TargetProtocolVersion,
@@ -163,6 +166,16 @@ final case class TransferInCommonData private (
     targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
   )
 
+  protected def toProtoV2: v2.TransferInCommonData = v2.TransferInCommonData(
+    salt = Some(salt.toProtoV0),
+    targetDomain = targetDomain.toProtoPrimitive,
+    targetMediator = targetMediator.toProtoPrimitive,
+    stakeholders = stakeholders.toSeq,
+    uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+    targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
+    transferCounter = transferCounter.toProtoPrimitive,
+  )
+
   override def hashPurpose: HashPurpose = HashPurpose.TransferInCommonData
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -174,6 +187,7 @@ final case class TransferInCommonData private (
     param("stakeholders", _.stakeholders),
     param("uuid", _.uuid),
     param("salt", _.salt),
+    param("transfer counter", _.transferCounter),
   )
 }
 
@@ -190,6 +204,10 @@ object TransferInCommonData
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.TransferInCommonData)(
+      supportedProtoVersionMemoized(_)(fromProtoV2),
+      _.toProtoV2.toByteString,
+    ),
   )
 
   def create(hashOps: HashOps)(
@@ -198,9 +216,10 @@ object TransferInCommonData
       targetMediator: MediatorId,
       stakeholders: Set[LfPartyId],
       uuid: UUID,
+      transferCounter: TransferCounter,
       targetProtocolVersion: TargetProtocolVersion,
   ): TransferInCommonData =
-    TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid)(
+    TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid, transferCounter)(
       hashOps,
       targetProtocolVersion,
       None,
@@ -212,17 +231,20 @@ object TransferInCommonData
     val v0.TransferInCommonData(saltP, targetDomainP, stakeholdersP, uuidP, targetMediatorP) =
       transferInCommonDataP
     for {
-      salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
-      targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "target_domain")
-      targetMediator <- MediatorId.fromProtoPrimitive(targetMediatorP, "target_mediator")
-      stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
-      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
+      commonData <- ParsedDataV0V1V2.fromProto(
+        saltP,
+        targetDomainP,
+        stakeholdersP,
+        uuidP,
+        targetMediatorP,
+      )
     } yield TransferInCommonData(
-      salt,
-      TargetDomainId(targetDomain),
-      targetMediator,
-      stakeholders.toSet,
-      uuid,
+      commonData.salt,
+      commonData.targetDomain,
+      commonData.targetMediator,
+      commonData.stakeholders,
+      commonData.uuid,
+      TransferCounter.Genesis,
     )(
       hashOps,
       TargetProtocolVersion(
@@ -245,23 +267,94 @@ object TransferInCommonData
     ) =
       transferInCommonDataP
     for {
-      salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
-      targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "target_domain")
-      targetMediator <- MediatorId.fromProtoPrimitive(targetMediatorP, "target_mediator")
-      stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
-      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
+      commonData <- ParsedDataV0V1V2.fromProto(
+        saltP,
+        targetDomainP,
+        stakeholdersP,
+        uuidP,
+        targetMediatorP,
+      )
       protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield TransferInCommonData(
-      salt,
-      TargetDomainId(targetDomain),
-      targetMediator,
-      stakeholders.toSet,
-      uuid,
+      commonData.salt,
+      commonData.targetDomain,
+      commonData.targetMediator,
+      commonData.stakeholders,
+      commonData.uuid,
+      TransferCounter.Genesis,
     )(
       hashOps,
-      TargetProtocolVersion(protocolVersion),
+      TargetProtocolVersion(protocolVersion), // TODO(#12626)
       Some(bytes),
     )
+  }
+
+  private[this] def fromProtoV2(hashOps: HashOps, transferInCommonDataP: v2.TransferInCommonData)(
+      bytes: ByteString
+  ): ParsingResult[TransferInCommonData] = {
+    val v2.TransferInCommonData(
+      saltP,
+      targetDomainP,
+      stakeholdersP,
+      uuidP,
+      targetMediatorP,
+      protocolVersionP,
+      transferCounterP,
+    ) =
+      transferInCommonDataP
+    for {
+      commonData <- ParsedDataV0V1V2.fromProto(
+        saltP,
+        targetDomainP,
+        stakeholdersP,
+        uuidP,
+        targetMediatorP,
+      )
+      protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      transferCounter = TransferCounter(transferCounterP)
+    } yield TransferInCommonData(
+      commonData.salt,
+      commonData.targetDomain,
+      commonData.targetMediator,
+      commonData.stakeholders,
+      commonData.uuid,
+      transferCounter,
+    )(
+      hashOps,
+      TargetProtocolVersion(protocolVersion), // TODO(#12626)
+      Some(bytes),
+    )
+  }
+
+  final case class ParsedDataV0V1V2(
+      salt: Salt,
+      targetDomain: TargetDomainId,
+      targetMediator: MediatorId,
+      stakeholders: Set[LfPartyId],
+      uuid: UUID,
+  )
+
+  private[TransferInCommonData] object ParsedDataV0V1V2 {
+    def fromProto(
+        salt: Option[com.digitalasset.canton.crypto.v0.Salt],
+        targetDomain: String,
+        stakeholders: Seq[String],
+        uuid: String,
+        targetMediator: String,
+    ): ParsingResult[ParsedDataV0V1V2] =
+      for {
+        salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", salt)
+        targetDomain <- DomainId.fromProtoPrimitive(targetDomain, "target_domain")
+        targetMediator <- MediatorId.fromProtoPrimitive(targetMediator, "target_mediator")
+        stakeholders <- stakeholders.traverse(ProtoConverter.parseLfPartyId)
+        uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuid)
+      } yield ParsedDataV0V1V2(
+        salt,
+        TargetDomainId(targetDomain),
+        targetMediator,
+        stakeholders.toSet,
+        uuid,
+      )
   }
 }
 

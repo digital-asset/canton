@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.authentication
 
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -13,7 +14,6 @@ import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.util.FutureInstances.*
-import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future

@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.experimental_features.{
   AcsActiveAtOffsetFeature,
   ExperimentalFeatures,
@@ -22,6 +21,7 @@ import com.daml.ledger.api.v1.version_service.{
   VersionServiceGrpc,
 }
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.LedgerFeatures
 import com.digitalasset.canton.platform.localstore.UserManagementConfig

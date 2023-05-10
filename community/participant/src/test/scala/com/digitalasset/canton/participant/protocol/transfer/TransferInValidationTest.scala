@@ -134,6 +134,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       targetDomain,
       TargetProtocolVersion(testedProtocolVersion),
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, targetDomain = targetDomain),
+      TransferCounter.Genesis,
     )
     val uuid = new UUID(3L, 4L)
     val seed = seedGenerator.generateSaltSeed()
@@ -152,8 +153,11 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         fullTransferOutTree,
         CantonTimestamp.Epoch,
         contract,
+        TransferCounter.Genesis,
         transactionId1,
         Some(transferOutResult),
+        None,
+        None,
       )
 
     "succeed without errors when transfer data is valid" in {
@@ -251,6 +255,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       submitterInfo(submitter),
       stakeholders,
       contract,
+      TransferCounter.Genesis,
       creatingTransactionId,
       targetDomain,
       targetMediator,

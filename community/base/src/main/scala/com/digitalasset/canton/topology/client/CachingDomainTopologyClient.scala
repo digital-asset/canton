@@ -16,13 +16,9 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.{
-  TopologyStore,
-  TopologyStoreCommon,
-  TopologyStoreId,
-  TopologyStoreX,
-}
+import com.digitalasset.canton.topology.processing.*
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId, TopologyStoreX}
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
@@ -33,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-class CachingDomainTopologyClient(
+sealed abstract class BaseCachingDomainTopologyClient(
     protected val clock: Clock,
     parent: DomainTopologyClientWithInit,
     cachingConfigs: CachingConfigs,
@@ -64,10 +60,10 @@ class CachingDomainTopologyClient(
   // out which snapshot we can use instead of loading the data again and again.
   // so we use the snapshots list to figure out the update timestamp and then we use the pointwise cache
   // to load that update timestamp.
-  private class SnapshotEntry(val timestamp: CantonTimestamp) {
+  protected class SnapshotEntry(val timestamp: CantonTimestamp) {
     def get(): CachingTopologySnapshot = pointwise.get(timestamp.immediateSuccessor)
   }
-  private val snapshots = new AtomicReference[List[SnapshotEntry]](List.empty)
+  protected val snapshots = new AtomicReference[List[SnapshotEntry]](List.empty)
 
   private val pointwise = cachingConfigs.topologySnapshot
     .buildScaffeine()
@@ -79,7 +75,7 @@ class CachingDomainTopologyClient(
       )
     }
 
-  private def appendSnapshot(timestamp: CantonTimestamp): Unit = {
+  protected def appendSnapshot(timestamp: CantonTimestamp): Unit = {
     val item = new SnapshotEntry(timestamp)
     val _ = snapshots.updateAndGet { cur =>
       if (cur.headOption.exists(_.timestamp > timestamp))
@@ -91,22 +87,6 @@ class CachingDomainTopologyClient(
           ) > timestamp
         ))
     }
-  }
-
-  override def observed(
-      sequencedTimestamp: SequencedTime,
-      effectiveTimestamp: EffectiveTime,
-      sequencerCounter: SequencerCounter,
-      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    if (transactions.nonEmpty) {
-      // if there is a transaction, we insert the effective timestamp as a snapshot
-      appendSnapshot(effectiveTimestamp.value)
-    } else if (snapshots.get().isEmpty) {
-      // if we haven't seen any snapshot yet, we use the sequencer time to seed the first snapshot
-      appendSnapshot(sequencedTimestamp.value)
-    }
-    parent.observed(sequencedTimestamp, effectiveTimestamp, sequencerCounter, transactions)
   }
 
   override def trySnapshot(
@@ -172,6 +152,76 @@ class CachingDomainTopologyClient(
   override def numPendingChanges: Int = parent.numPendingChanges
 }
 
+final class CachingDomainTopologyClientOld(
+    clock: Clock,
+    parent: DomainTopologyClientWithInitOld,
+    cachingConfigs: CachingConfigs,
+    timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
+    loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends BaseCachingDomainTopologyClient(
+      clock,
+      parent,
+      cachingConfigs,
+      timeouts,
+      futureSupervisor,
+      loggerFactory,
+    )
+    with DomainTopologyClientWithInitOld {
+  override def observed(
+      sequencedTimestamp: SequencedTime,
+      effectiveTimestamp: EffectiveTime,
+      sequencerCounter: SequencerCounter,
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    if (transactions.nonEmpty) {
+      // if there is a transaction, we insert the effective timestamp as a snapshot
+      appendSnapshot(effectiveTimestamp.value)
+    } else if (snapshots.get().isEmpty) {
+      // if we haven't seen any snapshot yet, we use the sequencer time to seed the first snapshot
+      appendSnapshot(sequencedTimestamp.value)
+    }
+    parent.observed(sequencedTimestamp, effectiveTimestamp, sequencerCounter, transactions)
+  }
+
+}
+
+final class CachingDomainTopologyClientX(
+    clock: Clock,
+    parent: DomainTopologyClientWithInitX,
+    cachingConfigs: CachingConfigs,
+    timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
+    loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends BaseCachingDomainTopologyClient(
+      clock,
+      parent,
+      cachingConfigs,
+      timeouts,
+      futureSupervisor,
+      loggerFactory,
+    )
+    with DomainTopologyClientWithInitX {
+  override def observed(
+      sequencedTimestamp: SequencedTime,
+      effectiveTimestamp: EffectiveTime,
+      sequencerCounter: SequencerCounter,
+      transactions: Seq[GenericSignedTopologyTransactionX],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    if (transactions.nonEmpty) {
+      // if there is a transaction, we insert the effective timestamp as a snapshot
+      appendSnapshot(effectiveTimestamp.value)
+    } else if (snapshots.get().isEmpty) {
+      // if we haven't seen any snapshot yet, we use the sequencer time to seed the first snapshot
+      appendSnapshot(sequencedTimestamp.value)
+    }
+    parent.observed(sequencedTimestamp, effectiveTimestamp, sequencerCounter, transactions)
+  }
+
+}
+
 object CachingDomainTopologyClient {
 
   def create(
@@ -188,7 +238,7 @@ object CachingDomainTopologyClient {
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): Future[CachingDomainTopologyClient] = {
+  ): Future[CachingDomainTopologyClientOld] = {
 
     val dbClient =
       new StoreBasedDomainTopologyClient(
@@ -202,31 +252,8 @@ object CachingDomainTopologyClient {
         futureSupervisor,
         loggerFactory,
       )
-    createCachingClient(
-      dbClient,
-      clock,
-      store,
-      cachingConfigs,
-      timeouts,
-      futureSupervisor,
-      loggerFactory,
-    )
-  }
-
-  protected def createCachingClient(
-      dbClient: DomainTopologyClientWithInit,
-      clock: Clock,
-      store: TopologyStoreCommon[TopologyStoreId.DomainStore, _, _, _],
-      cachingConfigs: CachingConfigs,
-      timeouts: ProcessingTimeout,
-      futureSupervisor: FutureSupervisor,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): Future[CachingDomainTopologyClient] = {
     val caching =
-      new CachingDomainTopologyClient(
+      new CachingDomainTopologyClientOld(
         clock,
         dbClient,
         cachingConfigs,
@@ -255,7 +282,7 @@ object CachingDomainTopologyClient {
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): Future[CachingDomainTopologyClient] = {
+  ): Future[CachingDomainTopologyClientX] = {
     val dbClient =
       new StoreBasedDomainTopologyClientX(
         clock,
@@ -267,15 +294,22 @@ object CachingDomainTopologyClient {
         futureSupervisor,
         loggerFactory,
       )
-    createCachingClient(
-      dbClient,
-      clock,
-      store,
-      cachingConfigs,
-      timeouts,
-      futureSupervisor,
-      loggerFactory,
-    )
+    val caching =
+      new CachingDomainTopologyClientX(
+        clock,
+        dbClient,
+        cachingConfigs,
+        timeouts,
+        futureSupervisor,
+        loggerFactory,
+      )
+    store.maxTimestamp().map { x =>
+      x.foreach { case (_, effective) =>
+        caching
+          .updateHead(effective, effective.toApproximate, potentialTopologyChange = true)
+      }
+      caching
+    }
   }
 }
 
@@ -335,6 +369,9 @@ private class ForwardingTopologySnapshotClient(
   /** returns the list of currently known mediators */
   override def mediatorGroups(): Future[Seq[MediatorGroup]] = parent.mediatorGroups()
 
+  /** returns the sequencer group if known */
+  override def sequencerGroup(): Future[Option[SequencerGroup]] = parent.sequencerGroup()
+
   override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
   ): Future[Either[String, DynamicDomainParametersWithValidity]] =
@@ -387,6 +424,9 @@ class CachingTopologySnapshot(
     )
 
   private val mediatorsCache = new AtomicReference[Option[Future[Seq[MediatorGroup]]]](None)
+
+  private val sequencerGroupCache =
+    new AtomicReference[Option[Future[Option[SequencerGroup]]]](None)
 
   private val domainParametersCache =
     new AtomicReference[Option[Future[Either[String, DynamicDomainParametersWithValidity]]]](None)
@@ -464,6 +504,10 @@ class CachingTopologySnapshot(
   /** returns the list of currently known mediators */
   override def mediatorGroups(): Future[Seq[MediatorGroup]] =
     getAndCache(mediatorsCache, parent.mediatorGroups())
+
+  /** returns the sequencer group if known */
+  override def sequencerGroup(): Future[Option[SequencerGroup]] =
+    getAndCache(sequencerGroupCache, parent.sequencerGroup())
 
   /** Returns the value if it is present in the cache. Otherwise, use the
     * `getter` to fetch it and cache the result.

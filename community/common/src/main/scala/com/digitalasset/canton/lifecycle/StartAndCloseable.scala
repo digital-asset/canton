@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.lifecycle
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.lifecycle.StartAndCloseable.StartAfterClose
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SingleUseCell
-import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 

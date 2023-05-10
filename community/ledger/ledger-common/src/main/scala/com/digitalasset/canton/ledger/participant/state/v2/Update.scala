@@ -4,6 +4,7 @@
 package com.digitalasset.canton.ledger.participant.state.v2
 
 import com.daml.daml_lf_dev.DamlLf
+import com.daml.error.GrpcStatuses
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Bytes, Ref}
 import com.daml.lf.transaction.{BlindingInfo, CommittedTransaction}
@@ -11,7 +12,6 @@ import com.daml.lf.value.Value
 import com.daml.logging.entries.{LoggingEntry, LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.grpc.GrpcStatuses
 import com.google.rpc.status.{Status as RpcStatus}
 
 import java.time.Duration

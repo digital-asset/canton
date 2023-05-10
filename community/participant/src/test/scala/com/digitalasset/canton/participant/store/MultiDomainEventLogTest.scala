@@ -495,7 +495,7 @@ trait MultiDomainEventLogTest
         }
 
         "no last local offsets are known" in {
-          forEvery(eventLogIds.toSeq) { eventLogId =>
+          forEvery(eventLogIds) { eventLogId =>
             eventLog.lastLocalOffset(eventLogId).futureValue shouldBe None
           }
         }

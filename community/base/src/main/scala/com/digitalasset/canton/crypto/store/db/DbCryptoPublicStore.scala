@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.store.db
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.bifunctor.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.*
@@ -15,7 +16,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -61,7 +61,7 @@ class DbCryptoPublicStore(
   ): DbAction.WriteOnly[Int] =
     storage.profile match {
       case _: DbStorage.Profile.Oracle =>
-        sqlu"""insert 
+        sqlu"""insert
                /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( crypto_public_keys ( key_id ) ) */
                into crypto_public_keys (key_id, purpose, data, name)
            values (${key.id}, ${key.purpose}, $key, $name)"""

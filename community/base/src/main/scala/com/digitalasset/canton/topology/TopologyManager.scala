@@ -33,7 +33,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueueWithShutdown}
+import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -435,7 +435,7 @@ abstract class TopologyManager[E <: CantonError](
     )
   }
 
-  protected val sequentialQueue = new SimpleExecutionQueueWithShutdown(
+  protected val sequentialQueue = new SimpleExecutionQueue(
     "topology-manager-queue",
     futureSupervisor,
     timeouts,

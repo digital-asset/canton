@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
-import com.daml.error.definitions.LedgerApiErrors.MaximumNumberOfStreams
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.metrics.api.MetricHandle.Gauge
 import com.daml.metrics.api.MetricName
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.MaximumNumberOfStreams
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.{
   LimitResultCheck,
   OverLimit,

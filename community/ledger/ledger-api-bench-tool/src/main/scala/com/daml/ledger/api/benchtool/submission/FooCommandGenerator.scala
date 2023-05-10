@@ -3,16 +3,16 @@
 
 package com.daml.ledger.api.benchtool.submission
 
-import java.util.concurrent.atomic.AtomicLong
-
 import com.daml.ledger.api.benchtool.config.WorkflowConfig.FooSubmissionConfig
+import com.daml.ledger.api.benchtool.infrastructure.TestDars
 import com.daml.ledger.api.benchtool.submission.foo.RandomPartySelecting
-import com.daml.ledger.api.v1.commands.{Command, ExerciseByKeyCommand}
+import com.daml.ledger.api.v1.commands.{Command, CreateCommand, ExerciseByKeyCommand}
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
 import com.daml.ledger.client.binding
 import com.daml.ledger.client.binding.Primitive
-import com.daml.ledger.test.benchtool.Foo._
+import com.daml.lf.data.Ref
 
+import java.util.concurrent.atomic.AtomicLong
 import scala.util.control.NonFatal
 import scala.util.{Failure, Try}
 
@@ -26,6 +26,8 @@ final class FooCommandGenerator(
     partySelecting: RandomPartySelecting,
     randomnessProvider: RandomnessProvider,
 ) extends CommandGenerator {
+
+  private val packageId: Ref.PackageId = TestDars.benchtoolDarPackageId
 
   private val activeContractKeysPool = new ActiveContractKeysPool(randomnessProvider)
 
@@ -53,7 +55,8 @@ final class FooCommandGenerator(
       divulgees = partySelection.divulgees.toSet
       createContractPayload <- Try(randomPayload(contractDescription.payloadSizeBytes))
       command = createCommands(
-        templateDescriptor = FooTemplateDescriptor.forName(contractDescription.template),
+        templateDescriptor = FooTemplateDescriptor
+          .forName(templateName = contractDescription.template, packageId = packageId),
         signatory = allocatedParties.signatory,
         observers = partySelection.observers,
         divulgerContractKeyO =
@@ -107,11 +110,13 @@ final class FooCommandGenerator(
           templateName = templateDescriptor.name,
         )
       case None =>
-        templateDescriptor.name match {
-          case "Foo1" => Foo1(signatory, observers, payload, keyId = fooKeyId).create.command
-          case "Foo2" => Foo2(signatory, observers, payload, keyId = fooKeyId).create.command
-          case "Foo3" => Foo3(signatory, observers, payload, keyId = fooKeyId).create.command
-        }
+        makeCreateFooCommand(
+          payload = payload,
+          fooKeyId = fooKeyId,
+          signatory = signatory,
+          observers = observers,
+          templateId = templateDescriptor.templateId,
+        )
     }
     if (config.allowNonTransientContracts) {
       activeContractKeysPool.addContractKey(templateDescriptor.name, fooContractKey)
@@ -170,7 +175,7 @@ final class FooCommandGenerator(
       divulgerContractKey: Value,
   ): Command = {
     makeExerciseByKeyCommand(
-      templateId = FooTemplateDescriptor.Divulger_templateId,
+      templateId = FooTemplateDescriptor.divulgerTemplateId(packageId = packageId),
       choiceName = FooTemplateDescriptor.Divulger_DivulgeConsumingExercise,
       args = Seq(
         RecordField(
@@ -216,6 +221,55 @@ final class FooCommandGenerator(
     nonconsumingExercises
   }
 
+  private def makeCreateFooCommand(
+      payload: String,
+      fooKeyId: String,
+      signatory: Primitive.Party,
+      observers: List[Primitive.Party],
+      templateId: Identifier,
+  ) = {
+    val createArguments: Option[Record] = Some(
+      Record(
+        None,
+        Seq(
+          RecordField(
+            label = "signatory",
+            value = Some(Value(Value.Sum.Party(signatory.toString))),
+          ),
+          RecordField(
+            label = "observers",
+            value = Some(
+              Value(
+                Value.Sum.List(
+                  com.daml.ledger.api.v1.value.List(
+                    observers.map(obs => Value(Value.Sum.Party(obs.toString)))
+                  )
+                )
+              )
+            ),
+          ),
+          RecordField(
+            label = "payload",
+            value = Some(Value(Value.Sum.Text(payload))),
+          ),
+          RecordField(
+            label = "keyId",
+            value = Some(Value(Value.Sum.Text(fooKeyId))),
+          ),
+        ),
+      )
+    )
+    val c: Command = Command(
+      command = Command.Command.Create(
+        CreateCommand(
+          templateId = Some(templateId),
+          createArguments = createArguments,
+        )
+      )
+    )
+    c
+  }
+
   private def makeCreateAndDivulgeFooCommand(
       divulgerContractKey: Value,
       payload: String,
@@ -224,7 +278,7 @@ final class FooCommandGenerator(
       templateName: String,
   ) = {
     makeExerciseByKeyCommand(
-      templateId = FooTemplateDescriptor.Divulger_templateId,
+      templateId = FooTemplateDescriptor.divulgerTemplateId(packageId = packageId),
       choiceName = FooTemplateDescriptor.Divulger_DivulgeContractImmediate,
       args = Seq(
         RecordField(
@@ -313,7 +367,7 @@ object FooCommandGenerator {
     )
   }
 
-    final case class CommandGeneratorError(msg: String, cause: Throwable)
+  final case class CommandGeneratorError(msg: String, cause: Throwable)
       extends RuntimeException(msg, cause)
 
   private[submission] def randomPayload(

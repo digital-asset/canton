@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import cats.syntax.option.*
 import com.daml.metrics.Timed
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
@@ -29,6 +30,7 @@ import com.digitalasset.canton.sequencing.client.transports.*
 import com.digitalasset.canton.sequencing.handlers.{
   CleanSequencerCounterTracker,
   StoreSequencedEvent,
+  ThrottlingApplicationEventHandler,
 }
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequest.usingSignedSubmissionRequest
 import com.digitalasset.canton.sequencing.protocol.*
@@ -45,7 +47,6 @@ import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
 import java.nio.file.Path
@@ -136,8 +137,6 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
       eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
       timeTracker: DomainTimeTracker,
   )(implicit traceContext: TraceContext): Future[Unit]
-
-  def closeSubscription(): Unit
 
   /** Future which is completed when the client is not functional any more and is ready to be closed.
     * The value with which the future is completed will indicate the reason for completion.
@@ -299,7 +298,7 @@ class SequencerClientImpl(
           "Only authenticated members can use the authenticated send operation"
         ): SendAsyncClientError,
       )
-      // TODO(#12360): Consider validating that group addresses map to at least one member
+      // TODO(#12950): Validate that group addresses map to at least one member
       _ <- EitherT.cond[Future](
         timestampOfSigningKey.isEmpty || batch.envelopes.forall(
           _.recipients.allRecipients.forall {
@@ -572,6 +571,8 @@ class SequencerClientImpl(
 
   /** Does the same as [[subscribeAfter]], except that this method is supposed to be used
     * only by unauthenticated members
+    *
+    * The method does not verify the signature of the server.
     */
   def subscribeAfterUnauthenticated(
       priorTimestamp: CantonTimestamp,
@@ -592,12 +593,16 @@ class SequencerClientImpl(
   private def subscribeAfterInternal(
       priorTimestamp: CantonTimestamp,
       cleanPreheadTsO: Option[CantonTimestamp],
-      eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
+      nonThrottledEventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
       timeTracker: DomainTimeTracker,
       timeoutHandler: SendTimeoutHandler,
       fetchCleanTimestamp: PeriodicAcknowledgements.FetchCleanTimestamp,
       requiresAuthentication: Boolean,
   )(implicit traceContext: TraceContext): Future[Unit] = {
+    val eventHandler = ThrottlingApplicationEventHandler.throttle(
+      config.maximumInFlightEventBatches,
+      nonThrottledEventHandler,
+    )
     val subscriptionF = performUnlessClosingUSF(functionFullName) {
       for {
         initialPriorEventO <- FutureUnlessShutdown.outcomeF(
@@ -828,7 +833,7 @@ class SequencerClientImpl(
           )
           (for {
             _ <- EitherT.liftF(
-              FutureUnlessShutdown.outcomeF(processingDelay.delay(serializedEvent))
+              performUnlessClosingF("processing-delay")(processingDelay.delay(serializedEvent))
             )
             _ <- eventValidator
               .validate(serializedEvent)
@@ -1046,6 +1051,7 @@ class SequencerClientImpl(
   private def closeWithSubscriptionReason(
       subscriptionCloseReason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
   ): Unit = {
+
     val maybeCloseReason: Try[Either[SequencerClient.CloseReason, Unit]] =
       subscriptionCloseReason.map[Either[SequencerClient.CloseReason, Unit]] {
         case SubscriptionCloseReason.HandlerException(ex) =>
@@ -1057,21 +1063,29 @@ class SequencerClientImpl(
         case SubscriptionCloseReason.HandlerError(err) =>
           Left(SequencerClient.CloseReason.UnrecoverableError(s"handler returned error: $err"))
         case permissionDenied: SubscriptionCloseReason.PermissionDeniedError =>
+          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
           Left(SequencerClient.CloseReason.PermissionDenied(s"$permissionDenied"))
         case subscriptionError: SubscriptionCloseReason.SubscriptionError =>
+          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
           Left(
             SequencerClient.CloseReason.UnrecoverableError(
               s"subscription implementation failed: $subscriptionError"
             )
           )
-        case SubscriptionCloseReason.Closed => Left(SequencerClient.CloseReason.ClientShutdown)
+        case SubscriptionCloseReason.Closed =>
+          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
+          Left(SequencerClient.CloseReason.ClientShutdown)
+        case SubscriptionCloseReason.Shutdown => Left(SequencerClient.CloseReason.ClientShutdown)
         case SubscriptionCloseReason.TransportChange =>
           Right(()) // we don't want to close the sequencer client when changing transport
       }
 
-    val complete = (closeReasonPromise.tryComplete _).andThen(_.discard)
-    lazy val closeReason = maybeCloseReason.collect { case Left(error) =>
-      error
+    def complete(reason: Try[SequencerClient.CloseReason]): Unit =
+      closeReasonPromise.tryComplete(reason).discard
+
+    lazy val closeReason: Try[SequencerClient.CloseReason] = maybeCloseReason.collect {
+      case Left(error) =>
+        error
     }
     maybeCloseReason match {
       case Failure(_) => complete(closeReason)
@@ -1080,9 +1094,9 @@ class SequencerClientImpl(
     }
     if (closeReasonPromise.isCompleted) {
       logger.debug(
-        "The sequencer subscription has been closed. Closing send tracker to complete pending sends."
+        "The sequencer subscriptions have been closed. Closing sequencer client."
       )(TraceContext.empty)
-      sendTracker.close()
+      close()
     }
   }
 

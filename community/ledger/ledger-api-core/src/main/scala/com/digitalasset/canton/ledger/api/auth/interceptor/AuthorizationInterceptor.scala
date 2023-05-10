@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.ledger.api.auth.interceptor
 
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.UserId
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
@@ -12,6 +10,7 @@ import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User, UserRight}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import io.grpc.*
 

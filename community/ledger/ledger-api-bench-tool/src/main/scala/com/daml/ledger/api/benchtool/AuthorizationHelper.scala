@@ -5,8 +5,12 @@ package com.daml.ledger.api.benchtool
 
 import com.daml.jwt.JwtSigner
 import com.daml.jwt.domain.DecodedJwt
-import com.daml.ledger.api.auth.client.LedgerCallCredentials
-import com.daml.ledger.api.auth.{AuthServiceJWTCodec, StandardJWTPayload, StandardJWTTokenFormat}
+import com.digitalasset.canton.ledger.api.auth.client.LedgerCallCredentials
+import com.digitalasset.canton.ledger.api.auth.{
+  AuthServiceJWTCodec,
+  StandardJWTPayload,
+  StandardJWTTokenFormat,
+}
 import io.grpc.stub.AbstractStub
 
 object AuthorizationHelper {

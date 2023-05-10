@@ -16,11 +16,11 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.*
-import com.daml.error.definitions.PackageServiceError
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.daml.logging.LoggingContext
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.*
@@ -38,6 +38,7 @@ import com.digitalasset.canton.health.HealthReporting.{
 }
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.*
+import com.digitalasset.canton.ledger.error.PackageServiceError
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.lifecycle.{
@@ -74,6 +75,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceFailedDomainConnection,
 }
 import com.digitalasset.canton.participant.topology.*
+import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
@@ -89,7 +91,6 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 
@@ -203,11 +204,15 @@ class CantonSyncService(
   override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] =
     Source.single(ledgerInitialConditionsInternal)
 
-  // The domains this sync service is connected to. Can change due to connect/disconnect operations.
-  // This may contain domains for which recovery is still running.
-  // Invariant: All domain IDs in this map have a corresponding domain alias in the alias manager
+  /** The domains this sync service is connected to. Can change due to connect/disconnect operations.
+    * This may contain domains for which recovery is still running.
+    * Invariant: All domain IDs in this map have a corresponding domain alias in the alias manager
+    * DO NOT PASS THIS MUTABLE MAP TO OTHER CLASSES THAT ONLY REQUIRE READ ACCESS. USE [[connectedDomainsLookup]] INSTEAD
+    */
   private val connectedDomainsMap: TrieMap[DomainId, SyncDomain] =
     TrieMap.empty[DomainId, SyncDomain]
+  private val connectedDomainsLookup: ConnectedDomainsLookup =
+    ConnectedDomainsLookup.create(connectedDomainsMap)
 
   private val partyAllocation = new PartyAllocation(
     participantId,
@@ -216,7 +221,7 @@ class CantonSyncService(
     partyNotifier,
     parameters,
     isActive,
-    connectedDomainsMap,
+    connectedDomainsLookup,
     loggerFactory,
   )
 
@@ -244,9 +249,6 @@ class CantonSyncService(
 
   private def syncDomainForAlias(alias: DomainAlias): Option[SyncDomain] =
     aliasManager.domainIdForAlias(alias).flatMap(connectedDomainsMap.get)
-
-  private val connectedDomainsLookup: ConnectedDomainsLookup =
-    ConnectedDomainsLookup.create(connectedDomainsMap)
 
   private val domainRouter =
     DomainRouter(
@@ -329,7 +331,8 @@ class CantonSyncService(
       loggerFactory,
     )
 
-  val cantonAuthorityResolver: AuthorityResolver = new CantonAuthorityResolver
+  val cantonAuthorityResolver: AuthorityResolver =
+    new CantonAuthorityResolver(connectedDomainsLookup, loggerFactory)
 
   val repairService: RepairService = new RepairService(
     participantId,
@@ -1080,7 +1083,7 @@ class CantonSyncService(
   ): EitherT[Future, MissingConfigForAlias, StoredDomainConnectionConfig] =
     EitherT.fromEither[Future](domainConnectionConfigStore.get(domainAlias))
 
-  private val connectQueue = new SimpleExecutionQueueWithShutdown(
+  private val connectQueue = new SimpleExecutionQueue(
     "sync-service-connect-queue",
     futureSupervisor,
     timeouts,
@@ -1157,6 +1160,15 @@ class CantonSyncService(
         )
         domainLoggerFactory = loggerFactory.append("domain", domainAlias.unwrap)
 
+        domainCrypto = syncCrypto.tryForDomain(domainId, Some(domainAlias))
+        missingKeysAlerter = new MissingKeysAlerter(
+          participantId,
+          domainId,
+          domainHandle.topologyClient,
+          domainCrypto.crypto.cryptoPrivateStore,
+          loggerFactory,
+        )
+
         syncDomain = syncDomainFactory.create(
           domainId,
           domainHandle,
@@ -1168,9 +1180,15 @@ class CantonSyncService(
           persistent,
           ephemeral,
           packageService,
-          syncCrypto.tryForDomain(domainId, Some(domainAlias)),
+          domainCrypto,
           identityPusher,
-          domainHandle.topologyFactory.createTopologyProcessorFactory(partyNotifier),
+          domainHandle.topologyFactory
+            .createTopologyProcessorFactory(
+              partyNotifier,
+              missingKeysAlerter,
+              domainHandle.topologyClient,
+            ),
+          missingKeysAlerter,
           transferCoordination,
           inFlightSubmissionTracker,
           clock,

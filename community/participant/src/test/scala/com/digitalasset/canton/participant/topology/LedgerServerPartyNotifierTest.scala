@@ -50,7 +50,7 @@ final class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
         loggerFactory,
       )
 
-    private val subscriber = notifier.attachToTopologyProcessor()
+    private val subscriber = notifier.attachToTopologyProcessorOld()
 
     private var counter = SequencerCounter(0)
 

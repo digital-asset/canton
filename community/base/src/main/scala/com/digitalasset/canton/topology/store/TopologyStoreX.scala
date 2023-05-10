@@ -73,7 +73,15 @@ object StoredTopologyTransactionX {
 final case class ValidatedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMappingX](
     transaction: SignedTopologyTransactionX[Op, M],
     rejectionReason: Option[TopologyTransactionRejection] = None,
-) {}
+) {
+  def collectOfMapping[TargetM <: TopologyMappingX: ClassTag]
+      : Option[ValidatedTopologyTransactionX[Op, TargetM]] =
+    transaction.selectMapping[TargetM].map(tx => copy[Op, TargetM](transaction = tx))
+
+  def collectOf[TargetO <: TopologyChangeOpX: ClassTag, TargetM <: TopologyMappingX: ClassTag]
+      : Option[ValidatedTopologyTransactionX[TargetO, TargetM]] =
+    transaction.select[TargetO, TargetM].map(tx => copy[TargetO, TargetM](transaction = tx))
+}
 
 object ValidatedTopologyTransactionX {
   type GenericValidatedTopologyTransactionX =

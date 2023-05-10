@@ -9,6 +9,7 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.EitherT
 import com.codahale.metrics.{ConsoleReporter, MetricFilter, MetricRegistry}
 import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.CantonTimestamp
@@ -32,7 +33,6 @@ import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
-import io.functionmeta.functionFullName
 
 import java.io.{ByteArrayOutputStream, PrintStream}
 import java.nio.file.Path

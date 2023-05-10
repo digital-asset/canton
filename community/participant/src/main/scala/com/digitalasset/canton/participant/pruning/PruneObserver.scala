@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.pruning
 
 import cats.Eval
 import cats.syntax.functor.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -15,7 +16,6 @@ import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import io.functionmeta.functionFullName
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference

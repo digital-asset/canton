@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String2066
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -29,7 +30,6 @@ import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, checked}
 import com.github.blemale.scaffeine.AsyncCache
-import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.collection.immutable
@@ -158,7 +158,7 @@ class DbContractStore(
     OptionT(cache.getFuture(id, _ => get()).recover {
       case e: DbContractStore.AbortedDueToShutdownException =>
         logger.info(e.getMessage)
-        None // TODO(Error handling) Consider propagating the shutdown info further instead of converting to None
+        None // TODO(i12894) Consider propagating the shutdown info further instead of converting to None
     })
   }
 
@@ -297,7 +297,7 @@ class DbContractStore(
           pp >> instance
         }
 
-        // TODO(M40): Figure out if we should check that the contract instance remains the same and whether we should update the instance if not.
+        // TODO(i12908): Figure out if we should check that the contract instance remains the same and whether we should update the instance if not.
         // The instance payload is not being updated as uploading this payload on a previously set field is problematic for Oracle when it exceeds 32KB
         // (https://support.oracle.com/knowledge/Middleware/2773919_1.html).
         // For the same reason the instance is not put into the select statement of the oracle query.

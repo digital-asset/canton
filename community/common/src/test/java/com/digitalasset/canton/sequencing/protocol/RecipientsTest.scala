@@ -18,20 +18,20 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
   "Recipients" should {
 
     "filter for a member that doesn't occur" in {
-      recipients.forMember(p7) shouldBe None
+      recipients.forMember(p7, Set.empty) shouldBe None
     }
 
     "filter for a member that appears in one tree" in {
-      recipients.forMember(p6) shouldBe Some(Recipients(NonEmpty(Seq, t6)))
+      recipients.forMember(p6, Set.empty) shouldBe Some(Recipients(NonEmpty(Seq, t6)))
     }
 
     "filter for a member that appears in several trees" in {
-      recipients.forMember(p3) shouldBe Some(Recipients(NonEmpty(Seq, t3, t3, t3)))
+      recipients.forMember(p3, Set.empty) shouldBe Some(Recipients(NonEmpty(Seq, t3, t3, t3)))
     }
 
     "be preserved through serialization / deserialization" in {
       val proto = recipients.toProtoV0
-      val fromProto = Recipients.fromProtoV0(proto, supportGroupAddressing = false)
+      val fromProto = Recipients.fromProtoV0(proto, supportGroupAddressing = true)
       fromProto shouldBe Right(recipients)
     }
 

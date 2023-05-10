@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.OptionT
 import cats.syntax.either.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -19,7 +20,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Stor
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import java.util.concurrent.ConcurrentHashMap

@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{DamlContextualizedErrorLogger, ErrorsAssertions}
+import com.daml.error.ErrorsAssertions
 import com.daml.lf.data.Ref
 import com.daml.platform.apiserver.page_tokens.ListUsersPageTokenPayload
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.testing.ErrorAssertionsWithLogCollectorAssertions
 import org.scalatest.EitherValues
+import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -17,8 +19,11 @@ import java.util.Base64
 class ApiUserManagementServiceSpec
     extends AnyFlatSpec
     with Matchers
+    with Eventually
+    with IntegrationPatience
     with EitherValues
-    with ErrorsAssertions {
+    with ErrorsAssertions
+    with ErrorAssertionsWithLogCollectorAssertions {
 
   private val errorLogger = DamlContextualizedErrorLogger.forTesting(getClass)
 

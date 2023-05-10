@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -30,7 +31,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
-import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 

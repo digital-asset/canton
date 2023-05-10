@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -17,7 +18,6 @@ import com.digitalasset.canton.topology.{MediatorId, Member}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.util.UUID

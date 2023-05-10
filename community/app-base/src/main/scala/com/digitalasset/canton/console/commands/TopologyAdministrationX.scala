@@ -437,7 +437,7 @@ class TopologyAdministrationGroupX(
     // TODO(#11255) document console command
     def active(domainId: DomainId, participantId: ParticipantId): Boolean =
       list(filterStore = domainId.filterString).exists { x =>
-        x.item.domainId == domainId.uid && x.item.participantId == participantId.uid
+        x.item.domainId == domainId && x.item.participantId == participantId
       }
 
   }
@@ -694,8 +694,9 @@ class TopologyAdministrationGroupX(
           TopologyAdminCommandsX.Write.Propose(
             serial,
             // TODO(#11255) maybe don't just take default values for dynamic parameters
-            DomainParametersStateX(domain)(
-              DynamicDomainParameters.defaultValues(ProtocolVersion.dev)
+            DomainParametersStateX(
+              domain,
+              DynamicDomainParameters.defaultValues(ProtocolVersion.dev),
             ),
             signedBy.toList,
           )

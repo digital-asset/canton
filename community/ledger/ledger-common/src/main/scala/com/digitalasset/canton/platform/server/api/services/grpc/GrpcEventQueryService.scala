@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.server.api.services.grpc
 
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.event_query_service.*
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
@@ -14,6 +14,7 @@ import com.digitalasset.canton.ledger.api.validation.{
   EventQueryServiceRequestValidator,
   PartyNameChecker,
 }
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.server.api.ValidationLogger
 import com.digitalasset.canton.platform.server.api.services.domain.EventQueryService

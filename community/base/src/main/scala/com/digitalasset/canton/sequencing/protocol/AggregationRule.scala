@@ -42,7 +42,7 @@ final case class AggregationRule(
     with PrettyPrinting {
   @transient override protected lazy val companionObj: AggregationRule.type = AggregationRule
 
-  private[protocol] def toProtoV0: v0.AggregationRule = v0.AggregationRule(
+  private[canton] def toProtoV0: v0.AggregationRule = v0.AggregationRule(
     eligibleMembers = eligibleSenders.map(_.toProtoPrimitive),
     threshold = threshold.value,
   )
@@ -86,7 +86,7 @@ object AggregationRule
     ),
   )
 
-  private[protocol] def fromProtoV0(proto: v0.AggregationRule): ParsingResult[AggregationRule] = {
+  private[canton] def fromProtoV0(proto: v0.AggregationRule): ParsingResult[AggregationRule] = {
     val v0.AggregationRule(eligibleMembersP, thresholdP) = proto
     for {
       eligibleMembers <- ProtoConverter.parseRequiredNonEmpty(

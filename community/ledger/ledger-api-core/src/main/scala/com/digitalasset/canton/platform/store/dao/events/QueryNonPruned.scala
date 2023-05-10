@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.error.DamlContextualizedErrorLogger
-import com.daml.error.definitions.LedgerApiErrors
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
 

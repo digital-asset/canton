@@ -10,7 +10,7 @@ final case class SizeMetric[T](
     currentSizeBytesBucket: Long = 0,
     sizeRateList: List[Double] = List.empty,
 ) extends Metric[T] {
-  import SizeMetric._
+  import SizeMetric.*
 
   override type V = Value
 

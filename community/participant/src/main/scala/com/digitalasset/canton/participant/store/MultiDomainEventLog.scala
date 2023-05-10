@@ -35,6 +35,8 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEvent,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
+import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
+import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
@@ -42,7 +44,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.{LedgerSubmissionId, LedgerTransactionId}
+import com.digitalasset.canton.{DiscardOps, LedgerSubmissionId, LedgerTransactionId}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
@@ -65,6 +67,8 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   def indexedStringStore: IndexedStringStore
 
   protected implicit def executionContext: ExecutionContext
+
+  protected def dispatcher: Dispatcher[GlobalOffset]
 
   /** Appends a new event to the event log.
     *
@@ -126,6 +130,19 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   )(implicit
       traceContext: TraceContext
   ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed]
+
+  // TODO(#11002) This serves the PoC implementation of multi-domain Ledger API. In case PoC concluded this might be eligible for removal.
+  /** Yields an akka source with ledger end. */
+  def subscribeForLedgerEnds(startExclusive: GlobalOffset): Source[GlobalOffset, NotUsed] =
+    dispatcher
+      .startingAt(
+        startExclusive = startExclusive,
+        subSource = RangeSource { (_fromExcl, toIncl) =>
+          Source.single((toIncl, ()))
+        },
+        endInclusive = None,
+      )
+      .map { case (globalOffset, _) => globalOffset }
 
   /** Yields all events with offset up to `upToInclusive`. */
   def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit
@@ -248,7 +265,7 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): OptionT[Future, GlobalOffset]
 
-  protected val onPublish: AtomicReference[OnPublish] =
+  private val onPublish: AtomicReference[OnPublish] =
     new AtomicReference[OnPublish](OnPublish.DoNothing)
 
   /** Sets the listener to be called whenever events are published to the multi-domain event log. */
@@ -258,13 +275,13 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
       published: Seq[OnPublish.Publication]
   )(implicit traceContext: TraceContext): Unit =
     if (published.nonEmpty) {
-      val _ = Try(onPublish.get().notify(published)).recover { case ex =>
+      Try(onPublish.get().notify(published)).recover { case ex =>
         // If the observer throws, then we just log and carry on.
         logger.error(
           show"Notifying the MultiDomainEventLog listener failed for offsets ${published.map(_.globalOffset)}",
           ex,
         )
-      }
+      }.discard
     }
 
   /** Returns a lower bound on the latest publication time of a published event.
@@ -286,7 +303,7 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
 
 object MultiDomainEventLog {
 
-  val ledgerFirstOffset = 1L
+  val ledgerFirstOffset: GlobalOffset = 1L
 
   def create(
       syncDomainPersistentStates: SyncDomainPersistentStateLookup,

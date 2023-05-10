@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId, SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.{LfPartyId, TransferCounter}
 
 import java.util.UUID
 
@@ -32,6 +32,7 @@ final case class TransferOutRequest(
     targetDomain: TargetDomainId,
     targetProtocolVersion: TargetProtocolVersion,
     targetTimeProof: TimeProof,
+    transferCounter: TransferCounter,
 ) {
 
   def toFullTransferOutTree(
@@ -50,6 +51,7 @@ final case class TransferOutRequest(
         stakeholders,
         adminParties,
         uuid,
+        transferCounter,
         sourceProtocolVersion,
       )
     val view = TransferOutView.create(hashOps)(

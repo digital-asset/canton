@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.platform.apiserver.error
 
-import com.daml.error.definitions.LedgerApiErrors
-import com.daml.error.{BaseError, DamlContextualizedErrorLogger, NoLogging}
+import com.daml.error.{BaseError, NoLogging}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall
 import io.grpc.{
   ForwardingServerCallListener,

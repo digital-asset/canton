@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.{
   ContractStateCaches,
@@ -30,6 +31,7 @@ private[platform] class InMemoryState(
     val stringInterningView: StringInterningView,
     val dispatcherState: DispatcherState,
     val packageMetadataView: PackageMetadataView,
+    val submissionTracker: SubmissionTracker,
 )(implicit executionContext: ExecutionContext) {
   private val logger = ContextualizedLogger.get(getClass)
 
@@ -60,6 +62,7 @@ private[platform] class InMemoryState(
         contractStateCaches.reset(ledgerEnd.lastOffset)
         inMemoryFanoutBuffer.flush()
         ledgerEndCache.set(ledgerEnd.lastOffset -> ledgerEnd.lastEventSeqId)
+        submissionTracker.close()
       }
       // Start a new Ledger API offset dispatcher
       _ = dispatcherState.startDispatcher(ledgerEnd.lastOffset)
@@ -74,6 +77,7 @@ object InMemoryState {
       maxContractStateCacheSize: Long,
       maxContractKeyStateCacheSize: Long,
       maxTransactionsInMemoryFanOutBufferSize: Int,
+      maxCommandsInFlight: Int,
       metrics: Metrics,
       executionContext: ExecutionContext,
   )(implicit loggingContext: LoggingContext): ResourceOwner[InMemoryState] = {
@@ -81,6 +85,7 @@ object InMemoryState {
 
     for {
       dispatcherState <- DispatcherState.owner(apiStreamShutdownTimeout)
+      submissionTracker <- SubmissionTracker.owner(maxCommandsInFlight, metrics)
     } yield new InMemoryState(
       ledgerEndCache = MutableLedgerEndCache()
         .tap(
@@ -100,6 +105,7 @@ object InMemoryState {
       ),
       stringInterningView = new StringInterningView,
       packageMetadataView = PackageMetadataView.create,
+      submissionTracker = submissionTracker,
     )(executionContext)
   }
 }

@@ -14,6 +14,7 @@ import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.store.{
@@ -82,6 +83,7 @@ class GrpcDomainRegistry(
       sequencer: SequencerClient,
       override val topologyClient: DomainTopologyClientWithInit,
       override val topologyFactory: TopologyComponentFactory,
+      override val topologyRequestAddress: Option[TopologyRequestAddressX],
       override val domainPersistentState: SyncDomainPersistentState,
       override protected val timeouts: ProcessingTimeout,
   ) extends DomainHandle
@@ -158,6 +160,7 @@ class GrpcDomainRegistry(
       domainHandle.sequencer,
       domainHandle.topologyClient,
       domainHandle.topologyFactory,
+      domainHandle.topologyRequestAddress,
       domainHandle.domainPersistentState,
       domainHandle.timeouts,
     )

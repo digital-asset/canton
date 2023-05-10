@@ -231,6 +231,15 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- Some tests in CompletionStreamAuthIT log
+             PERMISSION_DENIED(7,0): Claims were valid until 2023-04-27T11:47:43Z, current time is 2023-04-27T11:47:44.532146Z
+        -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.canton.ledger.api.auth.OngoingAuthorizationObserver</logger>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
         <!-- Disable warnings about use of divulged contracts.
              We can remove this rule once we have migrated to disclosence.
         -->

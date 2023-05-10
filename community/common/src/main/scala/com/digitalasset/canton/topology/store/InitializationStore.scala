@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -11,7 +12,6 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
 
 import java.util.concurrent.atomic.AtomicReference

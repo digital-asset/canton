@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.platform.server.api.validation
 
-import com.daml.error.definitions.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
 import com.daml.error.{ContextualizedErrorLogger, NoLogging}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.ledger.api.validation.ValidatorTestUtils
+import com.digitalasset.canton.ledger.error.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
 import io.grpc.Status.Code.FAILED_PRECONDITION
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks

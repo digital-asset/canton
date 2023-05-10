@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future

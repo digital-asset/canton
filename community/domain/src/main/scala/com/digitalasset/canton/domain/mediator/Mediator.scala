@@ -73,7 +73,6 @@ private[mediator] class Mediator(
     protocolVersion: ProtocolVersion,
     clock: Clock,
     metrics: MediatorMetrics,
-    readyCheck: MediatorReadyCheck,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
@@ -131,7 +130,6 @@ private[mediator] class Mediator(
     processor,
     deduplicator,
     protocolVersion,
-    readyCheck,
     loggerFactory,
   )
 

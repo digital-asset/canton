@@ -66,14 +66,15 @@ import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success}
 
@@ -109,6 +110,11 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
   private lazy val deliver45: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
     45,
     CantonTimestamp.ofEpochSecond(3),
+    DefaultTestIdentities.domainId,
+  )
+  def deliver(i: Long): Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+    i,
+    CantonTimestamp.Epoch.plusSeconds(i),
     DefaultTestIdentities.domainId,
   )
 
@@ -466,6 +472,42 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
       } yield error
 
       errorF.futureValue shouldBe syncExc
+    }
+
+    "throttle message batches" in {
+      val counter = new AtomicInteger(0)
+      val maxSeenCounter = new AtomicInteger(0)
+      for {
+        env <- Env.create(
+          options = SequencerClientConfig(
+            eventInboxSize = PositiveInt.tryCreate(1),
+            maximumInFlightEventBatches = PositiveInt.tryCreate(5),
+          ),
+          useParallelExecutionContext = true,
+        )
+        _ <- env.subscribeAfter(
+          CantonTimestamp.Epoch,
+          ApplicationHandler.create("test-handler-throttling") { e =>
+            HandlerResult.asynchronous(
+              FutureUnlessShutdown.outcomeF(Future {
+                blocking {
+                  maxSeenCounter.synchronized {
+                    maxSeenCounter.set(Math.max(counter.incrementAndGet(), maxSeenCounter.get()))
+                  }
+                }
+                Threading.sleep(100)
+                counter.decrementAndGet().discard
+              }(SequencerClientTest.this.executorService))
+            )
+          },
+        )
+
+        _ <- MonadUtil.sequentialTraverse_(1 to 100) { i =>
+          env.transport.subscriber.value.sendToHandler(deliver(i.toLong))
+        }
+      } yield {
+        maxSeenCounter.get() shouldBe 5
+      }
     }
   }
 

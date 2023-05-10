@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.config.store
 
 import cats.data.EitherT
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.String1
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -11,7 +12,6 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
 import scala.annotation.unused
@@ -103,7 +103,7 @@ class DbDomainNodeSettingsStore(
             case _: DbStorage.Profile.Postgres =>
               sqlu"""insert into domain_node_settings (static_domain_parameters)
               values (${params})
-              on conflict (lock) do update set 
+              on conflict (lock) do update set
                   static_domain_parameters = excluded.static_domain_parameters"""
             case _: DbStorage.Profile.Oracle =>
               sqlu"""merge into domain_node_settings dsc
@@ -114,7 +114,7 @@ class DbDomainNodeSettingsStore(
                           ) excluded
                       on (dsc."LOCK" = 'X')
                        when matched then
-                        update set 
+                        update set
                             dsc.static_domain_parameters = excluded.static_domain_parameters
                        when not matched then
                         insert (static_domain_parameters)

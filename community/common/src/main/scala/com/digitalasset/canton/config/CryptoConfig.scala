@@ -91,6 +91,7 @@ object CryptoProvider {
           Set,
           EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
           EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc,
+          EncryptionKeyScheme.Rsa2048OaepSha256,
         ),
       )
 

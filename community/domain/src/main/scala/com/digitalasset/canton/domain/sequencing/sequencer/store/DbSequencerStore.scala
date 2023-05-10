@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.catsinstances.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
@@ -36,7 +37,6 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import com.zaxxer.hikari.pool.HikariProxyConnection
-import io.functionmeta.functionFullName
 import oracle.jdbc.{OracleArray, OracleConnection}
 import org.h2.api.ErrorCode as H2ErrorCode
 import org.postgresql.util.PSQLState

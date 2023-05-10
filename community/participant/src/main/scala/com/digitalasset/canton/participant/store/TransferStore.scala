@@ -5,14 +5,15 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.protocol.transfer.TransferData
+import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SourceDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{Checked, CheckedT, OptionUtil}
+import com.digitalasset.canton.util.{Checked, CheckedT, EitherUtil, OptionUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
 
 import scala.concurrent.Future
@@ -46,6 +47,36 @@ trait TransferStore extends TransferLookup {
     *         transfer request has been added before, including as part of [[addTransfer]].
     */
   def addTransferOutResult(transferOutResult: DeliveredTransferOutResult)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferStoreError, Unit]
+
+  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the transfer-out to the transfer data in
+    * the store, provided that the transfer data has previously been stored.
+    *
+    * The same [[com.digitalasset.canton.participant.GlobalOffset]] can be added any number of times.
+    *
+    * @param transferId The id of the transfer
+    * @param offset The global offset of the transfer-out result to add
+    * @return [[TransferStore$.UnknownTransferId]] if the transfer has not previously been added with [[addTransfer]].
+    *         [[TransferStore$.TransferOutGlobalOffsetAlreadyExists]] if a different transfer-out global offset for the same
+    *         transfer request has been added before.
+    */
+  def addTransferOutGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TransferStoreError, Unit]
+
+  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the transfer-in to the transfer data in
+    * the store, provided that the transfer data has previously been stored.
+    *
+    * The same [[com.digitalasset.canton.participant.GlobalOffset]] can be added any number of times.
+    *
+    * @param transferId The id of the transfer
+    * @param offset     The global offset of the transfer-in result to add
+    * @return [[TransferStore$.UnknownTransferId]] if the transfer has not previously been added with [[addTransfer]].
+    *         [[TransferStore$.TransferInGlobalOffsetAlreadyExists]] if a different transfer-in global offset for the same
+    *         transfer request has been added before.
+    */
+  def addTransferInGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferStoreError, Unit]
 
@@ -102,6 +133,21 @@ object TransferStore {
       `new`: DeliveredTransferOutResult,
   ) extends TransferStoreError
 
+  final case class TransferOutGlobalOffsetAlreadyExists(
+      transferId: TransferId,
+      old: GlobalOffset,
+      `new`: GlobalOffset,
+  ) extends TransferStoreError
+
+  final case class TransferInGlobalOffsetAlreadyExists(
+      transferId: TransferId,
+      old: GlobalOffset,
+      `new`: GlobalOffset,
+  ) extends TransferStoreError
+
+  final case class TransferOutInSameGlobalOffset(transferId: TransferId, offset: GlobalOffset)
+      extends TransferStoreError
+
   final case class TransferAlreadyCompleted(transferId: TransferId, newCompletion: TimeOfChange)
       extends TransferStoreError
 
@@ -145,18 +191,54 @@ object TransferStore {
         else TransferEntry(mergedData, mergedToc)
     }
 
-    def addTransferOutResult(
+    private[store] def addTransferOutResult(
         transferOutResult: DeliveredTransferOutResult
     ): Either[TransferOutResultAlreadyExists, TransferEntry] =
       transferData
         .addTransferOutResult(transferOutResult)
         .toRight {
           val old = transferData.transferOutResult.getOrElse(
-            throw new IllegalStateException("Transfer out result should not be empty")
+            throw new IllegalStateException("Transfer-out result should not be empty")
           )
           TransferOutResultAlreadyExists(transferData.transferId, old, transferOutResult)
         }
         .map(TransferEntry(_, timeOfCompletion))
+
+    private[store] def addTransferOutGlobalOffset(
+        offset: GlobalOffset
+    ): Either[TransferStoreError, TransferEntry] =
+      for {
+        _ <- EitherUtil.condUnitE(
+          !transferData.transferInGlobalOffset.contains(offset),
+          TransferOutInSameGlobalOffset(transferData.transferId, offset),
+        )
+        newTransferData <- transferData
+          .addTransferOutGlobalOffset(offset)
+          .toRight {
+            val old = transferData.transferOutGlobalOffset.getOrElse(
+              throw new IllegalStateException("Transfer-out global offset should not be empty")
+            )
+            TransferOutGlobalOffsetAlreadyExists(transferData.transferId, old, offset)
+          }
+      } yield TransferEntry(newTransferData, timeOfCompletion)
+
+    private[store] def addTransferInGlobalOffset(
+        offset: GlobalOffset
+    ): Either[TransferStoreError, TransferEntry] =
+      for {
+        _ <- EitherUtil.condUnitE(
+          !transferData.transferOutGlobalOffset.contains(offset),
+          TransferOutInSameGlobalOffset(transferData.transferId, offset),
+        )
+        newTransferData <- transferData
+          .addTransferInGlobalOffset(offset)
+          .toRight {
+            val old = transferData.transferInGlobalOffset.getOrElse(
+              throw new IllegalStateException("Transfer-in global offset should not be empty")
+            )
+            TransferInGlobalOffsetAlreadyExists(transferData.transferId, old, offset)
+          }
+      } yield TransferEntry(newTransferData, timeOfCompletion)
 
     def complete(
         timeOfChange: TimeOfChange
@@ -222,8 +304,34 @@ trait TransferLookup {
       onlyCompletedTransferOut: Boolean,
       transferOutRequestNotAfter: LocalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
-      limit: Int,
-  )(implicit
-      traceContext: TraceContext
-  ): Future[Seq[TransferData]]
+      limit: NonNegativeInt,
+  )(implicit traceContext: TraceContext): Future[Seq[TransferData]]
+
+  /** Find utility to look for incomplete transfers.
+    * Transfers are ordered by global offset.
+    *
+    * A transfer `t` is considered as incomplete at offset `validAt` if only one of the two transfer events
+    * was emitted on the multi-domain event log at `validAt`. That is, one of the following hold:
+    *   1. Only transfer-out was emitted
+    *       - `t.transferOutGlobalOffset` is smaller or equal to `validAt`
+    *       - `t.transferInGlobalOffset` is null or greater than `validAt`
+    *   2. Only transfer-in was emitted
+    *       - `t.transferInGlobalOffset` is smaller or equal to `validAt`
+    *       - `t.transferOutGlobalOffset` is null or greater than `validAt`
+    *
+    * In particular, for a transfer to be considered incomplete at `validAt`, then exactly one of the two offsets
+    * (transferOutGlobalOffset, transferInGlobalOffset) is not null and smaller or equal to `validAt`.
+    *
+    * @param sourceDomain source domain of the transfer
+    * @param validAt select only transfers that are successfully transferred-out
+    * @param stakeholders if non-empty, select only transfers of contracts whose set of stakeholders
+    *                     intersects `stakeholders`.
+    * @param limit limit the number of results
+    */
+  def findIncomplete(
+      sourceDomain: SourceDomainId,
+      validAt: GlobalOffset,
+      stakeholders: Option[NonEmpty[Set[LfPartyId]]],
+      limit: NonNegativeInt,
+  )(implicit traceContext: TraceContext): Future[Seq[IncompleteTransferData]]
 }

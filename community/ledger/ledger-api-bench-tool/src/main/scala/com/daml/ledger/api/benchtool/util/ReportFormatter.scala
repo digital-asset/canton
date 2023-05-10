@@ -4,7 +4,7 @@
 package com.daml.ledger.api.benchtool.util
 
 import com.daml.ledger.api.benchtool.metrics.MetricsCollector.Response.{FinalReport, PeriodicReport}
-import com.daml.ledger.api.benchtool.metrics._
+import com.daml.ledger.api.benchtool.metrics.*
 import com.daml.ledger.api.benchtool.metrics.metrics.TotalRuntimeMetric
 
 object ReportFormatter {
@@ -62,6 +62,7 @@ object ReportFormatter {
     case _: TotalCountMetric.Value => "Total item count [item]"
     case _: LatencyMetric.Value => "Average latency (millis)"
     case _: TotalRuntimeMetric.Value => "Total runtime [ms]"
+    case other => sys.error(s"Unsupported value: $other")
   }
 
   private def shortMetricReport(value: MetricValue): String =
@@ -75,6 +76,7 @@ object ReportFormatter {
     case _: TotalCountMetric.Value => "count [item]"
     case _: LatencyMetric.Value => "Average latency (millis)"
     case _: TotalRuntimeMetric.Value => "Total runtime [ms]"
+    case other => sys.error(s"Unsupported value: $other")
   }
 
   private def formattedValue(value: MetricValue): String = value match {
@@ -92,6 +94,7 @@ object ReportFormatter {
       s"${v.latencyNanos / 1000000.0d}"
     case v: TotalRuntimeMetric.Value =>
       v.v.toMillis.toString
+    case other => sys.error(s"Unsupported value: $other")
   }
 
   private def objectiveName(objective: ServiceLevelObjective[_]): String =
@@ -108,6 +111,7 @@ object ReportFormatter {
         "Maximum latency (millis)"
       case _: TotalRuntimeMetric.MaxDurationObjective =>
         "Total runtime [ms]"
+      case other => sys.error(s"Unsupported value: $other")
     }
 
   private def formattedObjectiveValue(objective: ServiceLevelObjective[_]): String =
@@ -124,6 +128,7 @@ object ReportFormatter {
         obj.millis.toString
       case obj: TotalRuntimeMetric.MaxDurationObjective =>
         obj.maxValue.toMillis.toString
+      case other => sys.error(s"Unsupported value: $other")
     }
 
   private def rounded(value: Double): String = "%.2f".format(value)

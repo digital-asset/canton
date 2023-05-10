@@ -44,8 +44,6 @@ final case class CommitSet(
   // In a request by a malicious submitter,
   // creations may overlap with transferIns because transfer-in requests can be batched with a confirmation request.
   // A transfer-out request cannot be batched with a confirmation request, though.
-  // TODO(M40): Once transfer-ins can be batched with a confirmation request,
-  //  check that we emit a sensible warning about malicious behaviour.
   requireDisjoint(transferOuts.keySet -> "Transfer-outs", archivals.keySet -> "archivals")
   requireDisjoint(transferIns.keySet -> "Transfer-ins", creations.keySet -> "creations")
 

@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.daml.api.util.TimestampConversion.*
-import com.daml.error.{ContextualizedErrorLogger, DamlContextualizedErrorLogger}
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc.TimeService
 import com.daml.ledger.api.v1.testing.time_service.*
@@ -14,6 +14,7 @@ import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.timer.Timeout.*
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, optionalLedgerId}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SignalDispatcher
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.TimeServiceBackend

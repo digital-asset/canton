@@ -7,6 +7,7 @@ import akka.actor.ActorSystem
 import cats.data.{EitherT, OptionT}
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -36,7 +37,6 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
-import io.functionmeta.functionFullName
 import io.grpc.ServerServiceDefinition
 import org.slf4j.event.Level
 
@@ -240,31 +240,39 @@ abstract class CantonNodeBootstrapBase[
         .toRight("Active replica failed to initialize unique identifier")
     }
 
-    for {
-      // if we're a passive replica but the node is set to auto-initialize, wait here until the node has established an id
-      id <-
-        if (!storage.isActive && initConfig.autoInit) waitForActiveId().map(Some(_))
-        else
-          EitherT.right[String](
-            initializationStore.id
-          ) // otherwise just fetch what's that immediately
-      _ <- id.fold(
-        if (initConfig.autoInit) {
-          logger.info("Node is not initialized yet. Performing automated default initialization.")
-          autoInitializeIdentity(initConfig).onShutdown(
-            Left("Node was shutdown during initialization")
-          )
-        } else {
-          logger.info(
-            "Node is not initialized yet. You have opted for manual configuration by yourself."
-          )
-          runOnSkippedInitialization
-        }
-      )(startWithStoredNodeId)
-    } yield {
-      // if we're still not initialized and support a replica doing on our behalf, start a watcher to handle that happening
-      if (getId.isEmpty && supportsReplicaInitialization) waitForReplicaInitialization()
-    }
+    initQueue
+      .executeE(
+        for {
+          // if we're a passive replica but the node is set to auto-initialize, wait here until the node has established an id
+          id <-
+            if (!storage.isActive && initConfig.autoInit) waitForActiveId().map(Some(_))
+            else
+              EitherT.right[String](
+                initializationStore.id
+              ) // otherwise just fetch what's that immediately
+          _ <- id.fold(
+            if (initConfig.autoInit) {
+              logger.info(
+                "Node is not initialized yet. Performing automated default initialization."
+              )
+              autoInitializeIdentity(initConfig).onShutdown(
+                Left("Node was shutdown during initialization")
+              )
+            } else {
+              logger.info(
+                "Node is not initialized yet. You have opted for manual configuration by yourself."
+              )
+              runOnSkippedInitialization
+            }
+          )(startWithStoredNodeId)
+        } yield (),
+        functionFullName,
+      )
+      .map { _ =>
+        // if we're still not initialized and support a replica doing on our behalf, start a watcher to handle that happening
+        if (getId.isEmpty && supportsReplicaInitialization) waitForReplicaInitialization()
+      }
+      .onShutdown(Left("Aborted due to shutdown"))
   }
 
   /** Poll the datastore to see if the id has been initialized in case a replica initializes the node */
@@ -273,14 +281,21 @@ abstract class CantonNodeBootstrapBase[
       withNewTraceContext { implicit traceContext =>
         if (isRunning && initializationWatcherRef.get().isEmpty) {
           val initializationWatcher = new InitializationWatcher(initializationStore, loggerFactory)
-          initializationWatcher.watch(startWithStoredNodeId)
+          initializationWatcher.watch(nodeId =>
+            initQueue
+              .executeE(
+                startWithStoredNodeId(nodeId),
+                "waitForReplicaInitializationStartWithStoredNodeId",
+              )
+              .onShutdown(Left("Aborted due to shutdown"))
+          )
           initializationWatcherRef.set(initializationWatcher.some)
         }
       }
     }
   }
 
-  protected def startWithStoredNodeId(id: NodeId): EitherT[Future, String, Unit] = {
+  protected def startWithStoredNodeId(id: NodeId): EitherT[Future, String, Unit] =
     if (nodeId.compareAndSet(None, Some(id))) {
       logger.info(s"Resuming as existing instance with uid=${id}")
       initialize(id).leftMap { err =>
@@ -291,7 +306,6 @@ abstract class CantonNodeBootstrapBase[
     } else {
       EitherT.leftT[Future, Unit]("Node identity has already been initialized")
     }
-  }
 
   def getId: Option[NodeId] = nodeId.get()
 
@@ -331,12 +345,17 @@ abstract class CantonNodeBootstrapBase[
   protected def sequencedTopologyStores: Seq[TopologyStore[TopologyStoreId]]
 
   /** Initialize the node with an externally provided identity. */
-  def initializeWithProvidedId(nodeId: NodeId): EitherT[Future, String, Unit] = {
-    for {
-      _ <- storeId(nodeId)
-      _ <- initialize(nodeId)
-    } yield ()
-  }
+  def initializeWithProvidedId(nodeId: NodeId): EitherT[Future, String, Unit] = initQueue
+    .executeE(
+      {
+        for {
+          _ <- storeId(nodeId)
+          _ <- initialize(nodeId)
+        } yield ()
+      },
+      functionFullName,
+    )
+    .onShutdown(Left("Aborted due to shutdown"))
 
   protected def startTopologyManagementWriteService[E <: CantonError](
       topologyManager: TopologyManager[E],
@@ -418,6 +437,7 @@ abstract class CantonNodeBootstrapBase[
         authorizedTopologyStore,
       )
       val instances = List(
+        initQueue,
         Lifecycle.toCloseableOption(initializationWatcherRef.get()),
         adminServerRegistry,
         adminServer,

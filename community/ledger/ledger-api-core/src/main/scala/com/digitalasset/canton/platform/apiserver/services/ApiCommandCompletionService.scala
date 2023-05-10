@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services
 import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.DamlContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.command_completion_service.*
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
@@ -20,6 +19,7 @@ import com.digitalasset.canton.ledger.api.validation.{
   CompletionServiceRequestValidator,
   PartyNameChecker,
 }
+import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexCompletionsService
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandCompletionService.*
@@ -98,7 +98,7 @@ private[apiserver] object ApiCommandCompletionService {
       esf: ExecutionSequencerFactory,
       executionContext: ExecutionContext,
       loggingContext: LoggingContext,
-  ): (CommandCompletionService, GrpcCommandCompletionService with GrpcApiService) = {
+  ): GrpcCommandCompletionService with GrpcApiService = {
     val validator = new CompletionServiceRequestValidator(
       ledgerId,
       PartyNameChecker.AllowAllParties,
@@ -106,7 +106,7 @@ private[apiserver] object ApiCommandCompletionService {
     val impl: CommandCompletionService =
       new ApiCommandCompletionService(completionsService, validator, metrics)
 
-    impl -> new GrpcCommandCompletionService(
+    new GrpcCommandCompletionService(
       impl,
       validator,
       telemetry,

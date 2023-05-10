@@ -22,7 +22,7 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManagerOps,
 }
 import com.digitalasset.canton.topology.TopologyManagerError.MappingAlreadyExists
-import com.digitalasset.canton.topology.{DomainId, Identifier, ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{Identifier, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, LfTimestamp}
@@ -30,7 +30,6 @@ import io.opentelemetry.api.trace.Tracer
 
 import java.util.UUID
 import java.util.concurrent.CompletionStage
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.FutureConverters.*
 import scala.util.chaining.*
@@ -43,7 +42,7 @@ private[sync] class PartyAllocation(
     partyNotifier: LedgerServerPartyNotifier,
     parameters: ParticipantNodeParameters,
     isActive: () => Boolean,
-    connectedDomainsMap: TrieMap[DomainId, SyncDomain],
+    connectedDomainsLookup: ConnectedDomainsLookup,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, val tracer: Tracer)
     extends Spanning
@@ -99,7 +98,7 @@ private[sync] class PartyAllocation(
         // Otherwise the gRPC call will just timeout without a meaning error message
         _ <- EitherT.cond[Future](
           parameters.partyChangeNotification == PartyNotificationConfig.Eager ||
-            connectedDomainsMap.nonEmpty,
+            connectedDomainsLookup.snapshot.nonEmpty,
           (),
           SubmissionResult.SynchronousError(
             SyncServiceError.PartyAllocationNoDomainError.Error(rawSubmissionId).rpcStatus()

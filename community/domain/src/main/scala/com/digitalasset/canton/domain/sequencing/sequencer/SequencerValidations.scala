@@ -22,7 +22,6 @@ object SequencerValidations {
         s"Sender is unknown: ${submission.sender}"
       ): SendAsyncError,
     )
-    // TODO(#12360): include all kinds of recipients
     unregisteredRecipients = submission.batch.allMembers.toList.filterNot(isRegistered)
     _ <- Either.cond(
       unregisteredRecipients.isEmpty,

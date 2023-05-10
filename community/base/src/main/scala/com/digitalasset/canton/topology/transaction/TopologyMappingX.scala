@@ -341,9 +341,10 @@ object NamespaceDelegationX {
   *   exception: a sequencer can leave the consortium unilaterally as long as there are enough members
   *              to reach the threshold
   */
-final case class UnionspaceDefinitionX private (unionspace: Namespace)(
-    val threshold: PositiveInt,
-    val owners: NonEmpty[Set[Namespace]],
+final case class UnionspaceDefinitionX private (
+    unionspace: Namespace,
+    threshold: PositiveInt,
+    owners: NonEmpty[Set[Namespace]],
 ) extends TopologyMappingX {
 
   def toProto: v2.UnionspaceDefinitionX =
@@ -372,16 +373,20 @@ final case class UnionspaceDefinitionX private (unionspace: Namespace)(
       case None =>
         RequiredNamespaces(owners.forgetNE)
       case Some(
-            TopologyTransactionX(_op, _serial, prevUnionspace @ UnionspaceDefinitionX(`unionspace`))
+            TopologyTransactionX(
+              _op,
+              _serial,
+              UnionspaceDefinitionX(`unionspace`, previousThreshold, previousOwners),
+            )
           ) =>
-        val added = owners.diff(prevUnionspace.owners)
+        val added = owners.diff(previousOwners)
         // all added owners MUST sign
         RequiredNamespaces(added)
           // and the quorum of existing owners
           .and(
             RequiredNamespaces(
-              prevUnionspace.owners.forgetNE,
-              threshold = Some(prevUnionspace.threshold),
+              previousOwners.forgetNE,
+              threshold = Some(previousThreshold),
             )
           )
       case Some(topoTx) =>
@@ -412,7 +417,7 @@ object UnionspaceDefinitionX {
         (),
         s"Invalid threshold (${threshold}) for ${unionspace} with ${owners.length} owners",
       )
-    } yield UnionspaceDefinitionX(unionspace)(threshold, ownersNE)
+    } yield UnionspaceDefinitionX(unionspace, threshold, ownersNE)
 
   def fromProtoV2(
       value: v2.UnionspaceDefinitionX
@@ -501,8 +506,8 @@ object IdentifierDelegationX {
 final case class OwnerToKeyMappingX(
     member: Member,
     domain: Option[DomainId],
-)(val keys: NonEmpty[Seq[PublicKey]])
-    extends TopologyMappingX {
+    keys: NonEmpty[Seq[PublicKey]],
+) extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     TopologyMappingX.addDomainId(builder.add(member.uid.toProtoPrimitive), domain)
@@ -551,7 +556,7 @@ object OwnerToKeyMappingX {
       domain <- OptionUtil
         .emptyStringAsNone(domainP)
         .traverse(DomainId.fromProtoPrimitive(_, "domain"))
-    } yield OwnerToKeyMappingX(member, domain)(keysNE)
+    } yield OwnerToKeyMappingX(member, domain, keysNE)
   }
 
 }
@@ -559,12 +564,10 @@ object OwnerToKeyMappingX {
 /** Participant domain trust certificate
   */
 final case class DomainTrustCertificateX(
-    // TODO(#11255) should be ParticipantId and DomainId
-    participantId: UniqueIdentifier,
-    domainId: UniqueIdentifier,
-)(
-    val transferOnlyToGivenTargetDomains: Boolean,
-    val targetDomains: Seq[UniqueIdentifier],
+    participantId: ParticipantId,
+    domainId: DomainId,
+    transferOnlyToGivenTargetDomains: Boolean,
+    targetDomains: Seq[DomainId],
 ) extends TopologyMappingX {
 
   def toProto: v2.DomainTrustCertificateX =
@@ -584,13 +587,13 @@ final case class DomainTrustCertificateX(
 
   override def code: Code = Code.DomainTrustCertificateX
 
-  override def namespace: Namespace = participantId.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(participantId)
+  override def namespace: Namespace = participantId.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX =
-    RequiredUids(Set(participantId))
+    RequiredUids(Set(participantId.uid))
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder
@@ -606,13 +609,15 @@ object DomainTrustCertificateX {
       value: v2.DomainTrustCertificateX
   ): ParsingResult[DomainTrustCertificateX] =
     for {
-      participantId <- UniqueIdentifier.fromProtoPrimitive(value.participant, "participant")
-      domainId <- UniqueIdentifier.fromProtoPrimitive(value.domain, "domain")
+      participantId <- ParticipantId.fromProtoPrimitive(value.participant, "participant")
+      domainId <- DomainId.fromProtoPrimitive(value.domain, "domain")
       transferOnlyToGivenTargetDomains = value.transferOnlyToGivenTargetDomains
       targetDomains <- value.targetDomains.traverse(
-        UniqueIdentifier.fromProtoPrimitive(_, "target_domains")
+        DomainId.fromProtoPrimitive(_, "target_domains")
       )
-    } yield DomainTrustCertificateX(participantId, domainId)(
+    } yield DomainTrustCertificateX(
+      participantId,
+      domainId,
       transferOnlyToGivenTargetDomains,
       targetDomains,
     )
@@ -681,13 +686,12 @@ object ParticipantDomainLimits {
 }
 
 final case class ParticipantDomainPermissionX(
-    domainId: UniqueIdentifier,
-    participantId: UniqueIdentifier,
-)(
-    val permission: ParticipantPermissionX,
-    val trustLevel: TrustLevelX,
-    val limits: Option[ParticipantDomainLimits],
-    val loginAfter: Option[CantonTimestamp],
+    domainId: DomainId,
+    participantId: ParticipantId,
+    permission: ParticipantPermissionX,
+    trustLevel: TrustLevelX,
+    limits: Option[ParticipantDomainLimits],
+    loginAfter: Option[CantonTimestamp],
 ) extends TopologyMappingX {
 
   def toParticipantAttributes: ParticipantAttributes =
@@ -712,13 +716,13 @@ final case class ParticipantDomainPermissionX(
 
   override def code: Code = Code.ParticipantDomainPermissionX
 
-  override def namespace: Namespace = domainId.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(domainId)
+  override def namespace: Namespace = domainId.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(domainId.uid)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX =
-    RequiredUids(Set(domainId))
+    RequiredUids(Set(domainId.uid))
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder
@@ -731,7 +735,9 @@ final case class ParticipantDomainPermissionX(
     if (limits.nonEmpty)
       this
     else
-      ParticipantDomainPermissionX(domainId, participantId)(
+      ParticipantDomainPermissionX(
+        domainId,
+        participantId,
         permission,
         trustLevel,
         Some(defaultLimits),
@@ -744,10 +750,12 @@ object ParticipantDomainPermissionX {
   def code: Code = Code.ParticipantDomainPermissionX
 
   def default(
-      domainId: UniqueIdentifier,
-      participantId: UniqueIdentifier,
+      domainId: DomainId,
+      participantId: ParticipantId,
   ): ParticipantDomainPermissionX =
-    ParticipantDomainPermissionX(domainId, participantId)(
+    ParticipantDomainPermissionX(
+      domainId,
+      participantId,
       ParticipantPermissionX.Submission,
       TrustLevelX.Ordinary,
       None,
@@ -758,15 +766,17 @@ object ParticipantDomainPermissionX {
       value: v2.ParticipantDomainPermissionX
   ): ParsingResult[ParticipantDomainPermissionX] =
     for {
-      domainId <- UniqueIdentifier.fromProtoPrimitive(value.domain, "domain")
-      participantId <- UniqueIdentifier.fromProtoPrimitive(value.participant, "participant")
+      domainId <- DomainId.fromProtoPrimitive(value.domain, "domain")
+      participantId <- ParticipantId.fromProtoPrimitive(value.participant, "participant")
       permission <- ParticipantPermissionX.fromProtoV2(value.permission)
       trustLevel <- TrustLevelX.fromProtoV2(value.trustLevel)
       limits = value.limits.map(ParticipantDomainLimits.fromProtoV2)
       loginAfter <- value.loginAfter.fold[ParsingResult[Option[CantonTimestamp]]](Right(None))(
         CantonTimestamp.fromProtoPrimitive(_).map(_.some)
       )
-    } yield ParticipantDomainPermissionX(domainId, participantId)(
+    } yield ParticipantDomainPermissionX(
+      domainId,
+      participantId,
       permission,
       trustLevel,
       limits,
@@ -776,10 +786,9 @@ object ParticipantDomainPermissionX {
 
 // Party hosting limits
 final case class PartyHostingLimitsX(
-    domainId: UniqueIdentifier,
-    partyId: UniqueIdentifier,
-)(
-    val quota: Int
+    domainId: DomainId,
+    partyId: PartyId,
+    quota: Int,
 ) extends TopologyMappingX {
 
   def toProto: v2.PartyHostingLimitsX =
@@ -798,13 +807,13 @@ final case class PartyHostingLimitsX(
 
   override def code: Code = Code.PartyHostingLimitsX
 
-  override def namespace: Namespace = domainId.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(domainId)
+  override def namespace: Namespace = domainId.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(domainId.uid)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX =
-    RequiredUids(Set(domainId))
+    RequiredUids(Set(domainId.uid))
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder
@@ -820,18 +829,17 @@ object PartyHostingLimitsX {
       value: v2.PartyHostingLimitsX
   ): ParsingResult[PartyHostingLimitsX] =
     for {
-      domainId <- UniqueIdentifier.fromProtoPrimitive(value.domain, "domain")
-      partyId <- UniqueIdentifier.fromProtoPrimitive(value.party, "party")
+      domainId <- DomainId.fromProtoPrimitive(value.domain, "domain")
+      partyId <- PartyId.fromProtoPrimitive(value.party, "party")
       quota = value.quota
-    } yield PartyHostingLimitsX(domainId, partyId)(quota)
+    } yield PartyHostingLimitsX(domainId, partyId, quota)
 }
 
 // Package vetting
 final case class VettedPackagesX(
-    participantId: UniqueIdentifier,
-    domainId: Option[UniqueIdentifier],
-)(
-    val packageIds: Seq[LfPackageId]
+    participantId: ParticipantId,
+    domainId: Option[DomainId],
+    packageIds: Seq[LfPackageId],
 ) extends TopologyMappingX {
 
   def toProto: v2.VettedPackagesX =
@@ -850,13 +858,13 @@ final case class VettedPackagesX(
 
   override def code: Code = Code.VettedPackagesX
 
-  override def namespace: Namespace = participantId.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(participantId)
+  override def namespace: Namespace = participantId.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX =
-    RequiredUids(Set(participantId))
+    RequiredUids(Set(participantId.uid))
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder
@@ -872,20 +880,20 @@ object VettedPackagesX {
       value: v2.VettedPackagesX
   ): ParsingResult[VettedPackagesX] =
     for {
-      participantId <- UniqueIdentifier.fromProtoPrimitive(value.participant, "participant")
+      participantId <- ParticipantId.fromProtoPrimitive(value.participant, "participant")
       packageIds <- value.packageIds
         .traverse(LfPackageId.fromString)
         .leftMap(ProtoDeserializationError.ValueConversionError("package_ids", _))
       domainId <-
         if (value.domain.nonEmpty)
-          UniqueIdentifier.fromProtoPrimitive(value.domain, "domain").map(_.some)
+          DomainId.fromProtoPrimitive(value.domain, "domain").map(_.some)
         else Right(None)
-    } yield VettedPackagesX(participantId, domainId)(packageIds)
+    } yield VettedPackagesX(participantId, domainId, packageIds)
 }
 
 // Party to participant mappings
 final case class HostingParticipant(
-    participantId: UniqueIdentifier,
+    participantId: ParticipantId,
     permission: ParticipantPermissionX,
 ) {
   def toProto: v2.PartyToParticipantX.HostingParticipant =
@@ -899,18 +907,17 @@ object HostingParticipant {
   def fromProtoV2(
       value: v2.PartyToParticipantX.HostingParticipant
   ): ParsingResult[HostingParticipant] = for {
-    participantId <- UniqueIdentifier.fromProtoPrimitive(value.participant, "participant")
+    participantId <- ParticipantId.fromProtoPrimitive(value.participant, "participant")
     permission <- ParticipantPermissionX.fromProtoV2(value.permission)
   } yield HostingParticipant(participantId, permission)
 }
 
 final case class PartyToParticipantX(
-    partyId: UniqueIdentifier,
-    domainId: Option[UniqueIdentifier],
-)(
-    val threshold: Int,
-    val participants: Seq[HostingParticipant],
-    val groupAddressing: Boolean,
+    partyId: PartyId,
+    domainId: Option[DomainId],
+    threshold: Int,
+    participants: Seq[HostingParticipant],
+    groupAddressing: Boolean,
 ) extends TopologyMappingX {
 
   def toProto: v2.PartyToParticipantX =
@@ -931,17 +938,17 @@ final case class PartyToParticipantX(
 
   override def code: Code = Code.PartyToParticipantX
 
-  override def namespace: Namespace = partyId.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(partyId)
+  override def namespace: Namespace = partyId.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
 
-  def participantIds: Seq[UniqueIdentifier] = participants.map(_.participantId)
+  def participantIds: Seq[ParticipantId] = participants.map(_.participantId)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = {
     // TODO(#11255): take into account the previous transaction and allow participants to unilaterally
     //   disassociate themselves from a party as long as the threshold can still be reached
-    RequiredUids(Set(partyId) ++ participants.map(_.participantId))
+    RequiredUids(Set(partyId.uid) ++ participants.map(_.participantId.uid))
   }
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -958,24 +965,23 @@ object PartyToParticipantX {
       value: v2.PartyToParticipantX
   ): ParsingResult[PartyToParticipantX] =
     for {
-      partyId <- UniqueIdentifier.fromProtoPrimitive(value.party, "party")
+      partyId <- PartyId.fromProtoPrimitive(value.party, "party")
       threshold = value.threshold
       participants <- value.participants.traverse(HostingParticipant.fromProtoV2)
       groupAddressing = value.groupAddressing
       domainId <-
         if (value.domain.nonEmpty)
-          UniqueIdentifier.fromProtoPrimitive(value.domain, "domain").map(_.some)
+          DomainId.fromProtoPrimitive(value.domain, "domain").map(_.some)
         else Right(None)
-    } yield PartyToParticipantX(partyId, domainId)(threshold, participants, groupAddressing)
+    } yield PartyToParticipantX(partyId, domainId, threshold, participants, groupAddressing)
 }
 
 // AuthorityOfX
 final case class AuthorityOfX(
-    partyId: UniqueIdentifier,
-    domainId: Option[UniqueIdentifier],
-)(
-    val threshold: PositiveInt,
-    val parties: Seq[UniqueIdentifier],
+    partyId: PartyId,
+    domainId: Option[DomainId],
+    threshold: PositiveInt,
+    parties: Seq[PartyId],
 ) extends TopologyMappingX {
 
   def toProto: v2.AuthorityOfX =
@@ -995,14 +1001,14 @@ final case class AuthorityOfX(
 
   override def code: Code = Code.AuthorityOfX
 
-  override def namespace: Namespace = partyId.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(partyId)
+  override def namespace: Namespace = partyId.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = {
     // TODO(#11255): take the previous transaction into account
-    RequiredUids(Set(partyId) ++ parties)
+    RequiredUids(Set(partyId.uid) ++ parties.map(_.uid))
   }
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -1019,7 +1025,7 @@ object AuthorityOfX {
       value: v2.AuthorityOfX
   ): ParsingResult[AuthorityOfX] =
     for {
-      partyId <- UniqueIdentifier.fromProtoPrimitive(value.party, "party")
+      partyId <- PartyId.fromProtoPrimitive(value.party, "party")
       threshold <- PositiveInt
         .create(value.threshold)
         .leftMap(_ =>
@@ -1028,12 +1034,12 @@ object AuthorityOfX {
             s"threshold needs to be positive and not ${value.threshold}",
           )
         )
-      parties <- value.parties.traverse(UniqueIdentifier.fromProtoPrimitive(_, "party"))
+      parties <- value.parties.traverse(PartyId.fromProtoPrimitive(_, "parties"))
       domainId <-
         if (value.domain.nonEmpty)
-          UniqueIdentifier.fromProtoPrimitive(value.domain, "domain").map(_.some)
+          DomainId.fromProtoPrimitive(value.domain, "domain").map(_.some)
         else Right(None)
-    } yield AuthorityOfX(partyId, domainId)(threshold, parties)
+    } yield AuthorityOfX(partyId, domainId, threshold, parties)
 }
 
 /** Dynamic domain parameter settings for the domain
@@ -1042,9 +1048,7 @@ object AuthorityOfX {
   * These changes are authorized by the owner of the domain and distributed
   * to all nodes accordingly.
   */
-final case class DomainParametersStateX(
-    domain: DomainId
-)(val parameters: DynamicDomainParameters)
+final case class DomainParametersStateX(domain: DomainId, parameters: DynamicDomainParameters)
     extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -1086,7 +1090,7 @@ object DomainParametersStateX {
         "domainParameters",
         domainParametersP,
       )
-    } yield DomainParametersStateX(domainId)(parameters)
+    } yield DomainParametersStateX(domainId, parameters)
   }
 }
 
@@ -1096,10 +1100,12 @@ object DomainParametersStateX {
   * Mediators can be temporarily be turned off by making them observers. This way,
   * they get informed but they don't have to reply.
   */
-final case class MediatorDomainStateX private (domain: DomainId, group: NonNegativeInt)(
-    val threshold: PositiveInt,
-    val active: NonEmpty[Seq[MediatorId]],
-    val observers: Seq[MediatorId],
+final case class MediatorDomainStateX private (
+    domain: DomainId,
+    group: NonNegativeInt,
+    threshold: PositiveInt,
+    active: NonEmpty[Seq[MediatorId]],
+    observers: Seq[MediatorId],
 ) extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -1133,9 +1139,21 @@ final case class MediatorDomainStateX private (domain: DomainId, group: NonNegat
       // this is the first transaction with serial=1
       RequiredUids((Set(domain) ++ active.forgetNE ++ observers).map(_.uid))
 
-    case Some(TopologyTransactionX(_op, _serial, state @ MediatorDomainStateX(`domain`, _group))) =>
-      val previousMediators = (state.active ++ state.observers).map(_.uid).forgetNE.toSet
-      val currentMediators = (active ++ observers).map(_.uid).forgetNE.toSet
+    case Some(
+          TopologyTransactionX(
+            _op,
+            _serial,
+            MediatorDomainStateX(
+              `domain`,
+              _group,
+              previousThreshold,
+              previouslyActive,
+              previousObservers,
+            ),
+          )
+        ) =>
+      val previousMediators = (previouslyActive ++ previousObservers).map(_.uid).forgetNE.toSet
+      val currentMediators = (this.active ++ this.observers).map(_.uid).forgetNE.toSet
       val added = currentMediators.diff(previousMediators)
       val removed = previousMediators.diff(currentMediators)
 
@@ -1156,7 +1174,7 @@ final case class MediatorDomainStateX private (domain: DomainId, group: NonNegat
       }
 
       val authForThresholdChange: RequiredAuthX =
-        if (this.threshold != state.threshold) {
+        if (this.threshold != previousThreshold) {
           // the threshold has changed, the domain must approve
           RequiredUids(Set(domain.uid))
         } else {
@@ -1191,7 +1209,7 @@ object MediatorDomainStateX {
     activeNE <- NonEmpty
       .from(active)
       .toRight("mediator domain state requires at least one active mediator")
-  } yield MediatorDomainStateX(domain, group)(threshold, activeNE, observers)
+  } yield MediatorDomainStateX(domain, group, threshold, activeNE, observers)
 
   def fromProtoV2(
       value: v2.MediatorDomainStateX
@@ -1225,10 +1243,11 @@ object MediatorDomainStateX {
   *              to reach the threshold
   * UNIQUE(domain)
   */
-final case class SequencerDomainStateX private (domain: DomainId)(
-    val threshold: PositiveInt,
-    val active: NonEmpty[Seq[SequencerId]],
-    val observers: Seq[SequencerId],
+final case class SequencerDomainStateX private (
+    domain: DomainId,
+    threshold: PositiveInt,
+    active: NonEmpty[Seq[SequencerId]],
+    observers: Seq[SequencerId],
 ) extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -1278,7 +1297,7 @@ object SequencerDomainStateX {
     activeNE <- NonEmpty
       .from(active)
       .toRight("sequencer domain state requires at least one active sequencer")
-  } yield SequencerDomainStateX(domain)(threshold, activeNE, observers)
+  } yield SequencerDomainStateX(domain, threshold, activeNE, observers)
 
   def fromProtoV2(
       value: v2.SequencerDomainStateX
@@ -1302,8 +1321,9 @@ object SequencerDomainStateX {
 }
 
 // Purge topology transaction-x
-final case class PurgeTopologyTransactionX private (domain: DomainId)(
-    val mappings: NonEmpty[Seq[TopologyMappingX]]
+final case class PurgeTopologyTransactionX private (
+    domain: DomainId,
+    mappings: NonEmpty[Seq[TopologyMappingX]],
 ) extends TopologyMappingX {
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
@@ -1343,7 +1363,7 @@ object PurgeTopologyTransactionX {
     mappingsToPurge <- NonEmpty
       .from(mappings)
       .toRight("purge topology transaction-x requires at least one topology mapping")
-  } yield PurgeTopologyTransactionX(domain)(mappingsToPurge)
+  } yield PurgeTopologyTransactionX(domain, mappingsToPurge)
 
   def fromProtoV2(
       value: v2.PurgeTopologyTransactionX

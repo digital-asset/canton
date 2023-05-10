@@ -206,6 +206,15 @@ object AcceptedTopologyTransactionsX
 
   override protected def name: String = "AcceptedTopologyTransactionsX"
 
+  implicit val acceptedTopologyTransactionXMessageCast
+      : ProtocolMessageContentCast[AcceptedTopologyTransactionsX] =
+    ProtocolMessageContentCast.create[AcceptedTopologyTransactionsX](
+      name
+    ) {
+      case att: AcceptedTopologyTransactionsX => Some(att)
+      case _ => None
+    }
+
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
     ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(

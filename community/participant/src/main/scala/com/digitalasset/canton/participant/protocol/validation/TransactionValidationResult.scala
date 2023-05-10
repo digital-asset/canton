@@ -14,7 +14,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlar
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfPartyId, WorkflowId}
 
-// TODO(M40): Push model conformance down to individual views, not just for the transaction as a whole
 final case class TransactionValidationResult(
     transactionId: TransactionId,
     confirmationPolicy: ConfirmationPolicy,
@@ -53,7 +52,7 @@ final case class TransactionValidationResult(
       SyncServiceAlarm
         .Warn(s"Request $requestId with failed activeness check is approved.")
         .report()
-      // TODO(M40) Handle this case gracefully
+      // TODO(i12904) Handle this case gracefully
       throw new RuntimeException(s"Request $requestId with failed activeness check is approved.")
     }
   }

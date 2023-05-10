@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.topology.store
 
 import cats.data.OptionT
 import cats.syntax.either.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -20,7 +21,6 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future, blocking}

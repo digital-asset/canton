@@ -3,10 +3,11 @@
 
 package com.daml.ledger.api.benchtool.config
 
-import com.daml.ledger.api.tls.TlsConfiguration
-import java.io.File
 import com.daml.metrics.api.reporters.MetricsReporter
-import scala.concurrent.duration._
+import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
+
+import java.io.File
+import scala.concurrent.duration.*
 
 final case class Config(
     ledger: Config.Ledger,
@@ -26,13 +27,13 @@ final case class Config(
 }
 
 object Config {
-    final case class Ledger(
+  final case class Ledger(
       hostname: String,
       port: Int,
       indexDbJdbcUrlO: Option[String] = None,
   )
 
-    final case class Concurrency(
+  final case class Concurrency(
       corePoolSize: Int,
       maxPoolSize: Int,
       keepAliveTime: Long,

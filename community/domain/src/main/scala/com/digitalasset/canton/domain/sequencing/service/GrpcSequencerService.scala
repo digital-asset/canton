@@ -9,6 +9,7 @@ import cats.instances.future.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric}
@@ -36,7 +37,6 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.empty.Empty
-import io.functionmeta.functionFullName
 import io.grpc.Status
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 
@@ -101,6 +101,7 @@ object GrpcSequencerService {
       parameters: SequencerParameters,
       protocolVersion: ProtocolVersion,
       topologyStateForInitializationService: Option[TopologyStateForInitializationService],
+      enableMediatorUnauthenticatedMessages: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
     new GrpcSequencerService(
@@ -124,6 +125,7 @@ object GrpcSequencerService {
       parameters,
       topologyStateForInitializationService,
       protocolVersion,
+      enableMediatorUnauthenticatedMessages,
     )
 
   /** Abstracts the steps that are different in processing the submission requests coming from the various sendAsync endpoints
@@ -267,6 +269,7 @@ class GrpcSequencerService(
     parameters: SequencerParameters,
     topologyStateForInitializationService: Option[TopologyStateForInitializationService],
     protocolVersion: ProtocolVersion,
+    enableMediatorUnauthenticatedMessages: Boolean,
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
     with NamedLogging
@@ -509,9 +512,6 @@ class GrpcSequencerService(
       )
       _ <- request.aggregationRule.traverse_(validateAggregationRule(sender, messageId, _))
     } yield {
-      // TODO(M40) requestSize might be misleading under faulty participants.
-      // A faulty submitter may include irrelevant fields / repeated fields in the sent message
-      // and this will not be reported here because we're recomputing the size from the deserialized protobuf
       metrics.bytesProcessed.mark(requestSize.toLong)(MetricsContext.Empty)
       metrics.messagesProcessed.mark()
       if (TimeProof.isTimeProofSubmission(request)) metrics.timeRequests.mark()
@@ -581,6 +581,7 @@ class GrpcSequencerService(
   )(implicit traceContext: TraceContext): Either[SendAsyncError, Unit] = sender match {
     case _: DomainTopologyManagerId =>
       Right(())
+    case _: MediatorId if enableMediatorUnauthenticatedMessages => Right(())
     case _ =>
       val unauthRecipients = request.batch.envelopes
         .toSet[ClosedEnvelope]
@@ -606,6 +607,7 @@ class GrpcSequencerService(
       .flatMap(_.recipients.allRecipients)
       .filter {
         case MemberRecipient(_: DomainTopologyManagerId) => false
+        case MemberRecipient(_: MediatorId) if enableMediatorUnauthenticatedMessages => false
         case _ => true
       }
     Either.cond(

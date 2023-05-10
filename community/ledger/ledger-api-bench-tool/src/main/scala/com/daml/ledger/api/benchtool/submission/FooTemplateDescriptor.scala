@@ -16,33 +16,82 @@ final case class FooTemplateDescriptor(
   */
 object FooTemplateDescriptor {
 
-  val Foo1: FooTemplateDescriptor = FooTemplateDescriptor(
+  def inefficientFibonacciTemplateId(packageId: String): Identifier = Identifier(
+    packageId = packageId,
+    moduleName = "Bench",
+    entityName = "InefficientFibonacci",
+  )
+
+  def fooI1TemplateId(packageId: String): Identifier = Identifier(
+    packageId = packageId,
+    moduleName = "InterfaceSubscription",
+    entityName = "FooI1",
+  )
+
+  def fooI2TemplateId(packageId: String): Identifier = Identifier(
+    packageId = packageId,
+    moduleName = "InterfaceSubscription",
+    entityName = "FooI2",
+  )
+
+  def fooI3TemplateId(packageId: String): Identifier = Identifier(
+    packageId = packageId,
+    moduleName = "InterfaceSubscription",
+    entityName = "FooI3",
+  )
+
+  def divulgerTemplateId(packageId: String): Identifier = Identifier(
+    packageId = packageId,
+    moduleName = "Foo",
+    entityName = "Divulger",
+  )
+
+  def dummyTemplateId(packageId: String): Identifier = Identifier(
+    packageId = packageId,
+    moduleName = "Foo",
+    entityName = "Dummy",
+  )
+
+  def Foo1(packageId: String): FooTemplateDescriptor = FooTemplateDescriptor(
     name = "Foo1",
-    templateId = com.daml.ledger.test.benchtool.Foo.Foo1.id.asInstanceOf[Identifier],
+    templateId = Identifier(
+      packageId = packageId,
+      moduleName = "Foo",
+      entityName = "Foo1",
+    ),
     consumingChoiceName = "Foo1_ConsumingChoice",
     nonconsumingChoiceName = "Foo1_NonconsumingChoice",
   )
-  val Foo2: FooTemplateDescriptor = FooTemplateDescriptor(
+  def Foo2(packageId: String): FooTemplateDescriptor = FooTemplateDescriptor(
     name = "Foo2",
-    templateId = com.daml.ledger.test.benchtool.Foo.Foo2.id.asInstanceOf[Identifier],
+    templateId = Identifier(
+      packageId = packageId,
+      moduleName = "Foo",
+      entityName = "Foo2",
+    ),
     consumingChoiceName = "Foo2_ConsumingChoice",
     nonconsumingChoiceName = "Foo2_NonconsumingChoice",
   )
-  val Foo3: FooTemplateDescriptor = FooTemplateDescriptor(
+  def Foo3(packageId: String): FooTemplateDescriptor = FooTemplateDescriptor(
     name = "Foo3",
-    templateId = com.daml.ledger.test.benchtool.Foo.Foo3.id.asInstanceOf[Identifier],
+    templateId = Identifier(
+      packageId = packageId,
+      moduleName = "Foo",
+      entityName = "Foo3",
+    ),
     consumingChoiceName = "Foo3_ConsumingChoice",
     nonconsumingChoiceName = "Foo3_NonconsumingChoice",
   )
 
-  private val all: Map[String, FooTemplateDescriptor] =
-    List(Foo1, Foo2, Foo3).map(foo => foo.name -> foo).toMap
+  def forName(templateName: String, packageId: String): FooTemplateDescriptor = {
+    templateName match {
+      case "Foo1" => Foo1(packageId)
+      case "Foo2" => Foo2(packageId)
+      case "Foo3" => Foo3(packageId)
+      case other => sys.error(s"Invalid template: $other")
+    }
+  }
 
-  def forName(templateName: String): FooTemplateDescriptor =
-    all.getOrElse(templateName, sys.error(s"Invalid template: $templateName"))
-
-  val Divulger_templateId: Identifier =
-    com.daml.ledger.test.benchtool.Foo.Divulger.id.asInstanceOf[Identifier]
   val Divulger_DivulgeContractImmediate = "DivulgeContractImmediate"
   val Divulger_DivulgeConsumingExercise = "DivulgeConsumingExercise"
 }

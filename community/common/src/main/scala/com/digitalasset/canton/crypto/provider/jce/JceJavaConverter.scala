@@ -128,6 +128,8 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
             toJavaEcDsa(privateKey, CurveType.NIST_P256)
           case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
             convert(CryptoKeyFormat.Der, privateKey.key.toByteArray, "EC")
+          // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
+          case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
         }
     }
   }
@@ -176,7 +178,8 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
           case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
             val algoId = new AlgorithmIdentifier(SECObjectIdentifiers.secp256r1)
             convert(CryptoKeyFormat.Der, publicKey.key.toByteArray, "EC").map(pk => (algoId, pk))
-
+          // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
+          case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
         }
     }
   }

@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -46,7 +47,6 @@ import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 

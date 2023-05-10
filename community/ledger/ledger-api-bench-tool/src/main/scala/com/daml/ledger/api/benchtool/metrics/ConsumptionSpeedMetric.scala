@@ -16,7 +16,7 @@ final case class ConsumptionSpeedMetric[T](
     previousLatest: Option[Instant] = None,
     currentPeriodLatest: Option[Instant] = None,
 ) extends Metric[T] {
-  import ConsumptionSpeedMetric._
+  import ConsumptionSpeedMetric.*
 
   override type V = Value
   override type Objective = MinConsumptionSpeed

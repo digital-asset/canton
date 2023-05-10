@@ -110,8 +110,6 @@ object CantonTimestamp {
       cantonTimestamp <- CantonTimestamp.fromInstant(instant)
     } yield cantonTimestamp
 
-  // TODO(error handling) these throw an IllegalArgumentException with the error message "cannot interpret ... as Timestamp"
-  // Consider changing the error message or removing these methods
   def assertFromInstant(i: Instant) = new CantonTimestamp(LfTimestamp.assertFromInstant(i))
   def assertFromLong(micros: Long) = new CantonTimestamp(LfTimestamp.assertFromLong(micros))
 

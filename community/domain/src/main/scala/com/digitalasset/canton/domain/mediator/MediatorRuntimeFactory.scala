@@ -161,7 +161,6 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
           protocolVersion,
           clock,
           metrics,
-          MediatorReadyCheck(mediatorId, syncCrypto, loggerFactory),
           loggerFactory,
         ),
         nodeParameters.processingTimeouts,
