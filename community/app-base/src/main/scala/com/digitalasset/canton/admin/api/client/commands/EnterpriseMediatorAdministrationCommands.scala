@@ -25,7 +25,7 @@ import com.digitalasset.canton.pruning.admin.v0.LocatePruningTimestamp
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, SequencerId}
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
 
@@ -97,6 +97,7 @@ object EnterpriseMediatorAdministrationCommands {
   final case class InitializeX(
       domainId: DomainId,
       domainParameters: StaticDomainParameters,
+      sequencerId: SequencerId,
       sequencerConnection: SequencerConnection,
   ) extends BaseMediatorXInitializationCommand[
         v2.InitializeMediatorRequest,
@@ -108,6 +109,7 @@ object EnterpriseMediatorAdministrationCommands {
         InitializeMediatorRequestX(
           domainId,
           domainParameters,
+          sequencerId,
           sequencerConnection,
         ).toProtoV2
       )

@@ -189,6 +189,8 @@ final class ErrorInterceptorSpec
       val failure = new RuntimeException("some failure")
       val failingCall = () => throw failure
 
+      // TODO(#13019) Avoid the global execution context
+      @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
       implicit val ec: ExecutionContextExecutor = ExecutionContext.global
 
       Future(LogOnUnhandledFailureInClose(failingCall())).failed.map {
@@ -298,6 +300,8 @@ object ErrorInterceptorSpec {
     implicit protected val damlLogger: DamlContextualizedErrorLogger =
       DamlContextualizedErrorLogger.forTesting(getClass)
 
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     override def bindService(): ServerServiceDefinition =
       HelloServiceGrpc.bindService(this, scala.concurrent.ExecutionContext.Implicits.global)
 

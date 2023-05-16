@@ -369,7 +369,7 @@ object CliConfig {
             portFile = portFile,
             serverJdbcUrl = jdbcUrl,
             indexerConfig = IndexerConfig(
-              startupMode = IndexerStartupMode.MigrateAndStart(allowExistingSchema = false),
+              startupMode = IndexerStartupMode.MigrateAndStart,
               maxInputBufferSize = indexerMaxInputBufferSize,
               inputMappingParallelism = indexerInputMappingParallelism,
               batchingParallelism = indexerBatchingParallelism,

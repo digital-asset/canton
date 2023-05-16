@@ -555,9 +555,10 @@ object TopologyAdminCommandsX {
     }
 
     final case class Propose[M <: TopologyMappingX: ClassTag](
-        serial: PositiveInt,
         mapping: Either[String, M],
         signedBy: Seq[Fingerprint],
+        serial: Option[PositiveInt] = None,
+        mustFullyAuthorize: Boolean = true,
     ) extends BaseWriteCommand[
           AuthorizeRequest,
           AuthorizeResponse,
@@ -569,11 +570,11 @@ object TopologyAdminCommandsX {
           Proposal(
             AuthorizeRequest.Proposal(
               v2.TopologyChangeOpX.Replace,
-              serial.value,
+              serial.map(_.value).getOrElse(0),
               Some(m.toProtoV2),
             )
           ),
-          mustFullyAuthorize = false,
+          mustFullyAuthorize = mustFullyAuthorize,
           forceChange = false,
           signedBy = signedBy.map(_.toProtoPrimitive),
         )
@@ -601,11 +602,11 @@ object TopologyAdminCommandsX {
     }
     object Propose {
       def apply[M <: TopologyMappingX: ClassTag](
-          serial: PositiveInt,
           mapping: M,
           signedBy: Seq[Fingerprint],
+          serial: Option[PositiveInt],
       ): Propose[M] =
-        Propose(serial, Right(mapping), signedBy)
+        Propose(Right(mapping), signedBy, serial)
 
     }
   }

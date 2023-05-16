@@ -18,7 +18,7 @@ import scala.util.{Failure, Success, Try}
 /** Deduplicates package load requests, such that concurrent requests
   * only access the data store and decode the package once.
   */
-private[platform] class DeduplicatingPackageLoader() {
+class DeduplicatingPackageLoader() {
   // Concurrent map of promises to request each package only once.
   private[this] val packagePromises: ConcurrentHashMap[Ref.PackageId, Promise[Option[Package]]] =
     new ConcurrentHashMap()

@@ -126,7 +126,7 @@ object StoredTopologyTransactionsX
           "valid_from",
           item.validFrom,
         )
-        validUntil <- item.validFrom.traverse(EffectiveTime.fromProtoPrimitive)
+        validUntil <- item.validUntil.traverse(EffectiveTime.fromProtoPrimitive)
         transaction <- SignedTopologyTransactionX.fromByteString(item.transaction)
       } yield StoredTopologyTransactionX(
         sequenced,

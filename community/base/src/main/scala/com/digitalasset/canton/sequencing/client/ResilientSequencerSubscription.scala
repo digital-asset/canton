@@ -382,6 +382,27 @@ object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
         )
   }
 
+  @Explanation(
+    """This error is logged when a sequencer client determined a ledger fork, where a sequencer node
+      |responded with different events for the same timestamp / counter.
+      |
+      |Whenever a client reconnects to a domain, it will start with the last message received and compare
+      |whether that last message matches the one it received previously. If not, it will report with this error.
+      |
+      |A ledger fork should not happen in normal operation. It can happen if the backups have been taken
+      |in a wrong order and e.g. the participant was more advanced than the sequencer.
+      |"""
+  )
+  @Resolution(
+    """You can recover by restoring the system with a correctly ordered backup. Please consult the
+      |respective sections in the manual."""
+  )
+  object ForkHappened
+      extends ErrorCode(
+        "SEQUENCER_FORK_DETECTED",
+        ErrorCategory.SystemInternalAssumptionViolated,
+      )
+
 }
 
 /** Errors that may occur on the creation of a sequencer subscription

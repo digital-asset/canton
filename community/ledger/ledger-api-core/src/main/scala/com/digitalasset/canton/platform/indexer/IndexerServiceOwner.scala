@@ -68,9 +68,9 @@ final class IndexerServiceOwner(
         }
 
     config.startupMode match {
-      case IndexerStartupMode.MigrateAndStart(allowExistingSchema) =>
+      case IndexerStartupMode.MigrateAndStart =>
         startIndexer(
-          migration = flywayMigrations.migrate(allowExistingSchema)
+          migration = flywayMigrations.migrate()
         )
 
       case IndexerStartupMode.ValidateAndStart =>
@@ -108,11 +108,10 @@ object IndexerServiceOwner {
   // does not require any of the configurations of a full-fledged indexer except for the jdbc url.
   def migrateOnly(
       jdbcUrl: String,
-      allowExistingSchema: Boolean = false,
       additionalMigrationPaths: Seq[String] = Seq.empty,
   )(implicit rc: ResourceContext, loggingContext: LoggingContext): Future[Unit] = {
     val flywayMigrations =
       new FlywayMigrations(jdbcUrl, additionalMigrationPaths)
-    flywayMigrations.migrate(allowExistingSchema)
+    flywayMigrations.migrate()
   }
 }

@@ -10,8 +10,8 @@ import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.crypto.store.{
-  CryptoPrivateStore,
   CryptoPrivateStoreError,
+  CryptoPrivateStoreExtended,
   EncryptionPrivateKeyWithName,
   PrivateKeyWithName,
   SigningPrivateKeyWithName,
@@ -41,7 +41,7 @@ class InMemoryCryptoPrivateStore(
     override protected val loggerFactory: NamedLoggerFactory,
 )(
     override implicit val ec: ExecutionContext
-) extends CryptoPrivateStore
+) extends CryptoPrivateStoreExtended
     with NamedLogging {
 
   private val storedSigningKeyMap: TrieMap[Fingerprint, SigningPrivateKeyWithName] = TrieMap.empty

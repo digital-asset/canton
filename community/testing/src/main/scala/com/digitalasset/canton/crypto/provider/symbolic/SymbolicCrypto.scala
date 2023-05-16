@@ -74,7 +74,7 @@ object SymbolicCrypto extends LazyLogging {
     SymbolicPureCrypto.createSignature(signature, signedBy, 0xffffffff)
 
   def emptySignature: Signature =
-    signature(ByteString.EMPTY, Fingerprint.create(ByteString.EMPTY, HashAlgorithm.Sha256))
+    signature(ByteString.EMPTY, Fingerprint.create(ByteString.EMPTY))
 
   def create(
       releaseProtocolVersion: ReleaseProtocolVersion,
@@ -135,7 +135,10 @@ object SymbolicCrypto extends LazyLogging {
       ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
 
     val crypto = SymbolicCrypto.create(releaseProtocolVersion, timeouts, loggerFactory)
-
+    val cryptoPrivateStore = crypto.cryptoPrivateStoreExtended
+      .getOrElse(
+        throw new RuntimeException(s"Crypto private store does not implement all necessary methods")
+      )
     def runStorage[A](op: EitherT[Future, _, A], description: String): A =
       timeouts.io
         .await(s"storing $description")(op.value)
@@ -146,7 +149,7 @@ object SymbolicCrypto extends LazyLogging {
       val sigPrivKey = SymbolicCrypto.signingPrivateKey(k)
       val sigPubKey = SymbolicCrypto.signingPublicKey(k)
       runStorage(
-        crypto.cryptoPrivateStore.storeSigningKey(sigPrivKey, None),
+        cryptoPrivateStore.storeSigningKey(sigPrivKey, None),
         s"private signing key for $k",
       )
       runStorage(
@@ -166,7 +169,7 @@ object SymbolicCrypto extends LazyLogging {
       val encPubKey = SymbolicCrypto.encryptionPublicKey(encKeyId)
 
       runStorage(
-        crypto.cryptoPrivateStore.storeSigningKey(sigPrivKey, None),
+        cryptoPrivateStore.storeSigningKey(sigPrivKey, None),
         s"private signing key for $k",
       )
       runStorage(
@@ -174,7 +177,7 @@ object SymbolicCrypto extends LazyLogging {
         s"public signign key for $k",
       )
       runStorage(
-        crypto.cryptoPrivateStore.storeDecryptionKey(encPrivKey, None),
+        cryptoPrivateStore.storeDecryptionKey(encPrivKey, None),
         s"decryption key for $k",
       )
       runStorage(

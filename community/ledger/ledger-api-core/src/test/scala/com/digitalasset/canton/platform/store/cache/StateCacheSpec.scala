@@ -26,6 +26,9 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
   private val className = classOf[StateCache[_, _]].getSimpleName
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+
+  // TODO(#13019) Avoid the global execution context
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override implicit def executionContext: ExecutionContext =
     scala.concurrent.ExecutionContext.global
 
@@ -198,6 +201,8 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
     }
   }
 
+  // TODO(#13019) Avoid the global execution context
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def buildStateCache(cacheSize: Long): StateCache[String, String] =
     StateCache[String, String](
       initialCacheIndex = Offset.beforeBegin,
@@ -235,6 +240,8 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
     stateCache.pendingUpdates shouldBe empty
   }
 
+  // TODO(#13019) Avoid the global execution context
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def insertTimed(stateCache: StateCache[String, String])(
       insertions: Seq[(String, (Promise[String], String))]
   ): (Seq[Future[Unit]], FiniteDuration) =

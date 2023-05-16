@@ -8,7 +8,11 @@ import cats.data.{Chain, EitherT}
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestValidation
+import com.digitalasset.canton.participant.protocol.CanSubmit
+import com.digitalasset.canton.participant.protocol.transfer.{
+  AdminPartiesAndParticipants,
+  TransferOutProcessorError,
+}
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
 import com.digitalasset.canton.protocol.*
@@ -87,21 +91,25 @@ private[routing] class DomainRankComputation(
     ): EitherT[Future, String, LfPartyId] = {
       submitters match {
         case Nil =>
-          EitherT.leftT(show"Cannot transfer contract ${contractId}: ${errAccum.mkString(",")}")
+          EitherT.leftT(show"Cannot transfer contract $contractId: ${errAccum.mkString(",")}")
         case submitter :: rest =>
-          TransferOutRequestValidation
-            .adminPartiesWithSubmitterCheck(
-              participantId,
-              contractId,
-              submitter,
-              contractStakeholders,
-              sourceSnapshot,
-              targetSnapshot,
-              logger,
-            )
+          val result =
+            for {
+              _ <- CanSubmit(contractId, sourceSnapshot, submitter, participantId)
+              adminParties <- AdminPartiesAndParticipants(
+                contractId,
+                submitter,
+                contractStakeholders,
+                sourceSnapshot,
+                targetSnapshot,
+                logger,
+              )
+            } yield adminParties
+          result
+            .onShutdown(Left(TransferOutProcessorError.AbortedDueToShutdownOut(contractId)))
             .biflatMap(
-              left => go(rest, errAccum :+ show"Submitter ${submitter} cannot transfer: $left"),
-              _canTransfer => EitherT.rightT(submitter),
+              left => go(rest, errAccum :+ show"Submitter $submitter cannot transfer: $left"),
+              _ => EitherT.rightT(submitter),
             )
       }
     }

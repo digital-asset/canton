@@ -74,12 +74,16 @@ trait UserManagementStore {
 
   // read helpers
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def getUser(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
       loggingContext: LoggingContext
   ): Future[Result[User]] = {
     getUserInfo(id, identityProviderId).map(_.map(_.user))(ExecutionContext.parasitic)
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def listUserRights(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
       loggingContext: LoggingContext
   ): Future[Result[Set[UserRight]]] = {

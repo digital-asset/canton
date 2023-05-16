@@ -80,7 +80,8 @@ class GrpcTopologyManagerWriteServiceX(
 
       case Type.Proposal(Proposal(op, serial, mapping)) =>
         val validatedMappingE = for {
-          serial <- ProtoConverter.parsePositiveInt(serial)
+          // we treat serial=0 as "serial was not set". negative values should be rejected by parsePositiveInt
+          serial <- Option.when(serial != 0)(serial).traverse(ProtoConverter.parsePositiveInt)
           op <- TopologyChangeOpX.fromProtoV2(op)
           mapping <- ProtoConverter.required("AuthorizeRequest.mapping", mapping)
           signingKeys <-
@@ -96,6 +97,8 @@ class GrpcTopologyManagerWriteServiceX(
               MediatorDomainStateX.fromProtoV2(mapping)
             case Mapping.SequencerDomainState(mapping) =>
               SequencerDomainStateX.fromProtoV2(mapping)
+            case Mapping.PartyToParticipant(mapping) =>
+              PartyToParticipantX.fromProtoV2(mapping)
             case _ =>
               // TODO(#11255): match missing cases
               ???
@@ -112,7 +115,7 @@ class GrpcTopologyManagerWriteServiceX(
             .proposeAndAuthorize(
               op,
               validatedMapping,
-              Some(serial),
+              serial,
               signingKeys,
               protocolVersion,
               expectFullAuthorization = request.mustFullyAuthorize,

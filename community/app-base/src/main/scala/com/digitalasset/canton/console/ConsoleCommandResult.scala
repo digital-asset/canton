@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.console
 
+import cats.Monad
 import cats.syntax.alternative.*
 import com.daml.error.{ErrorCategory, ErrorCode}
 import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
@@ -18,9 +19,39 @@ import scala.util.{Failure, Success, Try}
   */
 sealed trait ConsoleCommandResult[+A] {
   def toEither: Either[String, A]
+
+  def flatMap[B](f: A => ConsoleCommandResult[B]): ConsoleCommandResult[B] = this match {
+    case CommandSuccessful(a) => f(a)
+    case err: CommandError => err
+  }
+
+  def map[B](f: A => B): ConsoleCommandResult[B] = this match {
+    case CommandSuccessful(a) => CommandSuccessful(f(a))
+    case err: CommandError => err
+  }
 }
 
 object ConsoleCommandResult {
+
+  implicit val consoleCommandResultMonad: Monad[ConsoleCommandResult] =
+    new Monad[ConsoleCommandResult] {
+      override def flatMap[A, B](fa: ConsoleCommandResult[A])(
+          f: A => ConsoleCommandResult[B]
+      ): ConsoleCommandResult[B] = fa.flatMap(f)
+
+      override def tailRecM[A, B](
+          a: A
+      )(f: A => ConsoleCommandResult[Either[A, B]]): ConsoleCommandResult[B] = {
+        def go(ccr: ConsoleCommandResult[Either[A, B]]): ConsoleCommandResult[B] = ccr match {
+          case CommandSuccessful(Left(a)) => go(f(a))
+          case CommandSuccessful(Right(b)) => CommandSuccessful(b)
+          case err: CommandError => err
+        }
+        go(CommandSuccessful(Left(a)))
+      }
+
+      override def pure[A](x: A): ConsoleCommandResult[A] = CommandSuccessful(x)
+    }
 
   def fromEither[A](either: Either[String, A]): ConsoleCommandResult[A] =
     either match {

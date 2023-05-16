@@ -12,7 +12,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.topology.{DomainId, MediatorId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, SequencerId, UniqueIdentifier}
 
 final case class InitializeMediatorRequest(
     domainId: DomainId,
@@ -69,12 +69,14 @@ object InitializeMediatorRequest {
 final case class InitializeMediatorRequestX(
     domainId: DomainId,
     domainParameters: StaticDomainParameters,
+    sequencerId: SequencerId,
     sequencerConnection: SequencerConnection,
 ) {
   def toProtoV2: v2.InitializeMediatorRequest =
     v2.InitializeMediatorRequest(
       domainId.toProtoPrimitive,
       Some(domainParameters.toProtoV1),
+      sequencerId.toProtoPrimitive,
       Some(sequencerConnection.toProtoV0),
     )
 }
@@ -86,6 +88,7 @@ object InitializeMediatorRequestX {
     val v2.InitializeMediatorRequest(
       domainIdP,
       domainParametersP,
+      sequencerIdP,
       sequencerConnectionP,
     ) = requestP
     for {
@@ -93,6 +96,7 @@ object InitializeMediatorRequestX {
       domainParameters <- ProtoConverter
         .required("domain_parameters", domainParametersP)
         .flatMap(StaticDomainParameters.fromProtoV1)
+      sequencerId <- SequencerId.fromProtoPrimitive(sequencerIdP, "sequencer_id")
       sequencerConnection <- ProtoConverter.parseRequired(
         SequencerConnection.fromProtoV0,
         "sequencer_connection",
@@ -101,6 +105,7 @@ object InitializeMediatorRequestX {
     } yield InitializeMediatorRequestX(
       domainId,
       domainParameters,
+      sequencerId,
       sequencerConnection,
     )
   }

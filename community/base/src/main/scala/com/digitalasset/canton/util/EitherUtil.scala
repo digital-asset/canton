@@ -3,9 +3,13 @@
 
 package com.digitalasset.canton.util
 
+import cats.syntax.either.*
+
 import scala.concurrent.Future
 
 object EitherUtil {
+
+  def unit[A]: Either[A, Unit] = ().asRight[A]
 
   implicit class RichEither[L, R](val either: Either[L, R]) extends AnyVal {
 

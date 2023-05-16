@@ -55,6 +55,8 @@ class PersistentPartyRecordStore(
 
   private val logger = ContextualizedLogger.get(getClass)
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def createPartyRecord(partyRecord: PartyRecord)(implicit
       loggingContext: LoggingContext
   ): Future[Result[PartyRecord]] = {
@@ -263,6 +265,8 @@ class PersistentPartyRecordStore(
     }
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def inTransaction[T](
       dbMetric: metrics.daml.partyRecordStore.type => DatabaseMetrics
   )(thunk: Connection => Result[T])(implicit loggingContext: LoggingContext): Future[Result[T]] = {

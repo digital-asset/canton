@@ -51,6 +51,10 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
 }
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
+import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.{
+  ErrorWithInternalConsistencyCheck,
+  alertingPartyLookup,
+}
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.protocol.validation.*
 import com.digitalasset.canton.participant.store.*
@@ -105,6 +109,7 @@ class TransactionProcessingSteps(
     serializableContractAuthenticator: SerializableContractAuthenticator,
     authenticationValidator: AuthenticationValidator,
     authorizationValidator: AuthorizationValidator,
+    internalConsistencyChecker: InternalConsistencyChecker,
     protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit val ec: ExecutionContext)
@@ -837,11 +842,23 @@ class TransactionProcessingSteps(
           )
           .value
 
+        globalKeyHostedParties <- InternalConsistencyChecker.hostedGlobalKeyParties(
+          rootViews,
+          participantId,
+          snapshot.ipsSnapshot,
+        )
+
+        internalConsistencyResultE = internalConsistencyChecker.check(
+          rootViews,
+          alertingPartyLookup(globalKeyHostedParties),
+        )
+
       } yield ParallelChecksResult(
         authenticationResult,
         consistencyResultE,
         authorizationResult,
         conformanceResultE,
+        internalConsistencyResultE,
         timeValidationE,
       )
     }
@@ -946,6 +963,7 @@ class TransactionProcessingSteps(
         authenticationResult = parallelChecksResult.authenticationResult,
         authorizationResult = parallelChecksResult.authorizationResult,
         modelConformanceResultE = parallelChecksResult.conformanceResultE,
+        internalConsistencyResultE = parallelChecksResult.internalConsistencyResultE,
         consumedInputsOfHostedParties =
           enrichedTransaction.rootViewsWithUsedAndCreated.contracts.consumedInputsOfHostedStakeholders,
         witnessedAndDivulged =
@@ -1078,6 +1096,7 @@ class TransactionProcessingSteps(
       _,
       _,
       _,
+      _,
       requestTime,
       requestCounter,
       requestSequencerCounter,
@@ -1171,6 +1190,7 @@ class TransactionProcessingSteps(
       authenticationResult,
       authorizationResult,
       modelConformanceResultE,
+      internalConsistencyResultE,
       consumedInputsOfHostedParties,
       witnessedAndDivulged,
       createdContracts,
@@ -1190,6 +1210,7 @@ class TransactionProcessingSteps(
     validation.PendingTransaction(
       transactionId,
       modelConformanceResultE,
+      internalConsistencyResultE,
       workflowIdO,
       id.unwrap,
       rc,
@@ -1404,6 +1425,7 @@ object TransactionProcessingSteps {
         ModelConformanceChecker.ErrorWithSubviewsCheck,
         ModelConformanceChecker.Result,
       ],
+      internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit],
       timeValidationResultE: Either[TimeCheckFailure, Unit],
   )
 

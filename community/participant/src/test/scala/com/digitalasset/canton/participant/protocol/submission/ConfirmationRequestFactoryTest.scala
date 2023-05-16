@@ -91,7 +91,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
 
   val privateCryptoApi: DomainSnapshotSyncCryptoApi =
     TestingTopology()
-      .withParticipants(submitterParticipant)
+      .withSimpleParticipants(submitterParticipant)
       .build()
       .forOwnerAndDomain(submitterParticipant, domain)
       .currentSnapshotApproximation

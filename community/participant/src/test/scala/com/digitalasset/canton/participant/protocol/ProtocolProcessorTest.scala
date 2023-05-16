@@ -58,11 +58,7 @@ import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.{
-  ParticipantAttributes,
-  ParticipantPermission,
-  TrustLevel,
-}
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
@@ -83,7 +79,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     Set(domain),
     Map(
       party.toLf -> Map(
-        participant -> ParticipantAttributes(ParticipantPermission.Submission, TrustLevel.Ordinary)
+        participant -> ParticipantPermission.Submission
       )
     ),
   )

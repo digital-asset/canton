@@ -63,9 +63,9 @@ class FlywayMigrations(
     logger.info("Flyway schema validation finished successfully.")
   }
 
-  def migrate(allowExistingSchema: Boolean = false): Future[Unit] = run { configBase =>
+  def migrate(): Future[Unit] = run { configBase =>
     val flyway = configBase
-      .baselineOnMigrate(allowExistingSchema)
+      .baselineOnMigrate(false)
       .baselineVersion(MigrationVersion.fromVersion("0"))
       .ignoreMigrationPatterns("") // disables the default ignoring "*:future" migrations
       .load()

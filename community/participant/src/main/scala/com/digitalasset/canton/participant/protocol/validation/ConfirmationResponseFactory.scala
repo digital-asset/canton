@@ -200,6 +200,17 @@ class ConfirmationResponseFactory(
                 )
               )
 
+            // Rejections due to a failed internal consistency check
+            val internalConsistencyRejections =
+              transactionValidationResult.internalConsistencyResultE.swap.toOption.map(cause =>
+                logged(
+                  requestId,
+                  LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)(
+                    verdictProtocolVersion
+                  ),
+                )
+              )
+
             // Rejections due to a failed authentication check
             val authenticationRejections =
               transactionValidationResult.authenticationResult
@@ -252,7 +263,8 @@ class ConfirmationResponseFactory(
 
             val localVerdicts: Seq[LocalVerdict] =
               consistencyVerdicts.toList ++ timeValidationRejections ++
-                authenticationRejections ++ authorizationRejections ++ modelConformanceRejections
+                authenticationRejections ++ authorizationRejections ++
+                modelConformanceRejections ++ internalConsistencyRejections
 
             val localVerdictAndPartiesO = localVerdicts
               .collectFirst[(LocalVerdict, Set[LfPartyId])] {

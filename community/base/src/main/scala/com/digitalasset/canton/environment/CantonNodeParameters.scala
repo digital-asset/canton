@@ -28,6 +28,7 @@ object CantonNodeParameters {
     def sequencerClient: SequencerClientConfig
     def cachingConfigs: CachingConfigs
     def nonStandardConfig: Boolean
+    def dbMigrateAndStart: Boolean
   }
   object General {
     final case class Impl(
@@ -41,6 +42,7 @@ object CantonNodeParameters {
         sequencerClient: SequencerClientConfig,
         cachingConfigs: CachingConfigs,
         nonStandardConfig: Boolean,
+        dbMigrateAndStart: Boolean,
     ) extends CantonNodeParameters.General
   }
   trait Protocol {
@@ -63,16 +65,18 @@ trait HasGeneralCantonNodeParameters extends CantonNodeParameters.General {
 
   protected def general: CantonNodeParameters.General
 
-  def tracing: TracingConfig = general.tracing
-  def delayLoggingThreshold: NonNegativeFiniteDuration = general.delayLoggingThreshold
-  def logQueryCost: Option[QueryCostMonitoringConfig] = general.logQueryCost
-  def loggingConfig: LoggingConfig = general.loggingConfig
-  def enableAdditionalConsistencyChecks: Boolean = general.enableAdditionalConsistencyChecks
-  def enablePreviewFeatures: Boolean = general.enablePreviewFeatures
-  def processingTimeouts: ProcessingTimeout = general.processingTimeouts
-  def sequencerClient: SequencerClientConfig = general.sequencerClient
-  def cachingConfigs: CachingConfigs = general.cachingConfigs
-  def nonStandardConfig: Boolean = general.nonStandardConfig
+  override def tracing: TracingConfig = general.tracing
+  override def delayLoggingThreshold: NonNegativeFiniteDuration = general.delayLoggingThreshold
+  override def logQueryCost: Option[QueryCostMonitoringConfig] = general.logQueryCost
+  override def loggingConfig: LoggingConfig = general.loggingConfig
+  override def enableAdditionalConsistencyChecks: Boolean =
+    general.enableAdditionalConsistencyChecks
+  override def enablePreviewFeatures: Boolean = general.enablePreviewFeatures
+  override def processingTimeouts: ProcessingTimeout = general.processingTimeouts
+  override def sequencerClient: SequencerClientConfig = general.sequencerClient
+  override def cachingConfigs: CachingConfigs = general.cachingConfigs
+  override def nonStandardConfig: Boolean = general.nonStandardConfig
+  override def dbMigrateAndStart: Boolean = general.dbMigrateAndStart
 }
 
 trait HasProtocolCantonNodeParameters extends CantonNodeParameters.Protocol {

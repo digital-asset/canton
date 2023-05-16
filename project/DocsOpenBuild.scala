@@ -49,20 +49,21 @@ object DocsOpenBuild {
       val source = sourceDirectory.value / "sphinx"
       val target = sourceDirectory.value / "preprocessed-sphinx"
       val assemblyTarget = sourceDirectory.value / "preprocessed-sphinx-assembly"
+      val snippetJsonSource = targetDirectory.value / "pre"
+      val snippetJsonTarget = target / "includes" / "snippet_data"
 
       IO.delete(target)
       IO.delete(assemblyTarget)
       IO.copyDirectory(source, target)
+      IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
       IO.createDirectory(assemblyTarget)
 
       log.info(
         "[generateRst][preprocessing:step 1] Replacing custom `.. snippet::` directives with RST code blocks ..."
       )
 
-      val snippetScriptPath =
-        resourceDirectory.value / "snippet_processing.py"
-      val jsonSourceRootDir = targetDirectory.value / "pre"
-      runCommand(s"python $snippetScriptPath $jsonSourceRootDir $target", log)
+      val snippetScriptPath = resourceDirectory.value / "snippet_directive.py"
+      runCommand(s"python $snippetScriptPath $snippetJsonTarget $target", log)
     }
   }
 

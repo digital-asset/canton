@@ -90,7 +90,10 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val domainId = DefaultTestIdentities.domainId
   private val sequencerId = DefaultTestIdentities.sequencerId
   private val cryptoApi =
-    TestingTopology().withParticipants(participant).build().forOwnerAndDomain(participant, domainId)
+    TestingTopology()
+      .withSimpleParticipants(participant)
+      .build()
+      .forOwnerAndDomain(participant, domainId)
   private val clock = new SimClock(loggerFactory = loggerFactory)
   private val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
   def timeouts = DefaultProcessingTimeouts.testing

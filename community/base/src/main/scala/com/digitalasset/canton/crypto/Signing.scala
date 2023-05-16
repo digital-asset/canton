@@ -8,8 +8,8 @@ import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.store.{
-  CryptoPrivateStore,
   CryptoPrivateStoreError,
+  CryptoPrivateStoreExtended,
   CryptoPublicStoreError,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -73,16 +73,13 @@ trait SigningPrivateOps {
   ): EitherT[Future, SigningError, Signature]
 
   /** Generates a new signing key pair with the given scheme and optional name, stores the private key and returns the public key. */
-  protected[crypto] def generateSigningKey(
+  def generateSigningKey(
       scheme: SigningKeyScheme = defaultSigningKeyScheme,
       name: Option[KeyName] = None,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningPublicKey]
 
-  protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair]
 }
 
 /** A default implementation with a private key store */
@@ -90,11 +87,11 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
 
   implicit val ec: ExecutionContext
 
-  protected val store: CryptoPrivateStore
+  protected val store: CryptoPrivateStoreExtended
 
   protected val signingOps: SigningOps
 
-  override protected[crypto] def sign(
+  protected[crypto] def sign(
       bytes: ByteString,
       signingKeyId: Fingerprint,
   ): EitherT[Future, SigningError, Signature] =
@@ -104,7 +101,11 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
       .subflatMap(_.toRight(SigningError.UnknownSigningKey(signingKeyId)))
       .subflatMap(signingKey => signingOps.sign(bytes, signingKey))
 
-  override protected[crypto] def generateSigningKey(
+  protected[crypto] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair]
+
+  def generateSigningKey(
       scheme: SigningKeyScheme,
       name: Option[KeyName],
   )(implicit

@@ -190,6 +190,8 @@ object InMemoryStateUpdaterSpec {
     val cachesUpdateCaptor =
       (v: PrepareResult) => cacheUpdates.addOne(v).pipe(_ => ())
 
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val inMemoryStateUpdater = InMemoryStateUpdaterFlow(
       2,
       scala.concurrent.ExecutionContext.global,
@@ -233,6 +235,8 @@ object InMemoryStateUpdaterSpec {
 
     when(dispatcherState.getDispatcher).thenReturn(dispatcher)
 
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val inMemoryState = new InMemoryState(
       ledgerEndCache = ledgerEndCache,
       contractStateCaches = contractStateCaches,

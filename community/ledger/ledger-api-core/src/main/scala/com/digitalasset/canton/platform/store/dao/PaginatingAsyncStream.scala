@@ -31,6 +31,8 @@ private[platform] object PaginatingAsyncStream {
     * @param queryPage takes the offset from which to start the next page and returns that page
     * @tparam T the type of the items returned in each call
     */
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def streamFromLimitOffsetPagination[T](
       pageSize: Int
   )(queryPage: Long => Future[Vector[T]]): Source[T, NotUsed] = {
@@ -65,6 +67,8 @@ private[platform] object PaginatingAsyncStream {
     * @tparam Off the type of the offset
     * @tparam T   the type of the items returned in each call
     */
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def streamFromSeekPagination[Off, T](startFromOffset: Off, getOffset: T => Off)(
       query: Off => Future[Vector[T]]
   ): Source[T, NotUsed] = {
@@ -83,6 +87,8 @@ private[platform] object PaginatingAsyncStream {
 
   final case class IdPaginationState(fromIdExclusive: Long, pageSize: Int)
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def streamIdsFromSeekPagination(
       idPageSizing: IdPageSizing,
       idPageBufferSize: Int,

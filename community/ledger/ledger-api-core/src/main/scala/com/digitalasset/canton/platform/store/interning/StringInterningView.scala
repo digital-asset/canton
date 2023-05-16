@@ -103,6 +103,8 @@ class StringInterningView()
       newEntries
     })
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def update(lastStringInterningId: Int)(
       loadStringInterningEntries: LoadStringInterningEntries
   )(implicit loggingContext: LoggingContext): Future[Unit] =

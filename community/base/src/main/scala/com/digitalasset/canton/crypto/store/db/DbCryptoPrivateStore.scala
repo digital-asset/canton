@@ -65,7 +65,7 @@ class DbCryptoPrivateStore(
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override implicit val ec: ExecutionContext)
-    extends CryptoPrivateStore
+    extends CryptoPrivateStoreExtended
     with DbStore {
 
   import storage.api.*

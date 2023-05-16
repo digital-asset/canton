@@ -2,7 +2,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- architecture-handbook-entry-begin: IouDaml
-
 module Iou where
 
 import Daml.Script
@@ -43,7 +42,6 @@ template Iou
       controller owner
         do
           create this with viewers = (viewer :: viewers)
-
 -- architecture-handbook-entry-end: IouDaml
 
 template GetCash

@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.crypto.store.db
 
-import com.digitalasset.canton.crypto.store.CryptoPrivateStoreTest
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtendedTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
 
-trait DbCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateStoreTest {
+trait DbCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateStoreExtendedTest {
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
@@ -27,7 +27,7 @@ trait DbCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateStoreTest
   }
 
   "DbCryptoPrivateStore" can {
-    behave like cryptoPrivateStore(
+    behave like cryptoPrivateStoreExtended(
       new DbCryptoPrivateStore(storage, testedReleaseProtocolVersion, timeouts, loggerFactory),
       encrypted = false,
     )

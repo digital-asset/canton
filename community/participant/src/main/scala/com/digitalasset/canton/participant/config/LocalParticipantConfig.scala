@@ -215,7 +215,6 @@ final case class RemoteParticipantConfig(
   * @param maxContractKeyStateCacheSize    maximum caffeine cache size of mutable state cache of contract keys
   * @param maxInboundMessageSize maximum inbound message size on the ledger api
   * @param databaseConnectionTimeout database connection timeout
-  * @param enableInMemoryFanOutForLedgerApi enable the "in-memory fan-out" performance optimization (default false; not tested for production yet)
   * @param maxTransactionsInMemoryFanOutBufferSize maximum number of transactions to hold in the "in-memory fanout" (if enabled)
   * @param additionalMigrationPaths Optional extra paths for the database migrations
   * @param inMemoryStateUpdaterParallelism The processing parallelism of the Ledger API server in-memory state updater
@@ -259,7 +258,6 @@ final case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultApiStreamShutdownTimeout,
     maxTransactionsInMemoryFanOutBufferSize: Int =
       LedgerApiServerConfig.DefaultMaxTransactionsInMemoryFanOutBufferSize,
-    enableInMemoryFanOutForLedgerApi: Boolean = false, // Not tested for production yet
     additionalMigrationPaths: Seq[String] = Seq.empty,
     inMemoryStateUpdaterParallelism: Int =
       LedgerApiServerConfig.DefaultInMemoryStateUpdaterParallelism,
@@ -809,7 +807,7 @@ final case class IndexerConfig(
   ): DamlIndexerConfig = this
     .into[DamlIndexerConfig]
     .disableDefaultValues
-    .withFieldConst(_.startupMode, IndexerStartupMode.MigrateAndStart(false))
+    .withFieldConst(_.startupMode, IndexerStartupMode.MigrateAndStart)
     .withFieldConst(
       _.highAvailability,
       indexerLockIds.fold(HaConfig()) { case IndexerLockIds(mainLockId, workerLockId) =>
@@ -851,7 +849,7 @@ object IndexerConfig {
 
     val (schemaMigrationAttempts, schemaMigrationAttemptBackoff) = (startupMode match {
       case IndexerStartupMode.ValidateAndStart => None
-      case IndexerStartupMode.MigrateAndStart(_) => None
+      case IndexerStartupMode.MigrateAndStart => None
       case IndexerStartupMode.ValidateAndWaitOnly(
             schemaMigrationAttempts,
             schemaMigrationAttemptBackoff,

@@ -23,6 +23,8 @@ class ContractStoreBasedMaximumLedgerTimeService(contractStore: ContractStore)
   override def lookupMaximumLedgerTimeAfterInterpretation(
       ids: Set[Value.ContractId]
   )(implicit loggingContext: LoggingContext): Future[MaximumLedgerTime] = {
+    // TODO(#13019) Replace parasitic with DirectExecutionContext
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     def goAsync(
         maximumLedgerTime: Option[Timestamp],
         contractIds: List[ContractId],

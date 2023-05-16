@@ -262,6 +262,7 @@ class ParticipantTopologyDispatcher(
           val outbox = new DomainOutbox(
             domain,
             domainId,
+            participantId,
             protocolVersion,
             handle,
             client,
@@ -483,6 +484,7 @@ class ParticipantTopologyDispatcherX(
             val outbox = new DomainOutboxX(
               domain,
               domainId,
+              participantId,
               protocolVersion,
               handle,
               client,
@@ -510,6 +512,7 @@ class ParticipantTopologyDispatcherX(
 private class DomainOutbox(
     domain: DomainAlias,
     domainId: DomainId,
+    participantId: ParticipantId,
     protocolVersion: ProtocolVersion,
     val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction],
     targetClient: DomainTopologyClientWithInit,
@@ -528,6 +531,7 @@ private class DomainOutbox(
     ](
       domain,
       domainId,
+      participantId,
       protocolVersion,
       targetClient,
       timeouts,
@@ -570,6 +574,7 @@ private class DomainOutbox(
 private class DomainOutboxX(
     domain: DomainAlias,
     domainId: DomainId,
+    participantId: ParticipantId,
     protocolVersion: ProtocolVersion,
     val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransactionX],
     targetClient: DomainTopologyClientWithInit,
@@ -587,6 +592,7 @@ private class DomainOutboxX(
     ](
       domain,
       domainId,
+      participantId,
       protocolVersion,
       targetClient,
       timeouts,
@@ -628,6 +634,7 @@ private abstract class DomainOutboxCommon[
 ](
     domain: DomainAlias,
     val domainId: DomainId,
+    val participantId: ParticipantId,
     val protocolVersion: ProtocolVersion,
     val targetClient: DomainTopologyClientWithInit,
     override protected val timeouts: ProcessingTimeout,
@@ -908,7 +915,7 @@ private class DomainOnboardingOutbox(
     domain: DomainAlias,
     val domainId: DomainId,
     val protocolVersion: ProtocolVersion,
-    participantId: ParticipantId,
+    val participantId: ParticipantId,
     val handle: RegisterTopologyTransactionHandleCommon[GenericSignedTopologyTransaction],
     val authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStore[TopologyStoreId.DomainStore],
@@ -1035,7 +1042,7 @@ private class DomainOnboardingOutboxX(
     domain: DomainAlias,
     val domainId: DomainId,
     val protocolVersion: ProtocolVersion,
-    participantId: ParticipantId,
+    val participantId: ParticipantId,
     val handle: RegisterTopologyTransactionHandleWithProcessor[GenericSignedTopologyTransactionX],
     val authorizedStore: TopologyStoreX[TopologyStoreId.AuthorizedStore],
     val targetStore: TopologyStoreX[TopologyStoreId.DomainStore],
@@ -1154,6 +1161,7 @@ object DomainOnboardingOutboxX {
 
 private sealed trait DomainOutboxDispatchStoreSpecific[TX] extends NamedLogging {
   protected def domainId: DomainId
+  protected def participantId: ParticipantId
   protected def protocolVersion: ProtocolVersion
   protected def crypto: Crypto
 
@@ -1256,9 +1264,12 @@ private sealed trait DomainOutboxDispatchHelperX
   ): Future[Seq[GenericSignedTopologyTransactionX]] = {
     def notAlien(tx: GenericSignedTopologyTransactionX): Boolean = {
       val mapping = tx.transaction.mapping
+      val pid = participantId
+      val did = domainId
       mapping match {
-        case OwnerToKeyMappingX(_: ParticipantId, _, _) => true
+        case OwnerToKeyMappingX(`pid`, _, _) => true
         case OwnerToKeyMappingX(owner, _, _) => owner.uid == domainId.unwrap
+        case DomainTrustCertificateX(`pid`, `did`, _, _) => true
         case _ => true
       }
     }

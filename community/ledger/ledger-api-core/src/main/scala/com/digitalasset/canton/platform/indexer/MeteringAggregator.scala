@@ -88,6 +88,8 @@ class MeteringAggregator(
     clock: () => Timestamp = () => Timestamp.now(),
 )(implicit loggingContext: LoggingContext) {
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private val parasitic: ExecutionContext = ExecutionContext.parasitic
 
   private val logger = ContextualizedLogger.get(getClass)

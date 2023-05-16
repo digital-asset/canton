@@ -34,8 +34,11 @@ trait JavaKeyConverterTest extends BaseTest { this: AsyncWordSpec =>
         for {
           crypto <- newCrypto
           publicKey <- newPublicKey(crypto)
+          // TODO(#12799): move this test to avoid conflict with KMS crypto provider
+          cryptoPrivateStore = crypto.cryptoPrivateStoreExtended
+            .valueOrFail("crypto private store does not implement all necessary methods")
           privateKey <- valueOrFail(
-            crypto.cryptoPrivateStore
+            cryptoPrivateStore
               .exportPrivateKey(publicKey.id)
               .leftMap(_.toString)
               .subflatMap(_.toRight("No private key found"))
@@ -82,7 +85,9 @@ trait JavaKeyConverterTest extends BaseTest { this: AsyncWordSpec =>
             keyStorePass = Password("foobar")
             generator = certificateGenerator(crypto)
             publicKey1 <- newSigningPublicKey(crypto)
-            privateKey1 <- crypto.cryptoPrivateStore
+            cryptoPrivateStore = crypto.cryptoPrivateStoreExtended
+              .valueOrFail("crypto private store does not implement all necessary methods")
+            privateKey1 <- cryptoPrivateStore
               .signingKey(publicKey1.id)
               .valueOrFail("failed to get private key")
               .map(_.valueOrFail("private key not found"))
@@ -95,7 +100,7 @@ trait JavaKeyConverterTest extends BaseTest { this: AsyncWordSpec =>
             cert2 <- generator.generate("bar", publicKey2.id).valueOrFail("generate cert")
             _ <- crypto.cryptoPublicStore.storeCertificate(cert2).valueOrFail("store cert")
             keyStore <- crypto.javaKeyConverter
-              .toJava(crypto.cryptoPrivateStore, crypto.cryptoPublicStore, keyStorePass)
+              .toJava(cryptoPrivateStore, crypto.cryptoPublicStore, keyStorePass)
               .valueOrFail("convert to java")
           } yield {
             val cert1Id = cert1.id.unwrap

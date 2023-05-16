@@ -32,10 +32,10 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
 
-    final case class ImplementMe()(implicit
+    final case class ImplementMe(msg: String = "")(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = "TODO(#11255) implement me"
+          cause = "TODO(#11255) implement me" + (if (msg.nonEmpty) s": $msg" else "")
         )
         with TopologyManagerError
 

@@ -602,6 +602,7 @@ class SequencerClientImpl(
     val eventHandler = ThrottlingApplicationEventHandler.throttle(
       config.maximumInFlightEventBatches,
       nonThrottledEventHandler,
+      metrics,
     )
     val subscriptionF = performUnlessClosingUSF(functionFullName) {
       for {

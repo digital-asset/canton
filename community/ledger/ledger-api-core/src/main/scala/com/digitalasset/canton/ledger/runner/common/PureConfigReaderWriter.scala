@@ -316,11 +316,8 @@ class PureConfigReaderWriter(secure: Boolean = true) {
       : ConfigConvert[IndexerStartupMode.MigrateOnEmptySchemaAndStart.type] =
     deriveConvert[IndexerStartupMode.MigrateOnEmptySchemaAndStart.type]
 
-  implicit val migrateAndStartConvertHint =
-    ProductHint[IndexerStartupMode.MigrateAndStart](allowUnknownKeys = false)
-
-  implicit val migrateAndStartConvert: ConfigConvert[IndexerStartupMode.MigrateAndStart] =
-    deriveConvert[IndexerStartupMode.MigrateAndStart]
+  implicit val migrateAndStartConvert: ConfigConvert[IndexerStartupMode.MigrateAndStart.type] =
+    deriveConvert[IndexerStartupMode.MigrateAndStart.type]
 
   implicit val validateAndWaitOnlyHint =
     ProductHint[IndexerStartupMode.ValidateAndWaitOnly](allowUnknownKeys = false)

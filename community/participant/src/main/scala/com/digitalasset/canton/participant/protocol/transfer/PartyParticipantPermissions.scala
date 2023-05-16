@@ -3,33 +3,34 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
+import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.protocol.transfer.PartyParticipantPermissions.PartyParticipants
-import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Disabled,
   Observation,
   Submission,
 }
-import com.digitalasset.canton.util.FutureInstances.*
 
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
-private[transfer] final case class PartyParticipantPermissions(
-    // partyId -> (permission on source domain, permission on target domain)
-    permissions: Map[LfPartyId, (PartyParticipants, PartyParticipants)],
-    sourceTs: CantonTimestamp,
-    targetTs: CantonTimestamp,
+private final case class PartyParticipantPermissions(
+    perParty: List[PartyParticipantPermissions.PerParty],
+    validityAtSource: CantonTimestamp,
+    validityAtTarget: CantonTimestamp,
 )
 
-private[transfer] object PartyParticipantPermissions {
-  final case class PartyParticipants(
+private object PartyParticipantPermissions {
+
+  final case class PerParty(party: LfPartyId, source: Permissions, target: Permissions)
+
+  final case class Permissions(
       submission: Set[ParticipantId],
       confirmation: Set[ParticipantId],
       other: Set[ParticipantId],
@@ -56,50 +57,59 @@ private[transfer] object PartyParticipantPermissions {
 
   def apply(
       stakeholders: Set[LfPartyId],
-      sourceIps: TopologySnapshot,
-      targetIps: TopologySnapshot,
-  )(implicit ec: ExecutionContext): Future[PartyParticipantPermissions] = {
-    val permissions = stakeholders.toList
-      .parTraverse { stakeholder =>
-        val sourceF = partyParticipants(sourceIps, stakeholder)
-        val targetF = partyParticipants(targetIps, stakeholder)
-        for {
-          source <- sourceF
-          target <- targetF
-        } yield (stakeholder, (source, target))
-      }
-      .map(_.toMap)
+      sourceTopology: TopologySnapshot,
+      targetTopology: TopologySnapshot,
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, Nothing, PartyParticipantPermissions] =
+    EitherT.right(
+      stakeholders.toList
+        .parTraverse(partyParticipants(sourceTopology, targetTopology))
+        .map(
+          PartyParticipantPermissions(_, sourceTopology.timestamp, targetTopology.timestamp)
+        )
+    )
 
-    permissions.map(PartyParticipantPermissions(_, sourceIps.timestamp, targetIps.timestamp))
+  private def partyParticipants(
+      sourceTopology: TopologySnapshot,
+      targetTopology: TopologySnapshot,
+  )(
+      stakeholder: LfPartyId
+  )(implicit ec: ExecutionContext): FutureUnlessShutdown[PerParty] = {
+    val sourceF = partyParticipants(sourceTopology, stakeholder)
+    val targetF = partyParticipants(targetTopology, stakeholder)
+    for {
+      source <- sourceF
+      target <- targetF
+    } yield PerParty(stakeholder, source, target)
   }
 
-  private def partyParticipants(ips: TopologySnapshot, party: LfPartyId)(implicit
+  private def partyParticipants(topology: TopologySnapshot, party: LfPartyId)(implicit
       ec: ExecutionContext
-  ): Future[PartyParticipants] = {
+  ): FutureUnlessShutdown[Permissions] = {
 
     val submission = mutable.Set.newBuilder[ParticipantId]
     val confirmation = mutable.Set.newBuilder[ParticipantId]
     val other = mutable.Set.newBuilder[ParticipantId]
 
-    ips.activeParticipantsOf(party).map { partyParticipants =>
-      partyParticipants.foreach {
-        case (participantId, ParticipantAttributes(permission, _trustLevel)) =>
-          permission match {
-            case Submission => submission += participantId
-            case Confirmation => confirmation += participantId
-            case Observation => other += participantId
-            case Disabled =>
-              throw new IllegalStateException(
-                s"activeParticipantsOf($party) returned a disabled participant $participantId"
-              )
-          }
+    FutureUnlessShutdown.outcomeF(topology.activeParticipantsOf(party).map { partyParticipants =>
+      partyParticipants.foreach { case (participantId, attributes) =>
+        attributes.permission match {
+          case Submission => submission += participantId
+          case Confirmation => confirmation += participantId
+          case Observation => other += participantId
+          case Disabled =>
+            throw new IllegalStateException(
+              s"activeParticipantsOf($party) returned a disabled participant $participantId"
+            )
+        }
       }
-      PartyParticipants(
+      Permissions(
         submission.result().toSet,
         confirmation.result().toSet,
         other.result().toSet,
       )
-    }
+    })
 
   }
 }

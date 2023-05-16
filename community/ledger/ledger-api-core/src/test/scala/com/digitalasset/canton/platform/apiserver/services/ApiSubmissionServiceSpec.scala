@@ -52,6 +52,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 
+// TODO(#13019) Avoid the global execution context
+@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 class ApiSubmissionServiceSpec
     extends AnyFlatSpec
     with Matchers

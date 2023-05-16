@@ -103,7 +103,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     .withReversedTopology(
       Map(submitterParticipant -> Map(party1 -> ParticipantPermission.Submission))
     )
-    .withParticipants(participant) // required such that `participant` gets a signing key
+    .withSimpleParticipants(participant) // required such that `participant` gets a signing key
     .build(loggerFactory)
 
   private val cryptoSnapshot =

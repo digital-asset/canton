@@ -52,6 +52,8 @@ object StaticTime {
     }
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def updatedVia(
       timeService: TimeServiceStub,
       ledgerId: String,

@@ -131,6 +131,7 @@ object PartyMetadataStore {
 sealed trait TopologyStoreId {
   def filterName: String = dbString.unwrap
   def dbString: LengthLimitedString
+  def dbStringWithDaml2xUniquifier(uniquifier: String): LengthLimitedString
 }
 
 object TopologyStoreId {
@@ -138,17 +139,40 @@ object TopologyStoreId {
   /** A topology store storing sequenced topology transactions
     *
     * @param domainId the domain id of the store
-    * @param discriminator the discriminator of the store. only used for embedded mediator topology stores
+    * @param discriminator the discriminator of the store. used for mediator request store
+    *                      or in daml 2.x for embedded mediator topology stores
     */
   final case class DomainStore(domainId: DomainId, discriminator: String = "")
       extends TopologyStoreId {
-    lazy val dbString: LengthLimitedString = domainId.toLengthLimitedString
+    private val dbStringWithoutDiscriminator = domainId.toLengthLimitedString
+    val dbString: LengthLimitedString = {
+      if (discriminator.isEmpty) dbStringWithoutDiscriminator
+      else
+        LengthLimitedString
+          .tryCreate(discriminator + "::", discriminator.length + 2)
+          .tryConcatenate(dbStringWithoutDiscriminator)
+    }
+
+    // The reason for this somewhat awkward method is backward compat with uniquifier inserted in the middle of
+    // discriminator and domain id. Can be removed once fully on daml 3.0:
+    override def dbStringWithDaml2xUniquifier(uniquifier: String): LengthLimitedString = {
+      require(uniquifier.nonEmpty)
+      LengthLimitedString
+        .tryCreate(discriminator + uniquifier + "::", discriminator.length + uniquifier.length + 2)
+        .tryConcatenate(dbStringWithoutDiscriminator)
+    }
   }
 
   // authorized transactions (the topology managers store)
   type AuthorizedStore = AuthorizedStore.type
   object AuthorizedStore extends TopologyStoreId {
     val dbString = String255.tryCreate("Authorized")
+    override def dbStringWithDaml2xUniquifier(uniquifier: String): LengthLimitedString = {
+      require(uniquifier.nonEmpty)
+      LengthLimitedString
+        .tryCreate(uniquifier + "::", uniquifier.length + 2)
+        .tryConcatenate(dbString)
+    }
   }
 
   def apply(fName: String): TopologyStoreId = fName match {
@@ -173,6 +197,14 @@ object TopologyStoreId {
   ): Option[TopologyStore[StoreId]] = if (checker.isOfType(store.storeId))
     Some(store.asInstanceOf[TopologyStore[StoreId]])
   else None
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def selectX[StoreId <: TopologyStoreId](store: TopologyStoreX[TopologyStoreId])(implicit
+      checker: IdTypeChecker[StoreId]
+  ): Option[TopologyStoreX[StoreId]] = if (checker.isOfType(store.storeId))
+    Some(store.asInstanceOf[TopologyStoreX[StoreId]])
+  else None
+
 }
 
 sealed trait TopologyTransactionRejection extends PrettyPrinting {

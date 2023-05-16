@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.metrics
 
-import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
+import com.daml.metrics.api.MetricDoc.MetricQualification.{Debug, Saturation}
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Timer}
 import com.daml.metrics.api.{MetricDoc, MetricName, MetricsContext}
 import com.digitalasset.canton.metrics.MetricHandle.MetricsFactory
@@ -59,6 +59,49 @@ class SequencerClientMetrics(
     qualification = Debug,
   )
   val delay: Gauge[Long] = metricsFactory.gauge(prefix :+ "delay", 0L)(MetricsContext.Empty)
+
+  object handler {
+    val prefix: MetricName = SequencerClientMetrics.this.prefix :+ "handler"
+
+    @MetricDoc.Tag(
+      summary =
+        "Nodes process the events from the domain's sequencer in batches. This metric tracks how many such batches are processed in parallel.",
+      description = """Incoming messages are processed by a sequencer client, which combines them into batches of
+          |size up to 'event-inbox-size' before sending them to an application handler for processing. Depending on the
+          |system's configuration, the rate at which event batches are sent to the handler may be throttled to avoid
+          |overwhelming it with too many events at once.
+          |
+          |Indicators that the configured upper bound may be too low:
+          |This metric constantly is closed to the configured maximum, which is exposed via 'max-in-flight-event-batches',
+          |while the system's resources are under-utilized.
+          |Indicators that the configured upper bound may be too high:
+          |Out-of-memory errors crashing the JVM or frequent garbage collection cycles that slow down processing.
+          |
+          |The metric tracks how many of these batches have been sent to the application handler but have not yet
+          |been fully processed. This metric can help identify potential bottlenecks or issues with the application's
+          |processing of events and provide insights into the overall workload of the system.""",
+      qualification = Saturation,
+    )
+    val actualInFlightEventBatches: Counter =
+      metricsFactory.counter(prefix :+ "actual-in-flight-event-batches")
+
+    @MetricDoc.Tag(
+      summary =
+        "Nodes process the events from the domain's sequencer in batches. This metric tracks the upper bound of such batches being processed in parallel.",
+      description = """Incoming messages are processed by a sequencer client, which combines them into batches of
+          |size up to 'event-inbox-size' before sending them to an application handler for processing. Depending on the
+          |system's configuration, the rate at which event batches are sent to the handler may be throttled to avoid
+          |overwhelming it with too many events at once.
+          |
+          |Configured by 'maximum-in-flight-event-batches' parameter in the sequencer-client config
+          |
+          |The metric shows the configured upper limit on how many batches the application handler may process concurrently.
+          |The metric 'actual-in-flight-event-batches' tracks the actual number of currently processed batches.""",
+      qualification = Saturation,
+    )
+    val maxInFlightEventBatches: Gauge[Int] =
+      metricsFactory.gauge(prefix :+ "max-in-flight-event-batches", 0)(MetricsContext.Empty)
+  }
 
   object submissions {
     val prefix: MetricName = SequencerClientMetrics.this.prefix :+ "submissions"

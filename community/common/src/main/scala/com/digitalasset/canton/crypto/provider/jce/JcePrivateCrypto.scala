@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.crypto.store.CryptoPrivateStore
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.crypto.tink.subtle.EllipticCurves.CurveType
 import com.google.crypto.tink.subtle.{Ed25519Sign, EllipticCurves}
@@ -15,7 +15,7 @@ import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.gm.{GMNamedCurves, GMObjectIdentifiers}
 import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec
 
-import java.security.spec.ECGenParameterSpec
+import java.security.spec.{ECGenParameterSpec, RSAKeyGenParameterSpec}
 import java.security.{
   GeneralSecurityException,
   InvalidAlgorithmParameterException,
@@ -29,7 +29,7 @@ class JcePrivateCrypto(
     pureCrypto: JcePureCrypto,
     override val defaultSigningKeyScheme: SigningKeyScheme,
     override val defaultEncryptionKeyScheme: EncryptionKeyScheme,
-    override protected val store: CryptoPrivateStore,
+    override protected val store: CryptoPrivateStoreExtended,
 )(override implicit val ec: ExecutionContext)
     extends CryptoPrivateStoreApi {
 
@@ -40,7 +40,7 @@ class JcePrivateCrypto(
   private case class RawKeyPair(id: Fingerprint, publicKey: ByteString, privateKey: ByteString)
 
   private def fingerprint(publicKey: ByteString): Fingerprint =
-    Fingerprint.create(publicKey, pureCrypto.defaultHashAlgorithm)
+    Fingerprint.create(publicKey)
 
   private def fromJavaKeyPair(javaKeyPair: JKeyPair): RawKeyPair = {
     // Encode public key as X509 subject public key info in DER
@@ -78,7 +78,7 @@ class JcePrivateCrypto(
         .leftMap[SigningKeyGenerationError](SigningKeyGenerationError.GeneralError)
     } yield fromJavaSigningKeyPair(javaKeyPair, scheme)
 
-  override protected def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
+  override protected[crypto] def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair] = {
 
@@ -113,13 +113,21 @@ class JcePrivateCrypto(
               }
             )
             .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
-        // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
-        case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
+        case EncryptionKeyScheme.Rsa2048OaepSha256 =>
+          Either
+            .catchOnly[GeneralSecurityException](
+              {
+                val kpGen = KeyPairGenerator.getInstance("RSA", "BC")
+                kpGen.initialize(new RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4))
+                kpGen.generateKeyPair()
+              }
+            )
+            .leftMap[EncryptionKeyGenerationError](EncryptionKeyGenerationError.GeneralError)
       }).map(convertJavaKeyPair)
     }
   }
 
-  override protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+  override protected[crypto] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair] = scheme match {
     case SigningKeyScheme.Ed25519 =>

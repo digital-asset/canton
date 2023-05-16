@@ -60,6 +60,8 @@ class DispatcherState(dispatcherShutdownTimeout: Duration)(implicit
     }
   })
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def stopDispatcher(): Future[Unit] = blocking(synchronized {
     logger.info(s"Stopping active $ServiceName.")
     dispatcherStateRef match {
@@ -81,6 +83,8 @@ class DispatcherState(dispatcherShutdownTimeout: Duration)(implicit
     }
   })
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private[platform] def shutdown(): Future[Unit] = blocking(synchronized {
     logger.info(s"Shutting down $ServiceName state.")
 

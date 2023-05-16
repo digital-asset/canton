@@ -71,11 +71,9 @@ object Fingerprint {
       .map(Fingerprint(_))
 
   private[crypto] def create(
-      bytes: ByteString,
-      // TODO(#12847): Fix the hash algorithm and remove it as input
-      hashAlgorithm: HashAlgorithm = HashAlgorithm.Sha256,
+      bytes: ByteString
   ): Fingerprint = {
-    val hash = Hash.digest(HashPurpose.PublicKeyFingerprint, bytes, hashAlgorithm)
+    val hash = Hash.digest(HashPurpose.PublicKeyFingerprint, bytes, HashAlgorithm.Sha256)
     new Fingerprint(hash.toLengthLimitedHexString)
   }
 

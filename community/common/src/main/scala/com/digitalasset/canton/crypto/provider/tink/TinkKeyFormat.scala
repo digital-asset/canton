@@ -37,7 +37,7 @@ object TinkKeyFormat {
             if (keyData.getKeyMaterialType != proto.KeyData.KeyMaterialType.ASYMMETRIC_PUBLIC)
               throw new TinkKeyFingerprintException("Keyset contains non-public key")
 
-            val fp = Fingerprint.create(keyData.getValue, hashAlgorithm)
+            val fp = Fingerprint.create(keyData.getValue)
             printVar = Some(fp)
           }
 

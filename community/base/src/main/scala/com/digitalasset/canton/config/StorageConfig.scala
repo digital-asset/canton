@@ -38,6 +38,7 @@ import scala.jdk.CollectionConverters.*
   *                          Only migrations above {@code baselineVersion} will then be applied.</p>
   *                          <p>This is useful for databases projects where the initial vendor schema is not empty</p>
   *                          If baseline should be called on migrate for non-empty schemas, { @code false} if not. (default: { @code false})
+  * @param migrateAndStart if true, db migrations will be applied to the database (default is to abort start if db migrates are pending to force an explicit updgrade)
   */
 final case class DbParametersConfig(
     maxConnections: Option[Int] = None,
@@ -50,6 +51,7 @@ final case class DbParametersConfig(
       DbParametersConfig.defaultWarnOnSlowQueryInterval,
     unsafeCleanOnValidationError: Boolean = false,
     unsafeBaselineOnMigrate: Boolean = false,
+    migrateAndStart: Boolean = false,
 ) extends PrettyPrinting {
   override def pretty: Pretty[DbParametersConfig] =
     prettyOfClass(

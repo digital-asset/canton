@@ -6,12 +6,7 @@ package com.digitalasset.canton.domain.topology
 import cats.data.EitherT
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
-import com.daml.test.evidence.tag.Security.{
-  Attack,
-  SecurityTest,
-  SecurityTestLayer,
-  SecurityTestSuite,
-}
+import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.config.TopologyConfig
@@ -52,8 +47,6 @@ class DomainTopologyManagerRequestServiceTest
     with BaseTest
     with SecurityTestSuite
     with HasExecutionContext {
-
-  override val securityTestLayer: SecurityTestLayer = SecurityTestLayer.KeyRequirements
 
   lazy val factory = new TopologyTransactionTestFactory(
     loggerFactory,

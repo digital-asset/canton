@@ -163,6 +163,7 @@ final case class TransferSearchResult(
     sourceDomain: String,
     contractId: LfContractId,
     readyForTransferIn: Boolean,
+    targetTimeProofO: Option[CantonTimestamp],
 ) {
   def toProtoV0: AdminTransferSearchResponse.TransferSearchResult =
     AdminTransferSearchResponse.TransferSearchResult(
@@ -172,6 +173,7 @@ final case class TransferSearchResult(
       targetDomain = targetDomain,
       submittingParty = submittingParty,
       readyForTransferIn = readyForTransferIn,
+      targetTimeProof = targetTimeProofO.map(_.toProtoPrimitive),
     )
 }
 
@@ -188,16 +190,18 @@ object TransferSearchResult {
               targetDomain,
               submitter,
               ready,
+              targetTimeProofOP,
             ) =>
         for {
-          _ <- Either.cond(!contractIdP.isEmpty, (), FieldNotSet("contractId"))
+          _ <- Either.cond(contractIdP.nonEmpty, (), FieldNotSet("contractId"))
           contractId <- ProtoConverter.parseLfContractId(contractIdP)
           transferId <- ProtoConverter
             .required("transferId", transferIdP)
             .flatMap(TransferId.fromProtoV0)
-          _ <- Either.cond(!sourceDomain.isEmpty, (), FieldNotSet("originDomain"))
-          _ <- Either.cond(!targetDomain.isEmpty, (), FieldNotSet("targetDomain"))
-          _ <- Either.cond(!submitter.isEmpty, (), FieldNotSet("submitter"))
+          targetTimeProofO <- targetTimeProofOP.traverse(CantonTimestamp.fromProtoPrimitive)
+          _ <- Either.cond(sourceDomain.nonEmpty, (), FieldNotSet("originDomain"))
+          _ <- Either.cond(targetDomain.nonEmpty, (), FieldNotSet("targetDomain"))
+          _ <- Either.cond(submitter.nonEmpty, (), FieldNotSet("submitter"))
         } yield TransferSearchResult(
           transferId,
           submitter,
@@ -205,6 +209,7 @@ object TransferSearchResult {
           sourceDomain,
           contractId,
           ready,
+          targetTimeProofO,
         )
     }
 
@@ -216,5 +221,6 @@ object TransferSearchResult {
       transferData.sourceDomain.toProtoPrimitive,
       transferData.contract.contractId,
       transferData.transferOutResult.isDefined,
+      Some(transferData.transferOutRequest.targetTimeProof.timestamp),
     )
 }

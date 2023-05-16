@@ -21,6 +21,8 @@ import scala.util.chaining.*
 class TagWithLedgerEndSpec extends AnyFlatSpec with Matchers with MockitoSugar {
   behavior of classOf[TagWithLedgerEndImpl].getSimpleName
 
+  // TODO(#13019) Avoid the global execution context
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 

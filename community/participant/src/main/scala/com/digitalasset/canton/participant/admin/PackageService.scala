@@ -31,10 +31,12 @@ import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Packa
   PackageRemovalError,
 }
 import com.digitalasset.canton.participant.admin.PackageService.*
+import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.DamlPackageStore.readPackageId
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerOps
+import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.protocol.{PackageDescription, PackageInfoService}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -71,6 +73,7 @@ class PackageService(
     hashOps: HashOps,
     vettingHandle: ParticipantTopologyManagerOps,
     inspectionOps: PackageInspectionOps,
+    metrics: ParticipantMetrics,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -78,6 +81,8 @@ class PackageService(
     with PackageInfoService
     with NamedLogging
     with FlagCloseable {
+
+  private val packageLoader = new DeduplicatingPackageLoader()
 
   def getLfArchive(packageId: PackageId)(implicit
       traceContext: TraceContext
@@ -97,7 +102,11 @@ class PackageService(
   def getPackage(packageId: PackageId)(implicit
       traceContext: TraceContext
   ): Future[Option[Package]] =
-    getLfArchive(packageId).map(_.map(Decode.assertDecodeArchive(_)._2))
+    packageLoader.loadPackage(
+      packageId,
+      getLfArchive,
+      metrics.ledgerApiServer.daml.execution.getLfPackage,
+    )
 
   private def neededForAdminWorkflow(
       packageId: PackageId

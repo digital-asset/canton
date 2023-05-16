@@ -153,14 +153,26 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
     "initialised directly" should {
       val topology = Map(
         party1.toLf -> Map(
-          participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation, TrustLevel.Vip)
+          participant1 -> ParticipantPermission.Confirmation
         )
       )
-      val setup = TestingTopology(topology = topology, domainParameters = domainParameters).build()
+      val setup = TestingTopology(
+        topology = topology,
+        domainParameters = domainParameters,
+        participants = Map(
+          participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation, TrustLevel.Vip)
+        ),
+      ).build()
       compare(setup)
       // extend with admin parties should give participant2 a signing key
       val crypto2 = TestingTopology(topology = topology, domainParameters = domainParameters)
-        .withParticipants(participant2)
+        .withParticipants(
+          participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation, TrustLevel.Vip),
+          participant2 -> ParticipantAttributes(
+            ParticipantPermission.Submission,
+            TrustLevel.Ordinary,
+          ),
+        )
         .build()
       val p1 = crypto2.forOwnerAndDomain(participant1)
       val p2 = crypto2.forOwnerAndDomain(participant2)
@@ -197,8 +209,10 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
     "using reverse topology" should {
       val setup = TestingTopology(domainParameters = domainParameters)
         .withReversedTopology(
-          Map(participant1 -> Map(party1.toLf -> ParticipantPermission.Confirmation)),
-          TrustLevel.Vip,
+          Map(participant1 -> Map(party1.toLf -> ParticipantPermission.Confirmation))
+        )
+        .withParticipants(
+          participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation, TrustLevel.Vip)
         )
         .build()
       compare(setup)
@@ -231,24 +245,14 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
       }
     }
 
-    "using detailed topology" should {
-      val setup = TestingTopology(domainParameters = domainParameters)
-        .withDetailedTopology(
-          Map(
-            party1.toLf -> Map(participant1 -> ParticipantPermission.Confirmation)
-          ),
-          TrustLevel.Vip,
-        )
-        .build()
-      compare(setup)
-    }
-
     "withTopology" should {
       val setup = TestingTopology(domainParameters = domainParameters)
         .withTopology(
           Map(party1.toLf -> participant1),
           ParticipantPermission.Confirmation,
-          TrustLevel.Vip,
+        )
+        .withParticipants(
+          participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation, TrustLevel.Vip)
         )
         .build()
       compare(setup)

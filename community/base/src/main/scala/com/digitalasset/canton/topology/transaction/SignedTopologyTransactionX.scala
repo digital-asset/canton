@@ -194,19 +194,20 @@ object SignedTopologyTransactionX
 
   }
 
-  def createGetResultDomainTopologyTransaction
-      : GetResult[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] =
+  def createGetResultDomainTopologyTransaction: GetResult[GenericSignedTopologyTransactionX] =
     GetResult { r =>
       fromByteString(r.<<[ByteString])
         .valueOr(err =>
-          throw new DbSerializationException(s"Failed to deserialize TopologyTransaction: $err")
+          throw new DbSerializationException(
+            s"Failed to deserialize SignedTopologyTransactionX: $err"
+          )
         )
     }
 
   implicit def setParameterTopologyTransaction(implicit
       setParameterByteArray: SetParameter[Array[Byte]]
-  ): SetParameter[SignedTopologyTransaction[TopologyChangeOp]] = {
-    (d: SignedTopologyTransaction[TopologyChangeOp], pp: PositionedParameters) =>
+  ): SetParameter[GenericSignedTopologyTransactionX] = {
+    (d: GenericSignedTopologyTransactionX, pp: PositionedParameters) =>
       pp >> d.toByteArray
   }
 }

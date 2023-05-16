@@ -2,7 +2,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- architecture-handbook-entry-begin: PaintDaml
-
 module Paint where
 
 import Daml.Script
@@ -35,7 +34,6 @@ template OfferToPaintHouseByPainter
         iouId2 <- exercise iouId Transfer with newOwner = painter
         paint <- create $ PaintHouse with painter; houseOwner
         return iouId2
-
 -- architecture-handbook-entry-end: PaintDaml
 
 template OfferToPaintHouseByOwner
@@ -84,7 +82,7 @@ painterOffersAndHouseOwnerAccepts painter houseOwner bank =
           painter = painter; houseOwner = houseOwner; bank = bank; amount = price
     painterIouId <- submit houseOwner do
       exerciseCmd offerId AcceptByOwner with iouId
-    submit painter do 
+    submit painter do
       exerciseCmd painterIouId Call
 
 -- END_PAINT_OFFER_SCENARIO_SNIPPET

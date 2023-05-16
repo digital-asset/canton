@@ -20,7 +20,7 @@ import com.google.protobuf.empty.Empty
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
 import org.mockito.MockitoSugar
-import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
+import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, Inside, Succeeded}
@@ -36,7 +36,8 @@ class SubmissionTrackerSpec
     with ScalaFutures
     with Inside
     with ErrorsAssertions
-    with IntegrationPatience {
+    with IntegrationPatience
+    with Eventually {
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
   private implicit val errorLogger: ContextualizedErrorLogger =
     DamlContextualizedErrorLogger.forTesting(getClass)
@@ -325,13 +326,18 @@ class SubmissionTrackerSpec
       )
     )
 
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
 
     def run: Future[Assertion]
 
     run.futureValue shouldBe Succeeded
     // We want to assert this for each test
-    submissionTracker.pending shouldBe empty
+    // Completion of futures might race with removal of the entries from the map
+    eventually {
+      submissionTracker.pending shouldBe empty
+    }
     // Stop the timer
     timer.purge()
     timer.cancel()

@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.error.PackageServiceError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
 import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonExamples
+import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, ParticipantEventPublisher}
@@ -71,6 +72,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
         new SymbolicPureCrypto(),
         vettingOps,
         new PackageInspectionOpsForTesting(participantId, loggerFactory),
+        ParticipantTestMetrics,
         ProcessingTimeout(),
         loggerFactory,
       )

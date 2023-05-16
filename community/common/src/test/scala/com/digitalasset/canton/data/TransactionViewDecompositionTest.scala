@@ -8,29 +8,18 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.TransactionViewDecomposition.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.protocol.{
-  ConfirmationPolicy,
-  ExampleTransactionFactory,
-  LfNodeId,
-  LfTransactionVersion,
-  LfVersionedTransaction,
-  RollbackContext,
-  TransactionMetadata,
-  WellFormedTransaction,
-}
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.{
   BaseTest,
   ComparesLfTransactions,
   HasExecutionContext,
+  LfPartyId,
   LfValue,
   NeedsNewLfContractIds,
 }
 import org.scalatest.wordspec.AnyWordSpec
-
-import scala.concurrent.Await
-import scala.concurrent.duration.*
 
 class TransactionViewDecompositionTest
     extends AnyWordSpec
@@ -39,24 +28,34 @@ class TransactionViewDecompositionTest
     with ComparesLfTransactions
     with NeedsNewLfContractIds {
 
-  ConfirmationPolicy.values foreach { confirmationPolicy =>
-    s"With policy $confirmationPolicy" when {
+  Seq(TransactionViewDecompositionFactory.V1, TransactionViewDecompositionFactory.V2) foreach {
+    factory =>
+      s"With factory ${factory.getClass.getSimpleName}" when {
 
-      val factory = new ExampleTransactionFactory()(confirmationPolicy = confirmationPolicy)
+        ConfirmationPolicy.values foreach { confirmationPolicy =>
+          s"With policy $confirmationPolicy" when {
 
-      factory.standardHappyCases foreach { example =>
-        s"decomposing $example into views" must {
-          "yield the correct views" in {
-            fromTransaction(
-              confirmationPolicy,
-              factory.topologySnapshot,
-              example.wellFormedUnsuffixedTransaction,
-              RollbackContext.empty,
-            ).futureValue.toList shouldEqual example.rootViewDecompositions.toList
+            val exampleTransactionFactory =
+              new ExampleTransactionFactory()(confirmationPolicy = confirmationPolicy)
+
+            exampleTransactionFactory.standardHappyCases foreach { example =>
+              s"decomposing $example into views" must {
+                "yield the correct views" in {
+                  factory
+                    .fromTransaction(
+                      confirmationPolicy,
+                      exampleTransactionFactory.topologySnapshot,
+                      example.wellFormedUnsuffixedTransaction,
+                      RollbackContext.empty,
+                    )
+                    .futureValue
+                    .toList shouldEqual example.rootViewDecompositions.toList
+                }
+              }
+            }
           }
         }
       }
-    }
   }
 
   "A view decomposition" when {
@@ -92,25 +91,31 @@ class TransactionViewDecompositionTest
     }
 
     "the nodes in a view have different informees or thresholds" can {
-      "not be constructed" in {
-        an[IllegalArgumentException] should be thrownBy
-          Await.result(
-            createWithConfirmationPolicy(
-              ConfirmationPolicy.Signatory,
-              defaultTopologySnapshot,
-              createNode(unsuffixedId(0), signatories = Set(signatory)),
-              Some(ExampleTransactionFactory.lfHash(-1)),
-              LfNodeId(0),
-              Seq(
-                SameView(
-                  createNode(unsuffixedId(0), signatories = Set(submitter)),
-                  LfNodeId(1),
-                  RollbackContext.empty,
-                )
-              ),
-            ),
-            10.seconds,
-          )
+
+      "fails validation" in {
+
+        val createWithSignatory = createNode(unsuffixedId(0), signatories = Set(signatory))
+        val createWithSubmitter = createNode(unsuffixedId(0), signatories = Set(submitter))
+
+        val (viewInformees, viewThreshold) = ConfirmationPolicy.Signatory
+          .informeesAndThreshold(createWithSignatory, defaultTopologySnapshot)
+          .futureValue
+
+        val viewWithInconsistentInformees = NewView(
+          createWithSignatory,
+          viewInformees,
+          viewThreshold,
+          Some(ExampleTransactionFactory.lfHash(-1)),
+          LfNodeId(0),
+          Seq(SameView(createWithSubmitter, LfNodeId(1), RollbackContext.empty)),
+          RollbackContext.empty,
+        )
+
+        val actual = viewWithInconsistentInformees
+          .compliesWith(ConfirmationPolicy.Signatory, defaultTopologySnapshot)
+          .value
+          .futureValue
+        actual.isLeft shouldBe true
       }
     }
 
@@ -119,7 +124,7 @@ class TransactionViewDecompositionTest
         val flatTransactionSize = 10000
 
         val decomposition = timeouts.default.await("Decomposing test transaction")(
-          TransactionViewDecomposition.fromTransaction(
+          TransactionViewDecompositionFactory.V2.fromTransaction(
             ConfirmationPolicy.Signatory,
             mock[TopologySnapshot],
             createWellFormedTransaction(flatTransactionSize),
@@ -130,6 +135,66 @@ class TransactionViewDecompositionTest
         decomposition.size shouldBe flatTransactionSize
       }
     }
+
+    "a transaction with nested rollbacks" can {
+
+      import RollbackTransactionBuilder.*
+
+      val alice: LfPartyId = LfPartyId.assertFromString("alice::default")
+      val bob: LfPartyId = LfPartyId.assertFromString("bob::default")
+      val carol: LfPartyId = LfPartyId.assertFromString("carol::default")
+
+      val embeddedRollbackExample: LfTransaction = {
+        RollbackTransactionBuilder.run(for {
+          rootId <- nextExerciseWithChildren( // NewView
+            n => c => exerciseNode(n, signatories = Set(alice), children = c.toList), // SameView
+            Seq(
+              nextExerciseWithChildren(
+                n => c => exerciseNode(n, signatories = Set(alice), children = c.toList),
+                Seq(
+                  nextRollbackFromChildren(
+                    Seq(
+                      nextExercise(exerciseNode(_, signatories = Set(alice, carol)))
+                    )
+                  )
+                ),
+              ),
+              nextExercise(exerciseNode(_, signatories = Set(alice, bob))),
+            ),
+          )
+          tx <- buildAndReset(rootNodeIds = Seq(rootId))
+        } yield tx)
+      }
+
+      val expected = List(
+        RbNewTree(
+          rbScope(1),
+          Set(alice),
+          List[RollbackDecomposition](
+            RbSameTree(rbScope(1)),
+            RbNewTree(rbScope(1, 1), Set(alice, carol)),
+            RbNewTree(rbScope(2), Set(alice, bob)),
+          ),
+        )
+      )
+
+      "does not re-used rollback contexts" in {
+
+        val decomposition = TransactionViewDecompositionFactory.V2
+          .fromTransaction(
+            ConfirmationPolicy.Signatory,
+            defaultTopologySnapshot,
+            RollbackTransactionBuilder.wellFormedUnsuffixedTransaction(embeddedRollbackExample),
+            RollbackContext.empty,
+          )
+          .futureValue
+
+        val actual = rollbackDecomposition(decomposition)
+
+        actual shouldBe expected
+      }
+    }
+
   }
 
   private def createWellFormedTransaction(size: Int): WellFormedTransaction[WithoutSuffixes] = {

@@ -26,7 +26,11 @@ import com.digitalasset.canton.crypto.provider.tink.{
   TinkPureCrypto,
 }
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
-import com.digitalasset.canton.crypto.store.CryptoPublicStore
+import com.digitalasset.canton.crypto.store.{
+  CryptoPrivateStore,
+  CryptoPrivateStoreExtended,
+  CryptoPublicStore,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.version.ReleaseProtocolVersion
@@ -92,6 +96,19 @@ object CryptoFactory {
   ): EitherT[Future, String, Crypto] = {
     val cryptoPublicStore =
       CryptoPublicStore.create(storage, releaseProtocolVersion, timeouts, loggerFactory)
+
+    def toExtended(
+        cryptoPrivateStore: CryptoPrivateStore,
+        provider: CryptoProvider,
+    ): Either[String, CryptoPrivateStoreExtended] =
+      cryptoPrivateStore match {
+        case extended: CryptoPrivateStoreExtended => Right(extended)
+        case _ =>
+          Left(
+            s"The crypto private store does not implement all the functions necessary for the chosen provider $provider"
+          )
+      }
+
     for {
       cryptoPrivateStore <- cryptoPrivateStoreFactory
         .create(storage, releaseProtocolVersion, timeouts, loggerFactory)
@@ -109,12 +126,13 @@ object CryptoFactory {
       crypto <- config.provider match {
         case CryptoProvider.Tink =>
           for {
+            cryptoPrivateStoreExtended <- toExtended(cryptoPrivateStore, config.provider).toEitherT
             pureCrypto <- TinkPureCrypto.create(symmetricKeyScheme, hashAlgorithm).toEitherT
             privateCrypto = TinkPrivateCrypto.create(
               pureCrypto,
               signingKeyScheme,
               encryptionKeyScheme,
-              cryptoPrivateStore,
+              cryptoPrivateStoreExtended,
             )
             javaKeyConverter = new TinkJavaConverter(pureCrypto.defaultHashAlgorithm)
             crypto = new Crypto(
@@ -128,19 +146,20 @@ object CryptoFactory {
             )
           } yield crypto
         case CryptoProvider.Jce =>
-          Security.addProvider(new BouncyCastleProvider)
-          val javaKeyConverter = new JceJavaConverter(hashAlgorithm)
-          val pureCrypto =
-            new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
-          val privateCrypto =
-            new JcePrivateCrypto(
-              pureCrypto,
-              signingKeyScheme,
-              encryptionKeyScheme,
-              cryptoPrivateStore,
-            )
-          EitherT.rightT[Future, String](
-            new Crypto(
+          for {
+            cryptoPrivateStoreExtended <- toExtended(cryptoPrivateStore, config.provider).toEitherT
+            _ = Security.addProvider(new BouncyCastleProvider)
+            javaKeyConverter = new JceJavaConverter(hashAlgorithm)
+            pureCrypto =
+              new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
+            privateCrypto =
+              new JcePrivateCrypto(
+                pureCrypto,
+                signingKeyScheme,
+                encryptionKeyScheme,
+                cryptoPrivateStoreExtended,
+              )
+            crypto = new Crypto(
               pureCrypto,
               privateCrypto,
               cryptoPrivateStore,
@@ -149,7 +168,7 @@ object CryptoFactory {
               timeouts,
               loggerFactory,
             )
-          )
+          } yield crypto
       }
     } yield crypto
   }

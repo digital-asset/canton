@@ -66,5 +66,6 @@ message AdminTransferSearchResponse {
     string target_domain = 4;
     string submitting_party = 5;
     bool ready_for_transfer_in = 6;
+    google.protobuf.Timestamp target_time_proof = 7;
   }
 }

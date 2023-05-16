@@ -56,6 +56,8 @@ class AuthorizationInterceptorSpec
       ()
     }
 
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val authorizationInterceptor =
       AuthorizationInterceptor(
         authService,

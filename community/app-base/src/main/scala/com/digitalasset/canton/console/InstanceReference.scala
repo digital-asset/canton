@@ -9,7 +9,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
-import com.digitalasset.canton.console.commands.*
+import com.digitalasset.canton.console.commands.{HealthAdministrationCommon, *}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.config.RemoteDomainConfig
 import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap}
@@ -439,12 +439,11 @@ trait ParticipantReferenceCommon
   override protected val loggerFactory: NamedLoggerFactory =
     consoleEnvironment.environment.loggerFactory.append("participant", name)
 
-  @Help.Summary("Health and diagnostic related commands")
-  @Help.Group("Health")
-  override def health: ParticipantHealthAdministration =
-    new ParticipantHealthAdministration(this, consoleEnvironment, loggerFactory)
-
-  override def id: ParticipantId
+  @Help.Summary(
+    "Yields the globally unique id of this participant. " +
+      "Throws an exception, if the id has not yet been allocated (e.g., the participant has not yet been started)."
+  )
+  override def id: ParticipantId = topology.idHelper(ParticipantId(_))
 
   def config: BaseParticipantConfig
 
@@ -473,6 +472,11 @@ abstract class ParticipantReference(
   protected def runner: AdminCommandRunner = this
 
   override protected val instanceType: String = ParticipantReference.InstanceType
+
+  @Help.Summary("Health and diagnostic related commands")
+  @Help.Group("Health")
+  override def health: ParticipantHealthAdministration =
+    new ParticipantHealthAdministration(this, consoleEnvironment, loggerFactory)
 
   @Help.Summary("Inspect and manage parties")
   @Help.Group("Parties")
@@ -522,13 +526,6 @@ trait RemoteParticipantReferenceCommon
       config.token,
     )
 
-  @Help.Summary("Inspect and manage parties")
-  @Help.Group("Parties")
-  def parties: ParticipantPartiesAdministrationGroup = partiesGroup
-  // above command needs to be def such that `Help` works.
-  lazy private val partiesGroup =
-    new ParticipantPartiesAdministrationGroup(id, this, consoleEnvironment)
-
   private lazy val testing_ = new ParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
   @Help.Summary("Commands used for development and testing", FeatureFlag.Testing)
   @Help.Group("Testing")
@@ -552,6 +549,14 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
     extends ParticipantReference(environment, name)
     with GrpcRemoteInstanceReference
     with RemoteParticipantReferenceCommon {
+
+  @Help.Summary("Inspect and manage parties")
+  @Help.Group("Parties")
+  def parties: ParticipantPartiesAdministrationGroup = partiesGroup
+
+  // above command needs to be def such that `Help` works.
+  lazy private val partiesGroup =
+    new ParticipantPartiesAdministrationGroup(id, this, consoleEnvironment)
 
   @Help.Summary("Return remote participant config")
   def config: RemoteParticipantConfig =
@@ -657,11 +662,14 @@ abstract class ParticipantReferenceX(
   override protected val instanceType: String = ParticipantReferenceX.InstanceType
   override protected def runner: AdminCommandRunner = this
 
-  @Help.Summary(
-    "Yields the globally unique id of this participant. " +
-      "Throws an exception, if the id has not yet been allocated (e.g., the participant has not yet been started)."
-  )
-  override def id: ParticipantId = topology.idHelper(ParticipantId(_))
+  @Help.Summary("Health and diagnostic related commands")
+  @Help.Group("Health")
+  override def health: ParticipantHealthAdministrationX =
+    new ParticipantHealthAdministrationX(this, consoleEnvironment, loggerFactory)
+
+  @Help.Summary("Inspect and manage parties")
+  @Help.Group("Parties")
+  def parties: ParticipantPartiesAdministrationGroupX
 
   private lazy val topology_ =
     new TopologyAdministrationGroupX(
@@ -692,6 +700,14 @@ class RemoteParticipantReferenceX(environment: ConsoleEnvironment, override val 
     extends ParticipantReferenceX(environment, name)
     with GrpcRemoteInstanceReference
     with RemoteParticipantReferenceCommon {
+
+  @Help.Summary("Inspect and manage parties")
+  @Help.Group("Parties")
+  override def parties: ParticipantPartiesAdministrationGroupX = partiesGroup
+
+  // above command needs to be def such that `Help` works.
+  lazy private val partiesGroup =
+    new ParticipantPartiesAdministrationGroupX(id, this, consoleEnvironment)
 
   @Help.Summary("Return remote participant config")
   def config: RemoteParticipantConfig =
@@ -731,10 +747,10 @@ class LocalParticipantReferenceX(
   //   but rather than keeping this, we should make local == remote and add local methods separately
   @Help.Summary("Inspect and manage parties")
   @Help.Group("Parties")
-  def parties: ParticipantPartiesAdministrationGroup = partiesGroup
+  def parties: LocalParticipantPartiesAdministrationGroupX = partiesGroup
   // above command needs to be def such that `Help` works.
   lazy private val partiesGroup =
-    new ParticipantPartiesAdministrationGroup(id, this, consoleEnvironment)
+    new LocalParticipantPartiesAdministrationGroupX(this, this, consoleEnvironment, loggerFactory)
 
   private lazy val testing_ = new ParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
   @Help.Summary("Commands used for development and testing", FeatureFlag.Testing)

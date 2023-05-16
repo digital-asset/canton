@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.traverse.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -23,6 +24,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
 }
 import com.digitalasset.canton.topology.store.TopologyStore.Change.{Other, TopologyDelay}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
+import com.digitalasset.canton.topology.store.db.DbTopologyStoreX
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreX
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
@@ -98,18 +100,12 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
     ] {
   this: NamedLogging =>
 
-  def findProposalsByTxHash(effective: EffectiveTime, hashes: Seq[TxHash])(implicit
+  def findProposalsByTxHash(asOfExclusive: EffectiveTime, hashes: NonEmpty[Set[TxHash]])(implicit
       traceContext: TraceContext
   ): Future[Seq[GenericSignedTopologyTransactionX]]
 
-  def findTransactionsForMapping(
-      effective: EffectiveTime,
-      hashes: Seq[MappingHash],
-  )(implicit traceContext: TraceContext): Future[Seq[GenericSignedTopologyTransactionX]]
-
-  def findValidTransactions(
-      asOfExclusive: EffectiveTime,
-      filter: GenericSignedTopologyTransactionX => Boolean,
+  def findTransactionsForMapping(asOfExclusive: EffectiveTime, hashes: NonEmpty[Set[MappingHash]])(
+      implicit traceContext: TraceContext
   ): Future[Seq[GenericSignedTopologyTransactionX]]
 
   /** returns the set of positive transactions
@@ -158,8 +154,9 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
   def inspect(
       proposals: Boolean,
       timeQuery: TimeQueryX,
+      // TODO(#11255) - consider removing `recentTimestampO` and moving callers to TimeQueryX.Snapshot
       recentTimestampO: Option[CantonTimestamp],
-      ops: Option[TopologyChangeOpX],
+      op: Option[TopologyChangeOpX],
       typ: Option[TopologyMappingX.Code],
       idFilter: String,
       namespaceOnly: Boolean,
@@ -240,10 +237,9 @@ object TopologyStoreX {
   ): TopologyStoreX[StoreID] =
     storage match {
       case _: MemoryStorage =>
-        (new InMemoryTopologyStoreX(storeId, loggerFactory))
-      case jdbc: DbStorage =>
-        // TODO(#11255) implement me!
-        (new InMemoryTopologyStoreX(storeId, loggerFactory))
+        new InMemoryTopologyStoreX(storeId, loggerFactory)
+      case dbStorage: DbStorage =>
+        new DbTopologyStoreX(dbStorage, storeId, timeouts, loggerFactory)
     }
 
   lazy val initialParticipantDispatchingSet = Set(
@@ -254,6 +250,47 @@ object TopologyStoreX {
     TopologyMappingX.Code.IdentifierDelegationX,
     TopologyMappingX.Code.UnionspaceDefinitionX,
   )
+
+  def filterInitialParticipantDispatchingTransactions(
+      participantId: ParticipantId,
+      domainId: DomainId,
+      transactions: Seq[GenericStoredTopologyTransactionX],
+  ): Seq[GenericSignedTopologyTransactionX] = {
+    // TODO(#11255): Extend filtering along the lines of:
+    //  TopologyStore.filterInitialParticipantDispatchingTransactions
+    transactions.map(_.transaction).collect {
+      case tx @ SignedTopologyTransactionX(
+            TopologyTransactionX(_, _, DomainTrustCertificateX(`participantId`, `domainId`, _, _)),
+            _,
+            _,
+          ) =>
+        tx
+      case tx @ SignedTopologyTransactionX(
+            TopologyTransactionX(_, _, OwnerToKeyMappingX(`participantId`, _, _)),
+            _,
+            _,
+          ) =>
+        tx
+      case tx @ SignedTopologyTransactionX(
+            TopologyTransactionX(_, _, NamespaceDelegationX(ns, _, _)),
+            _,
+            _,
+          ) if ns == participantId.uid.namespace =>
+        tx
+      case tx @ SignedTopologyTransactionX(
+            TopologyTransactionX(_, _, IdentifierDelegationX(uid, _)),
+            _,
+            _,
+          ) if uid == participantId.uid =>
+        tx
+      case tx @ SignedTopologyTransactionX(
+            TopologyTransactionX(_, _, _: UnionspaceDefinitionX),
+            _,
+            _,
+          ) =>
+        tx
+    }
+  }
 
   /** convenience method waiting until the last eligible transaction inserted into the source store has been dispatched successfully to the target domain */
   def awaitTxObserved(

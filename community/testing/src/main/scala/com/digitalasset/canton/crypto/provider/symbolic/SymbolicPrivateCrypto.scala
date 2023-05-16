@@ -5,14 +5,17 @@ package com.digitalasset.canton.crypto.provider.symbolic
 
 import cats.data.EitherT
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.crypto.store.CryptoPrivateStore
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.{ExecutionContext, Future}
 
-class SymbolicPrivateCrypto(pureCrypto: SymbolicPureCrypto, override val store: CryptoPrivateStore)(
+class SymbolicPrivateCrypto(
+    pureCrypto: SymbolicPureCrypto,
+    override val store: CryptoPrivateStoreExtended,
+)(
     override implicit val ec: ExecutionContext
 ) extends CryptoPrivateStoreApi {
 
@@ -28,13 +31,13 @@ class SymbolicPrivateCrypto(pureCrypto: SymbolicPureCrypto, override val store: 
 
   private def genKeyPair[K](keypair: (Fingerprint, ByteString, ByteString) => K): K = {
     val key = s"key-${keyCounter.incrementAndGet()}"
-    val id = Fingerprint.create(ByteString.copyFromUtf8(key), pureCrypto.defaultHashAlgorithm)
+    val id = Fingerprint.create(ByteString.copyFromUtf8(key))
     val publicKey = ByteString.copyFromUtf8(s"pub-$key")
     val privateKey = ByteString.copyFromUtf8(s"priv-$key")
     keypair(id, publicKey, privateKey)
   }
 
-  override protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+  override protected[crypto] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair] =
     EitherT.rightT(
@@ -43,7 +46,7 @@ class SymbolicPrivateCrypto(pureCrypto: SymbolicPureCrypto, override val store: 
       )
     )
 
-  override protected def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
+  override protected[crypto] def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair] =
     EitherT.rightT(

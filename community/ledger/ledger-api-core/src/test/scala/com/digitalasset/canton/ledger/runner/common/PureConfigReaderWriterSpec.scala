@@ -736,7 +736,6 @@ class PureConfigReaderWriterSpec
       |  max-input-buffer-size = 50
       |  restart-delay = "10s"
       |  startup-mode {
-      |    allow-existing-schema = false
       |    type = migrate-and-start
       |  }
       |  submission-batch-size = 50""".stripMargin

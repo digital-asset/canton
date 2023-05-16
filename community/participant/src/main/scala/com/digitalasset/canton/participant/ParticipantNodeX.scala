@@ -13,6 +13,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.*
@@ -49,9 +50,10 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
-import com.digitalasset.canton.topology.store.PartyMetadataStore
+import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 
@@ -90,6 +92,16 @@ class ParticipantNodeBootstrapX(
       ParticipantMetrics,
     ](arguments)
     with ParticipantNodeBootstrapCommon {
+
+  // TODO(#12946) clean up to remove SingleUseCell
+  private val cantonSyncService = new SingleUseCell[CantonSyncService]
+
+  override protected def sequencedTopologyStores: Seq[TopologyStoreX[TopologyStoreId]] =
+    cantonSyncService.get.toList.flatMap(
+      _.syncDomainPersistentStateManager.getAll.values.map(_.topologyStore).collect {
+        case s: TopologyStoreX[TopologyStoreId] => s
+      }
+    )
   override protected def customNodeStages(
       storage: Storage,
       crypto: Crypto,
@@ -172,7 +184,7 @@ class ParticipantNodeBootstrapX(
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = {
         // TODO(#11255) this vetting extension might fail on concurrent uploads of dars
-        val currentF = performUnlessClosingF(functionFullName)(
+        val currentMappingF = performUnlessClosingF(functionFullName)(
           topologyManager.store
             .findPositiveTransactions(
               asOf = CantonTimestamp.MaxValue,
@@ -187,12 +199,14 @@ class ParticipantNodeBootstrapX(
                 .collectOfMapping[VettedPackagesX]
                 .result
                 .lastOption
-                .map(_.transaction.transaction.mapping.packageIds)
-                .getOrElse(Seq.empty)
             }
         )
         for {
-          current <- EitherT.right(currentF)
+          currentMapping <- EitherT.right(currentMappingF)
+          currentPackages = currentMapping
+            .map(_.transaction.transaction.mapping.packageIds)
+            .getOrElse(Seq.empty)
+          nextSerial = currentMapping.map(_.transaction.transaction.serial + PositiveInt.one)
           _ <- performUnlessClosingEitherUSF(functionFullName)(
             topologyManager
               .proposeAndAuthorize(
@@ -200,9 +214,9 @@ class ParticipantNodeBootstrapX(
                 VettedPackagesX(
                   participantId = participantId,
                   domainId = None,
-                  (current ++ packages).distinct,
+                  (currentPackages ++ packages).distinct,
                 ),
-                serial = None,
+                serial = nextSerial,
                 // TODO(#11255) auto-determine signing keys
                 signingKeys = Seq(participantId.uid.namespace.fingerprint),
                 parameters.initialProtocolVersion,
@@ -311,6 +325,9 @@ class ParticipantNodeBootstrapX(
               schedulers,
               topologyDispatcher,
             ) =>
+          if (cantonSyncService.putIfAbsent(sync).nonEmpty) {
+            sys.error("should not happen")
+          }
           addCloseable(partyNotifier)
           addCloseable(ephemeralState.participantEventPublisher)
           addCloseable(topologyDispatcher)

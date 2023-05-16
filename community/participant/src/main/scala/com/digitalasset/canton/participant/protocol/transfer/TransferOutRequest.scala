@@ -3,15 +3,23 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
+import cats.data.EitherT
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.participant.protocol.CanSubmit
+import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
 import com.digitalasset.canton.protocol.{LfContractId, LfTemplateId, SourceDomainId, TargetDomainId}
 import com.digitalasset.canton.time.TimeProof
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, TransferCounter}
 
 import java.util.UUID
+import scala.concurrent.ExecutionContext
 
 /** Request to transfer a contract away from a domain.
   *
@@ -67,4 +75,66 @@ final case class TransferOutRequest(
     val tree = TransferOutViewTree(commonData, view, sourceProtocolVersion.v, hashOps)
     FullTransferOutTree(tree)
   }
+}
+
+object TransferOutRequest {
+
+  def validated(
+      participantId: ParticipantId,
+      timeProof: TimeProof,
+      contractId: LfContractId,
+      templateId: LfTemplateId,
+      submitterMetadata: TransferSubmitterMetadata,
+      stakeholders: Set[LfPartyId],
+      sourceDomain: SourceDomainId,
+      sourceProtocolVersion: SourceProtocolVersion,
+      sourceMediator: MediatorId,
+      targetDomain: TargetDomainId,
+      targetProtocolVersion: TargetProtocolVersion,
+      sourceIps: TopologySnapshot,
+      targetIps: TopologySnapshot,
+      transferCounter: TransferCounter,
+      logger: TracedLogger,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[
+    FutureUnlessShutdown,
+    TransferProcessorError,
+    TransferOutRequestValidated,
+  ] =
+    for {
+      _ <- CanSubmit(
+        contractId,
+        sourceIps,
+        submitterMetadata.submitter,
+        participantId,
+      )
+      adminPartiesAndRecipients <- AdminPartiesAndParticipants(
+        contractId,
+        submitterMetadata.submitter,
+        stakeholders,
+        sourceIps,
+        targetIps,
+        logger,
+      )
+    } yield {
+      val transferOutRequest = TransferOutRequest(
+        submitterMetadata,
+        stakeholders,
+        adminPartiesAndRecipients.adminParties,
+        contractId,
+        templateId,
+        sourceDomain,
+        sourceProtocolVersion,
+        sourceMediator,
+        targetDomain,
+        targetProtocolVersion,
+        timeProof,
+        transferCounter,
+      )
+
+      TransferOutRequestValidated(transferOutRequest, adminPartiesAndRecipients.participants)
+    }
+
 }

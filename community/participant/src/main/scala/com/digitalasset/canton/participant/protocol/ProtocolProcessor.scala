@@ -1312,7 +1312,7 @@ abstract class ProtocolProcessor[
           _,
         ) <- unsignedResultE.toOption
         case WrappedPendingRequestData(pendingRequestData) <- Some(pendingRequestDataOrReplayData)
-        case PendingTransaction(txId, _, _, requestTime, _, _, _, _) <- Some(pendingRequestData)
+        case PendingTransaction(txId, _, _, _, requestTime, _, _, _, _) <- Some(pendingRequestData)
 
         txRootHash = txId.toRootHash
         if resultRootHash != txRootHash
