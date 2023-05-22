@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.crypto.store.memory
 
-import com.digitalasset.canton.crypto.store.CryptoPrivateStoreTest
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtendedTest
 import org.scalatest.wordspec.AsyncWordSpec
 
-class CryptoPrivateStoreTestInMemory extends AsyncWordSpec with CryptoPrivateStoreTest {
+class CryptoPrivateStoreTestInMemory extends AsyncWordSpec with CryptoPrivateStoreExtendedTest {
   "InMemoryCryptoPrivateStore" should {
-    behave like cryptoPrivateStore(
+    behave like cryptoPrivateStoreExtended(
       new InMemoryCryptoPrivateStore(testedReleaseProtocolVersion, loggerFactory),
       encrypted = false,
     )

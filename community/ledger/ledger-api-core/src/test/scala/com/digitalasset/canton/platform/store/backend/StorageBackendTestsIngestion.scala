@@ -13,6 +13,8 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
 import scala.util.Random
 
+// TODO(#13019) Avoid the global execution context
+@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 private[backend] trait StorageBackendTestsIngestion
     extends Matchers
     with Inside

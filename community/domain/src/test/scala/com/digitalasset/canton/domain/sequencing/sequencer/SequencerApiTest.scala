@@ -32,9 +32,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 abstract class SequencerApiTest
-    extends FixtureAsyncWordSpec
-    with HasExecutionContext
-    with BaseTest
+    extends SequencerApiTestUtils
     with ProtocolVersionChecksFixtureAsyncWordSpec {
 
   import RecipientsTest.*
@@ -47,7 +45,7 @@ abstract class SequencerApiTest
 
     val topologyFactory =
       new TestingIdentityFactory(
-        topology = TestingTopology(additionalParticipants = Set(p11, p12, p13, p14, p15)),
+        topology = TestingTopology().withSimpleParticipants(p11, p12, p13, p14, p15),
         loggerFactory,
         List.empty,
       )
@@ -612,8 +610,10 @@ abstract class SequencerApiTest
       }
     }
   }
+}
 
-  private def readForMembers(
+trait SequencerApiTestUtils extends FixtureAsyncWordSpec with BaseTest with HasExecutionContext {
+  protected def readForMembers(
       members: Seq[Member],
       sequencer: CantonSequencer,
       // up to 60 seconds needed because Besu is very slow on CI
@@ -654,13 +654,13 @@ abstract class SequencerApiTest
       envs: EnvelopeDetails*
   )
 
-  private def registerMembers(members: Set[Member], sequencer: CantonSequencer): Future[Unit] =
+  protected def registerMembers(members: Set[Member], sequencer: CantonSequencer): Future[Unit] =
     members.toList.parTraverse_ { member =>
       val registerE = sequencer.registerMember(member)
       valueOrFail(registerE)(s"Register member $member")
     }
 
-  private def createSendRequest(
+  protected def createSendRequest(
       sender: Member,
       messageContent: String,
       recipients: Recipients,
@@ -682,7 +682,7 @@ abstract class SequencerApiTest
     )
   }
 
-  private def checkMessages(
+  protected def checkMessages(
       expectedMessages: Seq[EventDetails],
       receivedMessages: Seq[(Member, OrdinarySerializedEvent)],
   ): Assertion = {

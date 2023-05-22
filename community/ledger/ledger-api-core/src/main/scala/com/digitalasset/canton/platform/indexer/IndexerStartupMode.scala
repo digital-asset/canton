@@ -15,9 +15,7 @@ object IndexerStartupMode {
 
   case object ValidateAndStart extends IndexerStartupMode
 
-  final case class MigrateAndStart(
-      allowExistingSchema: Boolean = DefaultAllowExistingSchema
-  ) extends IndexerStartupMode
+  case object MigrateAndStart extends IndexerStartupMode
 
   final case class ValidateAndWaitOnly(
       schemaMigrationAttempts: Int = DefaultSchemaMigrationAttempts,

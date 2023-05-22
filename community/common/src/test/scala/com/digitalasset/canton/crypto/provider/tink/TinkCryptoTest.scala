@@ -16,6 +16,7 @@ class TinkCryptoTest
     extends AsyncWordSpec
     with SigningTest
     with EncryptionTest
+    with PrivateKeySerializationTest
     with HkdfTest
     with RandomTest
     with JavaKeyConverterTest {
@@ -39,6 +40,11 @@ class TinkCryptoTest
     behave like encryptionProvider(
       Tink.encryption.supported,
       Tink.symmetric.supported,
+      tinkCrypto(),
+    )
+    behave like privateKeySerializerProvider(
+      Tink.signing.supported,
+      Tink.encryption.supported,
       tinkCrypto(),
     )
     behave like hkdfProvider(tinkCrypto().map(_.pureCrypto))

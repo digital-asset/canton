@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology
 
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
@@ -130,16 +131,19 @@ class TopologyStateProcessorX(
       effective: EffectiveTime,
       transactions: Seq[GenericSignedTopologyTransactionX],
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val hashes = transactions
-      .map(x => x.transaction.mapping.uniqueKey)
-      .filterNot(txForMapping.contains)
-    if (hashes.nonEmpty) {
+    val hashes = NonEmpty.from(
+      transactions
+        .map(x => x.transaction.mapping.uniqueKey)
+        .filterNot(txForMapping.contains)
+        .toSet
+    )
+    hashes.fold(Future.unit) {
       store
-        .findTransactionsForMapping(effective, hashes)
+        .findTransactionsForMapping(effective, _)
         .map(_.foreach { item =>
           txForMapping.put(item.transaction.mapping.uniqueKey, MaybePending(item)).discard
         })
-    } else Future.unit
+    }
   }
 
   private def trackProposal(txHash: TxHash, mappingHash: MappingHash): Unit = {
@@ -156,10 +160,13 @@ class TopologyStateProcessorX(
       transactions: Seq[GenericSignedTopologyTransactionX],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val hashes =
-      transactions.map(x => x.transaction.hash).filterNot(proposalsForTx.contains)
-    if (hashes.nonEmpty) {
+      NonEmpty.from(
+        transactions.map(x => x.transaction.hash).filterNot(proposalsForTx.contains).toSet
+      )
+
+    hashes.fold(Future.unit) {
       store
-        .findProposalsByTxHash(effective, hashes)
+        .findProposalsByTxHash(effective, _)
         .map(_.foreach { item =>
           val txHash = item.transaction.hash
           // store the proposal
@@ -167,7 +174,7 @@ class TopologyStateProcessorX(
           // maintain a map from mapping to txs
           trackProposal(txHash, item.transaction.mapping.uniqueKey)
         })
-    } else Future.unit
+    }
   }
 
   private def serialIsMonotonicallyIncreasing(

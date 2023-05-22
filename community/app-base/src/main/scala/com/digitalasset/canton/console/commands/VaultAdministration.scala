@@ -167,6 +167,8 @@ class SecretKeyAdministration(
 
 }
 
+// TODO(#13019) Avoid the global execution context
+@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 class LocalSecretKeyAdministration(
     instance: InstanceReferenceCommon,
     runner: AdminCommandRunner,
@@ -236,6 +238,11 @@ class LocalSecretKeyAdministration(
       keyPair: CryptoKeyPair[_ <: PublicKey, _ <: PrivateKey],
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
     for {
+      cryptoPrivateStore <- crypto.cryptoPrivateStoreExtended
+        .toRight(
+          "The selected crypto provider does not support importing of private keys."
+        )
+        .toEitherT[Future]
       _ <- crypto.cryptoPublicStore
         .storePublicKey(keyPair.publicKey, validatedName)
         .recoverWith {
@@ -250,9 +257,7 @@ class LocalSecretKeyAdministration(
             } yield ()
         }
         .leftMap(_.toString)
-      _ <- crypto.cryptoPrivateStore
-        .storePrivateKey(keyPair.privateKey, validatedName)
-        .leftMap(_.toString)
+      _ <- cryptoPrivateStore.storePrivateKey(keyPair.privateKey, validatedName).leftMap(_.toString)
     } yield ()
 
   @Help.Summary("Download key pair")
@@ -262,7 +267,12 @@ class LocalSecretKeyAdministration(
   ): ByteString =
     TraceContext.withNewTraceContext { implicit traceContext =>
       val cmd = for {
-        privateKey <- crypto.cryptoPrivateStore
+        cryptoPrivateStore <- crypto.cryptoPrivateStoreExtended
+          .toRight(
+            "The selected crypto provider does not support exporting of private keys."
+          )
+          .toEitherT[Future]
+        privateKey <- cryptoPrivateStore
           .exportPrivateKey(fingerprint)
           .leftMap(_.toString)
           .subflatMap(_.toRight(s"no private key found for [$fingerprint]"))

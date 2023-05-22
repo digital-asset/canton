@@ -194,7 +194,11 @@ trait DbMigrations { this: NamedLogging =>
         for {
           _ <- connectionCheck(db.source, params.processingTimeouts)
           _ <- checkDbVersion(db, params.processingTimeouts, standardConfig)
-          _ <- migrateIfFreshAndCheckPending(flyway)
+          _ <-
+            if (params.dbMigrateAndStart)
+              migrateAndStartInternal(flyway)
+            else
+              migrateIfFreshAndCheckPending(flyway)
         } yield {
           val elapsed = System.nanoTime() - started
           logger.debug(
@@ -203,6 +207,21 @@ trait DbMigrations { this: NamedLogging =>
           )
         }
       }
+    }
+  }
+
+  private def migrateAndStartInternal(flyway: Flyway)(implicit
+      traceContext: TraceContext
+  ): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
+    val info = flyway.info()
+    if (info.pending().nonEmpty) {
+      logger.info(
+        s"There are ${info.pending().length} pending migrations for the db that is at version ${info.applied().length}. Performing migration before start."
+      )
+      migrateDatabaseInternal(flyway)
+    } else {
+      logger.debug("Db schema is already up to date")
+      EitherT.rightT(())
     }
   }
 

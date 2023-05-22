@@ -13,11 +13,7 @@ import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
-import com.digitalasset.canton.topology.transaction.{
-  ParticipantAttributes,
-  ParticipantPermission,
-  TrustLevel,
-}
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -524,12 +520,7 @@ class GenTransactionTreeTest
             6 -> Set(16),
           ).map { case (partyId, participantIds) =>
             party(partyId) -> participantIds
-              .map(id =>
-                participant(id) -> ParticipantAttributes(
-                  ParticipantPermission.Submission,
-                  TrustLevel.Ordinary,
-                )
-              )
+              .map(id => participant(id) -> ParticipantPermission.Submission)
               .toMap
           },
         ).topologySnapshot()

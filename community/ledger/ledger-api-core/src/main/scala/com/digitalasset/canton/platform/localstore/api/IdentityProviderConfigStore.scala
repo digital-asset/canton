@@ -39,6 +39,8 @@ trait IdentityProviderConfigStore {
       loggingContext: LoggingContext
   ): Future[Boolean]
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def getActiveIdentityProviderByIssuer(issuer: String)(implicit
       loggingContext: LoggingContext
   ): Future[IdentityProviderConfig] =

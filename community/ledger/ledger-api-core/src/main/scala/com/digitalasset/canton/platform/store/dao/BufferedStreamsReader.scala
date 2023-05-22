@@ -58,6 +58,8 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
   )(implicit
       loggingContext: LoggingContext
   ): Source[(Offset, API_RESPONSE), NotUsed] = {
+    // TODO(#13019) Replace parasitic with DirectExecutionContext
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     def toApiResponseStream(
         slice: Vector[(Offset, BUFFER_OUT)]
     ): Source[(Offset, API_RESPONSE), NotUsed] =

@@ -33,7 +33,7 @@ import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, SequencerId}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -182,12 +182,14 @@ trait MediatorXAdministrationGroupWithInit extends ConsoleCommandGroup {
     def assign(
         domainId: DomainId,
         domainParameters: StaticDomainParameters,
+        sequencerId: SequencerId,
         sequencerConnection: SequencerConnection,
     ): Unit = consoleEnvironment.run {
       runner.adminCommand(
         InitializeX(
           domainId,
           domainParameters.toInternal,
+          sequencerId,
           sequencerConnection,
         )
       )

@@ -38,6 +38,7 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.util.MapsUtil
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.mockito.MockitoSugar.mock
 
@@ -84,14 +85,17 @@ import scala.concurrent.{Await, ExecutionContext, Future}
   *
   * @param domains Set of domains for which the topology is valid
   * @param topology Static association of parties to participants in the most complete way it can be defined in this testing class.
-  * @param additionalParticipants Additional participants for which keys should be added besides the ones mentioned in the topology.
+  * @param participants participants for which keys should be added.
+  *                     A participant mentioned in `topology` will be included automatically in the topology state,
+  *                     so such a participant does not need to be declared again.
+  *                     If a participant occurs both in `topology` and `participants`, the attributes of `participants` have higher precedence.
   * @param keyPurposes The purposes of the keys that will be generated.
   */
 final case class TestingTopology(
     domains: Set[DomainId] = Set(DefaultTestIdentities.domainId),
-    topology: Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]] = Map.empty,
+    topology: Map[LfPartyId, Map[ParticipantId, ParticipantPermission]] = Map.empty,
     mediators: Set[MediatorId] = Set(DefaultTestIdentities.mediator),
-    additionalParticipants: Set[ParticipantId] = Set.empty,
+    participants: Map[ParticipantId, ParticipantAttributes] = Map.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.all,
     domainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]] = List(
       DomainParameters.WithValidity(
@@ -108,16 +112,27 @@ final case class TestingTopology(
     */
   def withDomains(domains: DomainId*): TestingTopology = this.copy(domains = domains.toSet)
 
-  /** Define which participants to add
-    *
-    * These participants will be added in addition to the participants mentioned in the topologies.
+  /** Overwrites the `participants` parameter while setting attributes to Submission / Ordinary.
     */
-  def withParticipants(additionalParticipants: ParticipantId*): TestingTopology =
-    this.copy(additionalParticipants = additionalParticipants.toSet)
+  def withSimpleParticipants(
+      participants: ParticipantId*
+  ): TestingTopology =
+    this.copy(participants =
+      participants
+        .map(_ -> ParticipantAttributes(ParticipantPermission.Submission, TrustLevel.Ordinary))
+        .toMap
+    )
 
-  def participants(): Set[ParticipantId] = {
+  /** Overwrites the `participants` parameter.
+    */
+  def withParticipants(
+      participants: (ParticipantId, ParticipantAttributes)*
+  ): TestingTopology =
+    this.copy(participants = participants.toMap)
+
+  def allParticipants(): Set[ParticipantId] = {
     (topology.values
-      .flatMap(x => x.keys) ++ additionalParticipants).toSet
+      .flatMap(x => x.keys) ++ participants.keys).toSet
   }
 
   def withKeyPurposes(keyPurposes: Set[KeyPurpose]): TestingTopology =
@@ -127,11 +142,10 @@ final case class TestingTopology(
   def withTopology(
       parties: Map[LfPartyId, ParticipantId],
       permission: ParticipantPermission = ParticipantPermission.Submission,
-      trustLevel: TrustLevel = TrustLevel.Ordinary,
   ): TestingTopology = {
-    val tmp: Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]] = parties.toSeq
+    val tmp: Map[LfPartyId, Map[ParticipantId, ParticipantPermission]] = parties.toSeq
       .map { case (party, participant) =>
-        (party, (participant, ParticipantAttributes(permission, trustLevel)))
+        (party, (participant, permission))
       }
       .groupBy(_._1)
       .fmap(res => res.map(_._2).toMap)
@@ -140,8 +154,7 @@ final case class TestingTopology(
 
   /** Define the topology as a map of participant to map of parties */
   def withReversedTopology(
-      parties: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
-      trustLevel: TrustLevel = TrustLevel.Ordinary,
+      parties: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]]
   ): TestingTopology = {
     val converted = parties
       .flatMap { case (participantId, partyToPermission) =>
@@ -153,15 +166,8 @@ final case class TestingTopology(
       .fmap(_.map { case (_, pid, permission) =>
         (pid, permission)
       }.toMap)
-    withDetailedTopology(converted, trustLevel)
+    copy(topology = converted)
   }
-
-  /** Define the topology as a map of parties to a map of participant ids and permission */
-  def withDetailedTopology(
-      parties: Map[LfPartyId, Map[ParticipantId, ParticipantPermission]],
-      trustLevel: TrustLevel = TrustLevel.Ordinary,
-  ): TestingTopology =
-    this.copy(topology = parties.fmap(w => w.fmap(ParticipantAttributes(_, trustLevel))))
 
   def build(
       loggerFactory: NamedLoggerFactory = NamedLoggerFactory("test-area", "crypto")
@@ -270,25 +276,14 @@ class TestingIdentityFactory(
       FutureSupervisor.Noop,
     )
 
-    // Compute participant permissions and trust levels to be the highest granted to an individual party
-    val permissions: Map[ParticipantId, ParticipantAttributes] =
-      topology.topology.foldLeft(Map.empty[ParticipantId, ParticipantAttributes]) {
-        case (acc, (_, participants)) =>
-          participants.foldLeft(acc) { case (acc, (participant, attributes1)) =>
-            val ParticipantAttributes(permission1, trustLevel1) = attributes1
-            val newAttributes = acc.get(participant) match {
-              case Some(ParticipantAttributes(permission2, trustLevel2)) =>
-                ParticipantAttributes(
-                  permission = ParticipantPermission.higherOf(permission1, permission2),
-                  trustLevel = TrustLevel.higherOf(trustLevel1, trustLevel2),
-                )
-              case None => attributes1
-            }
-            acc.updated(participant, newAttributes)
-          }
+    // Compute default participant permissions to be the highest granted to an individual party
+    val defaultPermissionByParticipant: Map[ParticipantId, ParticipantPermission] =
+      topology.topology.foldLeft(Map.empty[ParticipantId, ParticipantPermission]) {
+        case (acc, (_, permissionByParticipant)) =>
+          MapsUtil.extendedMapWith(acc, permissionByParticipant)(ParticipantPermission.higherOf)
       }
 
-    val participantTxs = participantsTxs(permissions, packages)
+    val participantTxs = participantsTxs(defaultPermissionByParticipant, packages)
 
     val domainMembers =
       (Seq[KeyOwner](
@@ -395,30 +390,34 @@ class TestingIdentityFactory(
     .flatMap { case (lfParty, participants) =>
       val partyId = PartyId.tryFromLfParty(lfParty)
       participants.iterator.filter(_._1.uid != partyId.uid).map {
-        case (participantId, relationship) =>
+        case (participantId, permission) =>
           mkAdd(
             PartyToParticipant(
               RequestSide.Both,
               partyId,
               participantId,
-              relationship.permission,
+              permission,
             )
           )
       }
     }
 
   private def participantsTxs(
-      permissions: Map[ParticipantId, ParticipantAttributes],
+      defaultPermissionByParticipant: Map[ParticipantId, ParticipantPermission],
       packages: Seq[PackageId],
   ): Seq[SignedTopologyTransaction[Add]] = topology
-    .participants()
+    .allParticipants()
     .toSeq
     .flatMap { participantId =>
-      val attributes = permissions
+      val defaultPermission = defaultPermissionByParticipant
         .getOrElse(
           participantId,
-          ParticipantAttributes(ParticipantPermission.Submission, TrustLevel.Ordinary),
+          ParticipantPermission.Submission,
         )
+      val attributes = topology.participants.getOrElse(
+        participantId,
+        ParticipantAttributes(defaultPermission, TrustLevel.Ordinary),
+      )
       val pkgs =
         if (packages.nonEmpty)
           Seq(mkAdd(VettedPackages(participantId, packages)))
@@ -651,7 +650,7 @@ object TestingIdentityFactory {
 
   def apply(
       loggerFactory: NamedLoggerFactory,
-      topology: Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]] = Map.empty,
+      topology: Map[LfPartyId, Map[ParticipantId, ParticipantPermission]] = Map.empty,
   ): TestingIdentityFactory =
     TestingIdentityFactory(
       TestingTopology(topology = topology),

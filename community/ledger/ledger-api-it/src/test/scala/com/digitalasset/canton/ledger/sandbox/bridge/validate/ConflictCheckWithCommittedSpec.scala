@@ -263,6 +263,8 @@ class ConflictCheckWithCommittedSpec
 
     val indexServiceMock: IndexService = mock[IndexService]
 
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val conflictCheckWithCommitted: ConflictCheckWithCommittedImpl =
       new ConflictCheckWithCommittedImpl(
         indexService = indexServiceMock,

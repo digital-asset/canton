@@ -56,7 +56,9 @@ abstract class TransactionTreeFactoryImpl(
 
   private val unicumGenerator = new UnicumGenerator(cryptoOps)
   private val cantonContractIdVersion = CantonContractIdVersion.fromProtocolVersion(protocolVersion)
-
+  private val transactionViewDecompositionFactory = TransactionViewDecompositionFactory(
+    protocolVersion
+  )
   protected type State <: TransactionTreeFactoryImpl.State
 
   protected def stateForSubmission(
@@ -124,7 +126,7 @@ abstract class TransactionTreeFactoryImpl(
     )
 
     val rootViewDecompositionsF =
-      TransactionViewDecomposition.fromTransaction(
+      transactionViewDecompositionFactory.fromTransaction(
         confirmationPolicy,
         topologySnapshot,
         transaction,
@@ -207,7 +209,7 @@ abstract class TransactionTreeFactoryImpl(
     )
 
     val decompositionsF =
-      TransactionViewDecomposition.fromTransaction(
+      transactionViewDecompositionFactory.fromTransaction(
         confirmationPolicy,
         topologySnapshot,
         subaction,

@@ -43,5 +43,7 @@ object MockedNodeParameters {
     override def dontWarnOnDeprecatedPV: Boolean = ???
 
     override def initialProtocolVersion: ProtocolVersion = ???
+
+    override def dbMigrateAndStart: Boolean = false
   }
 }

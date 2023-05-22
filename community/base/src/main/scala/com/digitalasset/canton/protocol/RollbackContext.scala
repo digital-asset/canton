@@ -6,10 +6,12 @@ package com.digitalasset.canton.protocol
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 import com.digitalasset.canton.protocol.v0.ViewParticipantData
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
-import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
+import scala.Ordering.Implicits.*
+import scala.math.Ordered.orderingToOrdered
 
 /** RollbackContext tracks the location of lf transaction nodes or canton participant views within a hierarchy of
   * LfNodeRollback suitable for maintaining the local position within the hierarchy of rollback nodes when iterating
@@ -24,7 +26,8 @@ import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 final case class RollbackContext private (
     private val rbScope: Vector[RollbackSibling],
     private val nextChild: RollbackSibling = firstChild,
-) extends PrettyPrinting {
+) extends PrettyPrinting
+    with Ordered[RollbackContext] {
 
   def enterRollback: RollbackContext = new RollbackContext(rbScope :+ nextChild)
 
@@ -56,6 +59,10 @@ final case class RollbackContext private (
     param("rollback scope", _.rollbackScope),
     param("next child", _.nextChild),
   )
+
+  private lazy val sortKey: Vector[Int] = rbScope :+ nextChild
+  override def compare(that: RollbackContext): Int = sortKey.compare(that.sortKey)
+
 }
 
 final case class WithRollbackScope[T](rbScope: RollbackScope, unwrap: T)

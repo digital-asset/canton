@@ -207,6 +207,8 @@ class RecoveringIndexerIntegrationSpec
     }
   }
 
+  // TODO(#13019) Avoid the global execution context
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def participantServer(
       newParticipantState: ParticipantStateFactory,
       restartDelay: FiniteDuration = 100.millis,
@@ -236,7 +238,7 @@ class RecoveringIndexerIntegrationSpec
         readService = participantState._1,
         participantId = participantId,
         config = IndexerConfig(
-          startupMode = IndexerStartupMode.MigrateAndStart(),
+          startupMode = IndexerStartupMode.MigrateAndStart,
           restartDelay = restartDelay,
         ),
         metrics = metrics,

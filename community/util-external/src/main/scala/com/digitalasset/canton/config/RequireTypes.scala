@@ -86,8 +86,6 @@ object RequireTypes {
     def tryAdd(other: T) = NonNegativeNumeric.tryCreate(value + other)
   }
 
-  type NonNegativeInt = NonNegativeNumeric[Int]
-
   object NonNegativeNumeric {
     def tryCreate[T](t: T)(implicit num: Numeric[T]): NonNegativeNumeric[T] =
       create(t).valueOr(err => throw new IllegalArgumentException(err.message))
@@ -145,6 +143,8 @@ object RequireTypes {
     }
   }
 
+  type NonNegativeInt = NonNegativeNumeric[Int]
+
   object NonNegativeInt {
     lazy val zero: NonNegativeInt = NonNegativeInt.tryCreate(0)
     lazy val one: NonNegativeInt = NonNegativeInt.tryCreate(1)
@@ -152,6 +152,18 @@ object RequireTypes {
 
     def create(n: Int): Either[InvariantViolation, NonNegativeInt] = NonNegativeNumeric.create(n)
     def tryCreate(n: Int): NonNegativeInt = NonNegativeNumeric.tryCreate(n)
+  }
+
+  type NonNegativeLong = NonNegativeNumeric[Long]
+
+  object NonNegativeLong {
+    lazy val zero: NonNegativeLong = NonNegativeLong.tryCreate(0)
+    lazy val one: NonNegativeLong = NonNegativeLong.tryCreate(1)
+    lazy val maxValue: NonNegativeLong = NonNegativeLong.tryCreate(Long.MaxValue)
+
+    def create(n: Long): Either[InvariantViolation, NonNegativeLong] = NonNegativeNumeric.create(n)
+
+    def tryCreate(n: Long): NonNegativeLong = NonNegativeNumeric.tryCreate(n)
   }
 
   final case class PositiveNumeric[T] private (value: T)(implicit val num: Numeric[T])

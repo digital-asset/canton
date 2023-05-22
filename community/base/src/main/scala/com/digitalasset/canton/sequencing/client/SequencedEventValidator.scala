@@ -18,6 +18,7 @@ import com.digitalasset.canton.crypto.{
   SyncCryptoClient,
 }
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -26,6 +27,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
   HasLoggerName,
   NamedLoggerFactory,
   NamedLogging,
@@ -89,7 +91,13 @@ object SequencedEventValidationError {
       counter: SequencerCounter,
       suppliedEvent: SequencedEvent[ClosedEnvelope],
       expectedEvent: Option[SequencedEvent[ClosedEnvelope]],
-  ) extends SequencedEventValidationError
+  )(implicit
+      val loggingContext: ErrorLoggingContext
+  ) extends CantonError.Impl(
+        cause =
+          "The sequencer responded with a different message for the same counter / timestamp, which means the sequencer forked."
+      )(ResilientSequencerSubscription.ForkHappened)
+      with SequencedEventValidationError
       with PrettyPrinting {
     override def pretty: Pretty[ForkHappened] = prettyOfClass(
       param("counter", _.counter),

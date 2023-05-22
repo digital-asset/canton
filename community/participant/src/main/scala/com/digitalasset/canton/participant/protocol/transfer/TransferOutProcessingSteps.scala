@@ -4,9 +4,7 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.*
-import cats.syntax.bifunctor.*
 import cats.syntax.either.*
-import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -20,7 +18,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
@@ -33,7 +31,10 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SeedGenerator,
 }
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestValidation.*
+import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessorError.{
+  TargetDomainIsSourceDomain,
+  UnexpectedDomain,
+}
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
 import com.digitalasset.canton.participant.store.*
@@ -48,10 +49,7 @@ import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
-import com.digitalasset.canton.util.EitherUtil.condUnitE
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
@@ -87,7 +85,7 @@ class TransferOutProcessingSteps(
   override type PendingDataAndResponseArgs = TransferOutProcessingSteps.PendingDataAndResponseArgs
 
   override type RequestType = ProcessingSteps.RequestType.TransferOut
-  override val requestType = ProcessingSteps.RequestType.TransferOut
+  override val requestType: RequestType = ProcessingSteps.RequestType.TransferOut
 
   override def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions = {
     state.pendingTransferOutSubmissions
@@ -100,6 +98,14 @@ class TransferOutProcessingSteps(
 
   override def submissionIdOfPendingRequest(pendingData: PendingTransferOut): RootHash =
     pendingData.rootHash
+
+  private def targetIsNotSource(contractId: LfContractId, target: TargetDomainId)(implicit
+      ec: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
+    condUnitET[FutureUnlessShutdown](
+      target.unwrap != domainId.unwrap,
+      TargetDomainIsSourceDomain(domainId.unwrap, contractId),
+    )
 
   override def prepareSubmission(
       param: SubmissionParam,
@@ -120,13 +126,8 @@ class TransferOutProcessingSteps(
     def withDetails(message: String) = s"Transfer-out $contractId to $targetDomain: $message"
 
     for {
-      _ <- condUnitET[FutureUnlessShutdown](
-        targetDomain.unwrap != domainId.id,
-        TargetDomainIsSourceDomain(domainId.unwrap, contractId),
-      )
-      storedContract <- getStoredContract(ephemeralState.contractLookup, contractId).mapK(
-        FutureUnlessShutdown.outcomeK
-      )
+      _ <- targetIsNotSource(contractId, targetDomain)
+      storedContract <- getStoredContract(ephemeralState.contractLookup, contractId)
       stakeholders = storedContract.contract.metadata.stakeholders
       templateId = storedContract.contract.rawContractInstance.contractInstance.unversioned.template
 
@@ -146,30 +147,27 @@ class TransferOutProcessingSteps(
       (timeProof, targetCrypto) = timeProofAndSnapshot
       _ = logger.debug(withDetails(s"Picked time proof ${timeProof.timestamp}"))
 
-      transferOutRequestAndRecipients <- TransferOutProcessingSteps
-        .createTransferOutRequest(
-          participantId,
-          timeProof,
-          contractId,
-          templateId,
-          submitterMetadata,
-          stakeholders,
-          domainId,
-          sourceDomainProtocolVersion,
-          mediatorId,
-          targetDomain,
-          targetProtocolVersion,
-          sourceRecentSnapshot.ipsSnapshot,
-          targetCrypto.ipsSnapshot,
-          TransferCounter.Genesis, // TODO(#12286): replace by the value from the stored contract
-          logger,
-        )
-        .mapK(FutureUnlessShutdown.outcomeK)
-      (transferOutRequest, recipients) = transferOutRequestAndRecipients
+      validated <- TransferOutRequest.validated(
+        participantId,
+        timeProof,
+        contractId,
+        templateId,
+        submitterMetadata,
+        stakeholders,
+        domainId,
+        sourceDomainProtocolVersion,
+        mediatorId,
+        targetDomain,
+        targetProtocolVersion,
+        sourceRecentSnapshot.ipsSnapshot,
+        targetCrypto.ipsSnapshot,
+        TransferCounter.Genesis, // TODO(#12286): replace by the value from the stored contract
+        logger,
+      )
 
       transferOutUuid = seedGenerator.generateUuid()
       seed = seedGenerator.generateSaltSeed()
-      fullTree = transferOutRequest.toFullTransferOutTree(
+      fullTree = validated.request.toFullTransferOutTree(
         pureCrypto,
         pureCrypto,
         seed,
@@ -181,7 +179,7 @@ class TransferOutProcessingSteps(
         .create(TransferOutViewType)(fullTree, sourceRecentSnapshot, sourceDomainProtocolVersion.v)
         .leftMap[TransferProcessorError](EncryptionError(contractId, _))
         .mapK(FutureUnlessShutdown.outcomeK)
-      maybeRecipients = Recipients.ofSet(recipients)
+      maybeRecipients = Recipients.ofSet(validated.recipients)
       recipientsT <- EitherT
         .fromOption[FutureUnlessShutdown](
           maybeRecipients,
@@ -200,7 +198,9 @@ class TransferOutProcessingSteps(
         Recipients.groups(
           checked(
             NonEmptyUtil.fromUnsafe(
-              recipients.toSeq.map(participant => NonEmpty(Set, mediatorId, participant: Member))
+              validated.recipients.toSeq.map(participant =>
+                NonEmpty(Set, mediatorId, participant: Member)
+              )
             )
           )
         )
@@ -239,10 +239,13 @@ class TransferOutProcessingSteps(
   private[this] def getStoredContract(
       contractLookup: ContractLookup,
       contractId: LfContractId,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, StoredContract] =
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, StoredContract] =
     contractLookup
       .lookup(contractId)
-      .toRight[TransferProcessorError](TransferOutRequestValidation.UnknownContract(contractId))
+      .toRight[TransferProcessorError](TransferOutProcessorError.UnknownContract(contractId))
+      .mapK(FutureUnlessShutdown.outcomeK)
 
   override protected def decryptTree(sourceSnapshot: DomainSnapshotSyncCryptoApi)(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferOutViewType]]
@@ -262,6 +265,18 @@ class TransferOutProcessingSteps(
       }
       .map(WithRecipients(_, envelope.recipients))
   }
+
+  private def expectedDomainId(
+      fromRequest: SourceDomainId,
+      timestamp: CantonTimestamp,
+  )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
+    condUnitET[FutureUnlessShutdown](
+      fromRequest == domainId,
+      UnexpectedDomain(
+        TransferId(fromRequest, timestamp),
+        domainId.unwrap,
+      ),
+    )
 
   override def computeActivenessSetAndPendingContracts(
       ts: CantonTimestamp,
@@ -286,13 +301,9 @@ class TransferOutProcessingSteps(
       )
       WithRecipients(txOutRequest, recipients) = txOutRequestAndRecipients
       contractId = txOutRequest.contractId
-      _ <- condUnitET[Future](
-        txOutRequest.sourceDomain == domainId,
-        UnexpectedDomain(
-          TransferId(txOutRequest.sourceDomain, ts),
-          domainId.unwrap,
-        ),
-      ).leftWiden[TransferProcessorError]
+      _ <- expectedDomainId(txOutRequest.sourceDomain, ts).onShutdown(
+        Left(TransferOutProcessorError.AbortedDueToShutdownOut(txOutRequest.contractId))
+      )
       contractIdS = Set(contractId)
       contractsCheck = ActivenessCheck(
         checkFresh = Set.empty,
@@ -312,6 +323,48 @@ class TransferOutProcessingSteps(
       PendingDataAndResponseArgs(txOutRequest, recipients, ts, rc, sc, sourceSnapshot),
     )
   }
+
+  /** Wait until the participant has received and processed all topology transactions on the target domain
+    * up to the target-domain time proof timestamp.
+    *
+    * As we're not processing messages in parallel, delayed message processing on one domain can
+    * block message processing on another domain and thus breaks isolation across domains.
+    * Even with parallel processing, the cursors in the request journal would not move forward,
+    * so event emission to the event log blocks, too.
+    *
+    * No deadlocks can arise under normal behaviour though.
+    * For a deadlock, we would need cyclic waiting, i.e., a transfer out request on one domain D1 references
+    * a time proof on another domain D2 and a earlier transfer-out request on D2 references a time proof on D3
+    * and so on to domain Dn and an earlier transfer-out request on Dn references a later time proof on D1.
+    * This, however, violates temporal causality of events.
+    *
+    * This argument breaks down for malicious participants
+    * because the participant cannot verify that the time proof is authentic without having processed
+    * all topology updates up to the declared timestamp as the sequencer's signing key might change.
+    * So a malicious participant could fake a time proof and set a timestamp in the future,
+    * which breaks causality.
+    * With parallel processing of messages, deadlocks cannot occur as this waiting runs in parallel with
+    * the request tracker, so time progresses on the target domain and eventually reaches the timestamp.
+    */
+  // TODO(i12926): Prevent deadlocks. Detect non-sensible timestamps. Verify sequencer signature on time proof.
+  private def getTopologySnapshotAtTimestamp(
+      transferringParticipant: Boolean,
+      domainId: TargetDomainId,
+      timestamp: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Option[TopologySnapshot]] =
+    Option
+      .when(transferringParticipant) {
+        transferCoordination
+          .awaitTimestampAndGetCryptoSnapshot(
+            domainId.unwrap,
+            timestamp,
+            waitForEffectiveTime = true,
+          )
+      }
+      .traverse(_.map(_.ipsSnapshot))
 
   override def constructPendingDataAndResponse(
       pendingDataAndResponseArgs: PendingDataAndResponseArgs,
@@ -338,18 +391,31 @@ class TransferOutProcessingSteps(
 
       // Since the transfer out request should be sent only to participants that host a stakeholder of the contract,
       // we can expect to find the contract in the contract store.
-      storedContract <- getStoredContract(contractLookup, fullTree.contractId).mapK(
-        FutureUnlessShutdown.outcomeK
+      storedContract <- getStoredContract(contractLookup, fullTree.contractId)
+
+      transferringParticipant = fullTree.adminParties.contains(participantId.adminParty.toLf)
+
+      targetTopology <- getTopologySnapshotAtTimestamp(
+        transferringParticipant,
+        fullTree.targetDomain,
+        fullTree.targetTimeProof.timestamp,
       )
 
-      sourceIps = sourceSnapshot.ipsSnapshot
-      validationRes <- validateTransferOutRequest(
+      _ <- TransferOutValidation(
         fullTree,
         storedContract.contract.metadata.stakeholders,
-        sourceIps,
+        sourceSnapshot.ipsSnapshot,
+        targetTopology,
         recipients,
-      ).mapK(FutureUnlessShutdown.outcomeK)
-      (transferringParticipant, transferInExclusivity) = validationRes
+        logger,
+      )
+
+      transferInExclusivity <- getTransferInExclusivity(
+        targetTopology,
+        fullTree.targetTimeProof.timestamp,
+        fullTree.targetDomain,
+      )
+
       // Since the participant hosts a stakeholder, it should find the creating transaction ID in the contract store
       creatingTransactionId <- EitherT.fromEither[FutureUnlessShutdown](
         storedContract.creatingTransactionIdO
@@ -359,7 +425,9 @@ class TransferOutProcessingSteps(
       activenessResult <- EitherT.right(activenessF)
 
       hostedStks <- EitherT.liftF(
-        FutureUnlessShutdown.outcomeF(hostedStakeholders(fullTree.stakeholders.toList, sourceIps))
+        FutureUnlessShutdown.outcomeF(
+          hostedStakeholders(fullTree.stakeholders.toList, sourceSnapshot.ipsSnapshot)
+        )
       )
 
       requestId = RequestId(ts)
@@ -382,7 +450,7 @@ class TransferOutProcessingSteps(
       )
 
       transferOutDecisionTime <- ProcessingSteps
-        .getDecisionTime(sourceIps, ts)
+        .getDecisionTime(sourceSnapshot.ipsSnapshot, ts)
         .leftMap(TransferParametersError(domainId.unwrap, _))
         .mapK(FutureUnlessShutdown.outcomeK)
 
@@ -406,7 +474,9 @@ class TransferOutProcessingSteps(
       confirmingStakeholders <- EitherT.right(
         storedContract.contract.metadata.stakeholders.toList.parTraverseFilter(stakeholder =>
           FutureUnlessShutdown.outcomeF(
-            sourceIps.canConfirm(participantId, stakeholder).map(if (_) Some(stakeholder) else None)
+            sourceSnapshot.ipsSnapshot
+              .canConfirm(participantId, stakeholder)
+              .map(Option.when(_)(stakeholder))
           )
         )
       )
@@ -428,70 +498,19 @@ class TransferOutProcessingSteps(
     )
   }
 
-  private[this] def validateTransferOutRequest(
-      txOutRequest: FullTransferOutTree,
-      actualStakeholders: Set[LfPartyId],
-      sourceIps: TopologySnapshot,
-      recipients: Recipients,
+  private[this] def getTransferInExclusivity(
+      targetTopology: Option[TopologySnapshot],
+      timestamp: CantonTimestamp,
+      domainId: TargetDomainId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, (Boolean, Option[CantonTimestamp])] = {
-    val isTransferringParticipant =
-      txOutRequest.adminParties.contains(participantId.adminParty.toLf)
-    val targetTimestamp = txOutRequest.targetTimeProof.timestamp
-    val maybeTargetIpsF =
-      if (isTransferringParticipant) {
-        for {
-          awaitO <- EitherT.fromEither[Future](
-            transferCoordination.awaitTimestamp(
-              txOutRequest.targetDomain.unwrap,
-              targetTimestamp,
-              waitForEffectiveTime = true,
-            )
-          )
-          /* Wait until the participant has received and processed all topology transactions on the target domain
-           * up to the target-domain time proof timestamp.
-           *
-           * As we're not processing messages in parallel, delayed message processing on one domain can
-           * block message processing on another domain and thus breaks isolation across domains.
-           * Even with parallel processing, the cursors in the request journal would not move forward,
-           * so event emission to the event log blocks, too.
-           *
-           * No deadlocks can arise under normal behaviour though.
-           * For a deadlock, we would need cyclic waiting, i.e., a transfer out request on one domain D1 references
-           * a time proof on another domain D2 and a earlier transfer-out request on D2 references a time proof on D3
-           * and so on to domain Dn and an earlier transfer-out request on Dn references a later time proof on D1.
-           * This, however, violates temporal causality of events.
-           *
-           * This argument breaks down for malicious participants
-           * because the participant cannot verify that the time proof is authentic without having processed
-           * all topology updates up to the declared timestamp as the sequencer's signing key might change.
-           * So a malicious participant could fake a time proof and set a timestamp in the future,
-           * which breaks causality.
-           * With parallel processing of messages, deadlocks cannot occur as this waiting runs in parallel with
-           * the request tracker, so time progresses on the target domain and eventually reaches the timestamp.
-           */
-          // TODO(i12926): Prevent deadlocks. Detect non-sensible timestamps.
-          _ <- EitherT.right(awaitO.getOrElse(Future.unit))
-          targetCrypto <- transferCoordination.cryptoSnapshot(
-            txOutRequest.targetDomain.unwrap,
-            targetTimestamp,
-          )
-          // TODO(i12926): Verify sequencer signature on time proof
-        } yield Some(targetCrypto.ipsSnapshot)
-      } else EitherT.pure[Future, TransferProcessorError](None)
-
-    for {
-      targetIps <- maybeTargetIpsF
-      transferInExclusivity <- validateTransferOutRequest(
-        txOutRequest,
-        actualStakeholders,
-        sourceIps,
-        targetIps,
-        recipients,
-      )
-    } yield isTransferringParticipant -> transferInExclusivity
-  }
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Option[CantonTimestamp]] =
+    targetTopology.traverse(
+      ProcessingSteps
+        .getTransferInExclusivity(_, timestamp)
+        .mapK(FutureUnlessShutdown.outcomeK)
+        .leftMap(TransferParametersError(domainId.unwrap, _))
+    )
 
   override def getCommitSetAndContractsToBeStoredAndEvent(
       eventE: Either[
@@ -517,10 +536,10 @@ class TransferOutProcessingSteps(
       transferId,
       targetDomain,
       stakeholders,
-      hostedStakeholders,
+      _hostedStakeholder,
       _targetTimeProof,
       transferInExclusivity,
-      _,
+      _mediatorId,
     ) = pendingRequestData
 
     val pendingSubmissionData = pendingSubmissionMap.get(rootHash)
@@ -538,10 +557,10 @@ class TransferOutProcessingSteps(
         )
         val commitSetFO = Some(Future.successful(commitSet))
         for {
-          _unit <- ifThenET(transferringParticipant) {
+          _ <- ifThenET(transferringParticipant) {
             EitherT
               .fromEither[Future](DeliveredTransferOutResult.create(eventE))
-              .leftMap(err => InvalidResult(transferId, err))
+              .leftMap(err => TransferOutProcessorError.InvalidResult(transferId, err))
               .flatMap(deliveredResult =>
                 transferCoordination.addTransferOutResult(targetDomain, deliveredResult)
               )
@@ -664,119 +683,6 @@ class TransferOutProcessingSteps(
     transferCoordination.deleteTransfer(targetDomain, transferId)
   }
 
-  private[this] def validateTransferOutRequest(
-      request: FullTransferOutTree,
-      expectedStakeholders: Set[LfPartyId],
-      sourceIps: TopologySnapshot,
-      maybeTargetIps: Option[TopologySnapshot],
-      recipients: Recipients,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, Option[CantonTimestamp]] = {
-    val stakeholders = request.stakeholders
-    val adminParties = request.adminParties
-
-    def checkStakeholderHasTransferringParticipant(
-        stakeholder: LfPartyId
-    ): Future[ValidatedNec[String, Unit]] =
-      sourceIps
-        .activeParticipantsOf(stakeholder)
-        .map(
-          _.filter(_._2.permission.canConfirm)
-            .exists { case (participant, _) =>
-              adminParties.contains(participant.adminParty.toLf)
-            }
-        )
-        .map { validated =>
-          Validated.condNec(
-            validated,
-            (),
-            s"Stakeholder $stakeholder has no transferring participant.",
-          )
-        }
-
-    val checkStakeholders: Either[TransferProcessorError, Unit] = condUnitE(
-      stakeholders == expectedStakeholders,
-      StakeholdersMismatch(
-        None,
-        declaredViewStakeholders = stakeholders,
-        declaredContractStakeholders = None,
-        expectedStakeholders = Right(expectedStakeholders),
-      ),
-    )
-
-    maybeTargetIps match {
-      case None =>
-        /* Checks that can be done by a non-transferring participant
-         * - every stakeholder is hosted on a participant with an admin party
-         * - the admin parties are hosted only on their participants
-         */
-        for {
-          _ <- EitherT.fromEither[Future](checkStakeholders)
-          _ <- EitherT(
-            adminParties.toList
-              .parTraverse(
-                TransferOutRequestValidation.checkAdminParticipantCanConfirm(sourceIps, logger)
-              )
-              .map(
-                _.sequence.toEither.leftMap(errors =>
-                  AdminPartyPermissionErrors(stringOfNec(errors))
-                )
-              )
-          ).leftWiden[TransferProcessorError]
-          _ <- EitherT(
-            stakeholders.toList
-              .parTraverse(checkStakeholderHasTransferringParticipant)
-              .map(
-                _.sequence.toEither.leftMap(errors => StakeholderHostingErrors(stringOfNec(errors)))
-              )
-          ).leftWiden[TransferProcessorError]
-        } yield None
-      case Some(targetIps) =>
-        for {
-          _ <- EitherT.fromEither[Future](checkStakeholders)
-          adminPartiesAndParticipants <- TransferOutRequestValidation
-            .adminPartiesWithoutSubmitterCheck(
-              request.contractId,
-              request.submitter,
-              expectedStakeholders,
-              sourceIps,
-              targetIps,
-              logger,
-            )
-          AdminPartiesAndParticipants(expectedAdminParties, expectedParticipants) =
-            adminPartiesAndParticipants
-
-          transferInExclusivity <- ProcessingSteps
-            .getTransferInExclusivity(
-              targetIps,
-              request.targetTimeProof.timestamp,
-            )
-            .leftMap(TransferParametersError(request.targetDomain.unwrap, _))
-
-          _ <- EitherTUtil.condUnitET[Future](
-            adminParties == expectedAdminParties,
-            AdminPartiesMismatch(
-              contractId = request.contractId,
-              expected = expectedAdminParties,
-              declared = adminParties,
-            ),
-          )
-          expectedRecipientsTree = Recipients.ofSet(expectedParticipants)
-          _ <- EitherTUtil
-            .condUnitET[Future](
-              expectedRecipientsTree.contains(recipients),
-              RecipientsMismatch(
-                contractId = request.contractId,
-                expected = expectedRecipientsTree,
-                declared = recipients,
-              ),
-            )
-            .leftWiden[TransferProcessorError]
-        } yield Some(transferInExclusivity)
-    }
-  }
-
   private[this] def createTransferOutResponse(
       requestId: RequestId,
       transferringParticipant: Boolean,
@@ -814,7 +720,6 @@ class TransferOutProcessingSteps(
 }
 
 object TransferOutProcessingSteps {
-  private def stringOfNec[A](chain: NonEmptyChain[String]): String = chain.toList.mkString(", ")
 
   final case class SubmissionParam(
       submitterMetadata: TransferSubmitterMetadata,
@@ -850,55 +755,6 @@ object TransferOutProcessingSteps {
       with PendingRequestData {
     override def pendingContracts: Set[LfContractId] = Set()
   }
-
-  def createTransferOutRequest(
-      participantId: ParticipantId,
-      timeProof: TimeProof,
-      contractId: LfContractId,
-      templateId: LfTemplateId,
-      submitterMetadata: TransferSubmitterMetadata,
-      stakeholders: Set[LfPartyId],
-      sourceDomain: SourceDomainId,
-      sourceProtocolVersion: SourceProtocolVersion,
-      sourceMediator: MediatorId,
-      targetDomain: TargetDomainId,
-      targetProtocolVersion: TargetProtocolVersion,
-      sourceIps: TopologySnapshot,
-      targetIps: TopologySnapshot,
-      transferCounter: TransferCounter,
-      logger: TracedLogger,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[Future, TransferProcessorError, (TransferOutRequest, Set[ParticipantId])] =
-    for {
-      adminPartiesAndRecipients <- TransferOutRequestValidation.adminPartiesWithSubmitterCheck(
-        participantId,
-        contractId,
-        submitterMetadata.submitter,
-        stakeholders,
-        sourceIps,
-        targetIps,
-        logger,
-      )
-    } yield {
-      val transferOutRequest = TransferOutRequest(
-        submitterMetadata,
-        stakeholders,
-        adminPartiesAndRecipients.adminParties,
-        contractId,
-        templateId,
-        sourceDomain,
-        sourceProtocolVersion,
-        sourceMediator,
-        targetDomain,
-        targetProtocolVersion,
-        timeProof,
-        transferCounter,
-      )
-
-      (transferOutRequest, adminPartiesAndRecipients.participants)
-    }
 
   final case class PendingDataAndResponseArgs(
       txOutRequest: FullTransferOutTree,

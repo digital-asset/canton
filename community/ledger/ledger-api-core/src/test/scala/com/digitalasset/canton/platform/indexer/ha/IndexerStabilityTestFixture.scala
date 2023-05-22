@@ -67,7 +67,7 @@ object IndexerStabilityTestFixture {
       lockIdSeed: Int,
   )(implicit resourceContext: ResourceContext, materializer: Materializer): Resource[Indexers] = {
     val indexerConfig = IndexerConfig(
-      startupMode = IndexerStartupMode.MigrateAndStart(),
+      startupMode = IndexerStartupMode.MigrateAndStart,
       highAvailability = HaConfig(
         indexerLockId = lockIdSeed,
         indexerWorkerLockId = lockIdSeed + 1,

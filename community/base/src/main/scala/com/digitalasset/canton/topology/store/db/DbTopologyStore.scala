@@ -18,7 +18,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
@@ -161,15 +161,99 @@ class DbPartyMetadataStore(
 
 }
 
+trait DbTopologyStoreCommon[+StoreId <: TopologyStoreId] extends NamedLogging {
+  this: TopologyStoreCommon[StoreId, ?, ?, ?] & DbStore =>
+
+  import DbStorage.Implicits.BuilderChain.*
+  import storage.api.*
+
+  protected def maxItemsInSqlQuery: Int
+  protected def transactionStoreIdName: LengthLimitedString
+  protected def updatingTime: TimedLoadGauge
+  protected def readTime: TimedLoadGauge
+
+  override def currentDispatchingWatermark(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]] = {
+    val query =
+      sql"SELECT watermark_ts FROM topology_dispatching WHERE store_id =$transactionStoreIdName"
+        .as[CantonTimestamp]
+        .headOption
+    readTime.event {
+      storage.query(query, functionFullName)
+    }
+  }
+
+  override def updateDispatchingWatermark(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
+    val query = storage.profile match {
+      case _: DbStorage.Profile.Postgres =>
+        sqlu"""insert into topology_dispatching (store_id, watermark_ts)
+                    VALUES ($transactionStoreIdName, $timestamp)
+                 on conflict (store_id) do update
+                  set
+                    watermark_ts = $timestamp
+                 """
+      case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Oracle =>
+        sqlu"""merge into topology_dispatching
+                  using dual
+                  on (store_id = $transactionStoreIdName)
+                  when matched then
+                    update set
+                       watermark_ts = $timestamp
+                  when not matched then
+                    insert (store_id, watermark_ts)
+                    values ($transactionStoreIdName, $timestamp)
+                 """
+    }
+    updatingTime.event {
+      storage.update_(query, functionFullName)
+    }
+  }
+
+  protected def asOfQuery(asOf: CantonTimestamp, asOfInclusive: Boolean): SQLActionBuilder =
+    if (asOfInclusive)
+      sql" AND valid_from <= $asOf AND (valid_until is NULL OR $asOf < valid_until)"
+    else
+      sql" AND valid_from < $asOf AND (valid_until is NULL OR $asOf <= valid_until)"
+
+  protected def getHeadStateQuery(
+      recentTimestampO: Option[CantonTimestamp]
+  ): SQLActionBuilderChain = recentTimestampO match {
+    case Some(value) => asOfQuery(value, asOfInclusive = false)
+    case None => sql" AND valid_until is NULL"
+  }
+
+  @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
+  protected def andIdFilter(
+      previousFilter: SQLActionBuilderChain,
+      idFilter: String,
+      namespaceOnly: Boolean,
+  ): SQLActionBuilderChain = if (idFilter.isEmpty) previousFilter
+  else if (namespaceOnly) {
+    previousFilter ++ sql" AND namespace LIKE ${idFilter + "%"}"
+  } else {
+    val (prefix, suffix) = UniqueIdentifier.splitFilter(idFilter, "%")
+    val tmp = previousFilter ++ sql" AND identifier like $prefix "
+    if (suffix.sizeCompare(1) > 0) {
+      tmp ++ sql" AND namespace like $suffix "
+    } else
+      tmp
+  }
+
+}
+
 class DbTopologyStore[StoreId <: TopologyStoreId](
     override protected val storage: DbStorage,
     val storeId: StoreId,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-    maxItemsInSqlQuery: Int = 100,
+    override protected val maxItemsInSqlQuery: Int = 100,
 )(implicit val ec: ExecutionContext)
     extends TopologyStore[StoreId]
+    with DbTopologyStoreCommon[StoreId]
     with DbStore {
 
   import DbStorage.Implicits.BuilderChain.*
@@ -180,32 +264,32 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       : GetResult[SignedTopologyTransaction[TopologyChangeOp]] =
     SignedTopologyTransaction.createGetResultDomainTopologyTransaction
 
-  private val (transactionStoreIdName, stateStoreIdFilterName) = buildTransactionStoreNames(storeId)
+  protected val (transactionStoreIdName, stateStoreIdFilterName) = buildTransactionStoreNames(
+    storeId
+  )
   private val isDomainStore = storeId match {
     case TopologyStoreId.DomainStore(_, _) => true
     case _ => false
   }
 
-  private val updatingTime: TimedLoadGauge =
+  protected val updatingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("topology-store-update")
-  private val readTime: TimedLoadGauge =
+  protected val readTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("topology-store-read")
 
   private def buildTransactionStoreNames(
       storeId: TopologyStoreId
-  ): (LengthLimitedString, LengthLimitedString) = {
-    def withPrefix(str: String): LengthLimitedString = {
-      LengthLimitedString.tryCreate(str + "::", str.length + 2).tryConcatenate(storeId.dbString)
-    }
+  ): (LengthLimitedString, LengthLimitedString) = (
     storeId match {
       case TopologyStoreId.DomainStore(_domainId, discriminator) if discriminator.isEmpty =>
-        (storeId.dbString, withPrefix("S"))
-      case TopologyStoreId.DomainStore(_domainId, discriminator) =>
-        ((withPrefix(discriminator + "T"), withPrefix(discriminator + "S")))
+        storeId.dbString
+      case TopologyStoreId.DomainStore(_domainId, _discriminator) =>
+        storeId.dbStringWithDaml2xUniquifier("T")
       case TopologyStoreId.AuthorizedStore =>
-        (storeId.dbString, withPrefix("S"))
-    }
-  }
+        storeId.dbString
+    },
+    storeId.dbStringWithDaml2xUniquifier("S"),
+  )
 
   private def pathQuery(uniquePath: UniquePath): SQLActionBuilder = {
 
@@ -421,13 +505,6 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       }
     }
 
-  private def asOfQuery(asOf: CantonTimestamp, asOfInclusive: Boolean): SQLActionBuilder = {
-
-    sql" AND valid_from #${if (asOfInclusive) "<="
-      else "<"} $asOf AND (valid_until is NULL OR $asOf #${if (asOfInclusive) "<"
-      else "<="} valid_until)"
-  }
-
   override def timestamp(
       useStateStore: Boolean
   )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] = {
@@ -552,13 +629,9 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
         stateStoreIdFilterName
       else transactionStoreIdName
     }
-    def getHeadStateQuery(): SQLActionBuilderChain = recentTimestampO match {
-      case Some(value) => asOfQuery(value, asOfInclusive = false)
-      case None => sql" AND valid_until is NULL"
-    }
     val query1: SQLActionBuilderChain = timeQuery match {
       case TimeQuery.HeadState =>
-        getHeadStateQuery()
+        getHeadStateQuery(recentTimestampO)
       case TimeQuery.Snapshot(asOf) =>
         asOfQuery(asOf = asOf, asOfInclusive = false)
       case TimeQuery.Range(None, None) =>
@@ -574,19 +647,9 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
         query1 ++ sql" AND operation = $value"
       case None => query1
     }
-    @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
-    val query3 =
-      if (idFilter.isEmpty) query2
-      else if (namespaceOnly) {
-        query2 ++ sql" AND namespace LIKE ${idFilter + "%"}"
-      } else {
-        val (prefix, suffix) = UniqueIdentifier.splitFilter(idFilter, "%")
-        val tmp = query2 ++ sql" AND identifier like $prefix "
-        if (suffix.sizeCompare(1) > 0) {
-          tmp ++ sql" AND namespace like $suffix "
-        } else
-          tmp
-      }
+
+    val query3 = andIdFilter(query2, idFilter, namespaceOnly)
+
     val query4 = typ match {
       case Some(value) => query3 ++ sql" AND transaction_type = $value"
       case None => query3

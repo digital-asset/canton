@@ -34,6 +34,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.protocol.validation.{
   ConfirmationResponseFactory,
+  InternalConsistencyChecker,
   ModelConformanceChecker,
 }
 import com.digitalasset.canton.participant.store.{DuplicateContract, SyncDomainEphemeralState}
@@ -96,6 +97,11 @@ class TransactionProcessor(
         new SerializableContractAuthenticatorImpl(new UnicumGenerator(crypto.pureCrypto)),
         new AuthenticationValidator(),
         new AuthorizationValidator(participantId),
+        new InternalConsistencyChecker(
+          staticDomainParameters.uniqueContractKeys,
+          staticDomainParameters.protocolVersion,
+          loggerFactory,
+        ),
         loggerFactory,
         futureSupervisor,
       ),

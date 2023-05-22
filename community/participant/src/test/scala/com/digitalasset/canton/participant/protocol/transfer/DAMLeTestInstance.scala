@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting, PackageService}
+import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerOps
@@ -39,6 +40,7 @@ object DAMLeTestInstance {
         pureCrypto,
         mock[ParticipantTopologyManagerOps],
         new PackageInspectionOpsForTesting(participant, loggerFactory),
+        ParticipantTestMetrics,
         ProcessingTimeout(),
         loggerFactory,
       )

@@ -8,6 +8,7 @@ import com.digitalasset.canton.data.SubmitterMetadata
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
+import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.ErrorWithInternalConsistencyCheck
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.store.ContractKeyJournal
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
@@ -26,6 +27,7 @@ final case class TransactionValidationResult(
       ModelConformanceChecker.ErrorWithSubviewsCheck,
       ModelConformanceChecker.Result,
     ],
+    internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit],
     consumedInputsOfHostedParties: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
     witnessedAndDivulged: Map[LfContractId, SerializableContract],
     createdContracts: Map[LfContractId, SerializableContract],

@@ -58,8 +58,8 @@ object IndexerConfig {
     ),
   )
 
-  val DefaultIndexerStartupMode: IndexerStartupMode.MigrateAndStart =
-    IndexerStartupMode.MigrateAndStart(allowExistingSchema = false)
+  val DefaultIndexerStartupMode: IndexerStartupMode =
+    IndexerStartupMode.MigrateAndStart
   val DefaultHaConfig: HaConfig = HaConfig()
   val DefaultRestartDelay: FiniteDuration = 10.seconds
   val DefaultMaxInputBufferSize: Int = 50

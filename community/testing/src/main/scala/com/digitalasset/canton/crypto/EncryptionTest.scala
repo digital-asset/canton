@@ -172,20 +172,6 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
       } yield key shouldEqual key2
     }
 
-    "serialize and deserialize encryption private key via protobuf" in {
-      for {
-        crypto <- newCrypto
-        publicKey <- newPublicKey(crypto, encryptionKeyScheme)
-        privateKey <- crypto.cryptoPrivateStore
-          .decryptionKey(publicKey.id)
-          .leftMap(_.toString)
-          .subflatMap(_.toRight("Private key not found"))
-          .valueOrFail("get key")
-        keyP = privateKey.toProtoVersioned(testedProtocolVersion)
-        key2 = EncryptionPrivateKey.fromProtoVersioned(keyP).valueOrFail("serialize key")
-      } yield privateKey shouldEqual key2
-    }
-
     "encrypt and decrypt with an encryption keypair" in {
       val message = Message(ByteString.copyFromUtf8("foobar"))
       for {

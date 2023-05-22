@@ -114,6 +114,10 @@ final case class UniqueIdentifier(id: Identifier, namespace: Namespace) extends 
 
   def toLengthLimitedString: String255 = checked(String255.tryCreate(toProtoPrimitive))
 
+  // utility to filter UIDs using prefixes obtained via UniqueIdentifier.splitFilter() below
+  def matchesPrefixes(idPrefix: String, nsPrefix: String): Boolean =
+    id.toProtoPrimitive.startsWith(idPrefix) && namespace.toProtoPrimitive.startsWith(nsPrefix)
+
   override def pretty: Pretty[this.type] =
     prettyOfString(uid => uid.id.show + SafeSimpleString.delimiter + uid.namespace.show)
 }

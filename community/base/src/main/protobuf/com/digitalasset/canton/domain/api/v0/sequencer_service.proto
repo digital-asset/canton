@@ -208,4 +208,3 @@ message TopologyStateForInitRequest {
 message TopologyStateForInitResponse {
     com.digitalasset.canton.protocol.v0.TopologyTransactions topology_transactions = 1;
 }
-

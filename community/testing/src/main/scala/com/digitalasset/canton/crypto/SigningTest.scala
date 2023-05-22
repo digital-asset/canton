@@ -38,22 +38,6 @@ trait SigningTest extends BaseTest {
           } yield publicKey shouldEqual publicKey2
         }
 
-        "serialize and deserialize a signing private key via protobuf" in {
-          for {
-            crypto <- newCrypto
-            publicKey <- newPublicKey(crypto)
-            privateKey <- crypto.cryptoPrivateStore
-              .signingKey(publicKey.id)
-              .leftMap(_.toString)
-              .subflatMap(_.toRight("Private key not found"))
-              .valueOrFail("get key")
-            privateKeyP = privateKey.toProtoVersioned(testedProtocolVersion)
-            privateKey2 = SigningPrivateKey
-              .fromProtoVersioned(privateKeyP)
-              .valueOrFail("serialize key")
-          } yield privateKey shouldEqual privateKey2
-        }
-
         "serialize and deserialize a signature via protobuf" in {
           for {
             crypto <- newCrypto
@@ -78,10 +62,7 @@ trait SigningTest extends BaseTest {
         "fail to sign with unknown private key" in {
           for {
             crypto <- newCrypto
-            unknownKeyId = Fingerprint.create(
-              ByteString.copyFromUtf8("foobar"),
-              crypto.pureCrypto.defaultHashAlgorithm,
-            )
+            unknownKeyId = Fingerprint.create(ByteString.copyFromUtf8("foobar"))
             hash = TestHash.digest("foobar")
             sig <- crypto.privateCrypto.sign(hash, unknownKeyId).value
           } yield sig.left.value shouldBe a[UnknownSigningKey]

@@ -14,6 +14,8 @@ import scala.util.{Success, Try}
 
 object CommandSubmissionFlow {
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def apply[Context](
       submit: SubmitRequest => Future[Empty],
       maxInFlight: Int,

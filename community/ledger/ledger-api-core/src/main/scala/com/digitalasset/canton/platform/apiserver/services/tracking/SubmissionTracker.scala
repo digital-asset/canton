@@ -67,6 +67,8 @@ object SubmissionTracker {
     // Set max-in-flight capacity
     metrics.daml.commands.maxInFlightCapacity.inc(maxCommandsInFlight.toLong)(MetricsContext.Empty)
 
+    // TODO(#13019) Replace parasitic with DirectExecutionContext
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     override def track(
         commands: Commands,
         timeout: Duration,
@@ -136,6 +138,8 @@ object SubmissionTracker {
     ): Unit =
       pending.get(submissionKey).foreach(_.complete(result))
 
+    // TODO(#13019) Replace parasitic with DirectExecutionContext
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     private def ensuringMaximumInFlight[T](
         f: => Future[T]
     )(implicit errorLogger: ContextualizedErrorLogger): Future[T] =

@@ -358,6 +358,7 @@ trait ParticipantNodeBootstrapCommon {
           syncCrypto.pureCrypto,
           topologyManager,
           componentFactory.createPackageInspectionOps(syncDomainPersistentStateManager, syncCrypto),
+          arguments.metrics,
           parameterConfig.processingTimeouts,
           loggerFactory,
         )

@@ -23,8 +23,10 @@ message InitializeMediatorRequest {
   string domain_id = 1;
   // parameters for the domain, must match the parameters used by all other domain entities
   com.digitalasset.canton.protocol.v1.StaticDomainParameters domain_parameters = 2;
+  // the sequencer identifier
+  string sequencer_id = 3;
   // how should the member connect to the domain sequencer
-  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 3;
+  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 4;
 }
 
 message InitializeMediatorResponse {

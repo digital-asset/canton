@@ -41,6 +41,11 @@ class TransactionProcessingStepsTest extends AsyncWordSpec with BaseTest {
     },
     new AuthenticationValidator(),
     new AuthorizationValidator(participantId),
+    new InternalConsistencyChecker(
+      defaultStaticDomainParameters.uniqueContractKeys,
+      defaultStaticDomainParameters.protocolVersion,
+      loggerFactory,
+    ),
     loggerFactory = loggerFactory,
     FutureSupervisor.Noop,
   )

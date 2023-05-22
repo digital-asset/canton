@@ -8,8 +8,8 @@ import cats.implicits.toFoldableOps
 import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.functorFilter.*
-import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -226,8 +226,12 @@ private[mediator] class Mediator(
       _ = logger.debug(show"Pruning sequenced event up to [$pruneAt]")
       _ <- EitherT.right(sequencedEventStore.prune(pruneAt).merge)
 
-      // After pruning successfully, update the "max-event-age" metric.
-      _ = MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, pruneAt.some)
+      // After pruning successfully, update the "max-event-age" metric
+      // looking up the oldest event (in case prunedAt precedes any events and nothing was pruned).
+      oldestEventTimestampO <- EitherT.right(
+        stateInspection.locatePruningTimestamp(NonNegativeInt.zero)
+      )
+      _ = MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, oldestEventTimestampO)
 
     } yield ()
   }

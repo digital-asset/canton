@@ -6,12 +6,11 @@ package com.digitalasset.canton.participant.protocol.transfer
 import cats.data.*
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, TransferSubmitterMetadata}
 import com.digitalasset.canton.error.{BaseCantonError, MediatorError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.NoTransferData
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequestValidation.AutomaticTransferInError
+import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessorError.AutomaticTransferInError
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.store.TransferStore.TransferCompleted
 import com.digitalasset.canton.protocol.*
@@ -22,6 +21,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
+import com.digitalasset.canton.{DiscardOps, LfPartyId}
 import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -31,7 +31,7 @@ private[participant] object AutomaticTransferIn {
       id: TransferId,
       targetDomain: TargetDomainId,
       transferCoordination: TransferCoordination,
-      stks: Set[LfPartyId],
+      stakeholders: Set[LfPartyId],
       transferOutSubmitterMetadata: TransferSubmitterMetadata,
       participantId: ParticipantId,
       t0: CantonTimestamp,
@@ -40,10 +40,10 @@ private[participant] object AutomaticTransferIn {
       elc: ErrorLoggingContext,
   ): EitherT[Future, TransferProcessorError, Unit] = {
     val logger = elc.logger
-    implicit val tc = elc.traceContext
+    implicit val traceContext: TraceContext = elc.traceContext
 
     def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] = {
-      stks.toList
+      stakeholders.toList
         .parTraverseFilter { partyId =>
           snapshot
             .hostedOn(partyId, participantId)
@@ -112,11 +112,8 @@ private[participant] object AutomaticTransferIn {
       val initial = performAutoInOnce.leftMap(error => StopRetry(Left(error)))
       val result = MonadUtil.repeatFlatmap(initial, tryAgain, retryCount)
 
-      result.transform {
-        case Left(StopRetry(Left(error))) => Left(error)
-        case Left(StopRetry(Right(_verdict))) => Right(())
-        case Right(_verdict) => Right(())
-      }
+      // The status was only useful to understand whether the operation could be retried
+      result.leftFlatMap(attempt => EitherT.fromEither[Future](attempt.result)).map(_.discard)
     }
 
     def triggerAutoIn(
@@ -134,31 +131,27 @@ private[participant] object AutomaticTransferIn {
           .leftWiden[TransferProcessorError]
 
         targetHostedStakeholders <- EitherT.right(hostedStakeholders(targetSnapshot))
-        _unit <-
+        _ <-
           if (targetHostedStakeholders.nonEmpty) {
             logger.info(
-              s"Registering automatic submission of transfer-in with ID ${id} at time $exclusivityLimit, where base timestamp is $t0"
+              s"Registering automatic submission of transfer-in with ID $id at time $exclusivityLimit, where base timestamp is $t0"
             )
             for {
-              timeoutFuture <- EitherT.fromEither[Future](
-                transferCoordination.awaitTimestamp(
-                  targetDomain.unwrap,
-                  exclusivityLimit,
-                  waitForEffectiveTime = false,
-                )
+              _ <- transferCoordination.awaitTimestamp(
+                targetDomain.unwrap,
+                exclusivityLimit,
+                waitForEffectiveTime = false,
+                Future.successful(logger.debug(s"Automatic transfer-in triggered immediately")),
               )
-              _ <- EitherT.liftF[Future, TransferProcessorError, Unit](timeoutFuture.getOrElse {
-                logger.debug(s"Automatic transfer-in triggered immediately")
-                Future.unit
-              })
-              _unit <- EitherTUtil.leftSubflatMap(performAutoInRepeatedly) {
+
+              _ <- EitherTUtil.leftSubflatMap(performAutoInRepeatedly) {
                 // Filter out submission errors occurring because the transfer is already completed
-                case NoTransferData(_id, TransferCompleted(_transferId, _timeOfCompletion)) =>
+                case NoTransferData(_, TransferCompleted(_, _)) =>
                   Right(())
                 // Filter out the case that the participant has disconnected from the target domain in the meantime.
-                case UnknownDomain(domain, _reason) if domain == targetDomain.unwrap =>
+                case UnknownDomain(domain, _) if domain == targetDomain.unwrap =>
                   Right(())
-                case DomainNotReady(domain, _reason) if domain == targetDomain.unwrap =>
+                case DomainNotReady(domain, _) if domain == targetDomain.unwrap =>
                   Right(())
                 // Filter out the case that the target domain is closing right now
                 case other => Left(other)

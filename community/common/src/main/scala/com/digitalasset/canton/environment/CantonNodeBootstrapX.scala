@@ -18,10 +18,11 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{
   GrpcIdentityInitializationServiceX,
+  GrpcTopologyAggregationServiceX,
   GrpcTopologyManagerReadServiceX,
   GrpcTopologyManagerWriteServiceX,
 }
-import com.digitalasset.canton.topology.admin.v1 as topologyProto
+import com.digitalasset.canton.topology.admin.{v0 as adminV0, v1 as topologyProto}
 import com.digitalasset.canton.topology.store.{InitializationStore, TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -243,6 +244,18 @@ abstract class CantonNodeBootstrapX[
             ),
             executionContext,
           )
+      )
+    import cats.syntax.functorFilter.*
+    adminServerRegistry
+      .addServiceU(
+        adminV0.TopologyAggregationServiceGrpc.bindService(
+          new GrpcTopologyAggregationServiceX(
+            sequencedTopologyStores.mapFilter(TopologyStoreId.selectX[TopologyStoreId.DomainStore]),
+            ips,
+            loggerFactory,
+          ),
+          executionContext,
+        )
       )
 
     override protected def stageCompleted(implicit

@@ -89,7 +89,7 @@ object ExtractUsedAndCreated {
     parties.result()
   }
 
-  private def fetchHostedParties(
+  def fetchHostedParties(
       parties: Set[LfPartyId],
       participantId: ParticipantId,
       topologySnapshot: TopologySnapshot,

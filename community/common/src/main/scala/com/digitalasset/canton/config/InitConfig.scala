@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.config
 
-import com.digitalasset.canton.config.InitConfigBase.{Identity, NodeIdentifierConfig}
+import com.digitalasset.canton.config.InitConfigBase.Identity
 
 import java.util.UUID
 
@@ -52,9 +52,8 @@ trait InitConfigBase {
 }
 
 /** Configuration for the node's init process
-  * @param nodeIdentifier Controls the identifier that will be assigned to the node during auto-init
+  * @param identity Controls how the node identity (prefix of the unique identifier) is determined
   */
 final case class InitConfig(
-    identity: Option[Identity] = None,
-    nodeIdentifier: NodeIdentifierConfig = NodeIdentifierConfig.Config,
+    identity: Option[Identity] = None
 ) extends InitConfigBase

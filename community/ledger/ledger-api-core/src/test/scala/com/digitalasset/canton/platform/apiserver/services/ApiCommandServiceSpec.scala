@@ -185,6 +185,8 @@ object ApiCommandServiceSpec {
     ),
   )
 
+  // TODO(#13019) Avoid the global execution context
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def openChannel(
       service: ApiCommandService,
       deadlineTicker: Deadline.Ticker = Deadline.getSystemTicker,

@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.crypto.store.CryptoPrivateStore
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.crypto.tink.KeysetHandle
 import com.google.crypto.tink.hybrid.HybridKeyTemplates
@@ -21,7 +21,7 @@ class TinkPrivateCrypto private (
     pureCrypto: TinkPureCrypto,
     override val defaultSigningKeyScheme: SigningKeyScheme,
     override val defaultEncryptionKeyScheme: EncryptionKeyScheme,
-    override protected val store: CryptoPrivateStore,
+    override protected val store: CryptoPrivateStoreExtended,
 )(override implicit val ec: ExecutionContext)
     extends CryptoPrivateStoreApi {
 
@@ -36,7 +36,7 @@ class TinkPrivateCrypto private (
       .catchOnly[GeneralSecurityException](KeysetHandle.generateNew(keyTemplate))
       .leftMap(errFn)
 
-  override protected def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
+  override protected[crypto] def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair] =
     for {
@@ -49,8 +49,12 @@ class TinkPrivateCrypto private (
               EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc
             )
           )
-        // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
-        case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
+        case EncryptionKeyScheme.Rsa2048OaepSha256 =>
+          EitherT.leftT(
+            EncryptionKeyGenerationError.UnsupportedKeyScheme(
+              EncryptionKeyScheme.Rsa2048OaepSha256
+            )
+          )
       }
       keysetHandle <- generateKey[EncryptionKeyGenerationError](
         keyTemplate,
@@ -70,7 +74,7 @@ class TinkPrivateCrypto private (
       )
     } yield keypair
 
-  override protected[canton] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
+  override protected[crypto] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair] = {
     for {
@@ -125,7 +129,7 @@ object TinkPrivateCrypto {
       pureCrypto: TinkPureCrypto,
       defaultSigningKeyScheme: SigningKeyScheme,
       defaultEncryptionKeyScheme: EncryptionKeyScheme,
-      privateStore: CryptoPrivateStore,
+      privateStore: CryptoPrivateStoreExtended,
   )(implicit ec: ExecutionContext): TinkPrivateCrypto =
     new TinkPrivateCrypto(
       pureCrypto,

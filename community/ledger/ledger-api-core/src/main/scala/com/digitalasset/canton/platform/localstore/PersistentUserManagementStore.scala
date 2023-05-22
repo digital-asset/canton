@@ -110,6 +110,8 @@ class PersistentUserManagementStore(
     }
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def createUser(
       user: domain.User,
       rights: Set[domain.UserRight],
@@ -239,6 +241,8 @@ class PersistentUserManagementStore(
     }
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def deleteUser(
       id: UserId,
       identityProviderId: IdentityProviderId,
@@ -255,6 +259,8 @@ class PersistentUserManagementStore(
     })(scala.concurrent.ExecutionContext.parasitic)
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def grantRights(
       id: UserId,
       rights: Set[domain.UserRight],
@@ -288,6 +294,8 @@ class PersistentUserManagementStore(
     })(scala.concurrent.ExecutionContext.parasitic)
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def revokeRights(
       id: UserId,
       rights: Set[domain.UserRight],
@@ -332,6 +340,8 @@ class PersistentUserManagementStore(
     }
   }
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def inTransaction[T](
       dbMetric: metrics.daml.userManagement.type => DatabaseMetrics
   )(thunk: Connection => Result[T])(implicit loggingContext: LoggingContext): Future[Result[T]] = {

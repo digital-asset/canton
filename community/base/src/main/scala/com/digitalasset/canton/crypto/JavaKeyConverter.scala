@@ -8,7 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.Password
-import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
+import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreExtended, CryptoPublicStore}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -41,7 +41,7 @@ trait JavaKeyConverter {
   /** Export certificates and corresponding signing private keys to a Java key store */
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   def toJava(
-      cryptoPrivateStore: CryptoPrivateStore,
+      cryptoPrivateStore: CryptoPrivateStoreExtended,
       cryptoPublicStore: CryptoPublicStore,
       keyStorePass: Password,
   )(implicit

@@ -131,7 +131,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
         val participantDataSourceConfig =
           DbSupport.ParticipantDataSourceConfig(ledgerApiStorage.jdbcUrl)
 
-        val startableStoppableLedgerApiServer =
+        val startableStoppableLedgerApiServer = {
           // Propagate NamedLoggerFactory's properties as map to upstream LoggingContext.
           LoggingContextUtil.createLoggingContext(config.loggerFactory) { implicit loggingContext =>
             new StartableStoppableLedgerApiServer(
@@ -143,14 +143,17 @@ object CantonLedgerApiServerWrapper extends NoTracing {
               futureSupervisor = futureSupervisor,
             )
           }
-
+        }
+        val startupMode: IndexerStartupMode =
+          if (config.cantonParameterConfig.dbMigrateAndStart)
+            IndexerStartupMode.MigrateAndStart
+          else IndexerStartupMode.MigrateOnEmptySchemaAndStart
         val startFUS = for {
           _ <- FutureUnlessShutdown.outcomeF(tryCreateSchema(ledgerApiStorage, config.logger))
           _ <-
             if (startLedgerApiServer)
-              startableStoppableLedgerApiServer.start(overrideIndexerStartupMode =
-                Some(IndexerStartupMode.MigrateOnEmptySchemaAndStart)
-              )
+              startableStoppableLedgerApiServer
+                .start(overrideIndexerStartupMode = Some(startupMode))
             else FutureUnlessShutdown.unit
         } yield ()
 

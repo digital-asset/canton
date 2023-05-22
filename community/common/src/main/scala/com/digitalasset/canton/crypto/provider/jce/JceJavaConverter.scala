@@ -15,7 +15,7 @@ import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.DEROctetString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.gm.GMObjectIdentifiers
-import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
+import org.bouncycastle.asn1.pkcs.{PKCSObjectIdentifiers, PrivateKeyInfo}
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
@@ -128,8 +128,8 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
             toJavaEcDsa(privateKey, CurveType.NIST_P256)
           case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
             convert(CryptoKeyFormat.Der, privateKey.key.toByteArray, "EC")
-          // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
-          case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
+          case EncryptionKeyScheme.Rsa2048OaepSha256 =>
+            convert(CryptoKeyFormat.Der, privateKey.key.toByteArray, "RSA")
         }
     }
   }
@@ -178,8 +178,9 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
           case EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc =>
             val algoId = new AlgorithmIdentifier(SECObjectIdentifiers.secp256r1)
             convert(CryptoKeyFormat.Der, publicKey.key.toByteArray, "EC").map(pk => (algoId, pk))
-          // TODO(#12737): Implement RSA as a supported scheme and remove unimplemented
-          case EncryptionKeyScheme.Rsa2048OaepSha256 => ???
+          case EncryptionKeyScheme.Rsa2048OaepSha256 =>
+            val algoId = new AlgorithmIdentifier(PKCSObjectIdentifiers.id_RSAES_OAEP)
+            convert(CryptoKeyFormat.Der, publicKey.key.toByteArray, "RSA").map(pk => (algoId, pk))
         }
     }
   }
@@ -210,7 +211,7 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
           _ <- ensureJceSupportedScheme(scheme)
 
           publicKeyBytes = ByteString.copyFrom(javaPublicKey.getEncoded)
-          id = Fingerprint.create(publicKeyBytes, hashAlgorithm)
+          id = Fingerprint.create(publicKeyBytes)
           publicKey = new SigningPublicKey(
             id = id,
             format = CryptoKeyFormat.Der,
@@ -242,7 +243,7 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
             .catchOnly[IOException](new Ed25519PublicKeyParameters(publicKeyEncoded.newInput()))
             .leftMap(JavaKeyConversionError.GeneralError)
           publicKeyBytes = ByteString.copyFrom(publicKeyParams.getEncoded)
-          id = Fingerprint.create(publicKeyBytes, hashAlgorithm)
+          id = Fingerprint.create(publicKeyBytes)
           publicKey = new SigningPublicKey(
             id = id,
             format = CryptoKeyFormat.Raw,

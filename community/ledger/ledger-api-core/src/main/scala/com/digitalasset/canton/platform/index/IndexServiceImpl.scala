@@ -372,6 +372,8 @@ private[index] class IndexServiceImpl(
     * to subscribe to further configuration changes.
     * The offset is internal and not exposed over Ledger API.
     */
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def lookupConfiguration()(implicit
       loggingContext: LoggingContext
   ): Future[Option[(LedgerOffset.Absolute, Configuration)]] =
@@ -518,6 +520,8 @@ private[index] class IndexServiceImpl(
   ): Future[MaximumLedgerTime] =
     maximumLedgerTimeService.lookupMaximumLedgerTimeAfterInterpretation(ids)
 
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def latestPrunedOffsets()(implicit
       loggingContext: LoggingContext
   ): Future[(LedgerOffset.Absolute, LedgerOffset.Absolute)] =

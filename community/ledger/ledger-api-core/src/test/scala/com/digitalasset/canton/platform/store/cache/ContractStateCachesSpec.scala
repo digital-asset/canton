@@ -29,6 +29,8 @@ class ContractStateCachesSpec
 
   "build" should "set the cache index to the initialization index" in {
     val cacheInitializationOffset = offset(1337)
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val contractStateCaches = ContractStateCaches.build(
       cacheInitializationOffset,
       1L,

@@ -8,8 +8,8 @@ import cats.data.EitherT
 import cats.instances.future.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.store.{
-  CryptoPrivateStore,
   CryptoPrivateStoreError,
+  CryptoPrivateStoreExtended,
   CryptoPublicStoreError,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -121,14 +121,9 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
 
   implicit val ec: ExecutionContext
 
-  protected def store: CryptoPrivateStore
+  protected def store: CryptoPrivateStoreExtended
 
   protected val encryptionOps: EncryptionOps
-
-  /** Internal method to generate and return the entire encryption key pair */
-  protected def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair]
 
   /** Decrypts an encrypted message using the referenced private encryption key */
   def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
@@ -141,6 +136,11 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
       .subflatMap(encryptionKey =>
         encryptionOps.decryptWith(encryptedMessage, encryptionKey)(deserialize)
       )
+
+  /** Internal method to generate and return the entire encryption key pair */
+  protected[crypto] def generateEncryptionKeypair(scheme: EncryptionKeyScheme)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair]
 
   def generateEncryptionKey(
       scheme: EncryptionKeyScheme = defaultEncryptionKeyScheme,
@@ -180,6 +180,8 @@ final case class AsymmetricEncrypted[+M](
 /** Key schemes for asymmetric/hybrid encryption. */
 sealed trait EncryptionKeyScheme extends Product with Serializable with PrettyPrinting {
   def name: String
+  // TODO(#12757): once we decouple the key scheme from the actual encryption algorithm this will move to the algorithm
+  def supportDeterministicEncryption: Boolean
   def toProtoEnum: v0.EncryptionKeyScheme
   override val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
@@ -191,6 +193,7 @@ object EncryptionKeyScheme {
 
   case object EciesP256HkdfHmacSha256Aes128Gcm extends EncryptionKeyScheme {
     override val name: String = "ECIES-P256_HMAC256_AES128-GCM"
+    override val supportDeterministicEncryption: Boolean = false
     override def toProtoEnum: v0.EncryptionKeyScheme =
       v0.EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm
   }
@@ -202,12 +205,14 @@ object EncryptionKeyScheme {
    */
   case object EciesP256HmacSha256Aes128Cbc extends EncryptionKeyScheme {
     override val name: String = "ECIES-P256_HMAC256_AES128-CBC"
+    override val supportDeterministicEncryption: Boolean = true
     override def toProtoEnum: v0.EncryptionKeyScheme =
       v0.EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc
   }
 
   case object Rsa2048OaepSha256 extends EncryptionKeyScheme {
     override val name: String = "RSA2048-OAEP-SHA256"
+    override val supportDeterministicEncryption: Boolean = true
     override def toProtoEnum: v0.EncryptionKeyScheme =
       v0.EncryptionKeyScheme.Rsa2048OaepSha256
   }

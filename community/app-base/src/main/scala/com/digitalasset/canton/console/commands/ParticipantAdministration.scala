@@ -1624,18 +1624,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   }
 }
 
-class ParticipantHealthAdministration(
-    runner: AdminCommandRunner,
-    val consoleEnvironment: ConsoleEnvironment,
-    override val loggerFactory: NamedLoggerFactory,
-) extends HealthAdministration[ParticipantStatus](
-      runner,
-      consoleEnvironment,
-      ParticipantStatus.fromProtoV0,
-    )
-    with FeatureFlagFilter {
+trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
+  this: HealthAdministrationCommon[ParticipantStatus] =>
 
-  import runner.*
+  protected def runner: AdminCommandRunner
 
   @Help.Summary(
     "Sends a ping to the target participant over the ledger. " +
@@ -1650,7 +1642,7 @@ class ParticipantHealthAdministration(
     // duplicating the code from `maybe_ping` here so `maybe_ping` so ping doesn't depend on it and
     // thus isn't affected by `maybe_ping` being marked as 'Testing'
     val adminApiRes: Option[Duration] = consoleEnvironment.run {
-      adminCommand(
+      runner.adminCommand(
         ParticipantAdminCommands.Ping
           .Ping(
             Set[String](participantId.adminParty.toLf),
@@ -1680,7 +1672,7 @@ class ParticipantHealthAdministration(
       id: String = "",
   ): Option[Duration] = check(FeatureFlag.Testing) {
     consoleEnvironment.run {
-      adminCommand(
+      runner.adminCommand(
         ParticipantAdminCommands.Ping
           .Ping(
             Set[String](participantId.adminParty.toLf),
@@ -1695,3 +1687,27 @@ class ParticipantHealthAdministration(
     }
   }
 }
+
+class ParticipantHealthAdministration(
+    val runner: AdminCommandRunner,
+    val consoleEnvironment: ConsoleEnvironment,
+    override val loggerFactory: NamedLoggerFactory,
+) extends HealthAdministration(
+      runner,
+      consoleEnvironment,
+      ParticipantStatus.fromProtoV0,
+    )
+    with FeatureFlagFilter
+    with ParticipantHealthAdministrationCommon
+
+class ParticipantHealthAdministrationX(
+    val runner: AdminCommandRunner,
+    val consoleEnvironment: ConsoleEnvironment,
+    override val loggerFactory: NamedLoggerFactory,
+) extends HealthAdministrationX(
+      runner,
+      consoleEnvironment,
+      ParticipantStatus.fromProtoV0,
+    )
+    with FeatureFlagFilter
+    with ParticipantHealthAdministrationCommon

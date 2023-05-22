@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.concurrent.{Semaphore, TimeUnit}
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
+@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 class ThreadingTest extends AnyWordSpec with BaseTest with TestMetrics {
 
   lazy val expectedNumberOfParallelTasks: Int = Threading.detectNumberOfThreads(logger)

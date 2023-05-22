@@ -84,28 +84,30 @@ abstract class BootstrapStage[T <: CantonNode, StageResult <: BootstrapStageOrLe
     */
   protected def attemptAndStore()(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Option[StageResult]] = bootstrap.queue.executeEUS(
-    stageResult.get() match {
-      case Some(previous) => EitherT.rightT(Some(previous))
-      case None =>
-        EitherT(
-          performUnlessClosingUSF(description)(
-            (for {
-              result <- attempt()
-                .leftMap { err =>
-                  logger.error(s"Startup of ${description} failed with $err")
-                  bootstrap.abortThisNodeOnStartupFailure()
-                  err
-                }
-            } yield {
-              stageResult.set(result)
-              result
-            }).value
+  ): EitherT[FutureUnlessShutdown, String, Option[StageResult]] = {
+    bootstrap.queue.executeEUS(
+      stageResult.get() match {
+        case Some(previous) => EitherT.rightT(Some(previous))
+        case None =>
+          EitherT(
+            performUnlessClosingUSF(description)(
+              (for {
+                result <- attempt()
+                  .leftMap { err =>
+                    logger.error(s"Startup of ${description} failed with $err")
+                    bootstrap.abortThisNodeOnStartupFailure()
+                    err
+                  }
+              } yield {
+                stageResult.set(result)
+                result
+              }).value
+            )
           )
-        )
-    },
-    description,
-  )
+      },
+      description,
+    )
+  }
 
   /** iterative start handler which will attempt to start the stages until
     * we are either up and running or awaiting some init action by the user

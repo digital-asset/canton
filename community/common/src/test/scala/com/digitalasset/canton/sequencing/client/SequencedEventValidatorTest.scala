@@ -6,14 +6,18 @@ package com.digitalasset.canton.sequencing.client
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
+import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.IgnoredSequencedEvent
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import com.google.protobuf.ByteString
-import org.scalatest.Outcome
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.wordspec.FixtureAnyWordSpec
+import org.scalatest.{Assertion, Outcome}
 
 class SequencedEventValidatorTest
     extends FixtureAnyWordSpec
@@ -27,6 +31,8 @@ class SequencedEventValidatorTest
     val env = new SequencedEventTestFixture(loggerFactory, testedProtocolVersion, timeouts)
     withFixture(test.toNoArgTest(env))
   }
+  private implicit val errorLoggingContext: ErrorLoggingContext =
+    ErrorLoggingContext(logger, Map(), TraceContext.empty)
 
   "validate on reconnect" should {
     "accept the prior event" in { fixture =>
@@ -97,44 +103,72 @@ class SequencedEventValidatorTest
 
     "check for a fork" in { fixture =>
       import fixture.*
+
+      def expectLog(
+          cmd: => FutureUnlessShutdown[SequencedEventValidationError]
+      ): SequencedEventValidationError = {
+        loggerFactory
+          .assertLogs(cmd, _.shouldBeCantonErrorCode(ResilientSequencerSubscription.ForkHappened))
+          .failOnShutdown
+          .futureValue
+      }
+
       val priorEvent = createEvent().futureValue
       val validator = mkValidator(priorEvent)
       val differentCounter = createEvent(counter = 43L).futureValue
-      val errCounter = validator
-        .validateOnReconnect(differentCounter)
-        .leftOrFail("fork on counter")
-        .failOnShutdown
-        .futureValue
+
+      val errCounter = expectLog(
+        validator
+          .validateOnReconnect(differentCounter)
+          .leftOrFail("fork on counter")
+      )
       val differentTimestamp = createEvent(timestamp = CantonTimestamp.MaxValue).futureValue
-      val errTimestamp = validator
-        .validateOnReconnect(differentTimestamp)
-        .leftOrFail("fork on timestamp")
-        .failOnShutdown
-        .futureValue
+      val errTimestamp = expectLog(
+        validator
+          .validateOnReconnect(differentTimestamp)
+          .leftOrFail("fork on timestamp")
+      )
+
       val differentContent = createEventWithCounterAndTs(
         counter = updatedCounter,
         CantonTimestamp.Epoch,
       ).futureValue
 
-      val errContent = validator
-        .validateOnReconnect(differentContent)
-        .leftOrFail("fork on content")
-        .failOnShutdown
-        .futureValue
+      val errContent = expectLog(
+        validator
+          .validateOnReconnect(differentContent)
+          .leftOrFail("fork on content")
+      )
 
-      errCounter shouldBe ForkHappened(
+      def assertFork(err: SequencedEventValidationError)(
+          counter: SequencerCounter,
+          suppliedEvent: SequencedEvent[ClosedEnvelope],
+          expectedEvent: Option[SequencedEvent[ClosedEnvelope]],
+      ): Assertion = {
+        err match {
+          case ForkHappened(counterRes, suppliedEventRes, expectedEventRes) =>
+            (
+              counter,
+              suppliedEvent,
+              expectedEvent,
+            ) shouldBe (counterRes, suppliedEventRes, expectedEventRes)
+          case x => fail(s"${x} is not ForkHappened")
+        }
+      }
+
+      assertFork(errCounter)(
         SequencerCounter(updatedCounter),
         differentCounter.signedEvent.content,
         Some(priorEvent.signedEvent.content),
       )
 
-      errTimestamp shouldBe ForkHappened(
+      assertFork(errTimestamp)(
         SequencerCounter(updatedCounter),
         differentTimestamp.signedEvent.content,
         Some(priorEvent.signedEvent.content),
       )
 
-      errContent shouldBe ForkHappened(
+      assertFork(errContent)(
         SequencerCounter(updatedCounter),
         differentContent.signedEvent.content,
         Some(priorEvent.signedEvent.content),

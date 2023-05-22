@@ -1,4 +1,3 @@
-
 // start all local instances defined in the configuration file
 nodes.local.start()
 

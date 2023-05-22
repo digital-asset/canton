@@ -321,6 +321,7 @@ class AsyncExecutorWithMetrics(
           "com.digitalasset.canton.metrics",
           "com.daml.executors",
           "com.digitalasset.canton.store.db.DbBulkUpdateProcessor",
+          "com.digitalasset.canton.lifecycle",
           LoggerUtil.getClass.getName.dropRight(1), // Drop Scala's trailing $
           MonadUtil.getClass.getName.dropRight(1), // Drop Scala's trailing $
         )

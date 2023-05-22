@@ -78,26 +78,11 @@ class ConfirmationResponseProcessorTest
     lazy val topology = TestingTopology(
       Set(domainId),
       Map(
-        submitter -> Map(
-          participant -> ParticipantAttributes(
-            ParticipantPermission.Confirmation,
-            TrustLevel.Ordinary,
-          )
-        ),
+        submitter -> Map(participant -> ParticipantPermission.Confirmation),
         signatory ->
-          Map(
-            participant -> ParticipantAttributes(
-              ParticipantPermission.Confirmation,
-              TrustLevel.Ordinary,
-            )
-          ),
+          Map(participant -> ParticipantPermission.Confirmation),
         observer ->
-          Map(
-            participant -> ParticipantAttributes(
-              ParticipantPermission.Observation,
-              TrustLevel.Ordinary,
-            )
-          ),
+          Map(participant -> ParticipantPermission.Observation),
       ),
       Set(mediatorId),
     )
@@ -154,24 +139,9 @@ class ConfirmationResponseProcessorTest
     lazy val topology2 = TestingTopology(
       Set(domainId),
       Map(
-        submitter -> Map(
-          participant1 -> ParticipantAttributes(
-            ParticipantPermission.Confirmation,
-            TrustLevel.Ordinary,
-          )
-        ),
-        signatory -> Map(
-          participant2 -> ParticipantAttributes(
-            ParticipantPermission.Confirmation,
-            TrustLevel.Ordinary,
-          )
-        ),
-        observer -> Map(
-          participant3 -> ParticipantAttributes(
-            ParticipantPermission.Confirmation,
-            TrustLevel.Ordinary,
-          )
-        ),
+        submitter -> Map(participant1 -> ParticipantPermission.Confirmation),
+        signatory -> Map(participant2 -> ParticipantPermission.Confirmation),
+        observer -> Map(participant3 -> ParticipantPermission.Confirmation),
       ),
       Set(mediatorId),
     )

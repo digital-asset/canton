@@ -368,7 +368,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
         transactions = Nil,
         crypto = TestingTopology()
           .withDomains(domainId)
-          .withParticipants(participantId)
+          .withSimpleParticipants(participantId)
           .build()
           .forOwnerAndDomain(participantId, domainId)
           .currentSnapshotApproximation,

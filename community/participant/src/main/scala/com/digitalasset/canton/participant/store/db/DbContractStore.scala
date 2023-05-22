@@ -146,21 +146,8 @@ class DbContractStore(
 
   def lookup(
       id: LfContractId
-  )(implicit traceContext: TraceContext): OptionT[Future, StoredContract] = {
-    def get(): Future[Option[StoredContract]] =
-      performUnlessClosingF(functionFullName)(batchAggregatorLookup.run(id))
-        .onShutdown(
-          throw DbContractStore.AbortedDueToShutdownException(
-            s"Shutdown in progress, unable to fetch contract $id"
-          )
-        )
-
-    OptionT(cache.getFuture(id, _ => get()).recover {
-      case e: DbContractStore.AbortedDueToShutdownException =>
-        logger.info(e.getMessage)
-        None // TODO(i12894) Consider propagating the shutdown info further instead of converting to None
-    })
-  }
+  )(implicit traceContext: TraceContext): OptionT[Future, StoredContract] =
+    OptionT(cache.getFuture(id, _ => batchAggregatorLookup.run(id)))
 
   override def lookupManyUncached(
       ids: Seq[LfContractId]

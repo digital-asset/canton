@@ -26,6 +26,8 @@ import scala.concurrent.{Future, Promise}
 import scala.util.Success
 import scala.util.chaining.*
 
+// TODO(#13019) Avoid the global execution context
+@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 class BufferedStreamsReaderSpec
     extends AnyWordSpec
     with Matchers
@@ -240,6 +242,8 @@ class BufferedStreamsReaderSpec
 }
 
 @nowarn("msg=match may not be exhaustive")
+// TODO(#13019) Avoid the global execution context
+@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 object BufferedStreamsReaderSpec {
   trait TestFixtures extends Matchers with ScalaFutures with IntegrationPatience {
     self: AkkaBeforeAndAfterAll =>

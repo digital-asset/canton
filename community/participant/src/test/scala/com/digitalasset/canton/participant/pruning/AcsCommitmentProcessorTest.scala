@@ -272,7 +272,7 @@ class AcsCommitmentProcessorTest
     val (remote, cids, fromExclusive, toInclusive) = params
 
     val crypto =
-      TestingTopology().withParticipants(remote).build().forOwnerAndDomain(remote)
+      TestingTopology().withSimpleParticipants(remote).build().forOwnerAndDomain(remote)
     val cmt = commitment(cids)
     val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
     val period =

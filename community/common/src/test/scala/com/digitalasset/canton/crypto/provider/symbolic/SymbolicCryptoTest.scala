@@ -3,7 +3,13 @@
 
 package com.digitalasset.canton.crypto.provider.symbolic
 
-import com.digitalasset.canton.crypto.{Crypto, EncryptionTest, RandomTest, SigningTest}
+import com.digitalasset.canton.crypto.{
+  Crypto,
+  EncryptionTest,
+  PrivateKeySerializationTest,
+  RandomTest,
+  SigningTest,
+}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -12,6 +18,7 @@ class SymbolicCryptoTest
     extends AsyncWordSpec
     with SigningTest
     with EncryptionTest
+    with PrivateKeySerializationTest
     with RandomTest {
 
   "SymbolicCrypto" can {
@@ -25,6 +32,11 @@ class SymbolicCryptoTest
     behave like encryptionProvider(
       SymbolicCryptoProvider.supportedEncryptionKeySchemes,
       SymbolicCryptoProvider.supportedSymmetricKeySchemes,
+      symbolicCrypto(),
+    )
+    behave like privateKeySerializerProvider(
+      SymbolicCryptoProvider.supportedSigningKeySchemes,
+      SymbolicCryptoProvider.supportedEncryptionKeySchemes,
       symbolicCrypto(),
     )
     behave like randomnessProvider(symbolicCrypto().map(_.pureCrypto))

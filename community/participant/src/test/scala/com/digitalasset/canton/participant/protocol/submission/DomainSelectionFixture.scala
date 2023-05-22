@@ -64,12 +64,12 @@ private[submission] object DomainSelectionFixture {
         topology: Map[LfPartyId, List[ParticipantId]],
         packages: Seq[LfPackageId] = Seq(),
     ): TopologySnapshot = {
-      val defaultParticipantAttributes = ParticipantAttributes(Submission, TrustLevel.Vip)
-
       val testingIdentityFactory = TestingTopology(
         topology = topology.map { case (partyId, participantIds) =>
-          partyId -> participantIds.map(_ -> defaultParticipantAttributes).toMap
-        }
+          partyId -> participantIds.map(_ -> Submission).toMap
+        },
+        participants =
+          topology.values.flatten.map(_ -> ParticipantAttributes(Submission, TrustLevel.Vip)).toMap,
       ).build()
 
       testingIdentityFactory.topologySnapshot(packages = packages)

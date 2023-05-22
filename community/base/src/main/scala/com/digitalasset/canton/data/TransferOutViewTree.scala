@@ -412,7 +412,7 @@ object TransferOutCommonData
 /** Aggregates the data of a transfer-out request that is only sent to the involved participants
   *
   * @param salt The salt to blind the Merkle hash
-  * @param submitter The submitter of the transfer-out request
+  * @param submitterMetadata The metadata of the submitter of the transfer-out request
   * @param contractId The contract ID to be transferred
   * @param templateId The template ID of the contract to be transferred
   * @param targetDomain The target domain to which the contract is to be transferred
@@ -674,7 +674,7 @@ object TransferOutView
       submittingParticipantP,
       applicationIdP,
       submissionIdP,
-      worfklowIdP,
+      workflowIdP,
       commandIdP,
     ) = transferOutViewP
 
@@ -692,7 +692,7 @@ object TransferOutView
         ProtoConverter.parseLfParticipantId(submittingParticipantP)
       applicationId <- ProtoConverter.parseLFApplicationId(applicationIdP)
       submissionId <- ProtoConverter.parseLFSubmissionIdO(submissionIdP)
-      workflowId <- ProtoConverter.parseLFWorkflowIdO(worfklowIdP)
+      workflowId <- ProtoConverter.parseLFWorkflowIdO(workflowIdP)
       commandId <- ProtoConverter.parseCommandId(commandIdP)
       templateId <- ProtoConverter.parseTemplateId(templateIdP)
     } yield TransferOutView(

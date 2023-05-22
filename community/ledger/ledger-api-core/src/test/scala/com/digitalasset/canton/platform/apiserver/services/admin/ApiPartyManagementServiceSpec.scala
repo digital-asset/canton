@@ -54,6 +54,8 @@ class ApiPartyManagementServiceSpec
     with ErrorsAssertions {
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  // TODO(#13019) Avoid the global execution context
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private implicit val ec = ExecutionContext.global
 
   "ApiPartyManagementService" should {

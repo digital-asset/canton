@@ -6,12 +6,8 @@ package com.digitalasset.canton.participant.protocol.transfer
 import cats.implicits.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree, TransferSubmitterMetadata}
-import com.digitalasset.canton.participant.protocol.submission.{
-  EncryptedViewMessageFactory,
-  SeedGenerator,
-}
+import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.store.TransferStoreTest.transactionId1
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.submitterParticipant
@@ -66,7 +62,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
     .withReversedTopology(
       Map(submitterParticipant -> Map(party1 -> ParticipantPermission.Submission))
     )
-    .withParticipants(participant) // required such that `participant` gets a signing key
+    .withSimpleParticipants(participant) // required such that `participant` gets a signing key
     .build(loggerFactory)
 
   private val cryptoSnapshot =
@@ -266,13 +262,4 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
     )
   }
 
-  private def encryptFullTransferInTree(
-      tree: FullTransferInTree
-  ): Future[EncryptedViewMessage[TransferInViewType]] =
-    EncryptedViewMessageFactory
-      .create(TransferInViewType)(tree, cryptoSnapshot, testedProtocolVersion)
-      .fold(
-        error => throw new IllegalArgumentException(s"Cannot encrypt transfer-in request: $error"),
-        Predef.identity,
-      )
 }

@@ -70,7 +70,7 @@ sealed trait TopologyMappingX extends Product with Serializable with PrettyPrint
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX
 
-  def restrictedToDomain: Option[DomainId] = None
+  def restrictedToDomain: Option[DomainId]
 
   def toProtoV2: v2.TopologyMappingX
 
@@ -283,6 +283,8 @@ final case class NamespaceDelegationX private (
 
   override def maybeUid: Option[UniqueIdentifier] = None
 
+  override def restrictedToDomain: Option[DomainId] = None
+
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX =
@@ -366,6 +368,8 @@ final case class UnionspaceDefinitionX private (
   override def namespace: Namespace = unionspace
   override def maybeUid: Option[UniqueIdentifier] = None
 
+  override def restrictedToDomain: Option[DomainId] = None
+
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = {
@@ -406,18 +410,15 @@ object UnionspaceDefinitionX {
   def create(
       unionspace: Namespace,
       threshold: PositiveInt,
-      owners: Seq[Namespace],
+      owners: NonEmpty[Set[Namespace]],
   ): Either[String, UnionspaceDefinitionX] =
     for {
-      ownersNE <- NonEmpty
-        .from(owners.toSet)
-        .toRight(s"Invalid unionspace ${unionspace} with empty owners")
       _ <- Either.cond(
-        owners.length >= threshold.value,
+        owners.size >= threshold.value,
         (),
-        s"Invalid threshold (${threshold}) for ${unionspace} with ${owners.length} owners",
+        s"Invalid threshold (${threshold}) for ${unionspace} with ${owners.size} owners",
       )
-    } yield UnionspaceDefinitionX(unionspace, threshold, ownersNE)
+    } yield UnionspaceDefinitionX(unionspace, threshold, owners)
 
   def fromProtoV2(
       value: v2.UnionspaceDefinitionX
@@ -427,7 +428,14 @@ object UnionspaceDefinitionX {
       unionspace <- Fingerprint.fromProtoPrimitive(unionspaceP).map(Namespace(_))
       threshold <- ProtoConverter.parsePositiveInt(thresholdP)
       owners <- ownersP.traverse(Fingerprint.fromProtoPrimitive)
-      item <- create(unionspace, threshold, owners.map(Namespace(_)))
+      ownersNE <- NonEmpty
+        .from(owners.toSet)
+        .toRight(
+          ProtoDeserializationError.InvariantViolation(
+            "owners cannot be empty"
+          )
+        )
+      item <- create(unionspace, threshold, ownersNE.map(Namespace(_)))
         .leftMap(ProtoDeserializationError.OtherError)
     } yield item
   }
@@ -468,6 +476,8 @@ final case class IdentifierDelegationX(identifier: UniqueIdentifier, target: Sig
 
   override def namespace: Namespace = identifier.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(identifier)
+
+  override def restrictedToDomain: Option[DomainId] = None
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
@@ -530,6 +540,8 @@ final case class OwnerToKeyMappingX(
   override def namespace: Namespace = member.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(member.uid)
 
+  override def restrictedToDomain: Option[DomainId] = domain
+
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = RequiredUids(Set(member.uid))
@@ -589,6 +601,8 @@ final case class DomainTrustCertificateX(
 
   override def namespace: Namespace = participantId.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
+
+  override def restrictedToDomain: Option[DomainId] = Some(domainId)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
@@ -719,6 +733,8 @@ final case class ParticipantDomainPermissionX(
   override def namespace: Namespace = domainId.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(domainId.uid)
 
+  override def restrictedToDomain: Option[DomainId] = Some(domainId)
+
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX =
@@ -810,6 +826,8 @@ final case class PartyHostingLimitsX(
   override def namespace: Namespace = domainId.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(domainId.uid)
 
+  override def restrictedToDomain: Option[DomainId] = Some(domainId)
+
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX =
@@ -860,6 +878,8 @@ final case class VettedPackagesX(
 
   override def namespace: Namespace = participantId.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
+
+  override def restrictedToDomain: Option[DomainId] = domainId
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
@@ -941,6 +961,8 @@ final case class PartyToParticipantX(
   override def namespace: Namespace = partyId.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
 
+  override def restrictedToDomain: Option[DomainId] = domainId
+
   def participantIds: Seq[ParticipantId] = participants.map(_.participantId)
 
   override def requiredAuth(
@@ -1003,6 +1025,8 @@ final case class AuthorityOfX(
 
   override def namespace: Namespace = partyId.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
+
+  override def restrictedToDomain: Option[DomainId] = domainId
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
@@ -1069,6 +1093,8 @@ final case class DomainParametersStateX(domain: DomainId, parameters: DynamicDom
   override def namespace: Namespace = domain.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(domain.uid)
 
+  override def restrictedToDomain: Option[DomainId] = Some(domain)
+
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = RequiredUids(Set(domain.uid))
@@ -1131,6 +1157,8 @@ final case class MediatorDomainStateX private (
 
   override def namespace: Namespace = domain.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(domain.uid)
+
+  override def restrictedToDomain: Option[DomainId] = Some(domain)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
@@ -1273,6 +1301,8 @@ final case class SequencerDomainStateX private (
   override def namespace: Namespace = domain.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(domain.uid)
 
+  override def restrictedToDomain: Option[DomainId] = Some(domain)
+
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]
   ): RequiredAuthX = ???
@@ -1346,6 +1376,8 @@ final case class PurgeTopologyTransactionX private (
 
   override def namespace: Namespace = domain.uid.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(domain.uid)
+
+  override def restrictedToDomain: Option[DomainId] = Some(domain)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]

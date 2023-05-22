@@ -39,7 +39,7 @@ object Config {
     metricsReportingInterval = Duration.ofSeconds(1),
     indexServiceConfig = IndexServiceConfig(),
     indexerConfig = IndexerConfig(
-      startupMode = IndexerStartupMode.MigrateAndStart()
+      startupMode = IndexerStartupMode.MigrateAndStart
     ),
     waitForUserInput = false,
     minUpdateRate = None,

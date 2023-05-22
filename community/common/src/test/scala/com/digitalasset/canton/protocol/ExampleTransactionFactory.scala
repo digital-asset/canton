@@ -20,11 +20,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
-import com.digitalasset.canton.data.TransactionViewDecomposition.{
-  NewView,
-  SameView,
-  createWithConfirmationPolicy,
-}
+import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
@@ -337,14 +333,15 @@ object ExampleTransactionFactory {
   def defaultTestingIdentityFactory: TestingIdentityFactory =
     TestingTopology(
       topology = Map(
-        submitter -> Map(submitterParticipant -> ParticipantAttributes(Submission, TrustLevel.Vip)),
+        submitter -> Map(submitterParticipant -> Submission),
         signatory -> Map(
-          signatoryParticipant -> ParticipantAttributes(Confirmation, TrustLevel.Ordinary)
+          signatoryParticipant -> Confirmation
         ),
         observer -> Map(
-          signatoryParticipant -> ParticipantAttributes(Observation, TrustLevel.Ordinary)
+          signatoryParticipant -> Observation
         ),
-      )
+      ),
+      participants = Map(submitterParticipant -> ParticipantAttributes(Submission, TrustLevel.Vip)),
     )
       .build()
 
@@ -392,6 +389,35 @@ class ExampleTransactionFactory(
 
   private def saltConditionally(salt: Salt): Option[Salt] =
     Option.when(protocolVersion >= ProtocolVersion.v4)(salt)
+
+  private def createWithConfirmationPolicy(
+      confirmationPolicy: ConfirmationPolicy,
+      topologySnapshot: TopologySnapshot,
+      rootNode: LfActionNode,
+      rootSeed: Option[LfHash],
+      rootNodeId: LfNodeId,
+      tailNodes: Seq[TransactionViewDecomposition],
+  )(implicit ec: ExecutionContext): Future[NewView] = {
+
+    val rootRbContext = RollbackContext.empty
+
+    confirmationPolicy.informeesAndThreshold(rootNode, topologySnapshot).flatMap {
+      case (viewInformees, viewThreshold) =>
+        val result = NewView(
+          rootNode,
+          viewInformees,
+          viewThreshold,
+          rootSeed,
+          rootNodeId,
+          tailNodes,
+          rootRbContext,
+        )
+        result
+          .compliesWith(confirmationPolicy, topologySnapshot)
+          .map(_ => result)
+          .valueOr(err => throw new IllegalArgumentException(err))
+    }
+  }
 
   private def awaitCreateWithConfirmationPolicy(
       confirmationPolicy: ConfirmationPolicy,

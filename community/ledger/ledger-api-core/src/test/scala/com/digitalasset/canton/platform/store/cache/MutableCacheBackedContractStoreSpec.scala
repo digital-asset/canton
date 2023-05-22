@@ -269,6 +269,8 @@ object MutableCacheBackedContractStoreSpec {
       startIndexExclusive: Offset = offset0,
   )(implicit loggingContext: LoggingContext) = {
     val metrics = Metrics.ForTesting
+    // TODO(#13019) Avoid the global execution context
+    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val contractStore = new MutableCacheBackedContractStore(
       metrics,
       readerFixture,

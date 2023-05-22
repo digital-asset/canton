@@ -115,7 +115,7 @@ class MissingKeysAlerter(
               _,
             ) =>
           logger.info(
-            s"Domain $domainId update my participant permission as of $timestamp to ${permission}, ${trustLevel}"
+            s"Domain $domainId update my participant permission as of $timestamp to $permission, $trustLevel"
           )
         case OwnerToKeyMappingX(`participantId`, _, keys) =>
           keys.foreach(k => alertOnMissingKey(k.fingerprint, k.purpose))

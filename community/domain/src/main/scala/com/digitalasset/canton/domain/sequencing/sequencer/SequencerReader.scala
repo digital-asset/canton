@@ -16,13 +16,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerReader.ReadState
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
-import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
-import com.digitalasset.canton.lifecycle.{
-  CloseContext,
-  FlagCloseable,
-  FutureUnlessShutdown,
-  HasCloseContext,
-}
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
@@ -75,8 +69,7 @@ class SequencerReader(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
-    with FlagCloseable
-    with HasCloseContext {
+    with FlagCloseable {
 
   def read(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
@@ -222,7 +215,7 @@ class SequencerReader(
 
     private def signValidatedEvent(
         unsignedEventData: UnsignedEventData
-    ): FutureUnlessShutdown[OrdinarySerializedEvent] = {
+    ): Future[OrdinarySerializedEvent] = {
       val UnsignedEventData(
         event,
         signingTimestampAndSnapshotO,
@@ -237,12 +230,12 @@ class SequencerReader(
 
       val signingTimestampOAndSnapshotF = signingTimestampAndSnapshotO match {
         case Some((signingTimestamp, signingSnaphot)) =>
-          FutureUnlessShutdown.pure(Some(signingTimestamp) -> signingSnaphot)
+          Future.successful(Some(signingTimestamp) -> signingSnaphot)
         case None =>
           val warnIfApproximate =
             (event.counter > SequencerCounter.Genesis) && member.isAuthenticated
           SyncCryptoClient
-            .getSnapshotForTimestampUS(
+            .getSnapshotForTimestamp(
               syncCryptoApi,
               event.timestamp,
               previousTopologyClientTimestamp,
@@ -251,13 +244,12 @@ class SequencerReader(
             )
             .map(None -> _)
       }
-      signingTimestampOAndSnapshotF
-        .flatMap { case (signingTimestampO, signingSnapshot) =>
-          logger.debug(
-            s"Signing event with counter ${event.counter} / timestamp ${event.timestamp} for $member"
-          )
-          performUnlessClosingF("sign-event")(signEvent(event, signingTimestampO, signingSnapshot))
-        }
+      signingTimestampOAndSnapshotF.flatMap { case (signingTimestampO, signingSnapshot) =>
+        logger.debug(
+          s"Signing event with counter ${event.counter} / timestamp ${event.timestamp} for $member"
+        )
+        signEvent(event, signingTimestampO, signingSnapshot)
+      }
     }
 
     def latestTopologyClientTimestampAfter(
@@ -404,11 +396,7 @@ class SequencerReader(
           // Neither do we have evidence that parallel processing helps, as a single sequencer reader
           // will typically serve many subscriptions in parallel.
           parallelism = 1
-        )(signValidatedEvent(_).unwrap)
-        // if we actually fail the future, then the upstream AkkaUtil.runSupervised call will log
-        // the failed event handling as an error. Therefore we let the queue drain but actually never
-        // do anything with it. The upstream should already have been killed.
-        .collect { case Outcome(ev) => ev }
+        )(signValidatedEvent)
     }
 
     /** Attempt to save the counter checkpoint and fail horribly if we find this is an inconsistent checkpoint update. */

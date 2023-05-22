@@ -394,6 +394,7 @@ object BuildCommon {
   lazy val cantonWarts = Seq(
     wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.GlobalExecutionContext"),
     // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
     Compile / compile / wartremoverErrors += Wart.custom("com.digitalasset.canton.NonUnitForEach"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.RequireBlocking"),

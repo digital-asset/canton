@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.console.commands
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.{
   TopologyAdminCommands,
   TopologyAdminCommandsX,
@@ -10,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
+  CommandErrors,
   ConsoleCommandResult,
   ConsoleEnvironment,
   FeatureFlag,
@@ -144,9 +146,18 @@ class TopologyAdministrationGroupX(
   object domain_bootstrap {
 
     // TODO(#11255) break individual bits out into separate admin functions, and have this only be the default wrapper
-    def generate_genesis_topology(name: String, owners: Seq[Member]) = {
+    def generate_genesis_topology(
+        name: String,
+        domainOwners: Seq[Member],
+        sequencers: Seq[SequencerId],
+        mediators: Seq[MediatorId],
+    ): Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]] = {
 
       val thisNodeRootKey = Some(instance.id.uid.namespace.fingerprint)
+
+      val isDomainOwner = domainOwners.contains(instance.id)
+      val isSequencer = sequencers.contains(instance.id)
+      val isMediator = mediators.contains(instance.id)
 
       val codes = Set(NamespaceDelegationX.code, OwnerToKeyMappingX.code)
       // provide the root namespace delegation and owner to key mapping
@@ -158,9 +169,8 @@ class TopologyAdministrationGroupX(
 
       // create and sign the unionspace for the domain
       val unionspaceTransaction = instance.topology.unionspaces.propose(
-        serial = PositiveInt.one,
-        owners.map(_.uid.namespace.fingerprint).toSet,
-        threshold = PositiveInt.tryCreate(owners.size - 1),
+        domainOwners.map(_.uid.namespace.fingerprint).toSet,
+        threshold = PositiveInt.tryCreate(1.max(domainOwners.size - 1)),
         signedBy = thisNodeRootKey,
       )
 
@@ -172,34 +182,34 @@ class TopologyAdministrationGroupX(
       )
 
       // create and sign the initial domain parameters
-      val domainParameterState = instance.topology.domain_parameters.propose(
-        serial = PositiveInt.one,
-        domainId,
-        signedBy = thisNodeRootKey,
+      val domainParameterState = Option.when(isDomainOwner)(
+        instance.topology.domain_parameters.propose(
+          domainId,
+          DynamicDomainParameters.defaultValues(ProtocolVersion.dev),
+          signedBy = thisNodeRootKey,
+        )
       )
 
-      val mediatorState = instance.topology.mediators.propose(
-        serial = PositiveInt.one,
-        domainId,
-        threshold = PositiveInt.one,
-        active = owners.collect { case id @ MediatorId(_) => id },
-        signedBy = thisNodeRootKey,
+      val mediatorState = Option.when(isDomainOwner || isMediator)(
+        instance.topology.mediators.propose(
+          domainId,
+          threshold = PositiveInt.one,
+          active = mediators,
+          signedBy = thisNodeRootKey,
+        )
       )
 
-      val sequencerState = instance.topology.sequencers.propose(
-        serial = PositiveInt.one,
-        domainId,
-        threshold = PositiveInt.one,
-        active = owners.collect { case id @ SequencerId(_) => id },
-        signedBy = thisNodeRootKey,
+      val sequencerState = Option.when(isDomainOwner || isSequencer)(
+        instance.topology.sequencers.propose(
+          domainId,
+          threshold = PositiveInt.one,
+          active = sequencers,
+          signedBy = thisNodeRootKey,
+        )
       )
 
-      namespace ++ Seq(
-        unionspaceTransaction,
-        domainParameterState,
-        sequencerState,
-        mediatorState,
-      )
+      namespace ++ domainParameterState ++ sequencerState ++ mediatorState ++
+        Option.when(isDomainOwner)(unionspaceTransaction)
     }
   }
 
@@ -231,24 +241,34 @@ class TopologyAdministrationGroupX(
     }
 
     def propose(
-        serial: PositiveInt,
-        members: Set[Fingerprint],
+        owners: Set[Fingerprint],
         threshold: PositiveInt,
-        signedBy: Option[Fingerprint] = None,
+        // TODO(#11255) don't use the instance's root namespace key by default.
+        //  let the grpc service figure out the right key to use, once that's implemented
+        signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
+        serial: Option[PositiveInt] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, UnionspaceDefinitionX] =
       consoleEnvironment.run {
-        adminCommand(
-          TopologyAdminCommandsX.Write.Propose(
-            serial,
-            UnionspaceDefinitionX
-              .create(
-                UnionspaceDefinitionX.computeNamespace(members.map(Namespace(_))),
-                threshold,
-                members.map(Namespace(_)).toSeq,
-              ),
-            signedBy = signedBy.toList,
-          )
-        )
+        NonEmpty
+          .from(owners) match {
+          case Some(ownersNE) =>
+            adminCommand(
+              {
+                TopologyAdminCommandsX.Write.Propose(
+                  UnionspaceDefinitionX
+                    .create(
+                      UnionspaceDefinitionX.computeNamespace(owners.map(Namespace(_))),
+                      threshold,
+                      ownersNE.map(Namespace(_)),
+                    ),
+                  signedBy = signedBy.toList,
+                  serial,
+                )
+              }
+            )
+          case None =>
+            CommandErrors.GenericCommandError("Proposed unionspace needs at least one owner")
+        }
       }
 
     def join(
@@ -590,21 +610,23 @@ class TopologyAdministrationGroupX(
     }
 
     def propose(
-        serial: PositiveInt,
         domainId: DomainId,
         threshold: PositiveInt,
         active: Seq[MediatorId],
         passive: Seq[MediatorId] = Seq.empty,
         group: NonNegativeInt = NonNegativeInt.zero,
-        signedBy: Option[Fingerprint] = None,
+        // TODO(#11255) don't use the instance's root namespace key by default.
+        //  let the grpc service figure out the right key to use, once that's implemented
+        signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
+        serial: Option[PositiveInt] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, MediatorDomainStateX] =
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommandsX.Write.Propose(
-            serial,
             MediatorDomainStateX
               .create(domainId, group, threshold, active, passive),
             signedBy.toList,
+            serial,
           )
         )
       }
@@ -638,20 +660,22 @@ class TopologyAdministrationGroupX(
     }
 
     def propose(
-        serial: PositiveInt,
         domainId: DomainId,
         threshold: PositiveInt,
         active: Seq[SequencerId],
         passive: Seq[SequencerId] = Seq.empty,
-        signedBy: Option[Fingerprint] = None,
+        // TODO(#11255) don't use the instance's root namespace key by default.
+        //  let the grpc service figure out the right key to use, once that's implemented
+        signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
+        serial: Option[PositiveInt] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, SequencerDomainStateX] =
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommandsX.Write.Propose(
-            serial,
             SequencerDomainStateX
               .create(domainId, threshold, active, passive),
             signedBy.toList,
+            serial,
           )
         )
       }
@@ -685,20 +709,23 @@ class TopologyAdministrationGroupX(
     }
 
     def propose(
-        serial: PositiveInt,
         domain: DomainId,
-        signedBy: Option[Fingerprint] = None,
+        parameters: DynamicDomainParameters,
+        // TODO(#11255) don't use the instance's root namespace key by default.
+        //  let the grpc service figure out the right key to use, once that's implemented
+        signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
+        serial: Option[PositiveInt] = None,
     ): SignedTopologyTransactionX[TopologyChangeOpX, DomainParametersStateX] =
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommandsX.Write.Propose(
-            serial,
             // TODO(#11255) maybe don't just take default values for dynamic parameters
             DomainParametersStateX(
               domain,
-              DynamicDomainParameters.defaultValues(ProtocolVersion.dev),
+              parameters,
             ),
             signedBy.toList,
+            serial,
           )
         )
       }
