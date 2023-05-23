@@ -448,7 +448,7 @@ class GrpcTopologyManagerReadServiceX(
         request.baseQuery,
         PartyToParticipantX.code,
         request.filterParty,
-        namespaceOnly = true,
+        namespaceOnly = false,
       )
     } yield {
       val results = res

@@ -102,7 +102,7 @@ object EnvelopeBox {
         event match {
           case ignored @ IgnoredSequencedEvent(_, _, _) =>
             G.widen(traverseIgnoredSequencedEvent[G, A, B](ignored)(f))
-          case ordinary @ OrdinarySequencedEvent(_) =>
+          case ordinary @ OrdinarySequencedEvent(_, _) =>
             G.widen(traverseOrdinarySequencedEvent(ordinary)(f))
         }
     }

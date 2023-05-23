@@ -54,8 +54,8 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult}
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{DomainId, MediatorId, Member, ParticipantId}
+import com.digitalasset.canton.topology.client.{PartyTopologySnapshotClient, TopologySnapshot}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.RichEither
@@ -971,18 +971,21 @@ abstract class ProtocolProcessor[
       viewsWithRecipientsAndSignature: Seq[
         (WithRecipients[steps.DecryptedView], Option[Signature])
       ],
-      snapshot: TopologySnapshot,
+      snapshot: PartyTopologySnapshotClient,
   )(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     for {
+      informeesWithGroupAddressing <- snapshot.partiesWithGroupAddressing(parties =
+        viewsWithRecipientsAndSignature.flatMap(_._1.unwrap.informees.map(_.party)).distinct.toList
+      )
       informeeParticipantsOfPosition <- viewsWithRecipientsAndSignature
         .parTraverse { case (WithRecipients(view, _recipients), _) =>
-          for {
-            expectedRecipients <- snapshot
-              .activeParticipantsOfAll(view.informees.map(_.party).toList)
-              .value
-          } yield view.viewPosition.position -> expectedRecipients
+          snapshot
+            .activeParticipantsOfParties(
+              view.informees.map(_.party).toList
+            )
+            .map(expectedRecipients => view.viewPosition.position -> expectedRecipients)
         }
         // It is ok to remove duplicates, as
         // the expectedRecipients depend on view.informees
@@ -1002,10 +1005,7 @@ abstract class ProtocolProcessor[
           )
         }
 
-        // TODO(#12382): support group addressing for informees
-        val recipientPathViewToRoot = allRecipientPathsViewToRoot.head1.map(_.collect {
-          case MemberRecipient(member) => member
-        })
+        val recipientPathViewToRoot = allRecipientPathsViewToRoot.head1
 
         /* Checks the recipients of the view at position `viewPosition`.
          * @param recipientGroups the recipient groups of the view. The order is view, parent view, grand parent view, and so on.
@@ -1014,14 +1014,14 @@ abstract class ProtocolProcessor[
         @tailrec
         def check(
             viewPosition: List[MerklePathElement],
-            recipientPathViewToRoot: Seq[Set[Member]],
+            recipientPathViewToRoot: Seq[Set[Recipient]],
         ): Unit =
-          (recipientPathViewToRoot: Seq[Set[Member]] @unchecked) match {
+          (recipientPathViewToRoot: Seq[Set[Recipient]] @unchecked) match {
             case Seq() => ()
             case Seq(recipientGroup, parentGroups @ _*) =>
               // TODO(i11908): Gracefully reject instead of throwing exceptions.
 
-              val informeeParticipantsOrInactiveParties =
+              val informeePartiesToParticipants =
                 informeeParticipantsOfPosition.getOrElse(
                   viewPosition,
                   ErrorUtil.internalError(
@@ -1031,29 +1031,48 @@ abstract class ProtocolProcessor[
                   ),
                 )
 
-              val informeeParticipants =
-                informeeParticipantsOrInactiveParties.valueOr(inactiveParties =>
+              {
+                val inactiveParties =
+                  informeePartiesToParticipants.collect {
+                    case (party, participants) if participants.isEmpty => party
+                  }.toSet
+                if (inactiveParties.nonEmpty)
                   ErrorUtil.internalError(
                     new IllegalArgumentException(
                       s"Received a request with id $requestId where the view at position ${view.viewPosition} has informees without an active participant: $inactiveParties. Crashing..."
                     )
                   )
-                )
+              }
 
-              val missingRecipients = informeeParticipants.toSet[Member] -- recipientGroup
+              val informeeRecipients = informeePartiesToParticipants.toList.flatMap {
+                case (party, participants) =>
+                  if (informeesWithGroupAddressing.contains(party))
+                    Seq(ParticipantsOfParty(PartyId.tryFromLfParty(party)))
+                  else
+                    participants.map(MemberRecipient)
+              }.toSet
+
+              val missingRecipients = informeeRecipients -- recipientGroup
               ErrorUtil.requireArgument(
                 missingRecipients.isEmpty,
                 s"Received a request with id $requestId where the view at position ${view.viewPosition} has missing recipients $missingRecipients. Crashing...",
               )
 
-              val extraRecipients = recipientGroup -- informeeParticipants.toSet[Member]
+              val extraRecipients = recipientGroup -- informeeRecipients
               ErrorUtil.requireArgument(
                 extraRecipients.isEmpty,
                 s"Received a request with id $requestId where the view at position ${view.viewPosition} has extra recipients $extraRecipients. Crashing...",
               )
 
+              lazy val participantsAddressed = recipientGroup.flatMap {
+                case MemberRecipient(participantId: ParticipantId) => Set(participantId)
+                case ParticipantsOfParty(party) =>
+                  informeePartiesToParticipants.getOrElse(party.toLf, Seq())
+                case _ => Set.empty
+              }
+
               ErrorUtil.requireArgument(
-                parentGroups.nonEmpty || recipientGroup.contains(participantId),
+                parentGroups.nonEmpty || participantsAddressed.contains(participantId),
                 // The sequencer should prevent this situation.
                 // Throwing, because it indicates that the participant has received a view it is not supposed to receive.
                 s"Received a request with id $requestId with a root view at ${view.viewPosition} that this participant is not allowed to receive.\n$recipients",

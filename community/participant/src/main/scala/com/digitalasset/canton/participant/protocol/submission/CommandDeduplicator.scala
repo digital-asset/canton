@@ -36,7 +36,9 @@ import scala.concurrent.{ExecutionContext, Future}
 trait CommandDeduplicator {
 
   /** Register the publication of the events in the [[com.digitalasset.canton.participant.store.CommandDeduplicationStore]] */
-  def processPublications(publications: Seq[MultiDomainEventLog.OnPublish.Publication])(implicit
+  def processPublications(
+      publications: Seq[MultiDomainEventLog.OnPublish.Publication]
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit]
 
@@ -92,6 +94,7 @@ class CommandDeduplicatorImpl(
             publicationTime,
             _inFlightReference,
             deduplicationInfo,
+            _event,
           ) =>
         deduplicationInfo.map { dedupInfo =>
           (

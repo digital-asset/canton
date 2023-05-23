@@ -401,6 +401,8 @@ object TaskSchedulerTest {
     }
 
     override def pretty: Pretty[this.type] = adHocPrettyInstance
+
+    override def close(): Unit = ()
   }
 
   private val TestTaskOrdering: Ordering[TestTask] =

@@ -124,6 +124,11 @@ object CryptoPrivateStoreError {
     override def pretty: Pretty[FailedToReadKey] = prettyOfClass(unnamedParam(_.reason.unquoted))
   }
 
+  final case class InvariantViolation(keyId: Fingerprint, reason: String)
+      extends CryptoPrivateStoreError {
+    override def pretty: Pretty[InvariantViolation] = prettyOfClass(unnamedParam(_.reason.unquoted))
+  }
+
   final case class FailedToInsertKey(keyId: Fingerprint, reason: String)
       extends CryptoPrivateStoreError {
     override def pretty: Pretty[FailedToInsertKey] =

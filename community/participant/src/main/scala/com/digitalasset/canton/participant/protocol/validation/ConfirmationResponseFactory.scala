@@ -47,9 +47,9 @@ class ConfirmationResponseFactory(
     ): Future[Set[LfPartyId]] = {
       viewValidationResult.view.viewCommonData.informees.toList
         .parTraverseFilter {
-          case ConfirmingParty(party, _) =>
+          case ConfirmingParty(party, _, requiredTrustLevel) =>
             topologySnapshot
-              .canConfirm(participantId, party, confirmationPolicy.requiredTrustLevel)
+              .canConfirm(participantId, party, requiredTrustLevel)
               .map(if (_) Some(party) else None)
           case _ => Future.successful(None)
         }

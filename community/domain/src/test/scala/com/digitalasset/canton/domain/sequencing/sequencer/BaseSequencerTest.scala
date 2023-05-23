@@ -16,6 +16,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficStatus
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.resource.Storage
@@ -159,6 +160,10 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
 
     override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
       ???
+
+    override def trafficStatus(implicit
+        traceContext: TraceContext
+    ): Future[SequencerTrafficStatus] = ???
   }
 
   Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>

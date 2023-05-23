@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.{
   BaseTest,
@@ -64,7 +65,7 @@ class TransactionViewDecompositionTest
       "not be constructed" in {
 
         val node = createNode(unsuffixedId(0))
-        val informees = Set[Informee](ConfirmingParty(signatory, 1))
+        val informees = Set[Informee](ConfirmingParty(signatory, 1, TrustLevel.Ordinary))
         val rootSeed = ExampleTransactionFactory.lfHash(-1)
         val child =
           NewView(

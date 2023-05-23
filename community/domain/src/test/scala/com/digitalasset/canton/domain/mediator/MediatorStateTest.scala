@@ -19,6 +19,7 @@ import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -39,7 +40,7 @@ class MediatorStateTest
       val domainId = DefaultTestIdentities.domainId
       val mediatorId = DefaultTestIdentities.mediator
       val alice = PlainInformee(LfPartyId.assertFromString("alice"))
-      val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2)
+      val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
       val hashOps: HashOps = new SymbolicPureCrypto
       val h: Int => Hash = TestHash.digest
       val s: Int => Salt = TestSalt.generateSalt

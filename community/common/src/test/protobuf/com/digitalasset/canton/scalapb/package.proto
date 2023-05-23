@@ -3,9 +3,9 @@
 
 syntax = "proto3";
 
-import "scalapb/scalapb.proto";
-
 package com.digitalasset.canton;
+
+import "scalapb/scalapb.proto";
 
 option (scalapb.options) = {
   scope: PACKAGE

@@ -93,7 +93,7 @@ abstract class ErrorCode(val id: String, val category: ErrorCategory)(implicit
       )
     )
     // Build request info
-    val requestInfo = statusInfo.correlationId.map { correlationId =>
+    val requestInfo = statusInfo.correlationId.orElse(statusInfo.traceId).map { correlationId =>
       ErrorDetails.RequestInfoDetail(
         correlationId = correlationId
       )
@@ -150,11 +150,12 @@ abstract class ErrorCode(val id: String, val category: ErrorCategory)(implicit
       err: BaseError
   )(implicit loggingContext: ContextualizedErrorLogger): ErrorCode.StatusInfo = {
     val correlationId = loggingContext.correlationId
+    val traceId = loggingContext.traceId
     val message =
-      if (code.category.securitySensitive)
-        s"${BaseError.SecuritySensitiveMessageOnApiPrefix} ${correlationId.getOrElse("<no-correlation-id>")}"
-      else
-        code.toMsg(err.cause, loggingContext.correlationId)
+      if (code.category.securitySensitive) {
+        BaseError.securitySensitiveMessage(correlationId, traceId)
+      } else
+        code.toMsg(err.cause, correlationId.orElse(traceId))
     val grpcStatusCode = category.grpcCode
       .getOrElse {
         loggingContext.warn(s"Passing non-grpc error via grpc $id ")
@@ -167,6 +168,7 @@ abstract class ErrorCode(val id: String, val category: ErrorCategory)(implicit
       message = message,
       contextMap = contextMap,
       correlationId = correlationId,
+      traceId = traceId,
     )
   }
 
@@ -204,6 +206,7 @@ object ErrorCode {
       message: String,
       contextMap: Map[String, String],
       correlationId: Option[String],
+      traceId: Option[String],
   )
 
   private def truncateContext(

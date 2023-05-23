@@ -8,6 +8,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -30,6 +31,7 @@ trait SequencerFactory extends AutoCloseable {
       clock: Clock,
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
+      rateLimitManager: Option[SequencerRateLimitManager],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -65,6 +67,7 @@ class CommunityDatabaseSequencerFactory(
       clock: Clock,
       domainSyncCryptoApi: DomainSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
+      rateLimitManager: Option[SequencerRateLimitManager],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,

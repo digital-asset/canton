@@ -59,38 +59,41 @@ class ErrorCodeSpec
       ) shouldBe "FOO_ERROR_CODE_SECURITY_SENSITIVE(4,123corre): cause123"
     }
 
-    "create a minimal grpc status and exception" in {
-      class FooErrorMinimal(override val code: ErrorCode) extends BaseError {
-        override val cause: String = "cause123"
-      }
-      val errorLoggerSmall = NoLogging
-      val testedErrorCode = FooErrorCode
-      final case class TestedError() extends FooErrorMinimal(testedErrorCode)
-      val details = Seq(
-        ErrorDetails
-          .ErrorInfoDetail(
-            testedErrorCode.id,
-            Map("category" -> testedErrorCode.category.asInt.toString),
-          )
-      )
-      val expected = Status
-        .newBuilder()
-        .setMessage("FOO_ERROR_CODE(8,0): cause123")
-        .setCode(Code.INVALID_ARGUMENT.value())
-        .addAllDetails(details.map(_.toRpcAny).asJava)
-        .build()
-      val testedError = TestedError()
+    "create a minimal grpc status and exception" - {
 
-      assertStatus(
-        actual = testedErrorCode.asGrpcStatus(testedError)(errorLoggerSmall),
-        expected = expected,
-      )
-      assertError(
-        actual = testedErrorCode.asGrpcError(testedError)(errorLoggerSmall),
-        expectedStatusCode = testedErrorCode.category.grpcCode.value,
-        expectedMessage = "FOO_ERROR_CODE(8,0): cause123",
-        expectedDetails = details,
-      )
+      "when correlation-id and trace-id are not set" in {
+        testMinimalGrpcStatus(NoLogging)
+      }
+
+      "when only correlation-id is set" in {
+        testMinimalGrpcStatus(
+          new NoLogging(
+            properties = Map.empty,
+            correlationId = Some("123correlationId"),
+          )
+        )
+      }
+
+      "when only trace-id is set" in {
+        testMinimalGrpcStatus(
+          new NoLogging(
+            properties = Map.empty,
+            correlationId = None,
+            traceId = Some("123traceId"),
+          )
+        )
+      }
+
+      "when correlation-id and trace-id are set" in {
+        testMinimalGrpcStatus(
+          new NoLogging(
+            properties = Map.empty,
+            correlationId = Some("123correlationId"),
+            traceId = Some("123traceId"),
+          )
+        )
+      }
+
     }
 
     "create a big grpc status and exception" - {
@@ -180,7 +183,7 @@ class ErrorCodeSpec
         val expectedStatus = Status
           .newBuilder()
           .setMessage(
-            "An error occurred. Please contact the operator and inquire about the request 123correlationId"
+            BaseError.securitySensitiveMessage(Some("123correlationId"))
           )
           .setCode(testedErrorCode.category.grpcCode.value.value())
           .addDetails(requestInfo.toRpcAny)
@@ -196,8 +199,7 @@ class ErrorCodeSpec
         assertError(
           actual = testedErrorCode.asGrpcError(testedError)(errorLoggerBig),
           expectedStatusCode = testedErrorCode.category.grpcCode.value,
-          expectedMessage =
-            "An error occurred. Please contact the operator and inquire about the request 123correlationId",
+          expectedMessage = BaseError.securitySensitiveMessage(Some("123correlationId")),
           expectedDetails = Seq(requestInfo, retryInfo),
         )
       }
@@ -281,6 +283,48 @@ class ErrorCodeSpec
         expectedDetails = expectedDetails,
       )
     }
+  }
+
+  def testMinimalGrpcStatus(errorLoggerSmall: ContextualizedErrorLogger): Unit = {
+    class FooErrorMinimal(override val code: ErrorCode) extends BaseError {
+      override val cause: String = "cause123"
+    }
+    val testedErrorCode = FooErrorCode
+    val id = errorLoggerSmall.correlationId.orElse(errorLoggerSmall.traceId)
+    val idTruncated = id.getOrElse("0").take(8)
+    final case class TestedError() extends FooErrorMinimal(testedErrorCode)
+    val details = Seq(
+      ErrorDetails
+        .ErrorInfoDetail(
+          testedErrorCode.id,
+          Map("category" -> testedErrorCode.category.asInt.toString),
+        )
+    ) ++ id
+      .map(correlationId =>
+        ErrorDetails.RequestInfoDetail(
+          correlationId = correlationId
+        )
+      )
+      .toList
+
+    val expected = Status
+      .newBuilder()
+      .setMessage(s"FOO_ERROR_CODE(8,$idTruncated): cause123")
+      .setCode(Code.INVALID_ARGUMENT.value())
+      .addAllDetails(details.map(_.toRpcAny).asJava)
+      .build()
+    val testedError = TestedError()
+
+    assertStatus(
+      actual = testedErrorCode.asGrpcStatus(testedError)(errorLoggerSmall),
+      expected = expected,
+    )
+    assertError(
+      actual = testedErrorCode.asGrpcError(testedError)(errorLoggerSmall),
+      expectedStatusCode = testedErrorCode.category.grpcCode.value,
+      expectedMessage = s"FOO_ERROR_CODE(8,$idTruncated): cause123",
+      expectedDetails = details,
+    )
   }
 
 }

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.transaction
 
 import com.digitalasset.canton.ProtoDeserializationError.*
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
@@ -94,9 +95,11 @@ object ParticipantPermission {
 
 /** The trust level of the participant. Can be either Ordinary or Vip
   */
-sealed trait TrustLevel extends Product with Serializable {
+sealed trait TrustLevel extends Product with Serializable with PrettyPrinting {
   def toProtoEnum: v0.TrustLevel
   def rank: Byte
+
+  override def pretty: Pretty[TrustLevel] = prettyOfObject[TrustLevel]
 }
 
 object TrustLevel {

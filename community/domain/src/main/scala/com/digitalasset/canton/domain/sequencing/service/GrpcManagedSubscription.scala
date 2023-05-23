@@ -91,6 +91,7 @@ private[service] class GrpcManagedSubscription(
         v0.SubscriptionResponse(
           signedSequencedEvent = Some(event.signedEvent.toProtoV0),
           Some(SerializableTraceContext(event.traceContext).toProtoV0),
+          event.trafficStatus.map(_.toProtoV0),
         )
       Right(performUnlessClosing("grpc-managed-subscription-handler") {
         observer.onNext(response)

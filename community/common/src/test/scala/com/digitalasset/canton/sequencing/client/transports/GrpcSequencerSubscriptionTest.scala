@@ -62,6 +62,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
         )
       ),
       Some(SerializableTraceContext.empty.toProtoV0),
+      None,
     )
 
   val RequestDescription = "request description"

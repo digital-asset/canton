@@ -5,8 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.participant.protocol.v0;
 
-import "google/protobuf/empty.proto";
 import "com/digitalasset/canton/participant/protocol/v0/ledger_sync_event.proto";
+import "google/protobuf/empty.proto";
 import "scalapb/scalapb.proto";
 
 message SubmissionTrackingData {

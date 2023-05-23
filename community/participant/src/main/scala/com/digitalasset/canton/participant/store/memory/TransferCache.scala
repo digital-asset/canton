@@ -157,7 +157,7 @@ class TransferCache(transferStore: TransferStore, override val loggerFactory: Na
     * query the store.
     */
   override def findIncomplete(
-      sourceDomain: SourceDomainId,
+      sourceDomain: Option[SourceDomainId],
       validAt: GlobalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,

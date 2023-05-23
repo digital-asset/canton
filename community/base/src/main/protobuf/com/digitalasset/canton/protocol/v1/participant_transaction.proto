@@ -6,8 +6,9 @@ package com.digitalasset.canton.protocol.v1;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v0/common.proto";
-import "com/digitalasset/canton/protocol/v1/common.proto";
 import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v0/topology.proto";
+import "com/digitalasset/canton/protocol/v1/common.proto";
 import "com/digitalasset/canton/protocol/v1/merkle.proto";
 import "scalapb/scalapb.proto";
 
@@ -47,45 +48,61 @@ message ViewNode {
   MerkleSeq subviews = 3; // changed type to MerkleSeq in v1
 }
 
+message ViewCommonData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
+  com.digitalasset.canton.crypto.v0.Salt salt = 1;
+  repeated Informee informees = 2;
+  int32 threshold = 3;
+}
+
+message Informee {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
+  string party = 1;
+  int32 weight = 2; // optional: only set if party is confirming
+  com.digitalasset.canton.protocol.v0.TrustLevel required_trust_level = 3;
+}
+
 // EncryptedViewMessage
 
 message EncryptedViewMessage {
-    option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
-    bytes view_tree = 1;
+  bytes view_tree = 1;
 
-    // The symmetric encryption scheme used to encrypt the view tree
-    com.digitalasset.canton.crypto.v0.SymmetricKeyScheme encryption_scheme = 2;
+  // The symmetric encryption scheme used to encrypt the view tree
+  com.digitalasset.canton.crypto.v0.SymmetricKeyScheme encryption_scheme = 2;
 
-    com.digitalasset.canton.crypto.v0.Signature submitter_participant_signature = 3; // optional
-    bytes view_hash = 4;
-    repeated ParticipantRandomnessLookup randomness = 5;
-    string domain_id = 6;
-    v0.ViewType view_type = 7;
+  com.digitalasset.canton.crypto.v0.Signature submitter_participant_signature = 3; // optional
+  bytes view_hash = 4;
+  repeated ParticipantRandomnessLookup randomness = 5;
+  string domain_id = 6;
+  v0.ViewType view_type = 7;
 }
 
 message ParticipantRandomnessLookup {
-    // An encrypted random bytestring. After decryption, used in HKDF to derive the encryption keys for the view and
-    // its subviews
-    bytes randomness = 1;
+  // An encrypted random bytestring. After decryption, used in HKDF to derive the encryption keys for the view and
+  // its subviews
+  bytes randomness = 1;
 
-    // The fingerprint of the public key that was used to encrypt the randomness for the participant
-    string fingerprint = 2;
+  // The fingerprint of the public key that was used to encrypt the randomness for the participant
+  string fingerprint = 2;
 }
 
 message ViewParticipantMessage {
-    // Placeholder as the protobuf format in v1 is identical to v0.
-    // To avoid copy-pasting the serializer/deserializers, the Scala code reuses the v0 message.
-    option deprecated = true;
+  // Placeholder as the protobuf format in v1 is identical to v0.
+  // To avoid copy-pasting the serializer/deserializers, the Scala code reuses the v0 message.
+  option deprecated = true;
 }
 
 // InformeeMessage
 
 message InformeeMessage {
-    option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
-    FullInformeeTree full_informee_tree = 1;
-    int32 protocol_version = 2; // added in v1
+  FullInformeeTree full_informee_tree = 1;
+  int32 protocol_version = 2; // added in v1
 }
 
 message LightTransactionViewTree {

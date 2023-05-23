@@ -33,12 +33,13 @@ import com.digitalasset.canton.participant.store.MultiDomainEventLog.{
   PublicationData,
 }
 import com.digitalasset.canton.participant.store.db.DbMultiDomainEventLog.*
-import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLog}
+import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLog, TransferStore}
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TransactionEventId
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
+import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Implicits.{
   getResultLfPartyId as _,
@@ -90,7 +91,8 @@ class DbMultiDomainEventLog private[db] (
     storage: DbStorage,
     clock: Clock,
     metrics: ParticipantMetrics,
-    val indexedStringStore: IndexedStringStore,
+    override val transferStoreFor: TargetDomainId => Either[String, TransferStore],
+    override val indexedStringStore: IndexedStringStore,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(
@@ -185,39 +187,54 @@ class DbMultiDomainEventLog private[db] (
     }
   }
 
+  /* `insert` assigns global offsets in ascending order, but some events may be skipped because they are already there.
+   * So we go through the events in reverse order and try to match them against the found global offsets,
+   * stopping at the global offset that was known previously.
+   */
+  private def publications(
+      eventsToPublish: Seq[PublicationData],
+      cap: GlobalOffset,
+      lastEvents: NonEmpty[Seq[(GlobalOffset, EventLogId, LocalOffset, CantonTimestamp)]],
+  ): Seq[OnPublish.Publication] = {
+    val cappedLastEvents = lastEvents.forgetNE.iterator.takeWhile {
+      case (globalOffset, _eventLogId, _localOffset, _publicationTime) => globalOffset > cap
+    }
+    IterableUtil
+      .subzipBy(cappedLastEvents, eventsToPublish.reverseIterator) {
+        case (
+              (globalOffset, allocatedEventLogId, allocatedLocalOffset, publicationTime),
+              PublicationData(eventLogId, event, inFlightReference),
+            ) =>
+          Option.when(
+            allocatedEventLogId == eventLogId && allocatedLocalOffset == event.localOffset
+          ) {
+            val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
+            OnPublish
+              .Publication(
+                globalOffset,
+                publicationTime,
+                inFlightReference,
+                deduplicationInfo,
+                event.event,
+              )
+          }
+      }
+      .reverse
+  }
+
   /** Allocates the global offsets for the batch of events and notifies the dispatcher on [[onPublish]].
     * Must run sequentially.
     */
   private def doPublish(events: Seq[(PublicationData, Promise[Unit])]): Future[Unit] = {
     val eventsToPublish = events.map(_._1)
-    implicit val batchTraceContext: TraceContext = TraceContext.ofBatch(eventsToPublish)(logger)
 
-    def publications(
-        cap: GlobalOffset,
-        lastEvents: Seq[(GlobalOffset, EventLogId, LocalOffset, CantonTimestamp)],
-    ): Seq[OnPublish.Publication] = {
-      /* `insert` assigns global offsets in ascending order, but some events may be skipped because they are already there.
-       * So we go through the events in reverse order and try to match them against the found global offsets,
-       * stopping at the global offset that was known previously.
-       */
-      val cappedLastEvents = lastEvents.iterator.takeWhile {
-        case (globalOffset, _eventLogId, _localOffset, _publicationTime) => globalOffset > cap
-      }
-      IterableUtil
-        .subzipBy(cappedLastEvents, eventsToPublish.reverseIterator) {
-          case (
-                (globalOffset, allocatedEventLogId, allocatedLocalOffset, publicationTime),
-                PublicationData(eventLogId, event, inFlightReference),
-              ) =>
-            if (allocatedEventLogId == eventLogId && allocatedLocalOffset == event.localOffset) {
-              val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
-              OnPublish
-                .Publication(globalOffset, publicationTime, inFlightReference, deduplicationInfo)
-                .some
-            } else None
-        }
-        .reverse
-    }
+    /*
+      We can have this here because this method is supposed to be called sequentially and it
+      is the only place where we update `lastPublishedOffset`
+     */
+    val previousGlobalOffset = lastPublishedOffset.get()
+
+    implicit val batchTraceContext: TraceContext = TraceContext.ofBatch(eventsToPublish)(logger)
 
     def nextPublicationTime(): CantonTimestamp = {
       val now = clock.monotonicTime()
@@ -248,39 +265,49 @@ class DbMultiDomainEventLog private[db] (
       _ <- enforceInOrderPublication(eventsToPublish)
       publicationTime = nextPublicationTime()
       _ <- insert(eventsToPublish, publicationTime)
+
       // Find the global offsets assigned to the inserted events
-      foundEvents <- lastEvents(events.size)
-    } yield {
-      val newGlobalOffsetO = foundEvents.headOption.map(_._1)
-      newGlobalOffsetO match {
-        case Some(newGlobalOffset) =>
-          logger.debug(show"Signalling global offset $newGlobalOffset.")
-
-          dispatcher.signalNewHead(newGlobalOffset)
-
-          val previousGlobalOffset = lastPublishedOffset.getAndSet(newGlobalOffset)
-          val published = publications(previousGlobalOffset, foundEvents)
-          // Advance the publication time lower bound to `publicationTime`
-          // only if it was actually stored for at least one event.
-          if (published.nonEmpty) {
-            advancePublicationTimeLowerBound(publicationTime)
-          }
-          notifyOnPublish(published)
-
-          events.foreach { case (data @ PublicationData(id, event, _inFlightReference), promise) =>
-            promise.success(())
-            logger.debug(
-              show"Published event from event log $id with local offset ${event.localOffset} with publication time $publicationTime."
-            )(data.traceContext)
-            metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
-          }
-
-        case None =>
-          ErrorUtil.internalError(
-            new IllegalStateException(
-              "Failed to publish events to linearized_event_log. The table appears to be empty."
-            )
+      foundEventsO <- lastEvents(events.size).map(NonEmpty.from)
+      foundEvents = foundEventsO.getOrElse {
+        ErrorUtil.internalError(
+          new IllegalStateException(
+            "Failed to publish events to linearized_event_log. The table appears to be empty."
           )
+        )
+      }
+      (newGlobalOffset, _, _, _) = foundEvents.head1
+
+      published = publications(eventsToPublish, previousGlobalOffset, foundEvents)
+
+      // We wait here because we don't want to update the ledger end (new head of the dispatcher) if notification fails
+      _ <- published.parTraverse_ { publication =>
+        publication.event match {
+          case transfer: LedgerSyncEvent.TransferEvent if transfer.isTransferringParticipant =>
+            notifyOnPublishTransfer(transfer, publication.globalOffset)
+
+          case _ => Future.unit
+        }
+      }
+
+    } yield {
+      logger.debug(show"Signalling global offset $newGlobalOffset.")
+
+      dispatcher.signalNewHead(newGlobalOffset)
+
+      lastPublishedOffset.set(newGlobalOffset)
+      // Advance the publication time lower bound to `publicationTime`
+      // only if it was actually stored for at least one event.
+      if (published.nonEmpty) {
+        advancePublicationTimeLowerBound(publicationTime)
+      }
+      notifyOnPublish(published)
+
+      events.foreach { case (data @ PublicationData(id, event, _inFlightReference), promise) =>
+        promise.success(())
+        logger.debug(
+          show"Published event from event log $id with local offset ${event.localOffset} with publication time $publicationTime."
+        )(data.traceContext)
+        metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
       }
     }
   }
@@ -515,6 +542,32 @@ class DbMultiDomainEventLog private[db] (
         }.toMap
       }
     case _ => Future.successful(Map.empty)
+  }
+
+  override def lookupByGlobalOffsets(offsets: Seq[GlobalOffset])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = {
+    offsets match {
+      case NonEmpty(offsetsNE) =>
+        val inClauses = DbStorage.toInClauses_(
+          "global_offset",
+          offsetsNE,
+          maxBatchSize,
+        )
+
+        val queries = inClauses.map { inClause =>
+          import DbStorage.Implicits.BuilderChain.*
+          (sql"""
+              select lel.global_offset, el.local_offset, request_sequencer_counter, el.event_id, el.content, trace_context
+              from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
+              where
+              """ ++ inClause).as[(GlobalOffset, TimestampedEvent)]
+        }
+        storage
+          .sequentialQueryAndCombine(queries, functionFullName)
+          .map(_.toSeq.sortBy { case (globalOffset, _) => globalOffset })
+      case _ => Future.successful(Seq.empty)
+    }
   }
 
   override def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
@@ -778,6 +831,7 @@ object DbMultiDomainEventLog {
       indexedStringStore: IndexedStringStore,
       loggerFactory: NamedLoggerFactory,
       participantEventLogId: ParticipantEventLogId,
+      transferStoreFor: TargetDomainId => Either[String, TransferStore],
       maxBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
   )(implicit
       ec: ExecutionContext,
@@ -802,6 +856,7 @@ object DbMultiDomainEventLog {
         clock = clock,
         metrics = metrics,
         indexedStringStore = indexedStringStore,
+        transferStoreFor = transferStoreFor,
         timeouts = timeouts,
         loggerFactory = loggerFactory,
       )

@@ -280,6 +280,8 @@ class RecordOrderPublisher(
       param("timestamp", _.timestamp),
       param("sequencer counter", _.sequencerCounter),
     )
+
+    override def close(): Unit = ()
   }
 
   /** Task to register the causality update `update` and publish the event `event` if defined.
@@ -313,6 +315,8 @@ class RecordOrderPublisher(
         param("sequencerCounter", _.sequencerCounter),
         param("event", _.eventO),
       )
+
+    override def close(): Unit = ()
   }
 
   private def publishEvent(
@@ -347,6 +351,8 @@ class RecordOrderPublisher(
 
     override def pretty: Pretty[this.type] =
       prettyOfClass(param("timestamp", _.timestamp), param("sequencerCounter", _.sequencerCounter))
+
+    override def close(): Unit = ()
   }
 
   def setAcsChangeListener(listener: AcsChangeListener): Unit = {

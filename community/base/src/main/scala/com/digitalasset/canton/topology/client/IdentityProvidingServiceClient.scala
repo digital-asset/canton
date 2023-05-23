@@ -24,7 +24,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
   AuthorityOfDelegation,
   AuthorityOfResponse,
-  nonConsortiumPartyDelegation,
+  PartyInfo,
 }
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
@@ -240,15 +240,7 @@ trait PartyTopologySnapshotClient {
   /** Returns the Authority-Of delegations for consortium parties. Non-consortium parties delegate to themselves
     * with threshold one
     */
-  def authorityOf(parties: Set[LfPartyId]): Future[AuthorityOfResponse] = {
-    // TODO(i11255): this is a stub implementation for non-consortium parties
-    //   Also: shouldn't this check whether the parties are known, e.g. via inspectKnownParties?
-    Future.successful(
-      AuthorityOfResponse(
-        parties.map(partyId => partyId -> nonConsortiumPartyDelegation(partyId)).toMap
-      )
-    )
-  }
+  def authorityOf(parties: Set[LfPartyId]): Future[AuthorityOfResponse]
 
   /** Returns true if there is at least one participant that satisfies the predicate */
   def isHostedByAtLeastOneParticipantF(
@@ -284,6 +276,10 @@ trait PartyTopologySnapshotClient {
       parties: List[LfPartyId]
   ): EitherT[Future, Set[LfPartyId], Set[ParticipantId]]
 
+  def partiesWithGroupAddressing(
+      parties: Seq[LfPartyId]
+  ): Future[Set[LfPartyId]]
+
   /** Returns a list of all known parties on this domain */
   def inspectKnownParties(
       filterParty: String,
@@ -302,6 +298,11 @@ object PartyTopologySnapshotClient {
     AuthorityOfDelegation(Set(partyId), PositiveInt.one)
 
   final case class AuthorityOfResponse(response: Map[LfPartyId, AuthorityOfDelegation])
+
+  final case class PartyInfo(
+      groupAddressing: Boolean,
+      participants: Map[ParticipantId, ParticipantAttributes],
+  )
 }
 
 /** The subset of the topology client, providing signing and encryption key information */
@@ -694,7 +695,6 @@ private[client] trait PartyTopologySnapshotBaseClient {
         (if (active.isEmpty) noActive + p else noActive, allActive.union(active.keySet))
       }
     } yield Either.cond(noActive.isEmpty, allActive, noActive))
-
 }
 
 private[client] trait PartyTopologySnapshotLoader
@@ -708,20 +708,20 @@ private[client] trait PartyTopologySnapshotLoader
   ): Future[Map[ParticipantId, ParticipantAttributes]] =
     PartyId
       .fromLfParty(party)
-      .map(loadActiveParticipantsOf(_, loadParticipantStates))
+      .map(loadActiveParticipantsOf(_, loadParticipantStates).map(_.participants))
       .getOrElse(Future.successful(Map()))
 
   private[client] def loadActiveParticipantsOf(
       party: PartyId,
       participantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
-  ): Future[Map[ParticipantId, ParticipantAttributes]]
+  ): Future[PartyInfo]
 
   final override def activeParticipantsOfParties(
       parties: Seq[LfPartyId]
   ): Future[Map[LfPartyId, Set[ParticipantId]]] = {
     val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
     loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.map { case (k, v) =>
-      (k.toLf, v.keySet)
+      (k.toLf, v.participants.keySet)
     })
   }
 
@@ -730,14 +730,23 @@ private[client] trait PartyTopologySnapshotLoader
   ): Future[Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]] = {
     val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
     loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.map { case (k, v) =>
-      (k.toLf, v)
+      (k.toLf, v.participants)
     })
+  }
+
+  final override def partiesWithGroupAddressing(
+      parties: Seq[LfPartyId]
+  ): Future[Set[LfPartyId]] = {
+    val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
+    loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.collect {
+      case (party, PartyInfo(groupAddressing, _)) if groupAddressing => party.toLf
+    }.toSet)
   }
 
   private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
       loadParticipantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
-  ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]]
+  ): Future[Map[PartyId, PartyInfo]]
 
 }
 
@@ -788,4 +797,5 @@ trait TopologySnapshotLoader
     with KeyTopologySnapshotClientLoader
     with VettedPackagesSnapshotLoader
     with DomainGovernanceSnapshotLoader
+    with DomainTrafficControlStateClient
     with NamedLogging

@@ -45,10 +45,10 @@ import scala.annotation.nowarn
 @nowarn("msg=match may not be exhaustive")
 class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
-  lazy val clock = new SimClock(loggerFactory = loggerFactory)
+  private lazy val clock = new SimClock(loggerFactory = loggerFactory)
 
-  lazy val submissionId1 = DefaultDamlValues.submissionId().some
-  lazy val event1 = TransactionAccepted(
+  private lazy val submissionId1 = DefaultDamlValues.submissionId().some
+  private lazy val event1 = TransactionAccepted(
     optCompletionInfo = DefaultDamlValues.completionInfo(List.empty).some,
     transactionMeta = DefaultDamlValues.transactionMeta(),
     transaction = DefaultDamlValues.emptyCommittedTransaction,
@@ -58,41 +58,41 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     blindingInfo = None,
     contractMetadata = Map(),
   )
-  lazy val changeId1 = event1.optCompletionInfo.value.changeId
-  lazy val changeId1Hash = ChangeIdHash(changeId1)
+  private lazy val changeId1 = event1.optCompletionInfo.value.changeId
+  private lazy val changeId1Hash = ChangeIdHash(changeId1)
 
-  lazy val event2 =
+  private lazy val event2 =
     event1.copy(optCompletionInfo = None, transactionId = DefaultDamlValues.lfTransactionId(2))
 
-  lazy val event1reject = CommandRejected(
+  private lazy val event1reject = CommandRejected(
     CantonTimestamp.Epoch.toLf,
     event1.optCompletionInfo.value,
     new FinalReason(RpcStatus(code = Code.ABORTED_VALUE, message = "event1 rejection")),
     ProcessingSteps.RequestType.Transaction,
   )
 
-  lazy val event3 = CommandRejected(
+  private lazy val event3 = CommandRejected(
     CantonTimestamp.Epoch.toLf,
     DefaultDamlValues
       .completionInfo(List.empty, commandId = DefaultDamlValues.commandId(3), submissionId = None),
     FinalReason(RpcStatus(code = Code.NOT_FOUND_VALUE, message = "event3 message")),
     ProcessingSteps.RequestType.Transaction,
   )
-  lazy val changeId3 = event3.completionInfo.changeId
-  lazy val changeId3Hash = ChangeIdHash(changeId3)
+  private lazy val changeId3 = event3.completionInfo.changeId
+  private lazy val changeId3Hash = ChangeIdHash(changeId3)
 
-  lazy val domainId = DefaultTestIdentities.domainId
-  lazy val messageId = MessageId.fromUuid(new UUID(10, 10))
-  lazy val eventLogId = DomainEventLogId(IndexedDomain.tryCreate(domainId, 1))
-  lazy val inFlightReference = InFlightByMessageId(domainId, messageId)
+  private lazy val domainId = DefaultTestIdentities.domainId
+  private lazy val messageId = MessageId.fromUuid(new UUID(10, 10))
+  private lazy val eventLogId = DomainEventLogId(IndexedDomain.tryCreate(domainId, 1))
+  private lazy val inFlightReference = InFlightByMessageId(domainId, messageId)
 
   class Fixture(
       val dedup: CommandDeduplicator,
       val store: CommandDeduplicationStore,
   )
 
-  lazy val eventsInLog = Seq(event1reject, event1, event1reject, event2, event3)
-  lazy val Seq(
+  private lazy val eventsInLog = Seq(event1reject, event1, event1reject, event2, event3)
+  private lazy val Seq(
     event1rejectOffset,
     event1Offset,
     event1rejectOffset2,
@@ -125,6 +125,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
       publicationTime,
       inFlightReference,
       deduplicationInfo,
+      event1,
     )
   }
 

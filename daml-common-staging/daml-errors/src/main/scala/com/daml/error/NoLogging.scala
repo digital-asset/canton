@@ -3,10 +3,13 @@
 
 package com.daml.error
 
-object NoLogging extends NoLogging(properties = Map.empty, correlationId = None) {}
+object NoLogging extends NoLogging(properties = Map.empty, correlationId = None, traceId = None) {}
 
-class NoLogging(val properties: Map[String, String], val correlationId: Option[String])
-    extends ContextualizedErrorLogger {
+class NoLogging(
+    val properties: Map[String, String],
+    val correlationId: Option[String],
+    val traceId: Option[String] = None,
+) extends ContextualizedErrorLogger {
   override def logError(err: BaseError, extra: Map[String, String]): Unit = ()
   override def info(message: String): Unit = ()
   override def info(message: String, throwable: Throwable): Unit = ()

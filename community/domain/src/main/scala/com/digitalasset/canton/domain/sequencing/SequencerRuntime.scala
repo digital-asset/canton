@@ -33,6 +33,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
@@ -91,6 +92,7 @@ class SequencerRuntime(
     agreementManager: Option[ServiceAgreementManager],
     memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
     topologyStateForInitializationService: Option[TopologyStateForInitializationService],
+    rateLimitManager: Option[SequencerRateLimitManager],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext,
@@ -123,6 +125,7 @@ class SequencerRuntime(
         clock,
         syncCrypto,
         futureSupervisor,
+        rateLimitManager,
       )
   }
 

@@ -5,16 +5,15 @@ syntax = "proto3";
 
 package com.digitalasset.canton.domain.admin.v0;
 
-import "google/protobuf/empty.proto";
-import "google/protobuf/timestamp.proto";
 import "com/digitalasset/canton/domain/admin/v0/sequencer_initialization_snapshot.proto";
 import "com/digitalasset/canton/pruning/admin/v0/pruning.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
 // administration service for enterprise feature supporting sequencer instances
 service EnterpriseSequencerAdministrationService {
-
   // Remove data from the Sequencer
-  rpc Prune (Pruning.Request) returns (Pruning.Response);
+  rpc Prune(Pruning.Request) returns (Pruning.Response);
 
   // fetch a snapshot of the sequencer state based on the given timestamp
   rpc Snapshot(Snapshot.Request) returns (Snapshot.Response);
@@ -46,7 +45,6 @@ service EnterpriseSequencerAdministrationService {
 
   // Retrieve pruning timestamp at or near the "beginning" of events.
   rpc LocatePruningTimestamp(com.digitalasset.canton.pruning.admin.v0.LocatePruningTimestamp.Request) returns (com.digitalasset.canton.pruning.admin.v0.LocatePruningTimestamp.Response);
-
 }
 
 message EthereumAccount {

@@ -480,32 +480,32 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookupNoOffset <- store.findIncomplete(sourceDomain1, Long.MaxValue, None, limit)
+          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit)
 
           _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
             "add transfer-out offset failed"
           )
           lookupBeforeTransferOut <- store.findIncomplete(
-            sourceDomain1,
+            None,
             transferOutOffset - 1,
             None,
             limit,
           )
-          lookupAtTransferOut <- store.findIncomplete(sourceDomain1, transferOutOffset, None, limit)
+          lookupAtTransferOut <- store.findIncomplete(None, transferOutOffset, None, limit)
 
           _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
             "add transfer-in offset failed"
           )
 
           lookupBeforeTransferIn <- store.findIncomplete(
-            sourceDomain1,
+            None,
             transferInOffset - 1,
             None,
             limit,
           )
-          lookupAtTransferIn <- store.findIncomplete(sourceDomain1, transferInOffset, None, limit)
+          lookupAtTransferIn <- store.findIncomplete(None, transferInOffset, None, limit)
           lookupAfterTransferIn <- store.findIncomplete(
-            sourceDomain1,
+            None,
             transferInOffset,
             None,
             limit,
@@ -539,32 +539,32 @@ trait TransferStoreTest {
 
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
-          lookupNoOffset <- store.findIncomplete(sourceDomain1, Long.MaxValue, None, limit)
+          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit)
 
           _ <- valueOrFail(store.addTransferInGlobalOffset(transferId, transferInOffset))(
             "add transfer-in offset failed"
           )
           lookupBeforeTransferIn <- store.findIncomplete(
-            sourceDomain1,
+            None,
             transferInOffset - 1,
             None,
             limit,
           )
-          lookupAtTransferIn <- store.findIncomplete(sourceDomain1, transferInOffset, None, limit)
+          lookupAtTransferIn <- store.findIncomplete(None, transferInOffset, None, limit)
 
           _ <- valueOrFail(store.addTransferOutGlobalOffset(transferId, transferOutOffset))(
             "add transfer-out offset failed"
           )
 
           lookupBeforeTransferOut <- store.findIncomplete(
-            sourceDomain1,
+            None,
             transferOutOffset - 1,
             None,
             limit,
           )
-          lookupAtTransferOut <- store.findIncomplete(sourceDomain1, transferOutOffset, None, limit)
+          lookupAtTransferOut <- store.findIncomplete(None, transferOutOffset, None, limit)
           lookupAfterTransferOut <- store.findIncomplete(
-            sourceDomain1,
+            None,
             transferOutOffset,
             None,
             limit,
@@ -624,16 +624,16 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(addTransfersET)("add failed")
 
-          lookupNone <- store.findIncomplete(sourceDomain1, transferOutOffset, None, limit)
+          lookupNone <- store.findIncomplete(None, transferOutOffset, None, limit)
           lookupAll <- store.findIncomplete(
-            sourceDomain1,
+            None,
             transferOutOffset,
             lift(alice, bob),
             limit,
           )
 
-          lookupAlice <- store.findIncomplete(sourceDomain1, transferOutOffset, lift(alice), limit)
-          lookupBob <- store.findIncomplete(sourceDomain1, transferOutOffset, lift(bob), limit)
+          lookupAlice <- store.findIncomplete(None, transferOutOffset, lift(alice), limit)
+          lookupBob <- store.findIncomplete(None, transferOutOffset, lift(bob), limit)
         } yield {
           stakeholdersOf(lookupNone) should contain theSameElementsAs stakeholders
           stakeholdersOf(lookupAll) should contain theSameElementsAs stakeholders
@@ -642,7 +642,7 @@ trait TransferStoreTest {
         }
       }
 
-      "take domainId filter into account" in {
+      "take domain filter into account" in {
         val store = mk(targetDomain)
         val offset = 10L
 
@@ -651,11 +651,13 @@ trait TransferStoreTest {
         for {
           _ <- valueOrFail(store.addTransfer(transfer))("add")
 
-          lookup1a <- store.findIncomplete(sourceDomain2, offset, None, limit) // Wrong domain
-          lookup1b <- store.findIncomplete(sourceDomain1, offset, None, limit)
+          lookup1a <- store.findIncomplete(Some(sourceDomain2), offset, None, limit) // Wrong domain
+          lookup1b <- store.findIncomplete(Some(sourceDomain1), offset, None, limit)
+          lookup1c <- store.findIncomplete(None, offset, None, limit)
         } yield {
           lookup1a shouldBe empty
           assertIsIncomplete(lookup1b, transfer)
+          assertIsIncomplete(lookup1c, transfer)
         }
       }
 
@@ -669,8 +671,8 @@ trait TransferStoreTest {
             "add out offset"
           )
 
-          lookup0 <- store.findIncomplete(sourceDomain1, offset, None, NonNegativeInt.zero)
-          lookup1 <- store.findIncomplete(sourceDomain1, offset, None, NonNegativeInt.one)
+          lookup0 <- store.findIncomplete(None, offset, None, NonNegativeInt.zero)
+          lookup1 <- store.findIncomplete(None, offset, None, NonNegativeInt.one)
 
         } yield {
           lookup0 shouldBe empty

@@ -413,7 +413,11 @@ final case class TransactionView private (
   }
 }
 
-object TransactionView extends HasProtocolVersionedWithContextCompanion[TransactionView, HashOps] {
+object TransactionView
+    extends HasProtocolVersionedWithContextCompanion[
+      TransactionView,
+      (HashOps, ConfirmationPolicy),
+    ] {
   override protected def name: String = "TransactionView"
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
@@ -528,19 +532,20 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
     GenLens[TransactionView](_.subviews)
 
   private def fromProtoV0(
-      hashOps: HashOps,
+      context: (HashOps, ConfirmationPolicy),
       protoView: v0.ViewNode,
   ): ParsingResult[TransactionView] = {
+    val (hashOps, _) = context
     for {
       commonData <- MerkleTree.fromProtoOptionV0(
         protoView.viewCommonData,
-        ViewCommonData.fromByteString(hashOps),
+        ViewCommonData.fromByteString(context),
       )
       participantData <- MerkleTree.fromProtoOptionV0(
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(hashOps),
       )
-      subViews <- TransactionSubviews.fromProtoV0(hashOps, protoView.subviews)
+      subViews <- TransactionSubviews.fromProtoV0(context, protoView.subviews)
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,
@@ -553,19 +558,20 @@ object TransactionView extends HasProtocolVersionedWithContextCompanion[Transact
   }
 
   private def fromProtoV1(
-      hashOps: HashOps,
+      context: (HashOps, ConfirmationPolicy),
       protoView: v1.ViewNode,
   ): ParsingResult[TransactionView] = {
+    val (hashOps, _) = context
     for {
       commonData <- MerkleTree.fromProtoOptionV1(
         protoView.viewCommonData,
-        ViewCommonData.fromByteString(hashOps),
+        ViewCommonData.fromByteString(context),
       )
       participantData <- MerkleTree.fromProtoOptionV1(
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(hashOps),
       )
-      subViews <- TransactionSubviews.fromProtoV1(hashOps, protoView.subviews)
+      subViews <- TransactionSubviews.fromProtoV1(context, protoView.subviews)
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,

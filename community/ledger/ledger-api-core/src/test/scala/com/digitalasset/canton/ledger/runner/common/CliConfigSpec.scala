@@ -212,7 +212,7 @@ final class CliConfigSpec
     config.tlsConfig.value.enableCertRevocationChecking should be(true)
   }
 
-  it should "get the tracker retention period when provided" in new TestScope {
+  it should "get the tracker default tracking timeout when provided" in new TestScope {
     val periodStringRepresentation = "P0DT1H2M3S"
     val expectedPeriod = Duration.ofHours(1).plusMinutes(2).plusSeconds(3)
     val config =
@@ -221,7 +221,7 @@ final class CliConfigSpec
       )
         .getOrElse(parsingFailure())
 
-    config.commandConfig.maxTrackingTimeout should be(expectedPeriod)
+    config.commandConfig.defaultTrackingTimeout should be(expectedPeriod)
   }
 
   it should "set the client-auth parameter when provided" in new TestScope {

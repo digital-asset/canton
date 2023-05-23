@@ -20,6 +20,8 @@ import com.daml.ledger.api.v1.admin.party_management_service.{
   PartyManagementServiceGrpc,
   UpdatePartyDetailsRequest,
   UpdatePartyDetailsResponse,
+  UpdatePartyIdentityProviderRequest,
+  UpdatePartyIdentityProviderResponse,
 }
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
@@ -476,6 +478,10 @@ private[apiserver] final class ApiPartyManagementService private (
           )
       }
 
+  // TODO (i13051): Implement IDP reassignment
+  override def updateUserIdentityProviderId(
+      request: UpdatePartyIdentityProviderRequest
+  ): Future[UpdatePartyIdentityProviderResponse] = ???
 }
 
 private[apiserver] object ApiPartyManagementService {

@@ -11,16 +11,15 @@ import "google/protobuf/empty.proto";
 // service used by sequencer clients to manage connection to the sequencer
 // used by the mediator and domain manager nodes
 service EnterpriseSequencerConnectionService {
-    rpc GetConnection (GetConnectionRequest) returns (GetConnectionResponse);
-    rpc SetConnection (SetConnectionRequest) returns (google.protobuf.Empty);
+  rpc GetConnection(GetConnectionRequest) returns (GetConnectionResponse);
+  rpc SetConnection(SetConnectionRequest) returns (google.protobuf.Empty);
 }
 
-message GetConnectionRequest{
-}
+message GetConnectionRequest {}
 
 message GetConnectionResponse {
-    com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 1;
+  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 1;
 }
 message SetConnectionRequest {
-    com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 1;
+  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 1;
 }

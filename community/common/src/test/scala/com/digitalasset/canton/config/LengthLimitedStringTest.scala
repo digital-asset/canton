@@ -34,9 +34,10 @@ class LengthLimitedStringTest extends AnyWordSpec with BaseTest {
     }
 
     "have symmetric equality with strings" in {
-      val s = "foo"
+      val s = "s"
       val s255 = String255.tryCreate("s")
-      (s255 == s) shouldBe (s == s255)
+      (s255 == s) shouldBe true
+      (s255 == s255) shouldBe true
       (s255 == "bar") shouldBe ("bar" == s255)
     }
   }

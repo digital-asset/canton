@@ -33,7 +33,6 @@ message AttackAddFieldSameType {
   bytes three = 3;
 }
 
-
 // Same as Base, but with another variant
 message AddVariant {
   oneof sum {
@@ -53,7 +52,6 @@ message VersionedDummyMessage {
   }
 }
 
-
 // Switching to repeated
 message Single {
   string one = 1;
@@ -68,4 +66,14 @@ message Repeated {
 message AttackRepeated {
   repeated string one = 1;
   repeated bytes two = 2;
+}
+
+message UnsignedInt {
+  uint32 unsigned = 1;
+}
+message SignedInt {
+  int32 signed = 1;
+}
+message UnsignedLong {
+  uint64 unsigned = 1;
 }

@@ -287,7 +287,6 @@ abstract class CantonNodeBootstrapBase[
                 startWithStoredNodeId(nodeId),
                 "waitForReplicaInitializationStartWithStoredNodeId",
               )
-              .onShutdown(Left("Aborted due to shutdown"))
           )
           initializationWatcherRef.set(initializationWatcher.some)
         }
@@ -461,7 +460,7 @@ abstract class CantonNodeBootstrapBase[
     override protected def timeouts: ProcessingTimeout =
       arguments.parameterConfig.processingTimeouts
     def watch(
-        startWithStoredNodeId: NodeId => EitherT[Future, String, Unit]
+        startWithStoredNodeId: NodeId => EitherT[FutureUnlessShutdown, String, Unit]
     )(implicit traceContext: TraceContext): Unit = {
       logger.debug(s"Waiting for a node id to be stored to start this node instance")
       // we try forever - 1 to avoid logging every attempt at warning
@@ -480,7 +479,7 @@ abstract class CantonNodeBootstrapBase[
             logger.debug("A stored id has been found but the id has already been set so ignoring")
           } else {
             logger.info("Starting node as we have found a stored id")
-            startWithStoredNodeId(id).value.foreach {
+            startWithStoredNodeId(id).onShutdown(Right(())).value.foreach {
               case Left(error) =>
                 // if we are already successfully initialized likely this was just called twice due to a race between
                 // the waiting and an initialize call

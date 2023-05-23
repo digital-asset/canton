@@ -557,11 +557,8 @@ class TransactionProcessingSteps(
 
       def extractRandomnessFromView(
           transactionViewEnvelope: OpenEnvelope[TransactionViewMessage]
-      ): Unit = {
-        if (
-          // TODO(#12382): support group addressing for informees
-          transactionViewEnvelope.recipients.leafRecipients.contains(MemberRecipient(participantId))
-        ) {
+      ): Future[Unit] = {
+        def completeRandomnessPromise(): Unit = {
           val message = transactionViewEnvelope.protocolMessage
           val randomnessF = EncryptedViewMessage
             .decryptRandomness(
@@ -580,6 +577,26 @@ class TransactionProcessingSteps(
           checked(randomnessMap(transactionViewEnvelope.protocolMessage.viewHash))
             .completeWith(randomnessF)
             .discard[Promise[SecureRandomness]]
+        }
+
+        if (
+          transactionViewEnvelope.recipients.leafRecipients.contains(MemberRecipient(participantId))
+        ) Future.successful(completeRandomnessPromise())
+        else {
+          // check also if participant is addressed as part of a group address
+          val parties = transactionViewEnvelope.recipients.leafRecipients.collect {
+            case ParticipantsOfParty(party) => party
+          }
+          if (parties.nonEmpty) {
+            crypto.ips.currentSnapshotApproximation
+              .activeParticipantsOfParties(
+                parties.toSeq.map(_.toLf)
+              )
+              .map { partiesToParticipants =>
+                val participants = partiesToParticipants.values.flatten.toSet
+                if (participants.contains(participantId)) completeRandomnessPromise() else ()
+              }
+          } else Future.unit
         }
       }
 
@@ -636,8 +653,8 @@ class TransactionProcessingSteps(
       def decryptView(
           transactionViewEnvelope: OpenEnvelope[TransactionViewMessage]
       ): Future[Either[DecryptionError, (WithRecipients[DecryptedView], Option[Signature])]] = {
-        extractRandomnessFromView(transactionViewEnvelope)
         for {
+          _ <- extractRandomnessFromView(transactionViewEnvelope)
           randomness <- randomnessMap(transactionViewEnvelope.protocolMessage.viewHash).future
           lightViewTreeE <- decryptViewWithRandomness(
             transactionViewEnvelope.protocolMessage,

@@ -13,11 +13,12 @@
 
 syntax = "proto3";
 package com.daml.ledger.configuration;
-option java_package = "com.daml.ledger.configuration.protobuf";
-option java_multiple_files = true;
-option csharp_namespace = "Com.Daml.Ledger.Configuration.Protobuf";
 
 import "google/protobuf/duration.proto";
+
+option csharp_namespace = "Com.Daml.Ledger.Configuration.Protobuf";
+option java_multiple_files = true;
+option java_package = "com.daml.ledger.configuration.protobuf";
 
 message LedgerConfiguration {
   // The version of the configuration message. Defines the semantics

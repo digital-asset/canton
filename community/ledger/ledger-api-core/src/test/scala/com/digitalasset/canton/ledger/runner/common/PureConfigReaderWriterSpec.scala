@@ -559,7 +559,7 @@ class PureConfigReaderWriterSpec
 
   val validCommandConfigurationValue =
     """
-      |  max-tracking-timeout = "300 seconds"
+      |  default-tracking-timeout = "300 seconds"
       |  max-commands-in-flight = 256""".stripMargin
 
   it should "read/write against predefined values" in {
@@ -632,7 +632,7 @@ class PureConfigReaderWriterSpec
     """
       |api-stream-shutdown-timeout = "5s"
       |command {
-      |  max-tracking-timeout = "300 seconds"
+      |  default-tracking-timeout = "300 seconds"
       |  max-commands-in-flight = 256
       |}
       |initial-ledger-configuration {

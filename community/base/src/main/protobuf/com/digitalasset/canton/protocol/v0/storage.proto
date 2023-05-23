@@ -7,5 +7,5 @@ package com.digitalasset.canton.protocol.v0;
 // TODO(#3256) get rid of this
 // Enables storing parties in the database as a blob
 message StoredParties {
-    repeated string parties = 1;
+  repeated string parties = 1;
 }

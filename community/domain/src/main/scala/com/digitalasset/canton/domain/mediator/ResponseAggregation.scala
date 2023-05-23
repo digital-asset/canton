@@ -172,11 +172,10 @@ private[mediator] final case class ResponseAggregation(
       _domainId,
     ) =
       response
-    val requiredTrustLevel = request.confirmationPolicy.requiredTrustLevel
 
     def authorizedPartiesOfSender(
         viewHash: ViewHash,
-        declaredConfirmingParties: Set[LfPartyId],
+        declaredConfirmingParties: Set[ConfirmingParty],
     ): OptionT[Future, Set[LfPartyId]] =
       localVerdict match {
         case malformed: Malformed =>
@@ -185,18 +184,19 @@ private[mediator] final case class ResponseAggregation(
           )
           val hostedConfirmingPartiesF =
             declaredConfirmingParties.toList
-              .parFilterA(p => topologySnapshot.canConfirm(sender, p, requiredTrustLevel))
+              .parFilterA(p => topologySnapshot.canConfirm(sender, p.party, p.requiredTrustLevel))
               .map(_.toSet)
           val res = hostedConfirmingPartiesF.map { hostedConfirmingParties =>
             logger.debug(
               show"Malformed response $responseTimestamp for $viewHash considered as a rejection on behalf of $hostedConfirmingParties"
             )
-            Some(hostedConfirmingParties): Option[Set[LfPartyId]]
+            Some(hostedConfirmingParties.map(_.party)): Option[Set[LfPartyId]]
           }
           OptionT(res)
 
         case _: LocalApprove | _: LocalReject =>
-          val unexpectedConfirmingParties = confirmingParties -- declaredConfirmingParties
+          val unexpectedConfirmingParties =
+            confirmingParties -- declaredConfirmingParties.map(_.party)
           for {
             _ <-
               if (unexpectedConfirmingParties.isEmpty) OptionT.some[Future](())
@@ -210,11 +210,14 @@ private[mediator] final case class ResponseAggregation(
                 OptionT.none[Future, Unit]
               }
 
+            expectedConfirmingParties =
+              declaredConfirmingParties.filter(p => confirmingParties.contains(p.party))
             unauthorizedConfirmingParties <- OptionT.liftF(
-              confirmingParties.toList
-                .parFilterA(p =>
-                  topologySnapshot.canConfirm(sender, p, requiredTrustLevel).map(x => !x)
-                )
+              expectedConfirmingParties.toList
+                .parFilterA { p =>
+                  topologySnapshot.canConfirm(sender, p.party, p.requiredTrustLevel).map(x => !x)
+                }
+                .map(_.map(_.party))
                 .map(_.toSet)
             )
             _ <-
@@ -267,8 +270,9 @@ private[mediator] final case class ResponseAggregation(
               newlyResponded.foldLeft(consortiumVoting)((votes, confirmingParty) => {
                 votes + (confirmingParty.party -> votes(confirmingParty.party).approveBy(sender))
               })
-            val newlyRespondedFullVotes = newlyResponded.filter { case ConfirmingParty(party, _) =>
-              consortiumVotingUpdated(party).isApproved
+            val newlyRespondedFullVotes = newlyResponded.filter {
+              case ConfirmingParty(party, _, _) =>
+                consortiumVotingUpdated(party).isApproved
             }
             logger.debug(
               show"$requestId(view hash $viewHash): Received an approval (or reached consortium thresholds) for parties: $newlyRespondedFullVotes"
@@ -373,7 +377,7 @@ private[mediator] final case class ResponseAggregation(
             val ret = informeesByView.toList
               .parTraverseFilter { case (viewHash, (informees, _threshold)) =>
                 val hostedConfirmingPartiesF = informees.toList.parTraverseFilter {
-                  case ConfirmingParty(party, _) =>
+                  case ConfirmingParty(party, _, requiredTrustLevel) =>
                     topologySnapshot
                       .canConfirm(sender, party, requiredTrustLevel)
                       .map(x => if (x) Some(party) else None)
@@ -407,9 +411,7 @@ private[mediator] final case class ResponseAggregation(
                   }
               )
               (informees, _) = informeesAndThreshold
-              declaredConfirmingParties = informees.collect { case ConfirmingParty(party, _) =>
-                party
-              }
+              declaredConfirmingParties = informees.collect { case p: ConfirmingParty => p }
               authorizedConfirmingParties <- authorizedPartiesOfSender(
                 viewHash,
                 declaredConfirmingParties,

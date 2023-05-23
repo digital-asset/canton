@@ -45,9 +45,9 @@ import com.digitalasset.canton.console.{
   Help,
   Helpful,
   LedgerApiCommandRunner,
-  LocalParticipantReference,
-  ParticipantReference,
-  RemoteParticipantReference,
+  LocalParticipantReferenceCommon,
+  ParticipantReferenceCommon,
+  RemoteParticipantReferenceCommon,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.domain.{
@@ -1257,7 +1257,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
 
   private def awaitTransaction(
       transactionId: String,
-      at: Map[ParticipantReference, PartyId],
+      at: Map[ParticipantReferenceCommon, PartyId],
       timeout: NonNegativeDuration,
   ): Unit = {
     def scan() = {
@@ -1282,16 +1282,24 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
 
   private[console] def involvedParticipants(
       transactionId: String
-  ): Map[ParticipantReference, PartyId] = {
+  ): Map[ParticipantReferenceCommon, PartyId] = {
     val txDomain = ledger_api.transactions.domain_of(transactionId)
     // TODO(#6317)
     // There's a race condition here, in the unlikely circumstance that the party->participant mapping on the domain
     // changes during the command's execution. We'll have to live with it for the moment, as there's no convenient
     // way to get the record time of the transaction to pass to the parties.list call.
-    val domainPartiesAndParticipants = consoleEnvironment.participants.all.iterator
-      .filter(x => x.health.running() && x.health.initialized() && x.name == name)
-      .flatMap(_.parties.list(filterDomain = txDomain.filterString))
-      .toSet
+    val domainPartiesAndParticipants = {
+      val pNodes = (consoleEnvironment.participants.all.iterator)
+        .filter(x => x.health.running() && x.health.initialized() && x.name == name)
+        .flatMap(_.parties.list(filterDomain = txDomain.filterString))
+        .toSet
+      val pXNodes = (consoleEnvironment.participantsX.all.iterator)
+        .filter(x => x.health.running() && x.health.initialized() && x.name == name)
+        .flatMap(_.parties.list(filterDomain = txDomain.filterString))
+        .toSet
+      pNodes ++ pXNodes
+    }
+
     val domainParties = domainPartiesAndParticipants.map(_.party)
     // Read the transaction under the authority of all parties on the domain, in order to get the witness_parties
     // to be all the actual witnesses of the transaction. There's no other convenient way to get the full witnesses,
@@ -1312,10 +1320,10 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
       .toSet
 
     // A participant identity equality check that doesn't blow up if the participant isn't running
-    def identityIs(pRef: ParticipantReference, id: ParticipantId): Boolean = pRef match {
-      case lRef: LocalParticipantReference =>
+    def identityIs(pRef: ParticipantReferenceCommon, id: ParticipantId): Boolean = pRef match {
+      case lRef: LocalParticipantReferenceCommon =>
         lRef.is_running && lRef.health.initialized() && lRef.id == id
-      case rRef: RemoteParticipantReference =>
+      case rRef: RemoteParticipantReferenceCommon =>
         rRef.health.initialized() && rRef.id == id
       case _ => false
     }
@@ -1325,9 +1333,10 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
       if (witnesses.contains(cand.party)) {
         val involvedConsoleParticipants = cand.participants.mapFilter { pd =>
           for {
-            participantReference <- consoleEnvironment.participants.all
-              .filter(x => x.health.running() && x.health.initialized())
-              .find(identityIs(_, pd.participant))
+            participantReference <-
+              (consoleEnvironment.participants.all ++ consoleEnvironment.participantsX.all)
+                .filter(x => x.health.running() && x.health.initialized())
+                .find(identityIs(_, pd.participant))
             _ <- pd.domains.find(_.domain == txDomain)
           } yield participantReference
         }

@@ -15,6 +15,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   TimeModelConversionError,
   ValueConversionError,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.configuration.*
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.participant.protocol.{ProcessingSteps, v0}
@@ -913,27 +914,29 @@ private[store] final case class SerializableTransferredOut(
       updateId,
       optCompletionInfo,
       submitter,
-      recordTime,
       contractId,
       templateId,
       contractStakeholders,
-      source,
+      transferId,
       target,
       transferInExclusivity,
       workflowId,
+      isTransferringParticipant,
     ) = transferOut
     v0.TransferredOut(
       updateId = updateId,
       completionInfo = optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV0),
       submitter = submitter,
-      recordTime = Some(SerializableLfTimestamp(recordTime).toProtoV0),
+      recordTime =
+        Some(SerializableLfTimestamp(transferId.transferOutTimestamp.underlying).toProtoV0),
       contractId = contractId.toProtoPrimitive,
       templateId = templateId.map(_.toString).getOrElse(""),
       contractStakeholders = contractStakeholders.toSeq,
-      sourceDomain = source.toProtoPrimitive,
+      sourceDomain = transferId.sourceDomain.toProtoPrimitive,
       targetDomain = target.toProtoPrimitive,
       transferInExclusivity = transferInExclusivity.map(SerializableLfTimestamp(_).toProtoV0),
       workflowId = workflowId.getOrElse(""),
+      isTransferringParticipant = isTransferringParticipant,
     )
   }
 }
@@ -954,6 +957,7 @@ private[store] object SerializableTransferredOut {
       transferInExclusivityP,
       workflowIdP,
       templateIdP,
+      isTransferringParticipant,
     ) = transferOutP
 
     for {
@@ -977,14 +981,14 @@ private[store] object SerializableTransferredOut {
       updateId = updateId,
       optCompletionInfo = optCompletionInfo,
       submitter = submitter,
-      recordTime = recordTime,
       contractId = contractId,
       templateId = templateId,
       contractStakeholders = contractStakeholders.toSet,
-      sourceDomainId = SourceDomainId(rawSourceDomainId),
-      targetDomainId = TargetDomainId(rawTargetDomainId),
+      transferId = TransferId(SourceDomainId(rawSourceDomainId), CantonTimestamp(recordTime)),
+      targetDomain = TargetDomainId(rawTargetDomainId),
       transferInExclusivity = transferInExclusivity,
       workflowId = workflowId,
+      isTransferringParticipant = isTransferringParticipant,
     )
   }
 }
@@ -1004,6 +1008,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       targetDomain,
       createTransactionAccepted,
       workflowId,
+      isTransferringParticipant,
     ) = transferIn
     val contractMetadataP = contractMetadata.toByteString
     val createNodeByteString = DamlLfSerializers
@@ -1026,6 +1031,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       targetDomain = targetDomain.toProtoPrimitive,
       createTransactionAccepted = createTransactionAccepted,
       workflowId = workflowId.getOrElse(""),
+      isTransferringParticipant = isTransferringParticipant,
     )
 
   }
@@ -1046,6 +1052,7 @@ private[store] object SerializableTransferredIn {
       targetDomainIdP,
       createTransactionAcceptedP,
       workflowIdP,
+      isTransferringParticipant,
     ) = transferInP
 
     for {
@@ -1059,7 +1066,7 @@ private[store] object SerializableTransferredIn {
         SerializableLfTimestamp.fromProtoPrimitive
       )
       contractMetadata = LfBytes.fromByteString(contractMetadataP)
-      transferOutId <- ProtoConverter.parseRequired(
+      transferId <- ProtoConverter.parseRequired(
         TransferId.fromProtoV0,
         "transfer_id",
         transferOutIdP,
@@ -1084,10 +1091,11 @@ private[store] object SerializableTransferredIn {
       createNode = createNode,
       creatingTransactionId = creatingTransactionId,
       contractMetadata = contractMetadata,
-      transferOutId = transferOutId,
+      transferId = transferId,
       targetDomain = TargetDomainId(rawTargetDomainId),
       createTransactionAccepted = createTransactionAcceptedP,
       workflowId = workflowId,
+      isTransferringParticipant = isTransferringParticipant,
     )
   }
 }

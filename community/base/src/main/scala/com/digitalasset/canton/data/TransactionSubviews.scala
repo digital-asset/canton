@@ -12,7 +12,7 @@ import com.digitalasset.canton.data.ViewPosition.{
   MerkleSeqIndexFromRoot,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{RootHash, ViewHash, v0, v1}
+import com.digitalasset.canton.protocol.{ConfirmationPolicy, RootHash, ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
@@ -207,26 +207,29 @@ final case class TransactionSubviewsV1 private[data] (
 
 object TransactionSubviews {
   private[data] def fromProtoV0(
-      hashOps: HashOps,
+      context: (HashOps, ConfirmationPolicy),
       subviewsP: Seq[v0.BlindableNode],
   ): ParsingResult[TransactionSubviewsV0] =
     for {
       subviews <- subviewsP.traverse(subviewP =>
         MerkleTree.fromProtoOptionV0(
           Some(subviewP),
-          TransactionView.fromByteString(ProtoVersion(0))(hashOps),
+          TransactionView.fromByteString(ProtoVersion(0))(context),
         )
       )
     } yield TransactionSubviewsV0(subviews)
 
   private[data] def fromProtoV1(
-      hashOps: HashOps,
+      context: (HashOps, ConfirmationPolicy),
       subviewsPO: Option[v1.MerkleSeq],
-  ): ParsingResult[TransactionSubviewsV1] = for {
-    subviewsP <- ProtoConverter.required("ViewNode.subviews", subviewsPO)
-    tvParser = TransactionView.fromByteString(ProtoVersion(1))(hashOps)
-    subviews <- MerkleSeq.fromProtoV1((hashOps, tvParser), subviewsP)
-  } yield TransactionSubviewsV1(subviews)
+  ): ParsingResult[TransactionSubviewsV1] = {
+    val (hashOps, _) = context
+    for {
+      subviewsP <- ProtoConverter.required("ViewNode.subviews", subviewsPO)
+      tvParser = TransactionView.fromByteString(ProtoVersion(1))(context)
+      subviews <- MerkleSeq.fromProtoV1((hashOps, tvParser), subviewsP)
+    } yield TransactionSubviewsV1(subviews)
+  }
 
   def apply(
       subviewsSeq: Seq[MerkleTree[TransactionView]]

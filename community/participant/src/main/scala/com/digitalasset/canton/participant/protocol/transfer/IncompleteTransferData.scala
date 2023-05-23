@@ -35,6 +35,9 @@ final case class IncompleteTransferData private (
     queryOffset: GlobalOffset,
 ) {
 
+  def sourceDomain: SourceDomainId = transferOutRequest.sourceDomain
+  def targetDomain: TargetDomainId = transferOutRequest.targetDomain
+
   def transferOutGlobalOffset: Option[GlobalOffset] =
     transferEventGlobalOffset.transferOutGlobalOffset
 

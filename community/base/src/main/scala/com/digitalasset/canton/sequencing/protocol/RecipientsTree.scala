@@ -73,6 +73,10 @@ final case class RecipientsTree(
 }
 
 object RecipientsTree {
+  def ofRecipients(
+      recipientGroup: NonEmpty[Set[Recipient]],
+      children: Seq[RecipientsTree],
+  ) = RecipientsTree(recipientGroup, children)
 
   def ofMembers(
       recipientGroup: NonEmpty[Set[Member]],

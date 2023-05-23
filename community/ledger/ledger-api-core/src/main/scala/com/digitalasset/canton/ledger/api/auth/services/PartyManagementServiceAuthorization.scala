@@ -67,4 +67,9 @@ final class PartyManagementServiceAuthorization(
     PartyManagementServiceGrpc.bindService(this, executionContext)
 
   override def close(): Unit = service.close()
+
+  // TODO (i13051): Implement IDP reassignment
+  override def updateUserIdentityProviderId(
+      request: UpdatePartyIdentityProviderRequest
+  ): Future[UpdatePartyIdentityProviderResponse] = ???
 }

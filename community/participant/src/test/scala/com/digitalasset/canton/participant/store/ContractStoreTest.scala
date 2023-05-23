@@ -24,10 +24,10 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 trait ContractStoreTest { this: AsyncWordSpec with BaseTest =>
 
-  val alice: LfPartyId = LfPartyId.assertFromString("alice")
-  val bob: LfPartyId = LfPartyId.assertFromString("bob")
-  val charlie: LfPartyId = LfPartyId.assertFromString("charlie")
-  val david: LfPartyId = LfPartyId.assertFromString("david")
+  protected val alice: LfPartyId = LfPartyId.assertFromString("alice")
+  protected val bob: LfPartyId = LfPartyId.assertFromString("bob")
+  protected val charlie: LfPartyId = LfPartyId.assertFromString("charlie")
+  protected val david: LfPartyId = LfPartyId.assertFromString("david")
 
   def contractStore(mk: () => ContractStore): Unit = {
 

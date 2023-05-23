@@ -6,8 +6,9 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import com.digitalasset.canton.data.Informee.InvalidInformee
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.{ConfirmationPolicy, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 /** A party that must be informed about the view.
@@ -22,6 +23,8 @@ sealed trait Informee extends Product with Serializable with PrettyPrinting {
 
   def weight: Int
 
+  def requiredTrustLevel: TrustLevel
+
   /** Creates the v0-proto version of an informee.
     *
     * Plain informees get weight 0.
@@ -30,25 +33,52 @@ sealed trait Informee extends Product with Serializable with PrettyPrinting {
   def toProtoV0: v0.Informee =
     v0.Informee(party = party, weight = weight)
 
+  def toProtoV1: v1.Informee =
+    v1.Informee(party = party, weight = weight, requiredTrustLevel = requiredTrustLevel.toProtoEnum)
+
   override def pretty: Pretty[Informee] =
-    prettyOfString(inst => inst.party.show + "*" + inst.weight.show)
+    prettyOfString(inst => show"${inst.party}*${inst.weight} $requiredTrustLevel")
 }
 
 object Informee {
-  def tryCreate(party: LfPartyId, weight: Int): Informee =
-    if (weight == 0) PlainInformee(party) else ConfirmingParty(party, weight)
 
-  def create(party: LfPartyId, weight: Int): Either[String, Informee] =
-    Either.catchOnly[InvalidInformee](tryCreate(party, weight)).leftMap(_.message)
+  def tryCreate(party: LfPartyId, weight: Int, requiredTrustLevel: TrustLevel): Informee =
+    if (weight == 0) PlainInformee(party) else ConfirmingParty(party, weight, requiredTrustLevel)
 
-  def fromProtoV0(informeeP: v0.Informee): ParsingResult[Informee] = {
-    val v0.Informee(partyString, weight) = informeeP
+  def create(
+      party: LfPartyId,
+      weight: Int,
+      requiredTrustLevel: TrustLevel,
+  ): Either[String, Informee] =
+    Either
+      .catchOnly[InvalidInformee](tryCreate(party, weight, requiredTrustLevel))
+      .leftMap(_.message)
+
+  def fromProtoV0(
+      confirmationPolicy: ConfirmationPolicy
+  )(informeeP: v0.Informee): ParsingResult[Informee] = {
+    val v0.Informee(partyP, weightP) = informeeP
     for {
       party <- LfPartyId
-        .fromString(partyString)
+        .fromString(partyP)
         .leftMap(ProtoDeserializationError.ValueDeserializationError("party", _))
       informee <- Informee
-        .create(party, weight)
+        .create(party, weightP, confirmationPolicy.requiredTrustLevel)
+        .leftMap(err =>
+          ProtoDeserializationError.OtherError(s"Unable to deserialize informee data: $err")
+        )
+    } yield informee
+  }
+
+  def fromProtoV1(informeeP: v1.Informee): ParsingResult[Informee] = {
+    val v1.Informee(partyP, weightP, requiredTrustLevelP) = informeeP
+    for {
+      party <- LfPartyId
+        .fromString(partyP)
+        .leftMap(ProtoDeserializationError.ValueDeserializationError("party", _))
+      requiredTrustLevel <- TrustLevel.fromProtoEnum(requiredTrustLevelP)
+      informee <- Informee
+        .create(party, weightP, requiredTrustLevel)
         .leftMap(err =>
           ProtoDeserializationError.OtherError(s"Unable to deserialize informee data: $err")
         )
@@ -63,7 +93,8 @@ object Informee {
   * @param weight determines the impact of the party on whether the view is approved.
   * @throws com.digitalasset.canton.data.Informee$.InvalidInformee if `weight` is not positive
   */
-final case class ConfirmingParty(party: LfPartyId, weight: Int) extends Informee {
+final case class ConfirmingParty(party: LfPartyId, weight: Int, requiredTrustLevel: TrustLevel)
+    extends Informee {
   if (weight <= 0)
     throw InvalidInformee(s"Unable to create a confirming party with non-positive weight $weight.")
 }
@@ -72,4 +103,6 @@ final case class ConfirmingParty(party: LfPartyId, weight: Int) extends Informee
   */
 final case class PlainInformee(party: LfPartyId) extends Informee {
   override val weight = 0
+
+  override val requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
 }

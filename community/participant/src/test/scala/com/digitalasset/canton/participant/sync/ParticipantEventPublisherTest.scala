@@ -17,6 +17,7 @@ import com.digitalasset.canton.participant.store.{
   MultiDomainEventLog,
   ParticipantEventLog,
   SingleDimensionEventLogTest,
+  TransferStore,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, TimelyRejectionEventId}
 import com.digitalasset.canton.participant.{LedgerSyncRecordTime, LocalOffset}
@@ -52,6 +53,7 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
       eventLog,
       clock,
       DefaultProcessingTimeouts.testing,
+      TransferStore.transferStoreFor(persistentStateManager),
       indexedStringStore,
       ParticipantTestMetrics,
       futureSupervisor,

@@ -319,7 +319,7 @@ object TransferCacheTest {
     )
 
     override def findIncomplete(
-        sourceDomain: SourceDomainId,
+        sourceDomain: Option[SourceDomainId],
         validAt: GlobalOffset,
         stakeholders: Option[NonEmpty[Set[LfPartyId]]],
         limit: NonNegativeInt,

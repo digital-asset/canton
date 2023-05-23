@@ -8,5 +8,5 @@ import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 
 // Messages for sequencing
 message TimeProof {
-    com.digitalasset.canton.protocol.v0.PossiblyIgnoredSequencedEvent event = 1; // must be an ordinary event
+  com.digitalasset.canton.protocol.v0.PossiblyIgnoredSequencedEvent event = 1; // must be an ordinary event
 }

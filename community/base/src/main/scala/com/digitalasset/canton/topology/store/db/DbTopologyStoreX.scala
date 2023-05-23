@@ -257,16 +257,37 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       filterParticipant: String,
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Set[PartyId]] = {
-    val (filterPartyIdentifier, filterPartyNamespace) =
-      UniqueIdentifier.splitFilter(filterParty, "%")
-    val (filterParticipantIdentifier, filterParticipantNamespace) =
-      UniqueIdentifier.splitFilter(filterParticipant, "%")
+    def splitFilterPrefixAndSql(uidFilter: String): (String, String, String, String) =
+      UniqueIdentifier.splitFilter(uidFilter) match {
+        case (id, ns) => (id, ns, id + "%", ns + "%")
+      }
+
+    val (prefixPartyIdentifier, prefixPartyNS, sqlPartyIdentifier, sqlPartyNS) =
+      splitFilterPrefixAndSql(filterParty)
+    val (
+      prefixParticipantIdentifier,
+      prefixParticipantNS,
+      sqlParticipantIdentifier,
+      sqlParticipantNS,
+    ) =
+      splitFilterPrefixAndSql(filterParticipant)
+
+    // conditional append avoids "like '%'" filters on empty filters
+    def conditionalAppend(filter: String, sqlIdentifier: String, sqlNamespace: String) =
+      if (filter.nonEmpty)
+        sql" AND identifier LIKE ${sqlIdentifier} AND namespace LIKE ${sqlNamespace}"
+      else sql""
 
     queryForTransactions(
       asOfQuery(timestamp, asOfInclusive = false) ++
-        sql" AND ((transaction_type = ${PartyToParticipantX.code} AND identifier LIKE ${filterPartyIdentifier} AND namespace LIKE ${filterPartyNamespace})"
-        // In DomainTrustCertificateX part of the filter, compare identifier not only to participant, but also to party identifier to enable searching for the admin party
-        ++ sql" OR (transaction_type = ${DomainTrustCertificateX.code} AND (identifier like ${filterPartyIdentifier} OR identifier like ${filterParticipantIdentifier}) AND namespace LIKE ${filterParticipantNamespace}))",
+        sql" AND (transaction_type = ${PartyToParticipantX.code}"
+        ++ conditionalAppend(filterParty, sqlPartyIdentifier, sqlPartyNS)
+        ++ sql") OR (transaction_type = ${DomainTrustCertificateX.code}"
+        // In DomainTrustCertificateX part of the filter, compare not only to participant, but also to party identifier
+        // to enable searching for the admin party
+        ++ conditionalAppend(filterParty, sqlPartyIdentifier, sqlPartyNS)
+        ++ conditionalAppend(filterParticipant, sqlParticipantIdentifier, sqlParticipantNS)
+        ++ sql")",
       storage.limit(limit),
     )
       .map(
@@ -279,12 +300,12 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
                 if filterParticipant.isEmpty || ptp.participants
                   .exists(
                     _.participantId.uid
-                      .matchesPrefixes(filterParticipantIdentifier, filterParticipantNamespace)
+                      .matchesPrefixes(prefixParticipantIdentifier, prefixParticipantNS)
                   ) =>
               Set(ptp.partyId)
             case cert: DomainTrustCertificateX
                 if filterParty.isEmpty || cert.participantId.adminParty.uid
-                  .matchesPrefixes(filterPartyIdentifier, filterParticipantNamespace) =>
+                  .matchesPrefixes(prefixPartyIdentifier, prefixPartyNS) =>
               Set(cert.participantId.adminParty)
             case _ => Set.empty
           })

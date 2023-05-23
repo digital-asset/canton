@@ -20,9 +20,9 @@ message TopologyTransactions {
     google.protobuf.Timestamp valid_from = 1;
     google.protobuf.Timestamp valid_until = 2;
     /** Versioned signed topology transactions serialized as byte-strings. Note that we use here the serialized
-        version that contains the version number. Using the "Versioned" version directly here would create a circular
-        dependency between the proto files. The only proper solution would be to move this into a third separate file
-        with "cross version data files", which we might do at some point. */
+       version that contains the version number. Using the "Versioned" version directly here would create a circular
+       dependency between the proto files. The only proper solution would be to move this into a third separate file
+       with "cross version data files", which we might do at some point. */
     bytes transaction = 3;
   }
   repeated Item items = 1;

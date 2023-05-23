@@ -9,7 +9,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
-import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, FutureUnlessShutdown, SyncCloseable}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -21,7 +21,7 @@ import com.google.common.annotations.VisibleForTesting
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.concurrent.{Future, Promise, blocking}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
 /** The task scheduler manages tasks with associated timestamps and sequencer counters.
   * Tasks may be inserted in any order; they will be executed nevertheless in the correct order
@@ -42,8 +42,9 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
-) extends NamedLogging
-    with FlagCloseableAsync {
+)(implicit executionContext: ExecutionContext)
+    extends NamedLogging
+    with FlagCloseable {
 
   /** Stores the timestamp up to which all tasks are known and can be performed,
     * unless they cannot be completed right now.
@@ -249,12 +250,8 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   @VisibleForTesting
   def flush(): Future[Unit] = queue.flush()
 
-  override def closeAsync() = {
-    Seq(
-      SyncCloseable("unregister-metrics", queueSizeGauge.close()),
-      SyncCloseable("queue", queue.close()),
-    )
-  }
+  override def onClosed(): Unit =
+    Lifecycle.close(queueSizeGauge, queue)(logger)
 
   /** Chains the futures of all actions whose timestamps the request tracker can progress to.
     *
@@ -300,7 +297,10 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
       case Some(tracedTask) =>
         tracedTask.withTraceContext { implicit traceContext => task =>
           FutureUtil.doNotAwait(
-            queue.executeUS(task.perform(), task.toString).unwrap,
+            // Close the task if the queue is shutdown
+            queue
+              .executeUS(task.perform(), task.toString)
+              .onShutdown(task.close()),
             show"A task failed with an exception.\n$task",
           )
           taskQueue.dequeue()
@@ -335,7 +335,7 @@ object TaskScheduler {
   final case class TimeBarrier(timestamp: CantonTimestamp) {
     private[TaskScheduler] val completion: Promise[Unit] = Promise[Unit]()
   }
-  trait TimedTask extends PrettyPrinting {
+  trait TimedTask extends PrettyPrinting with AutoCloseable {
 
     /** The timestamp when the task should be scheduled */
     def timestamp: CantonTimestamp

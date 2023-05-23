@@ -70,7 +70,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.{DiscardOps, DomainAlias, LedgerParticipantId}
+import com.digitalasset.canton.{DiscardOps, DomainAlias, LedgerApplicationId}
 
 import java.time.Instant
 import java.util.UUID
@@ -1474,7 +1474,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         contractId: LfContractId,
         sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
-        applicationId: LedgerParticipantId = LedgerParticipantId.assertFromString("AdminConsole"),
+        applicationId: LedgerApplicationId = LedgerApplicationId.assertFromString("AdminConsole"),
         submissionId: String = "",
         workflowId: String = "",
         commandId: String = "",
@@ -1508,7 +1508,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         submittingParty: PartyId,
         transferId: TransferId,
         targetDomain: DomainAlias,
-        applicationId: LedgerParticipantId = LedgerParticipantId.assertFromString("AdminConsole"),
+        applicationId: LedgerApplicationId = LedgerApplicationId.assertFromString("AdminConsole"),
         submissionId: String = "",
         workflowId: String = "",
         commandId: String = "",

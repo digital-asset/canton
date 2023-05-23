@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.server.api.validation
 
 import ch.qos.logback.classic.Level
 import com.daml.error.utils.ErrorDetails
-import com.daml.error.{ContextualizedErrorLogger, DamlError, ErrorCode}
+import com.daml.error.{BaseError, ContextualizedErrorLogger, DamlError, ErrorCode}
 import com.daml.lf.data.Ref
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
 import com.digitalasset.canton.ledger.error.{
@@ -57,7 +57,7 @@ class ErrorFactoriesSpec
   private val expectedLocationLogMarkerRegex =
     "\\{err-context: \"\\{location=ErrorFactoriesSpec.scala:\\d+\\}\"\\}"
   private val expectedInternalErrorMessage =
-    s"An error occurred. Please contact the operator and inquire about the request $originalCorrelationId"
+    BaseError.securitySensitiveMessage(Some(originalCorrelationId))
   private val expectedInternalErrorDetails =
     Seq[ErrorDetails.ErrorDetail](expectedCorrelationIdRequestInfo)
 

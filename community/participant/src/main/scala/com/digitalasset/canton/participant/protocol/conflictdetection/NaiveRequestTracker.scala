@@ -343,6 +343,8 @@ private[participant] class NaiveRequestTracker(
       param("sequencerCounter", _.sequencerCounter),
       param("rc", _.rc),
     )
+
+    override def close(): Unit = activenessResult.shutdown()
   }
 
   /** The action for triggering a timeout.
@@ -395,6 +397,8 @@ private[participant] class NaiveRequestTracker(
         param("requestTimestamp", _.requestTimestamp),
         param("rc", _.rc),
       )
+
+    override def close(): Unit = ()
   }
 
   /** The action for finalizing a request by committing and rolling back contract changes.
@@ -463,6 +467,8 @@ private[participant] class NaiveRequestTracker(
         param("rc", _.rc),
         param("commitTime", _.commitTime),
       )
+
+    override def close(): Unit = finalizationResult.shutdown()
   }
 }
 

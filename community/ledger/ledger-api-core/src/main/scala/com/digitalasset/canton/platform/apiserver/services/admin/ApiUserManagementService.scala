@@ -7,6 +7,8 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.user_management_service.{
   CreateUserResponse,
   GetUserResponse,
+  UpdateUserIdentityProviderRequest,
+  UpdateUserIdentityProviderResponse,
   UpdateUserRequest,
   UpdateUserResponse,
 }
@@ -542,6 +544,11 @@ private[apiserver] final class ApiUserManagementService(
       f: LoggingContext => A
   )(implicit loggingContext: LoggingContext): A =
     withEnrichedLoggingContext("submissionId" -> submissionIdGenerator.generate())(f)
+
+  // TODO (i13051): Implement IDP reassignment
+  override def updateUserIdentityProviderId(
+      request: UpdateUserIdentityProviderRequest
+  ): Future[UpdateUserIdentityProviderResponse] = ???
 }
 
 object ApiUserManagementService {

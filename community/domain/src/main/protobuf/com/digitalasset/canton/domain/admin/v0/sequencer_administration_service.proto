@@ -10,10 +10,8 @@ import "google/protobuf/timestamp.proto";
 
 // administration service for sequencer instances
 service SequencerAdministrationService {
-
   // fetch the current status of the sequencer
-  rpc PruningStatus (google.protobuf.Empty) returns (SequencerPruningStatus);
-
+  rpc PruningStatus(google.protobuf.Empty) returns (SequencerPruningStatus);
 }
 
 message SequencerMemberStatus {

@@ -36,6 +36,9 @@ sealed trait UnlessShutdown[+A] extends Product with Serializable {
     * Analogue to [[scala.Option.getOrElse]].
     */
   def onShutdown[B >: A](ifShutdown: => B): B
+
+  /** Returns whether the outcome is an actual outcome */
+  def isOutcome: Boolean
 }
 
 object UnlessShutdown {
@@ -47,6 +50,7 @@ object UnlessShutdown {
       F.map(f(result))(Outcome(_))
     override def toRight[L](aborted: => L): Either[L, A] = Right(result)
     override def onShutdown[B >: A](ifShutdown: => B): A = result
+    override def isOutcome: Boolean = true
   }
 
   case object AbortedDueToShutdown extends UnlessShutdown[Nothing] {
@@ -58,6 +62,7 @@ object UnlessShutdown {
     ): F[UnlessShutdown[B]] = F.pure(this)
     override def toRight[L](aborted: => L): Either[L, Nothing] = Left(aborted)
     override def onShutdown[B >: Nothing](ifShutdown: => B): B = ifShutdown
+    override def isOutcome: Boolean = false
   }
   type AbortedDueToShutdown = AbortedDueToShutdown.type
 

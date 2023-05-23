@@ -5,9 +5,9 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v2;
 
-import "google/protobuf/timestamp.proto";
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v2/domain_params.proto";
+import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
 enum TopologyChangeOpX {
@@ -92,7 +92,6 @@ message OwnerToKeyMappingX {
   // optionally restricted to domain
   string domain = 3;
 }
-
 
 // the trust certificate issued by the participant confirming that the participant
 // wishes to be present on the given domain
@@ -257,6 +256,16 @@ message PurgeTopologyTransactionX {
   repeated TopologyMappingX mappings = 2;
 }
 
+// UNIQUE(domain, member)
+message TrafficControlStateX {
+  // the domain-id
+  string domain = 1;
+  // member to change traffic control state for
+  string member = 2;
+  // total amount of traffic ever purchased, including the new top up amount, which must be positive and monotonically increasing.
+  uint64 total_extra_traffic_limit = 3;
+}
+
 message TopologyMappingX {
   oneof mapping {
     NamespaceDelegationX namespace_delegation = 1;
@@ -277,6 +286,7 @@ message TopologyMappingX {
     MediatorDomainStateX mediator_domain_state = 12;
     SequencerDomainStateX sequencer_domain_state = 13;
     PurgeTopologyTransactionX purge_topology_txs = 14;
+    TrafficControlStateX traffic_control_state = 15;
   }
 }
 
@@ -341,7 +351,6 @@ message RegisterTopologyTransactionRequestX {
   string domain = 5;
   // TODO(#11255) include request timeout / max sequencing time for crash recovery & at most once delivery
 }
-
 
 message RegisterTopologyTransactionResponseX {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";

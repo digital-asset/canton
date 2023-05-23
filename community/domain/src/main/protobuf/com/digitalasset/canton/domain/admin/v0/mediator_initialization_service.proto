@@ -6,18 +6,16 @@ syntax = "proto3";
 package com.digitalasset.canton.domain.admin.v0;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
+import "com/digitalasset/canton/domain/api/v0/sequencer_connection.proto";
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 import "com/digitalasset/canton/topology/admin/v0/topology_ext.proto";
-import "com/digitalasset/canton/domain/api/v0/sequencer_connection.proto";
 
 service MediatorInitializationService {
-
   // Initialize a Mediator service
   // If the Mediator is uninitialized it should initialize itself with the provided configuration
   // If the Mediator is already initialized then verify the request is for the domain we're running against,
   // if correct then just return the current key otherwise fail.
-  rpc Initialize (InitializeMediatorRequest) returns (InitializeMediatorResponse);
-
+  rpc Initialize(InitializeMediatorRequest) returns (InitializeMediatorResponse);
 }
 
 message InitializeMediatorRequest {

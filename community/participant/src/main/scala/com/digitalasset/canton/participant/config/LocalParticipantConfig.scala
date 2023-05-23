@@ -633,21 +633,21 @@ final case class TreeTransactionStreamsConfig(
 
 /** Ledger api command service specific configurations
   *
-  * @param maxTrackingTimeout maximum command tracking duration
+  * @param defaultTrackingTimeout default command tracking duration
   * @param maxCommandsInFlight    maximum number of submitted commands waiting to be completed
   */
 final case class CommandServiceConfig(
-    maxTrackingTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-      CommandConfiguration.Default.maxTrackingTimeout
+    defaultTrackingTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
+      CommandConfiguration.Default.defaultTrackingTimeout
     ),
     maxCommandsInFlight: Int = CommandConfiguration.Default.maxCommandsInFlight,
 ) {
   // This helps us detect if any CommandService configuration are added in the daml repo.
   private def _completenessCheck(config: CommandConfiguration): CommandServiceConfig =
     config match {
-      case CommandConfiguration(maxTrackingTimeout, maxCommandsInFlight) =>
+      case CommandConfiguration(defaultTrackingTimeout, maxCommandsInFlight) =>
         CommandServiceConfig(
-          maxTrackingTimeout = NonNegativeFiniteDuration(maxTrackingTimeout),
+          defaultTrackingTimeout = NonNegativeFiniteDuration(defaultTrackingTimeout),
           maxCommandsInFlight = maxCommandsInFlight,
         )
     }
@@ -663,8 +663,8 @@ object CommandServiceConfig {
       .into[CommandServiceConfig]
       .disableDefaultValues
       .withFieldComputed(
-        _.maxTrackingTimeout,
-        c => NonNegativeFiniteDuration(c.maxTrackingTimeout),
+        _.defaultTrackingTimeout,
+        c => NonNegativeFiniteDuration(c.defaultTrackingTimeout),
       )
       .transform
   }

@@ -7,20 +7,20 @@ import java.time.Duration
 
 /** Configuration for the Ledger API Command Service.
   *
-  * @param maxTrackingTimeout
-  *        The duration that the command service will keep tracking an active command. This value will be used
-  *        if a timeout is not specified on a gRPC request, or the specified one is shorter.
+  * @param defaultTrackingTimeout
+  *        The duration that the command service will keep tracking an active command by default. This value
+  *        will be used if a timeout is not specified on a gRPC request.
   * @param maxCommandsInFlight
   *        Maximum number of submitted commands waiting to be completed in parallel.
   *        Commands submitted after this limit is reached will be rejected.
   */
 final case class CommandConfiguration(
-    maxTrackingTimeout: Duration = CommandConfiguration.DefaultMaxTrackingTimeout,
+    defaultTrackingTimeout: Duration = CommandConfiguration.DefaultDefaultTrackingTimeout,
     maxCommandsInFlight: Int = CommandConfiguration.DefaultMaxCommandsInFlight,
 )
 
 object CommandConfiguration {
-  val DefaultMaxTrackingTimeout: Duration = Duration.ofMinutes(5)
+  val DefaultDefaultTrackingTimeout: Duration = Duration.ofMinutes(5)
   val DefaultMaxCommandsInFlight: Int = 256
   lazy val Default: CommandConfiguration = CommandConfiguration()
 }

@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store
 import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import cats.data.OptionT
+import cats.data.{EitherT, OptionT}
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -37,11 +37,13 @@ import com.digitalasset.canton.participant.sync.{
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
+import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{DiscardOps, LedgerSubmissionId, LedgerTransactionId}
@@ -161,6 +163,14 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
     * Results are sorted by global offset.
     */
   def lookupByLocalOffsets(id: EventLogId, offsets: Seq[LocalOffset])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]]
+
+  /** Yields all the published events with the given IDs.
+    * Unpublished events are ignored.
+    * Results are sorted by global offset.
+    */
+  def lookupByGlobalOffsets(offsets: Seq[GlobalOffset])(implicit
       traceContext: TraceContext
   ): Future[Seq[(GlobalOffset, TimestampedEvent)]]
 
@@ -284,6 +294,35 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
       }.discard
     }
 
+  protected def transferStoreFor: TargetDomainId => Either[String, TransferStore]
+
+  def notifyOnPublishTransfer(
+      event: LedgerSyncEvent.TransferEvent,
+      globalOffset: GlobalOffset,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+
+    val res: EitherT[Future, String, Unit] = for {
+      transferStore <- EitherT.fromEither[Future](
+        transferStoreFor(event.targetDomain)
+      )
+      _ <- transferStore
+        .addTransferEventGlobalOffset(event, globalOffset)
+        .leftMap(_.message)
+    } yield {
+      logger.debug(
+        s"Updated global offset for transfer-${event.kind} `${event.transferId}` to $globalOffset"
+      )
+    }
+
+    EitherTUtil.toFuture(
+      res.leftMap(err =>
+        new RuntimeException(
+          s"Unable to update global offset for transfer-${event.kind} `${event.transferId}` to $globalOffset: $err"
+        )
+      )
+    )
+  }
+
   /** Returns a lower bound on the latest publication time of a published event.
     * All events published later will receive the same or higher publication time.
     * Increases monotonically, even across restarts.
@@ -320,7 +359,8 @@ object MultiDomainEventLog {
       mat: Materializer,
       traceContext: TraceContext,
       closeContext: CloseContext,
-  ): Future[MultiDomainEventLog] =
+  ): Future[MultiDomainEventLog] = {
+
     storage match {
       case _: MemoryStorage =>
         val mdel =
@@ -329,6 +369,7 @@ object MultiDomainEventLog {
             participantEventLog,
             clock,
             timeouts,
+            TransferStore.transferStoreFor(syncDomainPersistentStates),
             indexedStringStore,
             metrics,
             futureSupervisor,
@@ -344,8 +385,10 @@ object MultiDomainEventLog {
           indexedStringStore,
           loggerFactory,
           participantEventLogId = participantEventLog.id,
+          transferStoreFor = TransferStore.transferStoreFor(syncDomainPersistentStates),
         )
     }
+  }
 
   final case class PublicationData(
       eventLogId: EventLogId,
@@ -382,12 +425,14 @@ object MultiDomainEventLog {
         publicationTime: CantonTimestamp,
         inFlightReference: Option[InFlightReference],
         deduplicationInfo: Option[DeduplicationInfo],
+        event: LedgerSyncEvent,
     ) extends PrettyPrinting {
 
       override def pretty: Pretty[Publication] = prettyOfClass(
         param("global offset", _.globalOffset),
         paramIfDefined("in-flight reference", _.inFlightReference),
         paramIfDefined("deduplication info", _.deduplicationInfo),
+        param("event", _.event),
       )
     }
 

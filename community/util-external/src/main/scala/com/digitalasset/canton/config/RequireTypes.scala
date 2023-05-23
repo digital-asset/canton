@@ -137,6 +137,9 @@ object RequireTypes {
       }
     }
 
+    implicit def nonNegativeNumericWriter[T]: ConfigWriter[NonNegativeNumeric[T]] =
+      ConfigWriter.toString(x => x.unwrap.toString)
+
     final case class NegativeValue[T](t: T) extends FailureReason {
       override def description: String =
         s"The value you gave for this configuration setting ($t) was negative, but we require a non-negative value for this configuration setting"
@@ -185,6 +188,17 @@ object RequireTypes {
 
     lazy val one: PositiveInt = PositiveInt.tryCreate(1)
     lazy val MaxValue: PositiveInt = PositiveInt.tryCreate(Int.MaxValue)
+  }
+
+  type PositiveLong = PositiveNumeric[Long]
+
+  object PositiveLong {
+    def create(n: Long): Either[InvariantViolation, PositiveLong] = PositiveNumeric.create(n)
+
+    def tryCreate(n: Long): PositiveLong = PositiveNumeric.tryCreate(n)
+
+    lazy val one: PositiveLong = PositiveLong.tryCreate(1)
+    lazy val MaxValue: PositiveLong = PositiveLong.tryCreate(Long.MaxValue)
   }
 
   type PositiveDouble = PositiveNumeric[Double]

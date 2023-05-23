@@ -36,7 +36,7 @@ import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, LedgerParticipantId, LedgerTransactionId}
+import com.digitalasset.canton.{DomainAlias, LedgerApplicationId, LedgerTransactionId}
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
@@ -807,7 +807,7 @@ object ParticipantAdminCommands {
         contractId: LfContractId,
         sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
-        applicationId: LedgerParticipantId,
+        applicationId: LedgerApplicationId,
         submissionId: String,
         workflowId: String,
         commandId: String,
@@ -844,7 +844,7 @@ object ParticipantAdminCommands {
         submittingParty: PartyId,
         transferId: v0proto.TransferId,
         targetDomain: DomainAlias,
-        applicationId: LedgerParticipantId,
+        applicationId: LedgerApplicationId,
         submissionId: String,
         workflowId: String,
         commandId: String,

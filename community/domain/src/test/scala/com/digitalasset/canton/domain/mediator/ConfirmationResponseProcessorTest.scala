@@ -418,9 +418,9 @@ class ConfirmationResponseProcessorTest
       // Create a custom informee message with several recipient participants
       val informeeMessage = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
         override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
-          val submitterI = Informee.tryCreate(submitter, 1)
-          val signatoryI = Informee.tryCreate(signatory, 1)
-          val observerI = Informee.tryCreate(observer, 1)
+          val submitterI = Informee.tryCreate(submitter, 1, TrustLevel.Ordinary)
+          val signatoryI = Informee.tryCreate(signatory, 1, TrustLevel.Ordinary)
+          val observerI = Informee.tryCreate(observer, 1, TrustLevel.Ordinary)
           Map(
             view.viewHash -> (Set(
               submitterI,
@@ -785,7 +785,7 @@ class ConfirmationResponseProcessorTest
                 ),
               factory.MultipleRootsAndViewNestings.view1.viewHash ->
                 ResponseAggregation.ViewState(
-                  Set(ConfirmingParty(signatory, 1)),
+                  Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
                   Map(
                     submitter -> ConsortiumVotingState(approvals =
                       Set(ExampleTransactionFactory.submitterParticipant)
@@ -797,14 +797,14 @@ class ConfirmationResponseProcessorTest
                 ),
               factory.MultipleRootsAndViewNestings.view10.viewHash ->
                 ResponseAggregation.ViewState(
-                  Set(ConfirmingParty(signatory, 1)),
+                  Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
                   Map(signatory -> ConsortiumVotingState()),
                   1,
                   Nil,
                 ),
               factory.MultipleRootsAndViewNestings.view11.viewHash ->
                 ResponseAggregation.ViewState(
-                  Set(ConfirmingParty(signatory, 1)),
+                  Set(ConfirmingParty(signatory, 1, TrustLevel.Ordinary)),
                   Map(
                     submitter -> ConsortiumVotingState(approvals =
                       Set(ExampleTransactionFactory.submitterParticipant)
@@ -866,9 +866,9 @@ class ConfirmationResponseProcessorTest
       // Create a custom informee message with many quorums such that the first Malformed rejection doesn't finalize the request
       val informeeMessage = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
         override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
-          val submitterI = Informee.tryCreate(submitter, 1)
-          val signatoryI = Informee.tryCreate(signatory, 1)
-          val observerI = Informee.tryCreate(observer, 1)
+          val submitterI = Informee.tryCreate(submitter, 1, TrustLevel.Ordinary)
+          val signatoryI = Informee.tryCreate(signatory, 1, TrustLevel.Ordinary)
+          val observerI = Informee.tryCreate(observer, 1, TrustLevel.Ordinary)
           Map(
             view.viewHash -> (Set(
               submitterI,

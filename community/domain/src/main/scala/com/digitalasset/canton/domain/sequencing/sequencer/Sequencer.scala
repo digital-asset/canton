@@ -16,6 +16,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficStatus
 import com.digitalasset.canton.health.HealthReporting.BaseHealthComponent
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
@@ -146,6 +147,8 @@ trait Sequencer
     * This is sound as pruning ensures that we never
     */
   private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter
+
+  def trafficStatus(implicit traceContext: TraceContext): Future[SequencerTrafficStatus]
 }
 
 /** Sequencer pruning interface.

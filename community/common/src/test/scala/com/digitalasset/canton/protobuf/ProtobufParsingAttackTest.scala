@@ -101,4 +101,20 @@ class ProtobufParsingAttackTest extends AnyWordSpec with BaseTest {
         .value shouldBe a[BufferException]
     }
   }
+
+  // The JVM does not have unsigned ints (except for char), so protobuf uintX are mapped to signed numbers
+  // in the generated Scala classes. This test here makes sure that we detect if the generated parsers
+  // change this behavior.
+  "Protobuf does not distinguish between signed and unsigned varints" in {
+    val signedInt = SignedInt(-1)
+    ProtoConverter.protoParser(UnsignedInt.parseFrom)(signedInt.toByteString) shouldBe
+      Right(UnsignedInt(-1))
+  }
+
+  // This test demonstrates that it is not safe to change the range of a varint in a protobuf message
+  "silently truncate numbers to smaller range" in {
+    val unsignedLong = UnsignedLong(0x7fffffffffffffffL)
+    ProtoConverter.protoParser(UnsignedInt.parseFrom)(unsignedLong.toByteString) shouldBe
+      Right(UnsignedInt(-1))
+  }
 }

@@ -397,6 +397,14 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
       participants.remote.map(p =>
         TopLevelValue(p.name, helpText("remote participant", p.name), p, nodeTopic)
       )
+    val localParticipantXBinds: Seq[TopLevelValue[_]] =
+      participantsX.local.map(p =>
+        TopLevelValue(p.name, helpText("participant x", p.name), p, nodeTopic)
+      )
+    val remoteParticipantXBinds: Seq[TopLevelValue[_]] =
+      participantsX.remote.map(p =>
+        TopLevelValue(p.name, helpText("remote participant x", p.name), p, nodeTopic)
+      )
     val localDomainBinds: Seq[TopLevelValue[_]] =
       domains.local.map(d =>
         localDomainTopLevelValue(
@@ -417,11 +425,18 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
       )
     val referencesTopic = Seq(topicGenericNodeReferences)
     localParticipantBinds ++ remoteParticipantBinds ++
+      localParticipantXBinds ++ remoteParticipantXBinds ++
       localDomainBinds ++ remoteDomainBinds ++ clockBinds.toList :+
       TopLevelValue(
         "participants",
         "All participant nodes" + genericNodeReferencesDoc,
         participants,
+        referencesTopic,
+      ) :+
+      TopLevelValue(
+        "participantsX",
+        "All participant x nodes" + genericNodeReferencesDoc,
+        participantsX,
         referencesTopic,
       ) :+
       domainsTopLevelValue(
