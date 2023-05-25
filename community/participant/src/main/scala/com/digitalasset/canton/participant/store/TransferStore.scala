@@ -8,10 +8,11 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
+import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, SyncDomainPersistentStateLookup}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
-import com.digitalasset.canton.protocol.{SourceDomainId, TransferId}
+import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, EitherUtil, OptionUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
@@ -80,6 +81,18 @@ trait TransferStore extends TransferLookup {
       traceContext: TraceContext
   ): EitherT[Future, TransferStoreError, Unit]
 
+  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the transfer event to the transfer data in
+    * the store, provided that the transfer data has previously been stored.
+    *
+    * The same [[com.digitalasset.canton.participant.GlobalOffset]] can be added any number of times.
+    */
+  def addTransferEventGlobalOffset(event: LedgerSyncEvent.TransferEvent, offset: GlobalOffset)(
+      implicit traceContext: TraceContext
+  ): EitherT[Future, TransferStoreError, Unit] = event match {
+    case _: LedgerSyncEvent.TransferredOut => addTransferOutGlobalOffset(event.transferId, offset)
+    case _: LedgerSyncEvent.TransferredIn => addTransferInGlobalOffset(event.transferId, offset)
+  }
+
   /** Marks the transfer as completed, i.e., a transfer-in request was committed.
     * If the transfer has already been completed then a [[TransferStore.TransferAlreadyCompleted]] is reported, and the
     * [[com.digitalasset.canton.participant.util.TimeOfChange]] of the completion is not changed from the old value.
@@ -109,10 +122,21 @@ trait TransferStore extends TransferLookup {
 }
 
 object TransferStore {
-  sealed trait TransferStoreError extends Product with Serializable
+  def transferStoreFor(
+      syncDomainPersistentStates: SyncDomainPersistentStateLookup
+  ): TargetDomainId => Either[String, TransferStore] = (domainId: TargetDomainId) =>
+    syncDomainPersistentStates.getAll
+      .get(domainId.unwrap)
+      .toRight(s"Unknown domain `${domainId.unwrap}`")
+      .map(_.transferStore)
 
+  sealed trait TransferStoreError extends Product with Serializable {
+    def message: String
+  }
   sealed trait TransferLookupError extends TransferStoreError {
     def cause: String
+    def transferId: TransferId
+    def message: String = s"Cannot lookup for transfer `$transferId`: $cause"
   }
 
   final case class UnknownTransferId(transferId: TransferId) extends TransferLookupError {
@@ -125,31 +149,50 @@ object TransferStore {
   }
 
   final case class TransferDataAlreadyExists(old: TransferData, `new`: TransferData)
-      extends TransferStoreError
+      extends TransferStoreError {
+    def transferId: TransferId = old.transferId
+
+    override def message: String =
+      s"Transfer data for transfer `$transferId` already exists and differs from the new one"
+  }
 
   final case class TransferOutResultAlreadyExists(
       transferId: TransferId,
       old: DeliveredTransferOutResult,
       `new`: DeliveredTransferOutResult,
-  ) extends TransferStoreError
+  ) extends TransferStoreError {
+    override def message: String =
+      s"Transfer-out result for transfer `$transferId` already exists and differs from the new one"
+  }
 
   final case class TransferOutGlobalOffsetAlreadyExists(
       transferId: TransferId,
       old: GlobalOffset,
       `new`: GlobalOffset,
-  ) extends TransferStoreError
+  ) extends TransferStoreError {
+    override def message: String =
+      s"Transfer-out offset for transfer `$transferId` already exists and differs from the new one"
+  }
 
   final case class TransferInGlobalOffsetAlreadyExists(
       transferId: TransferId,
       old: GlobalOffset,
       `new`: GlobalOffset,
-  ) extends TransferStoreError
+  ) extends TransferStoreError {
+    override def message: String =
+      s"Transfer-in offset for transfer `$transferId` already exists and differs from the new one"
+  }
 
   final case class TransferOutInSameGlobalOffset(transferId: TransferId, offset: GlobalOffset)
-      extends TransferStoreError
+      extends TransferStoreError {
+    override def message: String =
+      s"Cannot have identical transfer-out and transfer-in global offsets ($offset) for transfer `$transferId`"
+  }
 
   final case class TransferAlreadyCompleted(transferId: TransferId, newCompletion: TimeOfChange)
-      extends TransferStoreError
+      extends TransferStoreError {
+    override def message: String = s"Transfer `$transferId` is already completed"
+  }
 
   /** The data for a transfer and possible when the transfer was completed. */
   final case class TransferEntry(
@@ -322,14 +365,14 @@ trait TransferLookup {
     * In particular, for a transfer to be considered incomplete at `validAt`, then exactly one of the two offsets
     * (transferOutGlobalOffset, transferInGlobalOffset) is not null and smaller or equal to `validAt`.
     *
-    * @param sourceDomain source domain of the transfer
+    * @param sourceDomain if empty, select only transfers whose source domain matches the given one
     * @param validAt select only transfers that are successfully transferred-out
     * @param stakeholders if non-empty, select only transfers of contracts whose set of stakeholders
     *                     intersects `stakeholders`.
     * @param limit limit the number of results
     */
   def findIncomplete(
-      sourceDomain: SourceDomainId,
+      sourceDomain: Option[SourceDomainId],
       validAt: GlobalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,

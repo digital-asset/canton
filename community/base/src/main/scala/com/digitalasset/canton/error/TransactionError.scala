@@ -36,6 +36,9 @@ object TransactionError {
   val NotSupported: SubmissionResult.SynchronousError = SubmissionResult.SynchronousError(
     RpcStatus.of(Code.UNIMPLEMENTED.value, "Not supported", TransactionError.NoErrorDetails)
   )
+  val PassiveNode: SubmissionResult.SynchronousError = SubmissionResult.SynchronousError(
+    RpcStatus.of(Code.UNAVAILABLE.value, "Node is passive", TransactionError.NoErrorDetails)
+  )
 
   def internalError(reason: String): SubmissionResult.SynchronousError =
     SubmissionResult.SynchronousError(RpcStatus.of(Code.INTERNAL.value, reason, NoErrorDetails))

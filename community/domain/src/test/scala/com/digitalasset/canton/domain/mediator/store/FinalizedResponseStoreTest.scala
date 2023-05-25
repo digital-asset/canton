@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
+import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.HasTestCloseContext
@@ -38,7 +39,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     val mediatorId = DefaultTestIdentities.mediator
 
     val alice = PlainInformee(LfPartyId.assertFromString("alice"))
-    val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2)
+    val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
     val hashOps = new SymbolicPureCrypto
 
     def h(i: Int): Hash = TestHash.digest(i)

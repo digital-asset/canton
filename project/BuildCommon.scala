@@ -36,7 +36,7 @@ object BuildCommon {
         addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")) ++
         addCommandAlias(
           "lint",
-          "; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; damlCheckProjectVersions",
+          "; bufFormatCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; damlCheckProjectVersions",
         ) ++
         addCommandAlias(
           "scalafixCheck",
@@ -44,7 +44,7 @@ object BuildCommon {
         ) ++
         addCommandAlias(
           "format",
-          "; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders",
+          "; bufFormat ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders",
         ) ++
         // To be used by CI:
         // enable coverage and compile
@@ -683,7 +683,7 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .dependsOn(
         blake2b,
-        `akka-fork`,
+        `akka-fork` % "compile->compile;test->test",
         `community-base`,
         `wartremover-extension` % "compile->compile;test->test",
         `ledger-common` % "compile->compile;test->test",
@@ -944,7 +944,7 @@ object BuildCommon {
 
     lazy val blake2b = project
       .in(file("community/lib/Blake2b"))
-      .disablePlugins(ScalafmtPlugin, WartRemover)
+      .disablePlugins(BufPlugin, ScalafmtPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -958,7 +958,7 @@ object BuildCommon {
 
     lazy val `slick-fork` = project
       .in(file("community/lib/slick"))
-      .disablePlugins(ScalafmtPlugin, WartRemover)
+      .disablePlugins(BufPlugin, ScalafmtPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -988,7 +988,7 @@ object BuildCommon {
     // TODO(#10617) remove when no longer needed
     lazy val `akka-fork` = project
       .in(file("community/lib/akka"))
-      .disablePlugins(ScalafixPlugin, ScalafmtPlugin, WartRemover)
+      .disablePlugins(BufPlugin, ScalafixPlugin, ScalafmtPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -1284,6 +1284,7 @@ object BuildCommon {
     lazy val `daml-copy-macro` = project
       .in(file("community/lib/daml-copy-macro"))
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1310,6 +1311,7 @@ object BuildCommon {
     lazy val `daml-copy-protobuf-java` = project
       .in(file("community/lib/daml-copy-protobuf-java"))
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1342,6 +1344,7 @@ object BuildCommon {
     lazy val `google-common-protos-scala` = project
       .in(file("community/lib/google-common-protos-scala"))
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1388,6 +1391,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-protobuf"))
       .dependsOn(`google-common-protos-scala`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1430,6 +1434,7 @@ object BuildCommon {
       .dependsOn(`daml-copy-macro`, `daml-copy-protobuf`, `daml-copy-protobuf-java`)
       .enablePlugins(BuildInfoPlugin)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1510,6 +1515,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-common-1"))
       .dependsOn(`daml-copy-common-0`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1536,6 +1542,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-common-2"))
       .dependsOn(`daml-copy-common-1`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1561,6 +1568,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-common-3"))
       .dependsOn(`daml-copy-common-2`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1586,6 +1594,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-common-4"))
       .dependsOn(`daml-copy-common-3`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1611,6 +1620,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-common-5"))
       .dependsOn(`daml-copy-common-4`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1634,6 +1644,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-common"))
       .dependsOn(`daml-copy-common-5`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1660,6 +1671,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-testing-0"))
       .dependsOn(`daml-copy-common`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1731,6 +1743,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-testing-1"))
       .dependsOn(`daml-copy-testing-0`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -1753,6 +1766,7 @@ object BuildCommon {
       .in(file("community/lib/daml-copy-testing"))
       .dependsOn(`daml-copy-testing-1`)
       .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,

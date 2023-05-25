@@ -540,6 +540,18 @@ class SyncStateInspection(
       .map(UpstreamOffsetConvert.toLedgerOffset)
       .value
 
+  def lookupPublicationTime(
+      ledgerOffset: LedgerOffset
+  )(implicit traceContext: TraceContext): EitherT[Future, String, CantonTimestamp] = for {
+    globalOffset <- EitherT.fromEither[Future](
+      UpstreamOffsetConvert.ledgerOffsetToGlobalOffset(ledgerOffset)
+    )
+    res <- participantNodePersistentState.value.multiDomainEventLog
+      .lookupOffset(globalOffset)
+      .toRight(s"offset ${ledgerOffset} not found")
+    (_eventLogId, _localOffset, publicationTimestamp) = res
+  } yield publicationTimestamp
+
 }
 
 object SyncStateInspection {

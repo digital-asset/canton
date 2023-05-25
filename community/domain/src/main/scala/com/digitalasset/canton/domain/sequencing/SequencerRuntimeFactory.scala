@@ -14,6 +14,7 @@ import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministration
 import com.digitalasset.canton.domain.config.DomainConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.authentication.MemberAuthenticationServiceFactory
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommunityDatabaseSequencerFactory,
   CommunitySequencerConfig,
@@ -63,6 +64,7 @@ trait SequencerRuntimeFactory {
       indexedStringStore: IndexedStringStore,
       futureSupervisor: FutureSupervisor,
       topologyStateForInitializationService: Option[TopologyStateForInitializationService],
+      rateLimitManager: Option[SequencerRateLimitManager],
       loggerFactory: NamedLoggerFactory,
       logger: TracedLogger,
   )(implicit
@@ -97,6 +99,7 @@ object SequencerRuntimeFactory {
         indexedStringStore: IndexedStringStore,
         futureSupervisor: FutureSupervisor,
         topologyStateForInitializationService: Option[TopologyStateForInitializationService],
+        rateLimitManager: Option[SequencerRateLimitManager],
         loggerFactory: NamedLoggerFactory,
         logger: TracedLogger,
     )(implicit
@@ -143,6 +146,7 @@ object SequencerRuntimeFactory {
         agreementManager,
         memberAuthenticationServiceFactory,
         topologyStateForInitializationService,
+        Option.empty[SequencerRateLimitManager],
         loggerFactory,
       )
       ret.initialize().map(_ => ret)

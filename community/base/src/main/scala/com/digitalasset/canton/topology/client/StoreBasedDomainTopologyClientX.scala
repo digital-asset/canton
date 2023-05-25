@@ -18,6 +18,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
   AuthorityOfDelegation,
   AuthorityOfResponse,
+  PartyInfo,
 }
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactionX,
@@ -216,15 +217,15 @@ class StoreBasedTopologySnapshotX(
   override private[client] def loadActiveParticipantsOf(
       party: PartyId,
       participantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
-  ): Future[Map[ParticipantId, ParticipantAttributes]] =
+  ): Future[PartyInfo] =
     loadBatchActiveParticipantsOf(Seq(party), participantStates).map(
-      _.getOrElse(party, Map.empty)
+      _.getOrElse(party, PartyInfo(false, Map.empty))
     )
 
   override private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
       loadParticipantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
-  ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] = {
+  ): Future[Map[PartyId, PartyInfo]] = {
 
     def collectLatestByType[M <: TopologyMappingX: ClassTag](
         storedTransactions: StoredTopologyTransactionsX[
@@ -265,10 +266,10 @@ class StoreBasedTopologySnapshotX(
           storedTransactions,
           TopologyMappingX.Code.PartyToParticipantX,
         ).map { ptp =>
-          ptp.partyId -> ptp.participants.map {
+          ptp.partyId -> (ptp.groupAddressing, ptp.participants.map {
             case HostingParticipant(participantId, partyPermission) =>
               participantId -> partyPermission.toNonX
-          }.toMap
+          }.toMap)
         }.toMap
 
         // admin parties are implicitly defined by the fact that a participant is available on a domain.
@@ -284,6 +285,7 @@ class StoreBasedTopologySnapshotX(
 
       // fetch all admin parties
       participantIds = partyToParticipantMap.values
+        .map(_._2)
         .flatMap(_.keys)
         .toSeq ++ adminPartyParticipants
 
@@ -293,7 +295,12 @@ class StoreBasedTopologySnapshotX(
         .mapFilter(participantId =>
           participantToAttributesMap
             .get(participantId)
-            .map(attrs => participantId.adminParty -> Map(participantId -> attrs))
+            .map(attrs =>
+              participantId.adminParty -> PartyInfo(
+                groupAddressing = false,
+                Map(participantId -> attrs),
+              )
+            )
         )
         .toMap
 
@@ -302,7 +309,7 @@ class StoreBasedTopologySnapshotX(
       // parties whose participants have all been filtered out this way.
       // this can only affect participants that have left the domain
       result = adminPartiesMap ++ partyToParticipantMap.toSeq.mapFilter {
-        case (partyId, participantToPermissionsMap) =>
+        case (partyId, (groupAddressing, participantToPermissionsMap)) =>
           val participantIdToAttribs = participantToPermissionsMap.toSeq.mapFilter {
             case (participantId, partyPermission) =>
               participantToAttributesMap
@@ -318,7 +325,8 @@ class StoreBasedTopologySnapshotX(
                   )
                 }
           }.toMap
-          if (participantIdToAttribs.isEmpty) None else Some(partyId -> participantIdToAttribs)
+          if (participantIdToAttribs.isEmpty) None
+          else Some(partyId -> PartyInfo(groupAddressing, participantIdToAttribs))
       }.toMap
     } yield result
   }
@@ -353,6 +361,26 @@ class StoreBasedTopologySnapshotX(
       TopologyMappingX.Code.SequencerDomainStateX,
       transactions.collectOfMapping[SequencerDomainStateX].result,
     ).map { sds: SequencerDomainStateX => SequencerGroup(sds.active, sds.observers, sds.threshold) }
+  }
+
+  def trafficControlStatus(): Future[Map[Member, MemberTrafficControlState]] = findTransactions(
+    asOfInclusive = false,
+    types = Seq(TopologyMappingX.Code.TrafficControlStateX),
+    filterUid = None,
+    filterNamespace = None,
+  ).map { txs =>
+    txs
+      .collectOfMapping[TrafficControlStateX]
+      .result
+      .groupBy(_.transaction.transaction.mapping.member)
+      .flatMap { case (member, mappings) =>
+        collectLatestMapping(
+          TopologyMappingX.Code.TrafficControlStateX,
+          mappings.sortBy(_.validFrom),
+        ).map(mapping =>
+          MemberTrafficControlState(totalExtraTrafficLimit = mapping.totalExtraTrafficLimit)
+        ).map(member -> _)
+      }
   }
 
   /** Returns a list of all known parties on this domain */
@@ -597,7 +625,7 @@ class StoreBasedTopologySnapshotX(
           val validFrom = tx.validFrom.value
           if (previous >= validFrom) {
             logger.warn(
-              s"Instance of \"${typ.code}\" with hash \"${tx.transaction.transaction.hash.hash.toHexString}\" with non-monotonically growing valid-from effective time."
+              s"Instance of \"${typ.code}\" with hash \"${tx.transaction.transaction.hash.hash.toHexString}\" with non-monotonically growing valid-from effective time: previous $previous, new: $validFrom"
             )
           }
           validFrom

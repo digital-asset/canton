@@ -555,7 +555,30 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Manage authority-of mappings")
   @Help.Group("Authority-of mappings")
   object authority_of extends Helpful {
-    // TODO(#11255): implement write service
+    def propose(
+        partyId: PartyId,
+        threshold: Int,
+        parties: Seq[PartyId],
+        domainId: Option[DomainId] = None,
+        // TODO(#11255) don't use the instance's root namespace key by default.
+        //  let the grpc service figure out the right key to use, once that's implemented
+        signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
+        serial: Option[PositiveInt] = None,
+    ): SignedTopologyTransactionX[TopologyChangeOpX, AuthorityOfX] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommandsX.Write.Propose(
+            AuthorityOfX(
+              partyId,
+              domainId,
+              PositiveInt.tryCreate(threshold),
+              parties,
+            ),
+            signedBy = signedBy.toList,
+            serial,
+          )
+        )
+      }
 
     def list(
         filterStore: String = "",

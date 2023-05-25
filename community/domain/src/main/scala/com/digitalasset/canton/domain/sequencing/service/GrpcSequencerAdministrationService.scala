@@ -18,4 +18,5 @@ class GrpcSequencerAdministrationService(sequencer: Sequencer)(implicit
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     sequencer.pruningStatus.map(_.toProtoV0)
   }
+
 }

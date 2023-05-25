@@ -51,11 +51,13 @@ object ConfirmationPolicy {
   private def toInformeesAndThreshold(
       confirmingParties: Set[LfPartyId],
       plainInformees: Set[LfPartyId],
+      requiredTrustLevel: TrustLevel,
   ): (Set[Informee], NonNegativeInt) = {
     // We make sure that the threshold is at least 1 so that a transaction is not vacuously approved if the confirming parties are empty.
     val threshold = NonNegativeInt.tryCreate(Math.max(confirmingParties.size, 1))
     val informees =
-      confirmingParties.map(ConfirmingParty(_, 1): Informee) ++ plainInformees.map(PlainInformee)
+      confirmingParties.map(ConfirmingParty(_, 1, requiredTrustLevel): Informee) ++
+        plainInformees.map(PlainInformee)
     (informees, threshold)
   }
 
@@ -77,7 +79,8 @@ object ConfirmationPolicy {
       confirmingPartiesF.map { confirmingParties =>
         val plainInformees = LfTransactionUtil.informees(node) -- confirmingParties
         val informees =
-          confirmingParties.map(ConfirmingParty(_, 1)) ++ plainInformees.map(PlainInformee)
+          confirmingParties.map(ConfirmingParty(_, 1, TrustLevel.Vip)) ++
+            plainInformees.map(PlainInformee)
         // As all VIP participants are trusted, it suffices that one of them confirms.
         (informees, NonNegativeInt.one)
       }
@@ -102,7 +105,9 @@ object ConfirmationPolicy {
         "There must be at least one confirming party, as every node must have at least one signatory.",
       )
       val plainInformees = LfTransactionUtil.informees(node) -- confirmingParties
-      Future.successful(toInformeesAndThreshold(confirmingParties, plainInformees))
+      Future.successful(
+        toInformeesAndThreshold(confirmingParties, plainInformees, TrustLevel.Ordinary)
+      )
     }
 
     override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
@@ -122,7 +127,7 @@ object ConfirmationPolicy {
         informees.nonEmpty,
         "There must be at least one informee as every node must have at least one signatory.",
       )
-      Future.successful(toInformeesAndThreshold(informees, Set.empty))
+      Future.successful(toInformeesAndThreshold(informees, Set.empty, TrustLevel.Ordinary))
     }
 
     override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary

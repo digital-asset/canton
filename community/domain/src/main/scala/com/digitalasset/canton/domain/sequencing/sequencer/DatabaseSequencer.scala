@@ -18,6 +18,7 @@ import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.*
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficStatus
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
@@ -393,4 +394,7 @@ class DatabaseSequencer(
   ): EitherT[Future, String, Unit] =
     // see [[isLedgerIdentityRegistered]]
     EitherT.leftT("authorizeLedgerIdentity is not implemented for database sequencers")
+
+  override def trafficStatus(implicit traceContext: TraceContext): Future[SequencerTrafficStatus] =
+    Future.successful(SequencerTrafficStatus(Seq.empty))
 }

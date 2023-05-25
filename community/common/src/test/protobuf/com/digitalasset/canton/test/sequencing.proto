@@ -4,10 +4,9 @@
 syntax = "proto3";
 package com.digitalasset.canton.protobuf;
 
+import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
-
-import "com/digitalasset/canton/crypto/v0/crypto.proto";
 
 message OldSignedContent {
   google.protobuf.BytesValue content = 1;

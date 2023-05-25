@@ -518,7 +518,7 @@ class DbTransferStore(
     )
 
   private def findIncomplete(
-      sourceDomain: SourceDomainId,
+      sourceDomain: Option[SourceDomainId],
       validAt: GlobalOffset,
       start: Long,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
@@ -533,12 +533,15 @@ class DbTransferStore(
             sql"(transfer_in_global_offset is not null and transfer_in_global_offset <= $validAt) and (transfer_out_global_offset is null or transfer_out_global_offset > $validAt)"
           val incomplete = sql" and (" ++ outCompleted ++ sql" or " ++ inCompleted ++ sql")"
 
+          val sourceDomainFilter =
+            sourceDomain.fold(sql"")(sourceDomain => sql" and origin_domain=$sourceDomain")
+
           val limitSql =
             storage.limitSql(numberOfItems = DbTransferStore.dbQueryLimit, skipItems = start)
 
-          val base = findPendingBase(sourceDomain, onlyNotFinished = false)
+          val base = findPendingBase(onlyNotFinished = false)
 
-          (base ++ incomplete ++ limitSql).as[TransferData]
+          (base ++ incomplete ++ sourceDomainFilter ++ limitSql).as[TransferData]
         },
         functionFullName,
       )
@@ -601,7 +604,7 @@ class DbTransferStore(
   }
 
   override def findIncomplete(
-      sourceDomain: SourceDomainId,
+      sourceDomain: Option[SourceDomainId],
       validAt: GlobalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,

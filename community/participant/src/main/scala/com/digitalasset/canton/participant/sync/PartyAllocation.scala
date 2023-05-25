@@ -78,7 +78,7 @@ private[sync] class PartyAllocation(
     val result =
       for {
         _ <- EitherT
-          .cond[Future](isActive(), (), TransactionError.NotSupported)
+          .cond[Future](isActive(), (), TransactionError.PassiveNode)
           .leftWiden[SubmissionResult]
         id <- Identifier
           .create(partyName)

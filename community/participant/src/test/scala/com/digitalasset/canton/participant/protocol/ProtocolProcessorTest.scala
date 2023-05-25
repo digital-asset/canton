@@ -37,6 +37,7 @@ import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
   SyncDomainEphemeralState,
   SyncDomainPersistentState,
+  TransferStore,
 }
 import com.digitalasset.canton.participant.sync.{
   ParticipantEventPublisher,
@@ -58,7 +59,7 @@ import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.transaction.{ParticipantPermission, TrustLevel}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
@@ -206,6 +207,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       nodePersistentState.participantEventLog,
       clock,
       timeouts,
+      TransferStore.transferStoreFor(syncDomainPersistentStates),
       indexedStringStore,
       ParticipantTestMetrics,
       futureSupervisor,
@@ -254,7 +256,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     val steps = new TestProcessingSteps(
       pendingSubmissionMap = pendingSubmissionMap,
       overrideConstructedPendingRequestData,
-      informeesOfView = _ => Set(ConfirmingParty(party.toLf, 1)),
+      informeesOfView = _ => Set(ConfirmingParty(party.toLf, 1, TrustLevel.Ordinary)),
     )
 
     val sut: ProtocolProcessor[

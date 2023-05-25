@@ -36,7 +36,11 @@ trait SequencerRateLimitManager {
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
-  ): EitherT[Future, SequencerRateLimitError, Unit]
+  ): EitherT[
+    Future,
+    SequencerRateLimitError,
+    Unit,
+  ]
 }
 
 sealed trait SequencerRateLimitError

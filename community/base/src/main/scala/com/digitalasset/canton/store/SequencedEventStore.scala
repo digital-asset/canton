@@ -244,7 +244,8 @@ object SequencedEventStore {
     * It has been signed by the sequencer and contains a trace context.
     */
   final case class OrdinarySequencedEvent[+Env <: Envelope[_]](
-      signedEvent: SignedContent[SequencedEvent[Env]]
+      signedEvent: SignedContent[SequencedEvent[Env]],
+      trafficStatus: Option[TrafficState] = None,
   )(
       override val traceContext: TraceContext
   ) extends PossiblyIgnoredSequencedEvent[Env] {

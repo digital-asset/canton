@@ -29,6 +29,8 @@ final case class ErrorLoggingContext(
 ) extends ContextualizedErrorLogger {
   override def correlationId: Option[String] = traceContext.traceId
 
+  override def traceId: Option[String] = traceContext.traceId
+
   /** Log the cause while adding the context into the MDC
     *
     * We add the context twice to the MDC: first, every map item is added directly

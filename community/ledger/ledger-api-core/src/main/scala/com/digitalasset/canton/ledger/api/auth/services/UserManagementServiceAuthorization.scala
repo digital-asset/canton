@@ -147,4 +147,9 @@ final class UserManagementServiceAuthorization(
         )
       case _ => Success(None)
     }
+
+  // TODO (i13051): Implement IDP reassignment
+  override def updateUserIdentityProviderId(
+      request: UpdateUserIdentityProviderRequest
+  ): Future[UpdateUserIdentityProviderResponse] = ???
 }

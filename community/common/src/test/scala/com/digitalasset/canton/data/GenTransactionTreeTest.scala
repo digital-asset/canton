@@ -12,9 +12,15 @@ import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransac
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
+import com.digitalasset.canton.sequencing.protocol.{
+  MemberRecipient,
+  ParticipantsOfParty,
+  Recipients,
+  RecipientsTree,
+}
+import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
+import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTestWordSpec,
@@ -26,6 +32,7 @@ import com.digitalasset.canton.{
 
 import java.time.Duration
 import scala.annotation.nowarn
+import scala.concurrent.Future
 
 @nowarn("msg=match may not be exhaustive")
 class GenTransactionTreeTest
@@ -508,22 +515,29 @@ class GenTransactionTreeTest
         Witnesses(setup.map(_.map(informee)))
 
       // Maps parties to participants; parties have IDs that start at 1, participants have IDs that start at 11
-      def topology =
-        TestingIdentityFactory(
-          loggerFactory,
-          topology = Map(
-            1 -> Set(11),
-            2 -> Set(12),
-            3 -> Set(13),
-            4 -> Set(14),
-            5 -> Set(11, 12, 13, 15),
-            6 -> Set(16),
-          ).map { case (partyId, participantIds) =>
-            party(partyId) -> participantIds
-              .map(id => participant(id) -> ParticipantPermission.Submission)
-              .toMap
-          },
-        ).topologySnapshot()
+      val topologyMap = Map(
+        1 -> Set(11),
+        2 -> Set(12),
+        3 -> Set(13),
+        4 -> Set(14),
+        5 -> Set(11, 12, 13, 15),
+        6 -> Set(16),
+      ).map { case (partyId, participantIds) =>
+        party(partyId) -> participantIds
+          .map(id => participant(id) -> ParticipantPermission.Submission)
+          .toMap
+      }
+
+      val topology = mock[PartyTopologySnapshotClient]
+      when(topology.activeParticipantsOfParties(any[Seq[LfPartyId]]))
+        .thenAnswer[Seq[LfPartyId]] { parties =>
+          Future.successful(topologyMap.collect {
+            case (party, map) if parties.contains(party) => (party, map.keySet)
+          })
+        }
+      when(topology.partiesWithGroupAddressing(any[List[LfPartyId]]))
+        // parties 3 and 6 will use group addressing
+        .thenReturn(Future.successful(Set(party(3), party(6))))
 
       val witnesses = mkWitnesses(
         NonEmpty(Seq, Set(1, 2), Set(1, 3), Set(2, 4), Set(1, 2, 5), Set(6))
@@ -535,8 +549,8 @@ class GenTransactionTreeTest
         .futureValue shouldBe Recipients(
         NonEmpty(
           Seq,
-          RecipientsTree.ofMembers(
-            NonEmpty.mk(Set, participant(16)),
+          RecipientsTree.ofRecipients(
+            NonEmpty.mk(Set, ParticipantsOfParty(PartyId.tryFromLfParty(party(6)))),
             Seq(
               RecipientsTree.ofMembers(
                 NonEmpty(Set, 11, 12, 13, 15).map(participant),
@@ -544,8 +558,12 @@ class GenTransactionTreeTest
                   RecipientsTree.ofMembers(
                     NonEmpty.mk(Set, participant(12), participant(14)),
                     Seq(
-                      RecipientsTree.ofMembers(
-                        NonEmpty.mk(Set, participant(11), participant(13)),
+                      RecipientsTree.ofRecipients(
+                        NonEmpty.mk(
+                          Set,
+                          MemberRecipient(participant(11)),
+                          ParticipantsOfParty(PartyId.tryFromLfParty(party(3))),
+                        ),
                         Seq(
                           RecipientsTree.leaf(NonEmpty.mk(Set, participant(11), participant(12)))
                         ),

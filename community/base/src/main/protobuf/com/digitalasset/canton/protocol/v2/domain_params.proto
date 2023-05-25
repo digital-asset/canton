@@ -5,9 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v2;
 
-import "google/protobuf/duration.proto";
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
-
+import "google/protobuf/duration.proto";
 
 message StaticDomainParametersX {
   repeated com.digitalasset.canton.crypto.v0.SigningKeyScheme required_signing_key_schemes = 1;
@@ -29,7 +28,6 @@ message ParticipantDomainLimits {
 }
 
 message DynamicDomainParametersX {
-
   google.protobuf.Duration participant_response_timeout = 1;
   google.protobuf.Duration mediator_reaction_timeout = 2;
   google.protobuf.Duration transfer_exclusivity_timeout = 3;

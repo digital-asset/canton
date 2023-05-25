@@ -7,6 +7,7 @@ package com.daml.error
 trait ContextualizedErrorLogger {
   def properties: Map[String, String]
   def correlationId: Option[String]
+  def traceId: Option[String]
   def logError(err: BaseError, extra: Map[String, String]): Unit
   def info(message: String): Unit
   def info(message: String, throwable: Throwable): Unit

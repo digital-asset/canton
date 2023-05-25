@@ -309,7 +309,7 @@ object ApiServices {
           submit = apiSubmissionService.submit,
           configuration = ApiCommandService.Configuration(
             ledgerId,
-            commandConfig.maxTrackingTimeout,
+            commandConfig.defaultTrackingTimeout,
           ),
           transactionServices = new ApiCommandService.TransactionServices(
             getTransactionById = apiTransactionService.getTransactionById,

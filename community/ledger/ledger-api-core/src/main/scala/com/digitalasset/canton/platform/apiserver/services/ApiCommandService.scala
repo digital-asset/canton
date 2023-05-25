@@ -40,7 +40,7 @@ private[apiserver] final class ApiCommandService private[services] (
     transactionServices: TransactionServices,
     submissionTracker: SubmissionTracker,
     submit: SubmitRequest => Future[Empty],
-    maxTrackingTimeout: Duration,
+    defaultTrackingTimeout: Duration,
 )(implicit
     executionContext: ExecutionContext,
     loggingContext: LoggingContext,
@@ -131,8 +131,7 @@ private[apiserver] final class ApiCommandService private[services] (
     if (running.get()) {
       val timeout = Option(Context.current().getDeadline)
         .map(deadline => Duration.ofNanos(deadline.timeRemaining(TimeUnit.NANOSECONDS)))
-        .map(Ordering[Duration].max(_, maxTrackingTimeout))
-        .getOrElse(maxTrackingTimeout)
+        .getOrElse(defaultTrackingTimeout)
 
       val commands = request.commands.getOrElse(
         throw new IllegalArgumentException("Missing commands field in request")
@@ -181,7 +180,7 @@ private[apiserver] object ApiCommandService {
         transactionServices,
         submissionTracker,
         submit,
-        configuration.maxTrackingTimeout,
+        configuration.defaultTrackingTimeout,
       ),
       ledgerId = configuration.ledgerId,
       currentLedgerTime = () => timeProvider.getCurrentTime,
@@ -194,7 +193,7 @@ private[apiserver] object ApiCommandService {
 
   final case class Configuration(
       ledgerId: LedgerId,
-      maxTrackingTimeout: Duration,
+      defaultTrackingTimeout: Duration,
   )
 
   final class TransactionServices(

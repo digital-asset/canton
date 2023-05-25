@@ -19,6 +19,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
+  PartyInfo,
+  nonConsortiumPartyDelegation,
+}
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
@@ -31,7 +35,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DiscardOps, SequencerCounter}
+import com.digitalasset.canton.{DiscardOps, LfPartyId, SequencerCounter}
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
@@ -441,9 +445,9 @@ class StoreBasedTopologySnapshot(
       fetchParticipantStates: Seq[ParticipantId] => Future[
         Map[ParticipantId, ParticipantAttributes]
       ],
-  ): Future[Map[ParticipantId, ParticipantAttributes]] =
+  ): Future[PartyInfo] =
     loadBatchActiveParticipantsOf(Seq(party), fetchParticipantStates).map(
-      _.getOrElse(party, Map.empty)
+      _.getOrElse(party, PartyInfo(false, Map.empty))
     )
 
   override private[client] def loadBatchActiveParticipantsOf(
@@ -451,7 +455,7 @@ class StoreBasedTopologySnapshot(
       fetchParticipantStates: Seq[ParticipantId] => Future[
         Map[ParticipantId, ParticipantAttributes]
       ],
-  ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] = {
+  ): Future[Map[PartyId, PartyInfo]] = {
     def update(
         party: PartyId,
         mp: Map[PartyId, PartyAggregation],
@@ -513,7 +517,10 @@ class StoreBasedTopologySnapshot(
       val partyToParticipantAttributes = allAggregated.fmap(v => capped(v))
       // for each party we should return a result
       parties.map { party =>
-        party -> partyToParticipantAttributes.getOrElse(party, Map.empty)
+        party -> PartyInfo(
+          groupAddressing = false,
+          partyToParticipantAttributes.getOrElse(party, Map.empty),
+        )
       }.toMap
     }
   }
@@ -856,4 +863,22 @@ class StoreBasedTopologySnapshot(
             DynamicDomainParametersWithValidity(domainParameters, validFrom, validUntil, domainId)
         }
     }
+
+  override def trafficControlStatus(): Future[Map[Member, MemberTrafficControlState]] = {
+    // Non-X topology management does not support traffic control transactions
+    Future.successful(Map.empty)
+  }
+
+  /*
+  This client does not support consortium parties, i.e. for all requested
+  parties it delegates to themself with threshold 1
+   */
+  override def authorityOf(
+      parties: Set[LfPartyId]
+  ): Future[PartyTopologySnapshotClient.AuthorityOfResponse] =
+    Future.successful(
+      PartyTopologySnapshotClient.AuthorityOfResponse(
+        parties.map(partyId => partyId -> nonConsortiumPartyDelegation(partyId)).toMap
+      )
+    )
 }

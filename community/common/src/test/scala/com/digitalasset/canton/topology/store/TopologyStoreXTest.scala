@@ -100,6 +100,10 @@ trait TopologyStoreXTest
     )
     val signingKeys = NonEmpty(Seq, factory.SigningKeys.key1)
     val owners = NonEmpty(Set, Namespace(Fingerprint.tryCreate("owner1")))
+    val fredOfCanton = PartyId(
+      Identifier.tryCreate("fred"),
+      Namespace(Fingerprint.tryCreate("canton")),
+    )
 
     val tx_NSD_Proposal = makeSignedTx(
       NamespaceDelegationX
@@ -126,10 +130,7 @@ trait TopologyStoreXTest
     )
     val tx5_PTP = makeSignedTx(
       PartyToParticipantX(
-        PartyId(
-          Identifier.tryCreate("fred"),
-          Namespace(Fingerprint.tryCreate("canton")),
-        ),
+        partyId = fredOfCanton,
         domainId = None,
         threshold = 1,
         participants = Seq(HostingParticipant(participantId1, ParticipantPermissionX.Submission)),
@@ -302,6 +303,12 @@ trait TopologyStoreXTest
             )
             bothParties <- inspectKnownParties(store, ts6)
             onlyFred <- inspectKnownParties(store, ts6, filterParty = "fr::can")
+            fredFullySpecified <- inspectKnownParties(
+              store,
+              ts6,
+              filterParty = fredOfCanton.uid.toProtoPrimitive,
+              filterParticipant = participantId1.uid.toProtoPrimitive,
+            )
             onlyParticipant2 <- inspectKnownParties(store, ts6, filterParticipant = "participant2")
             neitherParty <- inspectKnownParties(store, ts6, "fred::canton", "participant2")
           } yield {
@@ -324,6 +331,7 @@ trait TopologyStoreXTest
               tx5_DTC.transaction.mapping.participantId.adminParty,
             )
             onlyFred shouldBe Set(tx5_PTP.transaction.mapping.partyId)
+            fredFullySpecified shouldBe Set(tx5_PTP.transaction.mapping.partyId)
             onlyParticipant2 shouldBe Set(tx5_DTC.transaction.mapping.participantId.adminParty)
             neitherParty shouldBe Set.empty
           }

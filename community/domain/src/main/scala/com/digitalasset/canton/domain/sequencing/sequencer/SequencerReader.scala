@@ -16,7 +16,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerReader.ReadState
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.domain.sequencing.sequencer.store.*
-import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
@@ -69,7 +74,8 @@ class SequencerReader(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
-    with FlagCloseable {
+    with FlagCloseable
+    with HasCloseContext {
 
   def read(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
@@ -215,7 +221,7 @@ class SequencerReader(
 
     private def signValidatedEvent(
         unsignedEventData: UnsignedEventData
-    ): Future[OrdinarySerializedEvent] = {
+    ): FutureUnlessShutdown[OrdinarySerializedEvent] = {
       val UnsignedEventData(
         event,
         signingTimestampAndSnapshotO,
@@ -230,12 +236,12 @@ class SequencerReader(
 
       val signingTimestampOAndSnapshotF = signingTimestampAndSnapshotO match {
         case Some((signingTimestamp, signingSnaphot)) =>
-          Future.successful(Some(signingTimestamp) -> signingSnaphot)
+          FutureUnlessShutdown.pure(Some(signingTimestamp) -> signingSnaphot)
         case None =>
           val warnIfApproximate =
             (event.counter > SequencerCounter.Genesis) && member.isAuthenticated
           SyncCryptoClient
-            .getSnapshotForTimestamp(
+            .getSnapshotForTimestampUS(
               syncCryptoApi,
               event.timestamp,
               previousTopologyClientTimestamp,
@@ -244,12 +250,13 @@ class SequencerReader(
             )
             .map(None -> _)
       }
-      signingTimestampOAndSnapshotF.flatMap { case (signingTimestampO, signingSnapshot) =>
-        logger.debug(
-          s"Signing event with counter ${event.counter} / timestamp ${event.timestamp} for $member"
-        )
-        signEvent(event, signingTimestampO, signingSnapshot)
-      }
+      signingTimestampOAndSnapshotF
+        .flatMap { case (signingTimestampO, signingSnapshot) =>
+          logger.debug(
+            s"Signing event with counter ${event.counter} / timestamp ${event.timestamp} for $member"
+          )
+          performUnlessClosingF("sign-event")(signEvent(event, signingTimestampO, signingSnapshot))
+        }
     }
 
     def latestTopologyClientTimestampAfter(
@@ -386,17 +393,19 @@ class SequencerReader(
       )(validateEvent)
       val eventsSource = validatedEventSrc.dropWhile(_.event.counter < startAt)
 
-      eventsSource
-        .viaMat(recordCheckpointFlow)(Keep.right)
-        .viaMat(KillSwitches.single) { case ((checkpointKillSwitch, checkpointDone), killSwitch) =>
-          (new CombinedKillSwitch(checkpointKillSwitch, killSwitch), checkpointDone)
-        }
-        .mapAsync(
+      AkkaUtil
+        .mapAsyncAndDrainUS(
+          eventsSource
+            .viaMat(recordCheckpointFlow)(Keep.right)
+            .viaMat(KillSwitches.single) {
+              case ((checkpointKillSwitch, checkpointDone), killSwitch) =>
+                (new CombinedKillSwitch(checkpointKillSwitch, killSwitch), checkpointDone)
+            },
           // We technically do not need to process everything sequentially here.
           // Neither do we have evidence that parallel processing helps, as a single sequencer reader
           // will typically serve many subscriptions in parallel.
-          parallelism = 1
-        )(signValidatedEvent)
+          parallelism = 1,
+        )(signValidatedEvent(_))
     }
 
     /** Attempt to save the counter checkpoint and fail horribly if we find this is an inconsistent checkpoint update. */

@@ -89,7 +89,12 @@ class DbStorageSingle private (
       case e: SQLException =>
         failureOccurred(DatabaseConnectionLost(e.getMessage, e))
         false
-    })).map(isActiveRef.set)
+    })).map { active =>
+      val old = isActiveRef.getAndSet(active)
+      val changed = old != active
+      if (changed)
+        logger.info(s"Changed db storage instance to ${if (active) "active" else "passive"}.")
+    }
   }
 
 }

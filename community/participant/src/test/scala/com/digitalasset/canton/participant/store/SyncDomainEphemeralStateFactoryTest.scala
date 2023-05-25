@@ -65,12 +65,13 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
       lookupOffsetsBetween = _ => _ => (_, _) => Future.successful(Seq.empty),
       byEventId = _ => _ => OptionT(Future.successful(Option.empty)),
       participantEventLogId = ParticipantEventLog.ProductionParticipantEventLogId,
-      new SimClock(loggerFactory = loggerFactory),
-      ParticipantTestMetrics,
+      clock = new SimClock(loggerFactory = loggerFactory),
+      metrics = ParticipantTestMetrics,
+      transferStoreFor = _ => Left("transferStoreFor is not implemented"),
       indexedStringStore = indexedStringStore,
-      timeouts,
-      futureSupervisor,
-      loggerFactory,
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
+      loggerFactory = loggerFactory,
     )
 
   def dummyTimestampedEvent(localOffset: LocalOffset): TimestampedEvent =

@@ -179,9 +179,8 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       filterParticipant: String,
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Set[PartyId]] = {
-    val (filterPartyIdentifier, filterPartyNamespace) =
-      UniqueIdentifier.splitFilter(filterParty)
-    val (filterParticipantIdentifier, filterParticipantNamespace) =
+    val (prefixPartyIdentifier, prefixPartyNS) = UniqueIdentifier.splitFilter(filterParty)
+    val (prefixParticipantIdentifier, prefixParticipantNS) =
       UniqueIdentifier.splitFilter(filterParticipant)
 
     def filter(entry: TopologyStoreEntry): Boolean = {
@@ -192,17 +191,17 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       // matches a party to participant mapping (with appropriate filters)
       (entry.transaction.transaction.mapping match {
         case ptp: PartyToParticipantX =>
-          ptp.partyId.uid.matchesPrefixes(filterPartyIdentifier, filterPartyNamespace) &&
+          ptp.partyId.uid.matchesPrefixes(prefixPartyIdentifier, prefixPartyNS) &&
           (filterParticipant.isEmpty ||
             ptp.participants.exists(
               _.participantId.uid
-                .matchesPrefixes(filterParticipantIdentifier, filterParticipantNamespace)
+                .matchesPrefixes(prefixParticipantIdentifier, prefixParticipantNS)
             ))
         case cert: DomainTrustCertificateX =>
           cert.participantId.adminParty.uid
-            .matchesPrefixes(filterPartyIdentifier, filterPartyNamespace) &&
+            .matchesPrefixes(prefixPartyIdentifier, prefixPartyNS) &&
           cert.participantId.uid
-            .matchesPrefixes(filterParticipantIdentifier, filterParticipantNamespace)
+            .matchesPrefixes(prefixParticipantIdentifier, prefixParticipantNS)
         case _ => false
       })
     }

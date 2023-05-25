@@ -536,7 +536,7 @@ class TransferOutProcessingSteps(
       transferId,
       targetDomain,
       stakeholders,
-      _hostedStakeholder,
+      _hostedStakeholders,
       _targetTimeProof,
       transferInExclusivity,
       _mediatorId,
@@ -573,7 +573,6 @@ class TransferOutProcessingSteps(
             else EitherT.pure[Future, TransferProcessorError](())
 
           transferOutEvent <- createTransferredOut(
-            requestId.unwrap,
             contractId,
             templateId,
             stakeholders,
@@ -582,6 +581,7 @@ class TransferOutProcessingSteps(
             targetDomain,
             rootHash,
             transferInExclusivity,
+            isTransferringParticipant = transferringParticipant,
           )
         } yield CommitAndStoreContractsAndPublishEvent(
           commitSetFO,
@@ -617,7 +617,6 @@ class TransferOutProcessingSteps(
   }
 
   private def createTransferredOut(
-      recordTime: CantonTimestamp,
       contractId: LfContractId,
       templateId: LfTemplateId,
       contractStakeholders: Set[LfPartyId],
@@ -626,6 +625,7 @@ class TransferOutProcessingSteps(
       targetDomain: TargetDomainId,
       rootHash: RootHash,
       transferInExclusivity: Option[CantonTimestamp],
+      isTransferringParticipant: Boolean,
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredOut] = {
     for {
       updateId <- EitherT
@@ -647,14 +647,14 @@ class TransferOutProcessingSteps(
       updateId = updateId,
       optCompletionInfo = completionInfo,
       submitter = submitterMetadata.submitter,
-      recordTime = recordTime.toLf,
+      transferId = transferId,
       contractId = contractId,
       templateId = Some(templateId),
       contractStakeholders = contractStakeholders,
-      sourceDomainId = transferId.sourceDomain,
-      targetDomainId = targetDomain,
+      targetDomain = targetDomain,
       transferInExclusivity = transferInExclusivity.map(_.toLf),
       workflowId = submitterMetadata.workflowId,
+      isTransferringParticipant = isTransferringParticipant,
     )
   }
 

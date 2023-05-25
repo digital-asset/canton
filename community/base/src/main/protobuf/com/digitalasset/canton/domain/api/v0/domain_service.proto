@@ -8,6 +8,6 @@ package com.digitalasset.canton.domain.api.v0;
 import "com/digitalasset/canton/domain/api/v0/service_agreement.proto";
 
 service DomainService {
-    option deprecated = true;
-    rpc GetServiceAgreement(GetServiceAgreementRequest) returns (GetServiceAgreementResponse);
+  option deprecated = true;
+  rpc GetServiceAgreement(GetServiceAgreementRequest) returns (GetServiceAgreementResponse);
 }

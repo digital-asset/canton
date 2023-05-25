@@ -340,7 +340,13 @@
             <testing>true</testing>
         </rewrite>
 
-
+        <!-- TODO(#13107): Clock/InstrumentedExecutorServiceMetrics do not yet support FlagCloseable -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.canton.time.TimeProofRequestSubmitterImpl</logger>
+            <exceptionMessage>java.util.concurrent.RejectedExecutionException: null</exceptionMessage>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
 
     </appender>
 

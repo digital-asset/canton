@@ -48,6 +48,7 @@ final case class StoredPrivateKey(
     with Serializable {
 
   def isEncrypted: Boolean = { this.wrapperKeyId.isDefined }
+
 }
 
 object StoredPrivateKey {

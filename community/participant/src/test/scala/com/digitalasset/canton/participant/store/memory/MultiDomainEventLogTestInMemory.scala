@@ -6,16 +6,21 @@ package com.digitalasset.canton.participant.store.memory
 import cats.data.OptionT
 import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLogTest}
+import com.digitalasset.canton.participant.store.{
+  EventLogId,
+  MultiDomainEventLogTest,
+  TransferStore,
+}
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
+import com.digitalasset.canton.protocol.TargetDomainId
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
 
 class MultiDomainEventLogTestInMemory extends MultiDomainEventLogTest {
 
-  val eventsRef: AtomicReference[Map[(EventLogId, LocalOffset), TimestampedEvent]] =
+  private val eventsRef: AtomicReference[Map[(EventLogId, LocalOffset), TimestampedEvent]] =
     new AtomicReference(Map.empty)
 
   override def storeEventsToSingleDimensionEventLogs(
@@ -36,10 +41,10 @@ class MultiDomainEventLogTestInMemory extends MultiDomainEventLogTest {
 
   protected override def cleanUpEventLogs(): Unit = ()
 
-  def lookupEvent(id: EventLogId, localOffset: LocalOffset): Future[TimestampedEvent] =
+  private def lookupEvent(id: EventLogId, localOffset: LocalOffset): Future[TimestampedEvent] =
     Future.successful(eventsRef.get()(id -> localOffset))
 
-  def lookupOffsetsBetween(
+  private def lookupOffsetsBetween(
       id: EventLogId
   )(fromInclusive: LocalOffset, upToInclusive: LocalOffset): Future[Seq[LocalOffset]] =
     Future.successful {
@@ -52,13 +57,24 @@ class MultiDomainEventLogTestInMemory extends MultiDomainEventLogTest {
         .sorted
     }
 
-  def domainIdOfEventId(eventId: EventId): OptionT[Future, (EventLogId, LocalOffset)] = {
+  private def domainIdOfEventId(eventId: EventId): OptionT[Future, (EventLogId, LocalOffset)] = {
     val resultO = eventsRef.get().collectFirst {
       case (eventLogIdAndLocalOffset, event) if event.eventId.contains(eventId) =>
         eventLogIdAndLocalOffset
     }
     OptionT(Future.successful(resultO))
   }
+
+  override protected def transferStores: Map[TargetDomainId, TransferStore] = domainIds.map {
+    domainId =>
+      val targetDomainId = TargetDomainId(domainId)
+      val transferStore = new InMemoryTransferStore(
+        targetDomainId,
+        loggerFactory,
+      )
+
+      targetDomainId -> transferStore
+  }.toMap
 
   "MultiDomainEventLogTestInMemory" should {
     behave like multiDomainEventLog {
@@ -69,6 +85,8 @@ class MultiDomainEventLogTestInMemory extends MultiDomainEventLogTest {
         participantEventLogId,
         _,
         ParticipantTestMetrics,
+        domainId =>
+          transferStores.get(domainId).toRight(s"Cannot find transfer store for domain $domainId"),
         indexedStringStore,
         timeouts,
         futureSupervisor,

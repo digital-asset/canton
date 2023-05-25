@@ -12,6 +12,7 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
@@ -247,6 +248,7 @@ class InFlightSubmissionTracker(
                   _publicationTime,
                   Some(inFlightReference),
                   _deduplicationInfo,
+                  _event,
                 ) =>
               inFlightReference
           }
@@ -298,6 +300,7 @@ class InFlightSubmissionTracker(
               publicationTime,
               reference.some,
               DeduplicationInfo.fromTimestampedEvent(event),
+              event.event,
             )
             reference -> publication
         }
@@ -328,87 +331,77 @@ class InFlightSubmissionTracker(
     )
 
     def localOffsetsFor(sequencedInFlight: Seq[InFlightSubmission[SequencedSubmission]]): Future[
-      ArraySeq[(LocalOffset, InFlightSubmission[SequencedSubmission], Option[DeduplicationInfo])]
-    ] = {
-      if (sequencedInFlight.isEmpty) Future.successful(ArraySeq.empty)
-      else {
-        // Locate the offsets in single-dimension event log based on the sequencer timestamps
-        // because that's what we have an index for
-        val first = sequencedInFlight
-          .minByOption(_.sequencingInfo.sequencingTime)
-          .getOrElse(
-            ErrorUtil.internalError(
-              new RuntimeException("A non-empty sequence must contain a minimum.")
-            )
-          )
-        val last = sequencedInFlight
-          .maxByOption(_.sequencingInfo.sequencingTime)
-          .getOrElse(
-            ErrorUtil.internalError(
-              new RuntimeException("A non-empty sequence must contain a maximum.")
-            )
-          )
-        for {
-          foundLocalEvents <- domainState.singleDimensionEventLog.lookupEventRange(
-            fromInclusive = None,
-            toInclusive = None,
-            fromTimestampInclusive = first.sequencingInfo.sequencingTime.some,
-            toTimestampInclusive = last.sequencingInfo.sequencingTime.some,
-            limit = None,
-          )
-        } yield {
-          val localOffsetsB =
-            ArraySeq.newBuilder[
-              (LocalOffset, InFlightSubmission[SequencedSubmission], Option[DeduplicationInfo])
-            ]
-          localOffsetsB.sizeHint(sequencedInFlight.size)
-          sequencedInFlight.foreach { inFlight =>
-            // We can't compare by timestamp because repair events may have the same timestamp as a sequenced event.
-            // Instead we check the unique sequencer counters.
-            val sequencerCounter = inFlight.sequencingInfo.sequencerCounter.some
-            val eventO = foundLocalEvents.find { case (_localOffset, event) =>
-              event.requestSequencerCounter == sequencerCounter
-            }
-            eventO match {
-              case None =>
-                ErrorUtil.internalError(
-                  new IllegalStateException(
-                    s"Cannot find event for sequenced in-flight submission $inFlight. Command deduplication may fail for the change id hash ${inFlight.changeIdHash}."
-                  )
-                )
-              case Some((localOffset, event)) =>
-                val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
-                localOffsetsB += ((localOffset, inFlight, deduplicationInfo))
-            }
-          }
-          localOffsetsB.result()
-        }
-      }
-    }
+      ArraySeq[InFlightData]
+    ] =
+      NonEmpty
+        .from(sequencedInFlight)
+        .fold(
+          Future.successful(ArraySeq.empty[InFlightData])
+        ) { sequencedInFlight =>
+          // Locate the offsets in single-dimension event log based on the sequencer timestamps
+          // because that's what we have an index for
+          val first = sequencedInFlight.minBy1(_.sequencingInfo.sequencingTime)
+          val last = sequencedInFlight.maxBy1(_.sequencingInfo.sequencingTime)
 
-    def publicationsFor(
-        localOffsets: ArraySeq[
-          (LocalOffset, InFlightSubmission[SequencedSubmission], Option[DeduplicationInfo])
-        ]
-    ): Future[Seq[(InFlightBySequencingInfo, MultiDomainEventLog.OnPublish.Publication)]] = {
-      EventLogId.forDomain(multiDomainEventLog.value.indexedStringStore)(domainId).flatMap {
-        eventLogId =>
-          localOffsets
-            .parTraverseFilter { case (localOffset, inFlight, deduplicationInfo) =>
-              multiDomainEventLog.value.globalOffsetFor(eventLogId, localOffset).map {
-                optPublicationInfo =>
-                  optPublicationInfo.map { case (globalOffset, publicationTime) =>
-                    val info = inFlight.referenceBySequencingInfo
-                    info -> MultiDomainEventLog.OnPublish.Publication(
-                      globalOffset,
-                      publicationTime,
-                      info.some,
-                      deduplicationInfo,
+          for {
+            foundLocalEvents <- domainState.singleDimensionEventLog.lookupEventRange(
+              fromInclusive = None,
+              toInclusive = None,
+              fromTimestampInclusive = first.sequencingInfo.sequencingTime.some,
+              toTimestampInclusive = last.sequencingInfo.sequencingTime.some,
+              limit = None,
+            )
+          } yield {
+            val localOffsetsB = ArraySeq.newBuilder[InFlightData]
+            localOffsetsB.sizeHint(sequencedInFlight.size)
+            sequencedInFlight.foreach { inFlight =>
+              // We can't compare by timestamp because repair events may have the same timestamp as a sequenced event.
+              // Instead we check the unique sequencer counters.
+              val sequencerCounter = inFlight.sequencingInfo.sequencerCounter.some
+              val eventO = foundLocalEvents.find { case (_localOffset, event) =>
+                event.requestSequencerCounter == sequencerCounter
+              }
+              eventO match {
+                case None =>
+                  ErrorUtil.internalError(
+                    new IllegalStateException(
+                      s"Cannot find event for sequenced in-flight submission $inFlight. Command deduplication may fail for the change id hash ${inFlight.changeIdHash}."
                     )
-                  }
+                  )
+                case Some((localOffset, event)) =>
+                  val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
+                  val inFlightData =
+                    InFlightData(localOffset, inFlight, deduplicationInfo, event.event)
+                  localOffsetsB += inFlightData
               }
             }
+            localOffsetsB.result()
+          }
+        }
+
+    def publicationFor(eventLogId: EventLogId)(
+        inFlightData: InFlightData
+    ): Future[Option[(InFlightBySequencingInfo, OnPublish.Publication)]] =
+      multiDomainEventLog.value.globalOffsetFor(eventLogId, inFlightData.localOffset).map {
+        optPublicationInfo =>
+          optPublicationInfo.map { case (globalOffset, publicationTime) =>
+            val info = inFlightData.inFlight.referenceBySequencingInfo
+            info -> MultiDomainEventLog.OnPublish.Publication(
+              globalOffset,
+              publicationTime,
+              info.some,
+              inFlightData.deduplication,
+              inFlightData.event,
+            )
+          }
       }
+
+    def publicationsFor(
+        localOffsets: ArraySeq[InFlightData]
+    ): Future[
+      Seq[(InFlightBySequencingInfo, MultiDomainEventLog.OnPublish.Publication)]
+    ] = EventLogId.forDomain(multiDomainEventLog.value.indexedStringStore)(domainId).flatMap {
+      eventLogId => localOffsets.parTraverseFilter(publicationFor(eventLogId))
     }
 
     for {
@@ -422,6 +415,14 @@ class InFlightSubmissionTracker(
       localOffsets <- localOffsetsFor(sequencedInFlight)
       sequencingInfoAndPublications <- publicationsFor(localOffsets)
       (toDelete, publications) = sequencingInfoAndPublications.unzip
+      _ <- publications.parTraverse_ { publication =>
+        publication.event match {
+          case transfer: LedgerSyncEvent.TransferEvent if transfer.isTransferringParticipant =>
+            multiDomainEventLog.value.notifyOnPublishTransfer(transfer, publication.globalOffset)
+
+          case _ => Future.unit
+        }
+      }
       _ <- deduplicator.processPublications(publications)
       _ = logger.debug("Removing in-flight submissions from in-flight submission store")
       _ <- store.value.delete(toDelete)
@@ -447,6 +448,12 @@ class InFlightSubmissionTracker(
 }
 
 object InFlightSubmissionTracker {
+  private final case class InFlightData(
+      localOffset: LocalOffset,
+      inFlight: InFlightSubmission[SequencedSubmission],
+      deduplication: Option[DeduplicationInfo],
+      event: LedgerSyncEvent,
+  )
 
   /** The portion of the [[com.digitalasset.canton.participant.store.SyncDomainEphemeralState]]
     * that is used by the [[InFlightSubmissionTracker]].
@@ -468,6 +475,7 @@ object InFlightSubmissionTracker {
   )
 
   object InFlightSubmissionTrackerDomainState {
+
     def fromSyncDomainState(
         persistent: SyncDomainPersistentState,
         ephemeral: SyncDomainEphemeralState,

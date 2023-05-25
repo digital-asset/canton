@@ -14,11 +14,11 @@ import "scalapb/scalapb.proto";
 // are exactly `interval` apart.
 // All fields are mandatory.
 message AcsCommitment {
-    option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-    string domain_id = 1;
-    string sending_participant = 2;
-    string counter_participant = 3;
-    google.protobuf.Timestamp from_exclusive = 4;
-    google.protobuf.Timestamp to_inclusive = 5;
-    bytes commitment = 6;
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+  string domain_id = 1;
+  string sending_participant = 2;
+  string counter_participant = 3;
+  google.protobuf.Timestamp from_exclusive = 4;
+  google.protobuf.Timestamp to_inclusive = 5;
+  bytes commitment = 6;
 }

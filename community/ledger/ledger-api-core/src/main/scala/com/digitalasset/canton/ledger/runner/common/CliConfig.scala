@@ -480,12 +480,12 @@ object CliConfig {
       opt[Duration]("max-tracking-timeout")
         .optional()
         .action((value, config) =>
-          config.copy(commandConfig = config.commandConfig.copy(maxTrackingTimeout = value))
+          config.copy(commandConfig = config.commandConfig.copy(defaultTrackingTimeout = value))
         )
         .text(
-          "The duration that the command service will keep tracking an active command. If timeout is not" +
-            " specified on the gRPC layer, this will be used. If there is specified one, and this is a longer," +
-            s" then this will be used. Default is ${CommandConfiguration.DefaultMaxTrackingTimeout}"
+          "The duration that the command service will keep tracking an active command by default. This value" +
+            "will be used if a timeout is not specified on a gRPC request." +
+            s" Default is ${CommandConfiguration.DefaultDefaultTrackingTimeout}"
         ),
       opt[Duration]("max-deduplication-duration")
         .optional()

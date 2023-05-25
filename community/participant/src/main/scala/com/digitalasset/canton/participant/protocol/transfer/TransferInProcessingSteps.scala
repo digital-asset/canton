@@ -516,7 +516,7 @@ private[transfer] class TransferInProcessingSteps(
             submitterMetadata,
             transferId,
             rootHash,
-            createTransactionAccepted = !transferringParticipant,
+            isTransferringParticipant = transferringParticipant,
           )
           timestampEvent = Some(
             TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
@@ -544,9 +544,9 @@ private[transfer] class TransferInProcessingSteps(
       creatingTransactionId: TransactionId,
       recordTime: CantonTimestamp,
       submitterMetadata: TransferSubmitterMetadata,
-      transferOutId: TransferId,
+      transferId: TransferId,
       rootHash: RootHash,
-      createTransactionAccepted: Boolean,
+      isTransferringParticipant: Boolean,
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
     val targetDomain = domainId
     val contractInst = contract.contractInstance.unversioned
@@ -570,13 +570,13 @@ private[transfer] class TransferInProcessingSteps(
     for {
       updateId <- EitherT.fromEither[Future](
         rootHash.asLedgerTransactionId.leftMap[TransferProcessorError](
-          FieldConversionError(transferOutId, "Transaction id (root hash)", _)
+          FieldConversionError(transferId, "Transaction id (root hash)", _)
         )
       )
 
       ledgerCreatingTransactionId <- EitherT.fromEither[Future](
         creatingTransactionId.asLedgerTransactionId.leftMap[TransferProcessorError](
-          FieldConversionError(transferOutId, "Transaction id (creating transaction)", _)
+          FieldConversionError(transferId, "Transaction id (creating transaction)", _)
         )
       )
 
@@ -600,10 +600,11 @@ private[transfer] class TransferInProcessingSteps(
       createNode = createNode,
       creatingTransactionId = ledgerCreatingTransactionId,
       contractMetadata = driverContractMetadata,
-      transferOutId = transferOutId,
+      transferId = transferId,
       targetDomain = targetDomain,
-      createTransactionAccepted = createTransactionAccepted,
       workflowId = submitterMetadata.workflowId,
+      createTransactionAccepted = !isTransferringParticipant,
+      isTransferringParticipant = isTransferringParticipant,
     )
   }
 }

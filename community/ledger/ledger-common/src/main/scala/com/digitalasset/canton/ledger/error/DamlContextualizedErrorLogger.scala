@@ -47,6 +47,8 @@ class DamlContextualizedErrorLogger(
     val correlationId: Option[String],
 ) extends ContextualizedErrorLogger {
 
+  override def traceId: Option[String] = None
+
   override def properties: Map[String, String] = {
     val a: MapView[LoggingKey, LoggingValue] = loggingContext.entries.contents.view
     a.map { case (key, value) =>

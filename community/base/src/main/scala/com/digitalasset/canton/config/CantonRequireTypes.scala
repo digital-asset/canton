@@ -591,4 +591,5 @@ object CantonRequireTypes {
     implicit val encodeKeyInstanceName: KeyEncoder[InstanceName] =
       KeyEncoder.encodeKeyString.contramap(_.unwrap)
   }
+
 }

@@ -87,10 +87,12 @@ class GrpcTopologyManagerWriteServiceX(
           signingKeys <-
             request.signedBy.traverse(Fingerprint.fromProtoPrimitive)
           validatedMapping <- mapping.mapping match {
-            case Mapping.NamespaceDelegation(mapping) =>
-              NamespaceDelegationX.fromProtoV2(mapping)
             case Mapping.UnionspaceDefinition(mapping) =>
               UnionspaceDefinitionX.fromProtoV2(mapping)
+            case Mapping.NamespaceDelegation(mapping) =>
+              NamespaceDelegationX.fromProtoV2(mapping)
+            case Mapping.IdentifierDelegation(mapping) =>
+              IdentifierDelegationX.fromProtoV2(mapping)
             case Mapping.DomainParametersState(mapping) =>
               DomainParametersStateX.fromProtoV2(mapping)
             case Mapping.MediatorDomainState(mapping) =>
@@ -99,6 +101,16 @@ class GrpcTopologyManagerWriteServiceX(
               SequencerDomainStateX.fromProtoV2(mapping)
             case Mapping.PartyToParticipant(mapping) =>
               PartyToParticipantX.fromProtoV2(mapping)
+            case Mapping.AuthorityOf(mapping) =>
+              AuthorityOfX.fromProtoV2(mapping)
+            case Mapping.DomainTrustCertificate(mapping) =>
+              DomainTrustCertificateX.fromProtoV2(mapping)
+            case Mapping.OwnerToKeyMapping(mapping) =>
+              OwnerToKeyMappingX.fromProtoV2(mapping)
+            case Mapping.VettedPackages(mapping) =>
+              VettedPackagesX.fromProtoV2(mapping)
+            case Mapping.ParticipantPermission(mapping) =>
+              ParticipantDomainPermissionX.fromProtoV2(mapping)
             case _ =>
               // TODO(#11255): match missing cases
               ???

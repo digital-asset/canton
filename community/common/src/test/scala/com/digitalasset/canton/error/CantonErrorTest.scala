@@ -110,10 +110,10 @@ class CantonErrorTest extends BaseTestWordSpec {
       val myAlarm = TestAlarmErrorCode.MyAlarm()
 
       val sre = myAlarm.asGrpcError
-      sre.getMessage shouldBe s"INVALID_ARGUMENT: ${LogEntry.SECURITY_SENSITIVE_MESSAGE_ON_API} <no-correlation-id>"
+      sre.getMessage shouldBe s"INVALID_ARGUMENT: ${LogEntry.SECURITY_SENSITIVE_MESSAGE_ON_API} <no-correlation-id> with tid <no-tid>"
 
       val status = sre.getStatus
-      status.getDescription shouldBe s"${LogEntry.SECURITY_SENSITIVE_MESSAGE_ON_API} <no-correlation-id>"
+      status.getDescription shouldBe s"${LogEntry.SECURITY_SENSITIVE_MESSAGE_ON_API} <no-correlation-id> with tid <no-tid>"
       status.getCode shouldBe Code.INVALID_ARGUMENT
       Option(status.getCause) shouldBe None
     }

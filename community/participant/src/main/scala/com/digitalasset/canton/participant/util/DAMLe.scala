@@ -277,7 +277,7 @@ class DAMLe(
         authorityResolver
           .resolve(
             AuthorityResolver
-              .AuthorityRequest(holding, requesting, domainId.map(_.toString))
+              .AuthorityRequest(holding, requesting, domainId.map(_.toProtoPrimitive))
           )
           .flatMap {
             case AuthorityResolver.AuthorityResponse.Authorized =>

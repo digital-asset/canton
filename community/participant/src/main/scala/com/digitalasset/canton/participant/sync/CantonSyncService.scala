@@ -634,7 +634,7 @@ class CantonSyncService(
     withSpan("CantonSyncService.uploadPackages") { implicit traceContext => span =>
       if (!isActive()) {
         logger.debug(s"Rejecting package upload on passive replica.")
-        Future.successful(TransactionError.NotSupported)
+        Future.successful(TransactionError.PassiveNode)
       } else {
         span.setAttribute("submission_id", submissionId)
         logger.debug(

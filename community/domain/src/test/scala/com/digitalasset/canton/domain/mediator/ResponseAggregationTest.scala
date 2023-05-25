@@ -42,10 +42,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val domainId = DefaultTestIdentities.domainId
     val mediatorId = DefaultTestIdentities.mediator
 
-    val alice = ConfirmingParty(LfPartyId.assertFromString("alice"), 3)
-    val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2)
+    val alice = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Ordinary)
+    val aliceVip = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Vip)
+    val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Ordinary)
+    val bobVip = ConfirmingParty(LfPartyId.assertFromString("bob"), 2, TrustLevel.Vip)
     val charlie = PlainInformee(LfPartyId.assertFromString("charlie"))
-    val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1)
+    val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1, TrustLevel.Ordinary)
     val solo = ParticipantId("solo")
     val uno = ParticipantId("uno")
     val duo = ParticipantId("duo")
@@ -80,6 +82,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         viewCommonData1,
         b(8),
         view1Subviews,
+        testedProtocolVersion,
+      )
+
+    val viewVip =
+      TransactionView.tryCreate(hashOps)(
+        ViewCommonData.create(hashOps)(
+          Set(aliceVip, bobVip, charlie),
+          NonNegativeInt.tryCreate(4),
+          salt(54171),
+          testedProtocolVersion,
+        ),
+        b(9),
+        emptySubviews,
         testedProtocolVersion,
       )
 
@@ -583,7 +598,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           b(0),
           commonMetadata,
           b(2),
-          MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(view1 :: Nil),
+          MerkleSeq.fromSeq(hashOps, testedProtocolVersion)(viewVip :: Nil),
         ),
         testedProtocolVersion,
       )
@@ -600,6 +615,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .thenReturn(Future.successful(true))
       when(topologySnapshotVip.canConfirm(eqTo(solo), eqTo(bob.party), eqTo(TrustLevel.Vip)))
         .thenReturn(Future.successful(false))
+      when(topologySnapshotVip.canConfirm(eqTo(solo), eqTo(bob.party), eqTo(TrustLevel.Ordinary)))
+        .thenReturn(Future.successful(true))
       when(topologySnapshotVip.canConfirm(eqTo(nonVip), any[LfPartyId], eqTo(TrustLevel.Vip)))
         .thenReturn(Future.successful(false))
       when(topologySnapshotVip.canConfirm(eqTo(nonVip), any[LfPartyId], eqTo(TrustLevel.Ordinary)))
@@ -613,21 +630,15 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           .futureValue
       val initialState =
         Map(
-          view1.viewHash -> ViewState(
-            Set(alice, bob),
-            Map(
+          viewVip.viewHash -> ViewState(
+            pendingConfirmingParties = Set(aliceVip, bobVip),
+            consortiumVoting = Map(
               alice.party -> ConsortiumVotingState(),
               bob.party -> ConsortiumVotingState(),
             ),
-            3,
-            Nil,
-          ),
-          view2.viewHash -> ViewState(
-            Set(bob),
-            Map(bob.party -> ConsortiumVotingState()),
-            2,
-            Nil,
-          ),
+            distanceToThreshold = viewVip.viewCommonData.tryUnwrap.threshold.unwrap,
+            rejections = Nil,
+          )
         )
 
       it("should have all pending confirming parties listed") {
@@ -637,7 +648,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       it("should reject non-VIP responses") {
         val response =
           mkResponse(
-            view1.viewHash,
+            viewVip.viewHash,
             LocalApprove(testedProtocolVersion),
             Set(alice.party, bob.party),
             rootHash,
@@ -692,7 +703,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       it("should accept VIP responses") {
         val changeTs = requestId.unwrap.plusSeconds(1)
         val response = mkResponse(
-          view1.viewHash,
+          viewVip.viewHash,
           LocalApprove(testedProtocolVersion),
           Set(alice.party),
           rootHash,
@@ -705,21 +716,15 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         result.state shouldBe
           Right(
             Map(
-              view1.viewHash -> ViewState(
-                Set(bob),
+              viewVip.viewHash -> ViewState(
+                Set(bobVip),
                 Map(
                   alice.party -> ConsortiumVotingState(approvals = Set(solo)),
                   bob.party -> ConsortiumVotingState(),
                 ),
-                0,
+                1,
                 Nil,
-              ),
-              view2.viewHash -> ViewState(
-                Set(bob),
-                Map(bob.party -> ConsortiumVotingState()),
-                2,
-                Nil,
-              ),
+              )
             )
           )
       }

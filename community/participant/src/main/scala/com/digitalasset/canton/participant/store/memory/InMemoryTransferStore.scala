@@ -230,7 +230,7 @@ class InMemoryTransferStore(
   }
 
   override def findIncomplete(
-      sourceDomain: SourceDomainId,
+      sourceDomain: Option[SourceDomainId],
       validAt: GlobalOffset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
@@ -247,7 +247,7 @@ class InMemoryTransferStore(
       onlyTransferOutCompleted(entry) || onlyTransferInCompleted(entry)
 
     def filter(entry: TransferEntry): Boolean = {
-      entry.transferData.sourceDomain == sourceDomain &&
+      sourceDomain.forall(_ == entry.transferData.sourceDomain) &&
       incompleteTransfer(entry) &&
       stakeholders.forall(_.exists(entry.transferData.contract.metadata.stakeholders))
     }

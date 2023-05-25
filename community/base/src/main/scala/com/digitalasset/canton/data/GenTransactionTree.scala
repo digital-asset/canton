@@ -6,6 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.MerkleTree.*
@@ -34,7 +35,12 @@ final case class GenTransactionTree private (
 )(hashOps: HashOps)
     extends MerkleTreeInnerNode[GenTransactionTree](hashOps) {
 
-  def validated: Either[String, this.type] = {
+  def validated: Either[String, this.type] = for {
+    _ <- checkUniqueHashes
+    _ <- commonMetadata.unwrap.leftMap(_ => "commonMetadata is blinded")
+  } yield this
+
+  private def checkUniqueHashes: Either[String, this.type] = {
     // Check that every subtree has a unique root hash
     val usedHashes = mutable.Set[RootHash]()
 
@@ -308,6 +314,9 @@ object GenTransactionTree {
           protoTransactionTree.commonMetadata,
           CommonMetadata.fromByteString(hashOps),
         )
+      commonMetadataUnblinded <- commonMetadata.unwrap.leftMap(_ =>
+        InvariantViolation("GenTransactionTree.commonMetadata is blinded")
+      )
       participantMetadata <- MerkleTree
         .fromProtoOptionV0(
           protoTransactionTree.participantMetadata,
@@ -316,7 +325,12 @@ object GenTransactionTree {
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
       rootViews <- MerkleSeq.fromProtoV0(
-        (hashOps, TransactionView.fromByteString(ProtoVersion(0))(hashOps)),
+        (
+          hashOps,
+          TransactionView.fromByteString(ProtoVersion(0))(
+            (hashOps, commonMetadataUnblinded.confirmationPolicy)
+          ),
+        ),
         rootViewsP,
       )
       genTransactionTree <- createGenTransactionTreeV0V1(
@@ -343,6 +357,9 @@ object GenTransactionTree {
           protoTransactionTree.commonMetadata,
           CommonMetadata.fromByteString(hashOps),
         )
+      commonMetadataUnblinded <- commonMetadata.unwrap.leftMap(_ =>
+        InvariantViolation("GenTransactionTree.commonMetadata is blinded")
+      )
       participantMetadata <- MerkleTree
         .fromProtoOptionV1(
           protoTransactionTree.participantMetadata,
@@ -353,7 +370,9 @@ object GenTransactionTree {
       rootViews <- MerkleSeq.fromProtoV1(
         (
           hashOps,
-          TransactionView.fromByteString(ProtoVersion(1))(hashOps),
+          TransactionView.fromByteString(ProtoVersion(1))(
+            (hashOps, commonMetadataUnblinded.confirmationPolicy)
+          ),
         ),
         rootViewsP,
       )

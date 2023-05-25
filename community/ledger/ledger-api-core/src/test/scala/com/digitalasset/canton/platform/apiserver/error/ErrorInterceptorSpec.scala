@@ -249,8 +249,7 @@ final class ErrorInterceptorSpec
     assertError(
       actual,
       expectedStatusCode = Status.Code.INTERNAL,
-      expectedMessage =
-        "An error occurred. Please contact the operator and inquire about the request <no-correlation-id>",
+      expectedMessage = BaseError.securitySensitiveMessage(None),
       expectedDetails = Seq(),
       verifyEmptyStackTrace = false,
     )

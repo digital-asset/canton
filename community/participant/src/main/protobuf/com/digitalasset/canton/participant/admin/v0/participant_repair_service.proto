@@ -5,31 +5,30 @@ syntax = "proto3";
 
 package com.digitalasset.canton.participant.admin.v0;
 
+import "com/digitalasset/canton/participant/admin/v0/domain_connectivity.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
-import "com/digitalasset/canton/participant/admin/v0/domain_connectivity.proto";
 
 // Moving ACS from one participant to another
 service ParticipantRepairService {
-    // get contracts for a party
-    rpc Download (DownloadRequest) returns (stream AcsSnapshotChunk);
+  // get contracts for a party
+  rpc Download(DownloadRequest) returns (stream AcsSnapshotChunk);
 
-    // upload contracts for a party
-    rpc Upload (stream UploadRequest) returns (UploadResponse);
+  // upload contracts for a party
+  rpc Upload(stream UploadRequest) returns (UploadResponse);
 
-    rpc MigrateDomain (MigrateDomainRequest) returns (MigrateDomainResponse);
+  rpc MigrateDomain(MigrateDomainRequest) returns (MigrateDomainResponse);
 }
 
 message DownloadRequest {
-    repeated string parties = 1;
-    string filter_domain_id = 2; // optional; exact match if set
-    google.protobuf.Timestamp timestamp = 3; // optional; take acs state for this timestamp
-    string protocol_version = 4; // optional; version of serialization to use
-    // Size of the byte chunks to stream back.
-    // Defaults to 2MB (half of the default gRPC max message size)
-    google.protobuf.UInt32Value chunkSize = 5;
-    bool gzip_format = 6;
-
+  repeated string parties = 1;
+  string filter_domain_id = 2; // optional; exact match if set
+  google.protobuf.Timestamp timestamp = 3; // optional; take acs state for this timestamp
+  string protocol_version = 4; // optional; version of serialization to use
+  // Size of the byte chunks to stream back.
+  // Defaults to 2MB (half of the default gRPC max message size)
+  google.protobuf.UInt32Value chunkSize = 5;
+  bool gzip_format = 6;
 }
 
 message AcsSnapshotChunk {
@@ -37,11 +36,10 @@ message AcsSnapshotChunk {
 }
 
 message UploadRequest {
-    bytes acs_snapshot = 1;
+  bytes acs_snapshot = 1;
 }
 
-message UploadResponse {
-}
+message UploadResponse {}
 
 message MigrateDomainRequest {
   // the alias of the source domain

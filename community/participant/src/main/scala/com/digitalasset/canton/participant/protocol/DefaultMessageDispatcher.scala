@@ -182,7 +182,7 @@ class DefaultMessageDispatcher(
         // Ordinary events
         case Left(Traced(e @ EventWithErrors(_content, _openingErrors, /* isIgnored */ false))) =>
           processOrdinary(Left(e))
-        case Right(OrdinarySequencedEvent(signedEvent)) =>
+        case Right(OrdinarySequencedEvent(signedEvent, _)) =>
           processOrdinary(Right(signedEvent))
 
         // Ignored events

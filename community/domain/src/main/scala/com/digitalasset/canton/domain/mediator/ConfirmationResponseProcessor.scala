@@ -450,8 +450,6 @@ private[mediator] class ConfirmationResponseProcessor(
   )(implicit
       loggingContext: ErrorLoggingContext
   ): EitherT[Future, MediatorReject, Unit] = {
-    val requiredTrustLevel = request.confirmationPolicy.requiredTrustLevel
-
     request.informeesAndThresholdByView.toList
       .parTraverse_ { case (viewHash, (informees, threshold)) =>
         // sorting parties to get deterministic error messages
@@ -465,7 +463,7 @@ private[mediator] class ConfirmationResponseProcessor(
                 canConfirm <- snapshot.isHostedByAtLeastOneParticipantF(
                   p.party,
                   attr =>
-                    attr.permission.canConfirm && attr.trustLevel.rank >= requiredTrustLevel.rank,
+                    attr.permission.canConfirm && attr.trustLevel.rank >= p.requiredTrustLevel.rank,
                 )
               } yield Either.cond(canConfirm, p, p)
             }
@@ -475,13 +473,20 @@ private[mediator] class ConfirmationResponseProcessor(
 
           _ <- EitherTUtil.condUnitET[Future][MediatorReject](
             authorized.map(_.weight).sum >= threshold.value, {
-              val unauthorizedPartiesHint =
-                if (unauthorized.nonEmpty)
-                  if (requiredTrustLevel == TrustLevel.Vip)
-                    show"\nParties without VIP participant: $unauthorized"
-                  else
-                    show"\nParties without participant having permission to confirm: $unauthorized"
+              // This partitioning is correct, because a VIP hosted party can always confirm.
+              // So if the required trust level is VIP, the problem must be the actual trust level.
+              val (insufficientTrustLevel, insufficientPermission) =
+                unauthorized.partition(_.requiredTrustLevel == TrustLevel.Vip)
+              val insufficientTrustLevelHint =
+                if (insufficientTrustLevel.nonEmpty)
+                  show"\nParties without VIP participant: ${insufficientTrustLevel.map(_.party)}"
                 else ""
+              val insufficientPermissionHint =
+                if (insufficientPermission.nonEmpty)
+                  show"\nParties without participant having permission to confirm: ${insufficientPermission
+                      .map(_.party)}"
+                else ""
+
               val authorizedPartiesHint =
                 if (authorized.nonEmpty) show"\nAuthorized parties: $authorized" else ""
 
@@ -489,7 +494,8 @@ private[mediator] class ConfirmationResponseProcessor(
                 .Reject(
                   s"Received a mediator request with id $requestId with insufficient authorized confirming parties for transaction view $viewHash. " +
                     s"Rejecting request. Threshold: $threshold." +
-                    unauthorizedPartiesHint +
+                    insufficientPermissionHint +
+                    insufficientTrustLevelHint +
                     authorizedPartiesHint,
                   v0.MediatorRejection.Code.NotEnoughConfirmingParties,
                   protocolVersion,

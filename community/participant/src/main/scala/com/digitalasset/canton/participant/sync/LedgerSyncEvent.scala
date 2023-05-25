@@ -7,6 +7,7 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.GrpcStatuses
 import com.daml.lf.data.{Bytes, ImmArray}
 import com.daml.lf.transaction.{BlindingInfo, CommittedTransaction}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.{
   CompletionInfo,
   DivulgedContract,
@@ -40,6 +41,7 @@ import com.digitalasset.canton.{
 import com.google.rpc.status.Status as RpcStatus
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*
+import monocle.macros.syntax.lens.*
 
 import scala.collection.immutable.HashMap
 
@@ -65,7 +67,7 @@ sealed trait LedgerSyncEvent extends Product with Serializable with PrettyPrinti
       case ev: LedgerSyncEvent.PartyAllocationRejected => ev.copy(recordTime = timestamp)
       case ev: LedgerSyncEvent.ConfigurationChanged => ev.copy(recordTime = timestamp)
       case ev: LedgerSyncEvent.ConfigurationChangeRejected => ev.copy(recordTime = timestamp)
-      case ev: LedgerSyncEvent.TransferredOut => ev.copy(recordTime = timestamp)
+      case ev: LedgerSyncEvent.TransferredOut => ev.updateRecordTime(newRecordTime = timestamp)
       case ev: LedgerSyncEvent.TransferredIn => ev.copy(recordTime = timestamp)
     }
 }
@@ -83,8 +85,7 @@ object LedgerSyncEvent {
       submissionId: LedgerSubmissionId,
       participantId: LedgerParticipantId,
       newConfiguration: LedgerConfiguration,
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override def description: String =
       s"Configuration change '$submissionId' from participant '$participantId' accepted with configuration: $newConfiguration"
 
@@ -104,8 +105,7 @@ object LedgerSyncEvent {
       participantId: LedgerParticipantId,
       proposedConfiguration: LedgerConfiguration,
       rejectionReason: String,
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override def description: String = {
       s"Configuration change '$submissionId' from participant '$participantId' was rejected: $rejectionReason"
     }
@@ -127,8 +127,7 @@ object LedgerSyncEvent {
       participantId: LedgerParticipantId,
       recordTime: LfTimestamp,
       submissionId: Option[LedgerSubmissionId],
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override def description: String =
       s"Add party '$party' to participant"
 
@@ -148,8 +147,7 @@ object LedgerSyncEvent {
       participantId: LedgerParticipantId,
       recordTime: LfTimestamp,
       rejectionReason: String,
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override val description: String =
       s"Request to add party to participant with submissionId '$submissionId' failed"
 
@@ -169,8 +167,7 @@ object LedgerSyncEvent {
       sourceDescription: Option[String],
       recordTime: LfTimestamp,
       submissionId: Option[LedgerSubmissionId],
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override def description: String =
       s"Public package upload: ${archives.map(_.getHash).mkString(", ")}"
 
@@ -189,8 +186,7 @@ object LedgerSyncEvent {
       submissionId: LedgerSubmissionId,
       recordTime: LfTimestamp,
       rejectionReason: String,
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override def description: String =
       s"Public package upload rejected, correlationId=$submissionId reason='$rejectionReason'"
 
@@ -213,8 +209,7 @@ object LedgerSyncEvent {
       divulgedContracts: List[DivulgedContract],
       blindingInfo: Option[BlindingInfo],
       contractMetadata: Map[LfContractId, Bytes],
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override def description: String = s"Accept transaction $transactionId"
 
     override def pretty: Pretty[TransactionAccepted] =
@@ -235,8 +230,7 @@ object LedgerSyncEvent {
       completionInfo: CompletionInfo,
       reasonTemplate: CommandRejected.FinalReason,
       kind: ProcessingSteps.RequestType.Values,
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+  ) extends LedgerSyncEvent {
     override def description: String =
       s"Reject command ${completionInfo.commandId}${if (definiteAnswer)
           " (definite answer)"}: ${reasonTemplate.message}"
@@ -277,47 +271,61 @@ object LedgerSyncEvent {
     }
   }
 
+  sealed trait TransferEvent extends LedgerSyncEvent {
+    def transferId: TransferId
+    def sourceDomain: SourceDomainId = transferId.sourceDomain
+    def targetDomain: TargetDomainId
+    def kind: String
+    def isTransferringParticipant: Boolean
+  }
+
   /** Signal the transfer-out of a contract from source to target domain.
     *
     * @param updateId              Uniquely identifies the update.
     * @param optCompletionInfo     Must be provided for the participant that submitted the transfer-out.
     * @param submitter             The partyId of the transfer submitter.
-    * @param recordTime            The ledger-provided timestamp at which the contract was transferred away.
+    * @param transferId            Uniquely identifies the transfer. See [[com.digitalasset.canton.protocol.TransferId]].
     * @param contractId            The contract-id that's being transferred-out.
     * @param templateId            The template-id of the contract that's being transferred-out.
-    * @param sourceDomainId        The source domain of the transfer.
-    * @param targetDomainId        The target domain of the transfer.
+    * @param targetDomain        The target domain of the transfer.
     * @param transferInExclusivity The timestamp of the timeout before which only the submitter can initiate the
     *                              corresponding transfer-in. Must be provided for the participant that submitted the transfer-out.
     * @param workflowId            The workflowId specified by the submitter in the transfer command.
+    * @param isTransferringParticipant True if the participant is transferring.
+    *                                  Note: false if the data comes from an old serialized event
     */
   final case class TransferredOut(
       updateId: LedgerTransactionId,
       optCompletionInfo: Option[CompletionInfo],
       submitter: LfPartyId,
-      recordTime: LfTimestamp,
       contractId: LfContractId,
       templateId: Option[LfTemplateId], // TODO(#9014): make this field not optional anymore
       contractStakeholders: Set[LfPartyId],
-      sourceDomainId: SourceDomainId,
-      targetDomainId: TargetDomainId,
+      transferId: TransferId,
+      targetDomain: TargetDomainId,
       transferInExclusivity: Option[LfTimestamp],
       workflowId: Option[LfWorkflowId],
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
+      isTransferringParticipant: Boolean,
+  ) extends TransferEvent {
+
+    override def recordTime: LfTimestamp = transferId.transferOutTimestamp.underlying
+
+    def updateRecordTime(newRecordTime: LfTimestamp): TransferredOut =
+      this.focus(_.transferId.transferOutTimestamp).replace(CantonTimestamp(newRecordTime))
 
     override def description: String =
-      s"transferred-out ${contractId} from $sourceDomainId to $targetDomainId"
+      s"transferred-out ${contractId} from $sourceDomain to $targetDomain"
+
+    override def kind: String = "out"
 
     override def pretty: Pretty[TransferredOut] = prettyOfClass(
       param("updateId", _.updateId),
       paramIfDefined("completionInfo", _.optCompletionInfo),
       param("submitter", _.submitter),
-      param("recordTime", _.recordTime),
+      param("transferId", _.transferId),
       param("contractId", _.contractId),
       paramIfDefined("templateId", _.templateId),
-      param("source", _.sourceDomainId),
-      param("target", _.targetDomainId),
+      param("target", _.targetDomain),
       paramIfDefined("transferInExclusivity", _.transferInExclusivity),
       paramIfDefined("workflowId", _.workflowId),
     )
@@ -334,13 +342,14 @@ object LedgerSyncEvent {
     * @param ledgerCreateTime          The ledger time of the transaction '''creating''' the contract
     * @param createNode                Denotes the creation of the contract being transferred-in.
     * @param contractMetadata          Contains contract metadata of the contract transferred assigned by the ledger implementation
-    * @param transferOutId             Uniquely identifies the transfer-out. See [[com.digitalasset.canton.protocol.TransferId]].
+    * @param transferId                Uniquely identifies the transfer. See [[com.digitalasset.canton.protocol.TransferId]].
     * @param targetDomain              The target domain of the transfer.
     * @param createTransactionAccepted We used to create a TransactionAccepted for the transferIn.
     *                                  This param is used to keep the same behavior.
     * @param workflowId                The workflowId specified by the submitter in the transfer command.
+    * @param isTransferringParticipant True if the participant is transferring.
+    *                                  Note: false if the data comes from an old serialized event
     */
-
   final case class TransferredIn(
       updateId: LedgerTransactionId,
       optCompletionInfo: Option[CompletionInfo],
@@ -350,13 +359,12 @@ object LedgerSyncEvent {
       createNode: LfNodeCreate,
       creatingTransactionId: LedgerTransactionId,
       contractMetadata: Bytes,
-      transferOutId: TransferId,
+      transferId: TransferId,
       targetDomain: TargetDomainId,
       createTransactionAccepted: Boolean,
       workflowId: Option[LfWorkflowId],
-  ) extends LedgerSyncEvent
-      with PrettyPrinting {
-    def sourceDomain: SourceDomainId = transferOutId.sourceDomain
+      isTransferringParticipant: Boolean,
+  ) extends TransferEvent {
 
     override def description: String =
       s"transferred-in ${createNode.coid} from $targetDomain to ${sourceDomain}"
@@ -366,13 +374,15 @@ object LedgerSyncEvent {
       paramIfDefined("optCompletionInfo", _.optCompletionInfo),
       param("submitter", _.submitter),
       param("recordTime", _.recordTime),
-      param("transferOutId", _.transferOutId),
+      param("transferId", _.transferId),
       param("target", _.targetDomain),
       paramWithoutValue("createNode"),
       paramWithoutValue("contractMetadata"),
       paramWithoutValue("createdEvent"),
       paramIfDefined("workflowId", _.workflowId),
     )
+
+    override def kind: String = "in"
 
     private lazy val transactionMeta: TransactionMeta = TransactionMeta(
       ledgerEffectiveTime = ledgerCreateTime,

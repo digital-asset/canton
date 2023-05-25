@@ -7,15 +7,15 @@ package com.digitalasset.canton.domain.api.v0;
 
 // Just used in tests
 service HelloService {
-    rpc Hello (Hello.Request) returns (Hello.Response) {}
-    rpc HelloStreamed (Hello.Request) returns (stream Hello.Response) {}
+  rpc Hello(Hello.Request) returns (Hello.Response) {}
+  rpc HelloStreamed(Hello.Request) returns (stream Hello.Response) {}
 }
 
 message Hello {
-    message Request {
-        string msg = 1;
-    }
-    message Response {
-        string msg = 1;
-    }
+  message Request {
+    string msg = 1;
+  }
+  message Response {
+    string msg = 1;
+  }
 }

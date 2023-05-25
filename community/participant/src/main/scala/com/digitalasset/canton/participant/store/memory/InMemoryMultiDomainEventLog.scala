@@ -42,6 +42,7 @@ import com.digitalasset.canton.participant.store.{
   MultiDomainEventLog,
   ParticipantEventLog,
   SingleDimensionEventLog,
+  TransferStore,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, TransactionEventId}
 import com.digitalasset.canton.participant.sync.{
@@ -52,6 +53,7 @@ import com.digitalasset.canton.participant.sync.{
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
+import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
@@ -77,6 +79,7 @@ class InMemoryMultiDomainEventLog(
     participantEventLogId: ParticipantEventLogId,
     clock: Clock,
     metrics: ParticipantMetrics,
+    override val transferStoreFor: TargetDomainId => Either[String, TransferStore],
     override val indexedStringStore: IndexedStringStore,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
@@ -120,78 +123,91 @@ class InMemoryMultiDomainEventLog(
     loggerFactory,
   )
 
-  override def publish(data: PublicationData): Future[Unit] = {
+  // Must run sequentially
+  private def publishInternal(data: PublicationData) = {
     implicit val traceContext: TraceContext = data.traceContext
     val PublicationData(id, event, inFlightReference) = data
     val localOffset = event.localOffset
+
+    // Since we're in an execution queue, we don't need the compare-and-set operations
+    val Entries(
+      firstOffset,
+      lastOffsetO,
+      lastLocalOffsets,
+      references,
+      referencesByOffset,
+      publicationTimeUpperBound,
+    ) = entriesRef.get()
+
+    if (references.contains((id, localOffset))) {
+      logger.info(
+        show"Skipping publication of event reference from event log $id with local offset $localOffset, as it has already been published."
+      )
+      Future.unit
+    } else if (lastLocalOffsets.get(id).forall(_ < localOffset)) {
+      val lastOffset = lastOffsetO.getOrElse(ledgerFirstOffset - 1)
+      val nextOffset = lastOffset + 1
+      val now = clock.monotonicTime()
+      val publicationTime = Ordering[CantonTimestamp].max(now, publicationTimeUpperBound)
+      if (now < publicationTime) {
+        logger.info(
+          s"Local participant clock at $now is before a previous publication time $publicationTime. Has the clock been reset, e.g., during participant failover?"
+        )
+      }
+      logger.debug(
+        show"Published event from event log $id with local offset $localOffset at global offset $nextOffset with publication time $publicationTime."
+      )
+      val newEntries = Entries(
+        firstOffset = firstOffset,
+        lastOffset = Some(nextOffset),
+        lastLocalOffsets = lastLocalOffsets + (id -> localOffset),
+        references = references + ((id, localOffset)),
+        referencesByOffset =
+          referencesByOffset + (nextOffset -> ((id, localOffset, publicationTime))),
+        publicationTimeUpperBound = publicationTime,
+      )
+      entriesRef.set(newEntries)
+
+      val notifyTransferF: Future[Unit] = event.event match {
+        case transfer: LedgerSyncEvent.TransferEvent if transfer.isTransferringParticipant =>
+          notifyOnPublishTransfer(transfer, nextOffset)
+
+        case _ => Future.unit
+      }
+
+      notifyTransferF.map { _ =>
+        dispatcher.signalNewHead(nextOffset) // new end index is inclusive
+        val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
+        val publication = OnPublish.Publication(
+          nextOffset,
+          publicationTime,
+          inFlightReference,
+          deduplicationInfo,
+          event.event,
+        )
+        notifyOnPublish(Seq(publication))
+
+        metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
+      }
+
+    } else {
+      ErrorUtil.internalError(
+        new IllegalArgumentException(
+          show"Unable to publish event at id $id and localOffset $localOffset, as that would reorder events."
+        )
+      )
+    }
+  }
+
+  override def publish(data: PublicationData): Future[Unit] = {
+    implicit val traceContext: TraceContext = data.traceContext
 
     // Overkill to use an executionQueue here, but it facilitates testing, because it
     // makes it behave similar to the DB version.
     FutureUtil.doNotAwait(
       executionQueue
-        .execute(
-          {
-            // Since we're in an execution queue, we don't need the compare-and-set operations
-            val Entries(
-              firstOffset,
-              lastOffsetO,
-              lastLocalOffsets,
-              references,
-              referencesByOffset,
-              publicationTimeUpperBound,
-            ) = entriesRef.get()
-
-            if (references.contains((id, localOffset))) {
-              logger.info(
-                show"Skipping publication of event reference from event log $id with local offset $localOffset, as it has already been published."
-              )
-            } else if (lastLocalOffsets.get(id).forall(_ < localOffset)) {
-              val lastOffset = lastOffsetO.getOrElse(ledgerFirstOffset - 1)
-              val nextOffset = lastOffset + 1
-              val now = clock.monotonicTime()
-              val publicationTime = Ordering[CantonTimestamp].max(now, publicationTimeUpperBound)
-              if (now < publicationTime) {
-                logger.info(
-                  s"Local participant clock at $now is before a previous publication time $publicationTime. Has the clock been reset, e.g., during participant failover?"
-                )
-              }
-              logger.debug(
-                show"Published event from event log $id with local offset $localOffset at global offset $nextOffset with publication time $publicationTime."
-              )
-              val newEntries = Entries(
-                firstOffset = firstOffset,
-                lastOffset = Some(nextOffset),
-                lastLocalOffsets = lastLocalOffsets + (id -> localOffset),
-                references = references + ((id, localOffset)),
-                referencesByOffset =
-                  referencesByOffset + (nextOffset -> ((id, localOffset, publicationTime))),
-                publicationTimeUpperBound = publicationTime,
-              )
-              entriesRef.set(newEntries)
-
-              dispatcher.signalNewHead(nextOffset) // new end index is inclusive
-              val deduplicationInfo = DeduplicationInfo.fromTimestampedEvent(event)
-              val publication = OnPublish.Publication(
-                nextOffset,
-                publicationTime,
-                inFlightReference,
-                deduplicationInfo,
-              )
-              notifyOnPublish(Seq(publication))
-
-              metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
-            } else {
-              ErrorUtil.internalError(
-                new IllegalArgumentException(
-                  show"Unable to publish event at id $id and localOffset $localOffset, as that would reorder events."
-                )
-              )
-            }
-            Future.unit
-          },
-          s"publish event $id",
-        )
-        .onShutdown(logger.debug(s"Publish event $id aborted due to shutdown")),
+        .execute(publishInternal(data), s"publish event ${data.event}")
+        .onShutdown(logger.debug(s"Publish event ${data.event} aborted due to shutdown")),
       "An exception occurred while publishing an event. Stop publishing events.",
     )
     Future.unit
@@ -357,6 +373,18 @@ class InMemoryMultiDomainEventLog(
       }
       .map(_.sortBy { case (globalOffset, _) => globalOffset })
 
+  override def lookupByGlobalOffsets(offsets: Seq[GlobalOffset])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[(GlobalOffset, TimestampedEvent)]] = {
+    val entries = entriesRef.get()
+    val references =
+      offsets.map(globalOffset => globalOffset -> entries.referencesByOffset(globalOffset))
+
+    references.toList.parTraverse { case (globalOffset, (id, localOffset, _processingTime)) =>
+      lookupEvent(namedLoggingContext)(id, localOffset).map(globalOffset -> _)
+    }
+  }
+
   override def lookupTransactionDomain(
       transactionId: LedgerTransactionId
   )(implicit traceContext: TraceContext): OptionT[Future, DomainId] =
@@ -512,6 +540,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
       participantEventLog: ParticipantEventLog,
       clock: Clock,
       timeouts: ProcessingTimeout,
+      transferStoreFor: TargetDomainId => Either[String, TransferStore],
       indexedStringStore: IndexedStringStore,
       metrics: ParticipantMetrics,
       futureSupervisor: FutureSupervisor,
@@ -531,6 +560,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
       participantEventLog.id,
       clock,
       metrics,
+      transferStoreFor,
       indexedStringStore,
       timeouts,
       futureSupervisor,

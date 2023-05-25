@@ -18,6 +18,7 @@ import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.*
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
@@ -93,6 +94,16 @@ final case class SignedTopologyTransactionX[+Op <: TopologyChangeOpX, +M <: Topo
     )
 
   def restrictedToDomain: Option[DomainId] = transaction.mapping.restrictedToDomain
+
+  @VisibleForTesting
+  def copy[Op2 <: TopologyChangeOpX, M2 <: TopologyMappingX](
+      transaction: TopologyTransactionX[Op2, M2] = this.transaction,
+      signatures: NonEmpty[Set[Signature]] = this.signatures,
+      isProposal: Boolean = this.isProposal,
+  ): SignedTopologyTransactionX[Op2, M2] =
+    new SignedTopologyTransactionX[Op2, M2](transaction, signatures, isProposal)(
+      representativeProtocolVersion
+    )
 }
 
 object SignedTopologyTransactionX

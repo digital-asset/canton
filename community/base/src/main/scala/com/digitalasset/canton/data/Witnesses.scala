@@ -7,7 +7,12 @@ import cats.data.EitherT
 import cats.syntax.foldable.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, Recipients, RecipientsTree}
+import com.digitalasset.canton.sequencing.protocol.{
+  MemberRecipient,
+  ParticipantsOfParty,
+  Recipients,
+  RecipientsTree,
+}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
 
@@ -30,19 +35,43 @@ final case class Witnesses(unwrap: NonEmpty[Seq[Set[Informee]]]) {
     for {
       recipientsList <- unwrap.forgetNE.foldLeftM(Seq.empty[RecipientsTree]) {
         (children, informees) =>
+          val parties = informees.map(_.party).toList
           for {
-            informeeParticipants <- topology
-              .activeParticipantsOfAll(informees.map(_.party).toList)
-              .leftMap(missing =>
-                InvalidWitnesses(s"Found no active participants for informees: $missing")
+            informeeParticipants <- EitherT
+              .right[InvalidWitnesses](
+                topology
+                  .activeParticipantsOfParties(parties)
               )
-            informeeParticipantSet <- EitherT.fromOption[Future](
-              NonEmpty.from(informeeParticipants.toSet[Member]),
+            _ <- {
+              val informeesWithNoActiveParticipants =
+                informeeParticipants
+                  .collect {
+                    case (party, participants) if participants.isEmpty => party
+                  }
+              EitherT.cond[Future](
+                informeesWithNoActiveParticipants.isEmpty,
+                (),
+                InvalidWitnesses(
+                  s"Found no active participants for informees: $informeesWithNoActiveParticipants"
+                ),
+              )
+            }
+            partiesWithGroupAddressing <- EitherT.right(
+              topology.partiesWithGroupAddressing(parties)
+            )
+            recipients = informeeParticipants.toList.flatMap { case (party, participants) =>
+              if (partiesWithGroupAddressing.contains(party))
+                Seq(ParticipantsOfParty(PartyId.tryFromLfParty(party)))
+              else
+                participants.map(MemberRecipient)
+            }.toSet
+
+            informeeRecipientSet <- EitherT.fromOption[Future](
+              NonEmpty.from(recipients),
               InvalidWitnesses(s"Empty set of witnesses given"),
             )
           } yield Seq(
-            // TODO(#12382): support group addressing for informees
-            RecipientsTree(informeeParticipantSet.map(MemberRecipient), children)
+            RecipientsTree(informeeRecipientSet, children)
           )
       }
       // recipientsList is non-empty, because unwrap is.

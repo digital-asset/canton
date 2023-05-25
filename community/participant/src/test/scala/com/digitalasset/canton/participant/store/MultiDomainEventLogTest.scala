@@ -38,6 +38,7 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEvent,
 }
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
+import com.digitalasset.canton.protocol.TargetDomainId
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{Clock, SimClock}
@@ -66,7 +67,7 @@ trait MultiDomainEventLogTest
   protected lazy val participantEventLogId: ParticipantEventLogId =
     DbEventLogTestResources.dbMultiDomainEventLogTestParticipantEventLogId
 
-  private lazy val domainIds: List[DomainId] = for (i <- (0 to 2).toList) yield {
+  protected lazy val domainIds: List[DomainId] = for (i <- (0 to 2).toList) yield {
     DomainId.tryFromString(s"MultiDomainEventLogTest::domain$i")
   }
 
@@ -74,6 +75,8 @@ trait MultiDomainEventLogTest
     domainIds.map(EventLogId.forDomain(indexedStringStore)(_).futureValue)
 
   private lazy val eventLogIds: List[EventLogId] = domainEventLogIds :+ participantEventLogId
+
+  protected def transferStores: Map[TargetDomainId, TransferStore]
 
   private def timestampAtRc(rc: Long): CantonTimestamp = CantonTimestamp.assertFromLong(rc * 1000)
 
@@ -158,9 +161,6 @@ trait MultiDomainEventLogTest
   )
   private lazy val recoveryPublicationTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(30)
 
-  private lazy val invalidRecoveryBound: (EventLogId, Option[LocalOffset]) =
-    eventLogIds(3) -> Some(1)
-
   private lazy val testEventsForRecoveredEventLog
       : Seq[(EventLogId, TimestampedEvent, Option[InFlightReference])] =
     allTestEvents.slice(0, 8)
@@ -228,7 +228,7 @@ trait MultiDomainEventLogTest
     super.afterAll()
   }
 
-  def multiDomainEventLog(mk: Clock => MultiDomainEventLog): Unit = {
+  private[store] def multiDomainEventLog(mk: Clock => MultiDomainEventLog): Unit = {
     val clock = new SimClock(loggerFactory = loggerFactory)
 
     def eventLog: MultiDomainEventLog = blocking {
