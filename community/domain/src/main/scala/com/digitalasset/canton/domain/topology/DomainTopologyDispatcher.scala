@@ -259,11 +259,6 @@ private[domain] class DomainTopologyDispatcher(
       // the queue stats are correct, while just on startup, they might be a bit too low
       inflight.updateAndGet(x => Math.max(0, x - transactions.size)).discard
     }
-    override def updateHead(
-        effectiveTimestamp: EffectiveTime,
-        approximateTimestamp: ApproximateTime,
-        potentialTopologyChange: Boolean,
-    )(implicit traceContext: TraceContext): Unit = {}
   })
 
   private def updateTopologyClientTs(timestamp: CantonTimestamp)(implicit

@@ -9,6 +9,7 @@ import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.lf.data.Ref.PackageId
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -17,7 +18,7 @@ import scala.concurrent.Future
   */
 trait IndexPackagesService {
   def listLfPackages()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Map[PackageId, PackageDetails]]
 
   def getLfArchive(

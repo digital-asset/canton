@@ -9,6 +9,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.error.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, InitConfigBase}
@@ -64,6 +65,7 @@ import com.digitalasset.canton.protocol.{
   StaticDomainParameters,
 }
 import com.digitalasset.canton.resource.{CommunityStorageFactory, Storage}
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.{grpc as _, *}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
@@ -225,9 +227,7 @@ class DomainNodeBootstrap(
         // as all methods above are idempotent, if we die during initialisation, we should come back here
         // and resume until we've stored the node id
         _ <- storeId(nodeId).mapK(FutureUnlessShutdown.outcomeK)
-        _ <- startDomain(topologyManager, staticDomainParametersFromConfig).mapK(
-          FutureUnlessShutdown.outcomeK
-        )
+        _ <- startDomain(topologyManager, staticDomainParametersFromConfig)
       } yield ()
     }
 
@@ -331,7 +331,7 @@ class DomainNodeBootstrap(
     EitherT.pure(())
   }
 
-  override protected def initialize(id: NodeId): EitherT[Future, String, Unit] = {
+  override protected def initialize(id: NodeId): EitherT[FutureUnlessShutdown, String, Unit] = {
     for {
       // TODO(#11052) fix node initialization such that we don't store "inconsistent" init data
       //    domain nodes get first initialized with init_id and then subsequently they get initialized
@@ -343,9 +343,11 @@ class DomainNodeBootstrap(
           _.fold(staticDomainParametersFromConfig)(_.staticDomainParameters)
         )
         .leftMap(_.toString)
-      manager <- EitherT.fromEither[Future](
-        initializeIdentityManagerAndServices(id, staticDomainParameters)
-      )
+        .mapK(FutureUnlessShutdown.outcomeK)
+      manager <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          initializeIdentityManagerAndServices(id, staticDomainParameters)
+        )
       _ <- startIfDomainManagerReadyOrDefer(manager, staticDomainParameters)
     } yield ()
   }
@@ -365,8 +367,8 @@ class DomainNodeBootstrap(
   private def startIfDomainManagerReadyOrDefer(
       manager: DomainTopologyManager,
       staticDomainParameters: StaticDomainParameters,
-  ): EitherT[Future, String, Unit] = {
-    def deferStart: EitherT[Future, String, Unit] = {
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    def deferStart: EitherT[FutureUnlessShutdown, String, Unit] = {
       logger.info("Deferring domain startup until domain manager has been fully initialized")
       manager.addObserver(new DomainIdentityStateObserver {
         val attemptedStart = new AtomicBoolean(false)
@@ -386,7 +388,9 @@ class DomainNodeBootstrap(
                 // we're now the top level error handler of starting a domain so log appropriately
                 val domainStarted =
                   initTimeout.await("Domain startup awaiting domain ready to handle requests")(
-                    startDomain(manager, staticDomainParameters).value
+                    startDomain(manager, staticDomainParameters).value.onShutdown(
+                      Left("Aborted startup due to shutdown")
+                    )
                   )
                 domainStarted match {
                   case Left(error) =>
@@ -398,12 +402,13 @@ class DomainNodeBootstrap(
           }
         }
       })
-      EitherT.pure[Future, String](())
+      EitherT.pure[FutureUnlessShutdown, String](())
     }
-
     for {
       // if the domain is starting up after previously running its identity will have been stored and will be immediately available
-      alreadyInitialized <- EitherT.right(manager.isInitialized(mustHaveActiveMediator = true))
+      alreadyInitialized <- EitherT
+        .right(manager.isInitialized(mustHaveActiveMediator = true))
+        .mapK(FutureUnlessShutdown.outcomeK)
       // if not, then create an observer of topology transactions that will check each time whether full identity has been generated
       _ <- if (alreadyInitialized) startDomain(manager, staticDomainParameters) else deferStart
     } yield ()
@@ -413,8 +418,8 @@ class DomainNodeBootstrap(
   private def startDomain(
       manager: DomainTopologyManager,
       staticDomainParameters: StaticDomainParameters,
-  ): EitherT[Future, String, Unit] =
-    startInstanceUnlessClosing {
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    startInstanceUnlessClosing(performUnlessClosingEitherU(functionFullName) {
       // store with all topology transactions which were timestamped and distributed via sequencer
       val domainId = manager.id.domainId
       val sequencedTopologyStore =
@@ -577,7 +582,7 @@ class DomainNodeBootstrap(
           crypto.value,
           syncCrypto,
           sequencedTopologyStore,
-          publicSequencerConnection,
+          SequencerConnections.default(publicSequencerConnection),
           manager,
           domainIdentityService,
           topologyManagerSequencerCounterTrackerStore,
@@ -601,7 +606,7 @@ class DomainNodeBootstrap(
           config.timeTracker,
           storage,
           sequencerClientFactoryFactory,
-          publicSequencerConnection,
+          SequencerConnections.default(publicSequencerConnection),
           arguments.metrics,
           mediatorFactory,
           indexedStringStore,
@@ -628,7 +633,7 @@ class DomainNodeBootstrap(
           )
         }
       } yield domain
-    }
+    })
 
   override def isActive: Boolean = true
 

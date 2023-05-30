@@ -39,6 +39,7 @@ import com.digitalasset.canton.ledger.api.validation.ValidationErrors
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
@@ -169,7 +170,7 @@ private[apiserver] final class ApiPartyManagementService private (
 
   override def allocateParty(request: AllocatePartyRequest): Future[AllocatePartyResponse] = {
     val submissionId = submissionIdGenerator(request.partyIdHint)
-    withEnrichedLoggingContext(
+    LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
       logging.partyString(request.partyIdHint),
       logging.submissionId(submissionId),
       traceId(telemetry.traceIdFromGrpcContext),
@@ -370,6 +371,60 @@ private[apiserver] final class ApiPartyManagementService private (
     }
   }
 
+  override def updatePartyIdentityProviderId(
+      request: UpdatePartyIdentityProviderRequest
+  ): Future[UpdatePartyIdentityProviderResponse] = {
+    withEnrichedLoggingContext(
+      traceId(telemetry.traceIdFromGrpcContext)
+    ) { implicit loggingContext =>
+      logger.info("Updating party identity provider")
+      implicit val errorLogger: DamlContextualizedErrorLogger =
+        new DamlContextualizedErrorLogger(logger, loggingContext, None)
+      withValidation {
+        for {
+          party <- requireParty(request.party)
+          sourceIdentityProviderId <- optionalIdentityProviderId(
+            request.sourceIdentityProviderId,
+            "source_identity_provider_id",
+          )
+          targetIdentityProviderId <- optionalIdentityProviderId(
+            request.targetIdentityProviderId,
+            "target_identity_provider_id",
+          )
+        } yield (party, sourceIdentityProviderId, targetIdentityProviderId)
+      } { case (party, sourceIdentityProviderId, targetIdentityProviderId) =>
+        for {
+          _ <- identityProviderExistsOrError(sourceIdentityProviderId)
+          _ <- identityProviderExistsOrError(targetIdentityProviderId)
+          fetchedPartyDetailsO <- partyManagementService
+            .getParties(parties = Seq(party))
+            .map(_.headOption)
+          _ <- fetchedPartyDetailsO match {
+            case Some(_) => Future.unit
+            case None =>
+              Future.failed(
+                LedgerApiErrors.Admin.PartyManagement.PartyNotFound
+                  .Reject(
+                    operation = "updating party's identity provider",
+                    party = party,
+                  )
+                  .asGrpcError
+              )
+          }
+          result <- partyRecordStore
+            .updatePartyRecordIdp(
+              party = party,
+              ledgerPartyIsLocal = fetchedPartyDetailsO.exists(_.isLocal),
+              sourceIdp = sourceIdentityProviderId,
+              targetIdp = targetIdentityProviderId,
+            )
+            .flatMap(handlePartyRecordStoreResult("updating party's identity provider"))
+            .map(_ => UpdatePartyIdentityProviderResponse())
+        } yield result
+      }
+    }
+  }
+
   // Check if party either doesn't exist or exists and belongs to the requested Identity Provider
   private def verifyPartyIsNonExistentOrInIdp(
       identityProviderId: IdentityProviderId,
@@ -477,11 +532,6 @@ private[apiserver] final class ApiPartyManagementService private (
               .asGrpcError
           )
       }
-
-  // TODO (i13051): Implement IDP reassignment
-  override def updateUserIdentityProviderId(
-      request: UpdatePartyIdentityProviderRequest
-  ): Future[UpdatePartyIdentityProviderResponse] = ???
 }
 
 private[apiserver] object ApiPartyManagementService {
@@ -590,6 +640,8 @@ private[apiserver] object ApiPartyManagementService {
 
     override def reject(
         submissionId: Ref.SubmissionId
+    )(implicit
+        loggingContext: LoggingContextWithTrace
     ): PartialFunction[PartyEntry, StatusRuntimeException] = {
       case PartyEntry.AllocationRejected(`submissionId`, reason) =>
         ValidationErrors.invalidArgument(reason)(

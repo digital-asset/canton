@@ -183,7 +183,6 @@ class ApiPartyManagementServiceSpec
                   Map(
                     "parties" -> "['aParty']",
                     "submissionId" -> "'aSubmission'",
-                    "tid" -> "''",
                     "category" -> "1",
                     "definite_answer" -> "false",
                   ),

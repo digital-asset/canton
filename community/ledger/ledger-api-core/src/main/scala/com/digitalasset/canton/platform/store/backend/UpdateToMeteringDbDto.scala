@@ -8,8 +8,9 @@ import com.daml.metrics.IndexedUpdatesMetrics
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.participant.state.v2.Update.TransactionAccepted
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.tracing.Traced
 
 object UpdateToMeteringDbDto {
 
@@ -18,7 +19,7 @@ object UpdateToMeteringDbDto {
       metrics: IndexedUpdatesMetrics,
   )(implicit
       mc: MetricsContext
-  ): Iterable[(Offset, state.Update)] => Vector[DbDto.TransactionMetering] = input => {
+  ): Iterable[(Offset, Traced[Update])] => Vector[DbDto.TransactionMetering] = input => {
 
     val time = clock()
 
@@ -29,7 +30,7 @@ object UpdateToMeteringDbDto {
       val ledgerOffset = input.last._1.toHexString
 
       (for {
-        optCompletionInfo <- input.collect { case (_, ta: TransactionAccepted) =>
+        optCompletionInfo <- input.collect { case (_, Traced(ta: TransactionAccepted)) =>
           ta.optCompletionInfo
         }
         ci <- optCompletionInfo.iterator

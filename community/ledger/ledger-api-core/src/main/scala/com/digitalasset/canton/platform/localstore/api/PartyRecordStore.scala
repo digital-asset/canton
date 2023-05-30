@@ -35,6 +35,13 @@ trait PartyRecordStore {
       loggingContext: LoggingContext
   ): Future[Result[PartyRecord]]
 
+  def updatePartyRecordIdp(
+      party: Ref.Party,
+      ledgerPartyIsLocal: Boolean,
+      sourceIdp: IdentityProviderId,
+      targetIdp: IdentityProviderId,
+  )(implicit loggingContext: LoggingContext): Future[Result[PartyRecord]]
+
   def getPartyRecordO(party: Ref.Party)(implicit
       loggingContext: LoggingContext
   ): Future[Result[Option[PartyRecord]]]

@@ -25,6 +25,7 @@ import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SimpleExecutionQueue
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
@@ -63,6 +64,9 @@ class TopologyManagerX(
   private val observers = new AtomicReference[Seq[TopologyManagerObserver]](Seq.empty)
   def addObserver(observer: TopologyManagerObserver): Unit =
     observers.updateAndGet(_ :+ observer).discard
+
+  @VisibleForTesting
+  def clearObservers(): Unit = observers.set(Seq.empty)
 
   /** Authorizes a new topology transaction by signing it and adding it to the topology state
     *
@@ -155,12 +159,12 @@ class TopologyManagerX(
         logger.warn(
           s"found more than one valid mapping for unique key ${mapping.uniqueKey} of type ${mapping.code}"
         )
-      existingMapping = existingTransactions
+      existingTransaction = existingTransactions
         .sortBy(_.transaction.serial)
         .lastOption
-        .map(t => (t.transaction.mapping, t.transaction.serial))
+        .map(t => (t.transaction.op, t.transaction.mapping, t.transaction.serial))
 
-      theSerial <- ((existingMapping, serial) match {
+      theSerial <- ((existingTransaction, serial) match {
         case (None, proposedO) =>
           // didn't find an existing transaction, therefore the proposed serial must be 1
           EitherT.cond[Future][TopologyManagerError, PositiveInt](
@@ -171,7 +175,7 @@ class TopologyManagerX(
             ),
           )
 
-        case (Some((`mapping`, existingSerial)), proposedO) =>
+        case (Some((`op`, `mapping`, existingSerial)), proposedO) =>
           // TODO(#11255) existing mapping and the proposed mapping are the same. does this only add a (superfluous) signature?
           //              maybe we should reject this proposal, but for now we need this to pass through successfully, because we don't
           //              support proper topology transaction validation yet, especially not for multi-sig transactions.
@@ -183,7 +187,7 @@ class TopologyManagerX(
             ),
           )
 
-        case (Some((_, existingSerial)), proposedO) =>
+        case (Some((_, _, existingSerial)), proposedO) =>
           // check that the proposed serial matches existing+1 or auto-select existing+1
           val next = existingSerial + PositiveInt.one
           EitherT.cond[Future](

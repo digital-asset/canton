@@ -29,6 +29,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.indexer.{Indexer, IndexerServiceOwner, JdbcIndexer}
+import com.digitalasset.canton.tracing.Traced
 import org.slf4j.LoggerFactory
 
 import java.util.concurrent.{Executors, TimeUnit}
@@ -40,7 +41,7 @@ import scala.io.StdIn
 class IndexerBenchmark() {
 
   def run(
-      createUpdates: () => Future[Source[(Offset, Update), NotUsed]],
+      createUpdates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
       config: Config,
   ): Future[Unit] = {
     newLoggingContext { implicit loggingContext =>
@@ -163,7 +164,7 @@ class IndexerBenchmark() {
   }
 
   private[this] def createReadService(
-      updates: Source[(Offset, Update), NotUsed]
+      updates: Source[(Offset, Traced[Update]), NotUsed]
   ): ReadService = {
     val initialConditions = LedgerInitialConditions(
       IndexerBenchmark.LedgerId,
@@ -182,7 +183,7 @@ class IndexerBenchmark() {
 
       override def stateUpdates(
           beginAfter: Option[Offset]
-      )(implicit loggingContext: LoggingContext): Source[(Offset, Update), NotUsed] = {
+      )(implicit loggingContext: LoggingContext): Source[(Offset, Traced[Update]), NotUsed] = {
         assert(beginAfter.isEmpty, s"beginAfter is $beginAfter")
         updates
       }
@@ -200,7 +201,7 @@ object IndexerBenchmark {
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def runAndExit(
       config: Config,
-      updates: () => Future[Source[(Offset, Update), NotUsed]],
+      updates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
   ): Unit = {
     val result: Future[Unit] = new IndexerBenchmark()
       .run(updates, config)

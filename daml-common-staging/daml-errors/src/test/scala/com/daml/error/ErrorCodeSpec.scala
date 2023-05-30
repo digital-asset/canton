@@ -78,7 +78,8 @@ class ErrorCodeSpec
         testMinimalGrpcStatus(
           new NoLogging(
             properties = Map.empty,
-            correlationId = None,
+            // correlationId should be the traceId when not set
+            correlationId = Some("123traceId"),
             traceId = Some("123traceId"),
           )
         )
@@ -254,8 +255,8 @@ class ErrorCodeSpec
               "definite_answer" -> "false",
               "loggingEntryKey" -> "loggingEntryValue",
               "loggingEntryValueTooBig" -> ("x" * 474 + "..."),
-              ("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") -> "loggingEntryKeyTooBig",
-              ("yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy") -> ("y" * 1321 + "..."),
+              "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" -> "loggingEntryKeyTooBig",
+              "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy" -> ("y" * 1321 + "..."),
             ),
           ),
         requestInfo,
@@ -297,7 +298,9 @@ class ErrorCodeSpec
       ErrorDetails
         .ErrorInfoDetail(
           testedErrorCode.id,
-          Map("category" -> testedErrorCode.category.asInt.toString),
+          Map(
+            "category" -> testedErrorCode.category.asInt.toString
+          ) ++ errorLoggerSmall.traceId.fold(Map.empty[String, String])(tid => Map("tid" -> tid)),
         )
     ) ++ id
       .map(correlationId =>

@@ -117,6 +117,45 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
     } yield updatedPartyRecord
   }
 
+  override def updatePartyRecordIdp(
+      party: Party,
+      ledgerPartyIsLocal: Boolean,
+      sourceIdp: IdentityProviderId,
+      targetIdp: IdentityProviderId,
+  )(implicit loggingContext: LoggingContext): Future[Result[PartyRecord]] = {
+    withState {
+      state.get(party) match {
+        case Some(info) =>
+          if (info.identityProviderId != sourceIdp) {
+            Left(PartyRecordStore.PartyNotFound(party = party))
+          } else {
+            val updatedInfo = info.copy(identityProviderId = targetIdp)
+            state.put(party, updatedInfo).discard
+            Right(toPartyRecord(updatedInfo))
+          }
+        case None =>
+          if (ledgerPartyIsLocal) {
+            // When party record doesn't exist
+            // it implicitly means that the party belongs to the default idp.
+            if (sourceIdp != IdentityProviderId.Default) {
+              Left(PartyRecordStore.PartyNotFound(party = party))
+            } else {
+              val newPartyRecord = PartyRecord(
+                party = party,
+                metadata = domain.ObjectMeta.empty,
+                identityProviderId = targetIdp,
+              )
+              for {
+                info <- doCreatePartyRecord(newPartyRecord)
+              } yield toPartyRecord(info)
+            }
+          } else {
+            Left(PartyRecordStore.PartyNotFound(party))
+          }
+      }
+    }
+  }
+
   private def doUpdatePartyRecord(
       partyRecordUpdate: PartyRecordUpdate,
       party: Party,

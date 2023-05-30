@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.domain.grpc
 
 import cats.data.EitherT
+import com.digitalasset.canton.common.domain.DomainTopologyService
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.UnlessShutdown
-import com.digitalasset.canton.participant.domain.ParticipantDomainTopologyService
 import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   RegisterTopologyTransactionRequest,
@@ -102,7 +102,7 @@ class ParticipantDomainTopologyServiceTest
       .thenReturn(EitherT.pure[Future, SendAsyncClientError](()))
 
     "send request to IDM and wait to process response" in {
-      val sut = new ParticipantDomainTopologyService(
+      val sut = new DomainTopologyService(
         domainId,
         sendRequest,
         testedProtocolVersion,
@@ -127,7 +127,7 @@ class ParticipantDomainTopologyServiceTest
       } yield succeed
     }
     "send request to IDM and handle closing before response arrives" in {
-      val sut = new ParticipantDomainTopologyService(
+      val sut = new DomainTopologyService(
         domainId,
         sendRequest,
         testedProtocolVersion,

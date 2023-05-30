@@ -72,6 +72,11 @@ trait UserManagementStore {
       implicit loggingContext: LoggingContext
   ): Future[Result[Set[UserRight]]]
 
+  def updateUserIdp(
+      id: Ref.UserId,
+      sourceIdp: IdentityProviderId,
+      targetIdp: IdentityProviderId,
+  )(implicit loggingContext: LoggingContext): Future[Result[User]]
   // read helpers
 
   // TODO(#13019) Replace parasitic with DirectExecutionContext

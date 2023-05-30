@@ -245,7 +245,7 @@ class ParticipantNodeBootstrapX(
               PartyToParticipantX(
                 partyId,
                 None,
-                threshold = 1,
+                threshold = PositiveInt.one,
                 participants =
                   Seq(HostingParticipant(participantId, ParticipantPermissionX.Submission)),
                 groupAddressing = false,
@@ -287,6 +287,7 @@ class ParticipantNodeBootstrapX(
           partyMetadataStore,
           clock,
           arguments.futureSupervisor,
+          mustTrackSubmissionIds = true,
           parameterConfig.processingTimeouts,
           loggerFactory,
         )

@@ -18,7 +18,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressingLogger
-import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.{
   PackageService,
   ResourceManagementService,
@@ -42,6 +41,10 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManager,
 }
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.participant.{
+  DefaultParticipantStateValues,
+  ParticipantNodeParameters,
+}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
@@ -187,6 +190,14 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       when(f.participantEventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext))
         .thenReturn(FutureUnlessShutdown.unit)
 
+      when(
+        f.partyNotifier.expectPartyAllocationForXNodes(
+          any[PartyId],
+          any[ParticipantId],
+          any[String255],
+        )
+      ).thenReturn(Right(()))
+
       val lfInputPartyId = LfPartyId.assertFromString("desiredPartyName")
       val partyId =
         PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"${lfInputPartyId.toString}::default"))
@@ -236,8 +247,8 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       builder.add(createNode)
 
       lazy val event = TransactionAccepted(
-        optCompletionInfo = DefaultDamlValues.completionInfo(List.empty).some,
-        transactionMeta = DefaultDamlValues.transactionMeta(),
+        optCompletionInfo = DefaultParticipantStateValues.completionInfo(List.empty).some,
+        transactionMeta = DefaultParticipantStateValues.transactionMeta(),
         transaction = CommittedTransaction.subst[Id](builder.build()),
         transactionId = DefaultDamlValues.lfTransactionId(1),
         recordTime = CantonTimestamp.Epoch.toLf,

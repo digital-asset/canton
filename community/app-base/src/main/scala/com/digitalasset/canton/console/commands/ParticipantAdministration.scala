@@ -60,9 +60,9 @@ import com.digitalasset.canton.protocol.{
   TransferId,
 }
 import com.digitalasset.canton.sequencing.{
-  GrpcSequencerConnection,
   PossiblyIgnoredProtocolEvent,
   SequencerConnection,
+  SequencerConnections,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -70,7 +70,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.{DiscardOps, DomainAlias, LedgerApplicationId}
+import com.digitalasset.canton.{DiscardOps, DomainAlias, LedgerApplicationId, SequencerAlias}
 
 import java.time.Instant
 import java.util.UUID
@@ -111,9 +111,10 @@ private[console] object ParticipantCommands {
         priority: Int = 0,
     ): DomainConnectionConfig = {
       val domainAlias = alias.getOrElse(DomainAlias.tryCreate(domain.name))
+      val connection = domain.sequencerConnection
       DomainConnectionConfig(
         domainAlias,
-        domain.sequencerConnection,
+        SequencerConnections.default(connection),
         manualConnect = manualConnect,
         None,
         priority,
@@ -142,6 +143,7 @@ private[console] object ParticipantCommands {
         }
       }
       DomainConnectionConfig.grpc(
+        SequencerAlias.Default,
         domainAlias,
         connection,
         manualConnect,
@@ -1176,10 +1178,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         register(config.copy(manualConnect = true))
         if (!config.manualConnect) {
           // fetch and confirm domain agreement
-          config.sequencerConnection match {
-            case _: GrpcSequencerConnection =>
-              confirm_agreement(config.domain.unwrap)
-            case _ => ()
+          if (config.sequencerConnections.nonBftSetup) { // agreement is removed with the introduction of BFT domain.
+            confirm_agreement(config.domain.unwrap)
           }
           reconnect(config.domain.unwrap, retry = false).discard
           // now update the domain settings to auto-connect
@@ -1255,7 +1255,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       val sequencerConnection = SequencerConnection
         .merge(firstConnection +: additionalConnections)
         .getOrElse(sys.error("Invalid sequencer connection"))
-      val config = DomainConnectionConfig(domainAlias, sequencerConnection)
+      val sequencerConnections =
+        SequencerConnections.default(sequencerConnection)
+      val config = DomainConnectionConfig(domainAlias, sequencerConnections)
       connect(config)
       config
     }
@@ -1287,9 +1289,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): DomainConnectionConfig = {
+      val sequencerConnection =
+        SequencerConnection.merge(connections).getOrElse(sys.error("Invalid sequencer connection"))
+      val sequencerConnections =
+        SequencerConnections.default(sequencerConnection)
       val config = DomainConnectionConfig(
         domainAlias,
-        SequencerConnection.merge(connections).getOrElse(sys.error("Invalid sequencer connection")),
+        sequencerConnections,
       )
       connectFromConfig(config, synchronize)
       config

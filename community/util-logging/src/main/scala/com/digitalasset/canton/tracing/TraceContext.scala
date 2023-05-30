@@ -99,6 +99,9 @@ object TraceContext {
     result
   }
 
+  def wrapWithNewTraceContext[A](item: A): Traced[A] =
+    withNewTraceContext(implicit traceContext => Traced(item))
+
   /** Run a block with a TraceContext taken from a Traced wrapper. */
   def withTraceContext[A, B](fn: TraceContext => A => B)(traced: Traced[A]): B =
     fn(traced.traceContext)(traced.value)

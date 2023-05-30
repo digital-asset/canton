@@ -15,6 +15,8 @@ trait ExampleTransaction {
 
   def cryptoOps: HashOps with RandomOps
 
+  def supportedConfirmationPolicies: Set[ConfirmationPolicy] = ConfirmationPolicy.values.toSet
+
   /** Set of parties who are informees of an action (root or not) in the transaction */
   def allInformees: Set[LfPartyId] = fullInformeeTree.allInformees
 

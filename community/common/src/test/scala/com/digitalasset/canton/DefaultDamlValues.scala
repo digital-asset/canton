@@ -4,15 +4,11 @@
 package com.digitalasset.canton
 
 import cats.Id
-import cats.syntax.option.*
 import com.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.ledger.configuration.LedgerTimeModel
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.protocol.{
-  LedgerTransactionNodeStatistics,
   LfCommittedTransaction,
   LfHash,
   LfTransaction,
@@ -46,47 +42,12 @@ object DefaultDamlValues {
   def lfTransactionId(index: Int): Ref.TransactionId =
     Ref.TransactionId.assertFromString(s"lf-transaction-id-$index")
 
-  def submitterInfo(
-      actAs: List[LfPartyId],
-      applicationId: ApplicationId = DefaultDamlValues.applicationId(),
-      commandId: CommandId = DefaultDamlValues.commandId(),
-      deduplicationPeriod: DeduplicationPeriod = deduplicationDuration,
-      submissionId: Option[LedgerSubmissionId] = DefaultDamlValues.submissionId().some,
-      ledgerConfiguration: LedgerConfiguration = DefaultDamlValues.ledgerConfiguration,
-  ): SubmitterInfo =
-    SubmitterInfo(
-      actAs,
-      List.empty, // readAs parties in submitter info are ignored by canton
-      applicationId.unwrap,
-      commandId.unwrap,
-      deduplicationPeriod,
-      submissionId,
-      ledgerConfiguration,
-    )
-
   def changeId(
       actAs: Set[LfPartyId],
       applicationId: ApplicationId = DefaultDamlValues.applicationId(),
       commandId: CommandId = DefaultDamlValues.commandId(),
   ): ChangeId =
     ChangeId(applicationId.unwrap, commandId.unwrap, actAs)
-
-  def completionInfo(
-      actAs: List[LfPartyId],
-      applicationId: ApplicationId = DefaultDamlValues.applicationId(),
-      commandId: CommandId = DefaultDamlValues.commandId(),
-      optDeduplicationPeriod: Option[DeduplicationPeriod] = Some(deduplicationDuration),
-      submissionId: Option[LedgerSubmissionId] = DefaultDamlValues.submissionId().some,
-      statistics: Option[LedgerTransactionNodeStatistics] = None,
-  ): CompletionInfo =
-    CompletionInfo(
-      actAs,
-      applicationId.unwrap,
-      commandId.unwrap,
-      optDeduplicationPeriod,
-      submissionId,
-      statistics,
-    )
 
   def lfhash(index: Int = 0): LfHash = {
     val bytes = new Array[Byte](32)
@@ -95,22 +56,6 @@ object DefaultDamlValues {
     }
     LfHash.assertFromByteArray(bytes)
   }
-
-  def transactionMeta(
-      ledgerEffectiveTime: CantonTimestamp = CantonTimestamp.Epoch,
-      workflowId: Option[WorkflowId] = None,
-      submissionTime: CantonTimestamp = CantonTimestamp.Epoch,
-      submissionSeed: LfHash = lfhash(),
-  ): TransactionMeta =
-    TransactionMeta(
-      ledgerEffectiveTime.toLf,
-      workflowId.map(_.unwrap),
-      submissionTime.toLf,
-      submissionSeed,
-      optUsedPackages = None,
-      optNodeSeeds = None,
-      optByKeyNodes = None,
-    )
 
   lazy val emptyTransaction: LfTransaction =
     LfTransaction(nodes = Map.empty, roots = ImmArray.empty)

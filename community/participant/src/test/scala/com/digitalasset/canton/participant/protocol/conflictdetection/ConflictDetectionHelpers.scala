@@ -25,7 +25,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, ScalaFuturesWithPatience}
 import org.scalactic.source.Position
@@ -75,7 +75,7 @@ private[protocol] trait ConflictDetectionHelpers {
         for {
           transfer <- TransferStoreTest.mkTransferDataForDomain(
             transferId,
-            sourceMediator,
+            MediatorRef(sourceMediator),
             targetDomainId = TransferStoreTest.targetDomain,
           )
           result <- store

@@ -39,7 +39,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.MapsUtil
-import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfPackageId, LfPartyId}
 import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.duration.*
@@ -96,6 +96,7 @@ final case class TestingTopology(
     topology: Map[LfPartyId, Map[ParticipantId, ParticipantPermission]] = Map.empty,
     mediators: Set[MediatorId] = Set(DefaultTestIdentities.mediator),
     participants: Map[ParticipantId, ParticipantAttributes] = Map.empty,
+    packages: Seq[LfPackageId] = Seq.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.all,
     domainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]] = List(
       DomainParameters.WithValidity(
@@ -168,6 +169,8 @@ final case class TestingTopology(
       }.toMap)
     copy(topology = converted)
   }
+
+  def withPackages(packages: Seq[LfPackageId]): TestingTopology = this.copy(packages = packages)
 
   def build(
       loggerFactory: NamedLoggerFactory = NamedLoggerFactory("test-area", "crypto")
@@ -263,7 +266,6 @@ class TestingIdentityFactory(
 
   def topologySnapshot(
       domainId: DomainId = DefaultTestIdentities.domainId,
-      packages: Seq[PackageId] = Seq(),
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]] =
         StoreBasedDomainTopologyClient.NoPackageDependencies,
       timestampForDomainParameters: CantonTimestamp = CantonTimestamp.Epoch,
@@ -283,7 +285,7 @@ class TestingIdentityFactory(
           MapsUtil.extendedMapWith(acc, permissionByParticipant)(ParticipantPermission.higherOf)
       }
 
-    val participantTxs = participantsTxs(defaultPermissionByParticipant, packages)
+    val participantTxs = participantsTxs(defaultPermissionByParticipant, topology.packages)
 
     val domainMembers =
       (Seq[KeyOwner](

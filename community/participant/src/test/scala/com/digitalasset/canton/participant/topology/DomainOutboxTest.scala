@@ -3,16 +3,38 @@
 
 package com.digitalasset.canton.participant.topology
 
-import com.digitalasset.canton.BaseTest
+import cats.implicits.*
+import com.digitalasset.canton.common.domain.RegisterTopologyTransactionHandleCommon
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State
+import com.digitalasset.canton.time.WallClock
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.topology.store.{
+  TopologyStore,
+  TopologyStoreId,
+  ValidatedTopologyTransaction,
+}
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Remove}
+import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.{FutureUtil, MonadUtil}
+import com.digitalasset.canton.{BaseTest, DomainAlias}
 import org.scalatest.wordspec.AsyncWordSpec
 
-class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.*
+import scala.concurrent.{Future, Promise}
+import scala.util.chaining.scalaUtilChainingOps
 
-  // TODO(#11255) re-enable this test. as we have refactored the api, we need to adapt this test.
-  //    as the functionality itself is tested quite well in integration tests and as we
-  //    won't change the dispatcher (and there is little chance of someone else changing it)
-  //    we disabled to unblock the next x-node refactorings
-  /*
+class DomainOutboxTest extends AsyncWordSpec with BaseTest {
   import DefaultTestIdentities.*
 
   private val clock = new WallClock(timeouts, loggerFactory)
@@ -58,33 +80,22 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       loggerFactory,
       futureSupervisor,
     )
-    val mockState = mock[SyncDomainPersistentStateManagerImpl[SyncDomainPersistentStateOld]]
-    val dispatcher =
-      new ParticipantTopologyDispatcher(
-        manager,
-        participant1,
-        mockState,
-        crypto,
-        clock,
-        timeouts,
-        loggerFactory,
-      )
     val handle = new MockHandle(expect, store = target)
     val client = mock[DomainTopologyClientWithInit]
-    (source, target, manager, dispatcher, handle, client)
+    (source, target, manager, handle, client)
   }
 
   private class MockHandle(
       expectI: Int,
       response: State = State.Accepted,
       store: TopologyStore[TopologyStoreId],
-  ) extends RegisterTopologyTransactionHandle {
+  ) extends RegisterTopologyTransactionHandleCommon[SignedTopologyTransaction[TopologyChangeOp]] {
     val buffer = ListBuffer[SignedTopologyTransaction[TopologyChangeOp]]()
     val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
     val expect = new AtomicInteger(expectI)
     override def submit(
         transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
-    ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult]] =
+    ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult.State]] =
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")
         buffer ++= transactions
@@ -103,13 +114,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
           }
         } yield {
           logger.debug(s"Done with observed ${transactions.length} transactions")
-          transactions.map(transaction =>
-            RegisterTopologyTransactionResponseResult.create(
-              state = response,
-              uniquePathProtoPrimitive = transaction.uniquePath.toProtoPrimitive,
-              protocolVersion = testedProtocolVersion,
-            )
-          )
+          transactions.map(_ => response)
         }
       }
 
@@ -124,7 +129,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     def allObserved(): Future[Unit] = promise.get().future
 
     override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
-    override protected def logger: TracedLogger = ParticipantTopologyDispatcherTest.this.logger
+    override protected def logger: TracedLogger = DomainOutboxTest.this.logger
   }
 
   private def push(
@@ -140,24 +145,58 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       .value
       .failOnShutdown
 
-  private def dispatcherConnected(
-      dispatcher: ParticipantTopologyDispatcher,
-      handle: RegisterTopologyTransactionHandle,
+  private def outboxConnected(
+      manager: ParticipantTopologyManager,
+      handle: RegisterTopologyTransactionHandleCommon[SignedTopologyTransaction[TopologyChangeOp]],
       client: DomainTopologyClientWithInit,
+      source: TopologyStore[TopologyStoreId.AuthorizedStore],
       target: TopologyStore[TopologyStoreId.DomainStore],
-  ): Future[Unit] = dispatcher.createHandler(domain, domainId, testedProtocolVersion, client)
-    .domainConnected(domain, domainId, testedProtocolVersion, handle, client, target, crypto)
-    .value
-    .map(_ => ())
-    .onShutdown(())
+  ): Future[DomainOutbox] = {
+    val domainOutbox = new DomainOutbox(
+      domain,
+      domainId,
+      participant1,
+      testedProtocolVersion,
+      handle,
+      client,
+      source,
+      target,
+      timeouts,
+      loggerFactory,
+      crypto,
+    )
+    domainOutbox
+      .startup()
+      .fold[DomainOutbox](
+        s => fail(s"Failed to start domain outbox ${s}"),
+        _ =>
+          domainOutbox.tap(outbox =>
+            // add the outbox as an observer since these unit tests avoid instantiating the ParticipantTopologyDispatcher
+            manager.addObserver(new ParticipantTopologyManagerObserver {
+              override def addedNewTransactions(
+                  timestamp: CantonTimestamp,
+                  transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+              )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+                val num = transactions.size
+                outbox.newTransactionsAddedToAuthorizedStore(timestamp, num)
+              }
+            })
+          ),
+      )
+      .onShutdown(domainOutbox)
+  }
+
+  private def outboxDisconnected(manager: ParticipantTopologyManager): Unit =
+    manager.clearObservers()
 
   "dispatcher" should {
 
     "dispatch transaction on new connect" in {
-      val (_source, target, manager, dispatcher, handle, client) = mk(transactions.length)
+      val (source, target, manager, handle, client) =
+        mk(transactions.length)
       for {
         res <- push(manager, transactions)
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         _ <- handle.allObserved()
       } yield {
         res.value shouldBe a[Seq[_]]
@@ -166,9 +205,10 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     }
 
     "dispatch transaction on existing connections" in {
-      val (_, target, manager, dispatcher, handle, client) = mk(transactions.length)
+      val (source, target, manager, handle, client) =
+        mk(transactions.length)
       for {
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         res <- push(manager, transactions)
         _ <- handle.allObserved()
       } yield {
@@ -178,10 +218,10 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     }
 
     "dispatch transactions continuously" in {
-      val (_, target, manager, dispatcher, handle, client) = mk(slice1.length)
+      val (source, target, manager, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         _ <- handle.allObserved()
         observed1 = handle.clear(slice2.length)
         _ <- push(manager, slice2)
@@ -193,15 +233,15 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     }
 
     "not dispatch old data when reconnected" in {
-      val (_, target, manager, dispatcher, handle, client) = mk(slice1.length)
+      val (source, target, manager, handle, client) = mk(slice1.length)
       for {
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         _ <- push(manager, slice1)
         _ <- handle.allObserved()
         _ = handle.clear(slice2.length)
-        _ = dispatcher.domainDisconnected(domain)
+        _ = outboxDisconnected(manager)
         res2 <- push(manager, slice2)
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         _ <- handle.allObserved()
       } yield {
         res2.value shouldBe a[Seq[_]]
@@ -211,7 +251,8 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
 
     "correctly find a remove in source store" in {
 
-      val (source, target, manager, dispatcher, handle, client) = mk(transactions.length)
+      val (source, target, manager, handle, client) =
+        mk(transactions.length)
 
       val midRevert = transactions(2).reverse
       val another =
@@ -221,10 +262,10 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         )
 
       for {
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         _ <- push(manager, transactions)
         _ <- handle.allObserved()
-        _ = dispatcher.domainDisconnected(domain)
+        _ = outboxDisconnected(manager)
         // add a remove and another add
         _ <- push(manager, Seq(midRevert, another))
         // ensure that topology manager properly processed this state
@@ -237,7 +278,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         _ = tis should not contain (another.element)
         // re-connect
         _ = handle.clear(2)
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         _ <- handle.allObserved()
         tis <- target.headTransactions.map(_.toTopologyState)
       } yield {
@@ -247,11 +288,12 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     }
 
     "not push deprecated transactions" in {
-      val (_, target, manager, dispatcher, handle, client) = mk(transactions.length - 1)
+      val (source, target, manager, handle, client) =
+        mk(transactions.length - 1)
       val midRevert = transactions(2).reverse
       for {
         res <- push(manager, transactions :+ midRevert)
-        _ <- dispatcherConnected(dispatcher, handle, client, target)
+        _ <- outboxConnected(manager, handle, client, source, target)
         _ <- handle.allObserved()
       } yield {
         res.value shouldBe a[Seq[_]]
@@ -272,5 +314,4 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     }
 
   }
-   */
 }

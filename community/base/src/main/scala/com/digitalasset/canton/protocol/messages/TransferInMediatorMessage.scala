@@ -12,7 +12,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef}
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.Transfer.TargetProtocolVersion
 import com.digitalasset.canton.version.{
@@ -49,7 +49,7 @@ final case class TransferInMediatorMessage(tree: TransferInViewTree)
 
   override def domainId: DomainId = commonData.targetDomain.unwrap
 
-  override def mediatorId: MediatorId = commonData.targetMediator
+  override def mediator: MediatorRef = commonData.targetMediator
 
   override def requestUuid: UUID = commonData.uuid
 

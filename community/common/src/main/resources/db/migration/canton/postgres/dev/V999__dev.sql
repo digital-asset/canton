@@ -87,7 +87,12 @@ CREATE TABLE sequencer_info_for_mediator_x (
 
 -- TODO(#12373) Move this to stable when releasing BFT: END
 
--- TODO(#13104) Move traffic control to stable release
+-- TODO(#13104) Move traffic control to stable release: BEGIN
 -- adds extra traffic remainder per event
 alter table sequencer_state_manager_events
     add column extra_traffic_remainder bigint;
+
+-- adds extra traffic remainder per event in sequenced event store
+alter table sequenced_events
+    add column extra_traffic_remainder bigint;
+-- TODO(#13104) Move traffic control to stable release: END

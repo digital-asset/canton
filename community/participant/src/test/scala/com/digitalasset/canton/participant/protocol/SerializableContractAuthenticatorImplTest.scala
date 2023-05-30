@@ -8,7 +8,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Salt, TestSalt}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.{DomainId, MediatorId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef, UniqueIdentifier}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -25,7 +25,7 @@ class SerializableContractAuthenticatorImplTest extends AnyWordSpec with BaseTes
   private lazy val ledgerTime = CantonTimestamp.MinValue
   private lazy val (contractSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
     domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::da")),
-    mediatorId = MediatorId(UniqueIdentifier.tryCreate("mediator", "other")),
+    mediator = MediatorRef(MediatorId(UniqueIdentifier.tryCreate("mediator", "other"))),
     transactionUuid = new UUID(1L, 1L),
     viewPosition = ViewPosition(List.empty),
     viewParticipantDataSalt = TestSalt.generateSalt(1),

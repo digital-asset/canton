@@ -28,7 +28,9 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasRepresentativeProtocolVersion,
   HasSupportedProtoVersions,
@@ -285,5 +287,17 @@ object ClosedEnvelope extends HasSupportedProtoVersions[ClosedEnvelope] {
   ): EitherT[Future, SignatureCheckError, Unit] = {
     val hash = snapshot.pureCrypto.digest(HashPurpose.SignedProtocolMessageSignature, content)
     snapshot.verifySignatures(hash, sender, signatures)
+  }
+
+  // TODO(#12373) Adapt comment when releasing BFT
+  /** Use only in protocol version [[com.digitalasset.canton.version.ProtocolVersion.dev]] or later */
+  def verifySignatures(
+      snapshot: SyncCryptoApi,
+      mediatorGroupIndex: MediatorGroupIndex,
+      content: ByteString,
+      signatures: NonEmpty[Seq[Signature]],
+  )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit] = {
+    val hash = snapshot.pureCrypto.digest(HashPurpose.SignedProtocolMessageSignature, content)
+    snapshot.verifySignatures(hash, mediatorGroupIndex, signatures)
   }
 }

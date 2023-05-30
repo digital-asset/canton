@@ -321,6 +321,7 @@ class ConfirmationResponseProcessorTest
             requestTimestamp.plusSeconds(60),
             requestTimestamp.plusSeconds(120),
             response,
+            Recipients.cc(mediatorId),
           )
         } yield ()
 
@@ -400,6 +401,7 @@ class ConfirmationResponseProcessorTest
             ts.plusSeconds(60),
             ts.plusSeconds(120),
             response,
+            Recipients.cc(mediatorId),
           ), {
             _.shouldBeCantonError(
               MediatorError.InvalidMessage,
@@ -683,7 +685,11 @@ class ConfirmationResponseProcessorTest
           ),
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
-            _ shouldBe show"Received a mediator request with id ${RequestId(ts)} with an incorrect mediator id $otherMediatorId. Rejecting request...",
+            message => {
+              message should (include("Rejecting mediator request") and include(
+                s"${RequestId(ts)}"
+              ) and include("incorrect mediator id") and include(s"$otherMediatorId"))
+            },
           ),
         )
       } yield succeed
@@ -727,6 +733,7 @@ class ConfirmationResponseProcessorTest
             informeeMessage,
             testedProtocolVersion,
             mockTopologySnapshot,
+            sendVerdict = true,
           )(
             loggerFactory
           )
@@ -758,6 +765,7 @@ class ConfirmationResponseProcessorTest
             ts1.plusSeconds(60),
             ts1.plusSeconds(120),
             _,
+            Recipients.cc(mediatorId),
           )
         )
         // records the request
@@ -765,10 +773,16 @@ class ConfirmationResponseProcessorTest
         _ = {
           updatedState should matchPattern {
             case Some(
-                  ResponseAggregation(`requestId`, `informeeMessage`, `ts1`, Right(_states))
+                  ResponseAggregation(`requestId`, `informeeMessage`, `ts1`, Right(_states), true)
                 ) =>
           }
-          val ResponseAggregation(`requestId`, `informeeMessage`, `ts1`, Right(states)) =
+          val ResponseAggregation(
+            `requestId`,
+            `informeeMessage`,
+            `ts1`,
+            Right(states),
+            sendVerdict,
+          ) =
             updatedState.value
           assert(
             states === Map(
@@ -846,13 +860,14 @@ class ConfirmationResponseProcessorTest
             ts2.plusSeconds(60),
             ts2.plusSeconds(120),
             _,
+            Recipients.cc(mediatorId),
           )
         )
         // records the request
         finalState <- sut.mediatorState.fetch(requestId).value
         _ = {
           inside(finalState) {
-            case Some(ResponseAggregation(`requestId`, `informeeMessage`, `ts2`, state)) =>
+            case Some(ResponseAggregation(`requestId`, `informeeMessage`, `ts2`, state, true)) =>
               assert(state === Left(Approve(testedProtocolVersion)))
           }
         }
@@ -967,6 +982,7 @@ class ConfirmationResponseProcessorTest
               ts1.plusSeconds(60),
               ts1.plusSeconds(120),
               _,
+              Recipients.cc(mediatorId),
             )
           ),
           isMalformedWarn(participant1),
@@ -984,6 +1000,7 @@ class ConfirmationResponseProcessorTest
                   _request,
                   _version,
                   Left(ParticipantReject(reasons)),
+                  true,
                 )
               ) =>
             // TODO(#5337) These are only the rejections for the first view because this view happens to be finalized first.
@@ -1042,6 +1059,7 @@ class ConfirmationResponseProcessorTest
               participantResponseDeadline,
               requestIdTs.plusSeconds(120),
               response,
+              Recipients.cc(mediatorId),
             ),
           _.warningMessage shouldBe s"Response $responseTs is too late as request RequestId($requestTs) has already exceeded the participant response deadline [$participantResponseDeadline]",
         )
@@ -1057,7 +1075,8 @@ class ConfirmationResponseProcessorTest
 
       // this request is not added to the pending state
       for {
-        _ <- sut.processor.handleTimeout(requestId, timeoutTs, decisionTime)
+        snapshot <- domainSyncCryptoApi2.snapshot(requestTs)
+        _ <- sut.processor.handleTimeout(requestId, timeoutTs, decisionTime, snapshot.ipsSnapshot)
       } yield succeed
     }
 

@@ -40,7 +40,7 @@ class SequencedEventValidatorTest
       val priorEvent = createEvent().futureValue
       val validator = mkValidator(priorEvent)
       validator
-        .validateOnReconnect(priorEvent)
+        .validateOnReconnect(priorEvent, DefaultTestIdentities.sequencerId)
         .valueOrFail("successful reconnect")
         .failOnShutdown
         .futureValue
@@ -60,7 +60,7 @@ class SequencedEventValidatorTest
           fixture.traceContext
         )
       validator
-        .validateOnReconnect(eventWithNewSig)
+        .validateOnReconnect(eventWithNewSig, DefaultTestIdentities.sequencerId)
         .valueOrFail("event with regenerated signature")
         .failOnShutdown
         .futureValue
@@ -77,7 +77,7 @@ class SequencedEventValidatorTest
 
       val validator = mkValidator(deliver1)
       validator
-        .validateOnReconnect(deliver2)
+        .validateOnReconnect(deliver2, DefaultTestIdentities.sequencerId)
         .valueOrFail("Different serialization should be accepted")
         .failOnShutdown
         .futureValue
@@ -93,7 +93,7 @@ class SequencedEventValidatorTest
       )
       val wrongDomain = createEvent(incorrectDomainId).futureValue
       val err = validator
-        .validateOnReconnect(wrongDomain)
+        .validateOnReconnect(wrongDomain, DefaultTestIdentities.sequencerId)
         .leftOrFail("wrong domain ID on reconnect")
         .failOnShutdown
         .futureValue
@@ -119,13 +119,13 @@ class SequencedEventValidatorTest
 
       val errCounter = expectLog(
         validator
-          .validateOnReconnect(differentCounter)
+          .validateOnReconnect(differentCounter, DefaultTestIdentities.sequencerId)
           .leftOrFail("fork on counter")
       )
       val differentTimestamp = createEvent(timestamp = CantonTimestamp.MaxValue).futureValue
       val errTimestamp = expectLog(
         validator
-          .validateOnReconnect(differentTimestamp)
+          .validateOnReconnect(differentTimestamp, DefaultTestIdentities.sequencerId)
           .leftOrFail("fork on timestamp")
       )
 
@@ -136,7 +136,7 @@ class SequencedEventValidatorTest
 
       val errContent = expectLog(
         validator
-          .validateOnReconnect(differentContent)
+          .validateOnReconnect(differentContent, DefaultTestIdentities.sequencerId)
           .leftOrFail("fork on content")
       )
 
@@ -183,7 +183,7 @@ class SequencedEventValidatorTest
       val badEvent = createEvent(signatureOverride = Some(badSig)).futureValue
       val validator = mkValidator(priorEvent)
       val result = validator
-        .validateOnReconnect(badEvent)
+        .validateOnReconnect(badEvent, DefaultTestIdentities.sequencerId)
         .leftOrFail("invalid signature on reconnect")
         .failOnShutdown
         .futureValue
@@ -198,7 +198,7 @@ class SequencedEventValidatorTest
       val event = createEvent(incorrectDomainId).futureValue
       val validator = mkValidator()
       val result = validator
-        .validate(event)
+        .validate(event, DefaultTestIdentities.sequencerId)
         .leftOrFail("wrong domain ID")
         .failOnShutdown
         .futureValue
@@ -217,7 +217,7 @@ class SequencedEventValidatorTest
       ).futureValue
       val validator = mkValidator(priorEvent)
       val result = validator
-        .validate(badEvent)
+        .validate(badEvent, DefaultTestIdentities.sequencerId)
         .leftOrFail("invalid signature")
         .failOnShutdown
         .futureValue
@@ -238,7 +238,9 @@ class SequencedEventValidatorTest
       val deliver =
         createEventWithCounterAndTs(42, ts(2), timestampOfSigningKey = Some(ts(1))).futureValue
 
-      valueOrFail(validator.validate(deliver))("validate").failOnShutdown.futureValue
+      valueOrFail(validator.validate(deliver, DefaultTestIdentities.sequencerId))(
+        "validate"
+      ).failOnShutdown.futureValue
     }
 
     "reject the same counter-timestamp if passed in repeatedly" in { fixture =>
@@ -252,12 +254,12 @@ class SequencedEventValidatorTest
 
       val deliver = createEventWithCounterAndTs(42, CantonTimestamp.Epoch).futureValue
       validator
-        .validate(deliver)
+        .validate(deliver, DefaultTestIdentities.sequencerId)
         .valueOrFail("validate1")
         .failOnShutdown
         .futureValue
       val err = validator
-        .validate(deliver)
+        .validate(deliver, DefaultTestIdentities.sequencerId)
         .leftOrFail("validate2")
         .failOnShutdown
         .futureValue
@@ -279,22 +281,22 @@ class SequencedEventValidatorTest
       val deliver3 = createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2)).futureValue
 
       val error1 = validator
-        .validate(deliver1)
+        .validate(deliver1, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver1")
         .failOnShutdown
         .futureValue
       val error2 = validator
-        .validate(deliver2)
+        .validate(deliver2, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver2")
         .failOnShutdown
         .futureValue
       validator
-        .validate(deliver3)
+        .validate(deliver3, DefaultTestIdentities.sequencerId)
         .valueOrFail("deliver3")
         .failOnShutdown
         .futureValue
       val error3 = validator
-        .validate(deliver2)
+        .validate(deliver2, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver4")
         .failOnShutdown
         .futureValue
@@ -323,19 +325,19 @@ class SequencedEventValidatorTest
       val deliver3 = createEventWithCounterAndTs(44L, CantonTimestamp.ofEpochSecond(3)).futureValue
 
       val result1 = validator
-        .validate(deliver1)
+        .validate(deliver1, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver1")
         .failOnShutdown
         .futureValue
 
       validator
-        .validate(deliver2)
+        .validate(deliver2, DefaultTestIdentities.sequencerId)
         .valueOrFail("deliver2")
         .failOnShutdown
         .futureValue
 
       val result3 = validator
-        .validate(deliver3)
+        .validate(deliver3, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver3")
         .failOnShutdown
         .futureValue

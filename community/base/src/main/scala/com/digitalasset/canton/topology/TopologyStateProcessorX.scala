@@ -120,7 +120,9 @@ class TopologyStateProcessorX(
       },
       success => {
         logger.info(
-          "Persisted topology transactions:\n  " + success.mkString("\n  ")
+          s"Persisted topology transactions ($sequenced, $effective):\n  " + success.mkString(
+            "\n  "
+          )
         )
         success
       },

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.topology
 
+import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -24,6 +25,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Listens to changes of the topology stores and notifies the Ledger API server
@@ -37,11 +39,38 @@ class LedgerServerPartyNotifier(
     store: PartyMetadataStore,
     clock: Clock,
     futureSupervisor: FutureSupervisor,
+    mustTrackSubmissionIds: Boolean,
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable {
+
+  private val pendingAllocationSubmissionIds = TrieMap[(PartyId, ParticipantId), String255]()
+  def expectPartyAllocationForXNodes(
+      party: PartyId,
+      onParticipant: ParticipantId,
+      submissionId: String255,
+  ): Either[String, Unit] = if (mustTrackSubmissionIds) {
+    pendingAllocationSubmissionIds
+      .putIfAbsent((party, onParticipant), submissionId)
+      .toLeft(())
+      .leftMap(_ => s"Allocation for party ${party} is already inflight")
+  } else
+    Right(())
+
+  def expireExpectedPartyAllocationForXNodes(
+      party: PartyId,
+      onParticipant: ParticipantId,
+      submissionId: String255,
+  ): Unit = {
+    val key = (party, onParticipant)
+    pendingAllocationSubmissionIds.get(key).foreach { storedId =>
+      if (storedId == submissionId) {
+        pendingAllocationSubmissionIds.remove(key).discard
+      }
+    }
+  }
 
   def resumePending(): Future[Unit] = {
     import TraceContext.Implicits.Empty.*
@@ -57,14 +86,6 @@ class LedgerServerPartyNotifier(
 
   def attachToTopologyProcessorOld(): TopologyTransactionProcessingSubscriber =
     new TopologyTransactionProcessingSubscriber {
-
-      override def updateHead(
-          effectiveTimestamp: EffectiveTime,
-          approximateTimestamp: ApproximateTime,
-          potentialTopologyChange: Boolean,
-      )(implicit
-          traceContext: TraceContext
-      ): Unit = {}
 
       override def observed(
           sequencerTimestamp: SequencedTime,
@@ -117,14 +138,6 @@ class LedgerServerPartyNotifier(
   def attachToTopologyProcessorX(): TopologyTransactionProcessingSubscriberX =
     new TopologyTransactionProcessingSubscriberX {
 
-      override def updateHead(
-          effectiveTimestamp: EffectiveTime,
-          approximateTimestamp: ApproximateTime,
-          potentialTopologyChange: Boolean,
-      )(implicit
-          traceContext: TraceContext
-      ): Unit = {}
-
       override def observed(
           sequencerTimestamp: SequencedTime,
           effectiveTimestamp: EffectiveTime,
@@ -163,7 +176,9 @@ class LedgerServerPartyNotifier(
               (
                 partyId,
                 hostingParticipant.participantId,
-                LengthLimitedString.getUuid.asString255,
+                pendingAllocationSubmissionIds
+                  .remove((partyId, hostingParticipant.participantId))
+                  .getOrElse(LengthLimitedString.getUuid.asString255),
               )
             )
         // propagate admin parties

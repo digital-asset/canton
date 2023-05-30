@@ -14,5 +14,11 @@ final case class MemberTrafficControlState(totalExtraTrafficLimit: PositiveLong)
 trait DomainTrafficControlStateClient {
   this: BaseTopologySnapshotClient =>
 
-  def trafficControlStatus(): Future[Map[Member, MemberTrafficControlState]]
+  /** Return the traffic control states for the members specified
+    * @param members for which to return the traffic state
+    * @return all input members with their optional traffic state
+    */
+  def trafficControlStatus(
+      members: Seq[Member]
+  ): Future[Map[Member, Option[MemberTrafficControlState]]]
 }

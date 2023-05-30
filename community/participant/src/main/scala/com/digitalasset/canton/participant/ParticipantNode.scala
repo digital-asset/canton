@@ -189,7 +189,7 @@ class ParticipantNodeBootstrap(
           protocolVersion,
         )
         // avoid a race condition with admin-workflows and only kick off the start once the namespace certificate is registered
-        _ <- initialize(nodeId).mapK(FutureUnlessShutdown.outcomeK)
+        _ <- initialize(nodeId)
 
         _ <- authorizeStateUpdate(
           topologyManager,
@@ -248,132 +248,134 @@ class ParticipantNodeBootstrap(
     })
   }
 
-  override def initialize(id: NodeId): EitherT[Future, String, Unit] = startInstanceUS {
+  override def initialize(id: NodeId): EitherT[FutureUnlessShutdown, String, Unit] =
+    startInstanceUnlessClosing {
 
-    val participantId: ParticipantId = ParticipantId(id.identity)
-    topologyManager.setParticipantId(participantId)
+      val participantId: ParticipantId = ParticipantId(id.identity)
+      topologyManager.setParticipantId(participantId)
 
-    val componentFactory = new ParticipantComponentBootstrapFactory {
-      override def createSyncDomainAndTopologyDispatcher(
-          aliasResolution: DomainAliasResolution,
-          indexedStringStore: IndexedStringStore,
-      ): (SyncDomainPersistentStateManager, ParticipantTopologyDispatcherCommon) = {
-        val manager = new SyncDomainPersistentStateManagerOld(
-          aliasResolution,
-          storage,
-          indexedStringStore,
-          parameters,
-          crypto.value.pureCrypto,
-          clock,
-          futureSupervisor,
-          loggerFactory,
-        )
-        val topologyDispatcher =
-          new ParticipantTopologyDispatcher(
-            topologyManager,
-            participantId,
-            manager,
-            crypto.value,
+      val componentFactory = new ParticipantComponentBootstrapFactory {
+        override def createSyncDomainAndTopologyDispatcher(
+            aliasResolution: DomainAliasResolution,
+            indexedStringStore: IndexedStringStore,
+        ): (SyncDomainPersistentStateManager, ParticipantTopologyDispatcherCommon) = {
+          val manager = new SyncDomainPersistentStateManagerOld(
+            aliasResolution,
+            storage,
+            indexedStringStore,
+            parameters,
+            crypto.value.pureCrypto,
             clock,
-            parameterConfig.processingTimeouts,
+            futureSupervisor,
             loggerFactory,
           )
-        (manager, topologyDispatcher)
+          val topologyDispatcher =
+            new ParticipantTopologyDispatcher(
+              topologyManager,
+              participantId,
+              manager,
+              crypto.value,
+              clock,
+              parameterConfig.processingTimeouts,
+              loggerFactory,
+            )
+          (manager, topologyDispatcher)
+        }
+
+        override def createPackageInspectionOps(
+            manager: SyncDomainPersistentStateManager,
+            crypto: SyncCryptoApiProvider,
+        ): PackageInspectionOps = {
+          val client = new StoreBasedTopologySnapshot(
+            CantonTimestamp.MaxValue,
+            authorizedTopologyStore,
+            Map(),
+            useStateTxs = true,
+            StoreBasedDomainTopologyClient.NoPackageDependencies,
+            loggerFactory,
+          )
+          new PackageInspectionOpsImpl(
+            participantId,
+            client,
+            manager,
+            topologyManager,
+            parameterConfig.initialProtocolVersion,
+            loggerFactory,
+          )
+        }
       }
 
-      override def createPackageInspectionOps(
-          manager: SyncDomainPersistentStateManager,
-          crypto: SyncCryptoApiProvider,
-      ): PackageInspectionOps = {
-        val client = new StoreBasedTopologySnapshot(
-          CantonTimestamp.MaxValue,
-          authorizedTopologyStore,
-          Map(),
-          useStateTxs = true,
-          StoreBasedDomainTopologyClient.NoPackageDependencies,
-          loggerFactory,
-        )
-        new PackageInspectionOpsImpl(
+      val partyNotifierFactory = (eventPublisher: ParticipantEventPublisher) => {
+        val partyNotifier = new LedgerServerPartyNotifier(
           participantId,
-          client,
-          manager,
-          topologyManager,
-          parameterConfig.initialProtocolVersion,
+          eventPublisher,
+          partyMetadataStore,
+          clock,
+          arguments.futureSupervisor,
+          mustTrackSubmissionIds = false,
+          parameterConfig.processingTimeouts,
           loggerFactory,
         )
+        // Notify at participant level if eager notification is configured, else rely on notification via domain.
+        if (parameterConfig.partyChangeNotification == PartyNotificationConfig.Eager) {
+          topologyManager.addObserver(partyNotifier.attachToIdentityManagerOld())
+        }
+        partyNotifier
       }
-    }
 
-    val partyNotifierFactory = (eventPublisher: ParticipantEventPublisher) => {
-      val partyNotifier = new LedgerServerPartyNotifier(
+      createParticipantServices(
         participantId,
-        eventPublisher,
-        partyMetadataStore,
-        clock,
-        arguments.futureSupervisor,
-        parameterConfig.processingTimeouts,
-        loggerFactory,
-      )
-      // Notify at participant level if eager notification is configured, else rely on notification via domain.
-      if (parameterConfig.partyChangeNotification == PartyNotificationConfig.Eager) {
-        topologyManager.addObserver(partyNotifier.attachToIdentityManagerOld())
-      }
-      partyNotifier
-    }
-
-    createParticipantServices(
-      participantId,
-      crypto.value,
-      storage,
-      persistentStateFactory,
-      engine,
-      ledgerApiServerFactory,
-      indexedStringStore,
-      cantonSyncServiceFactory,
-      setStartableStoppableLedgerApiAndCantonServices,
-      resourceManagementServiceFactory,
-      replicationServiceFactory,
-      createSchedulers,
-      partyNotifierFactory,
-      adminToken,
-      topologyManager,
-      componentFactory,
-      skipRecipientsCheck,
-    ).map {
-      case (
+        crypto.value,
+        storage,
+        persistentStateFactory,
+        engine,
+        ledgerApiServerFactory,
+        indexedStringStore,
+        cantonSyncServiceFactory,
+        setStartableStoppableLedgerApiAndCantonServices,
+        resourceManagementServiceFactory,
+        replicationServiceFactory,
+        createSchedulers,
+        partyNotifierFactory,
+        adminToken,
+        topologyManager,
+        componentFactory,
+        skipRecipientsCheck,
+      ).map {
+        case (
+              partyNotifier,
+              sync,
+              ephemeralState,
+              ledgerApiServer,
+              ledgerApiDependentServices,
+              schedulers,
+              topologyDispatcher,
+            ) =>
+          new ParticipantNode(
+            participantId,
+            arguments.metrics,
+            config,
+            parameterConfig,
+            storage,
+            clock,
+            topologyManager,
+            crypto.value.pureCrypto,
+            topologyDispatcher,
             partyNotifier,
+            ips,
             sync,
-            ephemeralState,
+            ephemeralState.participantEventPublisher,
             ledgerApiServer,
             ledgerApiDependentServices,
+            adminToken,
+            recordSequencerInteractions,
+            replaySequencerConfig,
             schedulers,
-            topologyDispatcher,
-          ) =>
-        new ParticipantNode(
-          participantId,
-          arguments.metrics,
-          config,
-          parameterConfig,
-          storage,
-          clock,
-          topologyManager,
-          crypto.value.pureCrypto,
-          topologyDispatcher,
-          partyNotifier,
-          ips,
-          sync,
-          ephemeralState.participantEventPublisher,
-          ledgerApiServer,
-          ledgerApiDependentServices,
-          adminToken,
-          recordSequencerInteractions,
-          replaySequencerConfig,
-          schedulers,
-          loggerFactory,
-          nodeHealthService.dependencies.map(_.toComponentStatus),
-        )
+            loggerFactory,
+            nodeHealthService.dependencies.map(_.toComponentStatus),
+          )
+      }
     }
-  }
 
   override def isActive: Boolean = storage.isActive
 

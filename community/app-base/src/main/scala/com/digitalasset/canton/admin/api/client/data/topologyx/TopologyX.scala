@@ -26,6 +26,7 @@ import com.digitalasset.canton.topology.transaction.{
   PurgeTopologyTransactionX,
   SequencerDomainStateX,
   TopologyChangeOpX,
+  TrafficControlStateX,
   UnionspaceDefinitionX,
   VettedPackagesX,
 }
@@ -306,4 +307,19 @@ object ListPurgeTopologyTransactionXResult {
       itemProto <- ProtoConverter.required("item", value.item)
       item <- PurgeTopologyTransactionX.fromProtoV2(itemProto)
     } yield ListPurgeTopologyTransactionXResult(context, item)
+}
+
+final case class ListTrafficStateResult(
+    context: BaseResult,
+    item: TrafficControlStateX,
+)
+
+object ListTrafficStateResult {
+  def fromProtoV1(
+      value: v1.ListTrafficStateResult.Result
+  ): ParsingResult[ListTrafficStateResult] =
+    for {
+      context <- ProtoConverter.parseRequired(BaseResult.fromProtoV1, "context", value.context)
+      item <- ProtoConverter.parseRequired(TrafficControlStateX.fromProtoV2, "item", value.item)
+    } yield ListTrafficStateResult(context, item)
 }

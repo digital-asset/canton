@@ -377,11 +377,13 @@ class SuppressingLogger private[logging] (
             Option(recordedLogEntries.poll(pollTimeout.length, pollTimeout.unit)) match {
               case Some(logEntry) =>
                 unmatchedAssertions.collectFirst {
-                  case (index, (_required, assertion)) if Try(assertion(logEntry)).isSuccess =>
-                    index
+                  case (index, (required, assertion)) if Try(assertion(logEntry)).isSuccess =>
+                    (required, index)
                 } match {
-                  case Some(index) =>
-                    unmatchedAssertions.remove(index)
+                  case Some((LogEntryOptionality.OptionalMany, index)) =>
+                    matchedLogEntries += index -> logEntry
+                  case Some((_, index)) =>
+                    unmatchedAssertions.remove(index).discard
                     matchedLogEntries += index -> logEntry
                   case None => unexpectedLogEntries += logEntry
                 }
@@ -607,6 +609,11 @@ object SuppressingLogger {
   sealed trait LogEntryOptionality extends Product with Serializable
   object LogEntryOptionality {
     case object Required extends LogEntryOptionality
+
+    /** Once or not at all */
     case object Optional extends LogEntryOptionality
+
+    /** Can be there many times but doesn't have to be */
+    case object OptionalMany extends LogEntryOptionality
   }
 }

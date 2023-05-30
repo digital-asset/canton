@@ -5,6 +5,8 @@ package com.digitalasset.canton.domain.initialization
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DomainTimeTrackerConfig
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
@@ -13,7 +15,7 @@ import com.digitalasset.canton.domain.mediator.{MediatorRuntime, MediatorRuntime
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.SequencerConnection
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.{RequestSigner, SequencerClientFactory}
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.store.{
@@ -26,7 +28,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
@@ -45,7 +47,7 @@ object EmbeddedMediatorInitialization {
       timeTrackerConfig: DomainTimeTrackerConfig,
       storage: Storage,
       sequencerClientFactoryFactory: DomainTopologyClientWithInit => SequencerClientFactory,
-      connection: SequencerConnection,
+      sequencerConnections: SequencerConnections,
       metrics: DomainMetrics,
       mediatorFactory: MediatorRuntimeFactory,
       indexedStringStore: IndexedStringStore,
@@ -112,7 +114,8 @@ object EmbeddedMediatorInitialization {
         sequencedEventStore,
         sendTrackerStore,
         RequestSigner(syncCrypto, protocolVersion),
-        connection,
+        sequencerConnections,
+        NonEmpty.mk(Set, SequencerAlias.Default -> SequencerId(id)).toMap,
       )
       mediatorRuntime <- mediatorFactory
         .create(
@@ -125,6 +128,7 @@ object EmbeddedMediatorInitialization {
           syncCrypto,
           topologyClient,
           topologyProcessor,
+          None,
           None,
           timeTrackerConfig,
           cantonParameterConfig,

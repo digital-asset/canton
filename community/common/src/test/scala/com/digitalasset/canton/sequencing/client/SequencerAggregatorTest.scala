@@ -5,11 +5,8 @@ package com.digitalasset.canton.sequencing.client
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.sequencing.SequencerAggregator.{
-  DefaultSequencerId,
-  SequencerAggregatorError,
-  SequencerId,
-}
+import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
+import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
@@ -47,8 +44,8 @@ class SequencerAggregatorTest
       aggregator.eventQueue.size() shouldBe 0
 
       aggregator
-        .combineAndMergeEvent(DefaultSequencerId, event)
-        .futureValue shouldBe Right(DefaultSequencerId)
+        .combineAndMergeEvent(sequencerId, event)
+        .futureValue shouldBe Right(sequencerId)
 
       aggregator.eventQueue.take() shouldBe event
     }
@@ -63,8 +60,8 @@ class SequencerAggregatorTest
 
       events.foreach { event =>
         aggregator
-          .combineAndMergeEvent(DefaultSequencerId, event)
-          .futureValue shouldBe Right(DefaultSequencerId)
+          .combineAndMergeEvent(sequencerId, event)
+          .futureValue shouldBe Right(sequencerId)
         aggregator.eventQueue.take() shouldBe event
       }
     }
@@ -81,8 +78,8 @@ class SequencerAggregatorTest
 
       events.foreach { event =>
         aggregator
-          .combineAndMergeEvent(DefaultSequencerId, event)
-          .futureValue shouldBe Right(DefaultSequencerId)
+          .combineAndMergeEvent(sequencerId, event)
+          .futureValue shouldBe Right(sequencerId)
       }
 
       val blockingEvent = createEvent(timestamp = CantonTimestamp.Epoch.plusSeconds(3L)).futureValue
@@ -91,7 +88,7 @@ class SequencerAggregatorTest
       p.completeWith(
         Future(
           aggregator
-            .combineAndMergeEvent(DefaultSequencerId, blockingEvent)
+            .combineAndMergeEvent(sequencerId, blockingEvent)
         )
       )
       always() {
@@ -113,7 +110,7 @@ class SequencerAggregatorTest
         val event2 = createEvent().futureValue
 
         val aggregator = mkAggregator(
-          expectedSequencers = NonEmpty.mk(Set, DefaultSequencerId, SecondSequencerId)
+          expectedSequencers = NonEmpty.mk(Set, sequencerId, SecondSequencerId)
         )
 
         val combinedMessage = aggregator.combine(NonEmpty(Seq, event1, event2)).value
@@ -121,7 +118,7 @@ class SequencerAggregatorTest
         aggregator.eventQueue.size() shouldBe 0
 
         val f1 = aggregator
-          .combineAndMergeEvent(DefaultSequencerId, event1)
+          .combineAndMergeEvent(sequencerId, event1)
 
         f1.isCompleted shouldBe false
         aggregator.eventQueue.size() shouldBe 0
@@ -144,10 +141,10 @@ class SequencerAggregatorTest
       val event2 = createEvent(timestampOfSigningKey = None).futureValue
 
       val aggregator = mkAggregator(
-        expectedSequencers = NonEmpty.mk(Set, DefaultSequencerId, SecondSequencerId)
+        expectedSequencers = NonEmpty.mk(Set, sequencerId, SecondSequencerId)
       )
       val f1 = aggregator
-        .combineAndMergeEvent(DefaultSequencerId, event1)
+        .combineAndMergeEvent(sequencerId, event1)
 
       f1.isCompleted shouldBe false
       aggregator.eventQueue.size() shouldBe 0
@@ -167,10 +164,10 @@ class SequencerAggregatorTest
       val event2 = createEvent(serializedOverride = Some(ByteString.EMPTY)).futureValue
 
       val aggregator = mkAggregator(
-        expectedSequencers = NonEmpty.mk(Set, DefaultSequencerId, SecondSequencerId)
+        expectedSequencers = NonEmpty.mk(Set, sequencerId, SecondSequencerId)
       )
       val f1 = aggregator
-        .combineAndMergeEvent(DefaultSequencerId, event1)
+        .combineAndMergeEvent(sequencerId, event1)
 
       f1.isCompleted shouldBe false
       aggregator.eventQueue.size() shouldBe 0
@@ -192,11 +189,11 @@ class SequencerAggregatorTest
         createEvent(timestamp = CantonTimestamp.Epoch.plusSeconds(s.toLong)).futureValue
       )
       val aggregator = mkAggregator(
-        expectedSequencers = NonEmpty.mk(Set, DefaultSequencerId, SecondSequencerId)
+        expectedSequencers = NonEmpty.mk(Set, sequencerId, SecondSequencerId)
       )
 
       val futures = events.map { event =>
-        val f = aggregator.combineAndMergeEvent(DefaultSequencerId, event)
+        val f = aggregator.combineAndMergeEvent(sequencerId, event)
         f.isCompleted shouldBe false
         f
       }

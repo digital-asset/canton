@@ -35,8 +35,8 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithoutSuffixes,
 }
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, RequestCounter, checked}
@@ -95,13 +95,14 @@ class ModelConformanceChecker(
         checkView(
           viewTree.view,
           viewTree.viewPosition,
-          viewTree.mediatorId,
+          viewTree.mediator,
           viewTree.transactionUuid,
           keyResolverFor(viewTree),
           requestCounter,
           ledgerTime,
           submissionTime,
           confirmationPolicy,
+          viewTree.submitterMetadata.map(_.submitterParticipant),
           topologySnapshot,
         )
       }
@@ -122,13 +123,14 @@ class ModelConformanceChecker(
             checkView(
               view,
               viewPos,
-              viewTree.mediatorId,
+              viewTree.mediator,
               viewTree.transactionUuid,
               keyResolverFor(viewTree),
               requestCounter,
               ledgerTime,
               submissionTime,
               confirmationPolicy,
+              None,
               topologySnapshot,
             ).swap
           }
@@ -145,13 +147,14 @@ class ModelConformanceChecker(
   private def checkView(
       view: TransactionView,
       viewPosition: ViewPosition,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       transactionUuid: UUID,
       resolverFromView: LfKeyResolver,
       requestCounter: RequestCounter,
       ledgerTime: CantonTimestamp,
       submissionTime: CantonTimestamp,
       confirmationPolicy: ConfirmationPolicy,
+      submittingParticipantO: Option[ParticipantId],
       topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
@@ -205,7 +208,8 @@ class ModelConformanceChecker(
           rootPosition = viewPosition,
           rbContext = rbContext,
           confirmationPolicy = confirmationPolicy,
-          mediatorId = mediatorId,
+          mediator = mediator,
+          submittingParticipantO = submittingParticipantO,
           salts = salts,
           transactionUuid = transactionUuid,
           topologySnapshot = topologySnapshot,

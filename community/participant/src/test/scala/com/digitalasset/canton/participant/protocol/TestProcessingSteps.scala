@@ -54,7 +54,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   DomainId,
-  MediatorId,
+  MediatorRef,
   Member,
   ParticipantId,
 }
@@ -134,7 +134,7 @@ class TestProcessingSteps(
 
   override def prepareSubmission(
       param: Int,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -211,7 +211,7 @@ class TestProcessingSteps(
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TestProcessingError, CheckActivenessAndWritePendingContracts] = {
@@ -225,7 +225,7 @@ class TestProcessingSteps(
       contractLookup: ContractLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -235,7 +235,7 @@ class TestProcessingSteps(
   ] = {
     val res = StorePendingDataAndSendResponseAndCreateTimeout(
       pendingRequestData.getOrElse(
-        TestPendingRequestData(RequestCounter(0), SequencerCounter(0), Set.empty, mediatorId)
+        TestPendingRequestData(RequestCounter(0), SequencerCounter(0), Set.empty, mediator)
       ),
       Seq.empty,
       (),
@@ -282,7 +282,7 @@ class TestProcessingSteps(
   }
 
   override def postProcessSubmissionForInactiveMediator(
-      declaredMediator: MediatorId,
+      declaredMediator: MediatorRef,
       timestamp: CantonTimestamp,
       pendingSubmission: Unit,
   )(implicit traceContext: TraceContext): Unit = ()
@@ -306,7 +306,7 @@ object TestProcessingSteps {
       rootHash: RootHash,
       informees: Set[Informee] = Set.empty,
       domainId: DomainId = DefaultTestIdentities.domainId,
-      mediatorId: MediatorId = DefaultTestIdentities.mediator,
+      mediator: MediatorRef = MediatorRef(DefaultTestIdentities.mediator),
   ) extends ViewTree
       with HasVersionedToByteString {
 
@@ -330,7 +330,7 @@ object TestProcessingSteps {
       requestCounter: RequestCounter,
       requestSequencerCounter: SequencerCounter,
       pendingContracts: Set[LfContractId],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   ) extends PendingRequestData
 
   case object TestPendingRequestDataType extends RequestType {

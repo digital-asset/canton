@@ -23,7 +23,7 @@ import java.util.UUID
 final case class CommonMetadata private (
     confirmationPolicy: ConfirmationPolicy,
     domainId: DomainId,
-    mediatorId: MediatorId,
+    mediator: MediatorRef,
     salt: Salt,
     uuid: UUID,
 )(
@@ -42,20 +42,42 @@ final case class CommonMetadata private (
   override def pretty: Pretty[CommonMetadata] = prettyOfClass(
     param("confirmation policy", _.confirmationPolicy),
     param("domain id", _.domainId),
-    param("mediator id", _.mediatorId),
+    param("mediator", _.mediator),
     param("uuid", _.uuid),
     param("salt", _.salt),
   )
 
   @transient override protected lazy val companionObj: CommonMetadata.type = CommonMetadata
 
-  private[CommonMetadata] def toProtoV0: v0.CommonMetadata = v0.CommonMetadata(
-    confirmationPolicy = confirmationPolicy.toProtoPrimitive,
-    domainId = domainId.toProtoPrimitive,
-    salt = Some(salt.toProtoV0),
-    uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
-    mediatorId = mediatorId.toProtoPrimitive,
-  )
+  private[CommonMetadata] def toProtoV0: v0.CommonMetadata = {
+    require(isEquivalentTo(ProtocolVersion.v3))
+    mediator match {
+      case MediatorRef.Single(mediatorId) =>
+        v0.CommonMetadata(
+          confirmationPolicy = confirmationPolicy.toProtoPrimitive,
+          domainId = domainId.toProtoPrimitive,
+          salt = Some(salt.toProtoV0),
+          uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+          mediatorId = mediatorId.toProtoPrimitive,
+        )
+      case _ =>
+        throw new IllegalStateException(
+          s"Only single mediator exist in for the representative protocol version $representativeProtocolVersion"
+        )
+    }
+  }
+
+  private[CommonMetadata] def toProtoV1: v1.CommonMetadata = {
+    // TODO(#12373) Adapt when releasing BFT
+    require(isEquivalentTo(ProtocolVersion.dev))
+    v1.CommonMetadata(
+      confirmationPolicy = confirmationPolicy.toProtoPrimitive,
+      domainId = domainId.toProtoPrimitive,
+      salt = Some(salt.toProtoV0),
+      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+      mediator = mediator.toProtoPrimitive,
+    )
+  }
 }
 
 object CommonMetadata
@@ -69,7 +91,12 @@ object CommonMetadata
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.CommonMetadata)(
       supportedProtoVersionMemoized(_)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
+    // TODO(#12373) Adapt when releasing BFT
+    ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.dev)(v1.CommonMetadata)(
+      supportedProtoVersionMemoized(_)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def apply(
@@ -77,11 +104,11 @@ object CommonMetadata
   )(
       confirmationPolicy: ConfirmationPolicy,
       domain: DomainId,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       salt: Salt,
       uuid: UUID,
       protocolVersion: ProtocolVersion,
-  ): CommonMetadata = CommonMetadata(confirmationPolicy, domain, mediatorId, salt, uuid)(
+  ): CommonMetadata = CommonMetadata(confirmationPolicy, domain, mediator, salt, uuid)(
     hashOps,
     protocolVersionRepresentativeFor(protocolVersion),
     None,
@@ -106,9 +133,40 @@ object CommonMetadata
         .parseRequired(Salt.fromProtoV0, "salt", saltP)
         .leftMap(_.inField("salt"))
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
-    } yield CommonMetadata(confirmationPolicy, DomainId(domainUid), mediatorId, salt, uuid)(
+    } yield CommonMetadata(
+      confirmationPolicy,
+      DomainId(domainUid),
+      MediatorRef(mediatorId),
+      salt,
+      uuid,
+    )(
       hashOps,
       protocolVersionRepresentativeFor(ProtoVersion(0)),
+      Some(bytes),
+    )
+
+  private def fromProtoV1(hashOps: HashOps, metaDataP: v1.CommonMetadata)(
+      bytes: ByteString
+  ): ParsingResult[CommonMetadata] =
+    for {
+      confirmationPolicy <- ConfirmationPolicy
+        .fromProtoPrimitive(metaDataP.confirmationPolicy)
+        .leftMap(e =>
+          ProtoDeserializationError.ValueDeserializationError("confirmationPolicy", e.show)
+        )
+      v1.CommonMetadata(saltP, _confirmationPolicyP, domainIdP, uuidP, mediatorP) = metaDataP
+      domainUid <- UniqueIdentifier
+        .fromProtoPrimitive_(domainIdP)
+        .leftMap(ProtoDeserializationError.ValueDeserializationError("domainId", _))
+      mediator <- MediatorRef
+        .fromProtoPrimitive(mediatorP, "CommonMetadata.mediator_id")
+      salt <- ProtoConverter
+        .parseRequired(Salt.fromProtoV0, "salt", saltP)
+        .leftMap(_.inField("salt"))
+      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
+    } yield CommonMetadata(confirmationPolicy, DomainId(domainUid), mediator, salt, uuid)(
+      hashOps,
+      protocolVersionRepresentativeFor(ProtoVersion(1)),
       Some(bytes),
     )
 }

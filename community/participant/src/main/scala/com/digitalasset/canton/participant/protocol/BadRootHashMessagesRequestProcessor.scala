@@ -14,7 +14,7 @@ import com.digitalasset.canton.protocol.messages.{LocalReject, MediatorResponse}
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.Recipients
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -47,12 +47,12 @@ class BadRootHashMessagesRequestProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     performUnlessClosingUSF(functionFullName) {
       crypto
         .awaitIpsSnapshotUS(timestamp)
-        .flatMap(snapshot => FutureUnlessShutdown.outcomeF(snapshot.isMediatorActive(mediatorId)))
+        .flatMap(snapshot => FutureUnlessShutdown.outcomeF(snapshot.isMediatorActive(mediator)))
         .flatMap {
           case true =>
             prepareForMediatorResultOfBadRequest(requestCounter, sequencerCounter, timestamp)
@@ -72,7 +72,7 @@ class BadRootHashMessagesRequestProcessor(
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
       rootHash: RootHash,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       reject: LocalReject,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     performUnlessClosingUSF(functionFullName) {
@@ -96,7 +96,7 @@ class BadRootHashMessagesRequestProcessor(
         _ <- sendResponses(
           requestId,
           requestCounter,
-          Seq(signedRejection -> Recipients.cc(mediatorId)),
+          Seq(signedRejection -> Recipients.cc(mediator.toRecipient)),
         ).mapK(FutureUnlessShutdown.outcomeK)
           .valueOr(
             // This is a best-effort response anyway, so we merely log the failure and continue

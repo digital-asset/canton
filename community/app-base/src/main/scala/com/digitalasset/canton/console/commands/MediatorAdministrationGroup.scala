@@ -29,7 +29,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc
 import com.digitalasset.canton.domain.admin.v0.EnterpriseMediatorAdministrationServiceGrpc.EnterpriseMediatorAdministrationServiceStub
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.sequencing.SequencerConnection
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
@@ -157,6 +157,25 @@ class MediatorAdministrationGroupWithInit(
       domainId: DomainId,
       mediatorId: MediatorId,
       domainParameters: StaticDomainParameters,
+      sequencerConnections: SequencerConnections,
+      topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
+  ): PublicKey = consoleEnvironment.run {
+    runner.adminCommand(
+      Initialize(
+        domainId,
+        mediatorId,
+        topologySnapshot,
+        domainParameters.toInternal,
+        sequencerConnections,
+      )
+    )
+  }
+
+  @Help.Summary("Initialize a mediator")
+  def initialize(
+      domainId: DomainId,
+      mediatorId: MediatorId,
+      domainParameters: StaticDomainParameters,
       sequencerConnection: SequencerConnection,
       topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
   ): PublicKey = consoleEnvironment.run {
@@ -166,7 +185,7 @@ class MediatorAdministrationGroupWithInit(
         mediatorId,
         topologySnapshot,
         domainParameters.toInternal,
-        sequencerConnection,
+        SequencerConnections.default(sequencerConnection),
       )
     )
   }
@@ -183,14 +202,14 @@ trait MediatorXAdministrationGroupWithInit extends ConsoleCommandGroup {
         domainId: DomainId,
         domainParameters: StaticDomainParameters,
         sequencerId: SequencerId,
-        sequencerConnection: SequencerConnection,
+        sequencerConnections: SequencerConnections,
     ): Unit = consoleEnvironment.run {
       runner.adminCommand(
         InitializeX(
           domainId,
           domainParameters.toInternal,
           sequencerId,
-          sequencerConnection,
+          sequencerConnections,
         )
       )
     }

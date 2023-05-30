@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, Symboli
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
+import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.*
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
   UnableToDetermineKey,
@@ -51,14 +52,14 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
   val domain: DomainId = DefaultTestIdentities.domainId
   val applicationId: ApplicationId = DefaultDamlValues.applicationId()
   val commandId: CommandId = DefaultDamlValues.commandId()
-  val mediator: MediatorId = DefaultTestIdentities.mediator
+  val mediator: MediatorRef = MediatorRef(DefaultTestIdentities.mediator)
   val ledgerTime: CantonTimestamp = CantonTimestamp.Epoch
   val submissionTime: CantonTimestamp = ledgerTime.plusMillis(7)
   val workflowId: Option[WorkflowId] = Some(
     WorkflowId.assertFromString("workflowIdConfirmationRequestFactoryTest")
   )
   val ledgerConfiguration: LedgerConfiguration = DefaultDamlValues.ledgerConfiguration
-  val submitterInfo: SubmitterInfo = DefaultDamlValues.submitterInfo(submitters)
+  val submitterInfo: SubmitterInfo = DefaultParticipantStateValues.submitterInfo(submitters)
 
   // Crypto snapshots
   def createCryptoSnapshot(
@@ -115,7 +116,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           submitterInfo: SubmitterInfo,
           _confirmationPolicy: ConfirmationPolicy,
           _workflowId: Option[WorkflowId],
-          _mediatorId: MediatorId,
+          _mediator: MediatorRef,
           transactionSeed: SaltSeed,
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
@@ -143,7 +144,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           subaction: WellFormedTransaction[WithoutSuffixes],
           rootPosition: ViewPosition,
           confirmationPolicy: ConfirmationPolicy,
-          mediatorId: MediatorId,
+          mediator: MediatorRef,
+          submittingParticipantO: Option[ParticipantId],
           salts: Iterable[Salt],
           transactionUuid: UUID,
           topologySnapshot: TopologySnapshot,

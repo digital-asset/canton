@@ -30,6 +30,15 @@ private[backend] trait StorageBackendTestsPartyRecord
 
   private val zeroMicros: Long = 0
 
+  private val idpId = IdentityProviderId.Id(Ref.LedgerString.assertFromString("idp1"))
+  private val idpConfig = IdentityProviderConfig(
+    identityProviderId = idpId,
+    isDeactivated = false,
+    jwksUrl = JwksUrl("http//identityprovider.domain/"),
+    issuer = "issuer",
+    audience = Some("audience"),
+  )
+
   private def tested = backend.participantPartyStorageBackend
 
   override def newResource(): TestedResource = new TestedResource {
@@ -125,6 +134,49 @@ private[backend] trait StorageBackendTestsPartyRecord
         Some(idpId),
       )
     ) shouldBe Set(party2)
+  }
+
+  it should "update party's identityProviderId" in {
+    executeSql(
+      backend.identityProviderStorageBackend.createIdentityProviderConfig(
+        idpConfig
+      )
+    )
+    // create with the default idp
+    val pr = newDbPartyRecord(
+      createdAt = 123,
+      partyId = "party",
+      identityProviderId = IdentityProviderId.Default.toDb,
+    )
+    val internalId = executeSql(tested.createPartyRecord(pr))
+    executeSql(
+      (tested.getPartyRecord(pr.party))
+    ).value.payload.identityProviderId shouldBe IdentityProviderId.Default.toDb
+    // update to idp1
+    executeSql(
+      tested.updatePartyRecordIdp(internalId, identityProviderId = idpId.toDb)
+    ) shouldBe true
+    executeSql(
+      (tested.getPartyRecord(pr.party))
+    ).value.payload.identityProviderId shouldBe idpId.toDb
+    // update to idp1 again
+    executeSql(
+      tested.updatePartyRecordIdp(internalId, identityProviderId = idpId.toDb)
+    ) shouldBe true
+    executeSql(
+      (tested.getPartyRecord(pr.party))
+    ).value.payload.identityProviderId shouldBe idpId.toDb
+    // update to the default idp
+    executeSql(
+      tested.updatePartyRecordIdp(internalId, identityProviderId = IdentityProviderId.Default.toDb)
+    ) shouldBe true
+    executeSql(
+      (tested.getPartyRecord(pr.party))
+    ).value.payload.identityProviderId shouldBe IdentityProviderId.Default.toDb
+    // update on non-existent user
+    executeSql(
+      tested.updatePartyRecordIdp(100000, identityProviderId = IdentityProviderId.Default.toDb)
+    ) shouldBe false
   }
 
   private def newDbPartyRecord(

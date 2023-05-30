@@ -49,6 +49,7 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.akkastreams.dispatcher.DispatcherImpl.DispatcherIsClosedException
@@ -350,7 +351,7 @@ private[index] class IndexServiceImpl(
   }
 
   override def listLfPackages()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Map[Ref.PackageId, v2.PackageDetails]] =
     ledgerDao.listLfPackages()
 

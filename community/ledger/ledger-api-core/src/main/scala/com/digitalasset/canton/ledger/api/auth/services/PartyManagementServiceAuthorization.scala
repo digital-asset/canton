@@ -63,13 +63,18 @@ final class PartyManagementServiceAuthorization(
       authorizer.requireIdpAdminClaims(service.updatePartyDetails)(request)
   }
 
+  override def updatePartyIdentityProviderId(
+      request: UpdatePartyIdentityProviderRequest
+  ): Future[UpdatePartyIdentityProviderResponse] = {
+    authorizer.requireAdminClaims(
+      call = service.updatePartyIdentityProviderId
+    )(
+      request
+    )
+  }
+
   override def bindService(): ServerServiceDefinition =
     PartyManagementServiceGrpc.bindService(this, executionContext)
 
   override def close(): Unit = service.close()
-
-  // TODO (i13051): Implement IDP reassignment
-  override def updateUserIdentityProviderId(
-      request: UpdatePartyIdentityProviderRequest
-  ): Future[UpdatePartyIdentityProviderResponse] = ???
 }

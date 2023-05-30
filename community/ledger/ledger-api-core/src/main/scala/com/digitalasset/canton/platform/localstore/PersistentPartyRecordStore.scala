@@ -8,6 +8,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{DatabaseMetrics, Metrics}
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
 import com.digitalasset.canton.platform.localstore.PersistentPartyRecordStore.{
@@ -110,6 +111,58 @@ class PersistentPartyRecordStore(
                 }
                 updatePartyRecord <- doFetchDomainPartyRecord(party)(connection)
               } yield updatePartyRecord
+            } else {
+              Left(PartyRecordStore.PartyNotFound(party))
+            }
+        }
+      }.map(tapSuccess { updatePartyRecord =>
+        logger.info(s"Updated party record in participant local store: ${updatePartyRecord}")
+      })
+    } yield updatedPartyRecord
+  }
+
+  override def updatePartyRecordIdp(
+      party: Party,
+      ledgerPartyIsLocal: Boolean,
+      sourceIdp: IdentityProviderId,
+      targetIdp: IdentityProviderId,
+  )(implicit loggingContext: LoggingContext): Future[Result[PartyRecord]] = {
+    for {
+      updatedPartyRecord <- inTransaction(_.updatePartyRecordIdp) { implicit connection =>
+        backend.getPartyRecord(party = party)(connection) match {
+          // Update an existing party record
+          case Some(dbPartyRecord) =>
+            if (dbPartyRecord.payload.identityProviderId != sourceIdp.toDb) {
+              Left(PartyRecordStore.PartyNotFound(party = party))
+            } else {
+              backend
+                .updatePartyRecordIdp(
+                  internalId = dbPartyRecord.internalId,
+                  identityProviderId = targetIdp.toDb,
+                )(connection)
+                .discard
+              doFetchDomainPartyRecord(party)(connection)
+            }
+          case None =>
+            // Party record does not exist, but party is local to participant
+            if (ledgerPartyIsLocal) {
+              // When party record doesn't exist
+              // it means that the party implicitly belongs to the default idp.
+              if (sourceIdp != IdentityProviderId.Default) {
+                Left(PartyRecordStore.PartyNotFound(party = party))
+              } else {
+                for {
+                  _ <- withoutPartyRecord(party) {
+                    val newPartyRecord = PartyRecord(
+                      party = party,
+                      identityProviderId = targetIdp,
+                      metadata = domain.ObjectMeta.empty,
+                    )
+                    doCreatePartyRecord(newPartyRecord)(connection)
+                  }
+                  updatePartyRecord <- doFetchDomainPartyRecord(party)(connection)
+                } yield updatePartyRecord
+              }
             } else {
               Left(PartyRecordStore.PartyNotFound(party))
             }

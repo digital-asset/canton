@@ -17,7 +17,7 @@ import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.transaction.TrustLevel
-import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, MediatorRef, TestingIdentityFactory}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
@@ -62,7 +62,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     val commonMetadata = CommonMetadata(hashOps)(
       ConfirmationPolicy.Signatory,
       domainId,
-      mediatorId,
+      MediatorRef(mediatorId),
       s(5417),
       new UUID(0L, 0L),
       testedProtocolVersion,
@@ -84,6 +84,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       informeeMessage,
       MediatorError.Timeout.Reject.create(testedProtocolVersion),
       testedProtocolVersion,
+      sendVerdict = true,
     )(loggerFactory)
 
   private[mediator] def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {
@@ -101,7 +102,8 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         for {
           _ <- sut.store(currentVersion)
           result <- sut.fetch(requestId).value
-        } yield result shouldBe Some(currentVersion)
+          expected = currentVersion.copy(sendVerdict = false)
+        } yield result shouldBe Some(expected)
       }
       "should allow the same response to be stored more than once" in {
         // can happen after a crash and event replay

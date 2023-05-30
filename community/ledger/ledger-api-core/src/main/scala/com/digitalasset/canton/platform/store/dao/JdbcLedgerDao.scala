@@ -25,7 +25,9 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexerPartyDetails,
   PackageDetails,
 }
+import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.configuration.{
   AcsStreamsConfig,
   TransactionFlatStreamsConfig,
@@ -51,6 +53,7 @@ import com.digitalasset.canton.platform.{
   TransactionId,
   WorkflowId,
 }
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -147,17 +150,23 @@ private class JdbcLedgerDao(
       submissionId: String,
       configuration: Configuration,
       rejectionReason: Option[String],
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse] =
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse] =
     withEnrichedLoggingContext(Logging.submissionId(submissionId)) { implicit loggingContext =>
       logger.info("Storing configuration entry")
       dbDispatcher.executeSql(
         metrics.daml.index.db.storeConfigurationEntryDbMetrics
       ) { implicit conn =>
-        val update = state.Update.ConfigurationChanged(
-          recordTime = recordedAt,
-          submissionId = SubmissionId.assertFromString(submissionId),
-          participantId = Ref.ParticipantId.assertFromString("1"), // not used for DbDto generation
-          newConfiguration = configuration,
+        val update = Traced[Update](
+          state.Update.ConfigurationChanged(
+            recordTime = recordedAt,
+            submissionId = SubmissionId.assertFromString(submissionId),
+            participantId =
+              Ref.ParticipantId.assertFromString("1"), // not used for DbDto generation
+            newConfiguration = configuration,
+          )
         )
 
         sequentialIndexer.store(conn, offset, Some(update))
@@ -172,7 +181,10 @@ private class JdbcLedgerDao(
   override def storePartyEntry(
       offset: Offset,
       partyEntry: PartyLedgerEntry,
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse] = {
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse] = {
     logger.info("Storing party entry")
     dbDispatcher.executeSql(metrics.daml.index.db.storePartyEntryDbMetrics) { implicit conn =>
       partyEntry match {
@@ -181,17 +193,20 @@ private class JdbcLedgerDao(
             conn,
             offset,
             Some(
-              state.Update.PartyAddedToParticipant(
-                party = partyDetails.party,
-                displayName = partyDetails.displayName.orNull,
-                // HACK: the `PartyAddedToParticipant` transmits `participantId`s, while here we only have the information
-                // whether the party is locally hosted or not. We use the `nonLocalParticipantId` to get the desired effect of
-                // the `isLocal = False` information to be transmitted via a `PartyAddedToParticpant` `Update`.
-                //
-                // This will be properly resolved once we move away from the `sandbox-classic` codebase.
-                participantId = if (partyDetails.isLocal) participantId else NonLocalParticipantId,
-                recordTime = recordTime,
-                submissionId = submissionIdOpt,
+              Traced[Update](
+                state.Update.PartyAddedToParticipant(
+                  party = partyDetails.party,
+                  displayName = partyDetails.displayName.orNull,
+                  // HACK: the `PartyAddedToParticipant` transmits `participantId`s, while here we only have the information
+                  // whether the party is locally hosted or not. We use the `nonLocalParticipantId` to get the desired effect of
+                  // the `isLocal = False` information to be transmitted via a `PartyAddedToParticpant` `Update`.
+                  //
+                  // This will be properly resolved once we move away from the `sandbox-classic` codebase.
+                  participantId =
+                    if (partyDetails.isLocal) participantId else NonLocalParticipantId,
+                  recordTime = recordTime,
+                  submissionId = submissionIdOpt,
+                )
               )
             ),
           )
@@ -202,11 +217,13 @@ private class JdbcLedgerDao(
             conn,
             offset,
             Some(
-              state.Update.PartyAllocationRejected(
-                submissionId = submissionId,
-                participantId = participantId,
-                recordTime = recordTime,
-                rejectionReason = reason,
+              Traced[Update](
+                state.Update.PartyAllocationRejected(
+                  submissionId = submissionId,
+                  participantId = participantId,
+                  recordTime = recordTime,
+                  rejectionReason = reason,
+                )
               )
             ),
           )
@@ -238,17 +255,22 @@ private class JdbcLedgerDao(
       recordTime: Timestamp,
       offset: Offset,
       reason: state.Update.CommandRejected.RejectionReasonTemplate,
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse] =
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.storeRejectionDbMetrics) { implicit conn =>
         sequentialIndexer.store(
           conn,
           offset,
           completionInfo.map(info =>
-            state.Update.CommandRejected(
-              recordTime = recordTime,
-              completionInfo = info,
-              reasonTemplate = reason,
+            Traced[Update](
+              state.Update.CommandRejected(
+                recordTime = recordTime,
+                completionInfo = info,
+                reasonTemplate = reason,
+              )
             )
           ),
         )
@@ -277,7 +299,7 @@ private class JdbcLedgerDao(
       )
 
   override def listLfPackages()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Map[PackageId, PackageDetails]] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.loadPackages)(
@@ -299,7 +321,10 @@ private class JdbcLedgerDao(
       offset: Offset,
       packages: List[(Archive, PackageDetails)],
       optEntry: Option[PackageLedgerEntry],
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse] = {
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse] = {
     logger.info("Storing package entry")
     dbDispatcher.executeSql(metrics.daml.index.db.storePackageEntryDbMetrics) {
       implicit connection =>
@@ -349,7 +374,7 @@ private class JdbcLedgerDao(
               rejectionReason = reason,
             )
         }
-        sequentialIndexer.store(connection, offset, Some(update))
+        sequentialIndexer.store(connection, offset, Some(Traced[Update](update)))
         PersistenceResponse.Ok
     }
   }
@@ -596,7 +621,10 @@ private class JdbcLedgerDao(
       divulgedContracts: Iterable[state.DivulgedContract],
       blindingInfo: Option[BlindingInfo],
       recordTime: Timestamp,
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse] = {
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse] = {
     logger.info("Storing transaction")
     dbDispatcher
       .executeSql(metrics.daml.index.db.storeTransactionDbMetrics) { implicit conn =>
@@ -604,23 +632,25 @@ private class JdbcLedgerDao(
           conn,
           offset,
           Some(
-            state.Update.TransactionAccepted(
-              optCompletionInfo = completionInfo,
-              transactionMeta = state.TransactionMeta(
-                ledgerEffectiveTime = ledgerEffectiveTime,
-                workflowId = workflowId,
-                submissionTime = null, // not used for DbDto generation
-                submissionSeed = null, // not used for DbDto generation
-                optUsedPackages = None, // not used for DbDto generation
-                optNodeSeeds = None, // not used for DbDto generation
-                optByKeyNodes = None, // not used for DbDto generation
-              ),
-              transaction = transaction,
-              transactionId = transactionId,
-              recordTime = recordTime,
-              divulgedContracts = divulgedContracts.toList,
-              blindingInfo = blindingInfo,
-              contractMetadata = Map.empty,
+            Traced[Update](
+              state.Update.TransactionAccepted(
+                optCompletionInfo = completionInfo,
+                transactionMeta = state.TransactionMeta(
+                  ledgerEffectiveTime = ledgerEffectiveTime,
+                  workflowId = workflowId,
+                  submissionTime = null, // not used for DbDto generation
+                  submissionSeed = null, // not used for DbDto generation
+                  optUsedPackages = None, // not used for DbDto generation
+                  optNodeSeeds = None, // not used for DbDto generation
+                  optByKeyNodes = None, // not used for DbDto generation
+                ),
+                transaction = transaction,
+                transactionId = transactionId,
+                recordTime = recordTime,
+                divulgedContracts = divulgedContracts.toList,
+                blindingInfo = blindingInfo,
+                contractMetadata = Map.empty,
+              )
             )
           ),
         )

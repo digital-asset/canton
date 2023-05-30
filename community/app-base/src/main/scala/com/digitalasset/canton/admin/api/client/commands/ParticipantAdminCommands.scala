@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.grpc.{
   GrpcParticipantRepairService,
@@ -30,7 +31,9 @@ import com.digitalasset.canton.participant.admin.v0.TransferServiceGrpc.Transfer
 import com.digitalasset.canton.participant.admin.v0.{ResourceLimits as _, *}
 import com.digitalasset.canton.participant.admin.{ResourceLimits, v0}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig as CDomainConnectionConfig
+import com.digitalasset.canton.participant.traffic.TrafficStateController.ParticipantTrafficState
 import com.digitalasset.canton.protocol.{LfContractId, TransferId, v0 as v0proto}
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -1094,6 +1097,59 @@ object ParticipantAdminCommands {
         response match {
           case SetPassive.Response() => Right(())
         }
+    }
+  }
+
+  object TrafficControl {
+    final case class GetTrafficControlState(domainId: DomainId)
+        extends GrpcAdminCommand[
+          TrafficControlStateRequest,
+          TrafficControlStateResponse,
+          ParticipantTrafficState,
+        ] {
+      override type Svc = TrafficControlServiceGrpc.TrafficControlServiceStub
+
+      override def createService(
+          channel: ManagedChannel
+      ): TrafficControlServiceGrpc.TrafficControlServiceStub =
+        TrafficControlServiceGrpc.stub(channel)
+
+      override def submitRequest(
+          service: TrafficControlServiceGrpc.TrafficControlServiceStub,
+          request: TrafficControlStateRequest,
+      ): Future[TrafficControlStateResponse] =
+        service.trafficControlState(request)
+
+      override def createRequest(): Either[String, TrafficControlStateRequest] = Right(
+        TrafficControlStateRequest(domainId.toProtoPrimitive)
+      )
+
+      override def handleResponse(
+          response: TrafficControlStateResponse
+      ): Either[String, ParticipantTrafficState] = {
+        response.trafficState
+          .map { trafficState =>
+            val result = for {
+              timestamp <- ProtoConverter.parseRequired(
+                CantonTimestamp.fromProtoPrimitive,
+                "timestamp",
+                trafficState.timestamp,
+              )
+              totalExtraTraffic <- trafficState.totalExtraTrafficLimit.traverse(
+                ProtoConverter.parsePositiveLong
+              )
+              remainderExtraTraffic <- ProtoConverter.parseNonNegativeLong(
+                trafficState.extraTrafficRemainder
+              )
+            } yield ParticipantTrafficState(
+              timestamp,
+              totalExtraTraffic,
+              remainderExtraTraffic,
+            )
+            result.leftMap(_.message)
+          }
+          .getOrElse(Left("No traffic state available"))
+      }
     }
   }
 

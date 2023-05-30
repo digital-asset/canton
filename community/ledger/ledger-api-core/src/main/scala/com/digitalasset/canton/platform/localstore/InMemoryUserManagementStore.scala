@@ -162,6 +162,19 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
     state.valuesIterator.map(info => toDomainUser(info.user)).toList
   )
 
+  override def updateUserIdp(
+      id: Ref.UserId,
+      sourceIdp: IdentityProviderId,
+      targetIdp: IdentityProviderId,
+  )(implicit loggingContext: LoggingContext): Future[Result[User]] = {
+    withUser(id = id, identityProviderId = sourceIdp) { info =>
+      val user = info.user.copy(identityProviderId = targetIdp)
+      val updated = info.copy(user = user)
+      state.update(id, updated)
+      Right(toDomainUser(updated.user))
+    }
+  }
+
   private def withState[T](t: => T): Future[T] =
     blocking(
       state.synchronized(

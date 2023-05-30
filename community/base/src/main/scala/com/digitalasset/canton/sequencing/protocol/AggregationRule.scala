@@ -80,6 +80,7 @@ object AggregationRule
 
   override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.v3),
+    // TODO(#12373) Adapt when releasing BFT
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.dev)(v0.AggregationRule)(
       supportedProtoVersion(_)(fromProtoV0),
       _.toProtoV0.toByteString,

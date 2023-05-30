@@ -320,6 +320,7 @@ class StartableStoppableLedgerApiServer(
         createExternalServices = createExternalServices,
         explicitDisclosureUnsafeEnabled = config.serverConfig.explicitDisclosureUnsafe,
         telemetry = telemetry,
+        loggerFactory = loggerFactory,
       )
     } yield ()
   }

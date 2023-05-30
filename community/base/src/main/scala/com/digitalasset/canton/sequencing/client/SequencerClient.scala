@@ -45,7 +45,7 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DiscardOps, SequencerCounter}
+import com.digitalasset.canton.{DiscardOps, SequencerAlias, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
@@ -192,6 +192,7 @@ class SequencerClientImpl(
     cryptoPureApi: CryptoPureApi,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
+    expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
     initialCounterLowerBound: SequencerCounter = SequencerCounter.Genesis,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends SequencerClient
@@ -207,7 +208,15 @@ class SequencerClientImpl(
   }
 
   private val sequencerAggregator =
-    new SequencerAggregator(cryptoPureApi, config.eventInboxSize, loggerFactory)
+    new SequencerAggregator(
+      cryptoPureApi,
+      config.eventInboxSize,
+      loggerFactory,
+      NonEmpty(
+        Set,
+        expectedSequencers.head1._2,
+      ), // TODO(i12076): use expectedSequencers.map(_._2).toSet
+    )
 
   private val currentTransport =
     new AtomicReference[SequencerClientTransport](sequencerClientTransport)
@@ -708,8 +717,6 @@ class SequencerClientImpl(
           }
         }
 
-        val sequencerId = SequencerAggregator.DefaultSequencerId
-
         val subscriptionHandler = new SubscriptionHandler(
           StoreSequencedEvent(sequencedEventStore, domainId, loggerFactory).apply(
             timeTracker.wrapHandler(eventHandler)
@@ -718,7 +725,7 @@ class SequencerClientImpl(
           eventValidator,
           eventDelay,
           preSubscriptionEvent.map(_.counter),
-          sequencerId,
+          expectedSequencers.head1._2, // TODO(i12076): Create multiple subscriptions with all expected sequencers
         )
 
         val subscription = ResilientSequencerSubscription[SequencerClientSubscriptionError](
@@ -795,7 +802,7 @@ class SequencerClientImpl(
       eventValidator: SequencedEventValidator,
       processingDelay: DelaySequencedEvent,
       initialPriorEventCounter: Option[SequencerCounter],
-      sequencerId: SequencerAggregator.SequencerId,
+      sequencerId: SequencerId,
   ) {
 
     // keep track of the last event that we processed. In the event the SequencerClient is recreated or that our [[ResilientSequencerSubscription]] reconnects
@@ -825,7 +832,7 @@ class SequencerClientImpl(
             s"Do not handle event with sequencerCounter ${serializedEvent.counter}, as it is replayed and has already been handled."
           )
           eventValidator
-            .validateOnReconnect(serializedEvent)
+            .validateOnReconnect(serializedEvent, sequencerId)
             .leftMap[SequencerClientSubscriptionError](EventValidationError)
             .value
         } else {
@@ -837,7 +844,7 @@ class SequencerClientImpl(
               performUnlessClosingF("processing-delay")(processingDelay.delay(serializedEvent))
             )
             _ <- eventValidator
-              .validate(serializedEvent)
+              .validate(serializedEvent, sequencerId)
               .leftMap[SequencerClientSubscriptionError](EventValidationError)
             _ = priorEventCounter.set(Some(serializedEvent.counter))
 

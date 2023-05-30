@@ -7,7 +7,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.domain.admin.{v0, v2}
 import com.digitalasset.canton.domain.sequencing.admin.grpc.InitializeSequencerRequest
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.sequencing.SequencerConnection
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
@@ -19,7 +19,7 @@ final case class InitializeMediatorRequest(
     mediatorId: MediatorId,
     topologyState: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
     domainParameters: StaticDomainParameters,
-    sequencerConnection: SequencerConnection,
+    sequencerConnections: SequencerConnections,
 ) {
   def toProtoV0: v0.InitializeMediatorRequest =
     v0.InitializeMediatorRequest(
@@ -27,7 +27,8 @@ final case class InitializeMediatorRequest(
       mediatorId.uid.toProtoPrimitive,
       topologyState.map(_.toProtoV0),
       Some(domainParameters.toProtoV0),
-      Some(sequencerConnection.toProtoV0),
+      // Non-BFT domain is only supporting a single sequencer connection
+      Some(sequencerConnections.default.toProtoV0),
     )
 }
 
@@ -61,7 +62,7 @@ object InitializeMediatorRequest {
       mediatorId,
       topologyState,
       domainParameters,
-      sequencerConnection,
+      SequencerConnections.default(sequencerConnection),
     )
   }
 }
@@ -70,14 +71,14 @@ final case class InitializeMediatorRequestX(
     domainId: DomainId,
     domainParameters: StaticDomainParameters,
     sequencerId: SequencerId,
-    sequencerConnection: SequencerConnection,
+    sequencerConnections: SequencerConnections,
 ) {
   def toProtoV2: v2.InitializeMediatorRequest =
     v2.InitializeMediatorRequest(
       domainId.toProtoPrimitive,
       Some(domainParameters.toProtoV1),
       sequencerId.toProtoPrimitive,
-      Some(sequencerConnection.toProtoV0),
+      sequencerConnections.toProtoV0,
     )
 }
 
@@ -97,16 +98,12 @@ object InitializeMediatorRequestX {
         .required("domain_parameters", domainParametersP)
         .flatMap(StaticDomainParameters.fromProtoV1)
       sequencerId <- SequencerId.fromProtoPrimitive(sequencerIdP, "sequencer_id")
-      sequencerConnection <- ProtoConverter.parseRequired(
-        SequencerConnection.fromProtoV0,
-        "sequencer_connection",
-        sequencerConnectionP,
-      )
+      sequencerConnections <- SequencerConnections.fromProtoV0(sequencerConnectionP)
     } yield InitializeMediatorRequestX(
       domainId,
       domainParameters,
       sequencerId,
-      sequencerConnection,
+      sequencerConnections,
     )
   }
 }

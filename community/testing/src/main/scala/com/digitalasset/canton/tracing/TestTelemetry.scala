@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.tracing
 
-import io.opentelemetry.api.trace.Tracer
+import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.sdk.common.CompletableResultCode
 import io.opentelemetry.sdk.trace.data.{EventData, SpanData}
 import io.opentelemetry.sdk.trace.`export`.SpanExporter
@@ -17,6 +17,9 @@ class TestTelemetrySetup() extends AutoCloseable {
 
   val tracer: Tracer = tracerProvider.tracer
   def reportedSpans(): List[SpanData] = testExporter.allSpans()
+
+  def anEmptySpan(spanName: String = "aSpan"): Span =
+    tracer.spanBuilder(spanName).startSpan()
 
   override def close(): Unit = testExporter.close()
 }

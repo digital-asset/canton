@@ -93,6 +93,41 @@ private[backend] trait StorageBackendTestsUserManagement
     executeSql((tested.getUser(user.id))).value.payload.isDeactivated shouldBe true
   }
 
+  it should "update user's identityProviderId" in {
+    executeSql(
+      backend.identityProviderStorageBackend.createIdentityProviderConfig(
+        idpConfig
+      )
+    )
+    // create with the default idp
+    val user = newDbUser(
+      createdAt = 123,
+      userId = "userId1",
+      identityProviderId = IdentityProviderId.Default,
+    )
+    val internalId = executeSql(tested.createUser(user))
+    executeSql(
+      (tested.getUser(user.id))
+    ).value.payload.identityProviderId shouldBe IdentityProviderId.Default.toDb
+    // update to idp1
+    executeSql(tested.updateUserIdp(internalId, identityProviderId = idpId.toDb)) shouldBe true
+    executeSql((tested.getUser(user.id))).value.payload.identityProviderId shouldBe idpId.toDb
+    // update to idp1 again
+    executeSql(tested.updateUserIdp(internalId, identityProviderId = idpId.toDb)) shouldBe true
+    executeSql((tested.getUser(user.id))).value.payload.identityProviderId shouldBe idpId.toDb
+    // update to the default idp
+    executeSql(
+      tested.updateUserIdp(internalId, identityProviderId = IdentityProviderId.Default.toDb)
+    ) shouldBe true
+    executeSql(
+      (tested.getUser(user.id))
+    ).value.payload.identityProviderId shouldBe IdentityProviderId.Default.toDb
+    // update on non-existent user
+    executeSql(
+      tested.updateUserIdp(100000, identityProviderId = IdentityProviderId.Default.toDb)
+    ) shouldBe false
+  }
+
   it should "handle created_at and granted_at attributes correctly" in {
     val user = newDbUser(createdAt = 123)
     val internalId = executeSql(tested.createUser(user))

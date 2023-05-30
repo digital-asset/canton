@@ -99,7 +99,7 @@ final case class TransactionViewTree(tree: GenTransactionTree)
 
   override def domainId: DomainId = commonMetadata.domainId
 
-  override def mediatorId: MediatorId = commonMetadata.mediatorId
+  override def mediator: MediatorRef = commonMetadata.mediator
 
   def confirmationPolicy: ConfirmationPolicy = commonMetadata.confirmationPolicy
 

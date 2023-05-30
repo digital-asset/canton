@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
 }
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, MonadUtil}
@@ -64,7 +64,7 @@ class TransactionTreeFactoryImplV3(
     )
 
   protected[submission] class State private (
-      override val mediatorId: MediatorId,
+      override val mediator: MediatorRef,
       override val transactionUUID: UUID,
       override val ledgerTime: CantonTimestamp,
       override protected val salts: Iterator[Salt],
@@ -111,7 +111,7 @@ class TransactionTreeFactoryImplV3(
   private[submission] object State {
     private[submission] def submission(
         transactionSeed: SaltSeed,
-        mediatorId: MediatorId,
+        mediator: MediatorRef,
         transactionUUID: UUID,
         ledgerTime: CantonTimestamp,
         nextSaltIndex: Int,
@@ -120,21 +120,21 @@ class TransactionTreeFactoryImplV3(
       val salts = LazyList
         .from(nextSaltIndex)
         .map(index => Salt.tryDeriveSalt(transactionSeed, index, cryptoOps))
-      new State(mediatorId, transactionUUID, ledgerTime, salts.iterator, keyResolver)
+      new State(mediator, transactionUUID, ledgerTime, salts.iterator, keyResolver)
     }
 
     private[submission] def validation(
-        mediatorId: MediatorId,
+        mediator: MediatorRef,
         transactionUUID: UUID,
         ledgerTime: CantonTimestamp,
         salts: Iterable[Salt],
         keyResolver: LfKeyResolver,
-    ): State = new State(mediatorId, transactionUUID, ledgerTime, salts.iterator, keyResolver)
+    ): State = new State(mediator, transactionUUID, ledgerTime, salts.iterator, keyResolver)
   }
 
   override protected def stateForSubmission(
       transactionSeed: SaltSeed,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
       nextSaltIndex: Int,
@@ -142,7 +142,7 @@ class TransactionTreeFactoryImplV3(
   ): State =
     State.submission(
       transactionSeed,
-      mediatorId,
+      mediator,
       transactionUUID,
       ledgerTime,
       nextSaltIndex,
@@ -150,12 +150,12 @@ class TransactionTreeFactoryImplV3(
     )
 
   override protected def stateForValidation(
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
       salts: Iterable[Salt],
       keyResolver: LfKeyResolver,
-  ): State = State.validation(mediatorId, transactionUUID, ledgerTime, salts, keyResolver)
+  ): State = State.validation(mediator, transactionUUID, ledgerTime, salts, keyResolver)
 
   override protected def createView(
       view: TransactionViewDecomposition.NewView,

@@ -44,6 +44,7 @@ import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{
   DomainId,
   MediatorId,
+  MediatorRef,
   ParticipantId,
   TestingTopology,
   UniqueIdentifier,
@@ -202,7 +203,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
             any[RequestCounter],
             any[SequencerCounter],
             any[CantonTimestamp],
-            any[MediatorId],
+            any[MediatorRef],
           )(anyTraceContext)
       )
         .thenReturn(badRootHashMessagesRequestProcessorF)
@@ -212,7 +213,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
           any[SequencerCounter],
           any[CantonTimestamp],
           any[RootHash],
-          any[MediatorId],
+          any[MediatorRef],
           any[LocalReject],
         )(anyTraceContext)
       )
@@ -796,14 +797,14 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
             rootHashMessage -> Recipients.cc(participantId, otherParticipant, mediatorId2),
           ) -> Seq(
             "Received root hash message with invalid recipients"
-          ) -> ExpectMalformedMediatorRequestResult(mediatorId2),
+          ) -> ExpectMalformedMediatorRequestResult(MediatorRef(mediatorId2)),
           Batch.of[ProtocolMessage](
             testedProtocolVersion,
             view -> Recipients.cc(participantId),
             rootHashMessage -> Recipients.cc(participantId, otherParticipant, mediatorId2),
             rootHashMessage -> Recipients.cc(participantId, mediatorId2),
           ) -> Seq("Multiple root hash messages in batch") -> ExpectMalformedMediatorRequestResult(
-            (mediatorId2)
+            (MediatorRef(mediatorId2))
           ),
           Batch.of[ProtocolMessage](
             testedProtocolVersion,
@@ -815,7 +816,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
             show"Expected view type $wrongViewType, but received view types $viewType",
           ) -> SendMalformedAndExpectMediatorResult(
             rootHashMessage.rootHash,
-            mediatorId,
+            MediatorRef(mediatorId),
             show"Received no encrypted view message of type $wrongViewType",
           ),
           Batch.of[ProtocolMessage](
@@ -825,7 +826,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
             show"Received no encrypted view message of type $viewType"
           ) -> SendMalformedAndExpectMediatorResult(
             rootHashMessage.rootHash,
-            mediatorId,
+            MediatorRef(mediatorId),
             show"Received no encrypted view message of type $viewType",
           ),
           Batch.of[ProtocolMessage](
@@ -837,7 +838,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
             show"Received no encrypted view message of type $viewType",
           ) -> SendMalformedAndExpectMediatorResult(
             rootHashMessage.rootHash,
-            mediatorId,
+            MediatorRef(mediatorId),
             show"Received no encrypted view message of type $viewType",
           ),
         )

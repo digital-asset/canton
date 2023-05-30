@@ -18,7 +18,8 @@ import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.apiserver.configuration.{
   LedgerConfigurationInitializer,
   LedgerConfigurationSubscription,
@@ -108,6 +109,7 @@ object ApiServices {
       explicitDisclosureUnsafeEnabled: Boolean,
       createExternalServices: () => List[BindableService] = () => Nil,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -337,6 +339,7 @@ object ApiServices {
           managementServiceTimeout,
           engine,
           telemetry = telemetry,
+          loggerFactory = loggerFactory,
         )
 
         val apiConfigManagementService = ApiConfigManagementService.createApiService(

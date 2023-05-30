@@ -44,7 +44,7 @@ sealed case class ProtocolVersion private[version] (v: Int)
 
   def isDeleted: Boolean = deleted.contains(this)
 
-  private def isDev: Boolean = v == Int.MaxValue
+  def isDev: Boolean = v == Int.MaxValue
 
   def isSupported: Boolean =
     supported.contains(this) || unstable.contains(this)

@@ -261,7 +261,9 @@ object GrpcSequencerSubscription {
           response => {
             val tracedSignedEvent = response.signedSequencedEvent
             val ordinaryEvent =
-              OrdinarySequencedEvent(tracedSignedEvent.value)(tracedSignedEvent.traceContext)
+              OrdinarySequencedEvent(tracedSignedEvent.value, response.trafficState)(
+                tracedSignedEvent.traceContext
+              )
             handler(ordinaryEvent)
           },
         )

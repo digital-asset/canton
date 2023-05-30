@@ -66,10 +66,10 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
     }
 
     "successfully start and auto-connect to local domains" in { processLogger =>
-      s"""$cantonBin daemon 
-           |--bootstrap $resourceDir/scripts/startup.canton 
-           |-C canton.parameters.manual-start=no 
-           |--auto-connect-local 
+      s"""$cantonBin daemon
+           |--bootstrap $resourceDir/scripts/startup.canton
+           |-C canton.parameters.manual-start=no
+           |--auto-connect-local
            |--config $simpleConf --verbose --no-tty""".stripMargin ! processLogger
       checkOutput(
         processLogger,
@@ -223,6 +223,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
           "run",
           "demo/demo.sc",
           "--debug",
+          "--log-file-name=log/demo.log",
           "-c",
           "demo/demo.conf",
         ),

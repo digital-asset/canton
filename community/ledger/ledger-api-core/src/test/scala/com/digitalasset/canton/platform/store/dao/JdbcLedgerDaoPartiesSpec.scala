@@ -11,6 +11,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.IndexerPartyDet
 import com.digitalasset.canton.platform.store.dao.PersistenceResponse
 import com.digitalasset.canton.platform.store.entries.PartyLedgerEntry
 import com.digitalasset.canton.platform.store.entries.PartyLedgerEntry.AllocationAccepted
+import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.OptionValues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,6 +22,7 @@ import scala.concurrent.Future
 private[dao] trait JdbcLedgerDaoPartiesSpec {
   this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite with OptionValues =>
 
+  import TraceContext.Implicits.Empty.*
   behavior of "JdbcLedgerDao (parties)"
 
   it should "store and retrieve all parties" in {

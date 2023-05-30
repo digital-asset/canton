@@ -6,12 +6,15 @@ package com.digitalasset.canton.participant.domain
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.DomainTimeTrackerConfig
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.admin.v0
-import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
+import com.digitalasset.canton.sequencing.{
+  GrpcSequencerConnection,
+  SequencerConnection,
+  SequencerConnections,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -24,6 +27,7 @@ import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
 }
+import com.digitalasset.canton.{DomainAlias, SequencerAlias}
 import com.google.protobuf.ByteString
 
 import java.net.URI
@@ -31,8 +35,8 @@ import java.net.URI
 /** The domain connection configuration object
   *
   * @param domain alias to be used internally to refer to this domain connection
-  * @param sequencerConnection the host and port to the sequencer(s).
-  *                            multiple can be given by building the [[com.digitalasset.canton.sequencing.SequencerConnection]] object explicitly.
+  * @param sequencerConnections Configuration for the sequencers. In case of BFT domain - there could be sequencers with multiple connections.
+  *                             Each sequencer can also support high availability, so multiple endpoints could be provided for each individual sequencer.
   * @param manualConnect if set to true (default false), the domain is not connected automatically on startup.
   * @param domainId if the domain-id is known, then it can be passed as an argument. during the handshake, the
   *                 participant will check that the domain-id on the remote port is indeed the one given
@@ -48,7 +52,7 @@ import java.net.URI
   */
 final case class DomainConnectionConfig(
     domain: DomainAlias,
-    sequencerConnection: SequencerConnection,
+    sequencerConnections: SequencerConnections,
     manualConnect: Boolean = false,
     domainId: Option[DomainId] = None,
     priority: Int = 0,
@@ -61,31 +65,37 @@ final case class DomainConnectionConfig(
   override protected def companionObj = DomainConnectionConfig
 
   /** Helper methods to avoid having to use NonEmpty[Seq in the console */
-  def addConnection(connection: String, additionalConnections: String*): DomainConnectionConfig =
-    addConnection(new URI(connection), additionalConnections.map(new URI(_)): _*)
-  def addConnection(connection: URI, additionalConnections: URI*): DomainConnectionConfig =
-    copy(sequencerConnection =
-      sequencerConnection
-        .addConnection(connection, additionalConnections: _*)
-    )
+  def addEndpoints(
+      sequencerAlias: SequencerAlias,
+      connection: String,
+      additionalConnections: String*
+  ): DomainConnectionConfig =
+    addEndpoints(sequencerAlias, new URI(connection), additionalConnections.map(new URI(_)): _*)
 
-  def certificates: Option[ByteString] = sequencerConnection match {
-    case grpcConnection: GrpcSequencerConnection =>
-      grpcConnection.customTrustCertificates
+  def addEndpoints(
+      sequencerAlias: SequencerAlias,
+      connection: URI,
+      additionalConnections: URI*
+  ): DomainConnectionConfig =
+    copy(sequencerConnections =
+      sequencerConnections.addEndpoints(sequencerAlias, connection, additionalConnections: _*)
+    )
+  def addConnection(connection: SequencerConnection): DomainConnectionConfig = {
+    copy(sequencerConnections =
+      sequencerConnections.addEndpoints(connection.sequencerAlias, connection)
+    )
   }
 
-  def withCertificates(certificates: ByteString): DomainConnectionConfig =
-    sequencerConnection match {
-      case grpcConnection: GrpcSequencerConnection =>
-        copy(sequencerConnection =
-          grpcConnection.copy(customTrustCertificates = Some(certificates))
-        )
-    }
+  def withCertificates(
+      sequencerAlias: SequencerAlias,
+      certificates: ByteString,
+  ): DomainConnectionConfig =
+    copy(sequencerConnections = sequencerConnections.withCertificates(sequencerAlias, certificates))
 
   override def pretty: Pretty[DomainConnectionConfig] =
     prettyOfClass(
       param("domain", _.domain),
-      param("sequencerConnection", _.sequencerConnection),
+      param("sequencerConnections", _.sequencerConnections),
       param("manualConnect", _.manualConnect),
       param("domainId", _.domainId),
       param("priority", _.priority),
@@ -96,7 +106,7 @@ final case class DomainConnectionConfig(
   def toProtoV0: v0.DomainConnectionConfig =
     v0.DomainConnectionConfig(
       domainAlias = domain.unwrap,
-      sequencerConnection = sequencerConnection.toProtoV0.some,
+      sequencerConnections = sequencerConnections.toProtoV0,
       manualConnect = manualConnect,
       domainId = domainId.fold("")(_.toProtoPrimitive),
       priority = priority,
@@ -119,6 +129,7 @@ object DomainConnectionConfig
   override protected def name: String = "domain connection config"
 
   def grpc(
+      sequencerAlias: SequencerAlias,
       domainAlias: DomainAlias,
       connection: String,
       manualConnect: Boolean = false,
@@ -131,7 +142,9 @@ object DomainConnectionConfig
   ): DomainConnectionConfig =
     DomainConnectionConfig(
       domainAlias,
-      GrpcSequencerConnection.tryCreate(connection, certificates),
+      SequencerConnections.default(
+        GrpcSequencerConnection.tryCreate(connection, certificates, sequencerAlias)
+      ),
       manualConnect,
       domainId,
       priority,
@@ -158,10 +171,8 @@ object DomainConnectionConfig
       alias <- DomainAlias
         .create(domainAlias)
         .leftMap(err => InvariantViolation(s"DomainConnectionConfig.DomainAlias: $err"))
-      sequencerConnection <- ProtoConverter.parseRequired(
-        SequencerConnection.fromProtoV0,
-        "sequencerConnection",
-        sequencerConnectionP,
+      sequencerConnections <- SequencerConnections.fromProtoV0(
+        sequencerConnectionP
       )
       domainId <- OptionUtil
         .emptyStringAsNone(domainId)
@@ -179,7 +190,7 @@ object DomainConnectionConfig
       )
     } yield DomainConnectionConfig(
       alias,
-      sequencerConnection,
+      sequencerConnections,
       manualConnect,
       domainId,
       priority,

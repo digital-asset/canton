@@ -17,9 +17,9 @@ import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
+import com.digitalasset.canton.topology.{DefaultTestIdentities, MediatorRef}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -61,7 +61,7 @@ class MediatorStateTest
       val commonMetadata = CommonMetadata(hashOps)(
         ConfirmationPolicy.Signatory,
         domainId,
-        mediatorId,
+        MediatorRef(mediatorId),
         s(5417),
         new UUID(0, 0),
         testedProtocolVersion,
@@ -83,7 +83,13 @@ class MediatorStateTest
     }
     val currentVersion =
       ResponseAggregation
-        .fromRequest(requestId, informeeMessage, testedProtocolVersion, mockTopologySnapshot)(
+        .fromRequest(
+          requestId,
+          informeeMessage,
+          testedProtocolVersion,
+          mockTopologySnapshot,
+          sendVerdict = true,
+        )(
           loggerFactory
         )(anyTraceContext, executorService)
         .futureValue // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext

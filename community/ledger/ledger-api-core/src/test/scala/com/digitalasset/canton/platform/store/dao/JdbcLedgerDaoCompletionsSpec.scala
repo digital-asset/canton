@@ -9,10 +9,11 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.TransactionNodeStatistics
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoCompletionsSpec.*
-import com.google.rpc.status.{Status as RpcStatus}
+import com.digitalasset.canton.tracing.TraceContext
+import com.google.rpc.status.Status as RpcStatus
 import io.grpc.Status
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -24,6 +25,7 @@ import scala.concurrent.Future
 private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneElement {
   this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
 
+  import TraceContext.Implicits.Empty.*
   behavior of "JdbcLedgerDao (completions)"
 
   it should "return the expected completion for an accepted transaction" in {

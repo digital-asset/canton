@@ -43,6 +43,7 @@ import com.digitalasset.canton.platform.apiserver.{LedgerFeatures, TimeServiceBa
 import com.digitalasset.canton.platform.config.ParticipantConfig
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.DbType
+import com.digitalasset.canton.tracing.Traced
 
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContextExecutorService
@@ -205,7 +206,7 @@ object SandboxOnXRunner {
   // Builds the write service and uploads the initialization DARs
   def buildWriteService(
       participantId: Ref.ParticipantId,
-      feedSink: Sink[(Offset, Update), NotUsed],
+      feedSink: Sink[(Offset, Traced[Update]), NotUsed],
       bridgeConfig: BridgeConfig,
       materializer: Materializer,
       loggingContext: LoggingContext,

@@ -499,6 +499,14 @@ object SigningKeyGenerationError {
 sealed trait SignatureCheckError extends Product with Serializable with PrettyPrinting
 object SignatureCheckError {
 
+  final case class MultipleErrors(errors: Seq[SignatureCheckError], message: Option[String] = None)
+      extends SignatureCheckError {
+    override def pretty: Pretty[MultipleErrors] = prettyOfClass[MultipleErrors](
+      paramIfDefined("message", _.message.map(_.unquoted)),
+      param("errors", _.errors),
+    )
+  }
+
   final case class InvalidSignature(signature: Signature, bytes: ByteString, error: String)
       extends SignatureCheckError {
     override def pretty: Pretty[InvalidSignature] =

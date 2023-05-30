@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
@@ -39,11 +40,12 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
   lazy val messageId3 = new UUID(0, 3)
   lazy val messageId4 = new UUID(0, 4)
   lazy val traceContext1 = TraceContext.withNewTraceContext(Predef.identity)
-  lazy val completionInfo = DefaultDamlValues.completionInfo(List.empty)
+  lazy val completionInfo = DefaultParticipantStateValues.completionInfo(List.empty)
   lazy val trackingData1 =
     TransactionSubmissionTrackingData(
       completionInfo,
       TransactionSubmissionTrackingData.TimeoutCause,
+      None,
       testedProtocolVersion,
     )
   lazy val trackingData3 = TransactionSubmissionTrackingData(
@@ -55,6 +57,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
           .rpcStatus()
       )
     ),
+    None,
     testedProtocolVersion,
   )
   lazy val submission1 = InFlightSubmission(

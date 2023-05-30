@@ -21,7 +21,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
   ProtoVersion,
@@ -57,7 +57,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(
 
   override def domainId: DomainId = fullInformeeTree.domainId
 
-  override def mediatorId: MediatorId = fullInformeeTree.mediatorId
+  override def mediator: MediatorRef = fullInformeeTree.mediator
 
   override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
     fullInformeeTree.informeesAndThresholdByView

@@ -23,7 +23,7 @@ import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.UUID
@@ -41,7 +41,7 @@ trait TransactionTreeFactory {
       submitterInfo: SubmitterInfo,
       confirmationPolicy: ConfirmationPolicy,
       workflowId: Option[WorkflowId],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       transactionSeed: SaltSeed,
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
@@ -61,7 +61,8 @@ trait TransactionTreeFactory {
       subaction: WellFormedTransaction[WithoutSuffixes],
       rootPosition: ViewPosition,
       confirmationPolicy: ConfirmationPolicy,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
+      submittingParticipantO: Option[ParticipantId],
       salts: Iterable[Salt],
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,

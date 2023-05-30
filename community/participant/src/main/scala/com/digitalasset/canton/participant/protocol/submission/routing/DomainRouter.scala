@@ -124,7 +124,13 @@ class DomainRouter(
         )
 
       metadata <- EitherT
-        .fromEither[Future](TransactionMetadata.fromTransactionMeta(transactionMeta))
+        .fromEither[Future](
+          TransactionMetadata.fromTransactionMeta(
+            metaLedgerEffectiveTime = transactionMeta.ledgerEffectiveTime,
+            metaSubmissionTime = transactionMeta.submissionTime,
+            metaOptNodeSeeds = transactionMeta.optNodeSeeds,
+          )
+        )
         .leftMap(RoutingInternalError.IllformedTransaction)
 
       wfTransaction <- EitherT.fromEither[Future](
@@ -143,6 +149,7 @@ class DomainRouter(
         domainOfContracts,
         domainIdResolver,
         inputContractsMetadata,
+        transactionMeta.optDomainId,
       )
 
       domainSelector <- domainSelectorFactory.create(transactionData)

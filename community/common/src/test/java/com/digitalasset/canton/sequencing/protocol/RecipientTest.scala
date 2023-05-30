@@ -4,7 +4,13 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.topology.{ParticipantId, PartyId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  MediatorId,
+  MediatorRef,
+  ParticipantId,
+  PartyId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -61,6 +67,30 @@ class RecipientTest extends AnyWordSpec with BaseTest {
           .left
           .value shouldBe a[ProtoDeserializationError]
       }
+    }
+
+    "work on MediatorRecipient" in {
+      val mediatorsOfDomainMR = MediatorRef(mediatorsOfDomain)
+      val mediatorMemberMR =
+        MediatorRef(MediatorId(UniqueIdentifier.tryCreate("mediator", "fingerprint")))
+
+      MediatorRef.fromProtoPrimitive(
+        mediatorsOfDomainMR.toProtoPrimitive,
+        "mediator",
+      ) shouldBe (Right(mediatorsOfDomainMR))
+
+      MediatorRef.fromProtoPrimitive(
+        mediatorMemberMR.toProtoPrimitive,
+        "mediator",
+      ) shouldBe (Right(mediatorMemberMR))
+
+      MediatorRef
+        .fromProtoPrimitive(
+          memberRecipient.toProtoPrimitive, // a participant
+          "mediator",
+        )
+        .left
+        .value shouldBe a[ProtoDeserializationError]
     }
   }
 }

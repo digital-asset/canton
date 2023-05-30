@@ -18,6 +18,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology.KeyOwner
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
@@ -164,9 +165,19 @@ trait SyncCryptoApi {
       hash: Hash,
       signer: KeyOwner,
       signatures: NonEmpty[Seq[Signature]],
-  ): EitherT[Future, SignatureCheckError, Unit] =
-    // TODO(#11255) Properly check all signatures.
-    verifySignature(hash, signer, signatures.head1)
+  ): EitherT[Future, SignatureCheckError, Unit]
+
+  /** Verifies a list of `signatures` to be produced by active members of a `mediatorGroup`,
+    * counting each member's signature only once.
+    * Returns `Right` when the `mediatorGroup`'s threshold is met.
+    * Can be successful even if some signatures fail the check, logs the errors in that case.
+    * When the threshold is not met returns `Left` with all the signature check errors.
+    */
+  def verifySignatures(
+      hash: Hash,
+      mediatorGroupIndex: MediatorGroupIndex,
+      signatures: NonEmpty[Seq[Signature]],
+  )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit]
 
   /** Encrypts a message for the given key owner
     *

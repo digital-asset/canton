@@ -67,7 +67,7 @@ import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
@@ -156,7 +156,7 @@ class TransactionProcessingSteps(
 
   override def prepareSubmission(
       param: SubmissionParam,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -175,7 +175,7 @@ class TransactionProcessingSteps(
       transactionMeta,
       keyResolver,
       wfTransaction,
-      mediatorId,
+      mediator,
       recentSnapshot,
       ephemeralState.contractLookup,
       ephemeralState.observedTimestampLookup,
@@ -206,7 +206,7 @@ class TransactionProcessingSteps(
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
       contractLookup: ContractLookup,
       watermarkLookup: WatermarkLookup[CantonTimestamp],
@@ -268,6 +268,7 @@ class TransactionProcessingSteps(
       val tracking = TransactionSubmissionTrackingData(
         submitterInfo.toCompletionInfo().copy(optDeduplicationPeriod = dedupInfo.some),
         TransactionSubmissionTrackingData.CauseWithTemplate(error),
+        Some(domainId),
         protocolVersion,
       )
       UnsequencedSubmission(timestampForUpdate(), tracking)
@@ -367,7 +368,7 @@ class TransactionProcessingSteps(
               submitterInfoWithDedupPeriod,
               transactionMeta.workflowId.map(WorkflowId(_)),
               keyResolver,
-              mediatorId,
+              mediator,
               recentSnapshot,
               lookupContractsWithDisclosed,
               None,
@@ -399,6 +400,7 @@ class TransactionProcessingSteps(
         val trackingData = TransactionSubmissionTrackingData(
           submitterInfoWithDedupPeriod.toCompletionInfo(),
           rejectionCause,
+          Some(domainId),
           protocolVersion,
         )
         Success(Left(UnsequencedSubmission(timestampForUpdate(), trackingData)))
@@ -428,6 +430,7 @@ class TransactionProcessingSteps(
       TransactionSubmissionTrackingData(
         submitterInfo.toCompletionInfo().copy(optDeduplicationPeriod = None),
         TransactionSubmissionTrackingData.TimeoutCause,
+        Some(domainId),
         protocolVersion,
       )
 
@@ -486,7 +489,12 @@ class TransactionProcessingSteps(
       }
       val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(errorCode)
       val trackingData =
-        TransactionSubmissionTrackingData(completionInfo, rejectionCause, protocolVersion)
+        TransactionSubmissionTrackingData(
+          completionInfo,
+          rejectionCause,
+          Some(domainId),
+          protocolVersion,
+        )
       UnsequencedSubmission(timestamp, trackingData)
     }
   }
@@ -680,7 +688,7 @@ class TransactionProcessingSteps(
       ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CheckActivenessAndWritePendingContracts] = {
@@ -782,7 +790,7 @@ class TransactionProcessingSteps(
       contractLookup: ContractLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -997,7 +1005,7 @@ class TransactionProcessingSteps(
       )
     }
 
-    val mediatorRecipient = Recipients.cc(mediatorId)
+    val mediatorRecipients = Recipients.cc(mediator.toRecipient)
 
     val result =
       for {
@@ -1020,10 +1028,10 @@ class TransactionProcessingSteps(
       } yield {
 
         val pendingTransaction =
-          createPendingTransaction(requestId, transactionValidationResult, rc, sc, mediatorId)
+          createPendingTransaction(requestId, transactionValidationResult, rc, sc, mediator)
         StorePendingDataAndSendResponseAndCreateTimeout(
           pendingTransaction,
-          responses.map(_ -> mediatorRecipient),
+          responses.map(_ -> mediatorRecipients),
           RejectionArgs(
             pendingTransaction,
             LocalReject.TimeRejects.LocalTimeout.Reject(protocolVersion),
@@ -1074,12 +1082,12 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId]) = {
     val someView = decryptedViews.head1
-    val mediatorId = someView.unwrap.mediatorId
+    val mediator = someView.unwrap.mediator
     val submitterMetadataO = someView.unwrap.tree.submitterMetadata.unwrap.toOption
     submitterMetadataO.flatMap(completionInfoFromSubmitterMetadataO).map { completionInfo =>
       val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
         TransactionProcessor.SubmissionErrors.InactiveMediatorError
-          .Error(mediatorId, ts)
+          .Error(mediator, ts)
           .rpcStatus()
       )
 
@@ -1089,6 +1097,7 @@ class TransactionProcessingSteps(
           completionInfo,
           rejection,
           requestType,
+          Some(domainId),
         ),
         rc.asLocalOffset,
         Some(sc),
@@ -1097,7 +1106,7 @@ class TransactionProcessingSteps(
   }
 
   override def postProcessSubmissionForInactiveMediator(
-      declaredMediator: MediatorId,
+      declaredMediator: MediatorRef,
       ts: CantonTimestamp,
       pendingSubmission: Nothing,
   )(implicit
@@ -1147,7 +1156,8 @@ class TransactionProcessingSteps(
 
     val tseO = submitterParticipantSubmitterInfoO.map(info =>
       TimestampedEvent(
-        LedgerSyncEvent.CommandRejected(requestTime.toLf, info, rejection, requestType),
+        LedgerSyncEvent
+          .CommandRejected(requestTime.toLf, info, rejection, requestType, Some(domainId)),
         requestCounter.asLocalOffset,
         Some(requestSequencerCounter),
       )
@@ -1196,7 +1206,7 @@ class TransactionProcessingSteps(
       transactionValidationResult: TransactionValidationResult,
       rc: RequestCounter,
       sc: SequencerCounter,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit traceContext: TraceContext): PendingTransaction = {
     val TransactionValidationResult(
       transactionId,
@@ -1233,7 +1243,7 @@ class TransactionProcessingSteps(
       rc,
       sc,
       transactionValidationResult,
-      mediatorId,
+      mediator,
     )
   }
 

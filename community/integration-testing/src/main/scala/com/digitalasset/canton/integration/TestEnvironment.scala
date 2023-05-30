@@ -14,7 +14,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.environment.Environment
 
 /** Type including all environment macros and utilities to appear as you're using canton console */
-trait TestEnvironment[E <: Environment]
+trait TestEnvironment[+E <: Environment]
     extends ConsoleEnvironmentTestHelpers[E#Console]
     with ConsoleMacros
     with CommonTestAliases[E#Console]

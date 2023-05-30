@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.index
 import akka.Done
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
+import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
@@ -46,6 +47,7 @@ import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
 import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.mockito.{InOrder, MockitoSugar}
@@ -181,6 +183,8 @@ class InMemoryStateUpdaterSpec
 }
 
 object InMemoryStateUpdaterSpec {
+
+  import TraceContext.Implicits.Empty.*
   trait Scope extends Matchers with ScalaFutures with IntegrationPatience with MockitoSugar {
     val templateId = Identifier.assertFromString("noPkgId:Mod:I")
     val templateId2 = Identifier.assertFromString("noPkgId:Mod:I2")
@@ -325,7 +329,9 @@ object InMemoryStateUpdaterSpec {
     def result(lastEventSequentialId: Long): PrepareResult =
       PrepareResult(Vector.empty, offset(1L), lastEventSequentialId, PackageMetadata())
 
-    def runFlow(input: Seq[(Vector[(Offset, Update)], Long)])(implicit mat: Materializer): Done =
+    def runFlow(
+        input: Seq[(Vector[(Offset, Traced[Update])], Long)]
+    )(implicit mat: Materializer): Done =
       Source(input)
         .via(inMemoryStateUpdater)
         .runWith(Sink.ignore)
@@ -351,43 +357,50 @@ object InMemoryStateUpdaterSpec {
     optByKeyNodes = None,
   )
 
-  private val update1 = offset(1L) -> Update.TransactionAccepted(
-    optCompletionInfo = None,
-    transactionMeta = someTransactionMeta,
-    transaction = CommittedTransaction(TransactionBuilder.Empty),
-    transactionId = txId1,
-    recordTime = Timestamp.Epoch,
-    divulgedContracts = List.empty,
-    blindingInfo = None,
-    contractMetadata = Map.empty,
+  private val update1 = offset(1L) -> Traced(
+    Update.TransactionAccepted(
+      optCompletionInfo = None,
+      transactionMeta = someTransactionMeta,
+      transaction = CommittedTransaction(TransactionBuilder.Empty),
+      transactionId = txId1,
+      recordTime = Timestamp.Epoch,
+      divulgedContracts = List.empty,
+      blindingInfo = None,
+      contractMetadata = Map.empty,
+    )
   )
-  private val metadataChangedUpdate = offset(2L) -> Update.ConfigurationChanged(
+  private val rawMetadataChangedUpdate = offset(2L) -> Update.ConfigurationChanged(
     Timestamp.Epoch,
     someSubmissionId,
     participantId,
     configuration,
   )
-  private val update3 = offset(3L) -> Update.TransactionAccepted(
-    optCompletionInfo = None,
-    transactionMeta = someTransactionMeta,
-    transaction = CommittedTransaction(TransactionBuilder.Empty),
-    transactionId = txId2,
-    recordTime = Timestamp.Epoch,
-    divulgedContracts = List.empty,
-    blindingInfo = None,
-    contractMetadata = Map.empty,
+  private val metadataChangedUpdate = rawMetadataChangedUpdate.bimap(identity, Traced[Update])
+  private val update3 = offset(3L) -> Traced[Update](
+    Update.TransactionAccepted(
+      optCompletionInfo = None,
+      transactionMeta = someTransactionMeta,
+      transaction = CommittedTransaction(TransactionBuilder.Empty),
+      transactionId = txId2,
+      recordTime = Timestamp.Epoch,
+      divulgedContracts = List.empty,
+      blindingInfo = None,
+      contractMetadata = Map.empty,
+    )
   )
-  private val update4 = offset(4L) -> Update.CommandRejected(
-    recordTime = Time.Timestamp.assertFromLong(1337L),
-    completionInfo = CompletionInfo(
-      actAs = List.empty,
-      applicationId = Ref.ApplicationId.assertFromString("some-app-id"),
-      commandId = Ref.CommandId.assertFromString("cmdId"),
-      optDeduplicationPeriod = None,
-      submissionId = None,
-      statistics = None,
-    ),
-    reasonTemplate = FinalReason(new Status()),
+  private val update4 = offset(4L) -> Traced[Update](
+    Update.CommandRejected(
+      recordTime = Time.Timestamp.assertFromLong(1337L),
+      completionInfo = CompletionInfo(
+        actAs = List.empty,
+        applicationId = Ref.ApplicationId.assertFromString("some-app-id"),
+        commandId = Ref.CommandId.assertFromString("cmdId"),
+        optDeduplicationPeriod = None,
+        submissionId = None,
+        statistics = None,
+      ),
+      reasonTemplate = FinalReason(new Status()),
+    )
   )
   private val archive = DamlLf.Archive.newBuilder
     .setHash("00001")
@@ -401,22 +414,31 @@ object InMemoryStateUpdaterSpec {
     .setPayload(ByteString.copyFromUtf8("payload 2"))
     .build
 
-  private val update5 = offset(5L) -> Update.PublicPackageUpload(
-    archives = List(archive),
-    sourceDescription = None,
-    recordTime = Timestamp.Epoch,
-    submissionId = None,
+  private val update5 = offset(5L) -> Traced[Update](
+    Update.PublicPackageUpload(
+      archives = List(archive),
+      sourceDescription = None,
+      recordTime = Timestamp.Epoch,
+      submissionId = None,
+    )
   )
 
-  private val update6 = offset(6L) -> Update.PublicPackageUpload(
-    archives = List(archive2),
-    sourceDescription = None,
-    recordTime = Timestamp.Epoch,
-    submissionId = None,
+  private val update6 = offset(6L) -> Traced[Update](
+    Update.PublicPackageUpload(
+      archives = List(archive2),
+      sourceDescription = None,
+      recordTime = Timestamp.Epoch,
+      submissionId = None,
+    )
   )
 
   private val anotherMetadataChangedUpdate =
-    offset(5L) -> metadataChangedUpdate._2.copy(recordTime = Time.Timestamp.assertFromLong(1337L))
+    rawMetadataChangedUpdate
+      .bimap(
+        Function.const(offset(5L)),
+        _.copy(recordTime = Time.Timestamp.assertFromLong(1337L)),
+      )
+      .bimap(identity, Traced[Update](_))
 
   private def offset(idx: Long): Offset = {
     val base = BigInt(1) << 32

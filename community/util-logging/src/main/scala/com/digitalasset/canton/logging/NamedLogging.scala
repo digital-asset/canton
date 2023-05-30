@@ -40,7 +40,6 @@ object NamedLogging {
   private implicit val canLogTraceContext = CanLogTraceContext
 
   def loggerWithoutTracing(logger: TracedLogger): Logger = Logger(logger.underlying)
-  def todoTracedLogger(logger: TracedLogger): Logger = loggerWithoutTracing(logger)
 
   lazy val noopLogger = Logger.takingImplicit[TraceContext](NOPLogger.NOP_LOGGER)
 }

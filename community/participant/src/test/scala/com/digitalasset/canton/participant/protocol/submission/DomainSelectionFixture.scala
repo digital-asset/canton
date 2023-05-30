@@ -70,9 +70,10 @@ private[submission] object DomainSelectionFixture {
         },
         participants =
           topology.values.flatten.map(_ -> ParticipantAttributes(Submission, TrustLevel.Vip)).toMap,
+        packages = packages,
       ).build()
 
-      testingIdentityFactory.topologySnapshot(packages = packages)
+      testingIdentityFactory.topologySnapshot()
     }
   }
 

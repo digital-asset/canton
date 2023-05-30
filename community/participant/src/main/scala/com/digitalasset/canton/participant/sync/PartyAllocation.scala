@@ -104,6 +104,16 @@ private[sync] class PartyAllocation(
             SyncServiceError.PartyAllocationNoDomainError.Error(rawSubmissionId).rpcStatus()
           ),
         )
+        _ <- partyNotifier
+          .expectPartyAllocationForXNodes(
+            partyId,
+            participantId,
+            validatedSubmissionId,
+          )
+          .leftMap[SubmissionResult] { err =>
+            reject(err, SubmissionResult.Acknowledged)
+          }
+          .toEitherT[Future]
         _ <- topologyManagerOps
           .allocateParty(validatedSubmissionId, partyId, participantId, protocolVersion)
           .leftMap[SubmissionResult] {
@@ -114,6 +124,14 @@ private[sync] class PartyAllocation(
               )
             case IdentityManagerParentError(e) => reject(e.cause, SubmissionResult.Acknowledged)
             case e => reject(e.toString, TransactionError.internalError(e.toString))
+          }
+          .leftMap { x =>
+            partyNotifier.expireExpectedPartyAllocationForXNodes(
+              partyId,
+              participantId,
+              validatedSubmissionId,
+            )
+            x
           }
           .onShutdown(Left(TransactionError.shutdownError))
 

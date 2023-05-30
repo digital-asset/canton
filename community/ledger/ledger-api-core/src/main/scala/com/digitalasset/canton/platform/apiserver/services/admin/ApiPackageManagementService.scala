@@ -13,21 +13,27 @@ import com.daml.ledger.api.v1.admin.package_management_service.*
 import com.daml.lf.archive.{Dar, DarParser, Decode, GenDarReader}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.PackageServiceError.Validation
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
   IndexTransactionsService,
 }
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{
+  LedgerErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPackageManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
-import com.digitalasset.canton.platform.server.api.services.grpc.Logging.traceId
 import com.google.protobuf.ByteString
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import scalaz.std.either.*
@@ -49,19 +55,20 @@ private[apiserver] final class ApiPackageManagementService private (
     darReader: GenDarReader[Archive],
     submissionIdGenerator: String => Ref.SubmissionId,
     telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
     materializer: Materializer,
     executionContext: ExecutionContext,
     loggingContext: LoggingContext,
 ) extends PackageManagementService
-    with GrpcApiService {
-
-  private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
+    with GrpcApiService
+    with NamedLogging {
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
       packagesIndex,
       packagesWrite,
+      loggerFactory,
     )
   )
 
@@ -72,24 +79,24 @@ private[apiserver] final class ApiPackageManagementService private (
 
   override def listKnownPackages(
       request: ListKnownPackagesRequest
-  ): Future[ListKnownPackagesResponse] =
-    withEnrichedLoggingContext(traceId(telemetry.traceIdFromGrpcContext)) {
-      implicit loggingContext =>
-        logger.info("Listing known packages")
-        packagesIndex
-          .listLfPackages()
-          .map { pkgs =>
-            ListKnownPackagesResponse(pkgs.toSeq.map { case (pkgId, details) =>
-              PackageDetails(
-                pkgId.toString,
-                details.size,
-                Some(TimestampConversion.fromLf(details.knownSince)),
-                details.sourceDescription.getOrElse(""),
-              )
-            })
-          }
-          .andThen(logger.logErrorsOnCall[ListKnownPackagesResponse])
-    }
+  ): Future[ListKnownPackagesResponse] = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+
+    logger.info("Listing known packages")
+    packagesIndex
+      .listLfPackages()
+      .map { pkgs =>
+        ListKnownPackagesResponse(pkgs.toSeq.map { case (pkgId, details) =>
+          PackageDetails(
+            pkgId.toString,
+            details.size,
+            Some(TimestampConversion.fromLf(details.knownSince)),
+            details.sourceDescription.getOrElse(""),
+          )
+        })
+      }
+      .andThen(logger.logErrorsOnCall[ListKnownPackagesResponse])
+  }
 
   private def decodeAndValidate(
       darFile: ByteString
@@ -115,20 +122,21 @@ private[apiserver] final class ApiPackageManagementService private (
 
   override def uploadDarFile(request: UploadDarFileRequest): Future[UploadDarFileResponse] = {
     val submissionId = submissionIdGenerator(request.submissionId)
-    withEnrichedLoggingContext(
-      logging.submissionId(submissionId),
-      traceId(telemetry.traceIdFromGrpcContext),
-    ) { implicit loggingContext =>
-      logger.info("Uploading DAR file")
+    LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
+      logging.submissionId(submissionId)
+    ) { implicit loggingContext: LoggingContextWithTrace =>
+      logger.info(s"Uploading DAR file with submissionId: $submissionId")
 
       implicit val telemetryContext: TelemetryContext =
         telemetry.contextFromGrpcThreadLocalContext()
 
-      implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-        new DamlContextualizedErrorLogger(
+      // a new ErrorLoggingContext (that is overriding the default one derived from NamedLogging) is required to contain the loggingContext entries
+      implicit val errorLoggingContext =
+        LedgerErrorLoggingContext(
           logger,
-          loggingContext,
-          Some(submissionId),
+          loggerFactory.properties ++ loggingContext.toPropertiesMap,
+          loggingContext.traceContext,
+          submissionId,
         )
 
       val response = for {
@@ -169,6 +177,7 @@ private[apiserver] object ApiPackageManagementService {
       darReader: GenDarReader[Archive] = DarParser,
       submissionIdGenerator: String => Ref.SubmissionId = augmentSubmissionId,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       materializer: Materializer,
       executionContext: ExecutionContext,
@@ -183,18 +192,20 @@ private[apiserver] object ApiPackageManagementService {
       darReader,
       submissionIdGenerator,
       telemetry,
+      loggerFactory,
     )
 
   private final class SynchronousResponseStrategy(
       packagesIndex: IndexPackagesService,
       packagesWrite: state.WritePackagesService,
+      val loggerFactory: NamedLoggerFactory,
   )(implicit loggingContext: LoggingContext)
       extends SynchronousResponse.Strategy[
         Dar[Archive],
         PackageEntry,
         PackageEntry.PackageUploadAccepted,
-      ] {
-    private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
+      ]
+      with NamedLogging {
 
     override def submit(submissionId: Ref.SubmissionId, dar: Dar[Archive])(implicit
         telemetryContext: TelemetryContext,
@@ -213,11 +224,18 @@ private[apiserver] object ApiPackageManagementService {
 
     override def reject(
         submissionId: Ref.SubmissionId
+    )(implicit
+        loggingContext: LoggingContextWithTrace
     ): PartialFunction[PackageEntry, StatusRuntimeException] = {
       case PackageEntry.PackageUploadRejected(`submissionId`, _, reason) =>
         LedgerApiErrors.Admin.PackageUploadRejected
           .Reject(reason)(
-            new DamlContextualizedErrorLogger(logger, loggingContext, Some(submissionId))
+            LedgerErrorLoggingContext(
+              logger,
+              loggingContext.toPropertiesMap,
+              loggingContext.traceContext,
+              submissionId,
+            )
           )
           .asGrpcError
     }

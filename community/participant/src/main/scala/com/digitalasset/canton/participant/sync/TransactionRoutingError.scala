@@ -372,7 +372,7 @@ object TransactionRoutingError extends RoutingErrorGroup {
       """This error indicates that no valid domain was found for submission."""
     )
     @Resolution(
-      "Check the status of your domain connections, that packages are vetted and that your are connected to domains running recent protocol versions."
+      "Check the status of your domain connections, that packages are vetted and that you are connected to domains running recent protocol versions."
     )
     object NoDomainForSubmission
         extends ErrorCode(

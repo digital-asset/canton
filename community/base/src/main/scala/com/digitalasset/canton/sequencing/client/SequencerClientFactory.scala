@@ -7,6 +7,7 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -47,7 +48,8 @@ trait SequencerClientFactory {
       sequencedEventStore: SequencedEventStore,
       sendTrackerStore: SendTrackerStore,
       requestSigner: RequestSigner,
-      connection: SequencerConnection,
+      sequencerConnections: SequencerConnections,
+      expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
@@ -60,7 +62,6 @@ trait SequencerClientFactory {
 object SequencerClientFactory {
   def apply(
       domainId: DomainId,
-      sequencerId: SequencerId,
       syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
       crypto: Crypto,
       agreedAgreementId: Option[ServiceAgreementId],
@@ -87,7 +88,8 @@ object SequencerClientFactory {
           sequencedEventStore: SequencedEventStore,
           sendTrackerStore: SendTrackerStore,
           requestSigner: RequestSigner,
-          connection: SequencerConnection,
+          sequencerConnections: SequencerConnections,
+          expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
       )(implicit
           executionContext: ExecutionContextExecutor,
           materializer: Materializer,
@@ -112,7 +114,7 @@ object SequencerClientFactory {
 
         for {
           transport <- makeTransport(
-            connection,
+            sequencerConnections.default, // TODO(i12076): Support multiple sequencers
             member,
             requestSigner,
           )
@@ -133,7 +135,7 @@ object SequencerClientFactory {
                 unauthenticated: Boolean,
             )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
               if (config.skipSequencedEventValidation) {
-                SequencedEventValidator.noValidation(domainId, sequencerId, processingTimeout)(
+                SequencedEventValidator.noValidation(domainId, processingTimeout)(
                   NamedLoggingContext(loggerFactory, TraceContext.empty)
                 )
               } else {
@@ -142,7 +144,6 @@ object SequencerClientFactory {
                   unauthenticated,
                   config.optimisticSequencedEventValidation,
                   domainId,
-                  sequencerId,
                   domainParameters.protocolVersion,
                   syncCryptoApi,
                   loggerFactory,
@@ -170,6 +171,7 @@ object SequencerClientFactory {
           syncCryptoApi.pureCrypto,
           loggingConfig,
           loggerFactory,
+          expectedSequencers,
         )
       }
 

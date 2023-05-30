@@ -101,7 +101,6 @@ class DomainTopologyManagerEventHandler(
       // TODO(i4933) we need to add a signature to the request
       //   - signature must match participant
       //   - config flag / domain parameter ensuring that participant only sends transactions related to itself
-      //   - initial registration must not contain anything other than a cert and some keys
       //   - initial registration must be limited to a handful of certs and keys (100, configurable)
       responseResults <- requestHandler.newRequest(
         request.requestedBy,

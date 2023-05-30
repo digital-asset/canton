@@ -27,6 +27,10 @@ class ConsoleEnvironmentBinding {
        |import com.digitalasset.canton.config._
        |import com.digitalasset.canton.admin.api.client.data._
        |import com.digitalasset.canton.participant.domain.DomainConnectionConfig
+       |import com.digitalasset.canton.SequencerAlias
+       |import com.digitalasset.canton.sequencing.SequencerConnection
+       |import com.digitalasset.canton.sequencing.SequencerConnections
+       |import com.digitalasset.canton.sequencing.GrpcSequencerConnection
        |$consoleMacrosImport
        |import com.digitalasset.canton.console.commands.DomainChoice
        |import ${classOf[com.digitalasset.canton.console.BootstrapScriptException].getName}
@@ -38,6 +42,8 @@ class ConsoleEnvironmentBinding {
        |import scala.language.postfixOps
        |implicit val consoleEnvironment = ${ConsoleEnvironmentBinding.BindingName}
        |implicit val ec: ExecutionContextExecutor = consoleEnvironment.environment.executionContext
+       |implicit def fromSequencerConnection(connection: SequencerConnection): SequencerConnections =
+       |    SequencerConnections.default(connection)
        |def help = consoleEnvironment.help
        |def help(s: String) = consoleEnvironment.help(s)
        |def health = consoleEnvironment.health

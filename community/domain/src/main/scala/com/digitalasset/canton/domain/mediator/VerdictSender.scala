@@ -27,6 +27,7 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientSend,
 }
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregationRule,
   Batch,
   DeliverErrorReason,
   OpenEnvelope,
@@ -47,12 +48,14 @@ private[mediator] trait VerdictSender {
       request: MediatorRequest,
       verdict: Verdict,
       decisionTime: CantonTimestamp,
+      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit]
 
   def sendResultBatch(
       requestId: RequestId,
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
+      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit]
 }
 
@@ -79,11 +82,12 @@ private[mediator] class DefaultVerdictSender(
       request: MediatorRequest,
       verdict: Verdict,
       decisionTime: CantonTimestamp,
+      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val resultET = for {
       batch <- createResults(requestId, request, verdict)
       _ <- EitherT.right[SyncCryptoError](
-        sendResultBatch(requestId, batch, decisionTime)
+        sendResultBatch(requestId, batch, decisionTime, aggregationRule)
       )
     } yield ()
 
@@ -98,6 +102,7 @@ private[mediator] class DefaultVerdictSender(
       requestId: RequestId,
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
+      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val callback: SendCallback = {
       case UnlessShutdown.Outcome(SendResult.Success(_)) =>
@@ -106,9 +111,16 @@ private[mediator] class DefaultVerdictSender(
         val reason = error.reason
         reason match {
           case _: DeliverErrorReason.BatchRefused =>
-            logger.warn(
-              s"Result message was refused for $requestId: $reason"
-            )
+            // TODO(i13155):
+            if (reason.message.contains("was previously delivered at")) {
+              logger.info(
+                s"Result message was refused for $requestId: $reason"
+              )
+            } else {
+              logger.warn(
+                s"Result message was refused for $requestId: $reason"
+              )
+            }
           case _ =>
             logger.error(
               s"Failed to send result message for $requestId: $reason"
@@ -132,6 +144,7 @@ private[mediator] class DefaultVerdictSender(
       callback = callback,
       maxSequencingTime = decisionTime,
       messageId = VerdictMessageId(requestId).toMessageId,
+      aggregationRule = aggregationRule,
     )
 
     EitherTUtil

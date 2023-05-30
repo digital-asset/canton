@@ -17,12 +17,14 @@ import com.daml.lf.transaction.{
 import com.daml.logging.LoggingContext
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2.Update
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.indexer.ha.TestConnection
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{DbDto, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
@@ -33,6 +35,7 @@ import scala.concurrent.{Await, Future}
 
 class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
 
+  import TraceContext.Implicits.Empty.*
   private implicit val lc: LoggingContext = LoggingContext.ForTesting
 
   private val someParty = DbDto.PartyEntry(
@@ -135,7 +138,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
             .copy(recordTime = somePackageUploadRejected.recordTime.addMicros(1000)),
           somePackageUploadRejected
             .copy(recordTime = somePackageUploadRejected.recordTime.addMicros(2000)),
-        )
+        ).map(Traced[Update])
       )
 
   behavior of "inputMapper"
@@ -235,7 +238,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
         toMeteringDbDto = _ => expected,
       )(lc)(
         List(
-          (Offset.fromHexString(offset), someTransactionAccepted)
+          (Offset.fromHexString(offset), Traced[Update](someTransactionAccepted))
         )
       )
       .batch

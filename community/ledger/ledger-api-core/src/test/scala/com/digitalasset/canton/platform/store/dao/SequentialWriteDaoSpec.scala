@@ -8,7 +8,7 @@ import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
@@ -23,6 +23,7 @@ import com.digitalasset.canton.platform.store.interning.{
   StringInterning,
   StringInterningDomain,
 }
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.mockito.MockitoSugar.mock
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -33,6 +34,8 @@ import scala.concurrent.blocking
 
 class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 
+  import TraceContext.Implicits.Empty.*
+  implicit val TracedConverter: Option[Update] => Option[Traced[Update]] = _.map(Traced[Update])
   behavior of "SequentialWriteDaoImpl"
 
   it should "store correctly in a happy path case" in {
@@ -188,7 +191,7 @@ object SequentialWriteDaoSpec {
   private def offset(s: String): Offset = Offset.fromHexString(Ref.HexString.assertFromString(s))
 
   private def someUpdate(key: String) = Some(
-    state.Update.PublicPackageUploadRejected(
+    Update.PublicPackageUploadRejected(
       submissionId = Ref.SubmissionId.assertFromString("abc"),
       recordTime = Timestamp.now(),
       rejectionReason = key,
@@ -273,11 +276,11 @@ object SequentialWriteDaoSpec {
     event_sequential_id = 0,
   )
 
-  val singlePartyFixture: Option[state.Update.PublicPackageUploadRejected] =
+  val singlePartyFixture: Option[Update.PublicPackageUploadRejected] =
     someUpdate("singleParty")
-  val partyAndCreateFixture: Option[state.Update.PublicPackageUploadRejected] =
+  val partyAndCreateFixture: Option[Update.PublicPackageUploadRejected] =
     someUpdate("partyAndCreate")
-  val allEventsFixture: Option[state.Update.PublicPackageUploadRejected] =
+  val allEventsFixture: Option[Update.PublicPackageUploadRejected] =
     someUpdate("allEventsFixture")
 
   @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
@@ -293,9 +296,9 @@ object SequentialWriteDaoSpec {
     ),
   )
 
-  private val updateToDbDtoFixture: Offset => state.Update => Iterator[DbDto] =
+  private val updateToDbDtoFixture: Offset => Traced[Update] => Iterator[DbDto] =
     _ => {
-      case r: state.Update.PublicPackageUploadRejected =>
+      case Traced(r: Update.PublicPackageUploadRejected) =>
         someUpdateToDbDtoFixture(r.rejectionReason).iterator
       case _ => throw new Exception
     }

@@ -9,7 +9,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   TopologyAdminCommandsX,
 }
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.{
   CommandErrors,
   ConsoleCommandResult,
@@ -489,6 +489,64 @@ class TopologyAdministrationGroupX(
           filterUid,
         )
       )
+    }
+  }
+
+  @Help.Summary("Manage traffic control")
+  @Help.Group("Member traffic control")
+  object traffic_control {
+    @Help.Summary("List traffic control topology transactions.")
+    def list(
+        filterMember: String = instance.id.filterString,
+        filterStore: String = "",
+        includeProposals: Boolean = false,
+        timeQuery: TimeQueryX = TimeQueryX.HeadState,
+        operation: Option[TopologyChangeOpX] = None,
+        filterSigningKey: String = "",
+        protocolVersion: Option[String] = None,
+    ): Seq[ListTrafficStateResult] = consoleEnvironment.run {
+      adminCommand(
+        TopologyAdminCommandsX.Read.ListTrafficControlState(
+          BaseQueryX(
+            filterStore,
+            includeProposals,
+            timeQuery,
+            operation,
+            filterSigningKey,
+            protocolVersion.map(ProtocolVersion.tryCreate),
+          ),
+          filterMember = filterMember,
+        )
+      )
+    }
+
+    @Help.Summary("Top up traffic for this node")
+    @Help.Description(
+      """Use this command to update the new total traffic limit for the node.
+         The top up will have to be authorized by the domain to be accepted.
+         The newTotalTrafficAmount must be strictly increasing top up after top up."""
+    )
+    def top_up(
+        domainId: DomainId,
+        newTotalTrafficAmount: PositiveLong,
+        member: Member = instance.id.member,
+        serial: Option[PositiveInt] = None,
+        signedBy: Option[Fingerprint] = Some(instance.id.uid.namespace.fingerprint),
+    ): SignedTopologyTransactionX[TopologyChangeOpX, TrafficControlStateX] = {
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommandsX.Write.Propose(
+            TrafficControlStateX
+              .create(
+                domainId,
+                member,
+                newTotalTrafficAmount,
+              ),
+            signedBy = signedBy.toList,
+            serial,
+          )
+        )
+      }
     }
   }
 

@@ -5,11 +5,11 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.daml.lf.data.Ref
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.{v0, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -102,21 +102,25 @@ object SubmitterMetadata
   )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None)
 
   def fromSubmitterInfo(hashOps: HashOps)(
-      submitterInfo: SubmitterInfo,
+      submitterActAs: List[Ref.Party],
+      submitterApplicationId: Ref.ApplicationId,
+      submitterCommandId: Ref.CommandId,
+      submitterSubmissionId: Option[Ref.SubmissionId],
+      submitterDeduplicationPeriod: DeduplicationPeriod,
       submitterParticipant: ParticipantId,
       salt: Salt,
       protocolVersion: ProtocolVersion,
   ): Either[String, SubmitterMetadata] = {
-    NonEmpty.from(submitterInfo.actAs.toSet).toRight("The actAs set must not be empty.").map {
+    NonEmpty.from(submitterActAs.toSet).toRight("The actAs set must not be empty.").map {
       actAsNes =>
         SubmitterMetadata(
           actAsNes, // Canton ignores SubmitterInfo.readAs per https://github.com/digital-asset/daml/pull/12136
-          ApplicationId(submitterInfo.applicationId),
-          CommandId(submitterInfo.commandId),
+          ApplicationId(submitterApplicationId),
+          CommandId(submitterCommandId),
           submitterParticipant,
           salt,
-          submitterInfo.submissionId,
-          submitterInfo.deduplicationPeriod,
+          submitterSubmissionId,
+          submitterDeduplicationPeriod,
         )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None)
     }
   }

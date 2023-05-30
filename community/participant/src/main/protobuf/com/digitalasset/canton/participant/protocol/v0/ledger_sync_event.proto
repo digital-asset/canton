@@ -112,6 +112,7 @@ message TransactionMeta {
   repeated string used_packages = 5;
   repeated NodeSeed node_seeds = 6;
   ByKeyNodes by_key_nodes = 7; // optional
+  google.protobuf.StringValue domain_id = 8; // TODO(#13173) optional for backwards compatibility
 
   message ByKeyNodes {
     repeated int32 by_key_node = 1;
@@ -152,6 +153,7 @@ message CommandRejected {
     bytes status = 1;
   }
   CommandKind command_kind = 4;
+  google.protobuf.StringValue domain_id = 5; // TODO(#13173) optional for backwards compatibility
 }
 
 message TransferredOut {

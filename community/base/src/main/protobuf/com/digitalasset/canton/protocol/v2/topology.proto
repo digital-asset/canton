@@ -257,6 +257,7 @@ message PurgeTopologyTransactionX {
 }
 
 // UNIQUE(domain, member)
+// authorization: whoever controls the domain
 message TrafficControlStateX {
   // the domain-id
   string domain = 1;

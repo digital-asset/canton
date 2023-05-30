@@ -12,7 +12,10 @@ import com.digitalasset.canton.ledger.api.domain.{
   JwksUrl,
   ObjectMeta,
 }
-import com.digitalasset.canton.platform.localstore.api.PartyRecordStore.PartyRecordExistsFatal
+import com.digitalasset.canton.platform.localstore.api.PartyRecordStore.{
+  PartyNotFound,
+  PartyRecordExistsFatal,
+}
 import com.digitalasset.canton.platform.localstore.api.{
   ObjectMetaUpdate,
   PartyRecord,
@@ -31,13 +34,21 @@ trait PartyRecordStoreTests extends PartyRecordStoreSpecBase { self: AsyncFreeSp
     Party.assertFromString(s)
 
   private val party1 = "party1"
-  val persistedIdentityProviderId =
-    IdentityProviderId.Id(LedgerString.assertFromString("idp1"))
-  val idp1 = IdentityProviderConfig(
-    identityProviderId = persistedIdentityProviderId,
+  private val defaultIdpId = IdentityProviderId.Default
+  private val idpId1 = IdentityProviderId.Id(LedgerString.assertFromString("idp1"))
+  private val idpId2 = IdentityProviderId.Id(LedgerString.assertFromString("idp2"))
+  private val idp1 = IdentityProviderConfig(
+    identityProviderId = idpId1,
     isDeactivated = false,
     jwksUrl = JwksUrl("http://domain.com/"),
     issuer = "issuer",
+    audience = Some("audience"),
+  )
+  private val idp2 = IdentityProviderConfig(
+    identityProviderId = idpId2,
+    isDeactivated = false,
+    jwksUrl = JwksUrl("http://domain2.com/"),
+    issuer = "issuer2",
     audience = Some("audience"),
   )
 
@@ -95,14 +106,14 @@ trait PartyRecordStoreTests extends PartyRecordStoreSpecBase { self: AsyncFreeSp
             create1 <- tested.createPartyRecord(newPartyRecord("party1"))
             create2 <- tested.createPartyRecord(newPartyRecord("party2"))
             create3 <- tested.createPartyRecord(
-              newPartyRecord("party3", identityProviderId = persistedIdentityProviderId)
+              newPartyRecord("party3", identityProviderId = idpId1)
             )
           } yield {
             create1.value shouldBe createdPartyRecord("party1")
             create2.value shouldBe createdPartyRecord("party2")
             create3.value shouldBe createdPartyRecord(
               "party3",
-              identityProviderId = persistedIdentityProviderId,
+              identityProviderId = idpId1,
             )
           }
         }
@@ -189,7 +200,7 @@ trait PartyRecordStoreTests extends PartyRecordStoreSpecBase { self: AsyncFreeSp
                     )
                   ),
                 ),
-                identityProviderId = persistedIdentityProviderId,
+                identityProviderId = idpId1,
               ),
               ledgerPartyIsLocal = true,
             )
@@ -197,7 +208,7 @@ trait PartyRecordStoreTests extends PartyRecordStoreSpecBase { self: AsyncFreeSp
               "party1",
               resourceVersion = 0,
               annotations = Map("k1" -> "v1", "k2" -> "v2"),
-              identityProviderId = persistedIdentityProviderId,
+              identityProviderId = idpId1,
             )
           } yield succeed
         }
@@ -328,6 +339,78 @@ trait PartyRecordStoreTests extends PartyRecordStoreSpecBase { self: AsyncFreeSp
             _ = res1.left.value shouldBe PartyRecordStore.MaxAnnotationsSizeExceeded(party)
           } yield succeed
         }
+      }
+    }
+
+  }
+
+  "reassigning idp" - {
+    "change party's idp" in {
+      testIt { tested =>
+        for {
+          create <- tested.createPartyRecord(
+            newPartyRecord("p1", identityProviderId = defaultIdpId)
+          )
+          _ = create.value shouldBe createdPartyRecord("p1", identityProviderId = defaultIdpId)
+          _ <- createIdentityProviderConfig(idp1)
+          updated <- tested.updatePartyRecordIdp(
+            sourceIdp = defaultIdpId,
+            targetIdp = idpId1,
+            party = create.value.party,
+            ledgerPartyIsLocal = true,
+          )
+          _ <- updated.value.identityProviderId shouldBe idpId1
+        } yield succeed
+      }
+    }
+
+    "when using wrong source idp id" in {
+      testIt { tested =>
+        for {
+          _ <- createIdentityProviderConfig(idp1)
+          _ <- createIdentityProviderConfig(idp2)
+          create <- tested.createPartyRecord(newPartyRecord("p1", identityProviderId = idpId1))
+          _ = create.value shouldBe createdPartyRecord("p1", identityProviderId = idpId1)
+          updateResult <- tested.updatePartyRecordIdp(
+            sourceIdp = idpId2,
+            targetIdp = defaultIdpId,
+            party = create.value.party,
+            ledgerPartyIsLocal = true,
+          )
+          _ <- updateResult.left.value shouldBe PartyNotFound(create.value.party)
+        } yield succeed
+      }
+    }
+
+    "cannot change idp for non-existent party-record for non-local party" in {
+      testIt { tested =>
+        val party = Ref.Party.assertFromString("party")
+        for {
+          _ <- createIdentityProviderConfig(idp1)
+          updated <- tested.updatePartyRecordIdp(
+            sourceIdp = defaultIdpId,
+            targetIdp = idpId1,
+            party = party,
+            ledgerPartyIsLocal = false,
+          )
+          _ <- updated.left.value shouldBe PartyNotFound(party)
+        } yield succeed
+      }
+    }
+
+    "can change idp for non-existent party-record for local party" in {
+      testIt { tested =>
+        val party = Ref.Party.assertFromString("party")
+        for {
+          _ <- createIdentityProviderConfig(idp1)
+          updated <- tested.updatePartyRecordIdp(
+            sourceIdp = defaultIdpId,
+            targetIdp = idpId1,
+            party = party,
+            ledgerPartyIsLocal = true,
+          )
+          _ <- updated.value.identityProviderId shouldBe idpId1
+        } yield succeed
       }
     }
 

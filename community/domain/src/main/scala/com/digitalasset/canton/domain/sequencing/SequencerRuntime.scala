@@ -122,6 +122,7 @@ class SequencerRuntime(
     sequencerFactory
       .create(
         domainId,
+        sequencerId,
         clock,
         syncCrypto,
         futureSupervisor,
@@ -134,12 +135,13 @@ class SequencerRuntime(
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] = {
     def keyCheckET =
       EitherT {
-        syncCrypto
+        val snapshot = syncCrypto
           .currentSnapshotApproximation(TraceContext.empty)
           .ipsSnapshot
+        snapshot
           .signingKey(sequencerId)
           .map { keyO =>
-            Either.cond(keyO.nonEmpty, (), "Missing sequencer keys.")
+            Either.cond(keyO.nonEmpty, (), s"Missing sequencer keys at ${snapshot.referenceTime}.")
           }
       }
     def registerInitialMembers = {

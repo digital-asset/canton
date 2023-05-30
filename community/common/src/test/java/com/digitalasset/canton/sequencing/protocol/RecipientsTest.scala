@@ -43,7 +43,9 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
     "test for a single group when present" in {
       val recipients =
         Recipients(NonEmpty(Seq, RecipientsTree.leaf(NonEmpty.mk(Set, p2, p1, p3))))
-      recipients.asSingleGroup shouldBe NonEmpty.mk(Set, p3, p2, p1).some
+      recipients.asSingleGroup shouldBe NonEmpty
+        .mk(Set, MemberRecipient(p3), MemberRecipient(p2), MemberRecipient(p1))
+        .some
     }
 
     "test for a single group when not present" in {

@@ -577,7 +577,7 @@ private[store] final case class SerializableCommandRejected(
     commandRejected: LedgerSyncEvent.CommandRejected
 ) {
   def toProtoV0: v0.CommandRejected = {
-    val LedgerSyncEvent.CommandRejected(recordTime, completionInfo, reason, commandKind) =
+    val LedgerSyncEvent.CommandRejected(recordTime, completionInfo, reason, commandKind, domainId) =
       commandRejected
 
     val commandKindP = commandKind match {
@@ -591,6 +591,7 @@ private[store] final case class SerializableCommandRejected(
       Some(SerializableLfTimestamp(recordTime).toProtoV0),
       Some(SerializableRejectionReasonTemplate(reason).toProtoV0),
       commandKindP,
+      domainId.map(_.toProtoPrimitive),
     )
   }
 }
@@ -599,7 +600,13 @@ private[store] object SerializableCommandRejected {
   def fromProtoV0(
       commandRejectedP: v0.CommandRejected
   ): ParsingResult[LedgerSyncEvent.CommandRejected] = {
-    val v0.CommandRejected(completionInfoP, recordTimeP, rejectionReasonP, commandTypeP) =
+    val v0.CommandRejected(
+      completionInfoP,
+      recordTimeP,
+      rejectionReasonP,
+      commandTypeP,
+      domainIdP,
+    ) =
       commandRejectedP
 
     val commandTypeE: ParsingResult[ProcessingSteps.RequestType.Values] = commandTypeP match {
@@ -621,11 +628,13 @@ private[store] object SerializableCommandRejected {
         SerializableRejectionReasonTemplate.fromProtoV0
       )
       commandType <- commandTypeE
+      domainId <- domainIdP.map(DomainId.fromProtoPrimitive(_, "domain_id")).sequence
     } yield LedgerSyncEvent.CommandRejected(
       recordTime,
       completionInfo,
       rejectionReason,
       commandType,
+      domainId,
     )
   }
 }
@@ -782,6 +791,7 @@ private[store] final case class SerializableTransactionMeta(transactionMeta: Tra
       optUsedPackages,
       optNodeSeeds,
       optByKeyNodes,
+      optDomainId,
     ) = transactionMeta
     v0.TransactionMeta(
       ledgerTime = Some(InstantConverter.toProtoPrimitive(ledgerTime.toInstant)),
@@ -792,6 +802,7 @@ private[store] final case class SerializableTransactionMeta(transactionMeta: Tra
       nodeSeeds = optNodeSeeds.fold(Seq.empty[v0.NodeSeed])(_.map { case (nodeId, seedHash) =>
         SerializableNodeSeed(nodeId, seedHash).toProtoV0
       }.toSeq),
+      domainId = optDomainId.map(_.toProtoPrimitive),
       byKeyNodes = optByKeyNodes.map(byKeyNodes =>
         v0.TransactionMeta.ByKeyNodes(byKeyNodes.map(_.index).toSeq)
       ),
@@ -812,6 +823,7 @@ private[store] object SerializableTransactionMeta {
       usedPackagesP,
       nodeSeedsP,
       byKeyNodesP,
+      domainIdP,
     ) =
       transactionMetaP
     for {
@@ -838,6 +850,7 @@ private[store] object SerializableTransactionMeta {
       optByKeyNodes = byKeyNodesP.map(byKeyNodes =>
         byKeyNodes.byKeyNode.map(LfNodeId(_)).to(ImmArray)
       )
+      domainId <- domainIdP.map(DomainId.fromProtoPrimitive(_, "domain_id")).sequence
     } yield TransactionMeta(
       ledgerTime,
       workflowId,
@@ -846,6 +859,7 @@ private[store] object SerializableTransactionMeta {
       optUsedPackages,
       optNodeSeeds,
       optByKeyNodes,
+      domainId,
     )
   }
 }

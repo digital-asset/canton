@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.traffic
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.topology.Member
@@ -11,15 +12,22 @@ import com.digitalasset.canton.topology.Member
 final case class MemberTrafficStatus private[sequencing] (
     member: Member,
     lastAcceptedTraffic: CantonTimestamp,
-    totalExtraTrafficLimit: Long = 0L,
-    totalExtraTrafficConsumption: Long = 0L,
-    remainingBaseTraffic: Long = 0L,
+    totalExtraTrafficLimit: NonNegativeLong = NonNegativeLong.tryCreate(0L),
+    totalExtraTrafficConsumption: NonNegativeLong = NonNegativeLong.tryCreate(0L),
+    remainingBaseTraffic: NonNegativeLong = NonNegativeLong.tryCreate(0L),
 ) {
-  require(totalExtraTrafficLimit >= totalExtraTrafficConsumption)
+  require(
+    totalExtraTrafficLimit >= totalExtraTrafficConsumption,
+    s"Consumed traffic ($totalExtraTrafficConsumption) can't be greater than topped-up traffic ($totalExtraTrafficLimit)",
+  )
 
-  def extraTrafficRemainder: Long = totalExtraTrafficLimit - totalExtraTrafficConsumption
+  def extraTrafficRemainder: NonNegativeLong = {
+    // The require above guarantees that this will always work
+    NonNegativeLong.tryCreate(totalExtraTrafficLimit.value - totalExtraTrafficConsumption.value)
+  }
 
-  def toTrafficState: TrafficState = TrafficState(extraTrafficRemainder, lastAcceptedTraffic)
+  def toTrafficState(timestamp: CantonTimestamp): TrafficState =
+    TrafficState(extraTrafficRemainder, timestamp)
 }
 
 object MemberTrafficStatus {
@@ -31,9 +39,9 @@ object MemberTrafficStatus {
   def create(
       member: Member,
       lastAcceptedTraffic: CantonTimestamp,
-      totalExtraTrafficLimit: Long = 0L,
-      totalExtraTrafficConsumption: Long = 0L,
-      remainingBaseTraffic: Long = 0L,
+      totalExtraTrafficLimit: NonNegativeLong = NonNegativeLong.tryCreate(0L),
+      totalExtraTrafficConsumption: NonNegativeLong = NonNegativeLong.tryCreate(0L),
+      remainingBaseTraffic: NonNegativeLong = NonNegativeLong.tryCreate(0L),
   ): Either[String, MemberTrafficStatus] =
     Either.cond(
       totalExtraTrafficLimit >= totalExtraTrafficConsumption,

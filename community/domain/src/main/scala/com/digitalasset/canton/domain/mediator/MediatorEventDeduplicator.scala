@@ -169,6 +169,8 @@ class DefaultMediatorEventDeduplicator(
             request,
             verdict,
             decisionTime,
+            // TODO(i13205): Enable aggregation rule for BFT mediator rejects
+            aggregationRule = None,
           )
           (false, sendF)
         }

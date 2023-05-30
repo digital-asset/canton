@@ -21,7 +21,7 @@ import com.digitalasset.canton.demo.model.{ai as ME, doctor as M}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.protocol.DynamicDomainParameters
-import com.digitalasset.canton.sequencing.SequencerConnection
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
@@ -147,7 +147,11 @@ class ReferenceDemoScript(
   ): Unit = {
     val autoApprove = sys.env.getOrElse("CANTON_AUTO_APPROVE_AGREEMENTS", "no").toLowerCase == "yes"
     participant.domains.register(
-      DomainConnectionConfig(name, connection, manualConnect = autoApprove)
+      DomainConnectionConfig(
+        name,
+        SequencerConnections.default(connection), // TODO(i12076): Support multiple sequencers
+        manualConnect = autoApprove,
+      )
     )
     if (autoApprove) {
       val response = participant.domains.get_agreement(name)

@@ -51,7 +51,7 @@ object ConcurrentEnvironmentLimiter extends LazyLogging {
         else cur.updated(name, state)
       }
     val currentState = current.getOrElse(name, New)
-    val currentSet = current.keys.toSet
+    val currentSet = current.keySet
     val numSet = if (purge) (currentSet - name) else (currentSet + name)
     logger.debug(s"${name}: $currentState => $state (${numSet.size} pending)")
   }

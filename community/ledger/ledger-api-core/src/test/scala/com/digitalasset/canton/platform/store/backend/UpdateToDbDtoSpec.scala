@@ -22,7 +22,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.store.dao.events.Raw.TreeEvent
 import com.digitalasset.canton.platform.store.dao.events.{
   CompressionStrategy,
@@ -32,8 +32,9 @@ import com.digitalasset.canton.platform.store.dao.events.{
 }
 import com.digitalasset.canton.platform.store.dao.{EventProjectionProperties, JdbcLedgerDao}
 import com.digitalasset.canton.platform.{ContractId, Create, Exercise}
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.protobuf.ByteString
-import com.google.rpc.status.{Status as StatusProto}
+import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks.*
@@ -47,6 +48,7 @@ import scala.concurrent.{ExecutionContext, Future}
 // Should you ever consider replacing this suite by something else, make sure all functionality is still covered.
 class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
+  import TraceContext.Implicits.Empty.*
   import TransactionBuilder.Implicits.*
   import UpdateToDbDtoSpec.*
 
@@ -1558,7 +1560,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       MetricsContext.Empty
     )(
       someOffset
-    )(update).toList
+    )(Traced[Update](update)).toList
   }
 }
 

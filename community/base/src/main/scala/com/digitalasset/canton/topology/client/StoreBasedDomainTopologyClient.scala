@@ -39,7 +39,7 @@ import com.digitalasset.canton.{DiscardOps, LfPartyId, SequencerCounter}
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import scala.collection.compat.immutable.ArraySeq
+import scala.collection.immutable.ArraySeq
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Success
@@ -447,7 +447,7 @@ class StoreBasedTopologySnapshot(
       ],
   ): Future[PartyInfo] =
     loadBatchActiveParticipantsOf(Seq(party), fetchParticipantStates).map(
-      _.getOrElse(party, PartyInfo(false, Map.empty))
+      _.getOrElse(party, PartyInfo(false, PositiveInt.one, Map.empty))
     )
 
   override private[client] def loadBatchActiveParticipantsOf(
@@ -519,6 +519,7 @@ class StoreBasedTopologySnapshot(
       parties.map { party =>
         party -> PartyInfo(
           groupAddressing = false,
+          threshold = PositiveInt.one,
           partyToParticipantAttributes.getOrElse(party, Map.empty),
         )
       }.toMap
@@ -752,7 +753,10 @@ class StoreBasedTopologySnapshot(
 
   }
 
-  /** returns the list of currently known mediators */
+  /** returns the list of currently known mediators
+    * for singular mediators each one must be wrapped into its own group with threshold = 1
+    * group index in 2.0 topology management is not used and the order of output does not need to be stable
+    */
   override def mediatorGroups(): Future[Seq[MediatorGroup]] = findTransactions(
     asOfInclusive = false,
     includeSecondary = false,
@@ -760,27 +764,29 @@ class StoreBasedTopologySnapshot(
     filterUid = None,
     filterNamespace = None,
   ).map { res =>
-    val activeMediators = ArraySeq.from(
-      res.toTopologyState
-        .foldLeft(Map.empty[MediatorId, (Boolean, Boolean)]) {
-          case (acc, TopologyStateUpdateElement(_, MediatorDomainState(side, _, mediator))) =>
-            acc + (mediator -> RequestSide
-              .accumulateSide(acc.getOrElse(mediator, (false, false)), side))
-          case (acc, _) => acc
-        }
-        .filter { case (_, (lft, rght)) =>
-          lft && rght
-        }
-        .keys
-    )
-    Seq(
-      MediatorGroup(
-        index = NonNegativeInt.zero,
-        activeMediators,
-        Seq.empty,
-        threshold = PositiveInt.one,
+    ArraySeq
+      .from(
+        res.toTopologyState
+          .foldLeft(Map.empty[MediatorId, (Boolean, Boolean)]) {
+            case (acc, TopologyStateUpdateElement(_, MediatorDomainState(side, _, mediator))) =>
+              acc + (mediator -> RequestSide
+                .accumulateSide(acc.getOrElse(mediator, (false, false)), side))
+            case (acc, _) => acc
+          }
+          .filter { case (_, (lft, rght)) =>
+            lft && rght
+          }
+          .keys
       )
-    )
+      .zipWithIndex
+      .map { case (id, index) =>
+        MediatorGroup(
+          index = NonNegativeInt.tryCreate(index),
+          Seq(id),
+          Seq.empty,
+          threshold = PositiveInt.one,
+        )
+      }
   }
 
   /** returns the current sequencer group if known
@@ -864,9 +870,11 @@ class StoreBasedTopologySnapshot(
         }
     }
 
-  override def trafficControlStatus(): Future[Map[Member, MemberTrafficControlState]] = {
+  override def trafficControlStatus(
+      members: Seq[Member]
+  ): Future[Map[Member, Option[MemberTrafficControlState]]] = {
     // Non-X topology management does not support traffic control transactions
-    Future.successful(Map.empty)
+    Future.successful(members.map(_ -> None).toMap)
   }
 
   /*

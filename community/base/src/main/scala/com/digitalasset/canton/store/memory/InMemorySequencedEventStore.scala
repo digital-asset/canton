@@ -159,7 +159,7 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
       timestampOfCounter.addAll(timestamps)
 
       val events = timestamps.map { case (sc, ts) =>
-        ts -> IgnoredSequencedEvent(ts, sc, None)(traceContext)
+        ts -> IgnoredSequencedEvent(ts, sc, None, None)(traceContext)
       }
       eventByTimestamp.addAll(events)
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.domain.grpc
+package com.digitalasset.canton.common.domain.grpc
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant

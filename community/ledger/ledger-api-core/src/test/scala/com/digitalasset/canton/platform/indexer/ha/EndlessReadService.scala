@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.indexer.ha
 import akka.NotUsed
 import akka.stream.KillSwitches
 import akka.stream.scaladsl.Source
+import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.lf.crypto
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
@@ -26,6 +27,8 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   TransactionMeta,
   Update,
 }
+import com.digitalasset.canton.tracing.TraceContext.wrapWithNewTraceContext
+import com.digitalasset.canton.tracing.Traced
 
 import java.time.Instant
 import scala.concurrent.blocking
@@ -73,7 +76,7 @@ final case class EndlessReadService(
     */
   override def stateUpdates(
       beginAfter: Option[Offset]
-  )(implicit loggingContext: LoggingContext): Source[(Offset, Update), NotUsed] =
+  )(implicit loggingContext: LoggingContext): Source[(Offset, Traced[Update]), NotUsed] =
     blocking(synchronized {
       logger.info(s"EndlessReadService.stateUpdates($beginAfter) called")
       stateUpdatesCalls += 1
@@ -126,6 +129,7 @@ final case class EndlessReadService(
               contractMetadata = Map.empty,
             )
         }
+        .map(_.bimap(identity, wrapWithNewTraceContext))
         .via(killSwitch.flow)
     })
 

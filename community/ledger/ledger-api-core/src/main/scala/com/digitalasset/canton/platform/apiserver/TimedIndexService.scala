@@ -42,6 +42,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   MaximumLedgerTime,
   PartyEntry,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -50,7 +51,7 @@ final class TimedIndexService(delegate: IndexService, metrics: Metrics) extends 
   override def ledgerId: LedgerId = delegate.ledgerId
 
   override def listLfPackages()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Map[Ref.PackageId, v2.PackageDetails]] =
     Timed.future(metrics.daml.services.index.listLfPackages, delegate.listLfPackages())
 

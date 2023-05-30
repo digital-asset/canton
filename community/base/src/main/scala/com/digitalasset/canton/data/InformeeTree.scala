@@ -40,7 +40,7 @@ final case class InformeeTree private (tree: GenTransactionTree)(
 
   def domainId: DomainId = commonMetadata.domainId
 
-  def mediatorId: MediatorId = commonMetadata.mediatorId
+  def mediator: MediatorRef = commonMetadata.mediator
 
   def toProtoV0: v0.InformeeTree = v0.InformeeTree(tree = Some(tree.toProtoV0))
 

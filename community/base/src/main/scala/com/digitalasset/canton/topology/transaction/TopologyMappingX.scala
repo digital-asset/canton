@@ -12,7 +12,6 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   InvariantViolation,
   UnrecognizedEnum,
-  ValueConversionError,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.crypto.*
@@ -933,7 +932,7 @@ object HostingParticipant {
 final case class PartyToParticipantX(
     partyId: PartyId,
     domainId: Option[DomainId],
-    threshold: Int,
+    threshold: PositiveInt,
     participants: Seq[HostingParticipant],
     groupAddressing: Boolean,
 ) extends TopologyMappingX {
@@ -941,7 +940,7 @@ final case class PartyToParticipantX(
   def toProto: v2.PartyToParticipantX =
     v2.PartyToParticipantX(
       party = partyId.toProtoPrimitive,
-      threshold = threshold,
+      threshold = threshold.value,
       participants = participants.map(_.toProto),
       groupAddressing = groupAddressing,
       domain = domainId.fold("")(_.toProtoPrimitive),
@@ -986,7 +985,7 @@ object PartyToParticipantX {
   ): ParsingResult[PartyToParticipantX] =
     for {
       partyId <- PartyId.fromProtoPrimitive(value.party, "party")
-      threshold = value.threshold
+      threshold <- ProtoConverter.parsePositiveInt(value.threshold)
       participants <- value.participants.traverse(HostingParticipant.fromProtoV2)
       groupAddressing = value.groupAddressing
       domainId <-
@@ -1048,14 +1047,7 @@ object AuthorityOfX {
   ): ParsingResult[AuthorityOfX] =
     for {
       partyId <- PartyId.fromProtoPrimitive(value.party, "party")
-      threshold <- PositiveInt
-        .create(value.threshold)
-        .leftMap(_ =>
-          ValueConversionError(
-            "threshold",
-            s"threshold needs to be positive and not ${value.threshold}",
-          )
-        )
+      threshold <- ProtoConverter.parsePositiveInt(value.threshold)
       parties <- value.parties.traverse(PartyId.fromProtoPrimitive(_, "parties"))
       domainId <-
         if (value.domain.nonEmpty)
@@ -1435,8 +1427,8 @@ final case class TrafficControlStateX private (
 
   def code: TopologyMappingX.Code = Code.TrafficControlStateX
 
-  override def namespace: Namespace = domain.uid.namespace
-  override def maybeUid: Option[UniqueIdentifier] = Some(domain.uid)
+  override def namespace: Namespace = member.uid.namespace
+  override def maybeUid: Option[UniqueIdentifier] = Some(member.uid)
 
   override def requiredAuth(
       previous: Option[TopologyTransactionX[TopologyChangeOpX, TopologyMappingX]]

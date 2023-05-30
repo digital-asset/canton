@@ -22,14 +22,12 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.{
-  AuthorityOfDelegation,
   AuthorityOfResponse,
   PartyInfo,
 }
 import com.digitalasset.canton.topology.processing.{
-  ApproximateTime,
-  EffectiveTime,
   TopologyTransactionProcessingSubscriber,
+  TopologyTransactionProcessingSubscriberCommon,
   TopologyTransactionProcessingSubscriberX,
 }
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
@@ -229,13 +227,7 @@ trait PartyTopologySnapshotClient {
   /** Returns the consortium thresholds (how many votes from different participants that host the consortium party
     * are required for the confirmation to become valid). For normal parties returns 1.
     */
-  def consortiumThresholds(parties: Set[LfPartyId]): Future[Map[LfPartyId, PositiveInt]] = {
-    authorityOf(parties).map { case AuthorityOfResponse(result) =>
-      result.map { case (partyId, AuthorityOfDelegation(_expected, threshold)) =>
-        partyId -> threshold
-      }
-    }
-  }
+  def consortiumThresholds(parties: Set[LfPartyId]): Future[Map[LfPartyId, PositiveInt]]
 
   /** Returns the Authority-Of delegations for consortium parties. Non-consortium parties delegate to themselves
     * with threshold one
@@ -301,6 +293,7 @@ object PartyTopologySnapshotClient {
 
   final case class PartyInfo(
       groupAddressing: Boolean,
+      threshold: PositiveInt, // > 1 for consortium parties
       participants: Map[ParticipantId, ParticipantAttributes],
   )
 }
@@ -357,7 +350,23 @@ trait MediatorDomainStateClient {
   def mediatorGroups(): Future[Seq[MediatorGroup]]
 
   def isMediatorActive(mediatorId: MediatorId): Future[Boolean] =
-    mediatorGroups().map(_.exists(_.active.contains(mediatorId)))
+    mediatorGroups().map(_.exists { group =>
+      // Note: mediator in group.passive should still be able to authenticate and process MediatorResponses,
+      // only sending the verdicts is disabled and verdicts from a passive mediator should not pass the checks
+      group.isActive && (group.active.contains(mediatorId) || group.passive.contains(mediatorId))
+    })
+
+  def isMediatorActive(mediator: MediatorRef): Future[Boolean] = {
+    mediator match {
+      case MediatorRef.Single(mediatorId) =>
+        isMediatorActive(mediatorId)
+      case MediatorRef.Group(mediatorsOfDomain) =>
+        mediatorGroup(mediatorsOfDomain.group).map {
+          case Some(group) => group.isActive
+          case None => false
+        }
+    }
+  }
 
   def mediatorGroupsOfAll(
       groups: Seq[MediatorGroupIndex]
@@ -377,6 +386,9 @@ trait MediatorDomainStateClient {
           }
       )
 
+  def mediatorGroup(index: MediatorGroupIndex): Future[Option[MediatorGroup]] = {
+    mediatorGroups().map(_.find(_.index == index))
+  }
 }
 
 /** The subset of the topology client providing sequencer state information */
@@ -466,6 +478,7 @@ trait TopologySnapshot
     with VettedPackagesSnapshotClient
     with MediatorDomainStateClient
     with SequencerDomainStateClient
+    with DomainTrafficControlStateClient
     with DomainGovernanceSnapshotClient { this: BaseTopologySnapshotClient with NamedLogging => }
 
 // architecture-handbook-entry-end: IdentityProvidingServiceClient
@@ -481,30 +494,11 @@ trait DomainTopologyClientWithInitX
 /** The internal domain topology client interface used for initialisation and efficient processing */
 trait DomainTopologyClientWithInit
     extends DomainTopologyClient
+    with TopologyTransactionProcessingSubscriberCommon
     with HasFutureSupervision
     with NamedLogging {
 
   implicit override protected def executionContext: ExecutionContext
-
-  /** Move the most known timestamp ahead in future based of newly discovered information
-    *
-    * We don't know the most recent timestamp directly. However, we can guess it from two sources:
-    * What was the timestamp of the latest topology transaction added? And what was the last processing timestamp.
-    * We need to know both such that we can always deliver the latest valid set of topology information, and don't use
-    * old snapshots.
-    * Therefore, we expose the updateHead function on the public interface for initialisation purposes.
-    *
-    * @param effectiveTimestamp sequencer timestamp + epsilon(sequencer timestamp)
-    * @param approximateTimestamp our current best guess of what the "best" timestamp is to get a valid current topology snapshot
-    * @param potentialTopologyChange if true, the time advancement is related to a topology change that might have occurred or become effective
-    */
-  def updateHead(
-      effectiveTimestamp: EffectiveTime,
-      approximateTimestamp: ApproximateTime,
-      potentialTopologyChange: Boolean,
-  )(implicit
-      traceContext: TraceContext
-  ): Unit
 
   /** current number of changes waiting to become effective */
   def numPendingChanges: Int
@@ -718,36 +712,36 @@ private[client] trait PartyTopologySnapshotLoader
 
   final override def activeParticipantsOfParties(
       parties: Seq[LfPartyId]
-  ): Future[Map[LfPartyId, Set[ParticipantId]]] = {
-    val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
-    loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.map { case (k, v) =>
-      (k.toLf, v.participants.keySet)
-    })
-  }
+  ): Future[Map[LfPartyId, Set[ParticipantId]]] =
+    loadAndMapPartyInfos(parties, _.participants.keySet)
 
   final override def activeParticipantsOfPartiesWithAttributes(
       parties: Seq[LfPartyId]
-  ): Future[Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]] = {
-    val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
-    loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.map { case (k, v) =>
-      (k.toLf, v.participants)
-    })
-  }
+  ): Future[Map[LfPartyId, Map[ParticipantId, ParticipantAttributes]]] =
+    loadAndMapPartyInfos(parties, _.participants)
 
-  final override def partiesWithGroupAddressing(
-      parties: Seq[LfPartyId]
-  ): Future[Set[LfPartyId]] = {
-    val converted = parties.mapFilter(PartyId.fromLfParty(_).toOption)
-    loadBatchActiveParticipantsOf(converted, loadParticipantStates).map(_.collect {
-      case (party, PartyInfo(groupAddressing, _)) if groupAddressing => party.toLf
-    }.toSet)
-  }
+  final override def partiesWithGroupAddressing(parties: Seq[LfPartyId]): Future[Set[LfPartyId]] =
+    loadAndMapPartyInfos(parties, identity, _.groupAddressing).map(_.keySet)
+
+  final def consortiumThresholds(parties: Set[LfPartyId]): Future[Map[LfPartyId, PositiveInt]] =
+    loadAndMapPartyInfos(parties.toSeq, _.threshold)
+
+  private def loadAndMapPartyInfos[T](
+      lfParties: Seq[LfPartyId],
+      f: PartyInfo => T,
+      filter: PartyInfo => Boolean = _ => true,
+  ): Future[Map[LfPartyId, T]] =
+    loadBatchActiveParticipantsOf(
+      lfParties.mapFilter(PartyId.fromLfParty(_).toOption),
+      loadParticipantStates,
+    ).map(_.collect {
+      case (partyId, partyInfo) if filter(partyInfo) => partyId.toLf -> f(partyInfo)
+    })
 
   private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
       loadParticipantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
   ): Future[Map[PartyId, PartyInfo]]
-
 }
 
 trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient {

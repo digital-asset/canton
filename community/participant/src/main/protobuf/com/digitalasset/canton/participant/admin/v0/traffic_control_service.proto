@@ -1,0 +1,29 @@
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.participant.admin.v0;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+/*
+ * Service to retrieve information about the traffic state of the participant.
+ */
+service TrafficControlService {
+  rpc TrafficControlState(TrafficControlStateRequest) returns (TrafficControlStateResponse);
+}
+
+message TrafficControlStateRequest {
+  string domain_id = 1; // Domain id for which to retrieve the traffic state
+}
+
+message TrafficControlStateResponse {
+  message TrafficControlState {
+    google.protobuf.Timestamp timestamp = 1; // timestamp at which the state is valid
+    google.protobuf.UInt64Value total_extra_traffic_limit = 2; // total extra traffic at that timestamp
+    uint64 extra_traffic_remainder = 3; // remaining extra traffic at that timestamp
+  }
+  TrafficControlState traffic_state = 1;
+}

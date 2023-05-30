@@ -148,12 +148,14 @@ trait SequencedEventValidator extends FlagCloseable {
     * This method must not be called concurrently as it will corrupt the prior event state.
     */
   def validate(
-      event: OrdinarySerializedEvent
+      event: OrdinarySerializedEvent,
+      sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit]
 
   /** Validates a sequenced event when we reconnect against the prior event supplied to [[SequencedEventValidatorFactory.create]] */
   def validateOnReconnect(
-      reconnectEvent: OrdinarySerializedEvent
+      reconnectEvent: OrdinarySerializedEvent,
+      sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit]
 }
 
@@ -165,12 +167,15 @@ object SequencedEventValidator extends HasLoggerName {
       logger: TracedLogger,
   ) extends SequencedEventValidator {
     override def validate(
-        event: OrdinarySerializedEvent
+        event: OrdinarySerializedEvent,
+        sequencerId: SequencerId,
     ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
       EitherT(FutureUnlessShutdown.pure(Either.right(())))
     override def validateOnReconnect(
-        reconnectEvent: OrdinarySerializedEvent
-    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = validate(reconnectEvent)
+        reconnectEvent: OrdinarySerializedEvent,
+        sequencerId: SequencerId,
+    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
+      validate(reconnectEvent, sequencerId)
   }
 
   /** Do not validate sequenced events.
@@ -181,7 +186,6 @@ object SequencedEventValidator extends HasLoggerName {
     */
   def noValidation(
       domainId: DomainId,
-      sequencerId: SequencerId,
       timeout: ProcessingTimeout,
       warn: Boolean = true,
   )(implicit
@@ -189,7 +193,7 @@ object SequencedEventValidator extends HasLoggerName {
   ): SequencedEventValidator = {
     if (warn) {
       loggingContext.warn(
-        s"You have opted to skip event validation for domain $domainId using the sequencer $sequencerId. You should not do this unless you know what you are doing."
+        s"You have opted to skip event validation for domain $domainId. You should not do this unless you know what you are doing."
       )
     }
     NoValidation(timeout, loggingContext.tracedLogger)
@@ -400,7 +404,6 @@ object SequencedEventValidatorFactory {
     */
   def noValidation(
       domainId: DomainId,
-      sequencerId: SequencerId,
       warn: Boolean = true,
       timeouts: ProcessingTimeout,
   ): SequencedEventValidatorFactory = new SequencedEventValidatorFactory {
@@ -408,7 +411,7 @@ object SequencedEventValidatorFactory {
         initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
         unauthenticated: Boolean,
     )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
-      SequencedEventValidator.noValidation(domainId, sequencerId, timeouts, warn)
+      SequencedEventValidator.noValidation(domainId, timeouts, warn)
   }
 }
 
@@ -428,7 +431,6 @@ class SequencedEventValidatorImpl(
     unauthenticated: Boolean,
     optimistic: Boolean,
     domainId: DomainId,
-    sequencerId: SequencerId,
     protocolVersion: ProtocolVersion,
     syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
     protected val loggerFactory: NamedLoggerFactory,
@@ -453,7 +455,8 @@ class SequencedEventValidatorImpl(
     * This method must not be called concurrently as it will corrupt the prior event state.
     */
   override def validate(
-      event: OrdinarySerializedEvent
+      event: OrdinarySerializedEvent,
+      sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
     val priorEventO = priorEventRef.get()
     val oldCounter = priorEventO.fold(SequencerCounter.Genesis - 1L)(_.counter)
@@ -492,7 +495,7 @@ class SequencedEventValidatorImpl(
       // Otherwise, this is a fresh subscription and we will get the topology state with the first transaction
       // TODO(#4933) Upon a fresh subscription, retrieve the keys via the topology API and validate immediately or
       //  validate the signature after processing the initial event
-      _ <- verifySignature(priorEventO, event, protocolVersion)
+      _ <- verifySignature(priorEventO, event, sequencerId, protocolVersion)
     } yield updatePriorEvent(priorEventO, event)
   }
 
@@ -513,7 +516,8 @@ class SequencedEventValidatorImpl(
   }
 
   override def validateOnReconnect(
-      reconnectEvent: OrdinarySerializedEvent
+      reconnectEvent: OrdinarySerializedEvent,
+      sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
     implicit val traceContext: TraceContext = reconnectEvent.traceContext
     val priorEvent = priorEventRef.get.getOrElse(
@@ -558,7 +562,7 @@ class SequencedEventValidatorImpl(
           checkFork,
         ).sequence_
       )
-      _ <- verifySignature(Some(priorEvent), reconnectEvent, protocolVersion)
+      _ <- verifySignature(Some(priorEvent), reconnectEvent, sequencerId, protocolVersion)
     } yield ()
     // do not update the priorEvent because if it was ignored, then it was ignored for a reason.
   }
@@ -571,6 +575,7 @@ class SequencedEventValidatorImpl(
   private def verifySignature(
       priorEventO: Option[PossiblyIgnoredSerializedEvent],
       event: OrdinarySerializedEvent,
+      sequencerId: SequencerId,
       protocolVersion: ProtocolVersion,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
     implicit val traceContext: TraceContext = event.traceContext

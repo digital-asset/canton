@@ -188,7 +188,7 @@ class DefaultMessageDispatcher(
         // Ignored events
         case Left(Traced(EventWithErrors(content, _openingErrors, /* isIgnored */ true))) =>
           tickTrackers(content.counter, content.timestamp, triggerAcsChangePublication = false)
-        case Right(IgnoredSequencedEvent(ts, sc, _)) =>
+        case Right(IgnoredSequencedEvent(ts, sc, _, _)) =>
           tickTrackers(sc, ts, triggerAcsChangePublication = false)
       }
 

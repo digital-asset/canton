@@ -12,10 +12,10 @@ import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
   AlreadyAddedForAlias,
   MissingConfigForAlias,
 }
-import com.digitalasset.canton.sequencing.GrpcSequencerConnection
+import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.{BaseTest, DomainAlias}
+import com.digitalasset.canton.{BaseTest, DomainAlias, SequencerAlias}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -27,13 +27,15 @@ trait DomainConnectionConfigStoreTest {
   private val uid = DefaultTestIdentities.uid
   private val domainId = DomainId(uid)
   private val alias = DomainAlias.tryCreate("da")
+  private val connection = GrpcSequencerConnection(
+    NonEmpty(Seq, Endpoint("host1", Port.tryCreate(500)), Endpoint("host2", Port.tryCreate(600))),
+    false,
+    Some(ByteString.copyFrom("stuff".getBytes)),
+    SequencerAlias.Default,
+  )
   private val config = DomainConnectionConfig(
     alias,
-    GrpcSequencerConnection(
-      NonEmpty(Seq, Endpoint("host1", Port.tryCreate(500)), Endpoint("host2", Port.tryCreate(600))),
-      false,
-      Some(ByteString.copyFrom("stuff".getBytes)),
-    ),
+    SequencerConnections.default(connection),
     manualConnect = false,
     Some(domainId),
     42,
@@ -80,17 +82,19 @@ trait DomainConnectionConfigStoreTest {
         }
       }
       "be able to replace a config" in {
+        val connection = GrpcSequencerConnection(
+          NonEmpty(
+            Seq,
+            Endpoint("newHost1", Port.tryCreate(500)),
+            Endpoint("newHost2", Port.tryCreate(600)),
+          ),
+          false,
+          None,
+          SequencerAlias.Default,
+        )
         val secondConfig = DomainConnectionConfig(
           alias,
-          GrpcSequencerConnection(
-            NonEmpty(
-              Seq,
-              Endpoint("newHost1", Port.tryCreate(500)),
-              Endpoint("newHost2", Port.tryCreate(600)),
-            ),
-            false,
-            None,
-          ),
+          SequencerConnections.default(connection),
           manualConnect = true,
           None,
           99,
