@@ -8,7 +8,7 @@ import cats.data.{Chain, EitherT}
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.CanSubmit
+import com.digitalasset.canton.participant.protocol.CanSubmitTransfer
 import com.digitalasset.canton.participant.protocol.transfer.{
   AdminPartiesAndParticipants,
   TransferOutProcessorError,
@@ -95,7 +95,12 @@ private[routing] class DomainRankComputation(
         case submitter :: rest =>
           val result =
             for {
-              _ <- CanSubmit(contractId, sourceSnapshot, submitter, participantId)
+              _ <- CanSubmitTransfer.transferOut(
+                contractId,
+                sourceSnapshot,
+                submitter,
+                participantId,
+              )
               adminParties <- AdminPartiesAndParticipants(
                 contractId,
                 submitter,

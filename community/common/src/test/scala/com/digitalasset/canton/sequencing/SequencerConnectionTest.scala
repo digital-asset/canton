@@ -4,9 +4,9 @@
 package com.digitalasset.canton.sequencing
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.{BaseTest, SequencerAlias}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -35,11 +35,18 @@ object SequencerConnectionTest {
     NonEmpty(Seq, endpoint(1), endpoint(2)),
     false,
     Some(ByteString.copyFromUtf8("certificates")),
+    SequencerAlias.Default,
   )
-  val grpc2 = GrpcSequencerConnection(NonEmpty(Seq, endpoint(3), endpoint(4)), false, None)
+  val grpc2 = GrpcSequencerConnection(
+    NonEmpty(Seq, endpoint(3), endpoint(4)),
+    false,
+    None,
+    SequencerAlias.Default,
+  )
   val grpcMerged = GrpcSequencerConnection(
     NonEmpty(Seq, endpoint(1), endpoint(2), endpoint(3), endpoint(4)),
     false,
     Some(ByteString.copyFromUtf8("certificates")),
+    SequencerAlias.Default,
   )
 }

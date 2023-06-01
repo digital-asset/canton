@@ -11,6 +11,7 @@ import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationEr
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.WrongRandomnessLength
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{ViewHash, v0, v1, v2}
 import com.digitalasset.canton.serialization.DeserializationError
@@ -427,25 +428,37 @@ object EncryptedViewMessageV1 {
       ec: ExecutionContext
   ): EitherT[Future, EncryptedViewMessageDecryptionError[VT], SecureRandomness] = {
     val randomnessLength = EncryptedViewMessage.computeRandomnessLength(snapshot.pureCrypto)
-
-    for {
-      encryptionKeys <- EitherT
-        .right(snapshot.ipsSnapshot.encryptionKeys(participantId))
-        .map(_.map(_.id).toSet)
-      encryptedRandomnessForParticipant <- encrypted.randomness
-        .find(e => encryptionKeys.contains(e.encryptedFor))
-        .toRight(
-          EncryptedViewMessageDecryptionError.MissingParticipantKey(participantId, encrypted)
-        )
-        .toEitherT[Future]
-      viewRandomness <- snapshot
-        .decrypt(encryptedRandomnessForParticipant)(
-          SecureRandomness.fromByteString(randomnessLength)
-        )
-        .leftMap[EncryptedViewMessageDecryptionError[VT]](
-          EncryptedViewMessageDecryptionError.SyncCryptoDecryptError(_, encrypted)
-        )
-    } yield viewRandomness
+    encrypted.randomness
+      .collectFirst {
+        case AsymmetricEncrypted(ciphertext, encryptedFor)
+            // if we're using no encryption, it means we're using group addressing
+            // which currently does not support encryption of the randomness
+            if encryptedFor == AsymmetricEncrypted.noEncryptionFingerprint =>
+          SecureRandomness
+            .fromByteString(randomnessLength)(ciphertext)
+            .leftMap[EncryptedViewMessageDecryptionError[VT]](_ =>
+              WrongRandomnessLength(ciphertext.size(), randomnessLength, encrypted)
+            )
+            .toEitherT[Future]
+      }
+      .getOrElse(for {
+        encryptionKeys <- EitherT
+          .right(snapshot.ipsSnapshot.encryptionKeys(participantId))
+          .map(_.map(_.id).toSet)
+        encryptedRandomnessForParticipant <- encrypted.randomness
+          .find(e => encryptionKeys.contains(e.encryptedFor))
+          .toRight(
+            EncryptedViewMessageDecryptionError.MissingParticipantKey(participantId, encrypted)
+          )
+          .toEitherT[Future]
+        viewRandomness <- snapshot
+          .decrypt(encryptedRandomnessForParticipant)(
+            SecureRandomness.fromByteString(randomnessLength)
+          )
+          .leftMap[EncryptedViewMessageDecryptionError[VT]](
+            EncryptedViewMessageDecryptionError.SyncCryptoDecryptError(_, encrypted)
+          )
+      } yield viewRandomness)
   }
 
 }

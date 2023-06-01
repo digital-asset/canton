@@ -47,14 +47,16 @@ private[routing] object TransactionData {
       domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
       domainIdResolver: DomainAlias => Option[DomainId],
       inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
+      submitterDomainId: Option[DomainId],
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, TransactionRoutingError, TransactionData] = {
     for {
       prescribedDomainO <- EitherT.fromEither[Future](
-        toDomainId(workflowIdO, domainIdResolver)
+        submitterDomainId
+          .map(domainId => Right(Some(domainId))) // submitter domain takes precedence
+          .getOrElse(toDomainId(workflowIdO, domainIdResolver))
       )
-
       contractsDomainData <- EitherT.liftF(
         ContractsDomainData.create(domainOfContracts, inputContractsMetadata)
       )
@@ -74,6 +76,7 @@ private[routing] object TransactionData {
       domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
       domainIdResolver: DomainAlias => Option[DomainId],
       inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
+      submitterDomainId: Option[DomainId],
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, TransactionRoutingError, TransactionData] = {
@@ -95,6 +98,7 @@ private[routing] object TransactionData {
         domainOfContracts,
         domainIdResolver,
         inputContractsMetadata,
+        submitterDomainId,
       )
     } yield transactionData
   }

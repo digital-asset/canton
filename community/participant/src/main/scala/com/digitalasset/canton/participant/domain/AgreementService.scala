@@ -5,16 +5,14 @@ package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
 import cats.syntax.foldable.*
+import com.digitalasset.canton.common.domain.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
-import com.digitalasset.canton.participant.domain.grpc.{
-  GrpcDomainServiceClient,
-  GrpcSequencerConnectClient,
-}
+import com.digitalasset.canton.participant.domain.grpc.GrpcDomainServiceClient
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.DomainId

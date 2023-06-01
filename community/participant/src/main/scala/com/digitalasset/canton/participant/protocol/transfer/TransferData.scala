@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.{
   TransactionId,
   TransferId,
 }
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 import com.digitalasset.canton.{RequestCounter, TransferCounter}
@@ -44,7 +44,7 @@ final case class TransferData(
 
   def transferId: TransferId = TransferId(transferOutRequest.sourceDomain, transferOutTimestamp)
 
-  def sourceMediator: MediatorId = transferOutRequest.mediatorId
+  def sourceMediator: MediatorRef = transferOutRequest.mediator
 
   def addTransferOutResult(result: DeliveredTransferOutResult): Option[TransferData] =
     mergeTransferOutResult(Some(result))

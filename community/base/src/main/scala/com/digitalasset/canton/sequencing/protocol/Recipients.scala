@@ -41,12 +41,10 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
   override def pretty: Pretty[Recipients.this.type] =
     prettyOfClass(param("Recipient trees", _.trees.toList))
 
-  def asSingleGroup: Option[NonEmpty[Set[Member]]] = {
+  def asSingleGroup: Option[NonEmpty[Set[Recipient]]] = {
     trees match {
       case Seq(RecipientsTree(group, Seq())) =>
-        NonEmpty.from(group.collect { case MemberRecipient(member) =>
-          member
-        })
+        NonEmpty.from(group)
       case _ => None
     }
   }
@@ -85,11 +83,21 @@ object Recipients {
   def cc(first: Member, others: Member*): Recipients =
     Recipients(NonEmpty(Seq, RecipientsTree.leaf(NonEmpty(Set, first, others: _*))))
 
+  def cc(recipient: Recipient, others: Recipient*): Recipients = {
+    Recipients(NonEmpty.mk(Seq, RecipientsTree(NonEmpty.mk(Set, recipient, others *), Seq.empty)))
+  }
+
   /** Create a [[com.digitalasset.canton.sequencing.protocol.Recipients]] representing independent groups of members
     * that do not "see" each other.
     */
   def groups(groups: NonEmpty[Seq[NonEmpty[Set[Member]]]]): Recipients =
     Recipients(groups.map(group => RecipientsTree.leaf(group)))
+
+  /** Create a [[com.digitalasset.canton.sequencing.protocol.Recipients]] representing independent groups of [[Recipient]]
+    * that do not "see" each other.
+    */
+  def recipientGroups(groups: NonEmpty[Seq[NonEmpty[Set[Recipient]]]]): Recipients =
+    Recipients(groups.map(group => RecipientsTree.recipientsLeaf(group)))
 
   def ofSet[T <: Member](set: Set[T]): Option[Recipients] = {
     val members = set.toList

@@ -38,6 +38,7 @@ final case class CachingConfigs(
     keyCache: CacheConfig = CachingConfigs.defaultKeyCache,
     packageVettingCache: CacheConfig = CachingConfigs.defaultPackageVettingCache,
     mySigningKeyCache: CacheConfig = CachingConfigs.defaultMySigningKeyCache,
+    trafficStatusCache: CacheConfig = CachingConfigs.defaultTrafficStatusCache,
 )
 
 object CachingConfigs {
@@ -55,6 +56,8 @@ object CachingConfigs {
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(10000))
   val defaultMySigningKeyCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(5))
+  val defaultTrafficStatusCache: CacheConfig =
+    CacheConfig(maximumSize = PositiveNumeric.tryCreate(10000))
   @VisibleForTesting
   val testing =
     CachingConfigs(contractStore = CacheConfig(maximumSize = PositiveNumeric.tryCreate(100)))

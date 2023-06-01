@@ -484,6 +484,7 @@ object MultiDomainEventLog {
               completionInfo,
               _reason,
               ProcessingSteps.RequestType.Transaction,
+              _domainId,
             ) =>
           val changeId = completionInfo.changeId
           DeduplicationInfo(

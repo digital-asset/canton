@@ -192,6 +192,17 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
       storedTx: GenericStoredTopologyTransactionX
   ): SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX] = storedTx.transaction
 
+  override def providesAdditionalSignatures(
+      transaction: GenericSignedTopologyTransactionX
+  )(implicit traceContext: TraceContext): Future[Boolean] = {
+    findStored(transaction).map(_.forall { inStore =>
+      // check whether source still could provide an additional signature
+      transaction.signatures.diff(inStore.transaction.signatures.forgetNE).nonEmpty &&
+      // but only if the transaction in the target store is a proposal
+      inStore.transaction.isProposal
+    })
+  }
+
   /** returns initial set of onboarding transactions that should be dispatched to the domain */
   def findParticipantOnboardingTransactions(participantId: ParticipantId, domainId: DomainId)(
       implicit traceContext: TraceContext

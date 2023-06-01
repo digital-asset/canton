@@ -223,6 +223,35 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         selector.forMultiDomain.futureValue shouldBe defaultDomainRank
       }
 
+      "return correct response when prescribed submitter domain ID is the current one" in {
+        val selector = selectorForExerciseByInterface(
+          prescribedSubmitterDomainId = Some(da)
+        )
+
+        selector.forSingleDomain.futureValue shouldBe defaultDomainRank
+        selector.forMultiDomain.futureValue shouldBe defaultDomainRank
+      }
+
+      "return correct response when prescribed submitter domain ID is the current one (precedence over prescribed alias)" in {
+        val selector = selectorForExerciseByInterface(
+          prescribedDomainAlias = Some("acme"),
+          prescribedSubmitterDomainId = Some(da),
+        )
+
+        selector.forSingleDomain.futureValue shouldBe defaultDomainRank
+        selector.forMultiDomain.futureValue shouldBe defaultDomainRank
+      }
+
+      "return correct response when prescribed submitter domain ID is the current one (precedence over prescribed domain ID)" in {
+        val selector = selectorForExerciseByInterface(
+          prescribedDomainId = Some(acme),
+          prescribedSubmitterDomainId = Some(da),
+        )
+
+        selector.forSingleDomain.futureValue shouldBe defaultDomainRank
+        selector.forMultiDomain.futureValue shouldBe defaultDomainRank
+      }
+
       "return an error when prescribed domain is incorrect" in {
         val selector = selectorForExerciseByInterface(
           prescribedDomainAlias = Some("acme"),
@@ -364,6 +393,7 @@ private[routing] object DomainSelectorTest {
 
     private val defaultPrescribedDomainAlias: Option[String] = None
     private val defaultPrescribedDomainId: Option[DomainId] = None
+    private val defaultPrescribedSubmitterDomainId: Option[DomainId] = None
 
     private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ =>
       BaseTest.testedProtocolVersion
@@ -378,6 +408,7 @@ private[routing] object DomainSelectorTest {
         admissibleDomains: NonEmpty[Set[DomainId]] = defaultAdmissibleDomains,
         prescribedDomainAlias: Option[String] = defaultPrescribedDomainAlias,
         prescribedDomainId: Option[DomainId] = defaultPrescribedDomainId,
+        prescribedSubmitterDomainId: Option[DomainId] = defaultPrescribedSubmitterDomainId,
         domainProtocolVersion: DomainId => ProtocolVersion = defaultDomainProtocolVersion,
         languageVersion: LanguageVersion = defaultLanguageVersion,
         vettedPackages: Seq[LfPackageId] = ExerciseByInterface.correctPackages,
@@ -407,6 +438,7 @@ private[routing] object DomainSelectorTest {
         admissibleDomains,
         prescribedDomainAlias,
         prescribedDomainId,
+        prescribedSubmitterDomainId,
         domainProtocolVersion,
         vettedPackages,
         exerciseByInterface.tx,
@@ -448,6 +480,7 @@ private[routing] object DomainSelectorTest {
         admissibleDomains,
         prescribedDomainAlias,
         None,
+        None,
         domainProtocolVersion,
         vettedPackages,
         threeExercises.tx,
@@ -462,6 +495,7 @@ private[routing] object DomainSelectorTest {
         admissibleDomains: NonEmpty[Set[DomainId]],
         prescribedDomainAlias: Option[String],
         prescribedDomainId: Option[DomainId],
+        prescribedSubmitterDomainId: Option[DomainId],
         domainProtocolVersion: DomainId => ProtocolVersion,
         vettedPackages: Seq[LfPackageId],
         tx: LfVersionedTransaction,
@@ -516,6 +550,7 @@ private[routing] object DomainSelectorTest {
           domainOfContracts = ids => Future.successful(domainOfContracts(ids)),
           domainIdResolver = domainAliasResolver,
           inputContractsMetadata = inputContractsMetadata,
+          submitterDomainId = prescribedSubmitterDomainId,
         )
 
       private val domainSelector: EitherT[Future, TransactionRoutingError, DomainSelector] =

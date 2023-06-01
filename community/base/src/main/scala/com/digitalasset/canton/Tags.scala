@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   String255,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -27,6 +28,46 @@ object DomainAlias extends LengthLimitedStringWrapperCompanion[String255, Domain
   override protected def companion: String255.type = String255
   override def instanceName: String = "DomainAlias"
   override protected def factoryMethodWrapper(str: String255): DomainAlias = DomainAlias(str)
+}
+
+/** Class representing a SequencerAlias.
+  *
+  * A SequencerAlias serves as a shorthand, or 'nickname', for a particular sequencer or
+  * group of Highly Available (HA) replicas of a sequencer within a specific node.
+  *
+  * Note:
+  * - SequencerAlias is a node-local concept. This means that two different participants
+  *   may assign different aliases to the same sequencer or group of HA sequencer replicas.
+  *
+  * - The uniqueness of a SequencerAlias is only enforced within a given domain ID. This
+  *   means a node can use the same sequencer alias for different sequencers as long as
+  *   these sequencers belong to different domains.
+  */
+final case class SequencerAlias private (protected val str: String255)
+    extends LengthLimitedStringWrapper
+    with PrettyPrinting {
+  require(str.nonEmpty, "Empty SequencerAlias is not supported")
+
+  override def pretty: Pretty[SequencerAlias] =
+    prettyOfString(inst => show"Sequencer ${inst.unwrap.singleQuoted}")
+
+  override def toProtoPrimitive: String =
+    if (this == SequencerAlias.Default) "" else str.toProtoPrimitive
+}
+
+object SequencerAlias extends LengthLimitedStringWrapperCompanion[String255, SequencerAlias] {
+  val Default = SequencerAlias.tryCreate("DefaultSequencer")
+  override protected def companion: String255.type = String255
+  override def instanceName: String = "SequencerAlias"
+  override protected def factoryMethodWrapper(str: String255): SequencerAlias = SequencerAlias(str)
+
+  override def create(str: String): Either[String, SequencerAlias] =
+    if (str.isEmpty) Left("Empty SequencerAlias is not supported") else super.create(str)
+
+  override def fromProtoPrimitive(str: String): ParsingResult[SequencerAlias] =
+    if (str.isEmpty) {
+      Right(SequencerAlias.Default)
+    } else super.fromProtoPrimitive(str)
 }
 
 /** Command identifier for tracking ledger commands

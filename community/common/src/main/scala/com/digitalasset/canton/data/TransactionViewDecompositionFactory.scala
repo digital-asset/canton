@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.data.Chain
 import cats.syntax.parallel.*
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -26,6 +27,7 @@ trait TransactionViewDecompositionFactory {
       topologySnapshot: TopologySnapshot,
       transaction: WellFormedTransaction[WithoutSuffixes],
       viewRbContext: RollbackContext,
+      submittingAdminPartyO: Option[LfPartyId],
   )(implicit ec: ExecutionContext): Future[Seq[NewView]]
 }
 
@@ -44,14 +46,16 @@ object TransactionViewDecompositionFactory {
         topologySnapshot: TopologySnapshot,
         transaction: WellFormedTransaction[WithoutSuffixes],
         viewRbContext: RollbackContext,
+        submittingAdminPartyO: Option[LfPartyId],
     )(implicit ec: ExecutionContext): Future[Seq[NewView]] = {
 
       def idAndNode(id: LfNodeId): (LfNodeId, LfNode) = id -> transaction.unwrap.nodes(id)
 
       def createNewView: ((LfNodeId, LfActionNode, RollbackContext)) => Future[NewView] = {
         case (rootNodeId, rootNode, rbContext) =>
-          confirmationPolicy.informeesAndThreshold(rootNode, topologySnapshot).flatMap {
-            case (informees, threshold) =>
+          confirmationPolicy
+            .informeesAndThresholdV0(rootNode, topologySnapshot)
+            .flatMap { case (informees, threshold) =>
               val rootSeed = transaction.seedFor(rootNodeId)
               val tailNodesF = collectTailNodes(rootNode, informees, threshold, rbContext)
               tailNodesF.map(tailNodes =>
@@ -65,7 +69,7 @@ object TransactionViewDecompositionFactory {
                   rbContext,
                 )
               )
-          }
+            }
       }
 
       def collectTailNodes(
@@ -79,7 +83,7 @@ object TransactionViewDecompositionFactory {
         val actionNodeChildren = peelAwayTopLevelRollbackNodes(children, rbContext)
         actionNodeChildren
           .parTraverse { case (childNodeId, childNode, childRbContext) =>
-            confirmationPolicy.informeesAndThreshold(childNode, topologySnapshot).flatMap {
+            confirmationPolicy.informeesAndThresholdV0(childNode, topologySnapshot).flatMap {
               case (childInformees, childThreshold) =>
                 if (childInformees == viewInformees && childThreshold == viewThreshold) {
                   // childNode belongs to the core of the view, as informees and threshold are the same
@@ -273,12 +277,21 @@ object TransactionViewDecompositionFactory {
         topologySnapshot: TopologySnapshot,
         transaction: WellFormedTransaction[WithoutSuffixes],
         viewRbContext: RollbackContext,
+        submittingAdminPartyO: Option[LfPartyId],
     )(implicit ec: ExecutionContext): Future[Seq[NewView]] = {
 
       val tx: LfVersionedTransaction = transaction.unwrap
+      val rootIds = tx.roots.toSeq.toSet
 
       val policyMapF = tx.nodes.collect({ case (nodeId, node: LfActionNode) =>
-        val itF = confirmationPolicy.informeesAndThreshold(node, topologySnapshot)
+        val submittingAdminPartyIfRoot =
+          Option.when(rootIds.contains(nodeId))(submittingAdminPartyO).flatten
+        val itF =
+          confirmationPolicy.informeesAndThresholdV5(
+            node,
+            submittingAdminPartyIfRoot,
+            topologySnapshot,
+          )
         val childNodeIds = node match {
           case e: LfNodeExercises => e.children.toSeq
           case _ => Seq.empty

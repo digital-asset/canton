@@ -5,13 +5,18 @@ package com.digitalasset.canton.participant.domain
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import com.digitalasset.canton.DomainAlias
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
+import com.digitalasset.canton.common.domain.{
+  RegisterTopologyTransactionHandleWithProcessor,
+  SequencerBasedRegisterTopologyTransactionHandle,
+  SequencerBasedRegisterTopologyTransactionHandleX,
+}
 import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
-import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.{
   DomainOnboardingOutbox,
@@ -29,10 +34,17 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, 
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.{
+  DomainId,
+  ParticipantId,
+  SequencerId,
+  UnauthenticatedMemberId,
+  *,
+}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{DomainAlias, SequencerAlias}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
@@ -51,9 +63,10 @@ abstract class ParticipantInitializeTopologyCommon[TX](
     timeTracker: DomainTimeTrackerConfig,
     loggerFactory: NamedLoggerFactory,
     sequencerClientFactory: SequencerClientFactory,
-    connection: SequencerConnection,
+    connections: SequencerConnections,
     crypto: Crypto,
     protocolVersion: ProtocolVersion,
+    expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
 ) {
 
   protected def createHandler(
@@ -146,7 +159,8 @@ abstract class ParticipantInitializeTopologyCommon[TX](
           new InMemorySequencedEventStore(loggerFactory),
           new InMemorySendTrackerStore(),
           UnauthenticatedRequestSigner,
-          connection,
+          connections,
+          expectedSequencers, // TODO(i12906): Iterate over sequencers until the honest answer is received
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
@@ -200,9 +214,10 @@ class ParticipantInitializeTopology(
     processingTimeout: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     sequencerClientFactory: SequencerClientFactory,
-    connection: SequencerConnection,
+    connections: SequencerConnections,
     crypto: Crypto,
     protocolVersion: ProtocolVersion,
+    expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
 ) extends ParticipantInitializeTopologyCommon[SignedTopologyTransaction[TopologyChangeOp]](
       alias,
       participantId,
@@ -211,9 +226,10 @@ class ParticipantInitializeTopology(
       timeTracker,
       loggerFactory,
       sequencerClientFactory,
-      connection,
+      connections,
       crypto,
       protocolVersion,
+      expectedSequencers,
     ) {
 
   override protected def createHandler(
@@ -271,9 +287,10 @@ class ParticipantInitializeTopologyX(
     processingTimeout: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
     sequencerClientFactory: SequencerClientFactory,
-    connection: SequencerConnection,
+    connections: SequencerConnections,
     crypto: Crypto,
     protocolVersion: ProtocolVersion,
+    expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
 ) extends ParticipantInitializeTopologyCommon[GenericSignedTopologyTransactionX](
       alias,
       participantId,
@@ -282,9 +299,10 @@ class ParticipantInitializeTopologyX(
       timeTracker,
       loggerFactory,
       sequencerClientFactory,
-      connection,
+      connections,
       crypto,
       protocolVersion,
+      expectedSequencers,
     ) {
 
   override protected def createHandler(

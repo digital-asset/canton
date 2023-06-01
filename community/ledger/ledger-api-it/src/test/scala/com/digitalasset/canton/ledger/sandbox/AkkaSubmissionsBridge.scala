@@ -10,6 +10,7 @@ import com.daml.ledger.resources.ResourceOwner
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
+import com.digitalasset.canton.tracing.Traced
 
 import scala.util.chaining.*
 
@@ -18,12 +19,14 @@ object AkkaSubmissionsBridge {
   def apply()(implicit
       loggingContext: LoggingContext,
       materializer: Materializer,
-  ): ResourceOwner[(Sink[(Offset, Update), NotUsed], Source[(Offset, Update), NotUsed])] =
+  ): ResourceOwner[
+    (Sink[(Offset, Traced[Update]), NotUsed], Source[(Offset, Traced[Update]), NotUsed])
+  ] =
     ResourceOwner.forValue(() => {
       MergeHub
         // We can't instrument these buffers, therefore keep these to minimal sizes and
         // use a configurable instrumented buffer in the producer.
-        .source[(Offset, Update)](perProducerBufferSize = 1)
+        .source[(Offset, Traced[Update])](perProducerBufferSize = 1)
         .toMat(BroadcastHub.sink(bufferSize = 1))(Keep.both)
         .run()
         .tap { _ =>

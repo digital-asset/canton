@@ -30,7 +30,11 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
+import com.digitalasset.canton.participant.protocol.{
+  CanSubmitTransfer,
+  ProcessingSteps,
+  ProtocolProcessor,
+}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
@@ -39,7 +43,6 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureInstances.*
@@ -57,7 +60,7 @@ import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
 private[transfer] class TransferInProcessingSteps(
-    domainId: TargetDomainId,
+    val domainId: TargetDomainId,
     val participantId: ParticipantId,
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
@@ -106,7 +109,7 @@ private[transfer] class TransferInProcessingSteps(
 
   override def prepareSubmission(
       param: SubmissionParam,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -118,14 +121,14 @@ private[transfer] class TransferInProcessingSteps(
       transferId,
       sourceProtocolVersion,
     ) = param
-    val ipsSnapshot = recentSnapshot.ipsSnapshot
+    val topologySnapshot = recentSnapshot.ipsSnapshot
     val pureCrypto = recentSnapshot.pureCrypto
     val submitter = submitterMetadata.submitter
 
     def activeParticipantsOfParty(
         party: LfPartyId
     ): EitherT[Future, TransferProcessorError, Set[ParticipantId]] =
-      EitherT(ipsSnapshot.activeParticipantsOf(party).map(_.keySet).map { participants =>
+      EitherT(topologySnapshot.activeParticipantsOf(party).map(_.keySet).map { participants =>
         Either.cond(
           participants.nonEmpty,
           participants,
@@ -153,33 +156,29 @@ private[transfer] class TransferInProcessingSteps(
         SubmittingPartyMustBeStakeholderIn(transferId, submitter, stakeholders),
       )
 
-      submitterRelationship <- EitherT(
-        ipsSnapshot
-          .hostedOn(submitter, participantId)
-          .map(_.toRight(PartyNotHosted(transferId, submitter, participantId)))
-      )
+      _ <- CanSubmitTransfer.transferIn(transferId, topologySnapshot, submitter, participantId)
 
-      _ <- condUnitET[Future](
-        submitterRelationship.permission == ParticipantPermission.Submission,
-        NoSubmissionPermissionIn(transferId, submitter, participantId),
-      )
       transferInUuid = seedGenerator.generateUuid()
       seed = seedGenerator.generateSaltSeed()
-      fullTree = makeFullTransferInTree(
-        pureCrypto,
-        seed,
-        submitterMetadata,
-        stakeholders,
-        transferData.contract,
-        transferData.transferCounter,
-        transferData.creatingTransactionId,
-        targetDomain,
-        mediatorId,
-        transferOutResult,
-        transferInUuid,
-        sourceProtocolVersion,
-        targetProtocolVersion,
-      )
+      fullTree <- EitherT
+        .fromEither[Future](
+          makeFullTransferInTree(
+            pureCrypto,
+            seed,
+            submitterMetadata,
+            stakeholders,
+            transferData.contract,
+            transferData.transferCounter,
+            transferData.creatingTransactionId,
+            targetDomain,
+            mediator,
+            transferOutResult,
+            transferInUuid,
+            sourceProtocolVersion,
+            targetProtocolVersion,
+          )
+        )
+        .leftMap(GenericError)
       rootHash = fullTree.rootHash
       mediatorMessage = fullTree.mediatorMessage
       recipientsSet <- {
@@ -207,15 +206,17 @@ private[transfer] class TransferInProcessingSteps(
         )
       // Each member gets a message sent to itself and to the mediator
       val rootHashRecipients =
-        Recipients.groups(
+        Recipients.recipientGroups(
           checked(
             NonEmptyUtil.fromUnsafe(
-              recipientsSet.toSeq.map(participant => NonEmpty(Set, mediatorId, participant))
+              recipientsSet.toSeq.map(participant =>
+                NonEmpty(Set, mediator.toRecipient, MemberRecipient(participant))
+              )
             )
           )
         )
       val messages = Seq[(ProtocolMessage, Recipients)](
-        mediatorMessage -> Recipients.cc(mediatorId),
+        mediatorMessage -> Recipients.cc(mediator.toRecipient),
         viewMessage -> recipients,
         rootHashMessage -> rootHashRecipients,
       )
@@ -271,7 +272,7 @@ private[transfer] class TransferInProcessingSteps(
       ],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
@@ -334,7 +335,7 @@ private[transfer] class TransferInProcessingSteps(
       contractLookup: ContractLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -396,7 +397,7 @@ private[transfer] class TransferInProcessingSteps(
         transferringParticipant,
         transferId,
         hostedStks.toSet,
-        mediatorId,
+        mediator,
       )
       responses <- validationResultO match {
         case None =>
@@ -449,7 +450,7 @@ private[transfer] class TransferInProcessingSteps(
                 )
             )
             .leftMap(e => FailedToCreateResponse(transferId, e): TransferProcessorError)
-            .map(transferResponse => Seq(transferResponse -> Recipients.cc(mediatorId)))
+            .map(transferResponse => Seq(transferResponse -> Recipients.cc(mediator.toRecipient)))
       }
     } yield {
       StorePendingDataAndSendResponseAndCreateTimeout(
@@ -632,7 +633,7 @@ object TransferInProcessingSteps {
       transferringParticipant: Boolean,
       transferId: TransferId,
       hostedStakeholders: Set[LfPartyId],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   ) extends PendingTransfer
       with PendingRequestData {
     override def pendingContracts: Set[LfContractId] = Set(contract.contractId)
@@ -647,15 +648,15 @@ object TransferInProcessingSteps {
       transferCounter: TransferCounter,
       creatingTransactionId: TransactionId,
       targetDomain: TargetDomainId,
-      targetMediator: MediatorId,
+      targetMediator: MediatorRef,
       transferOutResult: DeliveredTransferOutResult,
       transferInUuid: UUID,
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
-  ): FullTransferInTree = {
+  ): Either[String, FullTransferInTree] = {
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, pureCrypto)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, pureCrypto)
-    val commonData = TransferInCommonData.create(pureCrypto)(
+    val commonDataE = TransferInCommonData.create(pureCrypto)(
       commonDataSalt,
       targetDomain,
       targetMediator,
@@ -673,8 +674,10 @@ object TransferInProcessingSteps {
       sourceProtocolVersion,
       targetProtocolVersion,
     )
-    val tree = TransferInViewTree(commonData, view)(pureCrypto)
-    FullTransferInTree(tree)
+    commonDataE.map { commonData =>
+      val tree = TransferInViewTree(commonData, view)(pureCrypto)
+      FullTransferInTree(tree)
+    }
   }
 
   final case class PendingDataAndResponseArgs(

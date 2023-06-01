@@ -35,6 +35,7 @@ import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, Trus
 import com.digitalasset.canton.topology.{
   DomainId,
   MediatorId,
+  MediatorRef,
   ParticipantId,
   TestingIdentityFactory,
   TestingTopology,
@@ -317,12 +318,12 @@ object ExampleTransactionFactory {
 
   // Parties and participants
 
-  val signatory: LfPartyId = LfPartyId.assertFromString("signatory::default")
-  val observer: LfPartyId = LfPartyId.assertFromString("observer::default")
-  val submitter: LfPartyId = LfPartyId.assertFromString("submitter::default")
-  val submitters: List[LfPartyId] = List(submitter)
   val submitterParticipant: ParticipantId = ParticipantId("submitterParticipant")
   val signatoryParticipant: ParticipantId = ParticipantId("signatoryParticipant")
+  val signatory: LfPartyId = LfPartyId.assertFromString("signatory::default")
+  val observer: LfPartyId = LfPartyId.assertFromString("observer::default")
+  val submitter: LfPartyId = submitterParticipant.adminParty.toLf
+  val submitters: List[LfPartyId] = List(submitter)
 
   // Request metadata
 
@@ -330,7 +331,7 @@ object ExampleTransactionFactory {
   val commandId: CommandId = DefaultDamlValues.commandId()
   val workflowId: WorkflowId = WorkflowId.assertFromString("testWorkflowId")
 
-  def defaultTestingIdentityFactory: TestingIdentityFactory =
+  def defaultTestingTopology =
     TestingTopology(
       topology = Map(
         submitter -> Map(submitterParticipant -> Submission),
@@ -342,13 +343,15 @@ object ExampleTransactionFactory {
         ),
       ),
       participants = Map(submitterParticipant -> ParticipantAttributes(Submission, TrustLevel.Vip)),
+      packages = Seq(ExampleTransactionFactory.packageId),
     )
-      .build()
+
+  def defaultTestingIdentityFactory: TestingIdentityFactory =
+    defaultTestingTopology.build()
 
   // Topology
   def defaultTopologySnapshot: TopologySnapshot =
-    defaultTestingIdentityFactory
-      .topologySnapshot(packages = Seq(ExampleTransactionFactory.packageId))
+    defaultTestingIdentityFactory.topologySnapshot()
 
   def defaultPackageInfoService: PackageInfoService = new PackageInfoService {
     override def getDescription(packageId: PackageId)(implicit
@@ -397,12 +400,17 @@ class ExampleTransactionFactory(
       rootSeed: Option[LfHash],
       rootNodeId: LfNodeId,
       tailNodes: Seq[TransactionViewDecomposition],
+      isRoot: Boolean,
+      protocolVersion: ProtocolVersion,
   )(implicit ec: ExecutionContext): Future[NewView] = {
 
     val rootRbContext = RollbackContext.empty
 
-    confirmationPolicy.informeesAndThreshold(rootNode, topologySnapshot).flatMap {
-      case (viewInformees, viewThreshold) =>
+    val submittingAdminPartyO =
+      Option.when(isRoot)(submitterMetadata.submitterParticipant.adminParty.toLf)
+    confirmationPolicy
+      .informeesAndThreshold(rootNode, submittingAdminPartyO, topologySnapshot, protocolVersion)
+      .flatMap { case (viewInformees, viewThreshold) =>
         val result = NewView(
           rootNode,
           viewInformees,
@@ -413,10 +421,15 @@ class ExampleTransactionFactory(
           rootRbContext,
         )
         result
-          .compliesWith(confirmationPolicy, topologySnapshot)
+          .compliesWith(
+            confirmationPolicy,
+            submittingAdminPartyO,
+            topologySnapshot,
+            protocolVersion,
+          )
           .map(_ => result)
           .valueOr(err => throw new IllegalArgumentException(err))
-    }
+      }
   }
 
   private def awaitCreateWithConfirmationPolicy(
@@ -426,6 +439,7 @@ class ExampleTransactionFactory(
       rootSeed: Option[LfHash],
       rootNodeId: LfNodeId,
       tailNodes: Seq[TransactionViewDecomposition],
+      isRoot: Boolean,
   )(implicit ec: ExecutionContext): NewView =
     Await.result(
       createWithConfirmationPolicy(
@@ -435,6 +449,8 @@ class ExampleTransactionFactory(
         rootSeed,
         rootNodeId,
         tailNodes,
+        isRoot,
+        protocolVersion,
       ),
       10.seconds,
     )
@@ -503,7 +519,7 @@ class ExampleTransactionFactory(
     val (contractSalt, unicum) = unicumGenerator
       .generateSaltAndUnicum(
         domainId,
-        mediatorId,
+        MediatorRef(mediatorId),
         transactionUuid,
         viewPosition,
         viewParticipantDataSalt,
@@ -543,11 +559,18 @@ class ExampleTransactionFactory(
       coreInputs: Seq[SerializableContract],
       created: Seq[SerializableContract],
       seed: Option[LfHash],
+      isRoot: Boolean,
       subviews: TransactionView*
   ): TransactionView = {
 
+    val submittingAdminPartyO =
+      Option.when(isRoot)(submitterMetadata.submitterParticipant.adminParty.toLf)
     val (informees, threshold) =
-      Await.result(confirmationPolicy.informeesAndThreshold(node, topologySnapshot), 10.seconds)
+      Await.result(
+        confirmationPolicy
+          .informeesAndThreshold(node, submittingAdminPartyO, topologySnapshot, protocolVersion),
+        10.seconds,
+      )
     val viewCommonData =
       ViewCommonData.create(cryptoOps)(
         informees,
@@ -630,7 +653,7 @@ class ExampleTransactionFactory(
     CommonMetadata(cryptoOps)(
       confirmationPolicy,
       domainId,
-      mediatorId,
+      MediatorRef(mediatorId),
       Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
       transactionUuid,
       protocolVersion,
@@ -837,10 +860,12 @@ class ExampleTransactionFactory(
           nodeSeed,
           nodeId,
           Seq.empty,
+          isRoot = true,
         )
       )
 
-    lazy val view0: TransactionView = view(node, 0, consumed, used, created, nodeSeed)
+    lazy val view0: TransactionView =
+      view(node, 0, consumed, used, created, nodeSeed, isRoot = true)
 
     override lazy val rootViews: Seq[TransactionView] = Seq(view0)
 
@@ -1122,7 +1147,8 @@ class ExampleTransactionFactory(
       examples.flatMap(_.rootViewDecompositions)
 
     override lazy val rootViews: Seq[TransactionView] = examples.zipWithIndex.map {
-      case (ex, index) => view(ex.node, index, ex.consumed, ex.used, ex.created, ex.nodeSeed)
+      case (ex, index) =>
+        view(ex.node, index, ex.consumed, ex.used, ex.created, ex.nodeSeed, isRoot = true)
     }
 
     override def viewWithSubviews: Seq[(TransactionView, Seq[TransactionView])] =
@@ -1175,6 +1201,9 @@ class ExampleTransactionFactory(
     * 1.3.1.0 View110
     */
   case object MultipleRootsAndViewNestings extends ExampleTransaction {
+
+    override def supportedConfirmationPolicies: Set[ConfirmationPolicy] =
+      Set(ConfirmationPolicy.Signatory, ConfirmationPolicy.Full)
 
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
@@ -1236,7 +1265,7 @@ class ExampleTransactionFactory(
         cid,
         actingParties = Set(submitter),
         signatories = Set(signatory),
-        observers = Set(submitter, observer),
+        observers = Set(submitter),
       )
     val lfFetch11: LfNodeFetch = genFetch11(lfCreate10.coid)
 
@@ -1329,6 +1358,7 @@ class ExampleTransactionFactory(
         Some(create0seed),
         LfNodeId(0),
         Seq.empty,
+        isRoot = true,
       )
 
       val v10 = awaitCreateWithConfirmationPolicy(
@@ -1338,6 +1368,7 @@ class ExampleTransactionFactory(
         Some(create130seed),
         LfNodeId(6),
         Seq.empty,
+        isRoot = false,
       )
 
       val v110 = awaitCreateWithConfirmationPolicy(
@@ -1347,6 +1378,7 @@ class ExampleTransactionFactory(
         Some(create1310seed),
         LfNodeId(8),
         Seq.empty,
+        isRoot = false,
       )
 
       val v11 = awaitCreateWithConfirmationPolicy(
@@ -1356,6 +1388,7 @@ class ExampleTransactionFactory(
         Some(exercise131seed),
         LfNodeId(7),
         Seq(v110),
+        isRoot = false,
       )
 
       val v1TailNodes = Seq(
@@ -1374,6 +1407,7 @@ class ExampleTransactionFactory(
           Some(exercise1seed),
           LfNodeId(1),
           v1TailNodes,
+          isRoot = true,
         )
 
       Seq(v0, v1)
@@ -1447,6 +1481,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create0, saltConditionally(salt0Id))),
         Some(create0seed),
+        isRoot = true,
       )
     val view10: TransactionView =
       view(
@@ -1456,6 +1491,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create130, saltConditionally(salt130Id))),
         Some(create130seed),
+        isRoot = false,
       )
     val view110: TransactionView =
       view(
@@ -1465,6 +1501,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create1310, saltConditionally(salt1310Id))),
         Some(create1310seed),
+        isRoot = false,
       )
 
     val view11: TransactionView =
@@ -1483,6 +1520,7 @@ class ExampleTransactionFactory(
         ),
         Seq.empty,
         Some(deriveNodeSeed(1, 3, 1)),
+        isRoot = false,
         view110,
       )
 
@@ -1505,6 +1543,7 @@ class ExampleTransactionFactory(
           serializableFromCreate(create12, saltConditionally(salt12Id)),
         ),
         Some(deriveNodeSeed(1)),
+        isRoot = true,
         view10,
         view11,
       )
@@ -1674,6 +1713,9 @@ class ExampleTransactionFactory(
     */
   case object ViewInterleavings extends ExampleTransaction {
 
+    override def supportedConfirmationPolicies: Set[ConfirmationPolicy] =
+      Set(ConfirmationPolicy.Signatory, ConfirmationPolicy.Full)
+
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with subviews and core nodes interleaved"
@@ -1839,6 +1881,7 @@ class ExampleTransactionFactory(
         Some(create0seed),
         LfNodeId(0),
         Seq.empty,
+        isRoot = true,
       )
 
       val v100 = awaitCreateWithConfirmationPolicy(
@@ -1848,6 +1891,7 @@ class ExampleTransactionFactory(
         Some(create100seed),
         LfNodeId(3),
         Seq.empty,
+        isRoot = false,
       )
 
       val v10 = awaitCreateWithConfirmationPolicy(
@@ -1857,6 +1901,7 @@ class ExampleTransactionFactory(
         Some(exercise10seed),
         LfNodeId(2),
         Seq(v100),
+        isRoot = false,
       )
 
       val v110 = awaitCreateWithConfirmationPolicy(
@@ -1866,6 +1911,7 @@ class ExampleTransactionFactory(
         Some(create120seed),
         LfNodeId(6),
         Seq.empty,
+        isRoot = false,
       )
 
       val v11 = awaitCreateWithConfirmationPolicy(
@@ -1875,6 +1921,7 @@ class ExampleTransactionFactory(
         Some(exercise12seed),
         LfNodeId(5),
         Seq(v110),
+        isRoot = false,
       )
 
       val v1 = awaitCreateWithConfirmationPolicy(
@@ -1889,6 +1936,7 @@ class ExampleTransactionFactory(
           v11,
           SameView(lfCreate13, LfNodeId(7), RollbackContext.empty),
         ),
+        isRoot = true,
       )
 
       val v2 = awaitCreateWithConfirmationPolicy(
@@ -1898,6 +1946,7 @@ class ExampleTransactionFactory(
         Some(create2seed),
         LfNodeId(8),
         Seq.empty,
+        isRoot = true,
       )
 
       Seq(v0, v1, v2)
@@ -1982,6 +2031,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create0, saltConditionally(salt0Id))),
         Some(create0seed),
+        isRoot = true,
       )
 
     val view100: TransactionView =
@@ -1992,6 +2042,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create100, saltConditionally(salt100Id))),
         Some(create100seed),
+        isRoot = false,
       )
 
     val view10: TransactionView = view(
@@ -2009,6 +2060,7 @@ class ExampleTransactionFactory(
       ),
       Seq.empty,
       Some(deriveNodeSeed(1, 0)),
+      isRoot = false,
       view100,
     )
 
@@ -2020,6 +2072,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create120, saltConditionally(salt120Id))),
         Some(create120seed),
+        isRoot = false,
       )
 
     val view11: TransactionView =
@@ -2038,6 +2091,7 @@ class ExampleTransactionFactory(
         ),
         Seq.empty,
         Some(deriveNodeSeed(1, 2)),
+        isRoot = false,
         view110,
       )
 
@@ -2061,6 +2115,7 @@ class ExampleTransactionFactory(
           serializableFromCreate(create13, saltConditionally(salt13Id)),
         ),
         Some(deriveNodeSeed(1)),
+        isRoot = true,
         view10,
         view11,
       )
@@ -2073,6 +2128,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create2, saltConditionally(salt2Id))),
         Some(create2seed),
+        isRoot = true,
       )
 
     override lazy val rootViews: Seq[TransactionView] = Seq(view0, view1, view2)
@@ -2278,6 +2334,9 @@ class ExampleTransactionFactory(
     */
   case object TransientContracts extends ExampleTransaction {
 
+    override def supportedConfirmationPolicies: Set[ConfirmationPolicy] =
+      Set(ConfirmationPolicy.Signatory, ConfirmationPolicy.Full)
+
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with transient contracts"
@@ -2394,6 +2453,7 @@ class ExampleTransactionFactory(
         Some(create0seed),
         LfNodeId(0),
         Seq.empty,
+        isRoot = true,
       )
 
       val v10 = awaitCreateWithConfirmationPolicy(
@@ -2403,6 +2463,7 @@ class ExampleTransactionFactory(
         Some(exercise11seed),
         LfNodeId(3),
         Seq(SameView(lfCreate110, LfNodeId(4), RollbackContext.empty)),
+        isRoot = false,
       )
 
       val v1 = awaitCreateWithConfirmationPolicy(
@@ -2417,6 +2478,7 @@ class ExampleTransactionFactory(
           SameView(LfTransactionUtil.lightWeight(lfExercise12), LfNodeId(5), RollbackContext.empty),
           SameView(LfTransactionUtil.lightWeight(lfExercise13), LfNodeId(6), RollbackContext.empty),
         ),
+        isRoot = true,
       )
 
       Seq(v0, v1)
@@ -2463,6 +2525,7 @@ class ExampleTransactionFactory(
         Seq.empty,
         Seq(serializableFromCreate(create0, saltConditionally(salt0Id))),
         Some(create0seed),
+        isRoot = true,
       )
 
     val view10: TransactionView = view(
@@ -2480,6 +2543,7 @@ class ExampleTransactionFactory(
       ),
       Seq(serializableFromCreate(create110, saltConditionally(salt110Id))),
       Some(deriveNodeSeed(1, 1)),
+      isRoot = false,
     )
 
     val view1: TransactionView = view(
@@ -2497,6 +2561,7 @@ class ExampleTransactionFactory(
       ),
       Seq(serializableFromCreate(create10, saltConditionally(salt10Id))),
       Some(deriveNodeSeed(1)),
+      isRoot = true,
       view10,
     )
 

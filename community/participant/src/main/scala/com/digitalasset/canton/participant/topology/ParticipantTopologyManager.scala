@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
@@ -90,6 +91,9 @@ class ParticipantTopologyManager(
   def addObserver(observer: ParticipantTopologyManagerObserver): Unit = blocking(synchronized {
     val _ = observers += observer
   })
+
+  @VisibleForTesting
+  private[topology] def clearObservers(): Unit = observers.clear()
 
   private val postInitCallbacks = new AtomicReference[Option[PostInitCallbacks]](None)
   def setPostInitCallbacks(callbacks: PostInitCallbacks): Unit =
@@ -459,6 +463,7 @@ class ParticipantTopologyManager(
       force = false,
     ).map(_ => ())
   }
+
 }
 
 object ParticipantTopologyManager {

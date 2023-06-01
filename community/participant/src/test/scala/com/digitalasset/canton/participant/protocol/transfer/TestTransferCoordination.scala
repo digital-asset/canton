@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -23,6 +22,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.{BaseTest, LfPackageId}
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.when
 import org.mockito.MockitoSugar.mock
@@ -36,6 +36,7 @@ private[transfer] object TestTransferCoordination {
       snapshotOverride: Option[DomainSnapshotSyncCryptoApi] = None,
       awaitTimestampOverride: Option[Option[Future[Unit]]] = None,
       loggerFactory: NamedLoggerFactory,
+      packages: Seq[LfPackageId] = Seq.empty,
   )(implicit ec: ExecutionContext): TransferCoordination = {
 
     val recentTimeProofProvider = mock[RecentTimeProofProvider]
@@ -54,7 +55,7 @@ private[transfer] object TestTransferCoordination {
       recentTimeProofFor = recentTimeProofProvider,
       inSubmissionById = transferInBySubmission,
       protocolVersionFor = protocolVersionGetter,
-      syncCryptoApi = defaultSyncCryptoApi(domains.toSeq.map(_.unwrap), loggerFactory),
+      syncCryptoApi = defaultSyncCryptoApi(domains.toSeq.map(_.unwrap), packages, loggerFactory),
       loggerFactory,
     ) {
 
@@ -77,7 +78,7 @@ private[transfer] object TestTransferCoordination {
           waitForEffectiveTime: Boolean,
       )(implicit
           traceContext: TraceContext
-      ) =
+      ): Either[TransferProcessorError, Option[Future[Unit]]] =
         awaitTimestampOverride match {
           case None =>
             super.awaitTimestamp(domainId, timestamp, waitForEffectiveTime)
@@ -97,10 +98,12 @@ private[transfer] object TestTransferCoordination {
 
   private def defaultSyncCryptoApi(
       domains: Seq[DomainId],
+      packages: Seq[LfPackageId],
       loggerFactory: NamedLoggerFactory,
   ): SyncCryptoApiProvider =
     TestingTopology(domains = domains.toSet)
       .withReversedTopology(defaultTopology)
+      .withPackages(packages)
       .build(loggerFactory)
       .forOwner(submitterParticipant)
 

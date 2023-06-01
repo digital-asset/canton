@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -10,11 +11,11 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
 /** The traffic state communicated to members on the sequencer API */
 final case class TrafficState(
-    extraTrafficRemainder: Long,
+    extraTrafficRemainder: NonNegativeLong,
     timestamp: CantonTimestamp,
 ) {
   def toProtoV0: v0.TrafficState = v0.TrafficState(
-    extraTrafficRemainder = extraTrafficRemainder,
+    extraTrafficRemainder = extraTrafficRemainder.value,
     timestamp = Some(timestamp.toProtoPrimitive),
   )
 }
@@ -30,8 +31,10 @@ object TrafficState {
         "timestamp",
         trafficStateP.timestamp,
       )
+      value <- ProtoConverter
+        .parseNonNegativeLong(trafficStateP.extraTrafficRemainder)
     } yield TrafficState(
-      extraTrafficRemainder = trafficStateP.extraTrafficRemainder,
+      extraTrafficRemainder = value,
       timestamp = timestamp,
     )
   }

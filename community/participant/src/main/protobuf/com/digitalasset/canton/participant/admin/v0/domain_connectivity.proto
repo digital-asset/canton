@@ -42,7 +42,7 @@ message DomainConnectionConfig {
   // participant local identifier of the target domain
   string domain_alias = 1;
   // connection information to sequencer
-  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencerConnection = 2;
+  repeated com.digitalasset.canton.domain.api.v0.SequencerConnection sequencerConnections = 2;
   // if false, then domain needs to be manually connected to (default false)
   bool manual_connect = 3;
   // optional domainId (if TLS isn't to be trusted)

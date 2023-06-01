@@ -6,12 +6,17 @@ syntax = "proto3";
 package com.digitalasset.canton.domain.api.v0;
 
 import "google/protobuf/wrappers.proto";
+import "scalapb/scalapb.proto";
 
 // Client configuration for how members should connect to the sequencer of a domain.
 message SequencerConnection {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
   oneof type {
     Grpc grpc = 2;
   }
+
+  string alias = 3;
 
   message Grpc {
     // connection information to sequencer (http[s]://<host>:<port>")

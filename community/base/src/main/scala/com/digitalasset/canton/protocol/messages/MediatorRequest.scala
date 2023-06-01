@@ -8,14 +8,14 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{Informee, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash}
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.MediatorRef
 
 import java.util.UUID
 
 trait MediatorRequest extends ProtocolMessage with UnsignedProtocolMessage {
   def requestUuid: UUID
 
-  def mediatorId: MediatorId
+  def mediator: MediatorRef
 
   def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)]
 

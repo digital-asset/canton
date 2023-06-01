@@ -126,7 +126,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       contract.rawContractInstance.contractInstance.unversioned.template,
       transferId.sourceDomain,
       SourceProtocolVersion(testedProtocolVersion),
-      sourceMediator,
+      MediatorRef(sourceMediator),
       targetDomain,
       TargetProtocolVersion(testedProtocolVersion),
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, targetDomain = targetDomain),
@@ -146,7 +146,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         SourceProtocolVersion(testedProtocolVersion),
         CantonTimestamp.Epoch,
         RequestCounter(1),
-        fullTransferOutTree,
+        valueOrFail(fullTransferOutTree)("Failed to create fullTransferOutTree"),
         CantonTimestamp.Epoch,
         contract,
         TransferCounter.Genesis,
@@ -245,21 +245,23 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       uuid: UUID = new UUID(4L, 5L),
   ): FullTransferInTree = {
     val seed = seedGenerator.generateSaltSeed()
-    TransferInProcessingSteps.makeFullTransferInTree(
-      pureCrypto,
-      seed,
-      submitterInfo(submitter),
-      stakeholders,
-      contract,
-      TransferCounter.Genesis,
-      creatingTransactionId,
-      targetDomain,
-      targetMediator,
-      transferOutResult,
-      uuid,
-      SourceProtocolVersion(testedProtocolVersion),
-      TargetProtocolVersion(testedProtocolVersion),
-    )
+    valueOrFail(
+      TransferInProcessingSteps.makeFullTransferInTree(
+        pureCrypto,
+        seed,
+        submitterInfo(submitter),
+        stakeholders,
+        contract,
+        TransferCounter.Genesis,
+        creatingTransactionId,
+        targetDomain,
+        MediatorRef(targetMediator),
+        transferOutResult,
+        uuid,
+        SourceProtocolVersion(testedProtocolVersion),
+        TargetProtocolVersion(testedProtocolVersion),
+      )
+    )("Failed to create FullTransferInTree")
   }
 
 }

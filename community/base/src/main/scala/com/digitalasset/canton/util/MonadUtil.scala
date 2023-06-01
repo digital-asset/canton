@@ -85,6 +85,17 @@ object MonadUtil {
       )(M.monad)
     )(_.flatten)
 
+  /** Parallel traverse with limited parallelism
+    */
+  def parTraverseWithLimit[X, M[_], S](parallelism: Int)(
+      xs: Seq[X]
+  )(processElement: X => M[S])(implicit M: Parallel[M]): M[Seq[S]] =
+    M.monad.map(
+      sequentialTraverse(xs.grouped(parallelism).toSeq)(
+        _.parTraverse(processElement)
+      )(M.monad)
+    )(_.flatten)
+
   def batchedSequentialTraverse_[X, M[_], S](parallelism: Int, chunkSize: Int)(
       xs: Seq[X]
   )(processChunk: Seq[X] => M[Unit])(implicit M: Parallel[M]): M[Unit] = {

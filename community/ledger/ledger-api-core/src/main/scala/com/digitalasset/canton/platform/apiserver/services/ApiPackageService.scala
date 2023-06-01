@@ -14,6 +14,7 @@ import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPackagesService
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.server.api.ValidationLogger
 import com.digitalasset.canton.platform.server.api.services.grpc.Logging.traceId
@@ -37,14 +38,12 @@ private[apiserver] final class ApiPackageService private (
   override def close(): Unit = ()
 
   override def listPackages(request: ListPackagesRequest): Future[ListPackagesResponse] = {
-    withEnrichedLoggingContext(traceId(telemetry.traceIdFromGrpcContext)) {
-      implicit loggingContext =>
-        logger.info(s"Received request to list packages: $request")
-        backend
-          .listLfPackages()
-          .map(p => ListPackagesResponse(p.keys.toSeq))
-          .andThen(logger.logErrorsOnCall[ListPackagesResponse])
-    }
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    logger.info(s"Received request to list packages: $request")
+    backend
+      .listLfPackages()
+      .map(p => ListPackagesResponse(p.keys.toSeq))
+      .andThen(logger.logErrorsOnCall[ListPackagesResponse])
   }
 
   override def getPackage(request: GetPackageRequest): Future[GetPackageResponse] =
@@ -74,9 +73,8 @@ private[apiserver] final class ApiPackageService private (
   override def getPackageStatus(
       request: GetPackageStatusRequest
   ): Future[GetPackageStatusResponse] =
-    withEnrichedLoggingContext(
-      logging.packageId(request.packageId),
-      traceId(telemetry.traceIdFromGrpcContext),
+    LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
+      logging.packageId(request.packageId)
     ) { implicit loggingContext =>
       logger.info(s"Received request for a package status: $request")
       withValidatedPackageId(request.packageId, request) { packageId =>

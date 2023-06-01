@@ -296,12 +296,6 @@ class MemberAuthenticationServiceOld(
       }
     })
 
-  override def updateHead(
-      effectiveTimestamp: EffectiveTime,
-      approximateTimestamp: ApproximateTime,
-      potentialTopologyChange: Boolean,
-  )(implicit traceContext: TraceContext): Unit = {}
-
   override def onClosed(): Unit = Lifecycle.close(store)(logger)
 }
 
@@ -369,12 +363,6 @@ class MemberAuthenticationServiceX(
         case _ =>
       }
     })
-
-  override def updateHead(
-      effectiveTimestamp: EffectiveTime,
-      approximateTimestamp: ApproximateTime,
-      potentialTopologyChange: Boolean,
-  )(implicit traceContext: TraceContext): Unit = {}
 
   override def onClosed(): Unit = Lifecycle.close(store)(logger)
 }

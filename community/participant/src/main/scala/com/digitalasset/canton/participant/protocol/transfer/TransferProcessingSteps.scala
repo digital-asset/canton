@@ -44,7 +44,7 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, WithRecipients}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.*
@@ -70,6 +70,8 @@ trait TransferProcessingSteps[
     with NamedLogging {
 
   val participantId: ParticipantId
+
+  val domainId: TransferDomainId
 
   protected def engine: DAMLe
 
@@ -102,7 +104,7 @@ trait TransferProcessingSteps[
     pendingSubmissions.remove(pendingSubmissionId)
 
   override def postProcessSubmissionForInactiveMediator(
-      declaredMediator: MediatorId,
+      declaredMediator: MediatorRef,
       ts: CantonTimestamp,
       pendingSubmission: PendingTransferSubmission,
   )(implicit traceContext: TraceContext): Unit = {
@@ -205,7 +207,7 @@ trait TransferProcessingSteps[
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId]) = {
     val someView = decryptedViews.head1
-    val mediatorId = someView.unwrap.mediatorId
+    val mediator = someView.unwrap.mediator
     val submitterMetadata = someView.unwrap.submitterMetadata
 
     val isSubmittingParticipant = submitterMetadata.submittingParticipant == participantId.toLf
@@ -221,13 +223,14 @@ trait TransferProcessingSteps[
 
     lazy val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
       TransactionProcessor.SubmissionErrors.InactiveMediatorError
-        .Error(mediatorId, ts)
+        .Error(mediator, ts)
         .rpcStatus()
     )
 
     val tse = Option.when(isSubmittingParticipant)(
       TimestampedEvent(
-        LedgerSyncEvent.CommandRejected(ts.toLf, completionInfo, rejection, requestType),
+        LedgerSyncEvent
+          .CommandRejected(ts.toLf, completionInfo, rejection, requestType, Some(domainId.unwrap)),
         rc.asLocalOffset,
         Some(sc),
       )
@@ -261,7 +264,13 @@ trait TransferProcessingSteps[
     val tse = completionInfoO.map(info =>
       TimestampedEvent(
         LedgerSyncEvent
-          .CommandRejected(pendingTransfer.requestId.unwrap.toLf, info, rejection, requestType),
+          .CommandRejected(
+            pendingTransfer.requestId.unwrap.toLf,
+            info,
+            rejection,
+            requestType,
+            Some(domainId.unwrap),
+          ),
         pendingTransfer.requestCounter.asLocalOffset,
         Some(pendingTransfer.requestSequencerCounter),
       )
@@ -341,6 +350,8 @@ object TransferProcessingSteps {
     def message: String
   }
 
+  final case class GenericError(override val message: String) extends TransferProcessorError
+
   final case class GenericStepsError(error: ProcessorError) extends TransferProcessorError {
     override def underlyingProcessorError(): Option[ProcessorError] = Some(error)
 
@@ -388,23 +399,14 @@ object TransferProcessingSteps {
       s"Expecting a single transfer id and got several: ${transferIds.mkString(", ")}"
   }
 
-  final case class NoSubmissionPermissionIn(
-      transferId: TransferId,
+  final case class NoTransferSubmissionPermission(
+      kind: String,
       party: LfPartyId,
       participantId: ParticipantId,
   ) extends TransferProcessorError {
 
     override def message: String =
-      s"For transfer-in `$transferId`: $party does not have submission permission on $participantId"
-  }
-
-  final case class NoSubmissionPermissionOut(
-      contractId: LfContractId,
-      party: LfPartyId,
-      participantId: ParticipantId,
-  ) extends TransferProcessorError {
-    override def message: String =
-      s"For transfer-out of `$contractId`: $party does not have submission permission on $participantId"
+      s"For $kind: $party does not have submission permission on $participantId"
   }
 
   final case class StakeholdersMismatch(

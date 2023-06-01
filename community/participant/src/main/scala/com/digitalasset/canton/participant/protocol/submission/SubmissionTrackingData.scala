@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
+import cats.implicits.toTraverseOps
 import cats.syntax.option.*
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.data.CantonTimestamp
@@ -20,6 +21,7 @@ import com.digitalasset.canton.participant.sync.LedgerSyncEvent.CommandRejected
 import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
@@ -94,6 +96,7 @@ object SubmissionTrackingData
 final case class TransactionSubmissionTrackingData(
     completionInfo: CompletionInfo,
     rejectionCause: TransactionSubmissionTrackingData.RejectionCause,
+    domainId: Option[DomainId],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       SubmissionTrackingData.type
@@ -111,6 +114,7 @@ final case class TransactionSubmissionTrackingData(
       completionInfo,
       reasonTemplate,
       ProcessingSteps.RequestType.Transaction,
+      domainId,
     )
   }
 
@@ -131,6 +135,7 @@ final case class TransactionSubmissionTrackingData(
     val transactionTracking = v0.TransactionSubmissionTrackingData(
       completionInfo = completionInfoP.some,
       rejectionCause = rejectionCause.toProtoV0.some,
+      domainId = domainId.map(_.toProtoPrimitive),
     )
     v0.SubmissionTrackingData(v0.SubmissionTrackingData.Tracking.Transaction(transactionTracking))
   }
@@ -145,16 +150,17 @@ object TransactionSubmissionTrackingData {
   def apply(
       completionInfo: CompletionInfo,
       rejectionCause: TransactionSubmissionTrackingData.RejectionCause,
+      domainId: Option[DomainId],
       protocolVersion: ProtocolVersion,
   ): TransactionSubmissionTrackingData =
-    TransactionSubmissionTrackingData(completionInfo, rejectionCause)(
+    TransactionSubmissionTrackingData(completionInfo, rejectionCause, domainId)(
       SubmissionTrackingData.protocolVersionRepresentativeFor(protocolVersion)
     )
 
   def fromProtoV0(
       tracking: v0.TransactionSubmissionTrackingData
   ): ParsingResult[TransactionSubmissionTrackingData] = {
-    val v0.TransactionSubmissionTrackingData(completionInfoP, causeP) = tracking
+    val v0.TransactionSubmissionTrackingData(completionInfoP, causeP, domainIdP) = tracking
     for {
       completionInfo <- ProtoConverter.parseRequired(
         SerializableCompletionInfo.fromProtoV0,
@@ -162,7 +168,8 @@ object TransactionSubmissionTrackingData {
         completionInfoP,
       )
       cause <- ProtoConverter.parseRequired(RejectionCause.fromProtoV0, "rejection cause", causeP)
-    } yield TransactionSubmissionTrackingData(completionInfo, cause)(
+      domainId <- domainIdP.map(DomainId.fromProtoPrimitive(_, "domain_id")).sequence
+    } yield TransactionSubmissionTrackingData(completionInfo, cause, domainId)(
       SubmissionTrackingData.protocolVersionRepresentativeFor(ProtoVersion(0))
     )
   }

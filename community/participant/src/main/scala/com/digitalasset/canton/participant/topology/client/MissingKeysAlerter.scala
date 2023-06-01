@@ -41,12 +41,6 @@ class MissingKeysAlerter(
 
   def attachToTopologyProcessorOld(): TopologyTransactionProcessingSubscriber =
     new TopologyTransactionProcessingSubscriber {
-      override def updateHead(
-          effectiveTimestamp: EffectiveTime,
-          approximateTimestamp: ApproximateTime,
-          potentialTopologyChange: Boolean,
-      )(implicit traceContext: TraceContext): Unit = ()
-
       override def observed(
           sequencedTimestamp: SequencedTime,
           effectiveTimestamp: EffectiveTime,
@@ -60,12 +54,6 @@ class MissingKeysAlerter(
 
   def attachToTopologyProcessorX(): TopologyTransactionProcessingSubscriberX =
     new TopologyTransactionProcessingSubscriberX {
-      override def updateHead(
-          effectiveTimestamp: EffectiveTime,
-          approximateTimestamp: ApproximateTime,
-          potentialTopologyChange: Boolean,
-      )(implicit traceContext: TraceContext): Unit = ()
-
       override def observed(
           sequencedTimestamp: SequencedTime,
           effectiveTimestamp: EffectiveTime,

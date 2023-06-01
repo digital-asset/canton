@@ -28,6 +28,7 @@ import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.configuration.LedgerId
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
@@ -77,6 +78,7 @@ object ApiServiceOwner {
       explicitDisclosureUnsafeEnabled: Boolean = false,
       createExternalServices: () => List[BindableService] = () => Nil,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root,
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -150,6 +152,7 @@ object ApiServiceOwner {
         explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
         createExternalServices = createExternalServices,
         telemetry = telemetry,
+        loggerFactory = loggerFactory,
       )(materializer, executionSequencerFactory, loggingContext)
         .map(_.withServices(otherServices))
       apiService <- new LedgerApiService(

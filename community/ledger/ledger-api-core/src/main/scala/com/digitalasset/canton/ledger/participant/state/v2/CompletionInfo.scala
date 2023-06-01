@@ -7,6 +7,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.transaction.TransactionNodeStatistics
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 
 /** Information about a completion for a submission.
   *
@@ -46,8 +47,16 @@ final case class CompletionInfo(
     optDeduplicationPeriod: Option[DeduplicationPeriod],
     submissionId: Option[Ref.SubmissionId],
     statistics: Option[TransactionNodeStatistics],
-) {
+) extends PrettyPrinting {
   def changeId: ChangeId = ChangeId(applicationId, commandId, actAs.toSet)
+
+  override def pretty: Pretty[CompletionInfo.this.type] = prettyOfClass(
+    param("actAs", _.actAs.mkShow()),
+    param("commandId", _.commandId),
+    param("applicationId", _.applicationId),
+    paramIfDefined("deduplication period", _.optDeduplicationPeriod),
+    param("submissionId", _.submissionId),
+  )
 }
 
 object CompletionInfo {

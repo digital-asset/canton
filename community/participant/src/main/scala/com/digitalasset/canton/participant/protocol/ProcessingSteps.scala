@@ -38,7 +38,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
@@ -138,7 +138,7 @@ trait ProcessingSteps[
     */
   def prepareSubmission(
       param: SubmissionParam,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SubmissionError, Submission]
@@ -354,7 +354,7 @@ trait ProcessingSteps[
       ],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RequestError, CheckActivenessAndWritePendingContracts]
@@ -385,7 +385,7 @@ trait ProcessingSteps[
     * @see com.digitalasset.canton.participant.protocol.ProcessingSteps.postProcessResult
     */
   def postProcessSubmissionForInactiveMediator(
-      declaredMediator: MediatorId,
+      declaredMediator: MediatorRef,
       timestamp: CantonTimestamp,
       pendingSubmission: PendingSubmissionData,
   )(implicit
@@ -432,7 +432,7 @@ trait ProcessingSteps[
       contractLookup: ContractLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RequestError, StorePendingDataAndSendResponseAndCreateTimeout]
@@ -588,14 +588,14 @@ object ProcessingSteps {
     def requestCounter: RequestCounter
     def requestSequencerCounter: SequencerCounter
     def pendingContracts: Set[LfContractId]
-    def mediatorId: MediatorId
+    def mediator: MediatorRef
   }
 
   object PendingRequestData {
     def unapply(
         arg: PendingRequestData
-    ): Some[(RequestCounter, SequencerCounter, Set[LfContractId], MediatorId)] = {
-      Some((arg.requestCounter, arg.requestSequencerCounter, arg.pendingContracts, arg.mediatorId))
+    ): Some[(RequestCounter, SequencerCounter, Set[LfContractId], MediatorRef)] = {
+      Some((arg.requestCounter, arg.requestSequencerCounter, arg.pendingContracts, arg.mediator))
     }
   }
 }

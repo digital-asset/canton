@@ -233,15 +233,6 @@ object TransferInValidation {
       s"Cannot transfer-in `$transferId` because transfer-out is incomplete"
   }
 
-  final case class PartyNotHosted(
-      transferId: TransferId,
-      party: LfPartyId,
-      participant: ParticipantId,
-  ) extends TransferInValidationError {
-    override def message: String =
-      s"Cannot transfer-in `$transferId` because $party is not hosted on $participant"
-  }
-
   final case class NoParticipantForReceivingParty(transferId: TransferId, party: LfPartyId)
       extends TransferInValidationError {
     override def message: String = s"Cannot transfer-in `$transferId` because $party is not active"

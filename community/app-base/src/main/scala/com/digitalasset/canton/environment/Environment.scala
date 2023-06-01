@@ -38,6 +38,7 @@ import com.digitalasset.canton.participant.{
   ParticipantNodeBootstrapX,
 }
 import com.digitalasset.canton.resource.DbMigrationsFactory
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.telemetry.{ConfiguredOpenTelemetry, OpenTelemetryFactory}
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
@@ -306,7 +307,8 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       (for {
         connection <- domain.config.sequencerConnectionConfig.toConnection
         name <- DomainAlias.create(domain.name.unwrap)
-      } yield DomainConnectionConfig(name, connection)).leftMap(err =>
+        sequencerConnections = SequencerConnections.default(connection)
+      } yield DomainConnectionConfig(name, sequencerConnections)).leftMap(err =>
         StartFailed(domain.name.unwrap, s"Can not parse config for auto-connect: ${err}")
       )
     val connectParticipants =

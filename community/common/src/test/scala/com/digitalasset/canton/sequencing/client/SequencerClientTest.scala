@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricName
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -62,9 +63,9 @@ import com.digitalasset.canton.store.{
   SequencerCounterTrackerStore,
 }
 import com.digitalasset.canton.time.{DomainTimeTracker, MockTimeRequestSubmitter, SimClock}
-import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -206,16 +207,18 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         env @ Env(_client, transport, _, _, _) <- Env.create(
           eventValidator = new SequencedEventValidator {
             override def validate(
-                event: OrdinarySerializedEvent
+                event: OrdinarySerializedEvent,
+                sequencerId: SequencerId,
             ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
               validated.set(true)
-              Env.eventAlwaysValid.validate(event)
+              Env.eventAlwaysValid.validate(event, sequencerId)
             }
 
             override def validateOnReconnect(
-                reconnectEvent: OrdinarySerializedEvent
+                reconnectEvent: OrdinarySerializedEvent,
+                sequencerId: SequencerId,
             ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
-              validate(reconnectEvent)
+              validate(reconnectEvent, sequencerId)
 
             override protected val timeouts: ProcessingTimeout = ProcessingTimeout()
             override protected val logger: TracedLogger = testLogger
@@ -907,7 +910,6 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
   private object Env {
     val eventAlwaysValid: SequencedEventValidator = SequencedEventValidator.noValidation(
       DefaultTestIdentities.domainId,
-      DefaultTestIdentities.sequencerId,
       timeouts,
       warn = false,
     )
@@ -1013,6 +1015,8 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         mock[CryptoPureApi],
         LoggingConfig(),
         loggerFactory,
+        expectedSequencers =
+          NonEmpty.mk(Set, SequencerAlias.Default -> DefaultTestIdentities.sequencerId).toMap,
       )(executionContext, tracer)
       val signedEvents = storedEvents.map(SequencerTestUtils.sign)
 

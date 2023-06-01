@@ -132,7 +132,7 @@ trait TopologyStoreXTest
       PartyToParticipantX(
         partyId = fredOfCanton,
         domainId = None,
-        threshold = 1,
+        threshold = PositiveInt.one,
         participants = Seq(HostingParticipant(participantId1, ParticipantPermissionX.Submission)),
         groupAddressing = true,
       )

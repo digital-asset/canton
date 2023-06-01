@@ -81,6 +81,7 @@ private[mediator] object ResponseAggregation {
       request: MediatorRequest,
       protocolVersion: ProtocolVersion,
       topologySnapshot: TopologySnapshot,
+      sendVerdict: Boolean,
   )(loggerFactory: NamedLoggerFactory)(implicit
       requestTraceContext: TraceContext,
       ec: ExecutionContext,
@@ -107,7 +108,7 @@ private[mediator] object ResponseAggregation {
     for {
       initialState <- initialStateF
     } yield {
-      ResponseAggregation(requestId, request, requestId.unwrap, Right(initialState))(
+      ResponseAggregation(requestId, request, requestId.unwrap, Right(initialState), sendVerdict)(
         protocolVersion = protocolVersion,
         requestTraceContext = requestTraceContext,
       )(loggerFactory)
@@ -121,10 +122,11 @@ private[mediator] object ResponseAggregation {
       request: MediatorRequest,
       verdict: Verdict,
       protocolVersion: ProtocolVersion,
+      sendVerdict: Boolean,
   )(
       loggerFactory: NamedLoggerFactory
   )(implicit requestTraceContext: TraceContext): ResponseAggregation =
-    ResponseAggregation(requestId, request, requestId.unwrap, Left(verdict))(
+    ResponseAggregation(requestId, request, requestId.unwrap, Left(verdict), sendVerdict)(
       protocolVersion,
       requestTraceContext,
     )(loggerFactory)
@@ -135,6 +137,8 @@ private[mediator] object ResponseAggregation {
   * @param state     If the [[com.digitalasset.canton.protocol.messages.InformeeMessage]] has been finalized,
   *                  this will be a `Left`
   *                  otherwise  a `Right` which shows which transaction view hashes are not confirmed yet.
+  * @param sendVerdict  A flag whether to send out the verdict. This is used for "passive" mediator that performs
+  *                     response aggregation for debugging without sending out messages
   * @param requestTraceContext we retain the original trace context from the initial confirmation request
   *                            for raising timeouts to help with debugging. this ideally would be the same trace
   *                            context throughout all responses could not be in a distributed setup so this is not
@@ -146,6 +150,7 @@ private[mediator] final case class ResponseAggregation(
     request: MediatorRequest,
     version: CantonTimestamp,
     state: Either[Verdict, Map[ViewHash, ViewState]],
+    sendVerdict: Boolean,
 )(protocolVersion: ProtocolVersion, val requestTraceContext: TraceContext)(
     protected val loggerFactory: NamedLoggerFactory
 ) extends NamedLogging
@@ -439,7 +444,8 @@ private[mediator] final case class ResponseAggregation(
       request: MediatorRequest = request,
       version: CantonTimestamp = version,
       state: Either[Verdict, Map[ViewHash, ViewState]] = state,
-  ): ResponseAggregation = ResponseAggregation(requestId, request, version, state)(
+      sendVerdict: Boolean = sendVerdict,
+  ): ResponseAggregation = ResponseAggregation(requestId, request, version, state, sendVerdict)(
     protocolVersion,
     requestTraceContext,
   )(loggerFactory)
@@ -450,6 +456,7 @@ private[mediator] final case class ResponseAggregation(
       this.request,
       version,
       Left(MediatorError.Timeout.Reject.create(protocolVersion)),
+      this.sendVerdict,
     )(this.protocolVersion, requestTraceContext)(loggerFactory)
 
   override def pretty: Pretty[ResponseAggregation] = prettyOfClass(
@@ -457,5 +464,6 @@ private[mediator] final case class ResponseAggregation(
     param("request", _.request),
     param("version", _.version),
     param("state", _.state),
+    param("sendVerdict", _.sendVerdict),
   )
 }

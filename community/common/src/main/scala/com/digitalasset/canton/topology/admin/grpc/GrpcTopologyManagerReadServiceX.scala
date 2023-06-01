@@ -21,6 +21,8 @@ import com.digitalasset.canton.topology.admin.v1.{
   ListPartyHostingLimitsResult,
   ListPurgeTopologyTransactionXRequest,
   ListPurgeTopologyTransactionXResult,
+  ListTrafficStateRequest,
+  ListTrafficStateResult,
 }
 import com.digitalasset.canton.topology.admin.v1 as adminProto
 import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
@@ -48,6 +50,7 @@ import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransactionX,
   TopologyChangeOpX,
   TopologyMappingX,
+  TrafficControlStateX,
   UnionspaceDefinitionX,
   VettedPackagesX,
 }
@@ -141,11 +144,14 @@ class GrpcTopologyManagerReadServiceX(
   private def getApproximateTimestamp(storeId: TopologyStoreId): Option[CantonTimestamp] =
     None // TODO(#11255): Address when the topology client / processor pipeline is up and running
 
+  /** Collects mappings of specified type from stores specified in baseQueryProto satisfying the
+    * filters specified in baseQueryProto as well as separately specified filter either by
+    * a namespace prefix (Left) or by a uid prefix (Right) depending on which applies to the mapping type.
+    */
   private def collectFromStores(
       baseQueryProto: Option[adminProto.BaseQuery],
       typ: TopologyMappingX.Code,
-      idFilter: String,
-      namespaceOnly: Boolean,
+      namespaceOrUidFilter: Either[String, String],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, CantonError, Seq[(TransactionSearchResult, TopologyMappingX)]] = {
@@ -163,8 +169,8 @@ class GrpcTopologyManagerReadServiceX(
           recentTimestampO = getApproximateTimestamp(storeId),
           op = baseQuery.ops,
           typ = Some(typ),
-          idFilter = idFilter,
-          namespaceOnly,
+          idFilter = namespaceOrUidFilter.merge,
+          namespaceOnly = namespaceOrUidFilter.isLeft,
         )
         .flatMap { col =>
           col.result
@@ -227,8 +233,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         NamespaceDelegationX.code,
-        request.filterNamespace,
-        namespaceOnly = true,
+        Left(request.filterNamespace),
       )
     } yield {
       val results = res
@@ -257,8 +262,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         UnionspaceDefinitionX.code,
-        request.filterUid,
-        namespaceOnly = true,
+        Left(request.filterNamespace),
       )
     } yield {
       val results = res
@@ -283,8 +287,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         IdentifierDelegationX.code,
-        request.filterUid,
-        namespaceOnly = true,
+        Right(request.filterUid),
       )
     } yield {
       val results = res
@@ -313,8 +316,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         OwnerToKeyMappingX.code,
-        request.filterKeyOwnerUid,
-        namespaceOnly = false,
+        Right(request.filterKeyOwnerUid),
       )
     } yield {
       val results = res
@@ -343,8 +345,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         DomainTrustCertificateX.code,
-        request.filterUid,
-        namespaceOnly = true,
+        Right(request.filterUid),
       )
     } yield {
       val results = res
@@ -369,8 +370,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         PartyHostingLimitsX.code,
-        request.filterUid,
-        namespaceOnly = true,
+        Right(request.filterUid),
       )
     } yield {
       val results = res
@@ -395,8 +395,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         ParticipantDomainPermissionX.code,
-        request.filterUid,
-        namespaceOnly = true,
+        Right(request.filterUid),
       )
     } yield {
       val results = res
@@ -421,8 +420,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         VettedPackagesX.code,
-        request.filterParticipant,
-        namespaceOnly = true,
+        Right(request.filterParticipant),
       )
     } yield {
       val results = res
@@ -447,8 +445,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         PartyToParticipantX.code,
-        request.filterParty,
-        namespaceOnly = false,
+        Right(request.filterParty),
       )
     } yield {
       val results = res
@@ -481,8 +478,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         AuthorityOfX.code,
-        request.filterParty,
-        namespaceOnly = true,
+        Right(request.filterParty),
       )
     } yield {
       val results = res
@@ -507,8 +503,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         DomainParametersStateX.code,
-        request.filterDomain,
-        namespaceOnly = true,
+        Right(request.filterDomain),
       )
     } yield {
       val results = res
@@ -533,8 +528,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         MediatorDomainStateX.code,
-        request.filterDomain,
-        namespaceOnly = true,
+        Right(request.filterDomain),
       )
     } yield {
       val results = res
@@ -559,8 +553,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         SequencerDomainStateX.code,
-        request.filterDomain,
-        namespaceOnly = true,
+        Right(request.filterDomain),
       )
     } yield {
       val results = res
@@ -625,8 +618,7 @@ class GrpcTopologyManagerReadServiceX(
       res <- collectFromStores(
         request.baseQuery,
         PurgeTopologyTransactionX.code,
-        request.filterDomain,
-        namespaceOnly = true,
+        Right(request.filterDomain),
       )
     } yield {
       val results = res
@@ -639,6 +631,31 @@ class GrpcTopologyManagerReadServiceX(
         }
 
       adminProto.ListPurgeTopologyTransactionXResult(results = results)
+    }
+    CantonGrpcUtil.mapErrNew(ret)
+  }
+
+  override def listTrafficState(
+      request: ListTrafficStateRequest
+  ): Future[ListTrafficStateResult] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStores(
+        request.baseQuery,
+        TrafficControlStateX.code,
+        Right(request.filterMember),
+      )
+    } yield {
+      val results = res
+        .collect { case (result, x: TrafficControlStateX) => (result, x) }
+        .map { case (context, elem) =>
+          new adminProto.ListTrafficStateResult.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.toProto),
+          )
+        }
+
+      adminProto.ListTrafficStateResult(results = results)
     }
     CantonGrpcUtil.mapErrNew(ret)
   }

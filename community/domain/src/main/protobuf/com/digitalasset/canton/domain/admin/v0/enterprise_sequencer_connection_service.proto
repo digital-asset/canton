@@ -18,8 +18,8 @@ service EnterpriseSequencerConnectionService {
 message GetConnectionRequest {}
 
 message GetConnectionResponse {
-  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 1;
+  repeated com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connections = 1;
 }
 message SetConnectionRequest {
-  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 1;
+  repeated com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connections = 1;
 }

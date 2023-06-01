@@ -24,7 +24,7 @@ message InitializeMediatorRequest {
   // the sequencer identifier
   string sequencer_id = 3;
   // how should the member connect to the domain sequencer
-  com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connection = 4;
+  repeated com.digitalasset.canton.domain.api.v0.SequencerConnection sequencer_connections = 4;
 }
 
 message InitializeMediatorResponse {}

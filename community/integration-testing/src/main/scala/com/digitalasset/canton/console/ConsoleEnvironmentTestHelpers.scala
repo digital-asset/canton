@@ -7,7 +7,7 @@ import com.digitalasset.canton.topology.*
 
 /** Utilities for accessing the console environment
   */
-trait ConsoleEnvironmentTestHelpers[CE <: ConsoleEnvironment] { this: CE =>
+trait ConsoleEnvironmentTestHelpers[+CE <: ConsoleEnvironment] { this: CE =>
 
   lazy val testConsoleOutput: TestConsoleOutput = consoleOutput match {
     case testConsoleOutput: TestConsoleOutput => testConsoleOutput

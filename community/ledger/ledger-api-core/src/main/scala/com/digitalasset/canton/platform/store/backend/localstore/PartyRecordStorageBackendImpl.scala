@@ -147,4 +147,19 @@ object PartyRecordStorageBackendImpl extends PartyRecordStorageBackend {
       .asVectorOf(party("party"))(connection)
       .toSet
   } else Set.empty
+
+  override def updatePartyRecordIdp(
+      internalId: Int,
+      identityProviderId: Option[IdentityProviderId.Id],
+  )(connection: Connection): Boolean = {
+    val idpId = identityProviderId.map(_.value): Option[String]
+    val rowsUpdated =
+      SQL"""
+         UPDATE participant_party_records
+         SET identity_provider_id = $idpId
+         WHERE
+             internal_id = ${internalId}
+       """.executeUpdate()(connection)
+    rowsUpdated == 1
+  }
 }

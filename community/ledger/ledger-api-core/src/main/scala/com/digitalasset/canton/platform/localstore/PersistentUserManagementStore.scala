@@ -243,6 +243,35 @@ class PersistentUserManagementStore(
 
   // TODO(#13019) Replace parasitic with DirectExecutionContext
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
+  override def updateUserIdp(
+      id: UserId,
+      sourceIdp: IdentityProviderId,
+      targetIdp: IdentityProviderId,
+  )(implicit loggingContext: LoggingContext): Future[Result[User]] = {
+    inTransaction(_.updateUserIdp) { implicit connection =>
+      for {
+        _ <- withUser(id = id, sourceIdp) { dbUser =>
+          val _ = backend.updateUserIdp(
+            internalId = dbUser.internalId,
+            identityProviderId = targetIdp.toDb,
+          )(connection)
+        }
+        domainUser <- withUser(
+          id = id,
+          identityProviderId = targetIdp,
+        ) { dbUserAfterUpdates =>
+          val annotations =
+            backend.getUserAnnotations(internalId = dbUserAfterUpdates.internalId)(connection)
+          toDomainUser(dbUser = dbUserAfterUpdates, annotations = annotations)
+        }
+      } yield domainUser
+    }.map(tapSuccess { _ =>
+      logger.info(s"Updated user $id idp from $sourceIdp to $targetIdp")
+    })(scala.concurrent.ExecutionContext.parasitic)
+  }
+
+  // TODO(#13019) Replace parasitic with DirectExecutionContext
+  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def deleteUser(
       id: UserId,
       identityProviderId: IdentityProviderId,

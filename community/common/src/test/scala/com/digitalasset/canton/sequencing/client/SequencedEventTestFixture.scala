@@ -24,6 +24,7 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
 }
+import com.digitalasset.canton.topology.DefaultTestIdentities.namespace
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -39,17 +40,16 @@ class SequencedEventTestFixture(
 )(implicit val traceContext: TraceContext) {
   lazy val defaultDomainId: DomainId = DefaultTestIdentities.domainId
   private lazy val subscriberId: ParticipantId = ParticipantId("participant1-id")
-  private lazy val sequencerId: SequencerId = DefaultTestIdentities.sequencerId
+  lazy val sequencerId: SequencerId = DefaultTestIdentities.sequencerId
   lazy val subscriberCryptoApi: DomainSyncCryptoClient =
     TestingIdentityFactory(loggerFactory).forOwnerAndDomain(subscriberId, defaultDomainId)
   private lazy val sequencerCryptoApi: DomainSyncCryptoClient =
     TestingIdentityFactory(loggerFactory).forOwnerAndDomain(sequencerId, defaultDomainId)
   lazy val updatedCounter: Long = 42L
-  val SecondSequencerId: SequencerAggregator.SequencerId = "SecondSequencerId"
+  val SecondSequencerId = SequencerId(UniqueIdentifier(Identifier.tryCreate("da2"), namespace))
 
   def mkAggregator(
-      expectedSequencers: NonEmpty[Set[SequencerAggregator.SequencerId]] =
-        NonEmpty.mk(Set, SequencerAggregator.DefaultSequencerId)
+      expectedSequencers: NonEmpty[Set[SequencerId]] = NonEmpty.mk(Set, sequencerId)
   ) =
     new SequencerAggregator(
       cryptoPureApi = subscriberCryptoApi.pureCrypto,
@@ -70,7 +70,6 @@ class SequencedEventTestFixture(
       unauthenticated = false,
       optimistic = false,
       defaultDomainId,
-      sequencerId,
       testedProtocolVersion,
       syncCryptoApi,
       loggerFactory,

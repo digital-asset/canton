@@ -7,10 +7,15 @@ import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.*
 import com.digitalasset.canton.data.GenTransactionTree
+import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
-import com.digitalasset.canton.protocol.ExampleTransactionFactory.defaultTestingIdentityFactory
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
+  defaultTestingIdentityFactory,
+  defaultTestingTopology,
+}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -58,13 +63,13 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
       snapshot: TopologySnapshot = factory.topologySnapshot,
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
-    val submitterInfo = DefaultDamlValues.submitterInfo(actAs)
+    val submitterInfo = DefaultParticipantStateValues.submitterInfo(actAs)
     treeFactory.createTransactionTree(
       transaction,
       submitterInfo,
       factory.confirmationPolicy,
       Some(WorkflowId.assertFromString("testWorkflowId")),
-      factory.mediatorId,
+      MediatorRef(factory.mediatorId),
       factory.transactionSeed,
       factory.transactionUuid,
       snapshot,
@@ -147,7 +152,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             example.wellFormedUnsuffixedTransaction,
             successfulLookup(example),
             example.keyResolver,
-            snapshot = defaultTestingIdentityFactory.topologySnapshot(),
+            snapshot = defaultTestingTopology.withPackages(Seq.empty).build().topologySnapshot(),
           ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
         }
         "fail if some dependency is not vetted" in {
@@ -160,13 +165,12 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
               successfulLookup(example),
               example.keyResolver,
               snapshot = defaultTestingIdentityFactory.topologySnapshot(
-                packages = Seq(ExampleTransactionFactory.packageId),
                 packageDependencies = x =>
                   EitherT.rightT(
                     if (x == ExampleTransactionFactory.packageId)
                       Set(banana)
                     else Set.empty[PackageId]
-                  ),
+                  )
               ),
             ).value
           } yield inside(err) { case Left(UnknownPackageError(unknownTo)) =>
@@ -186,11 +190,10 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
               successfulLookup(example),
               example.keyResolver,
               snapshot = defaultTestingIdentityFactory.topologySnapshot(
-                packages = Seq(ExampleTransactionFactory.packageId),
                 packageDependencies = x =>
                   if (x == ExampleTransactionFactory.packageId)
                     EitherT.leftT(banana)
-                  else EitherT.rightT(Set.empty[PackageId]),
+                  else EitherT.rightT(Set.empty[PackageId])
               ),
             ).value
           } yield inside(err) { case Left(UnknownPackageError(unknownTo)) =>

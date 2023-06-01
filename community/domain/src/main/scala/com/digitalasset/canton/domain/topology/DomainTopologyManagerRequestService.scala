@@ -17,7 +17,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.{DomainTopologyClient, StoreBasedTopologySnapshot}
+import com.digitalasset.canton.topology.client.{
+  DomainTopologyClient,
+  StoreBasedDomainTopologyClient,
+  StoreBasedTopologySnapshot,
+}
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   SequencedTime,
@@ -94,7 +98,7 @@ private[domain] object RequestProcessingStrategy {
         store,
         Map(),
         useStateTxs = false,
-        packageDependencies = _ => EitherT.rightT(Set()),
+        packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
         loggerFactory,
       )
 

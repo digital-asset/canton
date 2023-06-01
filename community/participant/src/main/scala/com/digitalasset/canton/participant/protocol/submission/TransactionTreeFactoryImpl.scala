@@ -21,7 +21,7 @@ import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MapsUtil, MonadUtil}
@@ -43,7 +43,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *                  as well as salts and contract ids [[com.digitalasset.canton.crypto.HmacOps]]
   */
 abstract class TransactionTreeFactoryImpl(
-    submitterParticipant: ParticipantId,
+    participantId: ParticipantId,
     domainId: DomainId,
     protocolVersion: ProtocolVersion,
     contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
@@ -63,7 +63,7 @@ abstract class TransactionTreeFactoryImpl(
 
   protected def stateForSubmission(
       transactionSeed: SaltSeed,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
       nextSaltIndex: Int,
@@ -71,7 +71,7 @@ abstract class TransactionTreeFactoryImpl(
   ): State
 
   protected def stateForValidation(
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
       salts: Iterable[Salt],
@@ -83,7 +83,7 @@ abstract class TransactionTreeFactoryImpl(
       submitterInfo: SubmitterInfo,
       confirmationPolicy: ConfirmationPolicy,
       workflowId: Option[WorkflowId],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       transactionSeed: SaltSeed,
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
@@ -95,7 +95,7 @@ abstract class TransactionTreeFactoryImpl(
     val metadata = transaction.metadata
     val state = stateForSubmission(
       transactionSeed,
-      mediatorId,
+      mediator,
       transactionUuid,
       metadata.ledgerTime,
       0,
@@ -111,7 +111,7 @@ abstract class TransactionTreeFactoryImpl(
     val commonMetadata = CommonMetadata(cryptoOps)(
       confirmationPolicy,
       domainId,
-      mediatorId,
+      mediator,
       commonMetadataSalt,
       transactionUuid,
       protocolVersion,
@@ -131,16 +131,21 @@ abstract class TransactionTreeFactoryImpl(
         topologySnapshot,
         transaction,
         RollbackContext.empty,
+        Some(participantId.adminParty.toLf),
       )
 
     for {
       submitterMetadata <- EitherT.fromEither[Future](
         SubmitterMetadata
           .fromSubmitterInfo(cryptoOps)(
-            submitterInfo,
-            submitterParticipant,
-            submitterMetadataSalt,
-            protocolVersion,
+            submitterActAs = submitterInfo.actAs,
+            submitterApplicationId = submitterInfo.applicationId,
+            submitterCommandId = submitterInfo.commandId,
+            submitterSubmissionId = submitterInfo.submissionId,
+            submitterDeduplicationPeriod = submitterInfo.deduplicationPeriod,
+            submitterParticipant = participantId,
+            salt = submitterMetadataSalt,
+            protocolVersion = protocolVersion,
           )
           .leftMap(SubmitterMetadataError)
       )
@@ -151,7 +156,7 @@ abstract class TransactionTreeFactoryImpl(
         snapshot = topologySnapshot,
         requiredPackagesByParty = requiredPackagesByParty(rootViewDecompositions),
         packageInfoService = packageInfoService,
-        localParticipantId = submitterParticipant,
+        localParticipantId = participantId,
       )
 
       _ <- checker.isUsable.leftMap(_.transformInto[UnknownPackageError])
@@ -173,7 +178,8 @@ abstract class TransactionTreeFactoryImpl(
       subaction: WellFormedTransaction[WithoutSuffixes],
       rootPosition: ViewPosition,
       confirmationPolicy: ConfirmationPolicy,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
+      submittingParticipantO: Option[ParticipantId],
       viewSalts: Iterable[Salt],
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
@@ -201,7 +207,7 @@ abstract class TransactionTreeFactoryImpl(
 
     val metadata = subaction.metadata
     val state = stateForValidation(
-      mediatorId,
+      mediator,
       transactionUuid,
       metadata.ledgerTime,
       viewSalts,
@@ -214,6 +220,7 @@ abstract class TransactionTreeFactoryImpl(
         topologySnapshot,
         subaction,
         rbContext,
+        submittingParticipantO.map(_.adminParty.toLf),
       )
     for {
       decompositions <- EitherT.liftF(decompositionsF)
@@ -365,7 +372,7 @@ abstract class TransactionTreeFactoryImpl(
     }
     val (contractSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
       domainId,
-      state.mediatorId,
+      state.mediator,
       state.transactionUUID,
       viewPosition,
       viewParticipantDataSalt,
@@ -561,7 +568,7 @@ object TransactionTreeFactoryImpl {
       .merge
 
   trait State {
-    def mediatorId: MediatorId
+    def mediator: MediatorRef
     def transactionUUID: UUID
     def ledgerTime: CantonTimestamp
 

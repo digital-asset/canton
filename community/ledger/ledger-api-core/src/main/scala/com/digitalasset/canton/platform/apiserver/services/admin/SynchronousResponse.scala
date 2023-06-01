@@ -12,6 +12,7 @@ import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.admin.SynchronousResponse.{
   Accepted,
   Rejected,
@@ -48,7 +49,7 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
       timeToLive: FiniteDuration,
   )(implicit
       telemetryContext: TelemetryContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[AcceptedEntry] = {
     for {
       submissionResult <- strategy.submit(submissionId, input)
@@ -61,7 +62,7 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
       ledgerEndBeforeRequest: Option[LedgerOffset.Absolute],
       submissionResult: SubmissionResult,
       timeToLive: FiniteDuration,
-  )(implicit loggingContext: LoggingContext) = submissionResult match {
+  )(implicit loggingContext: LoggingContextWithTrace) = submissionResult match {
     case SubmissionResult.Acknowledged =>
       acknowledged(submissionId, ledgerEndBeforeRequest, timeToLive)
     case synchronousError: SubmissionResult.SynchronousError =>
@@ -72,7 +73,7 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
       submissionId: Ref.SubmissionId,
       ledgerEndBeforeRequest: Option[LedgerOffset.Absolute],
       timeToLive: FiniteDuration,
-  )(implicit loggingContext: LoggingContext) = {
+  )(implicit loggingContext: LoggingContextWithTrace) = {
     val isAccepted = new Accepted(strategy.accept(submissionId))
     val isRejected = new Rejected(strategy.reject(submissionId))
     val contextualizedErrorLogger =
@@ -138,7 +139,9 @@ object SynchronousResponse {
     /** Filters the entry stream for rejected submissions, and transforms them into appropriate
       * exceptions.
       */
-    def reject(submissionId: Ref.SubmissionId): PartialFunction[Entry, StatusRuntimeException]
+    def reject(submissionId: Ref.SubmissionId)(implicit
+        loggingContext: LoggingContextWithTrace
+    ): PartialFunction[Entry, StatusRuntimeException]
 
   }
 

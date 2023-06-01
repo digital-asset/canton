@@ -1265,7 +1265,7 @@ object TransferStoreTest {
 
   def mkTransferDataForDomain(
       transferId: TransferId,
-      sourceMediator: MediatorId,
+      sourceMediator: MediatorRef,
       submittingParty: LfPartyId = LfPartyId.assertFromString("submitter"),
       targetDomainId: TargetDomainId,
       contract: SerializableContract = contract,
@@ -1312,7 +1312,13 @@ object TransferStoreTest {
         sourceProtocolVersion = SourceProtocolVersion(protocolVersion),
         transferOutTimestamp = transferId.transferOutTimestamp,
         transferOutRequestCounter = RequestCounter(0),
-        transferOutRequest = fullTransferOutViewTree,
+        transferOutRequest = fullTransferOutViewTree.fold(
+          err =>
+            throw new IllegalArgumentException(
+              s"Failed to create fullTransferOutViewTree with: $err"
+            ),
+          identity,
+        ),
         transferOutDecisionTime = CantonTimestamp.ofEpochSecond(10),
         contract = contract,
         transferCounter = TransferCounter.Genesis,
@@ -1333,7 +1339,7 @@ object TransferStoreTest {
   ) =
     mkTransferDataForDomain(
       transferId,
-      sourceMediator,
+      MediatorRef(sourceMediator),
       submitter,
       targetDomain,
       contract,

@@ -20,7 +20,6 @@ import com.daml.lf.value.Value
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.{Port, RefinedNumeric}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.ledger.participant.state.v2
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.ledger.{configuration, offset}
 import com.digitalasset.canton.protocol.*
@@ -255,14 +254,6 @@ trait PrettyInstances {
     param("timeModel", _.timeModel),
   )
 
-  implicit def prettyV2CompletionInfo: Pretty[v2.CompletionInfo] = prettyOfClass(
-    param("actAs", _.actAs.mkShow()),
-    param("commandId", _.commandId),
-    param("applicationId", _.applicationId),
-    paramIfDefined("deduplication period", _.optDeduplicationPeriod),
-    param("submissionId", _.submissionId),
-  )
-
   implicit def prettyV2DeduplicationPeriod: Pretty[DeduplicationPeriod] =
     prettyOfString {
       case deduplicationDuration: DeduplicationPeriod.DeduplicationDuration =>
@@ -271,12 +262,6 @@ trait PrettyInstances {
         s"DeduplicationOffset(offset=${dedupOffset.offset}"
     }
 
-  implicit def prettyV2TransactionMeta: Pretty[v2.TransactionMeta] = prettyOfClass(
-    param("ledgerEffectiveTime", _.ledgerEffectiveTime),
-    paramIfDefined("workflowId", _.workflowId),
-    param("submissionTime", _.submissionTime),
-    customParam(_ => "..."),
-  )
   implicit def prettyCompletion: Pretty[Completion] =
     prettyOfClass(
       unnamedParamIfDefined(_.status),

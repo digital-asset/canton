@@ -25,8 +25,7 @@ import com.daml.lf.language.{Ast, LanguageVersion}
 import com.daml.lf.testing.parser.Implicits.defaultParserParameters
 import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
-import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, TelemetryContext, TelemetrySpecBase}
-import com.digitalasset.canton.DiscardOps
+import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, SpanAttribute, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset.Absolute
 import com.digitalasset.canton.ledger.api.domain.PackageEntry
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -35,41 +34,50 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
 }
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
 import com.digitalasset.canton.ledger.participant.state.v2 as state
-import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
+import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.tracing.TestTelemetrySetup
+import com.digitalasset.canton.{BaseTest, DiscardOps}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
-import org.scalatest.concurrent.{Eventually, IntegrationPatience}
+import org.scalatest.BeforeAndAfterEach
+import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
+import org.slf4j.event.Level.DEBUG
 
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 import java.util.zip.ZipInputStream
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.{Future, Promise}
+import scala.jdk.CollectionConverters.MapHasAsScala
 import scala.util.{Failure, Success}
 
 class ApiPackageManagementServiceSpec
     extends AsyncWordSpec
-    with TelemetrySpecBase
     with MockitoSugar
     with Matchers
     with ArgumentMatchersSugar
     with AkkaBeforeAndAfterAll
-    with LoggingAssertions
     with Eventually
-    with IntegrationPatience
-    with ErrorsAssertions {
+    with ErrorsAssertions
+    with BaseTest
+    with BeforeAndAfterEach {
 
   import ApiPackageManagementServiceSpec.*
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
+  var testTelemetrySetup: TestTelemetrySetup = _
+
   override def beforeEach(): Unit = {
-    super.beforeEach()
-    TestingLogCollector.clear[this.type]
+    testTelemetrySetup = new TestTelemetrySetup()
+  }
+
+  override def afterEach(): Unit = {
+    testTelemetrySetup.close()
   }
 
   val apiService = createApiService()
@@ -77,7 +85,7 @@ class ApiPackageManagementServiceSpec
   "ApiPackageManagementService $suffix" should {
     "propagate trace context" in {
 
-      val span = anEmptySpan()
+      val span = testTelemetrySetup.anEmptySpan()
       val scope = span.makeCurrent()
       apiService
         .uploadDarFile(UploadDarFileRequest(ByteString.EMPTY, aSubmissionId))
@@ -86,27 +94,37 @@ class ApiPackageManagementServiceSpec
           span.end()
         }
         .map { _ =>
-          spanExporter.finishedSpanAttributes should contain(anApplicationIdSpanAttribute)
+          val spanData = testTelemetrySetup.reportedSpans()
+          val spanAttributes: Map[SpanAttribute, String] = spanData
+            .flatMap({ spanData =>
+              spanData.getAttributes.asMap.asScala.map { case (key, value) =>
+                SpanAttribute(key.toString) -> value.toString
+              }.toMap
+            })
+            .toMap
+
+          spanAttributes should contain(anApplicationIdSpanAttribute)
           succeed
         }
     }
 
     "have a tid" in {
-      val span = anEmptySpan()
+      val span = testTelemetrySetup.anEmptySpan()
       val _ = span.makeCurrent()
-      apiService
-        .uploadDarFile(UploadDarFileRequest(ByteString.EMPTY, aSubmissionId))
-        .map { _ =>
-          assertLogEntries[this.type, ApiPackageManagementService] { logs =>
-            val markers = logs.map(_.marker.fold("")(_.toString))
-            val nonEmptyTid = ".*tid: \"[a-zA-Z0-9]+\"}"
-            assert(logs.nonEmpty, "No logs were found")
-            assert(
-              markers.forall(_.matches(nonEmptyTid)),
-              "At least one log entry does not contain a trace-id",
-            )
-          }
-        }
+
+      loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(DEBUG))(
+        within = {
+          apiService
+            .uploadDarFile(UploadDarFileRequest(ByteString.EMPTY, aSubmissionId))
+            .map(_ => succeed)
+        },
+        { logEntries =>
+          logEntries should not be empty
+
+          val mdcs = logEntries.map(_.mdc)
+          forEvery(mdcs) { _.getOrElse("trace-id", "") should not be empty }
+        },
+      )
     }
 
     "close while uploading dar" in {
@@ -139,6 +157,7 @@ class ApiPackageManagementServiceSpec
         mockDarReader,
         _ => Ref.SubmissionId.assertFromString("aSubmission"),
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       promise.future.map(_ => apiPackageManagementService.close()).discard
@@ -159,7 +178,6 @@ class ApiPackageManagementServiceSpec
                 ErrorDetails.ErrorInfoDetail(
                   "SERVER_IS_SHUTTING_DOWN",
                   Map(
-                    "tid" -> "''",
                     "submissionId" -> s"'$aSubmissionId'",
                     "category" -> "1",
                     "definite_answer" -> "false",
@@ -215,6 +233,7 @@ class ApiPackageManagementServiceSpec
       mockDarReader,
       _ => Ref.SubmissionId.assertFromString("aSubmission"),
       telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
+      loggerFactory = loggerFactory,
     )
   }
 }

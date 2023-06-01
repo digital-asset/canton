@@ -39,7 +39,7 @@ final case class FullInformeeTree private (tree: GenTransactionTree)(
 
   private lazy val commonMetadata: CommonMetadata = checked(tree.commonMetadata.tryUnwrap)
   lazy val domainId: DomainId = commonMetadata.domainId
-  lazy val mediatorId: MediatorId = commonMetadata.mediatorId
+  lazy val mediator: MediatorRef = commonMetadata.mediator
 
   /** Yields the informee tree unblinded for a defined set of parties.
     * If a view common data is already blinded, then it remains blinded even if one of the given parties is a stakeholder.

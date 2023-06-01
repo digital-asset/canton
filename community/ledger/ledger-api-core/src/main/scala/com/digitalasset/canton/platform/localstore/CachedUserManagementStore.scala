@@ -101,6 +101,17 @@ class CachedUserManagementStore(
   ): Future[Result[UserManagementStore.UsersPage]] =
     delegate.listUsers(fromExcl, maxResults, identityProviderId)
 
+  override def updateUserIdp(
+      id: UserId,
+      sourceIdp: IdentityProviderId,
+      targetIdp: IdentityProviderId,
+  )(implicit loggingContext: LoggingContext): Future[Result[User]] = {
+    val keyToInvalidate = CacheKey(id, sourceIdp)
+    delegate
+      .updateUserIdp(id, sourceIdp = sourceIdp, targetIdp = targetIdp)
+      .andThen(invalidateOnSuccess(keyToInvalidate))
+  }
+
   private def invalidateOnSuccess(key: CacheKey): PartialFunction[Try[Result[Any]], Unit] = {
     case Success(Right(_)) => cache.invalidate(key)
   }

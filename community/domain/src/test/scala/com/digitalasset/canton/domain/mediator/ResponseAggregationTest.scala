@@ -40,7 +40,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     def salt(i: Int): Salt = TestSalt.generateSalt(i)
 
     val domainId = DefaultTestIdentities.domainId
-    val mediatorId = DefaultTestIdentities.mediator
+    val mediator = MediatorRef(DefaultTestIdentities.mediator)
 
     val alice = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Ordinary)
     val aliceVip = ConfirmingParty(LfPartyId.assertFromString("alice"), 3, TrustLevel.Vip)
@@ -103,7 +103,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val commonMetadataSignatory = CommonMetadata(hashOps)(
       ConfirmationPolicy.Signatory,
       domainId,
-      mediatorId,
+      mediator,
       salt(5417),
       new UUID(0L, 0L),
       testedProtocolVersion,
@@ -152,7 +152,13 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       val sut =
         ResponseAggregation
-          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshot)(
+          .fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            topologySnapshot,
+            sendVerdict = true,
+          )(
             loggerFactory
           )
           .futureValue
@@ -228,6 +234,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   testedProtocolVersion,
                 )
               ),
+              sendVerdict = true,
             )(
               testedProtocolVersion,
               TraceContext.empty,
@@ -285,6 +292,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 informeeMessage,
                 changeTs2,
                 Left(rejection),
+                sendVerdict = true,
               )(
                 testedProtocolVersion,
                 TraceContext.empty,
@@ -381,6 +389,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               informeeMessage,
               changeTs,
               Left(Verdict.Approve(testedProtocolVersion)),
+              sendVerdict = true,
             )(
               testedProtocolVersion,
               TraceContext.empty,
@@ -482,7 +491,13 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       val sut =
         ResponseAggregation
-          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshot)(
+          .fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            topologySnapshot,
+            sendVerdict = true,
+          )(
             loggerFactory
           )
           .futureValue
@@ -588,7 +603,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       val commonMetadata = CommonMetadata(hashOps)(
         ConfirmationPolicy.Vip,
         domainId,
-        mediatorId,
+        mediator,
         salt(5417),
         new UUID(0L, 0L),
         testedProtocolVersion,
@@ -624,7 +639,13 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       val sut =
         ResponseAggregation
-          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshotVip)(
+          .fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            topologySnapshotVip,
+            sendVerdict = true,
+          )(
             loggerFactory
           )
           .futureValue
@@ -818,7 +839,13 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       val sut =
         ResponseAggregation
-          .fromRequest(requestId, informeeMessage, testedProtocolVersion, topologySnapshot)(
+          .fromRequest(
+            requestId,
+            informeeMessage,
+            testedProtocolVersion,
+            topologySnapshot,
+            sendVerdict = true,
+          )(
             loggerFactory
           )
           .futureValue
@@ -1017,6 +1044,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   testedProtocolVersion,
                 )
               ),
+              sendVerdict = true,
             )(
               testedProtocolVersion,
               TraceContext.empty,
@@ -1095,6 +1123,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 informeeMessage,
                 changeTs5,
                 Left(rejection),
+                sendVerdict = true,
               )(
                 testedProtocolVersion,
                 TraceContext.empty,
@@ -1251,6 +1280,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               informeeMessage,
               changeTs2,
               Left(Verdict.Approve(testedProtocolVersion)),
+              sendVerdict = true,
             )(
               testedProtocolVersion,
               TraceContext.empty,

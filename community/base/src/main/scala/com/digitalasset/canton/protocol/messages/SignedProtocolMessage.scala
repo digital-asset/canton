@@ -26,6 +26,7 @@ import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
@@ -75,6 +76,7 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
         // TODO(#12373) Adapt when releasing BFT
         companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev)
     ) {
+      // TODO(#11255) Properly check the signatures, i.e. there shouldn't be multiple signatures from the same member on the same envelope
       ClosedEnvelope.verifySignatures(
         snapshot,
         member,
@@ -86,6 +88,29 @@ sealed case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] priv
       val hash = snapshot.pureCrypto.digest(hashPurpose, message.getCryptographicEvidence)
       snapshot.verifySignatures(hash, member, signatures)
     }
+
+  def verifySignature(
+      snapshot: SyncCryptoApi,
+      mediatorGroupIndex: MediatorGroupIndex,
+  )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit] = {
+    if (
+      representativeProtocolVersion >=
+        // TODO(#12373) Adapt when releasing BFT
+        companionObj.protocolVersionRepresentativeFor(ProtocolVersion.dev)
+    ) {
+
+      ClosedEnvelope.verifySignatures(
+        snapshot,
+        mediatorGroupIndex,
+        typedMessage.getCryptographicEvidence,
+        signatures,
+      )
+    } else {
+      val hashPurpose = message.hashPurpose
+      val hash = snapshot.pureCrypto.digest(hashPurpose, message.getCryptographicEvidence)
+      snapshot.verifySignatures(hash, mediatorGroupIndex, signatures)
+    }
+  }
 
   def copy[MM <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[MM] = this.typedMessage,

@@ -31,7 +31,8 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexerPartyDetails,
   PackageDetails,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.entries.{
@@ -40,6 +41,7 @@ import com.digitalasset.canton.platform.store.entries.{
   PartyLedgerEntry,
 }
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
 
@@ -148,7 +150,7 @@ private[platform] trait LedgerReadDao extends ReportsHealth {
 
   /** Returns a list of all known Daml-LF packages */
   def listLfPackages()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Map[PackageId, PackageDetails]]
 
   /** Returns the given Daml-LF archive */
@@ -217,7 +219,10 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
       recordTime: Timestamp,
       offset: Offset,
       reason: state.Update.CommandRejected.RejectionReasonTemplate,
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse]
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse]
 
   /** Stores a party allocation or rejection thereof.
     *
@@ -226,7 +231,8 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
     * @return Ok when the operation was successful otherwise a Duplicate
     */
   def storePartyEntry(offset: Offset, partyEntry: PartyLedgerEntry)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
   ): Future[PersistenceResponse]
 
   /** Store a configuration change or rejection.
@@ -237,7 +243,10 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
       submissionId: String,
       configuration: Configuration,
       rejectionReason: Option[String],
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse]
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse]
 
   /** Store a Daml-LF package upload result.
     */
@@ -245,7 +254,10 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
       offset: Offset,
       packages: List[(Archive, PackageDetails)],
       optEntry: Option[PackageLedgerEntry],
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse]
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse]
 
   /** This is a combined store transaction method to support sandbox-classic and tests
     * !!! Usage of this is discouraged, with the removal of sandbox-classic this will be removed
@@ -260,7 +272,10 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
       divulgedContracts: Iterable[state.DivulgedContract],
       blindingInfo: Option[BlindingInfo],
       recordTime: Timestamp,
-  )(implicit loggingContext: LoggingContext): Future[PersistenceResponse]
+  )(implicit
+      loggingContext: LoggingContext,
+      traceContext: TraceContext,
+  ): Future[PersistenceResponse]
 
 }
 

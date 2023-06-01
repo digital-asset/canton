@@ -154,6 +154,8 @@ object SequencedEventStore {
       with Serializable {
     def timestamp: CantonTimestamp
 
+    def trafficStatus: Option[TrafficState]
+
     def counter: SequencerCounter
 
     def underlyingEventBytes: Array[Byte]
@@ -189,6 +191,7 @@ object SequencedEventStore {
       override val timestamp: CantonTimestamp,
       override val counter: SequencerCounter,
       override val underlying: Option[SignedContent[SequencedEvent[Env]]],
+      override val trafficStatus: Option[TrafficState] = None,
   )(override val traceContext: TraceContext)
       extends PossiblyIgnoredSequencedEvent[Env] {
 
@@ -263,7 +266,7 @@ object SequencedEventStore {
     override def underlying: Some[SignedContent[SequencedEvent[Env]]] = Some(signedEvent)
 
     override def asIgnoredEvent: IgnoredSequencedEvent[Env] =
-      IgnoredSequencedEvent(timestamp, counter, Some(signedEvent))(traceContext)
+      IgnoredSequencedEvent(timestamp, counter, Some(signedEvent), trafficStatus)(traceContext)
 
     override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env] = this
 
@@ -329,7 +332,9 @@ object SequencedEventStore {
         possiblyIgnoredSequencedEvent <-
           if (isIgnored) {
             Right(
-              IgnoredSequencedEvent(timestamp, sequencerCounter, underlyingO)(traceContext.unwrap)
+              IgnoredSequencedEvent(timestamp, sequencerCounter, underlyingO, None)(
+                traceContext.unwrap
+              )
             )
           } else
             ProtoConverter

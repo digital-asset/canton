@@ -3,14 +3,16 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import com.digitalasset.canton.{BaseTest, DefaultDamlValues}
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.participant.DefaultParticipantStateValues
 
 object TestSubmissionTrackingData {
 
   lazy val default: SubmissionTrackingData =
     TransactionSubmissionTrackingData(
-      DefaultDamlValues.completionInfo(List.empty),
+      DefaultParticipantStateValues.completionInfo(List.empty),
       TransactionSubmissionTrackingData.TimeoutCause,
+      None,
       BaseTest.testedProtocolVersion,
     )
 }

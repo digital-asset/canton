@@ -6,6 +6,7 @@ package com.digitalasset.canton.config
 import better.files.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.networking.Endpoint
@@ -57,6 +58,7 @@ object SequencerConnectionConfig {
         NonEmpty(Seq, Endpoint(address, port)),
         transportSecurity,
         pem.map(_.unwrap),
+        SequencerAlias.Default,
       )
   }
 }

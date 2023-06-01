@@ -29,6 +29,7 @@ import com.digitalasset.canton.protocol.{
   TargetDomainId,
   TransferId,
 }
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.{
   LedgerConfiguration,
   LedgerParticipantId,
@@ -230,6 +231,7 @@ object LedgerSyncEvent {
       completionInfo: CompletionInfo,
       reasonTemplate: CommandRejected.FinalReason,
       kind: ProcessingSteps.RequestType.Values,
+      domainId: Option[DomainId],
   ) extends LedgerSyncEvent {
     override def description: String =
       s"Reject command ${completionInfo.commandId}${if (definiteAnswer)
@@ -243,6 +245,7 @@ object LedgerSyncEvent {
         param("completionInfo", _.completionInfo),
         param("reason", _.reasonTemplate),
         param("kind", _.kind),
+        paramIfDefined("domainId", _.domainId),
       )
 
     def toDamlUpdate: Option[Update] = {

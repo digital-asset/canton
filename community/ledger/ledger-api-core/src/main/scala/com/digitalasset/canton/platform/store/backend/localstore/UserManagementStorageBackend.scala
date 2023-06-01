@@ -53,6 +53,10 @@ trait UserManagementStorageBackend extends ResourceVersionOps {
       connection: Connection
   ): Boolean
 
+  def updateUserIdp(internalId: Int, identityProviderId: Option[IdentityProviderId.Id])(
+      connection: Connection
+  ): Boolean
+
   def updateUserIsDeactivated(
       internalId: Int,
       isDeactivated: Boolean,

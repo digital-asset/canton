@@ -5,15 +5,14 @@ package com.digitalasset.canton.data
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -63,23 +62,40 @@ object TransactionViewDecomposition {
 
     def childViews: Seq[NewView] = tailNodes.collect { case v: NewView => v }
 
-    def coreNodes: NonEmpty[Seq[LfActionNode]] =
-      NonEmpty(Seq, rootNode, tailNodes.collect { case sameView: SameView => sameView.lfNode }: _*)
+    def coreTailNodes: Seq[LfActionNode] =
+      tailNodes.collect { case sameView: SameView => sameView.lfNode }
 
     /** Checks whether the core nodes of this view have informees [[informees]] and threshold [[threshold]] under
       * the given confirmation policy and identity snapshot.
       *
+      * @param submittingAdminPartyO the admin party of the submitting participant; should only be defined for top-level views
+      *
       * @return `()` or an error messages
       */
-    def compliesWith(confirmationPolicy: ConfirmationPolicy, topologySnapshot: TopologySnapshot)(
-        implicit ec: ExecutionContext
+    def compliesWith(
+        confirmationPolicy: ConfirmationPolicy,
+        submittingAdminPartyO: Option[LfPartyId],
+        topologySnapshot: TopologySnapshot,
+        protocolVersion: ProtocolVersion,
+    )(implicit
+        ec: ExecutionContext
     ): EitherT[Future, String, Unit] = {
 
+      val rootNodeInformeesAndThresholdF = confirmationPolicy
+        .informeesAndThreshold(rootNode, submittingAdminPartyO, topologySnapshot, protocolVersion)
+      val coreNodesInformeesAndThresholdF = coreTailNodes
+        .map(coreNode =>
+          confirmationPolicy
+            .informeesAndThreshold(
+              coreNode,
+              submittingAdminPartyO = None,
+              topologySnapshot,
+              protocolVersion,
+            )
+        )
+
       EitherT(
-        coreNodes.toNEF
-          .parTraverse(coreNode =>
-            confirmationPolicy.informeesAndThreshold(coreNode, topologySnapshot)
-          )
+        (rootNodeInformeesAndThresholdF +: coreNodesInformeesAndThresholdF).sequence
           .map { nodes =>
             nodes
               .traverse { case (nodeInformees, nodeThreshold) =>

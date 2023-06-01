@@ -6,6 +6,7 @@ package com.digitalasset.canton.ledger.sandbox
 import akka.NotUsed
 import akka.stream.scaladsl.Sink
 import akka.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
+import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.{ImmArray, Ref, Time}
@@ -26,12 +27,14 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.ledger.sandbox.bridge.{BridgeMetrics, LedgerBridge}
 import com.digitalasset.canton.ledger.sandbox.domain.{Rejection, Submission}
+import com.digitalasset.canton.tracing.TraceContext.wrapWithNewTraceContext
+import com.digitalasset.canton.tracing.Traced
 
 import java.time.Duration
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 
 class BridgeWriteService(
-    feedSink: Sink[(Offset, Update), NotUsed],
+    feedSink: Sink[(Offset, Traced[Update]), NotUsed],
     submissionBufferSize: Int,
     ledgerBridge: LedgerBridge,
     bridgeMetrics: BridgeMetrics,
@@ -150,6 +153,7 @@ class BridgeWriteService(
           delayTimer = bridgeMetrics.BridgeInputQueue.conflictQueueDelay,
         )
         .via(ledgerBridge.flow)
+        .map(_.bimap(identity, wrapWithNewTraceContext))
         .preMaterialize()
 
     queueSource.runWith(feedSink)

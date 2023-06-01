@@ -30,7 +30,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, FutureUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, ErrorUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
@@ -92,16 +92,17 @@ private[mediator] class ConfirmationResponseProcessor(
                 request,
                 rootHashMessages,
               )
-            case MediatorEvent.Response(counter, timestamp, response) =>
+            case MediatorEvent.Response(counter, timestamp, response, recipients) =>
               processResponse(
                 timestamp,
                 counter,
                 participantResponseDeadline,
                 decisionTime,
                 response,
+                recipients,
               )
             case MediatorEvent.Timeout(_counter, timestamp, requestId) =>
-              handleTimeout(requestId, timestamp, decisionTime)
+              handleTimeout(requestId, timestamp, decisionTime, snapshot)
           }
         }
       }
@@ -114,6 +115,7 @@ private[mediator] class ConfirmationResponseProcessor(
       requestId: RequestId,
       timestamp: CantonTimestamp,
       decisionTime: CantonTimestamp,
+      topologySnapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     def pendingRequestNotFound: Future[Unit] = {
       logger.debug(
@@ -134,10 +136,29 @@ private[mediator] class ConfirmationResponseProcessor(
       mediatorState
         .replace(responseAggregation, timeout)
         .semiflatMap { _ =>
-          sendResultIfDone(timeout, decisionTime)
+          sendResultIfDone(timeout, decisionTime, topologySnapshot)
         }
         .getOrElse(())
     }
+  }
+
+  private def shouldSendVerdict(
+      request: MediatorRequest,
+      topologySnapshot: TopologySnapshot,
+  ): Future[Boolean] = request.mediator match {
+    case MediatorRef.Single(_) => Future.successful(true)
+    case MediatorRef.Group(MediatorsOfDomain(mediatorGroupIndex)) =>
+      topologySnapshot.mediatorGroup(mediatorGroupIndex).map { groupO =>
+        groupO
+          .getOrElse(
+            // This has been checked in the `validateRequest`
+            throw new IllegalStateException(
+              s"Unexpected absent mediator group $mediatorGroupIndex."
+            )
+          )
+          .active
+          .contains(mediatorId)
+      }
   }
 
   /** Stores the incoming request in the MediatorStore.
@@ -167,6 +188,8 @@ private[mediator] class ConfirmationResponseProcessor(
           topologySnapshot,
         )
 
+        sendVerdict <- shouldSendVerdict(request, topologySnapshot)
+
         // Take appropriate actions based on unitOrVerdictO
         _ <- unitOrVerdictO match {
           // Request is well-formed, but not yet finalized
@@ -176,6 +199,7 @@ private[mediator] class ConfirmationResponseProcessor(
               request,
               protocolVersion,
               topologySnapshot,
+              sendVerdict,
             )(loggerFactory)
 
             for {
@@ -200,6 +224,7 @@ private[mediator] class ConfirmationResponseProcessor(
               request,
               verdict,
               protocolVersion,
+              sendVerdict,
             )(loggerFactory)
 
             for {
@@ -214,7 +239,27 @@ private[mediator] class ConfirmationResponseProcessor(
                   )
 
                 case _: Verdict =>
-                  verdictSender.sendResult(requestId, request, verdict, decisionTime)
+                  for {
+                    aggregationRule <- groupAggregationRule(
+                      topologySnapshot,
+                      request.mediator,
+                      protocolVersion,
+                    )
+                      .fold(
+                        err =>
+                          ErrorUtil.invalidState(
+                            s"Mediator rule should not fail at this point, the error was: $err"
+                          ),
+                        identity,
+                      )
+                    _ <- verdictSender.sendResult(
+                      requestId,
+                      request,
+                      verdict,
+                      decisionTime,
+                      aggregationRule,
+                    )
+                  } yield ()
               }
 
               _ <- mediatorState.add(aggregation)
@@ -241,12 +286,13 @@ private[mediator] class ConfirmationResponseProcessor(
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       topologySnapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext): Future[Either[Option[Verdict], Unit]] = (for {
-
-    // Bail out, if this mediator is passive
+    // Bail out, if this mediator or group is passive, except is the mediator itself is passive in an active group.
     isActive <- EitherT.right(topologySnapshot.isMediatorActive(mediatorId))
     _ <- EitherTUtil.condUnitET[Future][Option[Verdict]](
       isActive, {
-        logger.info(show"Ignoring mediator request $requestId because I'm not active.")
+        logger.info(
+          show"Ignoring mediator request $requestId because I'm not active or mediator group is not active."
+        )
         None
       },
     )
@@ -264,23 +310,18 @@ private[mediator] class ConfirmationResponseProcessor(
         Some(reject)
       }
 
-    // Validate root hash messages
-    _ <- checkRootHashMessages(requestId, request, rootHashMessages, topologySnapshot)
-      .leftMap[Option[Verdict]](Some(_))
+    // Validate declared mediator and the group being active
+    validMediator <- checkDeclaredMediator(requestId, request, topologySnapshot)
 
-    // Validate declared mediator id
-    _ <- EitherTUtil.condUnitET[Future][Option[Verdict]](
-      request.mediatorId == mediatorId,
-      Some(
-        MediatorError.MalformedMessage
-          .Reject(
-            show"Received a mediator request with id $requestId with an incorrect mediator id ${request.mediatorId}. Rejecting request...",
-            v0.MediatorRejection.Code.WrongDeclaredMediator,
-            protocolVersion,
-          )
-          .reported()
-      ),
+    // Validate root hash messages
+    _ <- checkRootHashMessages(
+      validMediator,
+      requestId,
+      request,
+      rootHashMessages,
+      topologySnapshot,
     )
+      .leftMap[Option[Verdict]](Some(_))
 
     // Validate minimum threshold
     _ <- EitherT
@@ -299,29 +340,80 @@ private[mediator] class ConfirmationResponseProcessor(
 
   } yield ()).value
 
+  private def checkDeclaredMediator(
+      requestId: RequestId,
+      request: MediatorRequest,
+      topologySnapshot: TopologySnapshot,
+  )(implicit loggingContext: ErrorLoggingContext): EitherT[Future, Option[Verdict], MediatorRef] = {
+
+    def rejectWrongMediator(hint: => String): Option[Verdict] = {
+      Some(
+        MediatorError.MalformedMessage
+          .Reject(
+            show"Rejecting mediator request with $requestId, mediator ${request.mediator}, topology at ${topologySnapshot.timestamp} due to $hint",
+            v0.MediatorRejection.Code.WrongDeclaredMediator,
+            protocolVersion,
+          )
+          .reported()
+      )
+    }
+
+    (request.mediator match {
+      case MediatorRef.Single(declaredMediatorId) =>
+        EitherTUtil.condUnitET[Future][Option[Verdict]](
+          declaredMediatorId == mediatorId,
+          rejectWrongMediator(show"incorrect mediator id"),
+        )
+      case MediatorRef.Group(declaredMediatorGroup) =>
+        for {
+          mediatorGroupO <- EitherT.right(
+            topologySnapshot.mediatorGroup(declaredMediatorGroup.group)
+          )
+          mediatorGroup <- EitherT.fromOption[Future](
+            mediatorGroupO,
+            rejectWrongMediator(show"unknown mediator group"),
+          )
+          _ <- EitherTUtil.condUnitET[Future][Option[Verdict]](
+            mediatorGroup.isActive,
+            rejectWrongMediator(show"inactive mediator group"),
+          )
+          _ <- EitherTUtil.condUnitET[Future][Option[Verdict]](
+            mediatorGroup.active.contains(mediatorId) || mediatorGroup.passive.contains(mediatorId),
+            rejectWrongMediator(show"this mediator not being part of the mediator group"),
+          )
+
+        } yield ()
+    }).map(_ => request.mediator)
+  }
+
   private def checkRootHashMessages(
+      validMediator: MediatorRef,
       requestId: RequestId,
       request: MediatorRequest,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       topologySnapshot: TopologySnapshot,
   )(implicit loggingContext: ErrorLoggingContext): EitherT[Future, MediatorReject, Unit] = {
-    val (wrongRecipients, oneMemberRecipients) = rootHashMessages.flatMap { rhm =>
+
+    val (wrongRecipients, recipientsWithOneParticipant) = rootHashMessages.flatMap { rhm =>
       rhm.recipients.trees.toList.map {
         case tree @ RecipientsTree(group, Seq()) =>
           Either.cond(
-            group.size == 2 && group.contains(MemberRecipient(mediatorId)),
+            // since `checkDeclaredMediator` already validated against the mediatorId we can safely use validMediator = request.mediator
+            group.size == 2 && group.contains(validMediator.toRecipient) && group.exists {
+              case MemberRecipient(_: ParticipantId) =>
+                true // only other recipient must be a participant
+              case _ => false
+            },
             group,
             tree,
           )
         case badTree => Left(badTree)
       }
     }.separate
-    // TODO(#12569): support mediator groups
-    val members = oneMemberRecipients
+    val members = recipientsWithOneParticipant
       .mapFilter(recipients =>
-        (recipients.collect { case MemberRecipient(member) =>
-          member
-        } - mediatorId).headOption
+        recipients
+          .collectFirst { case MemberRecipient(member: ParticipantId) => member }
       )
 
     def repeatedMembers(members: Seq[Member]): Seq[Member] = {
@@ -345,7 +437,7 @@ private[mediator] class ConfirmationResponseProcessor(
         superfluousMembers: Set[Member],
     )
 
-    def wrongMembers(): Future[WrongMembers] = {
+    def wrongMembers(members: Seq[Member]): Future[WrongMembers] = {
       val allInformeeParticipantsF =
         request.allInformees.toList
           .parTraverse(topologySnapshot.activeParticipantsOf)
@@ -388,7 +480,7 @@ private[mediator] class ConfirmationResponseProcessor(
         case Some(rootHash) =>
           val wrongHashes = wrongRootHashes(rootHash)
           val wrongViewTypes = wrongViewType(request.viewType)
-          val wrongMembersF = wrongMembers()
+          val wrongMembersF = wrongMembers(members)
           for {
             _ <- EitherTUtil
               .condUnitET[Future](wrongHashes.isEmpty, show"Wrong root hashes: $wrongHashes")
@@ -425,10 +517,10 @@ private[mediator] class ConfirmationResponseProcessor(
       request: MediatorRequest,
       protocolVersion: ProtocolVersion,
   )(implicit loggingContext: ErrorLoggingContext): Either[MediatorReject, Unit] = {
-    val minimumThreshold = request.confirmationPolicy.minimumThreshold
 
     request.informeesAndThresholdByView.toSeq
-      .traverse_ { case (viewHash, (_, threshold)) =>
+      .traverse_ { case (viewHash, (informees, threshold)) =>
+        val minimumThreshold = request.confirmationPolicy.minimumThreshold(informees)
         EitherUtil.condUnitE(
           threshold >= minimumThreshold,
           MediatorError.MalformedMessage
@@ -593,7 +685,8 @@ private[mediator] class ConfirmationResponseProcessor(
               .map(_ -> recipients)
           }
         batch = Batch.of(protocolVersion, envs *)
-        _ <- verdictSender.sendResultBatch(requestId, batch, decisionTime)
+        // TODO(i13205): Enable aggregation rule for BFT mediator rejects
+        _ <- verdictSender.sendResultBatch(requestId, batch, decisionTime, aggregationRule = None)
       } yield ()
     } else Future.unit
   }
@@ -604,6 +697,7 @@ private[mediator] class ConfirmationResponseProcessor(
       participantResponseDeadline: CantonTimestamp,
       decisionTime: CantonTimestamp,
       signedResponse: SignedProtocolMessage[MediatorResponse],
+      recipients: Recipients,
   )(implicit traceContext: TraceContext): Future[Unit] =
     withSpan("ConfirmationResponseProcessor.processResponse") { implicit traceContext => span =>
       span.setAttribute("timestamp", ts.toString)
@@ -653,6 +747,24 @@ private[mediator] class ConfirmationResponseProcessor(
 
           OptionT.none
         }
+
+        _ <- {
+          if (
+            recipients.allRecipients.size == 1 &&
+            recipients.allRecipients.contains(responseAggregation.request.mediator.toRecipient)
+          ) {
+            OptionT.some[Future](())
+          } else {
+            MediatorError.MalformedMessage
+              .Reject(
+                s"Request ${response.requestId}, sender ${response.sender}: Discarding mediator response with wrong recipients ${recipients}, expected ${responseAggregation.request.mediator.toRecipient}",
+                protocolVersion,
+              )
+              .report()
+            OptionT.none[Future, Unit]
+          }
+        }
+
         nextResponseAggregation <- responseAggregation.progress(ts, response, snapshot.ipsSnapshot)
         _unit <- mediatorState.replace(responseAggregation, nextResponseAggregation)
       } yield {
@@ -660,7 +772,7 @@ private[mediator] class ConfirmationResponseProcessor(
         // order and there is no need to guarantee delivery of verdicts
         FutureUtil.doNotAwait(
           performUnlessClosingF("send-result-if-done")(
-            sendResultIfDone(nextResponseAggregation, decisionTime)
+            sendResultIfDone(nextResponseAggregation, decisionTime, snapshot.ipsSnapshot)
           ).onShutdown(()),
           s"send-result-if-done failed for request ${response.requestId}",
           level = Level.WARN,
@@ -668,14 +780,79 @@ private[mediator] class ConfirmationResponseProcessor(
       }).value.map(_ => ())
     }
 
+  private def groupAggregationRule(
+      topologySnapshot: TopologySnapshot,
+      mediatorRef: MediatorRef,
+      protocolVersion: ProtocolVersion,
+  ): EitherT[Future, String, Option[AggregationRule]] = {
+    // TODO(#12373) Adapt when releasing BFT
+    if (protocolVersion >= ProtocolVersion.dev) {
+      mediatorRef match {
+        case MediatorRef.Group(MediatorsOfDomain(index)) =>
+          for {
+            mediatorGroup <- EitherT(
+              topologySnapshot
+                .mediatorGroup(index)
+                .map(
+                  _.toRight(
+                    s"Mediator group $index does not exist in topology at ${topologySnapshot.timestamp}"
+                  )
+                )
+            )
+            activeNE <- EitherT.fromEither[Future](
+              NonEmpty
+                .from(mediatorGroup.active)
+                .toRight(
+                  "MediatorGroup is expected to have at least 1 active member at this point"
+                )
+            )
+          } yield {
+            Some(AggregationRule(activeNE, mediatorGroup.threshold, protocolVersion))
+          }
+        case MediatorRef.Single(_) =>
+          EitherT.right[String](Future.successful(Option.empty[AggregationRule]))
+      }
+    } else {
+      EitherT.right[String](Future.successful(Option.empty[AggregationRule]))
+    }
+  }
+
   private def sendResultIfDone(
       responseAggregation: ResponseAggregation,
       decisionTime: CantonTimestamp,
+      topologySnapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext): Future[Unit] =
     responseAggregation match {
-      case ResponseAggregation(requestId, request, _, Left(verdict)) =>
-        verdictSender.sendResult(requestId, request, verdict, decisionTime)
-      case ResponseAggregation(_, _, _, Right(_)) =>
+      case ResponseAggregation(requestId, request, _, Left(verdict), sendVerdict) =>
+        if (sendVerdict) {
+          for {
+            aggregationRule <- groupAggregationRule(
+              topologySnapshot,
+              request.mediator,
+              protocolVersion,
+            )
+              .fold(
+                err =>
+                  ErrorUtil.invalidState(
+                    s"Mediator rule should not fail at this point, the error was: $err"
+                  ),
+                identity,
+              )
+            _ <- verdictSender.sendResult(
+              requestId,
+              request,
+              verdict,
+              decisionTime,
+              aggregationRule,
+            )
+          } yield ()
+        } else {
+          logger.info(
+            s"Not sending the verdict $verdict for request $requestId as this mediator is passive in ${request.mediator}."
+          )
+          Future.unit
+        }
+      case ResponseAggregation(_, _, _, Right(_), _) =>
         /* no op */
         Future.unit
     }

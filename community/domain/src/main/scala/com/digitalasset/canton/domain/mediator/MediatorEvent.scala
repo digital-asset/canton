@@ -7,7 +7,7 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
+import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
 
 /** The [[MediatorEventsProcessor]] looks through all sequencer events provided by the sequencer client in a batch
   * to pick out events for the Mediator with the same request-id while also scheduling timeouts and running
@@ -38,6 +38,7 @@ private[mediator] object MediatorEvent {
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
       response: SignedProtocolMessage[MediatorResponse],
+      recipients: Recipients,
   ) extends MediatorEvent {
     override val requestId: RequestId = response.message.requestId
   }

@@ -24,7 +24,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.transaction.TrustLevel
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef}
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.version.{
@@ -44,6 +44,7 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfPartyId,
   LfWorkflowId,
+  ProtoDeserializationError,
   TransferCounter,
 }
 import com.google.protobuf.ByteString
@@ -156,7 +157,7 @@ object TransferOutViewTree
 final case class TransferOutCommonData private (
     override val salt: Salt,
     sourceDomain: SourceDomainId,
-    sourceMediator: MediatorId,
+    sourceMediator: MediatorRef,
     stakeholders: Set[LfPartyId],
     adminParties: Set[LfPartyId],
     uuid: UUID,
@@ -244,7 +245,8 @@ object TransferOutCommonData
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.TransferOutCommonData)(
+    // TODO(#12373) Adapt when releasing BFT
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v2.TransferOutCommonData)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),
@@ -253,22 +255,41 @@ object TransferOutCommonData
   def create(hashOps: HashOps)(
       salt: Salt,
       sourceDomain: SourceDomainId,
-      sourceMediator: MediatorId,
+      sourceMediator: MediatorRef,
       stakeholders: Set[LfPartyId],
       adminParties: Set[LfPartyId],
       uuid: UUID,
       transferCounter: TransferCounter,
       protocolVersion: SourceProtocolVersion,
-  ): TransferOutCommonData =
-    TransferOutCommonData(
-      salt,
-      sourceDomain,
-      sourceMediator,
-      stakeholders,
-      adminParties,
-      uuid,
-      transferCounter,
-    )(hashOps, protocolVersion, None)
+  ): Either[String, TransferOutCommonData] = {
+    // TODO(#12373) Adapt when releasing BFT
+    Either.cond(
+      sourceMediator.isSingle || protocolVersion.v >= ProtocolVersion.dev,
+      TransferOutCommonData(
+        salt,
+        sourceDomain,
+        sourceMediator,
+        stakeholders,
+        adminParties,
+        uuid,
+        transferCounter,
+      )(hashOps, protocolVersion, None),
+      s"Invariant violation: Mediator groups are not supported in protocol version $protocolVersion",
+    )
+  }
+
+  private[this] def enforceInvariantFailForMediatorGroup(
+      commonData: ParsedDataV0V1V2,
+      protoVersionHint: String,
+  ): Either[ProtoDeserializationError.InvariantViolation, Unit] = {
+    Either.cond(
+      commonData.sourceMediator.isSingle,
+      (),
+      ProtoDeserializationError.InvariantViolation(
+        s"Mediator groups are not supported in the proto version V$protoVersionHint"
+      ),
+    )
+  }
 
   private[this] def fromProtoV0(hashOps: HashOps, transferOutCommonDataP: v0.TransferOutCommonData)(
       bytes: ByteString
@@ -290,6 +311,7 @@ object TransferOutCommonData
         adminPartiesP,
         uuidP,
       )
+      _ <- enforceInvariantFailForMediatorGroup(commonData, protoVersionHint = "0")
     } yield TransferOutCommonData(
       commonData.salt,
       commonData.sourceDomain,
@@ -328,6 +350,7 @@ object TransferOutCommonData
         adminPartiesP,
         uuidP,
       )
+      _ <- enforceInvariantFailForMediatorGroup(commonData, protoVersionHint = "1")
       protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield TransferOutCommonData(
       commonData.salt,
@@ -378,7 +401,7 @@ object TransferOutCommonData
   final case class ParsedDataV0V1V2(
       salt: Salt,
       sourceDomain: SourceDomainId,
-      sourceMediator: MediatorId,
+      sourceMediator: MediatorRef,
       stakeholders: Set[LfPartyId],
       adminParties: Set[LfPartyId],
       uuid: UUID,
@@ -387,7 +410,7 @@ object TransferOutCommonData
     def fromProto(
         salt: Option[com.digitalasset.canton.crypto.v0.Salt],
         sourceDomain: String,
-        mediatorId: String,
+        mediatorRef: String,
         stakeholders: Seq[String],
         adminParties: Seq[String],
         uuid: String,
@@ -395,7 +418,7 @@ object TransferOutCommonData
       for {
         salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", salt)
         sourceDomain <- DomainId.fromProtoPrimitive(sourceDomain, "source_domain")
-        sourceMediator <- MediatorId.fromProtoPrimitive(mediatorId, "source_mediator")
+        sourceMediator <- MediatorRef.fromProtoPrimitive(mediatorRef, "source_mediator")
         stakeholders <- stakeholders.traverse(ProtoConverter.parseLfPartyId)
         adminParties <- adminParties.traverse(ProtoConverter.parseLfPartyId)
         uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuid)
@@ -748,6 +771,8 @@ final case class FullTransferOutTree(tree: TransferOutViewTree)
 
   def contractId: LfContractId = view.contractId
 
+  def templateId: LfTemplateId = view.templateId
+
   def sourceDomain: SourceDomainId = commonData.sourceDomain
 
   def targetDomain: TargetDomainId = view.targetDomain
@@ -758,7 +783,7 @@ final case class FullTransferOutTree(tree: TransferOutViewTree)
 
   override def domainId: DomainId = sourceDomain.unwrap
 
-  override def mediatorId: MediatorId = commonData.sourceMediator
+  override def mediator: MediatorRef = commonData.sourceMediator
 
   override def informees: Set[Informee] = commonData.confirmingParties
 

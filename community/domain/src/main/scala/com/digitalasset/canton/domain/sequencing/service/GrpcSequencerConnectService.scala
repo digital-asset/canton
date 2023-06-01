@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.GetDomainParameters.Response.Parameters
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.{GetDomainId, GetDomainParameters}
@@ -41,12 +42,15 @@ class GrpcSequencerConnectService(
   def getDomainId(request: GetDomainId.Request): Future[GetDomainId.Response] =
     if (mediatorsProcessParticipantTopologyRequests) {
       implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-      // TODO(#11255): Until we have group notifications, return first active mediator
+      // TODO(#11255): Until we finish debugging group notifications, return first active mediator
+      //  in group 0 (needs to be deterministic so that all topology transactions go to the same
+      //  mediator group)
       cryptoApi.ips.currentSnapshotApproximation
         .mediatorGroups()
         .map { mgs =>
-          val maybeAddress = mgs.collectFirst { case MediatorGroup(_, firstActive +: _, _, _) =>
-            firstActive.toProtoPrimitive
+          val maybeAddress = mgs.collectFirst {
+            case MediatorGroup(NonNegativeInt.zero, firstActive +: _, _, _) =>
+              firstActive.toProtoPrimitive
           }
           GetDomainId
             .Response(

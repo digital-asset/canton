@@ -13,6 +13,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
+import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -21,6 +22,7 @@ import scala.concurrent.ExecutionContext
 private[transfer] final case class TransferOutValidation(
     request: FullTransferOutTree,
     expectedStakeholders: Set[LfPartyId],
+    sourceProtocolVersion: SourceProtocolVersion,
     sourceTopology: TopologySnapshot,
     targetTopology: Option[TopologySnapshot],
     recipients: Recipients,
@@ -48,6 +50,7 @@ private[transfer] final case class TransferOutValidation(
         TransferOutValidationTransferringParticipant(
           request,
           expectedStakeholders,
+          sourceProtocolVersion,
           sourceTopology,
           targetTopology,
           recipients,
@@ -64,6 +67,7 @@ private[transfer] object TransferOutValidation {
   def apply(
       request: FullTransferOutTree,
       expectedStakeholders: Set[LfPartyId],
+      sourceProtocolVersion: SourceProtocolVersion,
       sourceTopology: TopologySnapshot,
       targetTopology: Option[TopologySnapshot],
       recipients: Recipients,
@@ -76,6 +80,7 @@ private[transfer] object TransferOutValidation {
     val validation = TransferOutValidation(
       request,
       expectedStakeholders,
+      sourceProtocolVersion,
       sourceTopology,
       targetTopology,
       recipients,

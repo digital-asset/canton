@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.admin.v1.{
   AddTransactionsResponse,
   AuthorizeRequest,
   AuthorizeResponse,
+  ListTrafficStateRequest,
 }
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX
 import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.GenericStoredTopologyTransactionsX
@@ -52,6 +53,37 @@ object TopologyAdminCommandsX {
       //  command will potentially take a long time
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
 
+    }
+
+    final case class ListTrafficControlState(
+        query: BaseQueryX,
+        filterMember: String,
+    ) extends BaseCommand[
+          v1.ListTrafficStateRequest,
+          v1.ListTrafficStateResult,
+          Seq[ListTrafficStateResult],
+        ] {
+
+      override def createRequest(): Either[String, v1.ListTrafficStateRequest] =
+        Right(
+          new ListTrafficStateRequest(
+            baseQuery = Some(query.toProtoV1),
+            filterMember = filterMember,
+          )
+        )
+
+      override def submitRequest(
+          service: TopologyManagerReadServiceXStub,
+          request: v1.ListTrafficStateRequest,
+      ): Future[v1.ListTrafficStateResult] =
+        service.listTrafficState(request)
+
+      override def handleResponse(
+          response: v1.ListTrafficStateResult
+      ): Either[String, Seq[ListTrafficStateResult]] =
+        response.results
+          .traverse(ListTrafficStateResult.fromProtoV1)
+          .leftMap(_.toString)
     }
 
     final case class ListNamespaceDelegation(
@@ -98,7 +130,7 @@ object TopologyAdminCommandsX {
         Right(
           new v1.ListUnionspaceDefinitionRequest(
             baseQuery = Some(query.toProtoV1),
-            filterUid = filterNamespace,
+            filterNamespace = filterNamespace,
           )
         )
 

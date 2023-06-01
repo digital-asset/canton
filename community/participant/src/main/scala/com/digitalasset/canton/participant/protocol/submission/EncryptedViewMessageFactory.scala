@@ -66,12 +66,24 @@ object EncryptedViewMessageFactory {
       informeeParticipants <- cryptoSnapshot.ipsSnapshot
         .activeParticipantsOfAll(informeeParties)
         .leftMap(UnableToDetermineParticipant(_, cryptoSnapshot.domainId))
-      randomnessMap <- createRandomnessMap(
-        informeeParticipants.to(LazyList),
-        randomness,
-        cryptoSnapshot,
-        protocolVersion,
+      usingGroupAddressing <- EitherT.right(
+        cryptoSnapshot.ipsSnapshot.partiesWithGroupAddressing(informeeParties).map(_.nonEmpty)
       )
+      randomnessMap <-
+        if (!usingGroupAddressing)
+          createRandomnessMap(
+            informeeParticipants.to(LazyList),
+            randomness,
+            cryptoSnapshot,
+            protocolVersion,
+          )
+        else
+          EitherT.rightT[Future, EncryptedViewMessageCreationError](
+            Map.empty[
+              ParticipantId,
+              AsymmetricEncrypted[SecureRandomness],
+            ]
+          )
       signature <- viewTree.toBeSigned
         .traverse(rootHash => cryptoSnapshot.sign(rootHash.unwrap).leftMap(FailedToSignViewMessage))
       encryptedView <- eitherT(
@@ -79,9 +91,17 @@ object EncryptedViewMessageFactory {
           .compressed[VT](cryptoPureApi, symmetricViewKey, viewType, protocolVersion)(viewTree)
           .leftMap(FailedToEncryptViewMessage)
       )
-      message =
+      message = {
         if (protocolVersion >= ProtocolVersion.v4) {
-          val randomnessV1 = randomnessMap.values.toSeq
+          val randomnessV1 =
+            if (!usingGroupAddressing) randomnessMap.values.toSeq
+            else
+              Seq(
+                AsymmetricEncrypted[SecureRandomness](
+                  randomness.unwrap,
+                  AsymmetricEncrypted.noEncryptionFingerprint,
+                )
+              )
           EncryptedViewMessageV1[VT](
             signature,
             viewTree.viewHash,
@@ -100,6 +120,7 @@ object EncryptedViewMessageFactory {
             viewTree.domainId,
           )
         }
+      }
     } yield message
   }
 
@@ -110,7 +131,7 @@ object EncryptedViewMessageFactory {
       version: ProtocolVersion,
   )(implicit
       ec: ExecutionContext
-  ): EitherT[Future, UnableToDetermineKey, Map[
+  ): EitherT[Future, EncryptedViewMessageCreationError, Map[
     ParticipantId,
     AsymmetricEncrypted[SecureRandomness],
   ]] =
@@ -118,7 +139,14 @@ object EncryptedViewMessageFactory {
       .parTraverse { participant =>
         cryptoSnapshot
           .encryptFor(randomness, participant, version)
-          .bimap(UnableToDetermineKey(participant, _, cryptoSnapshot.domainId), participant -> _)
+          .bimap(
+            UnableToDetermineKey(
+              participant,
+              _,
+              cryptoSnapshot.domainId,
+            ): EncryptedViewMessageCreationError,
+            participant -> _,
+          )
       }
       .map(_.toMap)
 

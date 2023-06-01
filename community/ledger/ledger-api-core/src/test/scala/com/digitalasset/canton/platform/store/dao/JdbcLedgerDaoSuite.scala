@@ -20,9 +20,10 @@ import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeMo
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoSuite.*
-import com.digitalasset.canton.platform.store.dao.PersistenceResponse
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
+import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.{AsyncTestSuite, OptionValues}
 
 import java.time.Duration
@@ -36,7 +37,9 @@ import scala.util.chaining.*
 private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionValues {
   this: AsyncTestSuite =>
 
-  protected implicit final val loggingContext: LoggingContext = LoggingContext.ForTesting
+  import TraceContext.Implicits.Empty.*
+  protected implicit final val loggingContext: LoggingContextWithTrace =
+    LoggingContextWithTrace(TraceContext.empty)(LoggingContext.ForTesting)
 
   val previousOffset: AtomicReference[Option[Offset]] =
     new AtomicReference[Option[Offset]](Option.empty)

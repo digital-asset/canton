@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestPendingRequestDataType,
 }
 import com.digitalasset.canton.protocol.RequestId
-import com.digitalasset.canton.topology.{MediatorId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{MediatorId, MediatorRef, UniqueIdentifier}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, RequestCounter, SequencerCounter}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -37,7 +37,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
         RequestCounter(i),
         SequencerCounter(i),
         Set.empty,
-        MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+        MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
       )
     )
 

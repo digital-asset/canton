@@ -20,6 +20,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
   AsyncResult,
+  EnvelopeHandler,
   HandlerResult,
   TracedProtocolEvent,
   UnsignedProtocolEventHandler,
@@ -89,6 +90,7 @@ private[mediator] class MediatorEventsProcessor(
     crypto: DomainSyncCryptoClient,
     identityClientEventHandler: UnsignedProtocolEventHandler,
     maybeTopologyRequestProcessor: Option[UnsignedProtocolEventHandler],
+    maybeTopologyResponseHandler: Option[EnvelopeHandler],
     handleMediatorEvents: (
         RequestId,
         Seq[Traced[MediatorEvent]],
@@ -107,6 +109,8 @@ private[mediator] class MediatorEventsProcessor(
 
   private val topologyRequestProcessor =
     maybeTopologyRequestProcessor.getOrElse(ApplicationHandler.success())
+  private val topologyEnvelopeHandler =
+    maybeTopologyResponseHandler.getOrElse(ApplicationHandler.success())
 
   private def handle(
       events: NonEmpty[Seq[TracedProtocolEvent]]
@@ -125,6 +129,15 @@ private[mediator] class MediatorEventsProcessor(
 
       determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(uniqueEnvelopesByEvent))
       _ <- MonadUtil.sequentialTraverseMonoid(determinedStages)(executeStage(traceContext))
+
+      _ <- MonadUtil.sequentialTraverseMonoid(events.forgetNE) {
+        _.withTraceContext { implicit traceContext =>
+          {
+            case Deliver(_, _, _, _, batch) => topologyEnvelopeHandler(Traced(batch.envelopes))
+            case _ => HandlerResult.done
+          }
+        }
+      }
 
       resultIdentity <- identityF
       resultTopologyRequest <- topologyRequestF
@@ -304,7 +317,9 @@ private[mediator] class MediatorEventsProcessor(
           Seq.empty
       }
     } else if (responses.nonEmpty) {
-      responses.map(res => MediatorEvent.Response(counter, timestamp, res.protocolMessage))
+      responses.map(res =>
+        MediatorEvent.Response(counter, timestamp, res.protocolMessage, res.recipients)
+      )
     } else Seq.empty
 
     NonEmpty.from(events).map(MediatorEventStage(_))
@@ -317,6 +332,7 @@ private[mediator] object MediatorEventsProcessor {
       crypto: DomainSyncCryptoClient,
       identityClientEventHandler: UnsignedProtocolEventHandler,
       topologyRequestProcessor: Option[UnsignedProtocolEventHandler],
+      topologyResponseHandler: Option[EnvelopeHandler],
       confirmationResponseProcessor: ConfirmationResponseProcessor,
       mediatorEventDeduplicator: MediatorEventDeduplicator,
       protocolVersion: ProtocolVersion,
@@ -327,6 +343,7 @@ private[mediator] object MediatorEventsProcessor {
       crypto,
       identityClientEventHandler,
       topologyRequestProcessor,
+      topologyResponseHandler,
       confirmationResponseProcessor.handleRequestEvents,
       protocolVersion,
       mediatorEventDeduplicator,

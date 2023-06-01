@@ -26,7 +26,7 @@ import com.digitalasset.canton.sequencing.protocol.{SequencedEvent, SignedConten
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.transaction.TrustLevel
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef}
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.version.{
@@ -45,6 +45,7 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfPartyId,
   LfWorkflowId,
+  ProtoDeserializationError,
   TransferCounter,
 }
 import com.google.protobuf.ByteString
@@ -129,7 +130,7 @@ object TransferInViewTree
 final case class TransferInCommonData private (
     override val salt: Salt,
     targetDomain: TargetDomainId,
-    targetMediator: MediatorId,
+    targetMediator: MediatorRef,
     stakeholders: Set[LfPartyId],
     uuid: UUID,
     transferCounter: TransferCounter,
@@ -151,32 +152,35 @@ final case class TransferInCommonData private (
   @transient override protected lazy val companionObj: TransferInCommonData.type =
     TransferInCommonData
 
-  protected def toProtoV0: v0.TransferInCommonData = v0.TransferInCommonData(
-    salt = Some(salt.toProtoV0),
-    targetDomain = targetDomain.toProtoPrimitive,
-    targetMediator = targetMediator.toProtoPrimitive,
-    stakeholders = stakeholders.toSeq,
-    uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
-  )
+  protected def toProtoV0: v0.TransferInCommonData =
+    v0.TransferInCommonData(
+      salt = Some(salt.toProtoV0),
+      targetDomain = targetDomain.toProtoPrimitive,
+      targetMediator = targetMediator.toProtoPrimitive,
+      stakeholders = stakeholders.toSeq,
+      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+    )
 
-  protected def toProtoV1: v1.TransferInCommonData = v1.TransferInCommonData(
-    salt = Some(salt.toProtoV0),
-    targetDomain = targetDomain.toProtoPrimitive,
-    targetMediator = targetMediator.toProtoPrimitive,
-    stakeholders = stakeholders.toSeq,
-    uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
-    targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
-  )
+  protected def toProtoV1: v1.TransferInCommonData =
+    v1.TransferInCommonData(
+      salt = Some(salt.toProtoV0),
+      targetDomain = targetDomain.toProtoPrimitive,
+      targetMediator = targetMediator.toProtoPrimitive,
+      stakeholders = stakeholders.toSeq,
+      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+      targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
+    )
 
-  protected def toProtoV2: v2.TransferInCommonData = v2.TransferInCommonData(
-    salt = Some(salt.toProtoV0),
-    targetDomain = targetDomain.toProtoPrimitive,
-    targetMediator = targetMediator.toProtoPrimitive,
-    stakeholders = stakeholders.toSeq,
-    uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
-    targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
-    transferCounter = transferCounter.toProtoPrimitive,
-  )
+  protected def toProtoV2: v2.TransferInCommonData =
+    v2.TransferInCommonData(
+      salt = Some(salt.toProtoV0),
+      targetDomain = targetDomain.toProtoPrimitive,
+      targetMediator = targetMediator.toProtoPrimitive,
+      stakeholders = stakeholders.toSeq,
+      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+      targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
+      transferCounter = transferCounter.toProtoPrimitive,
+    )
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInCommonData
 
@@ -206,7 +210,8 @@ object TransferInCommonData
       supportedProtoVersionMemoized(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.TransferInCommonData)(
+    // TODO(#12373) Adapt when releasing BFT
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.dev)(v2.TransferInCommonData)(
       supportedProtoVersionMemoized(_)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),
@@ -215,16 +220,41 @@ object TransferInCommonData
   def create(hashOps: HashOps)(
       salt: Salt,
       targetDomain: TargetDomainId,
-      targetMediator: MediatorId,
+      targetMediator: MediatorRef,
       stakeholders: Set[LfPartyId],
       uuid: UUID,
       transferCounter: TransferCounter,
       targetProtocolVersion: TargetProtocolVersion,
-  ): TransferInCommonData =
-    TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid, transferCounter)(
-      hashOps,
-      targetProtocolVersion,
-      None,
+  ): Either[String, TransferInCommonData] = {
+    // TODO(#12373) Adapt when releasing BFT
+    Either.cond(
+      targetMediator.isSingle || targetProtocolVersion.v >= ProtocolVersion.dev,
+      TransferInCommonData(
+        salt,
+        targetDomain,
+        targetMediator,
+        stakeholders,
+        uuid,
+        transferCounter,
+      )(
+        hashOps,
+        targetProtocolVersion,
+        None,
+      ),
+      s"Invariant violation: Mediator groups are not supported in protocol version $targetProtocolVersion",
+    )
+  }
+
+  private[this] def enforceInvariantFailForMediatorGroup(
+      commonData: ParsedDataV0V1V2,
+      protoVersionHint: String,
+  ): Either[ProtoDeserializationError, Unit] =
+    Either.cond(
+      commonData.targetMediator.isSingle,
+      (),
+      ProtoDeserializationError.InvariantViolation(
+        s"Mediator groups are not supported in the proto version V$protoVersionHint"
+      ),
     )
 
   private[this] def fromProtoV0(hashOps: HashOps, transferInCommonDataP: v0.TransferInCommonData)(
@@ -240,6 +270,7 @@ object TransferInCommonData
         uuidP,
         targetMediatorP,
       )
+      _ <- enforceInvariantFailForMediatorGroup(commonData, "0")
     } yield TransferInCommonData(
       commonData.salt,
       commonData.targetDomain,
@@ -276,6 +307,7 @@ object TransferInCommonData
         uuidP,
         targetMediatorP,
       )
+      _ <- enforceInvariantFailForMediatorGroup(commonData, "1")
       protocolVersion = ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield TransferInCommonData(
       commonData.salt,
@@ -331,7 +363,7 @@ object TransferInCommonData
   final case class ParsedDataV0V1V2(
       salt: Salt,
       targetDomain: TargetDomainId,
-      targetMediator: MediatorId,
+      targetMediator: MediatorRef,
       stakeholders: Set[LfPartyId],
       uuid: UUID,
   )
@@ -347,7 +379,7 @@ object TransferInCommonData
       for {
         salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", salt)
         targetDomain <- DomainId.fromProtoPrimitive(targetDomain, "target_domain")
-        targetMediator <- MediatorId.fromProtoPrimitive(targetMediator, "target_mediator")
+        targetMediator <- MediatorRef.fromProtoPrimitive(targetMediator, "target_mediator")
         stakeholders <- stakeholders.traverse(ProtoConverter.parseLfPartyId)
         uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuid)
       } yield ParsedDataV0V1V2(
@@ -697,7 +729,7 @@ final case class FullTransferInTree(tree: TransferInViewTree)
 
   def targetDomain: TargetDomainId = commonData.targetDomain
 
-  override def mediatorId: MediatorId = commonData.targetMediator
+  override def mediator: MediatorRef = commonData.targetMediator
 
   override def informees: Set[Informee] = commonData.confirmingParties
 

@@ -15,12 +15,15 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
 private[transfer] sealed abstract case class TransferOutValidationTransferringParticipant(
     request: FullTransferOutTree,
     expectedStakeholders: Set[LfPartyId],
+    sourceProtocolVersion: SourceProtocolVersion,
     sourceTopology: TopologySnapshot,
     targetTopology: TopologySnapshot,
     recipients: Recipients,
@@ -56,6 +59,15 @@ private[transfer] sealed abstract case class TransferOutValidationTransferringPa
     )
   }
 
+  private def checkVetted(recipients: Set[ParticipantId])(implicit
+      ec: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Unit] =
+    // Before version 5 the transfer-out request did not include the template ID, so this check can't be done
+    if (sourceProtocolVersion.v < ProtocolVersion.v5)
+      EitherT.right(FutureUnlessShutdown.pure(()))
+    else
+      TransferKnownAndVetted(recipients, targetTopology, request.contractId, request.templateId)
+
 }
 
 private[transfer] object TransferOutValidationTransferringParticipant {
@@ -63,6 +75,7 @@ private[transfer] object TransferOutValidationTransferringParticipant {
   def apply(
       request: FullTransferOutTree,
       expectedStakeholders: Set[LfPartyId],
+      sourceProtocolVersion: SourceProtocolVersion,
       sourceTopology: TopologySnapshot,
       targetTopology: TopologySnapshot,
       recipients: Recipients,
@@ -74,6 +87,7 @@ private[transfer] object TransferOutValidationTransferringParticipant {
     val validation = new TransferOutValidationTransferringParticipant(
       request,
       expectedStakeholders,
+      sourceProtocolVersion,
       sourceTopology,
       targetTopology,
       recipients,
@@ -89,6 +103,7 @@ private[transfer] object TransferOutValidationTransferringParticipant {
       )
       _ <- validation.checkAdminParties(adminPartiesAndParticipants.adminParties)
       _ <- validation.checkParticipants(adminPartiesAndParticipants.participants)
+      _ <- validation.checkVetted(adminPartiesAndParticipants.participants)
     } yield ()
   }
 

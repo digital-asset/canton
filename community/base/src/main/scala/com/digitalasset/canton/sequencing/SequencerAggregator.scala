@@ -9,11 +9,9 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose, Signatu
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.SequencerAggregator.{
-  SequencerAggregatorError,
-  SequencerId,
-}
+import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
 import com.digitalasset.canton.sequencing.protocol.SignedContent
+import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
@@ -26,8 +24,7 @@ class SequencerAggregator(
     cryptoPureApi: CryptoPureApi,
     eventInboxSize: PositiveInt,
     val loggerFactory: NamedLoggerFactory,
-    expectedSequencers: NonEmpty[Set[SequencerAggregator.SequencerId]] =
-      NonEmpty.mk(Set, SequencerAggregator.DefaultSequencerId),
+    expectedSequencers: NonEmpty[Set[SequencerId]],
 ) extends NamedLogging {
 
   private val expectedSequencersSize: Int = expectedSequencers.size
@@ -158,8 +155,6 @@ class SequencerAggregator(
 
 }
 object SequencerAggregator {
-  type SequencerId = String
-  val DefaultSequencerId = "DefaultSequencerId"
   sealed trait SequencerAggregatorError extends Product with Serializable with PrettyPrinting
   object SequencerAggregatorError {
     final case class NotTheSameContentHash(hashes: NonEmpty[Set[Hash]])

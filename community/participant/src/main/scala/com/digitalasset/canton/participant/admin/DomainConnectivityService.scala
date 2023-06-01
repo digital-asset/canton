@@ -6,9 +6,10 @@ package com.digitalasset.canton.participant.admin
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.common.domain.ServiceAgreementId
+import com.digitalasset.canton.common.domain.{SequencerConnectClient, ServiceAgreementId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceInternalError.DomainIsMissingInternally
@@ -154,16 +155,20 @@ class DomainConnectivityService(
   )(implicit traceContext: TraceContext): Future[v0.GetAgreementResponse] = {
     val res = for {
       domainConnectionInfo <- getDomainConnectionInfo(domainAlias)
-      DomainConnectionInfo(sequencerConnection, domainId, staticDomainParameters) =
+      DomainConnectionInfo(sequencerConnections, domainId, staticDomainParameters) =
         domainConnectionInfo
-      optAgreement <- mapErr(sequencerConnection match {
-        case grpc: GrpcSequencerConnection =>
-          agreementService.getAgreement(
-            domainConnectionInfo.domainId,
-            grpc,
-            staticDomainParameters.protocolVersion,
-          )
-      })
+      optAgreement <- mapErr(
+        if (sequencerConnections.nonBftSetup) {
+          sequencerConnections.default match {
+            case grpc: GrpcSequencerConnection =>
+              agreementService.getAgreement(
+                domainConnectionInfo.domainId,
+                grpc,
+                staticDomainParameters.protocolVersion,
+              )
+          }
+        } else EitherT.pure[Future, AgreementServiceError](None)
+      )
       accepted <- optAgreement.fold(EitherT.rightT[Future, StatusRuntimeException](false))(ag =>
         mapErrNewET(EitherT.right(agreementService.hasAcceptedAgreement(domainId, ag.id)))
       )

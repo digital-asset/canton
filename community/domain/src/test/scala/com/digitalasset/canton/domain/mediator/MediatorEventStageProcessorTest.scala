@@ -90,6 +90,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
       domainSyncCryptoApi,
       identityClientEventHandler,
       None,
+      None,
       (requestId, events, _tc) => {
         receivedEvents.append((requestId, events))
         HandlerResult.done
@@ -321,6 +322,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest with H
         InformeeMessage(fullInformeeTree)(testedProtocolVersion),
         testedProtocolVersion,
         mockTopologySnapshot,
+        sendVerdict = true,
       )(loggerFactory) // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
   }
 }

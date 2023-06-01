@@ -37,7 +37,7 @@ class DomainUsabilityCheckerFull(
     traceContext: TraceContext,
 ) extends DomainUsabilityChecker[DomainNotUsedReason] {
   override def isUsable: EitherT[Future, DomainNotUsedReason, Unit] = {
-    val parties: Set[LfPartyId] = requiredPackagesByParty.keys.toSet
+    val parties: Set[LfPartyId] = requiredPackagesByParty.keySet
 
     val vetting = new DomainUsabilityCheckerVetting[DomainNotUsedReason](
       domainId,

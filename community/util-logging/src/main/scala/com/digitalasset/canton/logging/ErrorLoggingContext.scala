@@ -22,12 +22,11 @@ import org.slf4j.event.Level
   * @see [[NamedLoggingContext]] for another variant where the logger name is not fixed
   * @see [[NamedLogging.errorLoggingContext]] converts
   */
-final case class ErrorLoggingContext(
+abstract class ErrorLoggingContextBase(
     logger: TracedLogger,
     properties: Map[String, String],
     traceContext: TraceContext,
 ) extends ContextualizedErrorLogger {
-  override def correlationId: Option[String] = traceContext.traceId
 
   override def traceId: Option[String] = traceContext.traceId
 
@@ -80,6 +79,23 @@ final case class ErrorLoggingContext(
   def trace(message: String): Unit = logger.trace(message)(traceContext)
   def trace(message: String, throwable: Throwable): Unit =
     logger.trace(message, throwable)(traceContext)
+}
+
+final case class ErrorLoggingContext(
+    logger: TracedLogger,
+    properties: Map[String, String],
+    traceContext: TraceContext,
+) extends ErrorLoggingContextBase(logger, properties, traceContext) {
+  override def correlationId: Option[String] = traceContext.traceId
+}
+
+final case class LedgerErrorLoggingContext(
+    logger: TracedLogger,
+    properties: Map[String, String],
+    traceContext: TraceContext,
+    explicitCorrelationId: String,
+) extends ErrorLoggingContextBase(logger, properties, traceContext) {
+  override def correlationId: Option[String] = Some(explicitCorrelationId)
 }
 
 object ErrorLoggingContext {

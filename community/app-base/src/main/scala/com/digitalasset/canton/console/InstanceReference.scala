@@ -9,7 +9,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
-import com.digitalasset.canton.console.commands.{HealthAdministrationCommon, *}
+import com.digitalasset.canton.console.commands.*
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.config.RemoteDomainConfig
 import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap}
@@ -28,7 +28,7 @@ import com.digitalasset.canton.participant.{
   ParticipantNodeBootstrapX,
   ParticipantNodeX,
 }
-import com.digitalasset.canton.sequencing.SequencerConnection
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.topology.{DomainId, NodeIdentity, ParticipantId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
@@ -93,6 +93,18 @@ trait InstanceReference extends InstanceReferenceCommon {
   */
 trait InstanceReferenceX extends InstanceReferenceCommon {
   override def topology: TopologyAdministrationGroupX
+
+  private lazy val trafficControl_ =
+    new TrafficControlAdministrationGroup(
+      this,
+      topology,
+      this,
+      consoleEnvironment,
+      loggerFactory,
+    )
+  @Help.Summary("Traffic control related commands")
+  @Help.Group("Traffic")
+  def traffic_control: TrafficControlAdministrationGroup = trafficControl_
 }
 
 /** Pointer for a potentially running instance by instance type (domain/participant) and its id.
@@ -299,7 +311,10 @@ trait DomainReference
       "May throw an exception if the domain alias or sequencer connection is misconfigured."
   )
   def defaultDomainConnection: DomainConnectionConfig =
-    DomainConnectionConfig(DomainAlias.tryCreate(name), sequencerConnection)
+    DomainConnectionConfig(
+      DomainAlias.tryCreate(name),
+      SequencerConnections.default(sequencerConnection),
+    )
 }
 
 trait RemoteDomainReference extends DomainReference with GrpcRemoteInstanceReference {

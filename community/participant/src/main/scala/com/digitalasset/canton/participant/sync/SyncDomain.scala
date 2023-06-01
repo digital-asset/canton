@@ -56,6 +56,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.ParticipantTopologyDispatcherCommon
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
+import com.digitalasset.canton.participant.traffic.TrafficStateController
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -301,6 +302,14 @@ class SyncDomain(
       inFlightSubmissionTracker,
       loggerFactory,
     )
+
+  private val trafficStateController =
+    new TrafficStateController(topologyClient, participantId, loggerFactory)
+
+  def getTrafficControlState()(implicit
+      tc: TraceContext
+  ): Future[Option[TrafficStateController.ParticipantTrafficState]] =
+    trafficStateController.getState()
 
   def authorityOfInSnapshotApproximation(requestingAuthority: Set[LfPartyId])(implicit
       traceContext: TraceContext
@@ -573,6 +582,8 @@ class SyncDomain(
           ): HandlerResult = {
             tracedEvents.withTraceContext { traceContext => closedEvents =>
               val openEvents = closedEvents.map { event =>
+                event.trafficStatus.foreach(trafficStateController.updateState)
+
                 val openedEvent = PossiblyIgnoredSequencedEvent.openEnvelopes(event)(
                   staticDomainParameters.protocolVersion,
                   domainCrypto.crypto.pureCrypto,

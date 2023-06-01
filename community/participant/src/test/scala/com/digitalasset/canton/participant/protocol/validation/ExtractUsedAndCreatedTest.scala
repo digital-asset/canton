@@ -181,6 +181,7 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
         coreInputs = singleCreate.used,
         created = singleCreate.created,
         seed = singleCreate.nodeSeed,
+        isRoot = true,
       )
 
       val viewData = ViewData(

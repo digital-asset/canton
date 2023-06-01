@@ -5,7 +5,7 @@ package com.digitalasset.canton.data
 
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, ViewHash}
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef}
 
 /** Common supertype of all view trees that are sent as [[com.digitalasset.canton.protocol.messages.EncryptedViewMessage]]s */
 trait ViewTree extends PrettyPrinting {
@@ -23,7 +23,7 @@ trait ViewTree extends PrettyPrinting {
 
   /** The root hash of the view tree.
     *
-    * Two view trees with the same [[rootHash]] must also have the same [[domainId]] and [[mediatorId]]
+    * Two view trees with the same [[rootHash]] must also have the same [[domainId]] and [[mediator]]
     * (except for hash collisions).
     */
   def rootHash: RootHash
@@ -32,7 +32,7 @@ trait ViewTree extends PrettyPrinting {
   def domainId: DomainId
 
   /** The mediator that is responsible for coordinating this request */
-  def mediatorId: MediatorId
+  def mediator: MediatorRef
 
   override def pretty: Pretty[this.type]
 }

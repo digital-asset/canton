@@ -6,8 +6,13 @@ package com.digitalasset.canton.protocol.messages
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  MemberRecipient,
+  OpenEnvelope,
+  Recipients,
+}
+import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.version.ProtocolVersion
 
 /** Represents the confirmation request as sent from a submitting node to the sequencer.
@@ -18,11 +23,11 @@ final case class ConfirmationRequest(
     protocolVersion: ProtocolVersion,
 ) extends PrettyPrinting {
 
-  def mediator: MediatorId = informeeMessage.mediatorId
+  def mediator: MediatorRef = informeeMessage.mediator
 
   def asBatch: Batch[DefaultOpenEnvelope] = {
     val mediatorEnvelope: DefaultOpenEnvelope =
-      OpenEnvelope(informeeMessage, Recipients.cc(mediator))(protocolVersion)
+      OpenEnvelope(informeeMessage, Recipients.cc(mediator.toRecipient))(protocolVersion)
 
     val rootHashMessage = RootHashMessage(
       rootHash = informeeMessage.fullInformeeTree.transactionId.toRootHash,
@@ -48,7 +53,9 @@ final case class ConfirmationRequest(
       .map { participantsNE =>
         OpenEnvelope(
           rootHashMessage,
-          Recipients.groups(participantsNE.map(NonEmpty.mk(Set, _, mediator))),
+          Recipients.recipientGroups(
+            participantsNE.map(x => NonEmpty.mk(Set, MemberRecipient(x), mediator.toRecipient))
+          ),
         )(
           protocolVersion
         )

@@ -26,7 +26,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferInValidation.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
-  NoSubmissionPermissionIn,
+  NoTransferSubmissionPermission,
   ReceivedMultipleRequests,
   StakeholdersMismatch,
   SubmittingPartyMustBeStakeholderIn,
@@ -62,20 +62,19 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
   private val sourceDomain = SourceDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
   )
-  private val sourceMediator = MediatorId(
-    UniqueIdentifier.tryFromProtoPrimitive("mediator::source")
+  private val sourceMediator = MediatorRef(
+    MediatorId(UniqueIdentifier.tryFromProtoPrimitive("mediator::source"))
   )
   private val targetDomain = TargetDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::target"))
   )
-  private val targetMediator = MediatorId(
-    UniqueIdentifier.tryFromProtoPrimitive("mediator::target")
+  private val targetMediator = MediatorRef(
+    MediatorId(UniqueIdentifier.tryFromProtoPrimitive("mediator::target"))
   )
   private val anotherDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::another"))
-  private val anotherMediator = MediatorId(
-    UniqueIdentifier.tryFromProtoPrimitive("mediator::another")
+  private val anotherMediator = MediatorRef(
+    MediatorId(UniqueIdentifier.tryFromProtoPrimitive("mediator::another"))
   )
-
   private val party1: LfPartyId = PartyId(
     UniqueIdentifier.tryFromProtoPrimitive("party1::party")
   ).toLf
@@ -231,7 +230,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           SourceProtocolVersion(testedProtocolVersion),
           transferId.transferOutTimestamp,
           RequestCounter(0),
-          fullTransferOutTree,
+          valueOrFail(fullTransferOutTree)("Failed to create fullTransferOutTree"),
           CantonTimestamp.ofEpochSecond(10),
           contract,
           TransferCounter.Genesis, // TODO(#12286) test different values.
@@ -334,7 +333,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           )
         )("prepare submission did not return a left")
       } yield {
-        preparedSubmission should matchPattern { case NoSubmissionPermissionIn(_, _, _) => }
+        preparedSubmission should matchPattern { case NoTransferSubmissionPermission(_, _, _) => }
       }
     }
 
@@ -366,7 +365,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           )
         )("prepare submission did not return a left")
       } yield {
-        preparedSubmission should matchPattern { case PartyNotHosted(_, _, _) =>
+        preparedSubmission should matchPattern { case NoTransferSubmissionPermission(_, _, _) =>
         }
       }
     }
@@ -432,7 +431,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
-            MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+            MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
           )
         )("compute activeness set failed")
       } yield {
@@ -461,7 +460,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             NonEmpty(Seq, (WithRecipients(inTree2, RecipientsTest.testInstance), None)),
             Seq.empty,
             cryptoSnapshot,
-            MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+            MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
           )
         )("compute activeness set did not return a left")
       } yield {
@@ -489,7 +488,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             ),
             Seq.empty,
             cryptoSnapshot,
-            MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+            MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
           )
         )("compute activenss set did not return a left")
       } yield {
@@ -631,7 +630,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         transferringParticipant = false,
         transferId,
         contract.metadata.stakeholders,
-        MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+        MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
       )
 
       for {
@@ -690,26 +689,29 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       transferCounter: TransferCounter,
       creatingTransactionId: TransactionId,
       targetDomain: TargetDomainId,
-      targetMediator: MediatorId,
+      targetMediator: MediatorRef,
       transferOutResult: DeliveredTransferOutResult,
       uuid: UUID = new UUID(4L, 5L),
   ): FullTransferInTree = {
     val seed = seedGenerator.generateSaltSeed()
-    TransferInProcessingSteps.makeFullTransferInTree(
-      pureCrypto,
-      seed,
-      submitterInfo(submitter),
-      stakeholders,
-      contract,
-      transferCounter,
-      creatingTransactionId,
-      targetDomain,
-      targetMediator,
-      transferOutResult,
-      uuid,
-      SourceProtocolVersion(testedProtocolVersion),
-      TargetProtocolVersion(testedProtocolVersion),
-    )
+
+    valueOrFail(
+      TransferInProcessingSteps.makeFullTransferInTree(
+        pureCrypto,
+        seed,
+        submitterInfo(submitter),
+        stakeholders,
+        contract,
+        transferCounter,
+        creatingTransactionId,
+        targetDomain,
+        targetMediator,
+        transferOutResult,
+        uuid,
+        SourceProtocolVersion(testedProtocolVersion),
+        TargetProtocolVersion(testedProtocolVersion),
+      )
+    )("Failed to create FullTransferInTree")
   }
 
   private def encryptFullTransferInTree(

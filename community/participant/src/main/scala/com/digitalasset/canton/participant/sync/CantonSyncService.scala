@@ -559,7 +559,7 @@ class CantonSyncService(
     */
   override def stateUpdates(
       beginAfterOffset: Option[LedgerSyncOffset]
-  )(implicit loggingContext: LoggingContext): Source[(LedgerSyncOffset, Update), NotUsed] =
+  )(implicit loggingContext: LoggingContext): Source[(LedgerSyncOffset, Traced[Update]), NotUsed] =
     TraceContext.withNewTraceContext { implicit traceContext =>
       logger.debug(s"Subscribing to stateUpdates from $beginAfterOffset")
       // Plus one since dispatchers use inclusive offsets.
@@ -579,7 +579,7 @@ class CantonSyncService(
                     implicit val traceContext: TraceContext = tracedEvent.traceContext
                     logger
                       .debug(show"Emitting event at offset $offset. Event: ${tracedEvent.value}")
-                    (UpstreamOffsetConvert.fromGlobalOffset(offset), tracedUpdate.value)
+                    (UpstreamOffsetConvert.fromGlobalOffset(offset), tracedUpdate)
                   }
               }
               .collect { case Some(tuple) => tuple },
@@ -796,6 +796,7 @@ class CantonSyncService(
       SyncServiceError.SyncServiceDomainMustBeOffline.Error(alias): SyncServiceError,
     )
     for {
+      // TODO(i12076): Check each sequencer for the retrieved domainId and make they are aligned
       targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
         DomainConnectionInfo
           .fromConfig(domainRegistry.sequencerConnectClientBuilder)(target)
@@ -1631,6 +1632,8 @@ object SyncServiceError extends SyncServiceErrorGroup {
   abstract class MigrationErrors extends ErrorGroup()
 
   abstract class DomainRegistryErrorGroup extends ErrorGroup()
+
+  abstract class TrafficControlErrorGroup extends ErrorGroup()
 
   final case class SyncServiceFailedDomainConnection(
       domain: DomainAlias,

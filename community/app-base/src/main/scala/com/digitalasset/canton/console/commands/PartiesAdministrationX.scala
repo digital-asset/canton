@@ -154,7 +154,7 @@ class ParticipantPartiesAdministrationGroupX(
       name: String,
       namespace: Namespace = participantId.uid.namespace,
       participants: Seq[ParticipantId] = Seq(participantId),
-      threshold: Int = 1,
+      threshold: PositiveInt = PositiveInt.one,
       displayName: Option[String] = None,
       // TODO(i10809) replace wait for domain for a clean topology synchronisation using the dispatcher info
       waitForDomain: DomainChoice = DomainChoice.Only(Seq()),
@@ -283,7 +283,7 @@ class ParticipantPartiesAdministrationGroupX(
   private def runPartyCommand(
       partyId: PartyId,
       participants: Seq[ParticipantId],
-      threshold: Int,
+      threshold: PositiveInt,
       force: Boolean = false,
   ): ConsoleCommandResult[SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX]] = {
 
@@ -299,7 +299,7 @@ class ParticipantPartiesAdministrationGroupX(
             participants.map(pid =>
               HostingParticipant(
                 pid,
-                if (threshold > 1) ParticipantPermissionX.Confirmation
+                if (threshold.value > 1) ParticipantPermissionX.Confirmation
                 else ParticipantPermissionX.Submission,
               )
             ),

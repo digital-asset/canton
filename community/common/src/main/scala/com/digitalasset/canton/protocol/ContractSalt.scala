@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.serialization.DeterministicEncoding
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.{DomainId, MediatorRef}
 
 import java.util.UUID
 
@@ -33,7 +33,7 @@ object ContractSalt {
   def create(hmacOps: HmacOps)(
       transactionUuid: UUID,
       domainId: DomainId,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       actionSalt: Salt,
       createIndex: Int,
       viewPosition: ViewPosition,
@@ -44,7 +44,7 @@ object ContractSalt {
       .concat(viewPosition.encodeDeterministically)
       .concat(DeterministicEncoding.encodeString(transactionUuid.toString))
       .concat(DeterministicEncoding.encodeString(domainId.toProtoPrimitive))
-      .concat(DeterministicEncoding.encodeString(mediatorId.toProtoPrimitive))
+      .concat(DeterministicEncoding.encodeString(mediator.toProtoPrimitive))
 
     val salt = Salt.tryDeriveSalt(actionSalt, bytestring, contractIdVersion, hmacOps)
 

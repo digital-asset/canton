@@ -12,7 +12,8 @@ import com.daml.lf.value.Value
 import com.daml.logging.entries.{LoggingEntry, LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.google.rpc.status.{Status as RpcStatus}
+import com.digitalasset.canton.topology.DomainId
+import com.google.rpc.status.Status as RpcStatus
 
 import java.time.Duration
 
@@ -300,6 +301,8 @@ object Update {
       recordTime: Timestamp,
       completionInfo: CompletionInfo,
       reasonTemplate: CommandRejected.RejectionReasonTemplate,
+      optDomainId: Option[DomainId] =
+        None, // TODO(#13173) None for backwards compatibility, expected to be set for X nodes
   ) extends Update {
     override def description: String =
       s"Reject command ${completionInfo.commandId}${if (definiteAnswer)
@@ -315,14 +318,16 @@ object Update {
   object CommandRejected {
 
     implicit val `CommandRejected to LoggingValue`: ToLoggingValue[CommandRejected] = {
-      case CommandRejected(recordTime, submitterInfo, reason) =>
+      case CommandRejected(recordTime, submitterInfo, reason, optDomainId) =>
         LoggingValue.Nested.fromEntries(
-          Logging.recordTime(recordTime),
-          Logging.submitter(submitterInfo.actAs),
-          Logging.applicationId(submitterInfo.applicationId),
-          Logging.commandId(submitterInfo.commandId),
-          Logging.deduplicationPeriod(submitterInfo.optDeduplicationPeriod),
-          Logging.rejectionReason(reason),
+          List(
+            Logging.recordTime(recordTime),
+            Logging.submitter(submitterInfo.actAs),
+            Logging.applicationId(submitterInfo.applicationId),
+            Logging.commandId(submitterInfo.commandId),
+            Logging.deduplicationPeriod(submitterInfo.optDeduplicationPeriod),
+            Logging.rejectionReason(reason),
+          ) ::: optDomainId.map(Logging.domainId).toList: _*
         )
     }
 
@@ -451,6 +456,9 @@ object Update {
 
     def completionInfo(info: Option[CompletionInfo]): LoggingEntry =
       "completion" -> info
+
+    def domainId(domainId: DomainId): LoggingEntry =
+      "domainId" -> domainId.toString
   }
 
 }

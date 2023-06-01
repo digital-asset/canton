@@ -71,7 +71,7 @@ sealed abstract class LightTransactionViewTree private[data] (
 
   override def domainId: DomainId = commonMetadata.domainId
 
-  override def mediatorId: MediatorId = commonMetadata.mediatorId
+  override def mediator: MediatorRef = commonMetadata.mediator
 
   lazy val confirmationPolicy: ConfirmationPolicy = commonMetadata.confirmationPolicy
 

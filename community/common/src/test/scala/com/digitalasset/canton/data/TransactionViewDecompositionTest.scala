@@ -29,34 +29,37 @@ class TransactionViewDecompositionTest
     with ComparesLfTransactions
     with NeedsNewLfContractIds {
 
-  Seq(TransactionViewDecompositionFactory.V1, TransactionViewDecompositionFactory.V2) foreach {
-    factory =>
-      s"With factory ${factory.getClass.getSimpleName}" when {
+  lazy val factory: TransactionViewDecompositionFactory = TransactionViewDecompositionFactory(
+    testedProtocolVersion
+  )
+  s"With factory ${factory.getClass.getSimpleName}" when {
 
-        ConfirmationPolicy.values foreach { confirmationPolicy =>
-          s"With policy $confirmationPolicy" when {
+    ConfirmationPolicy.values foreach { confirmationPolicy =>
+      s"With policy $confirmationPolicy" when {
 
-            val exampleTransactionFactory =
-              new ExampleTransactionFactory()(confirmationPolicy = confirmationPolicy)
+        val exampleTransactionFactory =
+          new ExampleTransactionFactory()(confirmationPolicy = confirmationPolicy)
 
-            exampleTransactionFactory.standardHappyCases foreach { example =>
-              s"decomposing $example into views" must {
-                "yield the correct views" in {
-                  factory
-                    .fromTransaction(
-                      confirmationPolicy,
-                      exampleTransactionFactory.topologySnapshot,
-                      example.wellFormedUnsuffixedTransaction,
-                      RollbackContext.empty,
-                    )
-                    .futureValue
-                    .toList shouldEqual example.rootViewDecompositions.toList
-                }
-              }
+        exampleTransactionFactory.standardHappyCases.filter(
+          _.supportedConfirmationPolicies.contains(confirmationPolicy)
+        ) foreach { example =>
+          s"decomposing $example into views" must {
+            "yield the correct views" in {
+              factory
+                .fromTransaction(
+                  confirmationPolicy,
+                  exampleTransactionFactory.topologySnapshot,
+                  example.wellFormedUnsuffixedTransaction,
+                  RollbackContext.empty,
+                  Some(ExampleTransactionFactory.submitter),
+                )
+                .futureValue
+                .toList shouldEqual example.rootViewDecompositions.toList
             }
           }
         }
       }
+    }
   }
 
   "A view decomposition" when {
@@ -99,7 +102,12 @@ class TransactionViewDecompositionTest
         val createWithSubmitter = createNode(unsuffixedId(0), signatories = Set(submitter))
 
         val (viewInformees, viewThreshold) = ConfirmationPolicy.Signatory
-          .informeesAndThreshold(createWithSignatory, defaultTopologySnapshot)
+          .informeesAndThreshold(
+            createWithSignatory,
+            None,
+            defaultTopologySnapshot,
+            testedProtocolVersion,
+          )
           .futureValue
 
         val viewWithInconsistentInformees = NewView(
@@ -113,7 +121,12 @@ class TransactionViewDecompositionTest
         )
 
         val actual = viewWithInconsistentInformees
-          .compliesWith(ConfirmationPolicy.Signatory, defaultTopologySnapshot)
+          .compliesWith(
+            ConfirmationPolicy.Signatory,
+            None,
+            defaultTopologySnapshot,
+            testedProtocolVersion,
+          )
           .value
           .futureValue
         actual.isLeft shouldBe true
@@ -130,6 +143,7 @@ class TransactionViewDecompositionTest
             mock[TopologySnapshot],
             createWellFormedTransaction(flatTransactionSize),
             RollbackContext.empty,
+            None,
           )
         )
 
@@ -187,6 +201,7 @@ class TransactionViewDecompositionTest
             defaultTopologySnapshot,
             RollbackTransactionBuilder.wellFormedUnsuffixedTransaction(embeddedRollbackExample),
             RollbackContext.empty,
+            None,
           )
           .futureValue
 

@@ -35,7 +35,7 @@ import com.digitalasset.canton.protocol.{RequestAndRootHashMessage, RequestProce
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessorCommon
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, ErrorUtil}
@@ -323,7 +323,7 @@ trait MessageDispatcher { this: NamedLogging =>
           val batch = RequestAndRootHashMessage(
             goodRequest.requestEnvelopes,
             rootHashMessage,
-            goodRequest.mediatorId,
+            goodRequest.mediator,
           )
           doProcess(
             RequestKind(goodRequest.rootHashMessage.viewType),
@@ -331,17 +331,17 @@ trait MessageDispatcher { this: NamedLogging =>
           )
         }
       case Left(DoNotExpectMediatorResult) => tickRecordOrderPublisher(sc, ts)
-      case Left(ExpectMalformedMediatorRequestResult(mediatorId)) =>
+      case Left(ExpectMalformedMediatorRequestResult(mediator)) =>
         // The request is malformed from this participant's and the mediator's point of view if the sequencer is honest.
         // An honest mediator will therefore try to send a `MalformedMediatorRequestResult`.
         withNewRequestCounter { rc =>
           doProcess(
             UnspecifiedMessageKind,
             badRootHashMessagesRequestProcessor
-              .handleBadRequestWithExpectedMalformedMediatorRequest(rc, sc, ts, mediatorId),
+              .handleBadRequestWithExpectedMalformedMediatorRequest(rc, sc, ts, mediator),
           )
         }
-      case Left(SendMalformedAndExpectMediatorResult(rootHash, mediatorId, reason)) =>
+      case Left(SendMalformedAndExpectMediatorResult(rootHash, mediator, reason)) =>
         // The request is malformed from this participant's point of view, but not necessarily from the mediator's.
         withNewRequestCounter { rc =>
           doProcess(
@@ -351,7 +351,7 @@ trait MessageDispatcher { this: NamedLogging =>
               sc,
               ts,
               rootHash,
-              mediatorId,
+              mediator,
               LocalReject.MalformedRejects.BadRootHashMessages
                 .Reject(reason, protocolVersion),
             ),
@@ -373,7 +373,7 @@ trait MessageDispatcher { this: NamedLogging =>
       case (rootHashMessagesSentToAMediator, allMediators) =>
         (rootHashMessagesSentToAMediator: @unchecked) match {
           case Seq(rootHashMessage, furtherRHMs @ _*) =>
-            val mediatorId = allMediators.headOption.getOrElse {
+            val mediator: MediatorRef = allMediators.headOption.getOrElse {
               ErrorUtil.internalError(
                 new RuntimeException(
                   "The previous checks ensure that there is exactly one mediator ID"
@@ -383,18 +383,18 @@ trait MessageDispatcher { this: NamedLogging =>
 
             if (furtherRHMs.isEmpty) {
               val recipientsAreValid = rootHashMessage.recipients.asSingleGroup.contains(
-                NonEmpty.mk(Set, participantId, mediatorId)
+                NonEmpty.mk(Set, MemberRecipient(participantId), mediator.toRecipient)
               )
               if (recipientsAreValid) {
                 checkEncryptedViewsForRootHashMessage(
                   encryptedViews,
                   rootHashMessage.protocolMessage,
-                  mediatorId,
+                  mediator,
                 )
               } else {
                 // We assume that the participant receives only envelopes of which it is a recipient
                 Checked.Abort(
-                  ExpectMalformedMediatorRequestResult(mediatorId),
+                  ExpectMalformedMediatorRequestResult(mediator),
                   Chain(
                     show"Received root hash message with invalid recipients: ${rootHashMessage.recipients}"
                   ),
@@ -406,7 +406,7 @@ trait MessageDispatcher { this: NamedLogging =>
               // all these messages must have been sent to the same mediator.
               // This mediator will therefore reject the request as malformed.
               Checked.Abort(
-                ExpectMalformedMediatorRequestResult(mediatorId),
+                ExpectMalformedMediatorRequestResult(mediator),
                 Chain(show"Multiple root hash messages in batch: $rootHashMessagesSentToAMediator"),
               )
             }
@@ -431,7 +431,7 @@ trait MessageDispatcher { this: NamedLogging =>
   )(implicit traceContext: TraceContext): Checked[
     FailedRootHashMessageCheck,
     String,
-    (List[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]], Set[MediatorId]),
+    (List[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]], Set[MediatorRef]),
   ] = {
     def isMediatorId(recipient: Recipient): Boolean = recipient match {
       case MemberRecipient(_: MediatorId) => true
@@ -445,12 +445,12 @@ trait MessageDispatcher { this: NamedLogging =>
     // The sequencer checks that participants can send only batches that target at most one mediator.
     // Only participants send batches with encrypted views.
     // So we should find at most one mediator among the recipients of the root hash messages if there are encrypted views.
-    val allMediators = rootHashMessagesSentToAMediator.foldLeft(Set.empty[MediatorId]) {
+    val allMediators = rootHashMessagesSentToAMediator.foldLeft(Set.empty[MediatorRef]) {
       (acc, rhm) =>
         val mediators = {
-          // todo(#12360): handle MediatorsOfDomain
-          rhm.recipients.allRecipients.collect { case MemberRecipient(mediatorId: MediatorId) =>
-            mediatorId
+          rhm.recipients.allRecipients.collect {
+            case MemberRecipient(mediatorId: MediatorId) => MediatorRef(mediatorId)
+            case mediatorsOfDomain @ MediatorsOfDomain(_) => MediatorRef(mediatorsOfDomain)
           }
         }
         acc.union(mediators)
@@ -485,7 +485,7 @@ trait MessageDispatcher { this: NamedLogging =>
   private def checkEncryptedViewsForRootHashMessage(
       encryptedViews: List[OpenEnvelope[EncryptedViewMessage[ViewType]]],
       rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload],
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
   ): Checked[SendMalformedAndExpectMediatorResult, String, GoodRequest] = {
     val viewType: rootHashMessage.viewType.type = rootHashMessage.viewType
     val (badEncryptedViewTypes, goodEncryptedViews) = encryptedViews
@@ -513,13 +513,13 @@ trait MessageDispatcher { this: NamedLogging =>
         Checked.Abort(
           SendMalformedAndExpectMediatorResult(
             rootHashMessage.rootHash,
-            mediatorId,
+            mediator,
             show"Received no encrypted view message of type $viewType",
           ),
           Chain(show"Received no encrypted view message of type $viewType"),
         )
       case Some(nonemptyEncryptedViews) =>
-        Checked.result(GoodRequest(rootHashMessage, mediatorId)(nonemptyEncryptedViews))
+        Checked.result(GoodRequest(rootHashMessage, mediator)(nonemptyEncryptedViews))
     }
 
     badEncryptedViewsC.flatMap((_: Unit) => goodEncryptedViewsC)
@@ -607,17 +607,17 @@ private[participant] object MessageDispatcher {
   /** Sigma type to tie the envelope's view type to the root hash message's. */
   private sealed trait GoodRequest {
     val rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload]
-    val mediatorId: MediatorId
+    val mediator: MediatorRef
     val requestEnvelopes: NonEmpty[Seq[
       OpenEnvelope[EncryptedViewMessage[rootHashMessage.viewType.type]]
     ]]
   }
   private object GoodRequest {
-    def apply(rhm: RootHashMessage[SerializedRootHashMessagePayload], mediator: MediatorId)(
+    def apply(rhm: RootHashMessage[SerializedRootHashMessagePayload], mediatorRef: MediatorRef)(
         envelopes: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[rhm.viewType.type]]]]
     ): GoodRequest = new GoodRequest {
       override val rootHashMessage: rhm.type = rhm
-      override val mediatorId: MediatorId = mediator
+      override val mediator: MediatorRef = mediatorRef
       override val requestEnvelopes
           : NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[rootHashMessage.viewType.type]]]] =
         envelopes
@@ -647,12 +647,12 @@ private[participant] object MessageDispatcher {
   @VisibleForTesting
   private[protocol] sealed trait FailedRootHashMessageCheck extends Product with Serializable
   @VisibleForTesting
-  private[protocol] final case class ExpectMalformedMediatorRequestResult(mediatorId: MediatorId)
+  private[protocol] final case class ExpectMalformedMediatorRequestResult(mediator: MediatorRef)
       extends FailedRootHashMessageCheck
   @VisibleForTesting
   private[protocol] final case class SendMalformedAndExpectMediatorResult(
       rootHash: RootHash,
-      mediatorId: MediatorId,
+      mediator: MediatorRef,
       rejectionReason: String,
   ) extends FailedRootHashMessageCheck
   @VisibleForTesting
@@ -687,9 +687,7 @@ private[participant] object MessageDispatcher {
         transactionProcessor: TransactionProcessor,
         transferOutProcessor: TransferOutProcessor,
         transferInProcessor: TransferInProcessor,
-        registerTopologyTransactionResponseProcessor: Traced[
-          List[DefaultOpenEnvelope]
-        ] => HandlerResult,
+        registerTopologyTransactionResponseProcessor: EnvelopeHandler,
         topologyProcessor: TopologyTransactionProcessorCommon,
         acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
         requestCounterAllocator: RequestCounterAllocator,

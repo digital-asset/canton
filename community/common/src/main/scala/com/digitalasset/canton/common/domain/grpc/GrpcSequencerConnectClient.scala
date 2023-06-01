@@ -1,13 +1,18 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.domain.grpc
+package com.digitalasset.canton.common.domain.grpc
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.common.domain.ServiceAgreement
+import com.digitalasset.canton.common.domain.SequencerConnectClient.{
+  DomainClientBootstrapInfo,
+  Error,
+  TopologyRequestAddressX,
+}
+import com.digitalasset.canton.common.domain.{SequencerConnectClient, ServiceAgreement}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.GetServiceAgreementRequest
@@ -16,12 +21,6 @@ import com.digitalasset.canton.domain.api.v0.SequencerConnect.VerifyActive
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
-import com.digitalasset.canton.participant.domain.SequencerConnectClient
-import com.digitalasset.canton.participant.domain.SequencerConnectClient.{
-  DomainClientBootstrapInfo,
-  Error,
-  TopologyRequestAddressX,
-}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}

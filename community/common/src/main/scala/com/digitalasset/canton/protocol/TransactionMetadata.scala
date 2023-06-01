@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.protocol
 
+import com.daml.lf.crypto
+import com.daml.lf.data.{ImmArray, Time}
+import com.daml.lf.transaction.NodeId
 import com.daml.lf.transaction.Transaction.Metadata
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.participant.state.v2.TransactionMeta
 
 /** Collects the metadata of a LF transaction to the extent that is needed in Canton
   *
@@ -27,12 +29,16 @@ object TransactionMetadata {
       seeds = metadata.nodeSeeds.toSeq.toMap,
     )
 
-  def fromTransactionMeta(meta: TransactionMeta): Either[String, TransactionMetadata] = {
+  def fromTransactionMeta(
+      metaLedgerEffectiveTime: Time.Timestamp,
+      metaSubmissionTime: Time.Timestamp,
+      metaOptNodeSeeds: Option[ImmArray[(NodeId, crypto.Hash)]],
+  ): Either[String, TransactionMetadata] = {
     for {
-      seeds <- meta.optNodeSeeds.toRight("Node seeds must be specified")
+      seeds <- metaOptNodeSeeds.toRight("Node seeds must be specified")
     } yield TransactionMetadata(
-      CantonTimestamp(meta.ledgerEffectiveTime),
-      CantonTimestamp(meta.submissionTime),
+      CantonTimestamp(metaLedgerEffectiveTime),
+      CantonTimestamp(metaSubmissionTime),
       seeds.toSeq.toMap,
     )
   }

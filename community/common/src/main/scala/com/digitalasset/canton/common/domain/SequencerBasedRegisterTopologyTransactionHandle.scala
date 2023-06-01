@@ -1,25 +1,24 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.domain
+package com.digitalasset.canton.common.domain
 
 import cats.data.EitherT
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.mapErr
-import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
-import com.digitalasset.canton.participant.topology.RegisterTopologyTransactionHandleCommon
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
+import com.digitalasset.canton.sequencing.{EnvelopeHandler, HandlerResult}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member, ParticipantId}
@@ -33,6 +32,15 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.CollectionConverters.*
+
+trait RegisterTopologyTransactionHandleCommon[TX] extends FlagCloseable {
+  def submit(
+      transactions: Seq[TX]
+  ): FutureUnlessShutdown[Seq[
+    // TODO(#11255): Switch to RegisterTopologyTransactionResponseResultX once non-proto version exists
+    RegisterTopologyTransactionResponseResult.State
+  ]]
+}
 
 trait RegisterTopologyTransactionHandleWithProcessor[TX]
     extends RegisterTopologyTransactionHandleCommon[TX] {
@@ -61,10 +69,10 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     with NamedLogging {
 
   private val service =
-    new ParticipantDomainTopologyService(domainId, send, protocolVersion, timeouts, loggerFactory)
+    new DomainTopologyService(domainId, send, protocolVersion, timeouts, loggerFactory)
 
   // must be used by the event handler of a sequencer subscription in order to complete the promises of requests sent with the given sequencer client
-  val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = service.processor
+  val processor: EnvelopeHandler = service.processor
 
   override def submit(
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
@@ -93,7 +101,7 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     ) => EitherT[Future, SendAsyncClientError, Unit],
     domainId: DomainId,
     topologyRequestAddress: TopologyRequestAddressX,
-    participantId: ParticipantId,
+    requestedFor: Member,
     requestedBy: Member,
     protocolVersion: ProtocolVersion,
     protected val timeouts: ProcessingTimeout,
@@ -105,7 +113,7 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     with NamedLogging {
 
   private val service =
-    new ParticipantDomainTopologyServiceX(
+    new DomainTopologyServiceX(
       domainId,
       topologyRequestAddress,
       send,
@@ -115,7 +123,7 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     )
 
   // must be used by the event handler of a sequencer subscription in order to complete the promises of requests sent with the given sequencer client
-  val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = service.processor
+  val processor: EnvelopeHandler = service.processor
 
   override def submit(
       transactions: Seq[GenericSignedTopologyTransactionX]
@@ -124,7 +132,7 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
       RegisterTopologyTransactionRequestX
         .create(
           requestedBy = requestedBy,
-          requestedFor = participantId,
+          requestedFor = requestedFor,
           requestId = String255.tryCreate(UUID.randomUUID().toString),
           transactions = transactions.toList,
           domainId = domainId,
@@ -136,7 +144,7 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
   override def onClosed(): Unit = service.close()
 }
 
-private[domain] abstract class ParticipantDomainTopologyServiceCommon[
+abstract class DomainTopologyServiceCommon[
     Request <: ProtocolMessage,
     RequestIndex,
     Response,
@@ -212,7 +220,7 @@ private[domain] abstract class ParticipantDomainTopologyServiceCommon[
       )
     }
 
-  private[domain] val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = envs =>
+  val processor: EnvelopeHandler = envs =>
     envs.withTraceContext { implicit traceContext => envs =>
       HandlerResult.asynchronous(performUnlessClosingF(s"${getClass.getSimpleName}-processor") {
         Future {
@@ -232,7 +240,7 @@ private[domain] abstract class ParticipantDomainTopologyServiceCommon[
     )
   }
 }
-class ParticipantDomainTopologyService[
+class DomainTopologyService[
     Request,
     RequestIndex,
     Response,
@@ -247,7 +255,7 @@ class ParticipantDomainTopologyService[
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends ParticipantDomainTopologyServiceCommon[
+    extends DomainTopologyServiceCommon[
       RegisterTopologyTransactionRequest,
       (TopologyRequestId, ParticipantId),
       RegisterTopologyTransactionResponse.Result,
@@ -279,12 +287,7 @@ class ParticipantDomainTopologyService[
 
 }
 
-class ParticipantDomainTopologyServiceX[
-    Request,
-    RequestIndex,
-    Response,
-    Result,
-](
+class DomainTopologyServiceX(
     domainId: DomainId,
     topologyRequestAddress: TopologyRequestAddressX,
     send: (
@@ -295,7 +298,7 @@ class ParticipantDomainTopologyServiceX[
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends ParticipantDomainTopologyServiceCommon[
+    extends DomainTopologyServiceCommon[
       RegisterTopologyTransactionRequestX,
       (TopologyRequestId, Member),
       RegisterTopologyTransactionResponseX,

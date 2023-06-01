@@ -1,21 +1,20 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.domain
+package com.digitalasset.canton.common.domain
 
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.common.domain.ServiceAgreement
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.domain.SequencerConnectClient.Error.DeserializationFailure
-import com.digitalasset.canton.participant.domain.SequencerConnectClient.{
+import com.digitalasset.canton.common.domain.SequencerConnectClient.Error.DeserializationFailure
+import com.digitalasset.canton.common.domain.SequencerConnectClient.{
   DomainClientBootstrapInfo,
   Error,
 }
-import com.digitalasset.canton.participant.domain.grpc.GrpcSequencerConnectClient
+import com.digitalasset.canton.common.domain.grpc.GrpcSequencerConnectClient
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.domain.api.v0
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}

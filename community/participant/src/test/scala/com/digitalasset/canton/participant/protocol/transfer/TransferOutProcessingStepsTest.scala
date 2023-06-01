@@ -8,8 +8,8 @@ import cats.implicits.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashPurpose}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -29,7 +29,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.PendingTransferOut
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessorError.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
-  NoSubmissionPermissionOut,
+  NoTransferSubmissionPermission,
   TransferProcessorError,
 }
 import com.digitalasset.canton.participant.store.memory.*
@@ -48,6 +48,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
@@ -55,6 +56,7 @@ import com.digitalasset.canton.{
   LedgerApplicationId,
   LedgerCommandId,
   LedgerTransactionId,
+  LfPackageId,
   LfPartyId,
   RequestCounter,
   SequencerCounter,
@@ -69,15 +71,18 @@ import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 @nowarn("msg=match may not be exhaustive")
-class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with HasExecutorService {
+final class TransferOutProcessingStepsTest
+    extends AsyncWordSpec
+    with BaseTest
+    with HasExecutorService {
 
   private implicit val ec: ExecutionContext = executorService
 
   private val sourceDomain = SourceDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("source::domain"))
   )
-  private val sourceMediator = MediatorId(
-    UniqueIdentifier.tryFromProtoPrimitive("source::mediator")
+  private val sourceMediator = MediatorRef(
+    MediatorId(UniqueIdentifier.tryFromProtoPrimitive("source::mediator"))
   )
   private val targetDomain = TargetDomainId(
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("target::domain"))
@@ -144,57 +149,79 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       loggerFactory
     )
 
-  private def generateIps(
-      topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]]
-  ): TopologySnapshot =
-    TestingTopology()
+  private def createTestingIdentityFactory(
+      topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
+      packages: Seq[LfPackageId] = Seq.empty,
+      domains: Set[DomainId] = Set(DefaultTestIdentities.domainId),
+  ) =
+    TestingTopology(domains)
       .withReversedTopology(topology)
+      .withPackages(packages)
       .build(loggerFactory)
-      .topologySnapshot()
 
-  private val cryptoFactory =
-    TestingTopology(domains = Set(sourceDomain.unwrap, targetDomain.unwrap))
-      .withReversedTopology(
-        Map(
-          submittingParticipant -> Map(
-            party1 -> ParticipantPermission.Submission,
-            submittingParticipant.adminParty.toLf -> ParticipantPermission.Submission,
-          )
+  private def createTestingTopologySnapshot(
+      topology: Map[ParticipantId, Map[LfPartyId, ParticipantPermission]],
+      packages: Seq[LfPackageId] = Seq.empty,
+  ): TopologySnapshot =
+    createTestingIdentityFactory(topology, packages).topologySnapshot()
+
+  private def createCryptoFactory(packages: Seq[LfPackageId] = Seq(templateId.packageId)) =
+    createTestingIdentityFactory(
+      topology = Map(
+        submittingParticipant -> Map(
+          party1 -> ParticipantPermission.Submission,
+          submittingParticipant.adminParty.toLf -> ParticipantPermission.Submission,
         )
-      )
-      .build(loggerFactory)
+      ),
+      packages = packages,
+      domains = Set(sourceDomain.unwrap, targetDomain.unwrap),
+    )
 
-  private val cryptoSnapshot = cryptoFactory
-    .forOwnerAndDomain(submittingParticipant, sourceDomain.unwrap)
-    .currentSnapshotApproximation
+  private val cryptoFactory = createCryptoFactory()
+
+  private def createCryptoSnapshot(testingIdentityFactory: TestingIdentityFactory = cryptoFactory) =
+    testingIdentityFactory
+      .forOwnerAndDomain(submittingParticipant, sourceDomain.unwrap)
+      .currentSnapshotApproximation
+
+  private val cryptoSnapshot = createCryptoSnapshot()
 
   private val seedGenerator = new SeedGenerator(pureCrypto)
 
   private val cantonContractIdVersion =
     CantonContractIdVersion.fromProtocolVersion(testedProtocolVersion)
 
-  private val coordination: TransferCoordination =
+  private def createTransferCoordination(
+      cryptoSnapshot: DomainSnapshotSyncCryptoApi = cryptoSnapshot
+  ) =
     TestTransferCoordination(
       Set(TargetDomainId(sourceDomain.unwrap), targetDomain),
       CantonTimestamp.Epoch,
       Some(cryptoSnapshot),
       Some(None),
       loggerFactory,
+      Seq(templateId.packageId),
     )(directExecutionContext)
-  val outProcessingSteps =
+
+  private val coordination: TransferCoordination =
+    createTransferCoordination()
+
+  private def createOutProcessingSteps(transferCoordination: TransferCoordination = coordination) =
     new TransferOutProcessingSteps(
       sourceDomain,
       submittingParticipant,
       damle,
-      coordination,
+      transferCoordination,
       seedGenerator,
       SourceProtocolVersion(testedProtocolVersion),
       loggerFactory,
     )(executorService)
 
-  val Seq(
+  private val outProcessingSteps: TransferOutProcessingSteps = createOutProcessingSteps()
+
+  private val Seq(
     (participant1, admin1),
-    (participant2, admin2),
+    (participant2, _),
     (participant3, admin3),
     (participant4, admin4),
   ) =
@@ -208,13 +235,14 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
   private val timeEvent =
     TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, targetDomain = targetDomain)
 
-  "createTransferOutRequest" should {
-    val ips1 = generateIps(
-      Map(
+  "TransferOutRequest.validated" should {
+    val testingTopology = createTestingTopologySnapshot(
+      topology = Map(
         submittingParticipant -> Map(submitter -> Submission),
         participant1 -> Map(party1 -> Submission),
         participant2 -> Map(party2 -> Submission),
-      )
+      ),
+      packages = Seq(templateId.packageId),
     )
 
     val contractId = cantonContractIdVersion.fromDiscriminator(
@@ -224,8 +252,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
     def mkTxOutRes(
         stakeholders: Set[LfPartyId],
-        sourceIps: TopologySnapshot,
-        targetIps: TopologySnapshot,
+        sourceTopologySnapshot: TopologySnapshot,
+        targetTopologySnapshot: TopologySnapshot,
     ): Either[TransferProcessorError, TransferOutRequestValidated] =
       TransferOutRequest
         .validated(
@@ -240,8 +268,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           sourceMediator,
           targetDomain,
           TargetProtocolVersion(testedProtocolVersion),
-          sourceIps,
-          targetIps,
+          sourceTopologySnapshot,
+          targetTopologySnapshot,
           TransferCounter.Genesis,
           logger,
         )
@@ -251,20 +279,20 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
     "fail if submitter is not a stakeholder" in {
       val stakeholders = Set(party1, party2)
-      val result = mkTxOutRes(stakeholders, ips1, ips1)
+      val result = mkTxOutRes(stakeholders, testingTopology, testingTopology)
       result.left.value shouldBe a[SubmittingPartyMustBeStakeholderOut]
     }
 
     "fail if submitting participant does not have submission permission" in {
       val ipsNoSubmissionPermission =
-        generateIps(Map(submittingParticipant -> Map(submitter -> Confirmation)))
+        createTestingTopologySnapshot(Map(submittingParticipant -> Map(submitter -> Confirmation)))
 
-      val result = mkTxOutRes(Set(submitter), ipsNoSubmissionPermission, ips1)
-      result.left.value shouldBe a[NoSubmissionPermissionOut]
+      val result = mkTxOutRes(Set(submitter), ipsNoSubmissionPermission, testingTopology)
+      result.left.value shouldBe a[NoTransferSubmissionPermission]
     }
 
     "fail if a stakeholder cannot submit on target domain" in {
-      val ipsNoSubmissionOnTarget = generateIps(
+      val ipsNoSubmissionOnTarget = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(submitter -> Submission),
           participant1 -> Map(party1 -> Confirmation),
@@ -272,19 +300,19 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
 
       val stakeholders = Set(submitter, party1)
-      val result = mkTxOutRes(stakeholders, ips1, ipsNoSubmissionOnTarget)
+      val result = mkTxOutRes(stakeholders, testingTopology, ipsNoSubmissionOnTarget)
       result.left.value shouldBe a[PermissionErrors]
     }
 
     "fail if a stakeholder cannot confirm on target domain" in {
-      val ipsConfirmationOnSource = generateIps(
+      val ipsConfirmationOnSource = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(submitter -> Submission),
           participant1 -> Map(party1 -> Confirmation),
         )
       )
 
-      val ipsNoConfirmationOnTarget = generateIps(
+      val ipsNoConfirmationOnTarget = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(submitter -> Submission),
           participant1 -> Map(party1 -> Observation),
@@ -297,7 +325,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     }
 
     "fail if a stakeholder is not hosted on the same participant on both domains" in {
-      val ipsDifferentParticipant = generateIps(
+      val ipsDifferentParticipant = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(submitter -> Submission),
           participant1 -> Map(party1 -> Confirmation),
@@ -306,12 +334,12 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
 
       val stakeholders = Set(submitter, party1)
-      val result = mkTxOutRes(stakeholders, ips1, ipsDifferentParticipant)
+      val result = mkTxOutRes(stakeholders, testingTopology, ipsDifferentParticipant)
       result.left.value shouldBe a[PermissionErrors]
     }
 
     "fail if participant cannot confirm for admin party" in {
-      val ipsAdminNoConfirmation = generateIps(
+      val ipsAdminNoConfirmation = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(adminSubmitter -> Submission, submitter -> Submission),
           participant1 -> Map(party1 -> Observation),
@@ -319,13 +347,44 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
       val result =
         loggerFactory.suppressWarningsAndErrors(
-          mkTxOutRes(Set(submitter, party1), ipsAdminNoConfirmation, ips1)
+          mkTxOutRes(Set(submitter, party1), ipsAdminNoConfirmation, testingTopology)
         )
       result.left.value shouldBe a[PermissionErrors]
     }
 
+    // TODO(i13201) This should ideally be covered in integration tests as well
+    "fail if the package for the contract being transferred is unvetted on the target domain" in {
+
+      val sourceDomainTopology =
+        createTestingTopologySnapshot(
+          topology = Map(
+            submittingParticipant -> Map(submitter -> Submission),
+            participant1 -> Map(party1 -> Submission),
+          ),
+          packages = Seq(templateId.packageId), // The package is known on the source domain
+        )
+
+      val targetDomainTopology =
+        createTestingTopologySnapshot(
+          topology = Map(
+            submittingParticipant -> Map(submitter -> Submission),
+            participant1 -> Map(party1 -> Submission),
+          ),
+          packages = Seq.empty, // The package is not known on the target domain
+        )
+
+      val result =
+        mkTxOutRes(
+          stakeholders = Set(submitter, adminSubmitter, admin1),
+          sourceTopologySnapshot = sourceDomainTopology,
+          targetTopologySnapshot = targetDomainTopology,
+        )
+
+      result.left.value shouldBe a[PackageIdUnknownOrUnvetted]
+    }
+
     "pick the active confirming admin party" in {
-      val ipsAdminNoConfirmation = generateIps(
+      val ipsAdminNoConfirmation = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(adminSubmitter -> Submission, submitter -> Submission),
           participant1 -> Map(party1 -> Confirmation),
@@ -334,7 +393,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
       val result =
         loggerFactory.suppressWarningsAndErrors(
-          mkTxOutRes(Set(submitter, party1), ipsAdminNoConfirmation, ips1)
+          mkTxOutRes(Set(submitter, party1), ipsAdminNoConfirmation, testingTopology)
         )
       result.value shouldEqual
         TransferOutRequestValidated(
@@ -357,22 +416,24 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     }
 
     "work if topology constraints are satisfied" in {
-      val ipsSource = generateIps(
+      val ipsSource = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(adminSubmitter -> Submission, submitter -> Submission),
           participant1 -> Map(adminSubmitter -> Observation, submitter -> Confirmation),
           participant2 -> Map(party1 -> Submission),
           participant3 -> Map(party1 -> Submission),
           participant4 -> Map(party1 -> Confirmation),
-        )
+        ),
+        packages = Seq(templateId.packageId),
       )
-      val ipsTarget = generateIps(
+      val ipsTarget = createTestingTopologySnapshot(
         Map(
           submittingParticipant -> Map(submitter -> Submission),
           participant1 -> Map(submitter -> Observation),
           participant3 -> Map(party1 -> Submission),
           participant4 -> Map(party1 -> Confirmation),
-        )
+        ),
+        packages = Seq(templateId.packageId),
       )
       val stakeholders = Set(submitter, party1)
       val result = mkTxOutRes(stakeholders, ipsSource, ipsTarget)
@@ -398,7 +459,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
     "allow admin parties as stakeholders" in {
       val stakeholders = Set(submitter, adminSubmitter, admin1)
-      mkTxOutRes(stakeholders, ips1, ips1) shouldBe Right(
+      mkTxOutRes(stakeholders, testingTopology, testingTopology) shouldBe Right(
         TransferOutRequestValidated(
           TransferOutRequest(
             submitterMetadata = submitterMetadata(submitter),
@@ -426,7 +487,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       val contractId = ExampleTransactionFactory.suffixedId(10, 0)
       val contract = ExampleTransactionFactory.asSerializable(
         contractId,
-        contractInstance = ExampleTransactionFactory.contractInstance(),
+        contractInstance = ExampleTransactionFactory.contractInstance(templateId = templateId),
         metadata = ContractMetadata.tryCreate(
           signatories = Set(party1),
           stakeholders = Set(party1),
@@ -486,10 +547,9 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
             state,
             cryptoSnapshot,
           )
-        )("prepare submission failed")
+        )("prepare submission succeeded unexpectedly")
       } yield {
-        submissionResult should matchPattern { case TargetDomainIsSourceDomain(_, _) =>
-        }
+        submissionResult shouldBe a[TargetDomainIsSourceDomain]
       }
     }
   }
@@ -548,7 +608,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
             NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
-            MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+            MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
           )
         )("compute activeness set failed")
       } yield {
@@ -559,7 +619,10 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
   }
 
   "construct pending data and response" should {
-    "succeed without errors" in {
+
+    def constructPendingDataAndResponseWith(
+        transferOutProcessingSteps: TransferOutProcessingSteps
+    ) = {
       val state = mkState
       val contractId = ExampleTransactionFactory.suffixedId(10, 0)
       val metadata = ContractMetadata.tryCreate(Set.empty, Set(party1), None)
@@ -593,23 +656,56 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         SequencerCounter(1),
         cryptoSnapshot,
       )
-      for {
-        _ <- state.storedContractManager.addPendingContracts(
+
+      state.storedContractManager
+        .addPendingContracts(
           RequestCounter(1),
           Seq(WithTransactionId(contract, transactionId)),
         )
-        _ <- valueOrFail(
-          outProcessingSteps
-            .constructPendingDataAndResponse(
-              dataAndResponseArgs,
-              state.transferCache,
-              state.storedContractManager,
-              FutureUnlessShutdown.pure(ActivenessResult.success),
-              Future.unit,
-              sourceMediator,
-            )
-        )("construction of pending data and response failed").failOnShutdown
-      } yield succeed
+        .futureValue
+        .discard
+
+      transferOutProcessingSteps
+        .constructPendingDataAndResponse(
+          dataAndResponseArgs,
+          state.transferCache,
+          state.storedContractManager,
+          FutureUnlessShutdown.pure(ActivenessResult.success),
+          Future.unit,
+          sourceMediator,
+        )
+        .value
+        .onShutdown(fail("unexpected shutdown during a test"))
+        .futureValue
+    }
+
+    "succeed without errors" in {
+      constructPendingDataAndResponseWith(outProcessingSteps).valueOrFail(
+        "construction of pending data and response failed"
+      )
+      succeed
+    }
+
+    // TODO(i13201) This should ideally be covered in integration tests as well
+    "prevent the contract being transferred is not vetted on the target domain since version 5" in {
+      val outProcessingStepsWithoutPackages = {
+        val f = createCryptoFactory(packages = Seq.empty)
+        val s = createCryptoSnapshot(f)
+        val c = createTransferCoordination(s)
+        createOutProcessingSteps(c)
+      }
+
+      if (testedProtocolVersion >= ProtocolVersion.v5) {
+        constructPendingDataAndResponseWith(outProcessingStepsWithoutPackages).leftOrFail(
+          "construction of pending data and response succeeded unexpectedly"
+        ) shouldBe a[PackageIdUnknownOrUnvetted]
+      } else {
+        constructPendingDataAndResponseWith(outProcessingStepsWithoutPackages).valueOrFail(
+          "construction of pending data and response failed"
+        )
+        succeed
+      }
+
     }
   }
 
@@ -679,7 +775,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           Set(party1),
           timeEvent,
           Some(transferInExclusivity),
-          MediatorId(UniqueIdentifier.tryCreate("another", "mediator")),
+          MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),
         )
         _ <- valueOrFail(
           outProcessingSteps
@@ -700,7 +796,9 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       uuid: UUID = new UUID(6L, 7L),
   ): FullTransferOutTree = {
     val seed = seedGenerator.generateSaltSeed()
-    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+    valueOrFail(request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid))(
+      "Failed to create fullTransferOutTree"
+    )
   }
 
   def encryptTransferOutTree(

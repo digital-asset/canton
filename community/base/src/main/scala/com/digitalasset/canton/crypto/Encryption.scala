@@ -7,6 +7,7 @@ import cats.Order
 import cats.data.EitherT
 import cats.instances.future.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStoreError,
   CryptoPrivateStoreExtended,
@@ -175,6 +176,10 @@ final case class AsymmetricEncrypted[+M](
     encryptedFor: Fingerprint,
 ) extends NoCopy {
   def encrypted: Encrypted[M] = new Encrypted(ciphertext)
+}
+
+object AsymmetricEncrypted {
+  val noEncryptionFingerprint = Fingerprint(String68.tryCreate("no-encryption"))
 }
 
 /** Key schemes for asymmetric/hybrid encryption. */

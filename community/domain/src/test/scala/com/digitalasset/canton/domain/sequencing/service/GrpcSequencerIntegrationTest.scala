@@ -50,6 +50,7 @@ import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
   GrpcSequencerConnection,
   OrdinaryApplicationHandler,
+  SequencerConnections,
   SerializedEventHandler,
 }
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
@@ -223,13 +224,19 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
   private val sendTrackerStore = new InMemorySendTrackerStore()
   private val connection =
-    GrpcSequencerConnection(NonEmpty(Seq, Endpoint("localhost", serverPort)), false, None)
+    GrpcSequencerConnection(
+      NonEmpty(Seq, Endpoint("localhost", serverPort)),
+      false,
+      None,
+      SequencerAlias.Default,
+    )
+  private val connections = SequencerConnections.default(connection)
+  private val expectedSequencers = NonEmpty.mk(Set, SequencerAlias.Default -> sequencerId).toMap
 
   val client = Await
     .result(
       SequencerClientFactory(
         domainId,
-        sequencerId,
         cryptoApi,
         cryptoApi.crypto,
         agreedAgreementId = None,
@@ -270,7 +277,8 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
               )
             )
         },
-        connection,
+        connections,
+        expectedSequencers,
       ).value,
       10.seconds,
     )

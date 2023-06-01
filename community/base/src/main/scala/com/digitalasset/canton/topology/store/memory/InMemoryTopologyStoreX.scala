@@ -26,10 +26,8 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future, blocking}
-import scala.util.chaining.scalaUtilChainingOps
 
 class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
     val storeId: StoreId,
@@ -46,11 +44,10 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       sequenced: SequencedTime,
       from: EffectiveTime,
       rejected: Option[String],
+      until: Option[EffectiveTime],
   ) {
     def toStoredTransaction: StoredTopologyTransactionX[TopologyChangeOpX, TopologyMappingX] =
-      StoredTopologyTransactionX(sequenced, from, until.get(), transaction)
-
-    val until = new AtomicReference[Option[EffectiveTime]](rejected.map(_ => from))
+      StoredTopologyTransactionX(sequenced, from, until, transaction)
   }
 
   private val topologyTransactionStore = ArrayBuffer[TopologyStoreEntry]()
@@ -75,7 +72,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
           .filter(x =>
             x.from.value < asOfExclusive.value
               && x.rejected.isEmpty
-              && (x.until.get().forall(_.value <= asOfExclusive.value))
+              && (x.until.forall(_.value >= asOfExclusive.value))
               && filter(x)
           )
           .map(_.transaction)
@@ -113,13 +110,14 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
         // UPDATE txs SET valid_until = effective WHERE effective < $effective AND valid_from is NULL
         //    AND ((mapping_key_hash IN $removeMapping) OR (tx_hash IN $removeTxs))
         // INSERT IGNORE DUPLICATES (...)
-        topologyTransactionStore.foreach { tx =>
+        topologyTransactionStore.zipWithIndex.foreach { case (tx, idx) =>
           if (
-            tx.from.value < effective.value && tx.until.get().isEmpty && (removeMapping.contains(
+            tx.from.value < effective.value && tx.until.isEmpty && (removeMapping.contains(
               tx.transaction.transaction.mapping.uniqueKey
             ) || removeTxs.contains(tx.transaction.transaction.hash))
-          )
-            tx.until.set(Some(effective))
+          ) {
+            topologyTransactionStore.update(idx, tx.copy(until = Some(effective)))
+          }
         }
         topologyTransactionStore.appendAll(
           additions.map(tx =>
@@ -128,6 +126,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
               sequenced,
               from = effective,
               rejected = tx.rejectionReason.map(_.toString),
+              until = Option.when(tx.rejectionReason.nonEmpty)(effective),
             )
           )
         )
@@ -185,7 +184,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
 
     def filter(entry: TopologyStoreEntry): Boolean = {
       // active
-      entry.from.value < timestamp && entry.until.get().forall(until => timestamp <= until.value) &&
+      entry.from.value < timestamp && entry.until.forall(until => timestamp <= until.value) &&
       // not rejected
       entry.rejected.isEmpty &&
       // matches a party to participant mapping (with appropriate filters)
@@ -229,13 +228,13 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]] = {
     def mkAsOfFilter(asOf: CantonTimestamp): TopologyStoreEntry => Boolean = entry =>
-      asOfFilter(asOf, asOfInclusive = false)(entry.from.value, entry.until.get().map(_.value))
+      asOfFilter(asOf, asOfInclusive = false)(entry.from.value, entry.until.map(_.value))
 
     val filter1: TopologyStoreEntry => Boolean = timeQuery match {
       case TimeQueryX.HeadState =>
         // use recent timestamp to avoid race conditions (as we are looking
         // directly into the store, while the recent time still needs to propagate)
-        recentTimestampO.map(mkAsOfFilter).getOrElse(entry => entry.until.get().isEmpty)
+        recentTimestampO.map(mkAsOfFilter).getOrElse(entry => entry.until.isEmpty)
       case TimeQueryX.Snapshot(asOf) => mkAsOfFilter(asOf)
       case TimeQueryX.Range(from, until) =>
         entry =>
@@ -305,7 +304,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
     filteredState(
       blocking(synchronized { topologyTransactionStore.toSeq }),
       entry => {
-        timeFilter(entry.from.value, entry.until.get().map(_.value)) &&
+        timeFilter(entry.from.value, entry.until.map(_.value)) &&
         types.contains(entry.transaction.transaction.mapping.code) &&
         (pathFilter(entry.transaction.transaction.mapping)) &&
         entry.transaction.isProposal == isProposal
@@ -382,8 +381,13 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
         topologyTransactionStore
           .appendAll(
             snapshot.result.map { tx =>
-              TopologyStoreEntry(tx.transaction, tx.sequenced, tx.validFrom, rejected = None)
-                .tap(_.until.set(tx.validUntil))
+              TopologyStoreEntry(
+                tx.transaction,
+                tx.sequenced,
+                tx.validFrom,
+                rejected = None,
+                until = tx.validUntil,
+              )
             }
           )
           .discard
@@ -426,9 +430,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
     blocking(synchronized {
       val selected = topologyTransactionStore
         .filter(x =>
-          x.from.value > timestampExclusive && (x.until
-            .get()
-            .isEmpty || x.transaction.transaction.op == TopologyChangeOpX.Remove) && x.rejected.isEmpty
+          x.from.value > timestampExclusive && (x.until.isEmpty || x.transaction.transaction.op == TopologyChangeOpX.Remove) && x.rejected.isEmpty
         )
         .map(_.toStoredTransaction)
         .toSeq
@@ -443,7 +445,9 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): Future[Option[GenericStoredTopologyTransactionX]] =
-    allTransactions.map(_.result.find(_.transaction == transaction))
+    allTransactions.map(
+      _.result.find(_.transaction.transaction.hash == transaction.transaction.hash)
+    )
 
   override def findStoredForVersion(
       transaction: GenericTopologyTransactionX,
@@ -466,7 +470,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransactionX]] = {
     val res = blocking(synchronized {
       topologyTransactionStore.filter(x =>
-        x.until.get().isEmpty && TopologyStoreX.initialParticipantDispatchingSet.contains(
+        x.until.isEmpty && TopologyStoreX.initialParticipantDispatchingSet.contains(
           x.transaction.transaction.mapping.code
         )
       )

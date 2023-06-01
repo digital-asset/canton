@@ -359,6 +359,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
           request: MediatorRequest,
           verdict: Verdict,
           decisionTime: CantonTimestamp,
+          aggregationRule: Option[AggregationRule],
       )(implicit traceContext: TraceContext): Future[Unit] =
         Future.never
 
@@ -366,6 +367,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
           requestId: RequestId,
           batch: Batch[DefaultOpenEnvelope],
           decisionTime: CantonTimestamp,
+          aggregationRule: Option[AggregationRule],
       )(implicit traceContext: TraceContext): Future[Unit] =
         Future.never
     }

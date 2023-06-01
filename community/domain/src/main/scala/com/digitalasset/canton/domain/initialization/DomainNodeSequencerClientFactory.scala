@@ -5,6 +5,8 @@ package com.digitalasset.canton.domain.initialization
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.TestingConfigInternal
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
@@ -14,7 +16,6 @@ import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.client.{
   RequestSigner,
@@ -22,6 +23,7 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientFactory,
   SequencerClientTransportFactory,
 }
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.store.{SendTrackerStore, SequencedEventStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
@@ -54,14 +56,22 @@ class DomainNodeSequencerClientFactory(
       sequencedEventStore: SequencedEventStore,
       sendTrackerStore: SendTrackerStore,
       requestSigner: RequestSigner,
-      connection: SequencerConnection,
+      sequencerConnections: SequencerConnections,
+      expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
   )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
   ): EitherT[Future, String, SequencerClient] =
-    factory(member).create(member, sequencedEventStore, sendTrackerStore, requestSigner, connection)
+    factory(member).create(
+      member,
+      sequencedEventStore,
+      sendTrackerStore,
+      requestSigner,
+      sequencerConnections,
+      expectedSequencers,
+    )
 
   override def makeTransport(
       connection: SequencerConnection,
@@ -84,13 +94,11 @@ class DomainNodeSequencerClientFactory(
       case other => sys.error(s"Unexpected sequencer client in Domain node: $other")
     }
 
-    val sequencerId: SequencerId = SequencerId(id)
-
     val clientLoggerFactory = loggerFactory.append("client", clientName)
 
     val sequencerClientSyncCrypto =
       new DomainSyncCryptoClient(
-        sequencerId,
+        SequencerId(id),
         id,
         topologyClient,
         crypto,
@@ -102,7 +110,6 @@ class DomainNodeSequencerClientFactory(
 
     SequencerClientFactory(
       id,
-      sequencerId,
       sequencerClientSyncCrypto,
       crypto,
       None,

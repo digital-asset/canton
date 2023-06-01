@@ -10,7 +10,6 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.config_management_service.ConfigManagementServiceGrpc.ConfigManagementService
 import com.daml.ledger.api.v1.admin.config_management_service.*
 import com.daml.lf.data.{Ref, Time}
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain
@@ -20,6 +19,8 @@ import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeMo
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.LoggingContextWithTrace.withEnrichedLoggingContext
 import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiConfigManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
@@ -92,73 +93,74 @@ private[apiserver] final class ApiConfigManagementService private (
   }
 
   override def setTimeModel(request: SetTimeModelRequest): Future[SetTimeModelResponse] =
-    withEnrichedLoggingContext(logging.submissionId(request.submissionId)) {
-      implicit loggingContext =>
-        logger.info("Setting time model")
+    withEnrichedLoggingContext(telemetry)(
+      logging.submissionId(request.submissionId)
+    ) { implicit loggingContext =>
+      logger.info("Setting time model")
 
-        implicit val telemetryContext: TelemetryContext =
-          telemetry.contextFromGrpcThreadLocalContext()
-        implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-          new DamlContextualizedErrorLogger(logger, loggingContext, Some(request.submissionId))
+      implicit val telemetryContext: TelemetryContext =
+        telemetry.contextFromGrpcThreadLocalContext()
+      implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
+        new DamlContextualizedErrorLogger(logger, loggingContext, Some(request.submissionId))
 
-        val response = for {
-          // Validate and convert the request parameters
-          params <- validateParameters(request).fold(
-            t => Future.failed(ValidationLogger.logFailure(request, t)),
-            Future.successful,
-          )
+      val response = for {
+        // Validate and convert the request parameters
+        params <- validateParameters(request).fold(
+          t => Future.failed(ValidationLogger.logFailure(request, t)),
+          Future.successful,
+        )
 
-          // Lookup latest configuration to check generation and to extend it with the new time model.
-          configuration <- index
-            .lookupConfiguration()
-            .flatMap {
-              case Some(result) =>
-                Future.successful(result)
-              case None =>
-                logger.warn(
-                  "Could not get the current time model. The index does not yet have any ledger configuration."
-                )
-                Future.failed(
-                  LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
-                    .Reject()
-                    .asGrpcError
-                )
-            }
-          (ledgerEndBeforeRequest, currentConfig) = configuration
-
-          // Verify that we're modifying the current configuration.
-          expectedGeneration = currentConfig.generation
-          _ <-
-            if (request.configurationGeneration != expectedGeneration) {
-              Future.failed(
-                ValidationLogger.logFailure(
-                  request,
-                  invalidArgument(
-                    s"Mismatching configuration generation, expected $expectedGeneration, received ${request.configurationGeneration}"
-                  ),
-                )
+        // Lookup latest configuration to check generation and to extend it with the new time model.
+        configuration <- index
+          .lookupConfiguration()
+          .flatMap {
+            case Some(result) =>
+              Future.successful(result)
+            case None =>
+              logger.warn(
+                "Could not get the current time model. The index does not yet have any ledger configuration."
               )
-            } else {
-              Future.unit
-            }
+              Future.failed(
+                LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
+                  .Reject()
+                  .asGrpcError
+              )
+          }
+        (ledgerEndBeforeRequest, currentConfig) = configuration
 
-          // Create the new extended configuration.
-          newConfig = currentConfig.copy(
-            generation = currentConfig.generation + 1,
-            timeModel = params.newTimeModel,
-          )
+        // Verify that we're modifying the current configuration.
+        expectedGeneration = currentConfig.generation
+        _ <-
+          if (request.configurationGeneration != expectedGeneration) {
+            Future.failed(
+              ValidationLogger.logFailure(
+                request,
+                invalidArgument(
+                  s"Mismatching configuration generation, expected $expectedGeneration, received ${request.configurationGeneration}"
+                ),
+              )
+            )
+          } else {
+            Future.unit
+          }
 
-          // Submit configuration to the ledger, and start polling for the result.
-          augmentedSubmissionId = submissionIdGenerator(request.submissionId)
-          entry <- synchronousResponse.submitAndWait(
-            augmentedSubmissionId,
-            (params.maximumRecordTime, newConfig),
-            Some(ledgerEndBeforeRequest),
-            params.timeToLive,
-          )
-        } yield SetTimeModelResponse(entry.configuration.generation)
+        // Create the new extended configuration.
+        newConfig = currentConfig.copy(
+          generation = currentConfig.generation + 1,
+          timeModel = params.newTimeModel,
+        )
 
-        response.andThen(logger.logErrorsOnCall[SetTimeModelResponse])
+        // Submit configuration to the ledger, and start polling for the result.
+        augmentedSubmissionId = submissionIdGenerator(request.submissionId)
+        entry <- synchronousResponse.submitAndWait(
+          augmentedSubmissionId,
+          (params.maximumRecordTime, newConfig),
+          Some(ledgerEndBeforeRequest),
+          params.timeToLive,
+        )
+      } yield SetTimeModelResponse(entry.configuration.generation)
+
+      response.andThen(logger.logErrorsOnCall[SetTimeModelResponse])
     }
 
   private case class SetTimeModelParameters(
@@ -262,6 +264,8 @@ private[apiserver] object ApiConfigManagementService {
 
     override def reject(
         submissionId: Ref.SubmissionId
+    )(implicit
+        loggingContext: LoggingContextWithTrace
     ): PartialFunction[ConfigurationEntry, StatusRuntimeException] = {
       case domain.ConfigurationEntry.Rejected(`submissionId`, reason, _) =>
         LedgerApiErrors.Admin.ConfigurationEntryRejected

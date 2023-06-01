@@ -5,11 +5,12 @@ package com.digitalasset.canton.participant.domain
 
 import com.daml.error.*
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.common.domain.SequencerConnectClient
+import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
-import com.digitalasset.canton.participant.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.participant.store.SyncDomainPersistentState
 import com.digitalasset.canton.participant.sync.SyncServiceError.DomainRegistryErrorGroup
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
@@ -41,6 +42,20 @@ sealed trait DomainRegistryError extends Product with Serializable with CantonEr
 object DomainRegistryError extends DomainRegistryErrorGroup {
 
   object ConnectionErrors extends ErrorGroup() {
+
+    @Explanation(
+      """This error indicates that the participant failed to connect to the sequencers."""
+    )
+    @Resolution("Inspect the provided reason.")
+    object FailedToConnectToSequencers
+        extends ErrorCode(
+          id = "FAILED_TO_CONNECT_TO_SEQUENCERS",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
+          extends CantonError.Impl(cause = "The participant failed to connect to the sequencers")
+          with DomainRegistryError
+    }
 
     @Explanation(
       "This error results if the GRPC connection to the domain service fails with GRPC status UNAVAILABLE."
@@ -105,6 +120,51 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
   }
 
   object ConfigurationErrors extends ErrorGroup() {
+    @Explanation(
+      """This error indicates that the participant is configured to connect to multiple
+        |domain sequencers from different domains."""
+    )
+    @Resolution("Carefully verify the connection settings.")
+    object SequencersFromDifferentDomainsAreConfigured
+        extends ErrorCode(
+          id = "SEQUENCERS_FROM_DIFFERENT_DOMAINS_ARE_CONFIGURED",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Error(override val cause: String)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(cause)
+          with DomainRegistryError {}
+    }
+
+    @Explanation(
+      """This error indicates that the participant is configured to connect to multiple domain sequencers but their
+        |topologyRequestAddress is different from other sequencers."""
+    )
+    object MisconfiguredTopologyRequestAddress
+        extends ErrorCode(
+          id = "MISCONFIGURED_TOPOLOGY_REQUEST_ADDRESS",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Error(override val cause: String)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(cause)
+          with DomainRegistryError {}
+    }
+
+    @Explanation(
+      """This error indicates that the participant is configured to connect to multiple domain sequencers but their
+        |static domain parameters are different from other sequencers."""
+    )
+    object MisconfiguredStaticDomainParameters
+        extends ErrorCode(
+          id = "MISCONFIGURED_STATIC_DOMAIN_PARAMETERS",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Error(override val cause: String)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(cause)
+          with DomainRegistryError {}
+    }
 
     @Explanation(
       """This error indicates that the domain this participant is trying to connect to is a domain where unique

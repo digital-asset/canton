@@ -19,6 +19,7 @@ import com.digitalasset.canton.platform.store.backend.{
   StringInterningStorageBackend,
 }
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
+import com.digitalasset.canton.tracing.Traced
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -74,6 +75,6 @@ object InitializeParallelIngestion {
   final case class Initialized(
       initialEventSeqId: Long,
       initialStringInterningId: Int,
-      readServiceSource: Source[(Offset, Update), NotUsed],
+      readServiceSource: Source[(Offset, Traced[Update]), NotUsed],
   )
 }

@@ -5,10 +5,13 @@ package com.digitalasset.canton.crypto
 
 import cats.Monad
 import cats.data.EitherT
+import cats.implicits.catsSyntaxValidatedId
+import cats.syntax.alternative.*
 import cats.syntax.either.*
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SignatureCheckError.{
@@ -26,6 +29,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
@@ -437,37 +441,125 @@ class DomainSnapshotSyncCryptoApi(
   ): Future[Map[Fingerprint, SigningPublicKey]] =
     ipsSnapshot.signingKeys(owner).map(_.map(x => (x.fingerprint, x)).toMap)
 
+  private def verifySignature(
+      hash: Hash,
+      validKeys: Map[Fingerprint, SigningPublicKey],
+      signature: Signature,
+      signerStr: => String,
+  ): Either[SignatureCheckError, Unit] = {
+    lazy val signerStr_ = signerStr
+    def signatureCheckFailed(): Either[SignatureCheckError, Unit] = {
+      val error =
+        if (validKeys.isEmpty)
+          SignerHasNoValidKeys(
+            s"There are no valid keys for ${signerStr_} but received message signed with ${signature.signedBy}"
+          )
+        else
+          SignatureWithWrongKey(
+            s"Key ${signature.signedBy} used to generate signature is not a valid key for ${signerStr_}. Valid keys are ${validKeys.values
+                .map(_.fingerprint.unwrap)}"
+          )
+      Left(error)
+    }
+    validKeys.get(signature.signedBy) match {
+      case Some(key) =>
+        crypto.pureCrypto.verifySignature(hash, key, signature)
+      case None =>
+        signatureCheckFailed()
+    }
+  }
+
   override def verifySignature(
       hash: Hash,
       signer: KeyOwner,
       signature: Signature,
   ): EitherT[Future, SignatureCheckError, Unit] = {
-    val validKeysET = EitherT.right(validKeysCache.get(signer))
-    def signatureCheckFailed(
-        validKeys: Seq[SigningPublicKey]
-    ): Either[SignatureCheckError, Unit] = {
-      val error =
-        if (validKeys.isEmpty)
-          SignerHasNoValidKeys(
-            s"There are no valid keys for ${signer} but received message signed with ${signature.signedBy}"
-          )
-        else
-          SignatureWithWrongKey(
-            s"Key ${signature.signedBy} used to generate signature is not a valid key for ${signer}. Valid keys are ${validKeys
-                .map(_.fingerprint.unwrap)}"
-          )
-      Left(error)
-    }
+    for {
+      validKeys <- EitherT.right(validKeysCache.get(signer))
+      res <- EitherT.fromEither[Future](
+        verifySignature(hash, validKeys, signature, signer.toString)
+      )
+    } yield res
+  }
 
-    validKeysET.flatMap { validKeys =>
-      lazy val keysAsSeq = validKeys.values.toSeq
-      validKeys.get(signature.signedBy) match {
-        case Some(key) =>
-          EitherT.fromEither(crypto.pureCrypto.verifySignature(hash, key, signature))
-        case None =>
-          EitherT.fromEither(signatureCheckFailed(keysAsSeq))
+  override def verifySignatures(
+      hash: Hash,
+      signer: KeyOwner,
+      signatures: NonEmpty[Seq[Signature]],
+  ): EitherT[Future, SignatureCheckError, Unit] = {
+    for {
+      validKeys <- EitherT.right(validKeysCache.get(signer))
+      res <- signatures.forgetNE.parTraverse_ { signature =>
+        EitherT.fromEither[Future](verifySignature(hash, validKeys, signature, signer.toString))
       }
-    }
+    } yield res
+  }
+
+  override def verifySignatures(
+      hash: Hash,
+      mediatorGroupIndex: MediatorGroupIndex,
+      signatures: NonEmpty[Seq[Signature]],
+  )(implicit traceContext: TraceContext): EitherT[Future, SignatureCheckError, Unit] = {
+    for {
+      mediatorGroup <- EitherT(
+        ipsSnapshot.mediatorGroups().map { groups =>
+          groups
+            .find(_.index == mediatorGroupIndex)
+            .toRight(
+              SignatureCheckError.GeneralError(
+                new RuntimeException(
+                  s"Mediator request for unknown mediator group with index $mediatorGroupIndex"
+                )
+              )
+            )
+        }
+      )
+      validKeysWithMember <- EitherT.right(
+        mediatorGroup.active
+          .parFlatTraverse { mediatorId =>
+            ipsSnapshot
+              .signingKeys(mediatorId)
+              .map(keys => keys.map(key => (key.id, (mediatorId, key))))
+          }
+          .map(_.toMap)
+      )
+      validKeys = validKeysWithMember.view.mapValues(_._2).toMap
+      keyMember = validKeysWithMember.view.mapValues(_._1).toMap
+      validated <- EitherT.right(signatures.forgetNE.parTraverse { signature =>
+        EitherT
+          .fromEither[Future](
+            verifySignature(
+              hash,
+              validKeys,
+              signature,
+              mediatorGroup.toString,
+            )
+          )
+          .fold(
+            x => x.invalid[MediatorId],
+            _ => keyMember(signature.signedBy).valid[SignatureCheckError],
+          )
+      })
+      _ <- {
+        val (signatureCheckErrors, validSigners) = validated.separate
+        EitherT.cond[Future](
+          validSigners.distinct.sizeIs >= mediatorGroup.threshold.value, {
+            if (signatureCheckErrors.nonEmpty) {
+              val errors = SignatureCheckError.MultipleErrors(signatureCheckErrors)
+              // TODO(i13206): Replace with an Alarm
+              logger.warn(
+                s"Signature check passed for $mediatorGroup, although there were errors: $errors"
+              )
+            }
+            ()
+          },
+          SignatureCheckError.MultipleErrors(
+            signatureCheckErrors,
+            Some("Mediator group signature threshold not reached"),
+          ): SignatureCheckError,
+        )
+      }
+    } yield ()
   }
 
   private def ownerIsInitialized(

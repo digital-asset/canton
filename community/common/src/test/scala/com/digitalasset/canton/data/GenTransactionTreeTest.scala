@@ -20,7 +20,7 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{MediatorRef, ParticipantId, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTestWordSpec,
@@ -673,7 +673,7 @@ class GenTransactionTreeTest
       CommonMetadata(factory.cryptoOps)(
         factory.confirmationPolicy,
         factory.domainId,
-        factory.mediatorId,
+        MediatorRef(factory.mediatorId),
         mkTestSalt(0),
         factory.transactionUuid,
         protocolVersion,

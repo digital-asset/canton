@@ -6,6 +6,8 @@ package com.digitalasset.canton.domain.initialization
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.instances.future.*
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{
@@ -35,7 +37,7 @@ import com.digitalasset.canton.sequencing.handlers.{
   StripSignature,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
-import com.digitalasset.canton.sequencing.{SequencerConnection, UnsignedEnvelopeBox}
+import com.digitalasset.canton.sequencing.{SequencerConnections, UnsignedEnvelopeBox}
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.store.{
   IndexedStringStore,
@@ -121,7 +123,7 @@ object TopologyManagementInitialization {
       crypto: Crypto,
       syncCrypto: DomainSyncCryptoClient,
       sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
-      sequencerConnection: SequencerConnection,
+      sequencerConnections: SequencerConnections,
       domainTopologyManager: DomainTopologyManager,
       domainTopologyService: DomainTopologyManagerRequestService,
       topologyManagerSequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -169,7 +171,8 @@ object TopologyManagementInitialization {
           sequencedEventStore,
           sendTrackerStore,
           RequestSigner(syncCrypto, protocolVersion),
-          sequencerConnection,
+          sequencerConnections,
+          NonEmpty.mk(Set, SequencerAlias.Default -> SequencerId(id)).toMap,
         )
       }
       timeTracker = DomainTimeTracker(
@@ -254,11 +257,7 @@ object TopologyManagementInitialization {
             )
           } yield ())
         } else EitherT.rightT(())
-      _ <- sequencerConnection match {
-        // GRPC-based sequencers all go through the initial topology bootstrapping so we need to wait here to make sure
-        // that initial topology data has been sequenced before starting the topology dispatcher
-        case _ => EitherT.right(initializationObserver.waitUntilInitialisedAndEffective.unwrap)
-      }
+      _ <- EitherT.right(initializationObserver.waitUntilInitialisedAndEffective.unwrap)
       dispatcher <- EitherT(
         DomainTopologyDispatcher
           .create(

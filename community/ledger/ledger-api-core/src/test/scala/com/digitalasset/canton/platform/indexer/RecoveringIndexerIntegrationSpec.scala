@@ -43,6 +43,8 @@ import com.digitalasset.canton.platform.store.DbSupport.{
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
+import com.digitalasset.canton.tracing.TraceContext.wrapWithNewTraceContext
+import com.digitalasset.canton.tracing.Traced
 import org.mockito.Mockito.*
 import org.mockito.{ArgumentMatchers, MockitoSugar}
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
@@ -313,7 +315,10 @@ object RecoveringIndexerIntegrationSpec {
       ResourceOwner
         .forReleasable(() =>
           // required for the indexer to resubscribe to the update source
-          Source.queue[(Offset, Update)](bufferSize = 16).toMat(BroadcastHub.sink)(Keep.both).run()
+          Source
+            .queue[(Offset, Traced[Update])](bufferSize = 16)
+            .toMat(BroadcastHub.sink)(Keep.both)
+            .run()
         )({ case (queue, _) =>
           Future {
             queue.complete()
@@ -364,13 +369,13 @@ object RecoveringIndexerIntegrationSpec {
   class PartyOnlyQueueWriteService(
       ledgerId: String,
       participantId: Ref.ParticipantId,
-      queue: BoundedSourceQueue[(Offset, Update)],
-      source: Source[(Offset, Update), NotUsed],
+      queue: BoundedSourceQueue[(Offset, Traced[Update])],
+      source: Source[(Offset, Traced[Update]), NotUsed],
   ) extends WritePartyService
       with ReadService {
 
     private val offset = new AtomicLong(0)
-    private val writtenUpdates = mutable.Buffer.empty[(Offset, Update)]
+    private val writtenUpdates = mutable.Buffer.empty[(Offset, Traced[Update])]
 
     override def ledgerInitialConditions(): Source[LedgerInitialConditions, NotUsed] =
       Source.repeat(
@@ -383,7 +388,7 @@ object RecoveringIndexerIntegrationSpec {
 
     override def stateUpdates(beginAfter: Option[Offset])(implicit
         loggingContext: LoggingContext
-    ): Source[(Offset, Update), NotUsed] = {
+    ): Source[(Offset, Traced[Update]), NotUsed] = {
       val updatesForStream = writtenUpdates.toSeq
       Source
         .fromIterator(() => updatesForStream.iterator)
@@ -402,14 +407,16 @@ object RecoveringIndexerIntegrationSpec {
         telemetryContext: TelemetryContext,
     ): CompletionStage[SubmissionResult] = {
       val updateOffset = Offset.fromByteArray(offset.incrementAndGet().toString.getBytes)
-      val update = Update.PartyAddedToParticipant(
-        hint
-          .map(Party.assertFromString)
-          .getOrElse(Party.assertFromString(UUID.randomUUID().toString)),
-        displayName.orElse(hint).getOrElse("Unknown"),
-        participantId,
-        Time.Timestamp.now(),
-        Some(submissionId),
+      val update = wrapWithNewTraceContext(
+        Update.PartyAddedToParticipant(
+          hint
+            .map(Party.assertFromString)
+            .getOrElse(Party.assertFromString(UUID.randomUUID().toString)),
+          displayName.orElse(hint).getOrElse("Unknown"),
+          participantId,
+          Time.Timestamp.now(),
+          Some(submissionId),
+        )
       )
       writtenUpdates.append(updateOffset -> update)
       queue.offer(

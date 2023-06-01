@@ -39,7 +39,20 @@ service TopologyManagerReadServiceX {
   rpc ListAvailableStores(ListAvailableStoresRequest) returns (ListAvailableStoresResult);
   rpc ListAll(ListAllRequest) returns (ListAllResponse);
 
+  rpc ListTrafficState(ListTrafficStateRequest) returns (ListTrafficStateResult);
+}
 
+message ListTrafficStateRequest {
+  BaseQuery base_query = 1;
+  string filter_member = 2;
+}
+
+message ListTrafficStateResult {
+  message Result {
+    BaseResult context = 1;
+    com.digitalasset.canton.protocol.v2.TrafficControlStateX item = 2;
+  }
+  repeated Result results = 1;
 }
 
 
@@ -91,7 +104,7 @@ message ListNamespaceDelegationResult {
 
 message ListUnionspaceDefinitionRequest {
   BaseQuery base_query = 1;
-  string filter_uid = 2;
+  string filter_namespace = 2;
 }
 
 message ListUnionspaceDefinitionResult {

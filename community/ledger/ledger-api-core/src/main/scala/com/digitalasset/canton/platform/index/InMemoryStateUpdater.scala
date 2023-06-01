@@ -31,6 +31,7 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CompletionDetails
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
 import com.digitalasset.canton.platform.{Contract, InMemoryState, Key, Party}
+import com.digitalasset.canton.tracing.Traced
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
@@ -51,10 +52,10 @@ private[platform] object InMemoryStateUpdaterFlow {
       preparePackageMetadataTimeOutWarning: FiniteDuration,
       metrics: Metrics,
   )(
-      prepare: (Vector[(Offset, Update)], Long) => PrepareResult,
+      prepare: (Vector[(Offset, Traced[Update])], Long) => PrepareResult,
       update: PrepareResult => Unit,
   )(implicit loggingContext: LoggingContext): UpdaterFlow =
-    Flow[(Vector[(Offset, Update)], Long)]
+    Flow[(Vector[(Offset, Traced[Update])], Long)]
       .filter(_._1.nonEmpty)
       .mapAsync(prepareUpdatesParallelism) { case (batch, lastEventSequentialId) =>
         Future {
@@ -82,7 +83,7 @@ private[platform] object InMemoryStateUpdater {
       lastEventSequentialId: Long,
       packageMetadata: PackageMetadata,
   )
-  type UpdaterFlow = Flow[(Vector[(Offset, Update)], Long), Unit, NotUsed]
+  type UpdaterFlow = Flow[(Vector[(Offset, Traced[Update])], Long), Unit, NotUsed]
 
   private val logger = ContextualizedLogger.get(getClass)
 
@@ -122,22 +123,23 @@ private[platform] object InMemoryStateUpdater {
   private[index] def extractMetadataFromUploadedPackages(
       archiveToMetadata: DamlLf.Archive => PackageMetadata
   )(
-      batch: Vector[(Offset, Update)]
+      batch: Vector[(Offset, Traced[Update])]
   ): PackageMetadata =
     batch.view
-      .collect { case (_, packageUpload: Update.PublicPackageUpload) => packageUpload }
+      .collect { case (_, Traced(packageUpload: Update.PublicPackageUpload)) => packageUpload }
       .flatMap(_.archives.view)
       .map(archiveToMetadata)
       .foldLeft(PackageMetadata.empty)(_ append _)
 
   private[index] def prepare(archiveToMetadata: DamlLf.Archive => PackageMetadata)(
-      batch: Vector[(Offset, Update)],
+      batch: Vector[(Offset, Traced[Update])],
       lastEventSequentialId: Long,
   ): PrepareResult =
     PrepareResult(
       updates = batch.collect {
-        case (offset, u: Update.TransactionAccepted) => convertTransactionAccepted(offset, u)
-        case (offset, u: Update.CommandRejected) => convertTransactionRejected(offset, u)
+        case (offset, Traced(u: Update.TransactionAccepted)) =>
+          convertTransactionAccepted(offset, u)
+        case (offset, Traced(u: Update.CommandRejected)) => convertTransactionRejected(offset, u)
       },
       lastOffset = batch.lastOption.fold(throw new NoSuchElementException("empty batch"))(_._1),
       lastEventSequentialId = lastEventSequentialId,

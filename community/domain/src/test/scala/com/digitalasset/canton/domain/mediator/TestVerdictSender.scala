@@ -7,7 +7,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.TestVerdictSender.Result
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, MediatorRequest, Verdict}
-import com.digitalasset.canton.sequencing.protocol.Batch
+import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -25,6 +25,7 @@ class TestVerdictSender extends VerdictSender {
       request: MediatorRequest,
       verdict: Verdict,
       decisionTime: CantonTimestamp,
+      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     sentResultsQueue.add(Result(requestId, decisionTime, Some(request), Some(verdict), None))
     Future.unit
@@ -34,6 +35,7 @@ class TestVerdictSender extends VerdictSender {
       requestId: RequestId,
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
+      aggregationRule: Option[AggregationRule],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     sentResultsQueue.add(Result(requestId, decisionTime, None, None, Some(batch)))
     Future.unit

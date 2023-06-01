@@ -28,7 +28,12 @@ import com.digitalasset.canton.participant.sync.LedgerSyncEvent.{
   TransactionAccepted,
 }
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncOffset, LocalOffset}
+import com.digitalasset.canton.participant.{
+  DefaultParticipantStateValues,
+  GlobalOffset,
+  LedgerSyncOffset,
+  LocalOffset,
+}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.SimClock
@@ -49,8 +54,8 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
   private lazy val submissionId1 = DefaultDamlValues.submissionId().some
   private lazy val event1 = TransactionAccepted(
-    optCompletionInfo = DefaultDamlValues.completionInfo(List.empty).some,
-    transactionMeta = DefaultDamlValues.transactionMeta(),
+    optCompletionInfo = DefaultParticipantStateValues.completionInfo(List.empty).some,
+    transactionMeta = DefaultParticipantStateValues.transactionMeta(),
     transaction = DefaultDamlValues.emptyCommittedTransaction,
     transactionId = DefaultDamlValues.lfTransactionId(1),
     recordTime = CantonTimestamp.Epoch.toLf,
@@ -69,14 +74,16 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     event1.optCompletionInfo.value,
     new FinalReason(RpcStatus(code = Code.ABORTED_VALUE, message = "event1 rejection")),
     ProcessingSteps.RequestType.Transaction,
+    Some(domainId),
   )
 
   private lazy val event3 = CommandRejected(
     CantonTimestamp.Epoch.toLf,
-    DefaultDamlValues
+    DefaultParticipantStateValues
       .completionInfo(List.empty, commandId = DefaultDamlValues.commandId(3), submissionId = None),
     FinalReason(RpcStatus(code = Code.NOT_FOUND_VALUE, message = "event3 message")),
     ProcessingSteps.RequestType.Transaction,
+    Some(domainId),
   )
   private lazy val changeId3 = event3.completionInfo.changeId
   private lazy val changeId3Hash = ChangeIdHash(changeId3)
