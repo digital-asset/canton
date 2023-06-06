@@ -9,7 +9,6 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStore,
   CryptoPrivateStoreError,
-  CryptoPrivateStoreExtended,
   CryptoPublicStore,
 }
 import com.digitalasset.canton.data.CantonTimestamp
@@ -38,11 +37,6 @@ class Crypto(
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable {
-
-  def cryptoPrivateStoreExtended: Option[CryptoPrivateStoreExtended] = cryptoPrivateStore match {
-    case extended: CryptoPrivateStoreExtended => Some(extended)
-    case _ => None
-  }
 
   /** Helper method to generate a new signing key pair and store the public key in the public store as well. */
   def generateSigningKey(

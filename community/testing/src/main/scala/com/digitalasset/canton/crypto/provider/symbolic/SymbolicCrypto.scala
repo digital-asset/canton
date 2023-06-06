@@ -135,7 +135,7 @@ object SymbolicCrypto extends LazyLogging {
       ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
 
     val crypto = SymbolicCrypto.create(releaseProtocolVersion, timeouts, loggerFactory)
-    val cryptoPrivateStore = crypto.cryptoPrivateStoreExtended
+    val cryptoPrivateStore = crypto.cryptoPrivateStore.toExtended
       .getOrElse(
         throw new RuntimeException(s"Crypto private store does not implement all necessary methods")
       )

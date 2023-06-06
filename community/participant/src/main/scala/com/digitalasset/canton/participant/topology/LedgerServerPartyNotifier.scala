@@ -176,9 +176,12 @@ class LedgerServerPartyNotifier(
               (
                 partyId,
                 hostingParticipant.participantId,
+                // Note/CN-5291: Only remove pending submission-id once update persisted.
                 pendingAllocationSubmissionIds
-                  .remove((partyId, hostingParticipant.participantId))
-                  .getOrElse(LengthLimitedString.getUuid.asString255),
+                  .getOrElse(
+                    (partyId, hostingParticipant.participantId),
+                    LengthLimitedString.getUuid.asString255,
+                  ),
               )
             )
         // propagate admin parties
@@ -281,6 +284,14 @@ class LedgerServerPartyNotifier(
       sequencerTimestamp: SequencedTime,
   )(implicit traceContext: TraceContext): Future[Unit] =
     for (_ <- store.insertOrUpdatePartyMetadata(metadata)) yield {
+      // Clear the expected submissionId only after the party metadata has been stored
+      // in case of races (such as https://github.com/DACH-NY/canton-network-node/issues/5291).
+      // Further races are prevented by this function being called (indirectly) within the
+      // sequential queue.
+      metadata.participantId.foreach(participant =>
+        pendingAllocationSubmissionIds.remove((metadata.partyId, participant)).discard
+      )
+
       scheduleNotification(metadata, sequencerTimestamp)
     }
 

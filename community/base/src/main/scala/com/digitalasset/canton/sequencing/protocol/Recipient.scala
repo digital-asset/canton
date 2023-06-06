@@ -169,4 +169,10 @@ object MediatorsOfDomain {
   object Code extends GroupRecipientCode {
     val threeLetterId: String3 = String3.tryCreate("MOD")
   }
+
+  // Mediator group with index zero is responsible for handling topology transactions.
+  // Never change this.
+  val TopologyTransactionMediatorGroup: MediatorsOfDomain = MediatorsOfDomain(
+    NonNegativeInt.zero
+  )
 }

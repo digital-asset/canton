@@ -63,67 +63,78 @@ final class Authorizer(
     }
 
   def requirePublicClaims[Req, Res](call: Req => Future[Res]): Req => Future[Res] =
-    authorize(call) { claims =>
+    authorize(call) { (claims, req) =>
       for {
         _ <- valid(claims)
         _ <- claims.isPublic
-      } yield {
-        ()
-      }
+      } yield req
     }
 
   def requireAdminClaims[Req, Res](call: Req => Future[Res]): Req => Future[Res] =
-    authorize(call) { claims =>
+    authorize(call) { (claims, req) =>
       for {
         _ <- valid(claims)
         _ <- claims.isAdmin
-      } yield {
-        ()
-      }
+      } yield req
     }
 
   def requireIdpAdminClaimsAndMatchingRequestIdpId[Req, Res](
-      identityProviderId: String,
+      identityProviderIdL: Lens[Req, String],
       call: Req => Future[Res],
   ): Req => Future[Res] =
-    requireIdpAdminClaimsAndMatchingRequestIdpId(identityProviderId, false, call)
+    requireIdpAdminClaimsAndMatchingRequestIdpId(identityProviderIdL, false, call)
 
   def requireIdpAdminClaimsAndMatchingRequestIdpId[Req, Res](
-      identityProviderId: String,
+      identityProviderIdL: Lens[Req, String],
       mustBeParticipantAdmin: Boolean,
       call: Req => Future[Res],
-  ): Req => Future[Res] =
-    authorize(call) { claims =>
+  )(req: Req): Future[Res] =
+    authorize(call) { (claims, req) =>
       for {
         _ <- valid(claims)
         _ <- if (mustBeParticipantAdmin) claims.isAdmin else claims.isAdminOrIDPAdmin
-        requestIdentityProviderId <- requireIdentityProviderId(identityProviderId)
+        modifiedRequest = implyIdentityProviderIdFromClaims(identityProviderIdL, claims, req)
+        requestIdentityProviderId <- requireIdentityProviderId(
+          identityProviderIdL.get(modifiedRequest)
+        )
         _ <- validateRequestIdentityProviderId(requestIdentityProviderId, claims)
-      } yield ()
-    }
+      } yield modifiedRequest
+    }(req)
+
+  private def implyIdentityProviderIdFromClaims[Req](
+      identityProviderIdL: Lens[Req, String],
+      claims: ClaimSet.Claims,
+      req: Req,
+  ): Req = {
+    if (identityProviderIdL.get(req) == "" && !claims.claims.contains(ClaimAdmin)) {
+      val impliedIdpId = identityProviderIdFromClaims.fold("")(_.toRequestString)
+      identityProviderIdL.set(impliedIdpId)(req)
+    } else req
+  }
 
   def requireMatchingRequestIdpId[Req, Res](
-      identityProviderId: String,
+      identityProviderIdL: Lens[Req, String],
       call: Req => Future[Res],
   ): Req => Future[Res] =
-    authorize(call) { claims =>
+    authorize(call) { (claims, req) =>
       for {
         _ <- valid(claims)
-        requestIdentityProviderId <- requireIdentityProviderId(identityProviderId)
+        modifiedRequest = implyIdentityProviderIdFromClaims(identityProviderIdL, claims, req)
+        requestIdentityProviderId <- requireIdentityProviderId(
+          identityProviderIdL.get(modifiedRequest)
+        )
         _ <- validateRequestIdentityProviderId(requestIdentityProviderId, claims)
-      } yield ()
+      } yield modifiedRequest
     }
 
   def requireIdpAdminClaims[Req, Res](
       call: Req => Future[Res]
   ): Req => Future[Res] =
-    authorize(call) { claims =>
+    authorize(call) { (claims, req) =>
       for {
         _ <- valid(claims)
         _ <- claims.isAdminOrIDPAdmin
-      } yield {
-        ()
-      }
+      } yield req
     }
 
   private def requireIdentityProviderId(
@@ -192,13 +203,11 @@ final class Authorizer(
       parties: Iterable[String],
       call: Req => Future[Res],
   ): Req => Future[Res] =
-    authorize(call) { claims =>
+    authorize(call) { (claims, req) =>
       for {
         _ <- valid(claims)
         _ <- requireForAll(parties, party => claims.canReadAs(party))
-      } yield {
-        ()
-      }
+      } yield req
     }
 
   def requireActAndReadClaimsForParties[Req, Res](
@@ -235,6 +244,9 @@ final class Authorizer(
       filter.map(_.filtersByParty).fold(Set.empty[String])(_.keySet),
       call,
     )
+
+  def identityProviderIdFromClaims: Option[IdentityProviderId] =
+    authenticatedClaimsFromContext().map(_.identityProviderId).toOption
 
   def authenticatedUserId(): Try[Option[String]] =
     authenticatedClaimsFromContext()
@@ -393,10 +405,8 @@ final class Authorizer(
     }
 
   private[auth] def authorize[Req, Res](call: Req => Future[Res])(
-      authorized: ClaimSet.Claims => Either[AuthorizationError, Unit]
+      authorized: (ClaimSet.Claims, Req) => Either[AuthorizationError, Req]
   ): Req => Future[Res] =
-    authorizeWithReq(call)((claims, req) =>
-      authorizationErrorAsGrpc(authorized(claims)).map(_ => req)
-    )
+    authorizeWithReq(call)((claims, req) => authorizationErrorAsGrpc(authorized(claims, req)))
 
 }

@@ -6,8 +6,9 @@ package com.digitalasset.canton.ledger.sandbox.domain
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.lf.data.Ref.SubmissionId
 import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.transaction.{ProcessedDisclosedContract, SubmittedTransaction}
+import com.daml.lf.transaction.SubmittedTransaction
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 

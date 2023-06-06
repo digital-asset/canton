@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.store
 
 import cats.data.EitherT
 import cats.syntax.functor.*
+import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.crypto.{
@@ -233,4 +234,13 @@ trait CryptoPrivateStoreExtended extends CryptoPrivateStore { this: NamedLogging
         }
     }
 
+  /** Returns the wrapper key used to encrypt the private key
+    * or None if private key is not encrypted.
+    *
+    * @param keyId private key fingerprint
+    * @return the wrapper key used for encryption or None if key is not encrypted
+    */
+  private[crypto] def encrypted(keyId: Fingerprint)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Option[String300]]
 }

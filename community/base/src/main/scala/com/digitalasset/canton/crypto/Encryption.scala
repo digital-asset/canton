@@ -132,7 +132,7 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
   ): EitherT[Future, DecryptionError, M] =
     store
       .decryptionKey(encryptedMessage.encryptedFor)(TraceContext.todo)
-      .leftMap(DecryptionError.KeyStoreError)
+      .leftMap(storeError => DecryptionError.KeyStoreError(storeError.show))
       .subflatMap(_.toRight(DecryptionError.UnknownEncryptionKey(encryptedMessage.encryptedFor)))
       .subflatMap(encryptionKey =>
         encryptionOps.decryptWith(encryptedMessage, encryptionKey)(deserialize)
@@ -511,6 +511,9 @@ object DecryptionError {
   final case class InvalidSymmetricKey(error: String) extends DecryptionError {
     override def pretty: Pretty[InvalidSymmetricKey] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
+  final case class InvariantViolation(error: String) extends DecryptionError {
+    override def pretty: Pretty[InvariantViolation] = prettyOfClass(unnamedParam(_.error.unquoted))
+  }
   final case class InvalidEncryptionKey(error: String) extends DecryptionError {
     override def pretty: Pretty[InvalidEncryptionKey] = prettyOfClass(
       unnamedParam(_.error.unquoted)
@@ -525,9 +528,8 @@ object DecryptionError {
   final case class FailedToDeserialize(error: DeserializationError) extends DecryptionError {
     override def pretty: Pretty[FailedToDeserialize] = prettyOfClass(unnamedParam(_.error))
   }
-  final case class KeyStoreError(error: CryptoPrivateStoreError) extends DecryptionError {
-    override def pretty: Pretty[KeyStoreError] =
-      prettyOfClass(unnamedParam(_.error))
+  final case class KeyStoreError(error: String) extends DecryptionError {
+    override def pretty: Pretty[KeyStoreError] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
 }
 
@@ -536,6 +538,10 @@ object EncryptionKeyGenerationError {
 
   final case class GeneralError(error: Exception) extends EncryptionKeyGenerationError {
     override def pretty: Pretty[GeneralError] = prettyOfClass(unnamedParam(_.error))
+  }
+
+  final case class GeneralKmsError(error: String) extends EncryptionKeyGenerationError {
+    override def pretty: Pretty[GeneralKmsError] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
 
   final case class NameInvalidError(error: String) extends EncryptionKeyGenerationError {

@@ -12,18 +12,18 @@ import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.ledger.api.ValidationLogger
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
+import com.digitalasset.canton.ledger.api.grpc.Logging.traceId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.meteringreport.{
   MeteringReportGenerator,
   MeteringReportKey,
 }
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiMeteringReportService.*
-import com.digitalasset.canton.platform.server.api.ValidationLogger
-import com.digitalasset.canton.platform.server.api.services.grpc.Logging.traceId
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 

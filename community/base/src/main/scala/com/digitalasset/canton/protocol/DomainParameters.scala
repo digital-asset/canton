@@ -311,7 +311,9 @@ object StaticDomainParameters
   *                                The mediator reaction timeout starts when the confirmation response timeout has elapsed.
   *                                If the mediator does not send a result message within that timeout,
   *                                participants must rollback the transaction underlying the request.
-  *                                Chooses a lower value to reduce the time to learn whether a command
+  *                                Also applies to determine the max-sequencing-time of daml 3.x topology transactions
+  *                                governed by mediator group.
+  *                                Choose a lower value to reduce the time to learn whether a command
   *                                has been accepted.
   *                                Choose a higher value to reduce the likelihood of commands being rejected
   *                                due to timeouts.
@@ -458,7 +460,23 @@ final case class DynamicDomainParameters(
   )
 
   override def pretty: Pretty[DynamicDomainParameters] = {
+    // TODO(#11255) change when releasing BFT Domain
     if (
+      representativeProtocolVersion >= companionObj.protocolVersionRepresentativeFor(
+        ProtocolVersion.dev
+      )
+    ) {
+      prettyOfClass(
+        param("participant response timeout", _.participantResponseTimeout),
+        param("mediator reaction timeout", _.mediatorReactionTimeout),
+        param("transfer exclusivity timeout", _.transferExclusivityTimeout),
+        param("topology change delay", _.topologyChangeDelay),
+        param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
+        param("reconciliation interval", _.reconciliationInterval),
+        param("max rate per participant", _.maxRatePerParticipant),
+        param("max request size", _.maxRequestSize.value),
+      )
+    } else if (
       representativeProtocolVersion >= companionObj.protocolVersionRepresentativeFor(
         ProtocolVersion.v4
       )
@@ -565,6 +583,8 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     NonNegativeFiniteDuration.tryOfSeconds(30)
   private val defaultMediatorReactionTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(30)
+  private val defaultMediatorXReactionTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.tryOfMinutes(5)
 
   private val defaultTransferExclusivityTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(60)
@@ -584,15 +604,24 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
   def defaultValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
     initialValues(defaultTopologyChangeDelay, protocolVersion)
 
+  /** Default mediator-X dynamic parameters with more generous mediator-x timeouts for BFT-distribution */
+  def defaultXValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
+    initialValues(
+      defaultTopologyChangeDelay,
+      protocolVersion,
+      mediatorReactionTimeout = defaultMediatorXReactionTimeout,
+    )
+
   def initialValues(
       topologyChangeDelay: NonNegativeFiniteDuration,
       protocolVersion: ProtocolVersion,
       maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
       maxRequestSize: MaxRequestSize = StaticDomainParameters.defaultMaxRequestSize,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = defaultMediatorReactionTimeout,
   ) = checked( // safe because default values are safe
     DynamicDomainParameters.tryCreate(
       participantResponseTimeout = defaultParticipantResponseTimeout,
-      mediatorReactionTimeout = defaultMediatorReactionTimeout,
+      mediatorReactionTimeout = mediatorReactionTimeout,
       transferExclusivityTimeout = defaultTransferExclusivityTimeout,
       topologyChangeDelay = topologyChangeDelay,
       ledgerTimeRecordTimeTolerance = defaultLedgerTimeRecordTimeTolerance,
@@ -611,6 +640,18 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       case _ => defaultTopologyChangeDelay
     }
     initialValues(topologyChangeDelay, protocolVersion)
+  }
+
+  def initialXValues(clock: Clock, protocolVersion: ProtocolVersion): DynamicDomainParameters = {
+    val topologyChangeDelay = clock match {
+      case _: RemoteClock | _: SimClock => defaultTopologyChangeDelayNonStandardClock
+      case _ => defaultTopologyChangeDelay
+    }
+    initialValues(
+      topologyChangeDelay,
+      protocolVersion,
+      mediatorReactionTimeout = defaultMediatorXReactionTimeout,
+    )
   }
 
   // if there is no topology change delay defined (or not yet propagated), we'll use this one

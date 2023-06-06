@@ -10,6 +10,7 @@ import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User}
+import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
 import com.digitalasset.canton.platform.localstore.PersistentUserManagementStore.{
   ConcurrentUserUpdateDetectedRuntimeException,
   MaxAnnotationsSizeExceededException,
@@ -18,7 +19,6 @@ import com.digitalasset.canton.platform.localstore.PersistentUserManagementStore
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.*
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}
 import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
-import com.digitalasset.canton.platform.server.api.validation.ResourceAnnotationValidation
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.backend.localstore.UserManagementStorageBackend
 
@@ -120,7 +120,7 @@ class PersistentUserManagementStore(
       withoutUser(user.id, user.identityProviderId) {
         val now = epochMicroseconds()
         if (
-          !ResourceAnnotationValidation
+          !ResourceAnnotationValidator
             .isWithinMaxAnnotationsByteSize(user.metadata.annotations)
         ) {
           throw MaxAnnotationsSizeExceededException(userId = user.id)
@@ -199,7 +199,7 @@ class PersistentUserManagementStore(
               existing = existingAnnotations,
             )
             if (
-              !ResourceAnnotationValidation
+              !ResourceAnnotationValidator
                 .isWithinMaxAnnotationsByteSize(updatedAnnotations)
             ) {
               throw MaxAnnotationsSizeExceededException(userId = userUpdate.id)

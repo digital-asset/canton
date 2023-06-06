@@ -21,8 +21,8 @@ import com.daml.ledger.api.v1.version_service.{
   VersionServiceGrpc,
 }
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.LedgerFeatures
 import com.digitalasset.canton.platform.localstore.UserManagementConfig
 import io.grpc.ServerServiceDefinition

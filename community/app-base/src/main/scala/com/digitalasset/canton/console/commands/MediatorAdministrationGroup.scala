@@ -185,7 +185,7 @@ class MediatorAdministrationGroupWithInit(
         mediatorId,
         topologySnapshot,
         domainParameters.toInternal,
-        SequencerConnections.default(sequencerConnection),
+        SequencerConnections.single(sequencerConnection),
       )
     )
   }
@@ -208,7 +208,6 @@ trait MediatorXAdministrationGroupWithInit extends ConsoleCommandGroup {
         InitializeX(
           domainId,
           domainParameters.toInternal,
-          sequencerId,
           sequencerConnections,
         )
       )

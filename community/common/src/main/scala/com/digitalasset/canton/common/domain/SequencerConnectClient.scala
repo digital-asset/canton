@@ -4,9 +4,7 @@
 package com.digitalasset.canton.common.domain
 
 import cats.data.EitherT
-import cats.syntax.either.*
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.common.domain.SequencerConnectClient.Error.DeserializationFailure
 import com.digitalasset.canton.common.domain.SequencerConnectClient.{
   DomainClientBootstrapInfo,
   Error,
@@ -18,7 +16,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId, SequencerId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -100,26 +98,5 @@ object SequencerConnectClient {
     } yield client
   }
 
-  // TODO(#11255): Until group addressing is available, the topology request address x consists of only a single mediator id.
-  final case class TopologyRequestAddressX(mediatorId: MediatorId)
-
-  object TopologyRequestAddressX {
-    def fromProto(tra: String): Either[Error, Option[TopologyRequestAddressX]] =
-      if (tra.isEmpty)
-        Right(None)
-      else {
-        MediatorId
-          .fromProtoPrimitive(tra, "topology_request_address")
-          .bimap(
-            e => DeserializationFailure(e.message),
-            mediatorId => Some(TopologyRequestAddressX(mediatorId)),
-          )
-      }
-  }
-
-  final case class DomainClientBootstrapInfo(
-      domainId: DomainId,
-      sequencerId: SequencerId,
-      topologyRequestAddress: Option[TopologyRequestAddressX], // only available in the X-code path
-  )
+  final case class DomainClientBootstrapInfo(domainId: DomainId, sequencerId: SequencerId)
 }

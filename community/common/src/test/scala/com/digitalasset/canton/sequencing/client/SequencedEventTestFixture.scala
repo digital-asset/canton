@@ -16,14 +16,10 @@ import com.digitalasset.canton.protocol.messages.{EnvelopeContent, InformeeMessa
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   OrdinarySerializedEvent,
-  PossiblyIgnoredSerializedEvent,
   SequencerAggregator,
   SequencerTestUtils,
 }
-import com.digitalasset.canton.store.SequencedEventStore.{
-  IgnoredSequencedEvent,
-  OrdinarySequencedEvent,
-}
+import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.DefaultTestIdentities.namespace
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -59,14 +55,9 @@ class SequencedEventTestFixture(
     )
 
   def mkValidator(
-      initialEventMetadata: PossiblyIgnoredSerializedEvent =
-        IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(updatedCounter - 1), None)(
-          traceContext
-        ),
-      syncCryptoApi: DomainSyncCryptoClient = subscriberCryptoApi,
+      syncCryptoApi: DomainSyncCryptoClient = subscriberCryptoApi
   )(implicit executionContext: ExecutionContext): SequencedEventValidatorImpl = {
     new SequencedEventValidatorImpl(
-      Some(initialEventMetadata),
       unauthenticated = false,
       optimistic = false,
       defaultDomainId,

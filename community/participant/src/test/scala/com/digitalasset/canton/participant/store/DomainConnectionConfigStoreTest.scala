@@ -35,7 +35,7 @@ trait DomainConnectionConfigStoreTest {
   )
   private val config = DomainConnectionConfig(
     alias,
-    SequencerConnections.default(connection),
+    SequencerConnections.single(connection),
     manualConnect = false,
     Some(domainId),
     42,
@@ -94,7 +94,7 @@ trait DomainConnectionConfigStoreTest {
         )
         val secondConfig = DomainConnectionConfig(
           alias,
-          SequencerConnections.default(connection),
+          SequencerConnections.single(connection),
           manualConnect = true,
           None,
           99,

@@ -149,7 +149,7 @@ class ReferenceDemoScript(
     participant.domains.register(
       DomainConnectionConfig(
         name,
-        SequencerConnections.default(connection), // TODO(i12076): Support multiple sequencers
+        SequencerConnections.single(connection), // TODO(i12076): Support multiple sequencers
         manualConnect = autoApprove,
       )
     )
@@ -240,6 +240,9 @@ class ReferenceDemoScript(
                     .flatMap(_.domains)
                     .length == domains.length
                 }
+                // Force the time proofs to be updated after topology transactions
+                // TODO(i13200) The following line can be removed once the ticket is closed
+                participant.testing.fetch_domain_times()
               }
             }
           }
@@ -363,6 +366,9 @@ class ReferenceDemoScript(
         "ledger-api",
         "Insurance: exercise <claimId> AcceptAndSettleClaim with cashId = <cashId>",
         () => {
+          // Force the time proofs to be updated after topology transactions
+          // TODO(i13200) The following line can be removed once the ticket is closed
+          participant3.testing.fetch_domain_times()
           val withdraw = {
             import M.Bank.Cash.*
             insuranceLookup(M.Bank.Cash).contractId.exerciseSplit(quantity = 15).command

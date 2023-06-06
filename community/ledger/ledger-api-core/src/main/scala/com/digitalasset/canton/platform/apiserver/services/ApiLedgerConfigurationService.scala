@@ -10,11 +10,13 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.ledger_configuration_service.*
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.{
+  GrpcApiService,
+  GrpcLedgerConfigurationService,
+  StreamingServiceLifecycleManagement,
+}
 import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigurationService
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
-import com.digitalasset.canton.platform.server.api.services.grpc.StreamingServiceLifecycleManagement
-import com.digitalasset.canton.platform.server.api.validation.LedgerConfigurationServiceValidation
 import io.grpc.stub.StreamObserver
 import io.grpc.{BindableService, ServerServiceDefinition}
 
@@ -68,7 +70,7 @@ private[apiserver] object ApiLedgerConfigurationService {
       executionContext: ExecutionContext,
       loggingContext: LoggingContext,
   ): LedgerConfigurationServiceGrpc.LedgerConfigurationService with GrpcApiService = {
-    new LedgerConfigurationServiceValidation(
+    new GrpcLedgerConfigurationService(
       service = new ApiLedgerConfigurationService(configurationService),
       ledgerId = ledgerId,
     ) with BindableService {

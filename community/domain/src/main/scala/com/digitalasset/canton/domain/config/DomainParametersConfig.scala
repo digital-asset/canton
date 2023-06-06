@@ -7,6 +7,12 @@ import cats.syntax.contravariantSemigroupal.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, PositiveDurationSeconds, ProtocolConfig}
+import com.digitalasset.canton.crypto.CryptoFactory.{
+  selectAllowedEncryptionKeyScheme,
+  selectAllowedHashAlgorithms,
+  selectAllowedSigningKeyScheme,
+  selectAllowedSymmetricKeySchemes,
+}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -85,19 +91,19 @@ final case class DomainParametersConfig(
 
       newRequiredSigningKeySchemes <- selectSchemes(
         requiredSigningKeySchemes,
-        CryptoFactory.selectAllowedSigningKeyScheme,
+        selectAllowedSigningKeyScheme,
       )
       newRequiredEncryptionKeySchemes <- selectSchemes(
         requiredEncryptionKeySchemes,
-        CryptoFactory.selectAllowedEncryptionKeyScheme,
+        selectAllowedEncryptionKeyScheme,
       )
       newRequiredSymmetricKeySchemes <- selectSchemes(
         requiredSymmetricKeySchemes,
-        CryptoFactory.selectAllowedSymmetricKeySchemes,
+        selectAllowedSymmetricKeySchemes,
       )
       newRequiredHashAlgorithms <- selectSchemes(
         requiredHashAlgorithms,
-        CryptoFactory.selectAllowedHashAlgorithms,
+        selectAllowedHashAlgorithms,
       )
       newCryptoKeyFormats = requiredCryptoKeyFormats.getOrElse(
         cryptoConfig.provider.supportedCryptoKeyFormats

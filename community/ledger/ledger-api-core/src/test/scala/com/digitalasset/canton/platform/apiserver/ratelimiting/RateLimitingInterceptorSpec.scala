@@ -15,14 +15,11 @@ import com.daml.metrics.Metrics
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.ports.Port
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.ledger.api.grpc.{GrpcClientResource, GrpcHealthService}
 import com.digitalasset.canton.ledger.api.health.HealthChecks.ComponentName
 import com.digitalasset.canton.ledger.api.health.{HealthChecks, ReportsHealth}
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.LimitResultCheck
-import com.digitalasset.canton.platform.server.api.services.grpc.{
-  GrpcClientResource,
-  GrpcHealthService,
-}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import io.grpc.*

@@ -6,7 +6,12 @@ package com.digitalasset.canton.sequencing.client
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.sequencing.protocol.{Deliver, DeliverError, Envelope}
+import com.digitalasset.canton.sequencing.protocol.{
+  Deliver,
+  DeliverError,
+  DeliverErrorReason,
+  Envelope,
+}
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Possible outcomes for a send operation can be observed by a SequencerClient */
@@ -55,6 +60,11 @@ object SendResult {
     result match {
       case SendResult.Success(_) =>
         FutureUnlessShutdown.pure(())
+      // TODO(i13155): Use a dedicated signalling mechanism for this case
+      case SendResult.Error(DeliverError(_, _, _, _, DeliverErrorReason.BatchRefused(message)))
+          if message.contains("was previously delivered at") =>
+        // Stop retrying
+        FutureUnlessShutdown.unit
       case SendResult.Error(error) =>
         FutureUnlessShutdown.failed(
           new RuntimeException(

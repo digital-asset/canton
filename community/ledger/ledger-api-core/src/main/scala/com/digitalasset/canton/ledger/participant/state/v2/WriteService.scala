@@ -4,10 +4,11 @@
 package com.digitalasset.canton.ledger.participant.state.v2
 
 import com.daml.lf.data.ImmArray
-import com.daml.lf.transaction.{GlobalKey, ProcessedDisclosedContract, SubmittedTransaction}
+import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
 import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetryContext
+import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
 
 import java.util.concurrent.CompletionStage

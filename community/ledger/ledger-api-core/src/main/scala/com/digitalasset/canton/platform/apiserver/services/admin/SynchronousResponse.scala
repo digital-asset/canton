@@ -6,13 +6,13 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{KillSwitches, Materializer}
 import com.daml.lf.data.Ref
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
-import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
+import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
 import com.digitalasset.canton.ledger.participant.state.v2 as state
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.platform.apiserver.services.admin.SynchronousResponse.{
   Accepted,
   Rejected,
@@ -28,13 +28,13 @@ import scala.concurrent.{ExecutionContext, Future, TimeoutException}
   * the appropriate entry.
   */
 class SynchronousResponse[Input, Entry, AcceptedEntry](
-    strategy: SynchronousResponse.Strategy[Input, Entry, AcceptedEntry]
+    strategy: SynchronousResponse.Strategy[Input, Entry, AcceptedEntry],
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext,
     materializer: Materializer,
-) extends AutoCloseable {
-
-  private val logger = ContextualizedLogger.get(getClass)
+) extends AutoCloseable
+    with NamedLogging {
 
   private val shutdownKillSwitch = KillSwitches.shared("shutdown-synchronous-response")
 
@@ -76,8 +76,9 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
   )(implicit loggingContext: LoggingContextWithTrace) = {
     val isAccepted = new Accepted(strategy.accept(submissionId))
     val isRejected = new Rejected(strategy.reject(submissionId))
-    val contextualizedErrorLogger =
-      new DamlContextualizedErrorLogger(logger, loggingContext, None)
+    val contextualizedErrorLogger = {
+      ErrorLoggingContext(logger, loggingContext.toPropertiesMap, loggingContext.traceContext)
+    }
     strategy
       .entries(ledgerEndBeforeRequest)
       .via(shutdownKillSwitch.flow)
@@ -96,7 +97,7 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
   }
 
   private def toGrpcError(
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
       submissionId: Ref.SubmissionId,
   ): PartialFunction[Throwable, Future[Nothing]] = {
     case _: TimeoutException =>
@@ -115,8 +116,13 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
       )
   }
 
-  private def errorLogger(loggingContext: LoggingContext, submissionId: Ref.SubmissionId) =
-    new DamlContextualizedErrorLogger(logger, loggingContext, Some(submissionId))
+  private def errorLogger(loggingContext: LoggingContextWithTrace, submissionId: Ref.SubmissionId) =
+    LedgerErrorLoggingContext(
+      logger,
+      loggingContext.toPropertiesMap,
+      loggingContext.traceContext,
+      submissionId,
+    )
 
 }
 

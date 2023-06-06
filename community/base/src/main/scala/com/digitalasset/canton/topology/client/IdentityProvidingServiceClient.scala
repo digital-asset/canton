@@ -124,7 +124,7 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
   def awaitSnapshot(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Future[T]
 
   /** Supervised version of [[awaitSnapshot]] */
-  def awaitSnapshotSupervised(description: => String, warnAfter: Duration = 10.seconds)(
+  def awaitSnapshotSupervised(description: => String, warnAfter: Duration = 30.seconds)(
       timestamp: CantonTimestamp
   )(implicit
       traceContext: TraceContext
@@ -136,7 +136,7 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
   ): FutureUnlessShutdown[T]
 
   /** Supervised version of [[awaitSnapshotUS]] */
-  def awaitSnapshotUSSupervised(description: => String, warnAfter: Duration = 10.seconds)(
+  def awaitSnapshotUSSupervised(description: => String, warnAfter: Duration = 30.seconds)(
       timestamp: CantonTimestamp
   )(implicit
       traceContext: TraceContext

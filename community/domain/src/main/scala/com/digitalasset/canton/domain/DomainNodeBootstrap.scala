@@ -582,7 +582,7 @@ class DomainNodeBootstrap(
           crypto.value,
           syncCrypto,
           sequencedTopologyStore,
-          SequencerConnections.default(publicSequencerConnection),
+          SequencerConnections.single(publicSequencerConnection),
           manager,
           domainIdentityService,
           topologyManagerSequencerCounterTrackerStore,
@@ -606,7 +606,7 @@ class DomainNodeBootstrap(
           config.timeTracker,
           storage,
           sequencerClientFactoryFactory,
-          SequencerConnections.default(publicSequencerConnection),
+          SequencerConnections.single(publicSequencerConnection),
           arguments.metrics,
           mediatorFactory,
           indexedStringStore,
@@ -682,6 +682,7 @@ object DomainNodeBootstrap {
       arguments
         .toCantonNodeBootstrapCommonArguments(
           new CommunityStorageFactory(arguments.config.storage),
+          new CommunityCryptoFactory,
           new CommunityCryptoPrivateStoreFactory,
           new CommunityGrpcVaultServiceFactory,
         )

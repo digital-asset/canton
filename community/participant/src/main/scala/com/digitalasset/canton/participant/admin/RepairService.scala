@@ -25,7 +25,10 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashPurpose, Salt, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.api.validation.StricterValueValidator as LedgerApiValueValidator
+import com.digitalasset.canton.ledger.api.validation.{
+  FieldValidator as LedgerApiFieldValidations,
+  StricterValueValidator as LedgerApiValueValidator,
+}
 import com.digitalasset.canton.ledger.participant.state.v2.TransactionMeta
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -49,7 +52,6 @@ import com.digitalasset.canton.participant.sync.{
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
-import com.digitalasset.canton.platform.server.api.validation.FieldValidations as LedgerApiFieldValidations
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
 import com.digitalasset.canton.store.{

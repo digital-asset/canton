@@ -45,8 +45,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
 
-import java.util.ConcurrentModificationException
-import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 sealed trait SequencedEventValidationError extends Product with Serializable with PrettyPrinting
@@ -148,12 +146,14 @@ trait SequencedEventValidator extends FlagCloseable {
     * This method must not be called concurrently as it will corrupt the prior event state.
     */
   def validate(
+      priorEvent: Option[PossiblyIgnoredSerializedEvent],
       event: OrdinarySerializedEvent,
       sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit]
 
   /** Validates a sequenced event when we reconnect against the prior event supplied to [[SequencedEventValidatorFactory.create]] */
   def validateOnReconnect(
+      priorEvent: Option[PossiblyIgnoredSerializedEvent],
       reconnectEvent: OrdinarySerializedEvent,
       sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit]
@@ -167,15 +167,17 @@ object SequencedEventValidator extends HasLoggerName {
       logger: TracedLogger,
   ) extends SequencedEventValidator {
     override def validate(
+        priorEvent: Option[PossiblyIgnoredSerializedEvent],
         event: OrdinarySerializedEvent,
         sequencerId: SequencerId,
     ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
       EitherT(FutureUnlessShutdown.pure(Either.right(())))
     override def validateOnReconnect(
+        priorEvent: Option[PossiblyIgnoredSerializedEvent],
         reconnectEvent: OrdinarySerializedEvent,
         sequencerId: SequencerId,
     ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
-      validate(reconnectEvent, sequencerId)
+      validate(priorEvent, reconnectEvent, sequencerId)
   }
 
   /** Do not validate sequenced events.
@@ -389,8 +391,7 @@ trait SequencedEventValidatorFactory {
     * @param unauthenticated Whether the subscription is unauthenticated
     */
   def create(
-      initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
-      unauthenticated: Boolean,
+      unauthenticated: Boolean
   )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator
 }
 
@@ -408,8 +409,7 @@ object SequencedEventValidatorFactory {
       timeouts: ProcessingTimeout,
   ): SequencedEventValidatorFactory = new SequencedEventValidatorFactory {
     override def create(
-        initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
-        unauthenticated: Boolean,
+        unauthenticated: Boolean
     )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
       SequencedEventValidator.noValidation(domainId, timeouts, warn)
   }
@@ -417,7 +417,6 @@ object SequencedEventValidatorFactory {
 
 /** Validate whether a received event is valid for processing.
   *
-  * @param initialPriorEvent the preceding event of the first event to be validated (can be none on a new connection)
   * @param unauthenticated if true, then the connection is unauthenticated. in such cases, we have to skip some validations.
   * @param optimistic if true, we'll try to be optimistic and validate the event possibly with some stale data. this
   *                   means that during sequencer key rolling, a message might have been signed by a key that was just revoked.
@@ -427,7 +426,6 @@ object SequencedEventValidatorFactory {
   */
 // TODO(#10040) remove optimistic validation
 class SequencedEventValidatorImpl(
-    initialPriorEvent: Option[PossiblyIgnoredSerializedEvent],
     unauthenticated: Boolean,
     optimistic: Boolean,
     domainId: DomainId,
@@ -443,9 +441,6 @@ class SequencedEventValidatorImpl(
   import SequencedEventValidationError.*
   import SequencedEventValidatorImpl.*
 
-  private val priorEventRef: AtomicReference[Option[PossiblyIgnoredSerializedEvent]] =
-    new AtomicReference[Option[PossiblyIgnoredSerializedEvent]](initialPriorEvent)
-
   /** Validates that the supplied event is suitable for processing from the prior event.
     * Currently the signature not being valid is not considered an error but its validity is returned to the caller
     * to allow them to choose what to do with the event.
@@ -455,10 +450,10 @@ class SequencedEventValidatorImpl(
     * This method must not be called concurrently as it will corrupt the prior event state.
     */
   override def validate(
+      priorEventO: Option[PossiblyIgnoredSerializedEvent],
       event: OrdinarySerializedEvent,
       sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
-    val priorEventO = priorEventRef.get()
     val oldCounter = priorEventO.fold(SequencerCounter.Genesis - 1L)(_.counter)
     val newCounter = event.counter
 
@@ -496,31 +491,16 @@ class SequencedEventValidatorImpl(
       // TODO(#4933) Upon a fresh subscription, retrieve the keys via the topology API and validate immediately or
       //  validate the signature after processing the initial event
       _ <- verifySignature(priorEventO, event, sequencerId, protocolVersion)
-    } yield updatePriorEvent(priorEventO, event)
-  }
-
-  private def updatePriorEvent(
-      old: Option[PossiblyIgnoredSerializedEvent],
-      newEvent: OrdinarySerializedEvent,
-  ): Unit = {
-    implicit val traceContext: TraceContext = newEvent.traceContext
-    val replaced = priorEventRef.compareAndSet(old, Some(newEvent))
-    if (!replaced) {
-      // shouldn't happen but likely implies a bug in the caller if it does
-      ErrorUtil.internalError(
-        new ConcurrentModificationException(
-          "The prior event has been unexpectedly changed. Multiple events may be incorrectly being validated concurrently."
-        )
-      )
-    }
+    } yield ()
   }
 
   override def validateOnReconnect(
+      priorEvent0: Option[PossiblyIgnoredSerializedEvent],
       reconnectEvent: OrdinarySerializedEvent,
       sequencerId: SequencerId,
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
     implicit val traceContext: TraceContext = reconnectEvent.traceContext
-    val priorEvent = priorEventRef.get.getOrElse(
+    val priorEvent = priorEvent0.getOrElse(
       ErrorUtil.internalError(
         new IllegalStateException(
           "No prior event known even though the sequencer client reconnects"

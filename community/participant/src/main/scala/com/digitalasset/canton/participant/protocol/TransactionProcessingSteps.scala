@@ -383,6 +383,7 @@ class TransactionProcessingSteps(
             }
         )
       } yield {
+        logger.debug(s"Generated requestUuid=${request.informeeMessage.requestUuid}")
         val batch = request.asBatch
         val batchSize = batch.toProtoVersioned.serializedSize
         metrics.protocolMessages.confirmationRequestSize.update(batchSize)(MetricsContext.Empty)
@@ -1297,6 +1298,7 @@ class TransactionProcessingSteps(
           optUsedPackages = None,
           optNodeSeeds = Some(lfTx.metadata.seeds.to(ImmArray)),
           optByKeyNodes = None, // optByKeyNodes is unused by the indexer
+          optDomainId = Option(domainId),
         ),
         transaction = LfCommittedTransaction(lfTx.unwrap),
         transactionId = lfTxId,

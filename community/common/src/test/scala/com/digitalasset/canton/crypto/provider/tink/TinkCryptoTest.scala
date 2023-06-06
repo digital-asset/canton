@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto.provider.tink
 
 import com.digitalasset.canton.config.CommunityCryptoConfig
-import com.digitalasset.canton.config.CryptoProvider.Tink
+import com.digitalasset.canton.config.CommunityCryptoProvider.Tink
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
@@ -19,12 +19,13 @@ class TinkCryptoTest
     with PrivateKeySerializationTest
     with HkdfTest
     with RandomTest
-    with JavaKeyConverterTest {
+    with JavaPrivateKeyConverterTest
+    with JavaPublicKeyConverterTest {
 
   "TinkCrypto" can {
 
     def tinkCrypto(): Future[Crypto] = {
-      CryptoFactory
+      new CommunityCryptoFactory()
         .create(
           CommunityCryptoConfig(provider = Tink),
           new MemoryStorage(loggerFactory, timeouts),
@@ -51,7 +52,12 @@ class TinkCryptoTest
     behave like randomnessProvider(tinkCrypto().map(_.pureCrypto))
 
     // Tink provider does not support Java conversion of Ed25519 or Hybrid encryption keys
-    behave like javaKeyConverterProvider(
+    behave like javaPublicKeyConverterProvider(
+      Tink.signing.supported.filter(_ != SigningKeyScheme.Ed25519),
+      Set.empty,
+      tinkCrypto(),
+    )
+    behave like javaPrivateKeyConverterProvider(
       Tink.signing.supported.filter(_ != SigningKeyScheme.Ed25519),
       Set.empty,
       tinkCrypto(),

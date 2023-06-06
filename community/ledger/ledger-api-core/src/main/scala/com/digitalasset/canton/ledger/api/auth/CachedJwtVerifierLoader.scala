@@ -10,7 +10,7 @@ import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
 import com.digitalasset.canton.ledger.api.auth.CachedJwtVerifierLoader.CacheKey
 import com.digitalasset.canton.ledger.api.domain.JwksUrl
-import com.github.benmanes.caffeine.{cache as caffeine}
+import com.github.benmanes.caffeine.cache as caffeine
 import scalaz.\/
 
 import java.security.interfaces.RSAPublicKey

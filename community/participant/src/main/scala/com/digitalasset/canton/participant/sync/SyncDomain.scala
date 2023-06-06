@@ -277,7 +277,6 @@ class SyncDomain(
   private val registerIdentityTransactionHandle = identityPusher.createHandler(
     domainHandle.domainAlias,
     domainId,
-    domainHandle.topologyRequestAddress,
     staticDomainParameters.protocolVersion,
     domainHandle.topologyClient,
     domainHandle.sequencerClient,

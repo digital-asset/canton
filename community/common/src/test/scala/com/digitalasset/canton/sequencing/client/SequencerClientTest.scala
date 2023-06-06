@@ -207,18 +207,20 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
         env @ Env(_client, transport, _, _, _) <- Env.create(
           eventValidator = new SequencedEventValidator {
             override def validate(
+                priorEvent: Option[PossiblyIgnoredSerializedEvent],
                 event: OrdinarySerializedEvent,
                 sequencerId: SequencerId,
             ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
               validated.set(true)
-              Env.eventAlwaysValid.validate(event, sequencerId)
+              Env.eventAlwaysValid.validate(priorEvent, event, sequencerId)
             }
 
             override def validateOnReconnect(
+                priorEvent: Option[PossiblyIgnoredSerializedEvent],
                 reconnectEvent: OrdinarySerializedEvent,
                 sequencerId: SequencerId,
             ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] =
-              validate(reconnectEvent, sequencerId)
+              validate(priorEvent, reconnectEvent, sequencerId)
 
             override protected val timeouts: ProcessingTimeout = ProcessingTimeout()
             override protected val logger: TracedLogger = testLogger
@@ -953,8 +955,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
 
       val eventValidatorFactory = new SequencedEventValidatorFactory {
         override def create(
-            initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
-            unauthenticated: Boolean,
+            unauthenticated: Boolean
         )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
           eventValidator
       }

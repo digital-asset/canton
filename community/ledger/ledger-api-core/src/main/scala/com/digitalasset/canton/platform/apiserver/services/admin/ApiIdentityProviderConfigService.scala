@@ -6,8 +6,8 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import com.daml.ledger.api.v1.admin.identity_provider_config_service as proto
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiIdentityProviderConfigService.toProto
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.IdentityProviderConfigUpdateMapper
@@ -32,7 +32,7 @@ class ApiIdentityProviderConfigService(
   private implicit val contextualizedErrorLogger: DamlContextualizedErrorLogger =
     new DamlContextualizedErrorLogger(logger, loggingContext, None)
 
-  import com.digitalasset.canton.platform.server.api.validation.FieldValidations.*
+  import com.digitalasset.canton.ledger.api.validation.FieldValidator.*
 
   private def withValidation[A, B](validatedResult: Either[StatusRuntimeException, A])(
       f: A => Future[B]
@@ -41,7 +41,8 @@ class ApiIdentityProviderConfigService(
 
   override def createIdentityProviderConfig(
       request: proto.CreateIdentityProviderConfigRequest
-  ): Future[proto.CreateIdentityProviderConfigResponse] =
+  ): Future[proto.CreateIdentityProviderConfigResponse] = {
+    logger.info("Creating identity provider config")
     withValidation {
       for {
         config <- requirePresence(request.identityProviderConfig, "identity_provider_config")
@@ -65,6 +66,7 @@ class ApiIdentityProviderConfigService(
         .flatMap(handleResult("creating identity provider config"))
         .map(config => proto.CreateIdentityProviderConfigResponse(Some(toProto(config))))
     }
+  }
 
   override def getIdentityProviderConfig(
       request: proto.GetIdentityProviderConfigRequest

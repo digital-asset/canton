@@ -149,6 +149,9 @@ class DefaultMediatorEventDeduplicator(
           deduplicationTimeout <- getDeduplicationTimeout(Traced(requestTimestamp))
           expireAt = requestTimestamp.plus(deduplicationTimeout)
         } yield {
+          logger.debug(
+            s"Storing requestUuid=$uuid, requestTimestamp=$requestTimestamp, expireAt=$expireAt"
+          )
           val storeF = store.store(uuid, requestTimestamp, expireAt)
           (true, storeF)
         }

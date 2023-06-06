@@ -26,9 +26,6 @@ message SequencerConnect {
       // If `sequencer_id` is an empty string, consumers of this API can assume
       // that `domain_id` serves as the `sequencer_id`.
       string sequencer_id = 2;
-      // The topology request address represents the "mediator group x" to receive
-      // initial participant topology information. Only set by SequencerNodeX.
-      string topology_request_address = 3;
     }
   }
 

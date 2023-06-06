@@ -82,14 +82,18 @@ final case class SequencerConnections private (
       connection: URI,
       additionalConnections: URI*
   ): SequencerConnections =
-    modify(sequencerAlias, _.addEndpoints(connection, additionalConnections: _*))
+    (Seq(connection) ++ additionalConnections).foldLeft(this) { case (acc, elem) =>
+      acc.modify(sequencerAlias, _.addEndpoints(elem))
+    }
 
   def addEndpoints(
       sequencerAlias: SequencerAlias,
       connection: SequencerConnection,
       additionalConnections: SequencerConnection*
   ): SequencerConnections =
-    modify(sequencerAlias, _.addEndpoints(connection, additionalConnections: _*))
+    (Seq(connection) ++ additionalConnections).foldLeft(this) { case (acc, elem) =>
+      acc.modify(sequencerAlias, _.addEndpoints(elem))
+    }
 
   def withCertificates(
       sequencerAlias: SequencerAlias,
@@ -110,14 +114,14 @@ final case class SequencerConnections private (
 object SequencerConnections
     extends HasProtocolVersionedCompanion[SequencerConnections]
     with ProtocolVersionedCompanionDbHelpers[SequencerConnections] {
-  def default(connection: SequencerConnection): SequencerConnections =
+  def single(connection: SequencerConnection): SequencerConnections =
     new SequencerConnections(NonEmpty.mk(Seq, (connection.sequencerAlias, connection)).toMap)(
       protocolVersionRepresentativeFor(ProtocolVersion.v3)
     )
 
   def many(connections: NonEmpty[Seq[SequencerConnection]]): SequencerConnections = {
     if (connections.size == 1) {
-      SequencerConnections.default(connections.head1)
+      SequencerConnections.single(connections.head1)
     } else
       new SequencerConnections(connections.map(conn => (conn.sequencerAlias, conn)).toMap)(
         protocolVersionRepresentativeFor(ProtocolVersion.dev)

@@ -8,7 +8,6 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -17,7 +16,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.mapErr
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
-import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
+import com.digitalasset.canton.sequencing.protocol.{MediatorsOfDomain, OpenEnvelope, Recipients}
 import com.digitalasset.canton.sequencing.{EnvelopeHandler, HandlerResult}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
@@ -100,7 +99,6 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
         OpenEnvelope[ProtocolMessage],
     ) => EitherT[Future, SendAsyncClientError, Unit],
     domainId: DomainId,
-    topologyRequestAddress: TopologyRequestAddressX,
     requestedFor: Member,
     requestedBy: Member,
     protocolVersion: ProtocolVersion,
@@ -115,7 +113,6 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
   private val service =
     new DomainTopologyServiceX(
       domainId,
-      topologyRequestAddress,
       send,
       protocolVersion,
       timeouts,
@@ -240,12 +237,8 @@ abstract class DomainTopologyServiceCommon[
     )
   }
 }
-class DomainTopologyService[
-    Request,
-    RequestIndex,
-    Response,
-    Result,
-](
+
+class DomainTopologyService(
     domainId: DomainId,
     send: (
         TraceContext,
@@ -289,7 +282,6 @@ class DomainTopologyService[
 
 class DomainTopologyServiceX(
     domainId: DomainId,
-    topologyRequestAddress: TopologyRequestAddressX,
     send: (
         TraceContext,
         OpenEnvelope[ProtocolMessage],
@@ -305,8 +297,7 @@ class DomainTopologyServiceX(
       Seq[RegisterTopologyTransactionResponseResult.State],
     ](
       send,
-      // TODO(#11255) replace with mediator group(s) once we have group notifications
-      Recipients.cc(topologyRequestAddress.mediatorId),
+      Recipients.cc(MediatorsOfDomain.TopologyTransactionMediatorGroup),
       protocolVersion,
       timeouts,
       loggerFactory,

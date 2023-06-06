@@ -5,13 +5,13 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.api.util.TimeProvider
 import com.daml.lf
-import com.daml.lf.command.{ApiCommands as LfCommands, ContractMetadata, DisclosedContract}
+import com.daml.lf.command.ApiCommands as LfCommands
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
-import com.daml.lf.engine.{Error as LfError}
-import com.daml.lf.interpretation.{Error as LfInterpretationError}
+import com.daml.lf.engine.Error as LfError
+import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.{LookupError, Reference}
 import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
@@ -19,6 +19,7 @@ import com.daml.lf.value.Value
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.tracing.{NoOpTelemetryContext, TelemetryContext}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands}
@@ -30,7 +31,8 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   SubmitterInfo,
   TransactionMeta,
 }
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscription
 import com.digitalasset.canton.platform.apiserver.execution.{
@@ -38,11 +40,12 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutor,
 }
 import com.digitalasset.canton.platform.services.time.TimeProviderType
-import com.google.rpc.status.{Status as RpcStatus}
+import com.digitalasset.canton.tracing.TraceContext
+import com.google.rpc.status.Status as RpcStatus
 import io.grpc.{Status, StatusRuntimeException}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Inside
-import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -60,12 +63,13 @@ class ApiSubmissionServiceSpec
     with Inside
     with MockitoSugar
     with ScalaFutures
-    with IntegrationPatience
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
 
   import TransactionBuilder.Implicits.*
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContextWithTrace: LoggingContextWithTrace =
+    LoggingContextWithTrace(TraceContext.empty)(LoggingContext.ForTesting)
   private implicit val telemetryContext: TelemetryContext = NoOpTelemetryContext
 
   private val builder = TransactionBuilder()
@@ -95,7 +99,10 @@ class ApiSubmissionServiceSpec
 
   it should "finish successfully in the happy flow" in new TestContext {
     apiSubmissionService()
-      .submit(SubmitRequest(commands))
+      .submit(SubmitRequest(commands))(
+        telemetryContext,
+        LoggingContextWithTrace(TraceContext.empty),
+      )
       .futureValue
   }
 
@@ -160,7 +167,7 @@ class ApiSubmissionServiceSpec
             eqTo(commands),
             any[Hash],
             any[Configuration],
-          )(any[LoggingContext])
+          )(any[LoggingContextWithTrace])
         ).thenReturn(Future.successful(Left(error)))
 
         apiSubmissionService()
@@ -202,17 +209,15 @@ class ApiSubmissionServiceSpec
     val commandExecutor = mock[CommandExecutor]
     val metrics = Metrics.ForTesting
 
-    val disclosedContract = DisclosedContract(
+    val disclosedContract = com.digitalasset.canton.ledger.api.domain.DisclosedContract(
       templateId = Identifier.assertFromString("some:pkg:identifier"),
       contractId = TransactionBuilder.newCid,
       argument = Value.ValueNil,
-      metadata = ContractMetadata(
-        createdAt = Timestamp.Epoch,
-        keyHash = None,
-        driverMetadata = Bytes.Empty,
-      ),
+      createdAt = Timestamp.Epoch,
+      keyHash = None,
+      driverMetadata = Bytes.Empty,
     )
-    val processedDisclosedContract = ProcessedDisclosedContract(
+    val processedDisclosedContract = com.digitalasset.canton.data.ProcessedDisclosedContract(
       templateId = Identifier.assertFromString("some:pkg:identifier"),
       contractId = TransactionBuilder.newCid,
       argument = Value.ValueNil,
@@ -280,7 +285,7 @@ class ApiSubmissionServiceSpec
       .thenReturn(Some(ledgerConfiguration))
     when(
       commandExecutor.execute(eqTo(commands), any[Hash], eqTo(ledgerConfiguration))(
-        any[LoggingContext]
+        any[LoggingContextWithTrace]
       )
     )
       .thenReturn(Future.successful(Right(commandExecutionResult)))
@@ -306,6 +311,7 @@ class ApiSubmissionServiceSpec
       commandExecutor = commandExecutor,
       checkOverloaded = checkOverloaded,
       metrics = metrics,
+      loggerFactory = loggerFactory,
     )
   }
 }

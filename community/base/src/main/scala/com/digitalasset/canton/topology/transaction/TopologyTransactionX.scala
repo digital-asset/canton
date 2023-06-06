@@ -142,9 +142,9 @@ final case class TopologyTransactionX[+Op <: TopologyChangeOpX, +M <: TopologyMa
     */
   override def pretty: Pretty[TopologyTransactionX.this.type] =
     prettyOfClass(
-      param("op", _.op),
-      param("serial", _.serial),
       unnamedParam(_.mapping),
+      param("serial", _.serial),
+      param("op", _.op),
     )
 
   @transient override protected lazy val companionObj: TopologyTransactionX.type =

@@ -22,7 +22,7 @@ trait PrivateKeySerializationTest extends BaseTest { this: AsyncWordSpec =>
         s"for a $encryptionKeyScheme encryption private key" in {
           for {
             crypto <- newCrypto
-            cryptoPrivateStore = crypto.cryptoPrivateStoreExtended
+            cryptoPrivateStore = crypto.cryptoPrivateStore.toExtended
               .valueOrFail("crypto private store does not implement all necessary methods")
             publicKey <- crypto.privateCrypto
               .generateEncryptionKey(encryptionKeyScheme)
@@ -42,7 +42,7 @@ trait PrivateKeySerializationTest extends BaseTest { this: AsyncWordSpec =>
         s"for a $signingKeyScheme signing private key" in {
           for {
             crypto <- newCrypto
-            cryptoPrivateStore = crypto.cryptoPrivateStoreExtended
+            cryptoPrivateStore = crypto.cryptoPrivateStore.toExtended
               .valueOrFail("crypto private store does not implement all necessary methods")
             publicKey <- crypto.privateCrypto
               .generateSigningKey(signingKeyScheme)

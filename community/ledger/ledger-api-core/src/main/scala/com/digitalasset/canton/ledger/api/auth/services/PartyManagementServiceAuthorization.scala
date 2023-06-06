@@ -5,10 +5,11 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v1.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementService
 import com.daml.ledger.api.v1.admin.party_management_service.*
+import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.Authorizer
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
-import com.digitalasset.canton.platform.server.api.ProxyCloseable
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
+import scalapb.lenses.Lens
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -27,7 +28,7 @@ final class PartyManagementServiceAuthorization(
 
   override def getParties(request: GetPartiesRequest): Future[GetPartiesResponse] =
     authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-      request.identityProviderId,
+      Lens.unit[GetPartiesRequest].identityProviderId,
       service.getParties,
     )(request)
 
@@ -35,7 +36,7 @@ final class PartyManagementServiceAuthorization(
       request: ListKnownPartiesRequest
   ): Future[ListKnownPartiesResponse] =
     authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-      request.identityProviderId,
+      Lens.unit[ListKnownPartiesRequest].identityProviderId,
       service.listKnownParties,
     )(
       request
@@ -43,7 +44,7 @@ final class PartyManagementServiceAuthorization(
 
   override def allocateParty(request: AllocatePartyRequest): Future[AllocatePartyResponse] =
     authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-      request.identityProviderId,
+      Lens.unit[AllocatePartyRequest].identityProviderId,
       service.allocateParty,
     )(
       request
@@ -54,7 +55,7 @@ final class PartyManagementServiceAuthorization(
   ): Future[UpdatePartyDetailsResponse] = request.partyDetails match {
     case Some(partyDetails) =>
       authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-        partyDetails.identityProviderId,
+        Lens.unit[UpdatePartyDetailsRequest].partyDetails.identityProviderId,
         service.updatePartyDetails,
       )(
         request

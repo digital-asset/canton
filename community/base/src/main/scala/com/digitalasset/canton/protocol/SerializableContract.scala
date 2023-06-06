@@ -5,12 +5,11 @@ package com.digitalasset.canton.protocol
 
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
-import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.crypto
 import com.digitalasset.canton.crypto.Salt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, ProcessedDisclosedContract}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -86,6 +85,17 @@ case class SerializableContract(
     param("metadata", _.metadata),
     param("create time", _.ledgerCreateTime),
     paramIfDefined("contract salt", _.contractSalt),
+  )
+
+  def toLf: LfNodeCreate = LfNodeCreate(
+    coid = contractId,
+    templateId = rawContractInstance.contractInstance.unversioned.template,
+    arg = rawContractInstance.contractInstance.unversioned.arg,
+    agreementText = rawContractInstance.unvalidatedAgreementText.v,
+    signatories = metadata.signatories,
+    stakeholders = metadata.stakeholders,
+    keyOpt = metadata.maybeKeyWithMaintainers,
+    version = rawContractInstance.contractInstance.version,
   )
 
 }

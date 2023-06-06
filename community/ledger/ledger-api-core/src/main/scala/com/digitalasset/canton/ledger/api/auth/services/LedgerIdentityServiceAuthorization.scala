@@ -8,9 +8,9 @@ import com.daml.ledger.api.v1.ledger_identity_service.{
   GetLedgerIdentityResponse,
   LedgerIdentityServiceGrpc,
 }
+import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.Authorizer
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
-import com.digitalasset.canton.platform.server.api.ProxyCloseable
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
 
 import scala.annotation.nowarn

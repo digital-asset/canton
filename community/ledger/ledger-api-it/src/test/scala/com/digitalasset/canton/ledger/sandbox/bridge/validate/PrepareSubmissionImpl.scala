@@ -4,8 +4,9 @@
 package com.digitalasset.canton.ledger.sandbox.bridge.validate
 
 import com.daml.error.ContextualizedErrorLogger
+import com.daml.lf.data.Ref
 import com.daml.lf.engine.Blinding
-import com.daml.lf.transaction.{Transaction as LfTransaction}
+import com.daml.lf.transaction.{Node, Transaction as LfTransaction}
 import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.Timed
 import com.digitalasset.canton.ledger.participant.state.v2.CompletionInfo
@@ -25,6 +26,14 @@ private[validate] class PrepareSubmissionImpl(bridgeMetrics: BridgeMetrics)(impl
 ) extends PrepareSubmission {
   private[this] implicit val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
 
+  private def informees(transaction: LfTransaction) = {
+    // TODO(i13345): this should replaced with transaction.informees
+    transaction.nodes.values.foldLeft(Set.empty[Ref.Party]) {
+      case (acc, node: Node.Action) => acc | node.informeesOfNode
+      case (acc, _: Node.Rollback) => acc
+    }
+  }
+
   override def apply(submission: Submission): AsyncValidation[PreparedSubmission] =
     submission match {
       case transactionSubmission @ Submission.Transaction(submitterInfo, _, transaction, _, _) =>
@@ -39,7 +48,7 @@ private[validate] class PrepareSubmissionImpl(bridgeMetrics: BridgeMetrics)(impl
                   transaction.transaction.updatedContractKeys,
                   transaction.transaction.consumedContracts,
                   Blinding.blind(transaction),
-                  transaction.informees,
+                  informees(transaction.transaction),
                   transactionSubmission,
                 )
               })

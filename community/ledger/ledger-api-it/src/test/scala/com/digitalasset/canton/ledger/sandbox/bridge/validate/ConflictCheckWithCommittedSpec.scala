@@ -299,9 +299,9 @@ class ConflictCheckWithCommittedSpec
     val informeesSet: Set[Ref.Party] = transactionInformees.toSet
     val blindingInfo: BlindingInfo = BlindingInfo(Map(), Map(divulgedContract -> Set(informee1)))
 
-    val processedDisclosedContract: ProcessedDisclosedContract = {
+    val processedDisclosedContract: com.digitalasset.canton.data.ProcessedDisclosedContract = {
       val contractId = cid(1)
-      ProcessedDisclosedContract(
+      com.digitalasset.canton.data.ProcessedDisclosedContract(
         templateId = templateId,
         contractId = contractId,
         argument = Value.ValueText("Some contract value"),

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.sequencing.TrafficControlConfig.{
   DefaultBaseRate,
   DefaultMaxBurstDuration,
@@ -13,15 +13,14 @@ import com.digitalasset.canton.sequencing.TrafficControlConfig.{
 /** Traffic control configuration values - stored as dynamic domain parameters
   *
   * @param baseRate amount of byte per second acquired as "free" traffic per member
-  * @param storageCostMultiplier multiplier used to compute storage cost of an event
-  * @param deliveryCostMultiplier multiplier used to compute delivery cost of an event
+  * @param readVsWriteScalingFactor multiplier used to compute cost of an event. In per ten-mil (1 / 10 000). Defaults to 200 (=2%).
+  *                                 A multiplier of 2% means the base cost will be increased by 2% to produce the effective cost.
   * @param maxBurstDuration maximum amount of time the base rate traffic will accumulate before being capped
   */
 // TODO(i12858): Move to dynamic domain parameters
 final case class TrafficControlConfig(
     baseRate: NonNegativeLong = DefaultBaseRate,
-    storageCostMultiplier: PositiveInt = PositiveNumeric.tryCreate(1),
-    deliveryCostMultiplier: PositiveInt = PositiveNumeric.tryCreate(1),
+    readVsWriteScalingFactor: PositiveInt = PositiveInt.tryCreate(200),
     maxBurstDuration: config.NonNegativeDuration = DefaultMaxBurstDuration,
 ) {
   lazy val maxBurst: NonNegativeLong =

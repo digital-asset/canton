@@ -307,7 +307,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       (for {
         connection <- domain.config.sequencerConnectionConfig.toConnection
         name <- DomainAlias.create(domain.name.unwrap)
-        sequencerConnections = SequencerConnections.default(connection)
+        sequencerConnections = SequencerConnections.single(connection)
       } yield DomainConnectionConfig(name, sequencerConnections)).leftMap(err =>
         StartFailed(domain.name.unwrap, s"Can not parse config for auto-connect: ${err}")
       )

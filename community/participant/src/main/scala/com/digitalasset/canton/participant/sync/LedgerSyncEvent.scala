@@ -11,6 +11,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.{
   CompletionInfo,
   DivulgedContract,
+  Reassignment,
+  ReassignmentInfo,
   TransactionMeta,
   Update,
 }
@@ -52,7 +54,7 @@ import scala.collection.immutable.HashMap
 sealed trait LedgerSyncEvent extends Product with Serializable with PrettyPrinting {
   def description: String
   def recordTime: LfTimestamp
-  def toDamlUpdate: Option[Update]
+  def toDamlUpdate(populateTransfers: Boolean = false): Option[Update]
 
   def setTimestamp(timestamp: LfTimestamp): LedgerSyncEvent =
     this match {
@@ -74,6 +76,11 @@ sealed trait LedgerSyncEvent extends Product with Serializable with PrettyPrinti
 }
 
 object LedgerSyncEvent {
+
+  // TODO(i13313) Where relevant, the domain ID should be mandatory
+  sealed trait WithDomainId extends LedgerSyncEvent {
+    def domainId: Option[DomainId]
+  }
 
   /** Produces a constant dummy transaction seed for transactions in which we cannot expose a seed. Essentially all of
     * them. TransactionMeta.submissionSeed can no longer be set to None starting with Daml 1.3
@@ -97,7 +104,9 @@ object LedgerSyncEvent {
         param("submissionId", _.submissionId),
         param("newConfiguration", _.newConfiguration),
       )
-    def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.ConfigurationChanged])
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = Some(
+      this.transformInto[Update.ConfigurationChanged]
+    )
   }
 
   final case class ConfigurationChangeRejected(
@@ -119,7 +128,9 @@ object LedgerSyncEvent {
         param("rejectionReason", _.rejectionReason.doubleQuoted),
         param("proposedConfiguration", _.proposedConfiguration),
       )
-    def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.ConfigurationChangeRejected])
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = Some(
+      this.transformInto[Update.ConfigurationChangeRejected]
+    )
   }
 
   final case class PartyAddedToParticipant(
@@ -140,7 +151,9 @@ object LedgerSyncEvent {
         param("party", _.party),
         param("displayName", _.displayName.singleQuoted),
       )
-    def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.PartyAddedToParticipant])
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = Some(
+      this.transformInto[Update.PartyAddedToParticipant]
+    )
   }
 
   final case class PartyAllocationRejected(
@@ -160,7 +173,9 @@ object LedgerSyncEvent {
         param("rejectionReason", _.rejectionReason.doubleQuoted),
       )
 
-    def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.PartyAllocationRejected])
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = Some(
+      this.transformInto[Update.PartyAllocationRejected]
+    )
   }
 
   final case class PublicPackageUpload(
@@ -180,7 +195,9 @@ object LedgerSyncEvent {
         paramWithoutValue("archives"),
       )
 
-    def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.PublicPackageUpload])
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = Some(
+      this.transformInto[Update.PublicPackageUpload]
+    )
   }
 
   final case class PublicPackageUploadRejected(
@@ -198,7 +215,9 @@ object LedgerSyncEvent {
         param("rejectionReason", _.rejectionReason.doubleQuoted),
       )
 
-    def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.PublicPackageUploadRejected])
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = Some(
+      this.transformInto[Update.PublicPackageUploadRejected]
+    )
   }
 
   final case class TransactionAccepted(
@@ -210,7 +229,7 @@ object LedgerSyncEvent {
       divulgedContracts: List[DivulgedContract],
       blindingInfo: Option[BlindingInfo],
       contractMetadata: Map[LfContractId, Bytes],
-  ) extends LedgerSyncEvent {
+  ) extends LedgerSyncEvent.WithDomainId {
     override def description: String = s"Accept transaction $transactionId"
 
     override def pretty: Pretty[TransactionAccepted] =
@@ -223,7 +242,11 @@ object LedgerSyncEvent {
         paramWithoutValue("divulgedContracts"),
         paramWithoutValue("blindingInfo"),
       )
-    def toDamlUpdate: Option[Update] = Some(this.transformInto[Update.TransactionAccepted])
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = Some(
+      this.transformInto[Update.TransactionAccepted]
+    )
+
+    override def domainId: Option[DomainId] = transactionMeta.optDomainId
   }
 
   final case class CommandRejected(
@@ -232,7 +255,7 @@ object LedgerSyncEvent {
       reasonTemplate: CommandRejected.FinalReason,
       kind: ProcessingSteps.RequestType.Values,
       domainId: Option[DomainId],
-  ) extends LedgerSyncEvent {
+  ) extends LedgerSyncEvent.WithDomainId {
     override def description: String =
       s"Reject command ${completionInfo.commandId}${if (definiteAnswer)
           " (definite answer)"}: ${reasonTemplate.message}"
@@ -248,7 +271,7 @@ object LedgerSyncEvent {
         paramIfDefined("domainId", _.domainId),
       )
 
-    def toDamlUpdate: Option[Update] = {
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = {
       val selector = kind match {
         case RequestType.Transaction => Some(())
         case _: RequestType.Transfer => None
@@ -274,7 +297,7 @@ object LedgerSyncEvent {
     }
   }
 
-  sealed trait TransferEvent extends LedgerSyncEvent {
+  sealed trait TransferEvent extends LedgerSyncEvent.WithDomainId {
     def transferId: TransferId
     def sourceDomain: SourceDomainId = transferId.sourceDomain
     def targetDomain: TargetDomainId
@@ -309,9 +332,12 @@ object LedgerSyncEvent {
       transferInExclusivity: Option[LfTimestamp],
       workflowId: Option[LfWorkflowId],
       isTransferringParticipant: Boolean,
+      hostedStakeholders: List[LfPartyId],
   ) extends TransferEvent {
 
     override def recordTime: LfTimestamp = transferId.transferOutTimestamp.underlying
+
+    override def domainId: Option[DomainId] = Option(sourceDomain.id)
 
     def updateRecordTime(newRecordTime: LfTimestamp): TransferredOut =
       this.focus(_.transferId.transferOutTimestamp).replace(CantonTimestamp(newRecordTime))
@@ -333,7 +359,33 @@ object LedgerSyncEvent {
       paramIfDefined("workflowId", _.workflowId),
     )
 
-    def toDamlUpdate: Option[Update] = None
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] =
+      Option.when(populateTransfers) {
+        Update.ReassignmentAccepted(
+          optCompletionInfo = optCompletionInfo,
+          workflowId = workflowId,
+          updateId = updateId,
+          recordTime = recordTime,
+          reassignmentInfo = ReassignmentInfo(
+            sourceDomain = transferId.sourceDomain,
+            targetDomain = targetDomain,
+            submitter = submitter,
+            reassignmentCounter = 0L, // TODO(i12286): this needs to be populated properly
+            hostedStakeholders = hostedStakeholders,
+            unassignId = transferId.transferOutTimestamp,
+          ),
+          reassignment = Reassignment.Unassign(
+            contractId = contractId,
+            templateId = templateId.getOrElse(
+              throw new IllegalStateException(
+                s"templateId should not be empty in transfer-id: $transferId"
+              )
+            ),
+            stakeholders = contractStakeholders.toList,
+            assignmentExclusivity = transferInExclusivity,
+          ),
+        )
+      }
   }
 
   /**  Signal the transfer-in of a contract from the source domain to the target domain.
@@ -367,6 +419,7 @@ object LedgerSyncEvent {
       createTransactionAccepted: Boolean,
       workflowId: Option[LfWorkflowId],
       isTransferringParticipant: Boolean,
+      hostedStakeholders: List[LfPartyId],
   ) extends TransferEvent {
 
     override def description: String =
@@ -387,6 +440,8 @@ object LedgerSyncEvent {
 
     override def kind: String = "in"
 
+    override def domainId: Option[DomainId] = Option(targetDomain.id)
+
     private lazy val transactionMeta: TransactionMeta = TransactionMeta(
       ledgerEffectiveTime = ledgerCreateTime,
       workflowId = workflowId,
@@ -402,27 +457,52 @@ object LedgerSyncEvent {
       *
       * The transaction has the same ledger time and transaction id as the creation of the contract.
       */
-    def toDamlUpdate: Option[Update] =
-      Option.when(createTransactionAccepted) {
-        val nodeId = LfNodeId(0)
-        val committedTransaction = LfCommittedTransaction(
-          LfVersionedTransaction(
-            version = createNode.version,
-            nodes = HashMap((nodeId, createNode)),
-            roots = ImmArray(nodeId),
+    def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] =
+      Option
+        .when(populateTransfers)(
+          Update.ReassignmentAccepted(
+            optCompletionInfo = optCompletionInfo,
+            workflowId = workflowId,
+            updateId = updateId,
+            recordTime = recordTime,
+            reassignmentInfo = ReassignmentInfo(
+              sourceDomain = transferId.sourceDomain,
+              targetDomain = targetDomain,
+              submitter = submitter,
+              reassignmentCounter = 0L, // TODO(i12286): this needs to be populated properly
+              hostedStakeholders = hostedStakeholders,
+              unassignId = transferId.transferOutTimestamp,
+            ),
+            reassignment = Reassignment.Assign(
+              ledgerEffectiveTime = ledgerCreateTime,
+              createNode = createNode,
+              contractMetadata = contractMetadata,
+            ),
           )
         )
+        .orElse(
+          Option.when(createTransactionAccepted) {
+            val nodeId = LfNodeId(0)
+            val committedTransaction = LfCommittedTransaction(
+              LfVersionedTransaction(
+                version = createNode.version,
+                nodes = HashMap((nodeId, createNode)),
+                roots = ImmArray(nodeId),
+              )
+            )
 
-        Update.TransactionAccepted(
-          optCompletionInfo = optCompletionInfo,
-          transactionMeta = transactionMeta,
-          transaction = committedTransaction,
-          transactionId = updateId,
-          recordTime = recordTime,
-          divulgedContracts = Nil,
-          blindingInfo = None,
-          contractMetadata = Map(createNode.coid -> contractMetadata),
+            Update.TransactionAccepted(
+              optCompletionInfo = optCompletionInfo,
+              transactionMeta = transactionMeta,
+              transaction = committedTransaction,
+              transactionId = updateId,
+              recordTime = recordTime,
+              divulgedContracts = Nil,
+              blindingInfo = None,
+              contractMetadata = Map(createNode.coid -> contractMetadata),
+            )
+          }
         )
-      }
+
   }
 }

@@ -148,7 +148,7 @@ abstract class CantonNodeBootstrapX[
       // crypto factory doesn't write to the db during startup, hence,
       // we won't have "isPassive" issues here
       performUnlessClosingEitherU("create-crypto")(
-        CryptoFactory
+        arguments.cryptoFactory
           .create(
             cryptoConfig,
             storage,

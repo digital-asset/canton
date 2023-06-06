@@ -15,6 +15,9 @@ import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.{Metrics, Tracked}
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.ledger.api.ValidationLogger
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
+import com.digitalasset.canton.ledger.api.grpc.Logging.traceId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.offset.Offset
@@ -25,10 +28,8 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
+import com.digitalasset.canton.platform.apiserver.ApiException
 import com.digitalasset.canton.platform.apiserver.services.logging
-import com.digitalasset.canton.platform.server.api.services.grpc.Logging.traceId
-import com.digitalasset.canton.platform.server.api.{ApiException, ValidationLogger}
 import io.grpc.protobuf.StatusProto
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 

@@ -18,16 +18,15 @@ import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, GrpcCommandService}
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator
 import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscription
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandService.*
 import com.digitalasset.canton.platform.apiserver.services.tracking.{
   CompletionResponse,
   SubmissionTracker,
 }
-import com.digitalasset.canton.platform.server.api.services.grpc.GrpcCommandService
 import com.google.protobuf.empty.Empty
 import io.grpc.Context
 

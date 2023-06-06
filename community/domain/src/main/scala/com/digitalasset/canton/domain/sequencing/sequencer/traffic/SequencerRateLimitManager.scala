@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.traffic
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.PositiveLong
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
 import com.digitalasset.canton.topology.Member
@@ -68,8 +68,8 @@ sealed trait SequencerRateLimitError
 object SequencerRateLimitError {
   final case class UnknownMember(member: Member) extends SequencerRateLimitError
   final case class AboveTrafficLimit(
-      trafficCost: Long,
-      extraTrafficRemainder: Long,
-      remainingBaseTraffic: Long,
+      trafficCost: NonNegativeLong,
+      extraTrafficRemainder: NonNegativeLong,
+      remainingBaseTraffic: NonNegativeLong,
   ) extends SequencerRateLimitError
 }

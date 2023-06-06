@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.crypto.admin.grpc
 
+import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -68,12 +69,15 @@ class GrpcVaultService(
       keysMetadata <- EitherTUtil.toFuture(
         mapErr(
           filteredPublicKeys.parTraverse { pk =>
-            crypto.cryptoPrivateStore
-              .encrypted(pk.publicKey.id)
-              .leftMap[String](err =>
-                s"Failed to retrieve encrypted status for key ${pk.publicKey.id}: $err"
-              )
-              .map(encrypted => PrivateKeyMetadata(pk, encrypted).toProtoV0)
+            (crypto.cryptoPrivateStore.toExtended match {
+              case Some(extended) =>
+                extended
+                  .encrypted(pk.publicKey.id)
+                  .leftMap[String](err =>
+                    s"Failed to retrieve encrypted status for key ${pk.publicKey.id}: $err"
+                  )
+              case None => EitherT.rightT[Future, String](None)
+            }).map(encrypted => PrivateKeyMetadata(pk, encrypted).toProtoV0)
           }
         )
       )

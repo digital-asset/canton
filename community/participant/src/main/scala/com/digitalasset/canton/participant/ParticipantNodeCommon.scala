@@ -12,6 +12,8 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.LedgerParticipantId
+import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
+import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader.SequencerInfoLoaderError
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -68,7 +70,7 @@ import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseProtocolVersion}
 import io.grpc.{BindableService, ServerServiceDefinition}
 
 import java.util.concurrent.atomic.AtomicReference
@@ -364,22 +366,32 @@ trait ParticipantNodeBootstrapCommon {
         )
       }
 
+      sequencerInfoLoader = new SequencerInfoLoader(
+        parameterConfig.processingTimeouts,
+        parameterConfig.tracing.propagation,
+        ProtocolVersionCompatibility.supportedProtocolsParticipant(parameterConfig),
+        parameterConfig.protocolConfig.minimumProtocolVersion,
+        parameterConfig.protocolConfig.dontWarnOnDeprecatedPV,
+        loggerFactory,
+      )
+
       domainRegistry = new GrpcDomainRegistry(
         participantId,
         syncDomainPersistentStateManager,
         persistentState.map(_.settingsStore),
         agreementService,
         topologyDispatcher,
-        domainAliasManager,
         syncCrypto,
         config.crypto,
         clock,
         parameterConfig,
+        domainAliasManager,
         arguments.testingConfig,
         recordSequencerInteractions,
         replaySequencerConfig,
         packageId => packageService.packageDependencies(List(packageId)),
         arguments.metrics.domainMetrics,
+        sequencerInfoLoader,
         futureSupervisor,
         loggerFactory,
       )
@@ -450,6 +462,7 @@ trait ParticipantNodeBootstrapCommon {
         indexedStringStore,
         schedulers,
         arguments.metrics,
+        sequencerInfoLoader,
         arguments.futureSupervisor,
         loggerFactory,
         skipRecipientsCheck,
@@ -502,8 +515,8 @@ trait ParticipantNodeBootstrapCommon {
         sync,
         domainAliasManager,
         agreementService,
-        domainRegistry.sequencerConnectClientBuilder,
         parameterConfig.processingTimeouts,
+        sequencerInfoLoader,
         loggerFactory,
       )
 
@@ -586,6 +599,20 @@ trait ParticipantNodeBootstrapCommon {
       )
     }
   }
+
+  private def toSequencerInfoLoaderError(
+      error: DomainAliasManager.Error
+  ): SequencerInfoLoaderError =
+    error match {
+      case DomainAliasManager.GenericError(reason) =>
+        SequencerInfoLoader.SequencerInfoLoaderError.HandshakeFailedError(reason)
+      case DomainAliasManager.DomainAliasDuplication(domainId, alias, previousDomainId) =>
+        SequencerInfoLoader.SequencerInfoLoaderError.DomainAliasDuplication(
+          domainId,
+          alias,
+          previousDomainId,
+        )
+    }
 
 }
 

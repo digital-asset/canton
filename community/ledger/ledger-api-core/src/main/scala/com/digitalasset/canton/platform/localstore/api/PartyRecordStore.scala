@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.localstore.api
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
-import com.digitalasset.canton.platform.server.api.validation.ResourceAnnotationValidation
+import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
 
 import scala.concurrent.Future
 
@@ -66,7 +66,7 @@ object PartyRecordStore {
   final case class PartyRecordExistsFatal(party: Ref.Party) extends Error
   final case class ConcurrentPartyUpdate(party: Ref.Party) extends Error
   final case class MaxAnnotationsSizeExceeded(party: Ref.Party) extends Error {
-    def getReason: String = ResourceAnnotationValidation.AnnotationsSizeExceededError.reason
+    def getReason: String = ResourceAnnotationValidator.AnnotationsSizeExceededError.reason
   }
 
 }

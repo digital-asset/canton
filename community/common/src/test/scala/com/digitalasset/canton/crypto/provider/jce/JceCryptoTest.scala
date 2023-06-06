@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.crypto.provider.jce
 
-import com.digitalasset.canton.config.CryptoProvider.Jce
-import com.digitalasset.canton.config.{CommunityCryptoConfig, CryptoProvider}
+import com.digitalasset.canton.config.CommunityCryptoConfig
+import com.digitalasset.canton.config.CommunityCryptoProvider.Jce
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
@@ -20,14 +20,15 @@ class JceCryptoTest
     with PrivateKeySerializationTest
     with HkdfTest
     with RandomTest
-    with JavaKeyConverterTest {
+    with JavaPrivateKeyConverterTest
+    with JavaPublicKeyConverterTest {
 
   "JceCrypto" can {
 
     def jceCrypto(): Future[Crypto] = {
-      CryptoFactory
+      new CommunityCryptoFactory()
         .create(
-          CommunityCryptoConfig(provider = CryptoProvider.Jce),
+          CommunityCryptoConfig(provider = Jce),
           new MemoryStorage(loggerFactory, timeouts),
           new CommunityCryptoPrivateStoreFactory,
           testedReleaseProtocolVersion,
@@ -68,7 +69,7 @@ class JceCryptoTest
             val message = Message(ByteString.copyFromUtf8("foobar"))
             for {
               crypto <- jceCrypto()
-              publicKey <- newPublicKey(crypto, keyScheme)
+              publicKey <- getEncryptionPublicKey(crypto, keyScheme)
               encrypted1 = crypto.pureCrypto
                 .encryptDeterministicWith(message, publicKey, testedProtocolVersion)
                 .valueOrFail("encrypt")
@@ -84,7 +85,12 @@ class JceCryptoTest
 
     behave like hkdfProvider(jceCrypto().map(_.pureCrypto))
     behave like randomnessProvider(jceCrypto().map(_.pureCrypto))
-    behave like javaKeyConverterProvider(
+    behave like javaPublicKeyConverterProvider(
+      Jce.signing.supported,
+      Jce.encryption.supported,
+      jceCrypto(),
+    )
+    behave like javaPrivateKeyConverterProvider(
       Jce.signing.supported,
       Jce.encryption.supported,
       jceCrypto(),

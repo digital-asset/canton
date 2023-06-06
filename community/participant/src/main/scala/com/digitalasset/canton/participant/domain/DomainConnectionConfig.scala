@@ -142,7 +142,7 @@ object DomainConnectionConfig
   ): DomainConnectionConfig =
     DomainConnectionConfig(
       domainAlias,
-      SequencerConnections.default(
+      SequencerConnections.single(
         GrpcSequencerConnection.tryCreate(connection, certificates, sequencerAlias)
       ),
       manualConnect,

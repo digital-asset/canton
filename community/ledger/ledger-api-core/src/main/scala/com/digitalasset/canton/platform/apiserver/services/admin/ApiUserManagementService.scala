@@ -22,13 +22,13 @@ import com.digitalasset.canton.ledger.api.auth.ClaimAdmin
 import com.digitalasset.canton.ledger.api.auth.ClaimSet.Claims
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.ledger.api.domain.*
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
+import com.digitalasset.canton.ledger.api.validation.FieldValidator
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPartyManagementService
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.UserUpdateMapper
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
-import com.digitalasset.canton.platform.server.api.validation.FieldValidations
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import scalaz.std.either.*
 import scalaz.std.list.*
@@ -58,7 +58,7 @@ private[apiserver] final class ApiUserManagementService(
   private implicit val contextualizedErrorLogger: DamlContextualizedErrorLogger =
     new DamlContextualizedErrorLogger(logger, loggingContext, None)
 
-  import FieldValidations.*
+  import FieldValidator.*
 
   override def close(): Unit = ()
 
@@ -142,7 +142,7 @@ private[apiserver] final class ApiUserManagementService(
             "identity_provider_id",
           )
           pResourceVersion <- optionalString(pMetadata.resourceVersion)(
-            FieldValidations.requireResourceVersion(_, "user.metadata.resource_version")
+            FieldValidator.requireResourceVersion(_, "user.metadata.resource_version")
           )
           pAnnotations <- verifyMetadataAnnotations(
             pMetadata.annotations,
@@ -334,7 +334,7 @@ private[apiserver] final class ApiUserManagementService(
       resolveAuthenticatedUserContext()
     withValidation(
       for {
-        userId <- FieldValidations.requireUserId(request.userId, "user_id")
+        userId <- FieldValidator.requireUserId(request.userId, "user_id")
         rights <- fromProtoRights(request.rights)
         identityProviderId <- optionalIdentityProviderId(
           request.identityProviderId,

@@ -11,7 +11,7 @@ import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.concurrent.Future
 
-trait SigningTest extends BaseTest {
+trait SigningTest extends BaseTest with CryptoTestHelper {
   this: AsyncWordSpecLike =>
 
   def signingProvider(
@@ -22,15 +22,10 @@ trait SigningTest extends BaseTest {
     forAll(supportedSigningKeySchemes) { signingKeyScheme =>
       s"Sign with $signingKeyScheme" should {
 
-        def newPublicKey(crypto: Crypto): Future[SigningPublicKey] =
-          crypto.privateCrypto
-            .generateSigningKey(scheme = signingKeyScheme)
-            .valueOrFail("generate signing key")
-
         "serialize and deserialize a signing public key via protobuf" in {
           for {
             crypto <- newCrypto
-            publicKey <- newPublicKey(crypto)
+            publicKey <- getSigningPublicKey(crypto, signingKeyScheme)
             publicKeyP = publicKey.toProtoVersioned(testedProtocolVersion)
             publicKey2 = SigningPublicKey
               .fromProtoVersioned(publicKeyP)
@@ -41,7 +36,7 @@ trait SigningTest extends BaseTest {
         "serialize and deserialize a signature via protobuf" in {
           for {
             crypto <- newCrypto
-            publicKey <- newPublicKey(crypto)
+            publicKey <- getSigningPublicKey(crypto, signingKeyScheme)
             hash = TestHash.digest("foobar")
             sig <- crypto.privateCrypto.sign(hash, publicKey.id).valueOrFail("sign")
             sigP = sig.toProtoVersioned(testedProtocolVersion)
@@ -52,7 +47,7 @@ trait SigningTest extends BaseTest {
         "sign and verify" in {
           for {
             crypto <- newCrypto
-            publicKey <- newPublicKey(crypto)
+            publicKey <- getSigningPublicKey(crypto, signingKeyScheme)
             hash = TestHash.digest("foobar")
             sig <- crypto.privateCrypto.sign(hash, publicKey.id).valueOrFail("sign")
             res = crypto.pureCrypto.verifySignature(hash, publicKey, sig)
@@ -71,7 +66,7 @@ trait SigningTest extends BaseTest {
         "fail to verify if signature is invalid" in {
           for {
             crypto <- newCrypto
-            publicKey <- newPublicKey(crypto)
+            publicKey <- getSigningPublicKey(crypto, signingKeyScheme)
             hash = TestHash.digest("foobar")
             realSig <- crypto.privateCrypto.sign(hash, publicKey.id).valueOrFail("sign")
             randomBytes = ByteString.copyFromUtf8(PseudoRandom.randomAlphaNumericString(16))
@@ -83,8 +78,8 @@ trait SigningTest extends BaseTest {
         "fail to verify with a different public key" in {
           for {
             crypto <- newCrypto
-            publicKey <- newPublicKey(crypto)
-            publicKey2 <- newPublicKey(crypto)
+            (publicKey, publicKey2) <- getTwoSigningPublicKeys(crypto, signingKeyScheme)
+            _ = assert(publicKey != publicKey2)
             hash = TestHash.digest("foobar")
             sig <- crypto.privateCrypto.sign(hash, publicKey.id).valueOrFail("sign")
             res = crypto.pureCrypto.verifySignature(hash, publicKey2, sig)

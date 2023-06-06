@@ -185,7 +185,8 @@ class TopologyAdministrationGroupX(
       val domainParameterState = Option.when(isDomainOwner)(
         instance.topology.domain_parameters.propose(
           domainId,
-          DynamicDomainParameters.defaultValues(ProtocolVersion.dev),
+          DynamicDomainParameters
+            .initialXValues(consoleEnvironment.environment.clock, ProtocolVersion.dev),
           signedBy = thisNodeRootKey,
         )
       )

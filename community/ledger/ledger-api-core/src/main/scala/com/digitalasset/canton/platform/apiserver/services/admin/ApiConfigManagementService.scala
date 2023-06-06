@@ -10,22 +10,26 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.config_management_service.ConfigManagementServiceGrpc.ConfigManagementService
 import com.daml.ledger.api.v1.admin.config_management_service.*
 import com.daml.lf.data.{Ref, Time}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.tracing.{Telemetry, TelemetryContext}
-import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
+import com.digitalasset.canton.ledger.api.validation.FieldValidator
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
+import com.digitalasset.canton.ledger.api.{ValidationLogger, domain}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
-import com.digitalasset.canton.logging.LoggingContextWithTrace
-import com.digitalasset.canton.logging.LoggingContextWithTrace.withEnrichedLoggingContext
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
+import com.digitalasset.canton.logging.LoggingContextWithTrace.{
+  implicitExtractTraceContext,
+  withEnrichedLoggingContext,
+}
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiConfigManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
-import com.digitalasset.canton.platform.server.api.ValidationLogger
-import com.digitalasset.canton.platform.server.api.validation.FieldValidations
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -39,19 +43,22 @@ private[apiserver] final class ApiConfigManagementService private (
     timeProvider: TimeProvider,
     submissionIdGenerator: String => Ref.SubmissionId,
     telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
     materializer: Materializer,
     executionContext: ExecutionContext,
     loggingContext: LoggingContext,
 ) extends ConfigManagementService
-    with GrpcApiService {
-  private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
+    with GrpcApiService
+    with NamedLogging {
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
       writeService,
       index,
-    )
+      loggerFactory,
+    ),
+    loggerFactory,
   )
 
   override def close(): Unit = synchronousResponse.close()
@@ -60,7 +67,10 @@ private[apiserver] final class ApiConfigManagementService private (
     ConfigManagementServiceGrpc.bindService(this, executionContext)
 
   override def getTimeModel(request: GetTimeModelRequest): Future[GetTimeModelResponse] = {
-    logger.info("Getting time model")
+    implicit val traceContext =
+      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
+
+    logger.info("Getting time model.")
     index
       .lookupConfiguration()
       .flatMap {
@@ -70,7 +80,11 @@ private[apiserver] final class ApiConfigManagementService private (
           Future.failed(
             LedgerApiErrors.RequestValidation.NotFound.LedgerConfiguration
               .Reject()(
-                new DamlContextualizedErrorLogger(logger, loggingContext, None)
+                ErrorLoggingContext(
+                  logger,
+                  loggingContext.toPropertiesMap,
+                  traceContext,
+                )
               )
               .asGrpcError
           )
@@ -96,17 +110,22 @@ private[apiserver] final class ApiConfigManagementService private (
     withEnrichedLoggingContext(telemetry)(
       logging.submissionId(request.submissionId)
     ) { implicit loggingContext =>
-      logger.info("Setting time model")
+      logger.info(s"Setting time model, ${loggingContext.serializeFiltered("submissionId")}.")
 
       implicit val telemetryContext: TelemetryContext =
         telemetry.contextFromGrpcThreadLocalContext()
-      implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-        new DamlContextualizedErrorLogger(logger, loggingContext, Some(request.submissionId))
+      implicit val errorLoggingContext: ContextualizedErrorLogger =
+        LedgerErrorLoggingContext(
+          logger,
+          loggingContext.toPropertiesMap,
+          loggingContext.traceContext,
+          request.submissionId,
+        )
 
       val response = for {
         // Validate and convert the request parameters
         params <- validateParameters(request).fold(
-          t => Future.failed(ValidationLogger.logFailure(request, t)),
+          t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
           Future.successful,
         )
 
@@ -133,7 +152,8 @@ private[apiserver] final class ApiConfigManagementService private (
         _ <-
           if (request.configurationGeneration != expectedGeneration) {
             Future.failed(
-              ValidationLogger.logFailure(
+              ValidationLogger.logFailureWithTrace(
+                logger,
                 request,
                 invalidArgument(
                   s"Mismatching configuration generation, expected $expectedGeneration, received ${request.configurationGeneration}"
@@ -174,7 +194,7 @@ private[apiserver] final class ApiConfigManagementService private (
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, SetTimeModelParameters] = {
-    import FieldValidations.*
+    import FieldValidator.*
     for {
       pTimeModel <- requirePresence(request.newTimeModel, "new_time_model")
       pAvgTransactionLatency <- requirePresence(
@@ -214,6 +234,7 @@ private[apiserver] object ApiConfigManagementService {
       timeProvider: TimeProvider,
       submissionIdGenerator: String => Ref.SubmissionId = augmentSubmissionId,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       materializer: Materializer,
       executionContext: ExecutionContext,
@@ -225,19 +246,20 @@ private[apiserver] object ApiConfigManagementService {
       timeProvider,
       submissionIdGenerator,
       telemetry,
+      loggerFactory,
     )
 
   private final class SynchronousResponseStrategy(
       writeConfigService: state.WriteConfigService,
       configManagementService: IndexConfigManagementService,
+      val loggerFactory: NamedLoggerFactory,
   )(implicit loggingContext: LoggingContext)
       extends SynchronousResponse.Strategy[
         (Time.Timestamp, Configuration),
         ConfigurationEntry,
         ConfigurationEntry.Accepted,
-      ] {
-
-    private val logger = ContextualizedLogger.get(getClass)
+      ]
+      with NamedLogging {
 
     override def submit(
         submissionId: Ref.SubmissionId,
@@ -270,7 +292,12 @@ private[apiserver] object ApiConfigManagementService {
       case domain.ConfigurationEntry.Rejected(`submissionId`, reason, _) =>
         LedgerApiErrors.Admin.ConfigurationEntryRejected
           .Reject(reason)(
-            new DamlContextualizedErrorLogger(logger, loggingContext, Some(submissionId))
+            LedgerErrorLoggingContext(
+              logger,
+              loggingContext.toPropertiesMap,
+              loggingContext.traceContext,
+              submissionId,
+            )
           )
           .asGrpcError
     }

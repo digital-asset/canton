@@ -8,15 +8,13 @@ import cats.syntax.foldable.*
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.transaction.{
-  ProcessedDisclosedContract as LfProcessedDisclosedContract,
-  Transaction as LfTransaction,
-}
+import com.daml.lf.transaction.Transaction as LfTransaction
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Timed
+import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractState,
@@ -160,7 +158,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
     }.invertToEitherT
 
   private def validateExplicitDisclosure(
-      processedDisclosedContracts: ImmArray[LfProcessedDisclosedContract],
+      processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
       completionInfo: CompletionInfo,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger,
@@ -177,7 +175,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
     }.invertToEitherT
 
   private def validateDisclosedContractPayload(
-      provided: LfProcessedDisclosedContract,
+      provided: ProcessedDisclosedContract,
       completionInfo: CompletionInfo,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger,
@@ -201,7 +199,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
 
   private def validateDriverMetadataContractId(
       completionInfo: CompletionInfo,
-      provided: LfProcessedDisclosedContract,
+      provided: ProcessedDisclosedContract,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): EitherT[Future, Rejection, Unit] =
@@ -223,7 +221,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
   private def sameContractData(
       actualContractInstance: Value.VersionedContractInstance,
       actualLedgerEffectiveTime: Timestamp,
-      provided: LfProcessedDisclosedContract,
+      provided: ProcessedDisclosedContract,
   ): Either[String, Unit] = {
     val providedContractId = provided.contractId
 

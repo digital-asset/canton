@@ -9,9 +9,9 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.lf.data.ImmArray
-import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

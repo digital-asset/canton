@@ -5,17 +5,11 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import com.daml.lf.command.{ApiCommands as LfCommands, DisclosedContract}
 import com.daml.lf.crypto.Hash
-import com.daml.lf.data.Ref.{Identifier, ParticipantId}
-import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.daml.lf.data.Ref.ParticipantId
+import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.engine.{Engine, ResultDone}
 import com.daml.lf.transaction.test.TransactionBuilder
-import com.daml.lf.transaction.{
-  ProcessedDisclosedContract,
-  SubmittedTransaction,
-  Transaction,
-  TransactionVersion,
-}
-import com.daml.lf.value.Value
+import com.daml.lf.transaction.{SubmittedTransaction, Transaction}
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
@@ -25,6 +19,8 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractStore,
   IndexPackagesService,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.tracing.TraceContext
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
@@ -38,18 +34,6 @@ class StoreBackedCommandExecutorSpec
     with ArgumentMatchersSugar {
 
   private val processedDisclosedContracts = ImmArray(
-    ProcessedDisclosedContract(
-      templateId = Identifier.assertFromString("some:pkg:identifier"),
-      contractId = TransactionBuilder.newCid,
-      argument = Value.ValueNil,
-      createdAt = Time.Timestamp.Epoch,
-      driverMetadata = Bytes.Empty,
-      signatories = Set.empty,
-      stakeholders = Set.empty,
-      keyOpt = None,
-      agreementText = "some agreement text",
-      version = TransactionVersion.V15,
-    )
   )
 
   private val emptyTransactionMetadata = Transaction.Metadata(
@@ -59,7 +43,7 @@ class StoreBackedCommandExecutorSpec
     dependsOnTime = false,
     nodeSeeds = ImmArray.Empty,
     globalKeyMapping = Map.empty,
-    processedDisclosedContracts = processedDisclosedContracts,
+    disclosedEvents = processedDisclosedContracts,
   )
 
   "execute" should {
@@ -119,13 +103,17 @@ class StoreBackedCommandExecutorSpec
       )
 
       LoggingContext.newLoggingContext { implicit context =>
-        instance.execute(commands, submissionSeed, configuration).map { actual =>
-          actual.foreach { actualResult =>
-            actualResult.interpretationTimeNanos should be > 0L
-            actualResult.processedDisclosedContracts shouldBe processedDisclosedContracts
+        instance
+          .execute(commands, submissionSeed, configuration)(
+            LoggingContextWithTrace(TraceContext.empty)
+          )
+          .map { actual =>
+            actual.foreach { actualResult =>
+              actualResult.interpretationTimeNanos should be > 0L
+              actualResult.processedDisclosedContracts shouldBe processedDisclosedContracts
+            }
+            succeed
           }
-          succeed
-        }
       }
     }
   }

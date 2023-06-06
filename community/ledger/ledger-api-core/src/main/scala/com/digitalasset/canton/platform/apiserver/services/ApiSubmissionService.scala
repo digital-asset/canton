@@ -7,27 +7,36 @@ import com.daml.api.util.TimeProvider
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.error.ErrorCode.LoggedApiException
 import com.daml.lf.crypto
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.scalautil.future.FutureConversion.CompletionStageConversionOps
 import com.daml.timer.Delayed
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands, LedgerId, SubmissionId}
+import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, GrpcCommandSubmissionService}
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
+import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.v2 as state
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
+import com.digitalasset.canton.logging.LoggingContextWithTrace.{
+  implicitExtractTraceContext,
+  withEnrichedLoggingContext,
+}
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscription
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
-import com.digitalasset.canton.platform.server.api.services.domain.CommandSubmissionService
-import com.digitalasset.canton.platform.server.api.services.grpc.GrpcCommandSubmissionService
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 
 import java.time.{Duration, Instant}
@@ -48,6 +57,7 @@ private[apiserver] object ApiSubmissionService {
       metrics: Metrics,
       explicitDisclosureUnsafeEnabled: Boolean,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
       loggingContext: LoggingContext,
@@ -62,6 +72,7 @@ private[apiserver] object ApiSubmissionService {
         commandExecutor,
         checkOverloaded,
         metrics,
+        loggerFactory,
       ),
       ledgerId = ledgerId,
       currentLedgerTime = () => timeProvider.getCurrentTime,
@@ -72,6 +83,7 @@ private[apiserver] object ApiSubmissionService {
       metrics = metrics,
       explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
       telemetry = telemetry,
+      loggerFactory = loggerFactory,
     )
 }
 
@@ -84,21 +96,26 @@ private[apiserver] final class ApiSubmissionService private[services] (
     commandExecutor: CommandExecutor,
     checkOverloaded: TelemetryContext => Option[state.SubmissionResult],
     metrics: Metrics,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends CommandSubmissionService
-    with AutoCloseable {
-
-  private val logger = ContextualizedLogger.get(this.getClass)
+    with AutoCloseable
+    with NamedLogging {
 
   override def submit(
       request: SubmitRequest
-  )(implicit telemetryContext: TelemetryContext, loggingContext: LoggingContext): Future[Unit] =
+  )(implicit
+      telemetryContext: TelemetryContext,
+      loggingContext: LoggingContextWithTrace,
+  ): Future[Unit] =
     withEnrichedLoggingContext(logging.commands(request.commands)) { implicit loggingContext =>
-      logger.info("Submitting commands for interpretation")
-      logger.trace(s"Commands: ${request.commands.commands.commands}")
+      logger.info(
+        s"Submitting commands for interpretation, ${loggingContext.serializeFiltered("commands")}."
+      )
+      logger.trace(s"Commands: ${request.commands.commands.commands}.")
 
-      implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-        new DamlContextualizedErrorLogger(
+      implicit val errorLoggingContext: ContextualizedErrorLogger =
+        ErrorLoggingContext.fromOption(
           logger,
           loggingContext,
           request.commands.submissionId.map(SubmissionId.unwrap),
@@ -120,7 +137,7 @@ private[apiserver] final class ApiSubmissionService private[services] (
     }
 
   private def handleSubmissionResult(result: Try[state.SubmissionResult])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Try[Unit] = {
     import state.SubmissionResult.*
     result match {
@@ -156,9 +173,9 @@ private[apiserver] final class ApiSubmissionService private[services] (
       commands: ApiCommands,
       ledgerConfig: Configuration,
   )(implicit
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
       telemetryContext: TelemetryContext,
-      contextualizedErrorLogger: ContextualizedErrorLogger,
+      errorLoggingContext: ContextualizedErrorLogger,
   ): Future[state.SubmissionResult] =
     checkOverloaded(telemetryContext) match {
       case Some(submissionResult) => Future.successful(submissionResult)
@@ -178,7 +195,7 @@ private[apiserver] final class ApiSubmissionService private[services] (
       ledgerConfig: Configuration,
   )(implicit
       telemetryContext: TelemetryContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[state.SubmissionResult] =
     timeProviderType match {
       case TimeProviderType.WallClock =>
@@ -205,10 +222,10 @@ private[apiserver] final class ApiSubmissionService private[services] (
       result: CommandExecutionResult
   )(implicit
       telemetryContext: TelemetryContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[state.SubmissionResult] = {
     metrics.daml.commands.validSubmissions.mark()
-    logger.debug("Submitting transaction to ledger")
+    logger.debug("Submitting transaction to ledger.")
     writeService
       .submitTransaction(
         result.submitterInfo,

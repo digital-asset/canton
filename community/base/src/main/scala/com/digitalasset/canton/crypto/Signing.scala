@@ -97,10 +97,11 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
   ): EitherT[Future, SigningError, Signature] =
     store
       .signingKey(signingKeyId)(TraceContext.todo)
-      .leftMap(storeError => SigningError.KeyStoreError(storeError))
+      .leftMap(storeError => SigningError.KeyStoreError(storeError.show))
       .subflatMap(_.toRight(SigningError.UnknownSigningKey(signingKeyId)))
       .subflatMap(signingKey => signingOps.sign(bytes, signingKey))
 
+  /** Internal method to generate and return the entire signing key pair */
   protected[crypto] def generateSigningKeypair(scheme: SigningKeyScheme)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SigningKeyGenerationError, SigningKeyPair]
@@ -447,6 +448,10 @@ object SigningError {
     override def pretty: Pretty[GeneralError] = prettyOfClass(unnamedParam(_.error))
   }
 
+  final case class InvariantViolation(error: String) extends SigningError {
+    override def pretty: Pretty[InvariantViolation] = prettyOfClass(unnamedParam(_.error.unquoted))
+  }
+
   final case class InvalidSigningKey(error: String) extends SigningError {
     override def pretty: Pretty[InvalidSigningKey] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
@@ -459,9 +464,8 @@ object SigningError {
     override def pretty: Pretty[FailedToSign] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
 
-  final case class KeyStoreError(error: CryptoPrivateStoreError) extends SigningError {
-    override def pretty: Pretty[KeyStoreError] =
-      prettyOfClass(unnamedParam(_.error))
+  final case class KeyStoreError(error: String) extends SigningError {
+    override def pretty: Pretty[KeyStoreError] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
 }
 
@@ -470,6 +474,10 @@ object SigningKeyGenerationError {
 
   final case class GeneralError(error: Exception) extends SigningKeyGenerationError {
     override def pretty: Pretty[GeneralError] = prettyOfClass(unnamedParam(_.error))
+  }
+
+  final case class GeneralKmsError(error: String) extends SigningKeyGenerationError {
+    override def pretty: Pretty[GeneralKmsError] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
 
   final case class NameInvalidError(error: String) extends SigningKeyGenerationError {

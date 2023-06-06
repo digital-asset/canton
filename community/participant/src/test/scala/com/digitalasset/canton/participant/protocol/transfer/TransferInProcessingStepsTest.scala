@@ -627,7 +627,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         contract,
         submitterInfo(submitter),
         transactionId1,
-        transferringParticipant = false,
+        isTransferringParticipant = false,
         transferId,
         contract.metadata.stakeholders,
         MediatorRef(MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))),

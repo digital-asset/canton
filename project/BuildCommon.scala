@@ -1402,7 +1402,11 @@ object BuildCommon {
         dependencyOverrides ++= Seq(),
         // Without this, we get conflicts when the protofiles from the below sources
         // are copied by sbt to the target directory
-        excludeFilter := HiddenFileFilter || "*.bazel" || "scalapb.proto",
+        excludeFilter := HiddenFileFilter || "*.bazel" || "scalapb.proto" || new sbt.io.ExactFileFilter(
+          // This is currently empty proto file with documentation which makes our code generation fail.
+          // We need to consider renaming it to README.md or something else so we dont exclude it here.
+          damlFolder.value / "ledger-api" / "grpc-definitions" / "com" / "daml" / "ledger" / "api" / "v2" / "package.proto"
+        ),
         Compile / PB.protoSources ++= Seq(
           "ledger-api/grpc-definitions"
         ).map(f => damlFolder.value / f),

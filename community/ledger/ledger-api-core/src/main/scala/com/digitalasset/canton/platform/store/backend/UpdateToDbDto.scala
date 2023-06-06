@@ -370,6 +370,8 @@ object UpdateToDbDto {
           // will be assigned consecutive event sequential ids
           // and transaction meta is assigned sequential ids of its first and last event
           events ++ divulgences ++ completions ++ Seq(transactionMeta)
+
+        case _: ReassignmentAccepted => Iterator.empty
       }
   }
 

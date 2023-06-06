@@ -27,8 +27,9 @@ class AuthorizerSpec
   private val expectedSuccessfulResponse = "expectedSuccessfulResponse"
   private val dummyReqRes: Long => Future[String] =
     Map(dummyRequest -> Future.successful(expectedSuccessfulResponse))
-  private val allAuthorized: ClaimSet.Claims => Either[AuthorizationError, Unit] = _ => Right(())
-  private val unauthorized: ClaimSet.Claims => Either[AuthorizationError, Unit] = _ =>
+  private val allAuthorized: (ClaimSet.Claims, Long) => Either[AuthorizationError, Long] =
+    (_, req) => Right(req)
+  private val unauthorized: (ClaimSet.Claims, Long) => Either[AuthorizationError, Long] = (_, _) =>
     Left(AuthorizationError.MissingAdminClaim)
 
   behavior of s"$className.authorize"

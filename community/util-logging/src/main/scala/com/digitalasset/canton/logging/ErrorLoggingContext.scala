@@ -44,10 +44,10 @@ abstract class ErrorLoggingContextBase(
     // we are putting the context into the MDC twice, once as a serialised string, once argument by argument
     // for text logging, we'll use the err-context string, for json logging, we use the arguments and ignore the err-context
     val arguments = mergedContext ++ Map(
-      "error-code" -> err.code.codeStr(traceContext.traceId),
+      "error-code" -> err.code.codeStr(correlationId),
       "err-context" -> ("{" + ContextualizedErrorLogger.formatContextAsString(mergedContext) + "}"),
     ) ++ properties
-    val message = err.code.toMsg(err.cause, traceContext.traceId)
+    val message = err.code.toMsg(err.cause, correlationId)
     arguments.foreach { case (name, value) =>
       MDC.put(name, value)
     }
@@ -99,6 +99,8 @@ final case class LedgerErrorLoggingContext(
 }
 
 object ErrorLoggingContext {
+  def apply(logger: TracedLogger, loggingContext: LoggingContextWithTrace): ErrorLoggingContext =
+    ErrorLoggingContext(logger, loggingContext.toPropertiesMap, loggingContext.traceContext)
 
   def forClass(
       loggerFactory: NamedLoggerFactory,
@@ -106,7 +108,7 @@ object ErrorLoggingContext {
       properties: Map[String, String] = Map.empty,
       traceContext: TraceContext = TraceContext.empty,
   ): ErrorLoggingContext =
-    new ErrorLoggingContext(
+    ErrorLoggingContext(
       TracedLogger(loggerFactory.getLogger(clazz)),
       properties,
       traceContext,
@@ -116,4 +118,24 @@ object ErrorLoggingContext {
       traceContext: TraceContext
   ): ErrorLoggingContext =
     ErrorLoggingContext(tracedLogger, Map.empty, traceContext)
+
+  def fromOption(
+      logger: TracedLogger,
+      loggingContextWithTrace: LoggingContextWithTrace,
+      submissionIdO: Option[String],
+  ): ContextualizedErrorLogger = submissionIdO match {
+    case Some(submissionId) =>
+      LedgerErrorLoggingContext(
+        logger,
+        loggingContextWithTrace.toPropertiesMap,
+        loggingContextWithTrace.traceContext,
+        submissionId,
+      )
+    case None =>
+      ErrorLoggingContext(
+        logger,
+        loggingContextWithTrace.toPropertiesMap,
+        loggingContextWithTrace.traceContext,
+      )
+  }
 }

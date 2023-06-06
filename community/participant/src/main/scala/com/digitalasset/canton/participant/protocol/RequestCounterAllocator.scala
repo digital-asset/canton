@@ -133,7 +133,7 @@ class RequestCounterAllocatorImpl(
         s"No more request counters can be allocated because the request counters have reached ${RequestCounter.MaxValue - 1}.",
       )
       ErrorUtil.requireArgument(
-        rc != nextRequestCounter,
+        rc == nextRequestCounter,
         s"Cannot skip request counter $rc other than the next request counter $nextRc",
       )
 

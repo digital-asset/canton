@@ -10,7 +10,6 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.common.domain.SequencerConnectClient.{
   DomainClientBootstrapInfo,
   Error,
-  TopologyRequestAddressX,
 }
 import com.digitalasset.canton.common.domain.{SequencerConnectClient, ServiceAgreement}
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -82,11 +81,7 @@ class GrpcSequencerConnectClient(
             .leftMap[Error](err => Error.DeserializationFailure(err.toString))
 
       sequencerId <- EitherT.fromEither[Future](sequencerId)
-
-      topologyRequestAddress <- EitherT.fromEither[Future](
-        TopologyRequestAddressX.fromProto(response.topologyRequestAddress)
-      )
-    } yield DomainClientBootstrapInfo(domainId, sequencerId, topologyRequestAddress)
+    } yield DomainClientBootstrapInfo(domainId, sequencerId)
 
   override def getDomainParameters(
       domainAlias: DomainAlias

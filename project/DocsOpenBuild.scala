@@ -1,15 +1,89 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import sbt.Keys.{definedTests, streams, testOnly}
-import sbt._
-import BuildCommon._
+import sbt.Keys.{
+  baseDirectory,
+  definedTests,
+  resourceDirectory,
+  sourceDirectory,
+  streams,
+  testOnly,
+  version,
+}
+import sbt.*
+import BuildCommon.*
 import sbt.internal.LogManager
 import sbt.internal.util.ManagedLogger
 
 import scala.collection.{Seq, mutable}
+import scala.util.matching.Regex
 
 object DocsOpenBuild {
+
+  def getCantonRoot(docsOpenDir: File): File = docsOpenDir / ".."
+
+  def getDocsCantonFolder(cantonRoot: File, cantonVersion: String): File =
+    cantonRoot / "docs.daml.com" / "docs" / extractVersion(cantonVersion)
+
+  def getCantonDocsSourcePath(cantonRoot: File, cantonVersion: String): File = {
+    getDocsCantonFolder(cantonRoot, cantonVersion) / "docs" / "canton"
+  }
+
+  def getSnippetDirectiveScriptPath(cantonRoot: File, cantonVersion: String): File = {
+    getDocsCantonFolder(cantonRoot, cantonVersion) / "bin" / "canton"
+  }
+
+  def updateManifest() = {
+    Def
+      .task {
+        val log: ManagedLogger = streams.value.log
+
+        log.info(
+          "[updateDocs] Refreshing canton sources manifest ..."
+        )
+        val cantonRoot = getCantonRoot(baseDirectory.value)
+        val source = getCantonDocsSourcePath(cantonRoot, version.value)
+        val scriptPath = (Compile / resourceDirectory).value / "canton_source.py"
+        val manifest = sourceDirectory.value / "assembly" / "canton_sources_manifest"
+        runCommand(s"python $scriptPath $source $manifest", log)
+      }
+  }
+
+  def updateDocs(sourceDirectory: SettingKey[File], targetDirectory: SettingKey[File]) = {
+    Def
+      .task {
+        val log: ManagedLogger = streams.value.log
+
+        log.info(
+          "[updateDocs] Cleaning output directories ..."
+        )
+        val target = sourceDirectory.value / "preprocessed-sphinx"
+        val assemblyTarget = sourceDirectory.value / "preprocessed-sphinx-assembly"
+        IO.delete(target)
+        IO.delete(assemblyTarget)
+
+        log.info(
+          "[updateDocs] Refreshing snippet data ..."
+        )
+        val snippetJsonSource = targetDirectory.value / "pre"
+        val cantonRoot = getCantonRoot(baseDirectory.value)
+        val snippetJsonTarget =
+          getCantonDocsSourcePath(cantonRoot, version.value) / "includes" / "snippet_data"
+
+        IO.delete(snippetJsonTarget)
+        IO.createDirectory(snippetJsonTarget)
+        IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
+
+        updateManifest.value
+      }
+  }
+
+  def extractVersion(version: String): String = {
+    val versionPattern: Regex = raw"\d+\.\d+\.\d+".r
+    versionPattern
+      .findFirstIn(version)
+      .getOrElse(throw new IllegalArgumentException(s"No version number found in '$version'"))
+  }
 
   def generateSphinxSnippets(`enterprise-app`: Project): Def.Initialize[Task[Unit]] = {
     Def.taskDyn {
@@ -27,11 +101,10 @@ object DocsOpenBuild {
     }
   }
 
-  def generateRstPreamble(
+  def generateRstInitialize(
       sourceDirectory: SettingKey[File],
       targetDirectory: SettingKey[File],
-      resourceDirectory: SettingKey[File],
-  ): Def.Initialize[Task[Unit]] = {
+  ) = {
     Def.task {
       val log: ManagedLogger = streams.value.log
 
@@ -41,6 +114,9 @@ object DocsOpenBuild {
 
       val testPath = sourceDirectory.value / "main" / "resources"
       runCommand(s"python -m unittest discover -v -s $testPath", log)
+      val docsTestPath =
+        getSnippetDirectiveScriptPath(getCantonRoot(baseDirectory.value), version.value)
+      runCommand(s"python -m unittest discover -v -s $docsTestPath", log)
 
       log.info(
         "[generateRst][clean] Clean RST-preprocessor output directories and copy RST sources ..."
@@ -54,15 +130,31 @@ object DocsOpenBuild {
 
       IO.delete(target)
       IO.delete(assemblyTarget)
+
+      val cantonDocsSourcePath =
+        getCantonDocsSourcePath(getCantonRoot(baseDirectory.value), version.value)
+      IO.copyDirectory(cantonDocsSourcePath, target)
       IO.copyDirectory(source, target)
       IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
       IO.createDirectory(assemblyTarget)
+    }
+  }
+
+  def generateRstResolveSnippet(sourceDirectory: SettingKey[File]) = {
+    Def.task {
+      val log: ManagedLogger = streams.value.log
+
+      val target = sourceDirectory.value / "preprocessed-sphinx"
+      val snippetJsonTarget = target / "includes" / "snippet_data"
 
       log.info(
         "[generateRst][preprocessing:step 1] Replacing custom `.. snippet::` directives with RST code blocks ..."
       )
 
-      val snippetScriptPath = resourceDirectory.value / "snippet_directive.py"
+      val snippetScriptPath = getSnippetDirectiveScriptPath(
+        getCantonRoot(baseDirectory.value),
+        version.value,
+      ) / "snippet_directive.py"
       runCommand(s"python $snippetScriptPath $snippetJsonTarget $target", log)
     }
   }
@@ -76,9 +168,11 @@ object DocsOpenBuild {
       .task {
         val log: ManagedLogger = streams.value.log
 
-        val source = sourceDirectory.value / "sphinx"
+        val cantonRoot = getCantonRoot(baseDirectory.value)
+        val source = getCantonDocsSourcePath(cantonRoot, version.value)
         val target = sourceDirectory.value / "preprocessed-sphinx"
         val assemblyTarget = sourceDirectory.value / "preprocessed-sphinx-assembly"
+        val manifest = sourceDirectory.value / "assembly" / "canton_sources_manifest"
 
         log.info(
           "[generateRst][preprocessing:step 2] Using the reference JSON to preprocess the RST files ..."
@@ -86,7 +180,7 @@ object DocsOpenBuild {
 
         val scriptPath = resourceDirectory.value / "rst-preprocessor.py"
         runCommand(
-          s"python $scriptPath ${generateReferenceJson.value} $source $target $assemblyTarget",
+          s"python $scriptPath $cantonRoot ${generateReferenceJson.value} $source $manifest $target $assemblyTarget",
           log,
         )
 
@@ -95,11 +189,8 @@ object DocsOpenBuild {
         )
 
         // copy data for the docs-open-assembly generation
-        runCommand("mkdir -p docs-open-assembly/src", log)
-        runCommand(
-          "cp -r docs-open/src/preprocessed-sphinx-assembly/ docs-open-assembly/src/sphinx/",
-          log,
-        )
+        IO.createDirectory(cantonRoot / "docs-open-assembly" / "src")
+        IO.copyDirectory(assemblyTarget, cantonRoot / "docs-open-assembly" / "src" / "sphinx")
       }
   }
 

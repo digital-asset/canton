@@ -116,20 +116,9 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   def prune(upToInclusive: GlobalOffset)(implicit traceContext: TraceContext): Future[Unit]
 
   /** Yields an akka source with all stored events, optionally starting from a given offset.
-    * @throws java.lang.IllegalArgumentException if `beginWith` is lower than [[MultiDomainEventLog.ledgerFirstOffset]].
+    * @throws java.lang.IllegalArgumentException if `startInclusive` is lower than [[MultiDomainEventLog.ledgerFirstOffset]].
     */
-  def subscribe(beginWith: Option[GlobalOffset])(implicit
-      traceContext: TraceContext
-  ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed]
-
-  // TODO(#11002) This serves the PoC implementation of multi-domain Ledger API. In case PoC concluded this might be eligible for removal.
-  /** Yields an akka source with all stored events for one domain. This will include all the transaction accepted and command rejected events.
-    */
-  def subscribeForDomainUpdates(
-      startExclusive: GlobalOffset,
-      endInclusive: GlobalOffset,
-      domainId: DomainId,
-  )(implicit
+  def subscribe(startInclusive: Option[GlobalOffset])(implicit
       traceContext: TraceContext
   ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed]
 

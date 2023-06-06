@@ -541,7 +541,7 @@ class TransferOutProcessingSteps(
       transferId,
       targetDomain,
       stakeholders,
-      _hostedStakeholders,
+      hostedStakeholders,
       _targetTimeProof,
       transferInExclusivity,
       _mediatorId,
@@ -587,6 +587,7 @@ class TransferOutProcessingSteps(
             rootHash,
             transferInExclusivity,
             isTransferringParticipant = transferringParticipant,
+            hostedStakeholders.toList,
           )
         } yield CommitAndStoreContractsAndPublishEvent(
           commitSetFO,
@@ -631,6 +632,7 @@ class TransferOutProcessingSteps(
       rootHash: RootHash,
       transferInExclusivity: Option[CantonTimestamp],
       isTransferringParticipant: Boolean,
+      hostedStakeholders: List[LfPartyId],
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredOut] = {
     for {
       updateId <- EitherT
@@ -660,6 +662,7 @@ class TransferOutProcessingSteps(
       transferInExclusivity = transferInExclusivity.map(_.toLf),
       workflowId = submitterMetadata.workflowId,
       isTransferringParticipant = isTransferringParticipant,
+      hostedStakeholders = hostedStakeholders,
     )
   }
 

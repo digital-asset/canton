@@ -518,6 +518,7 @@ private[transfer] class TransferInProcessingSteps(
             transferId,
             rootHash,
             isTransferringParticipant = transferringParticipant,
+            hostedStakeholders.toList,
           )
           timestampEvent = Some(
             TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
@@ -548,6 +549,7 @@ private[transfer] class TransferInProcessingSteps(
       transferId: TransferId,
       rootHash: RootHash,
       isTransferringParticipant: Boolean,
+      hostedStakeholders: List[LfPartyId],
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
     val targetDomain = domainId
     val contractInst = contract.contractInstance.unversioned
@@ -606,6 +608,7 @@ private[transfer] class TransferInProcessingSteps(
       workflowId = submitterMetadata.workflowId,
       createTransactionAccepted = !isTransferringParticipant,
       isTransferringParticipant = isTransferringParticipant,
+      hostedStakeholders = hostedStakeholders,
     )
   }
 }
@@ -630,7 +633,7 @@ object TransferInProcessingSteps {
       contract: SerializableContract,
       submitterMetadata: TransferSubmitterMetadata,
       creatingTransactionId: TransactionId,
-      transferringParticipant: Boolean,
+      isTransferringParticipant: Boolean,
       transferId: TransferId,
       hostedStakeholders: Set[LfPartyId],
       mediator: MediatorRef,

@@ -21,8 +21,7 @@ import com.daml.lf.data.Ref.SubmissionId
 import com.daml.lf.data.{Ref, Time}
 import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
-import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, TelemetryContext, TelemetrySpecBase}
-import com.digitalasset.canton.DiscardOps
+import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
@@ -33,15 +32,17 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
 }
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiConfigManagementServiceSpec.*
+import com.digitalasset.canton.tracing.TestTelemetrySetup
+import com.digitalasset.canton.{BaseTest, DiscardOps}
 import com.google.protobuf.duration.Duration as DurationProto
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
-import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{BeforeAndAfterEach, Inside}
 
 import java.time.Duration
 import java.util.concurrent.CompletableFuture.completedFuture
@@ -58,11 +59,22 @@ class ApiConfigManagementServiceSpec
     with Inside
     with MockitoSugar
     with ArgumentMatchersSugar
-    with TelemetrySpecBase
     with AkkaBeforeAndAfterAll
-    with ErrorsAssertions {
+    with ErrorsAssertions
+    with BaseTest
+    with BeforeAndAfterEach {
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+
+  var testTelemetrySetup: TestTelemetrySetup = _
+
+  override def beforeEach(): Unit = {
+    testTelemetrySetup = new TestTelemetrySetup()
+  }
+
+  override def afterEach(): Unit = {
+    testTelemetrySetup.close()
+  }
 
   "ApiConfigManagementService" should {
     "get the time model" in {
@@ -86,6 +98,7 @@ class ApiConfigManagementServiceSpec
         writeService,
         TimeProvider.UTC,
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       apiConfigManagementService
@@ -104,6 +117,7 @@ class ApiConfigManagementServiceSpec
         writeService,
         TimeProvider.UTC,
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       apiConfigManagementService
@@ -152,6 +166,7 @@ class ApiConfigManagementServiceSpec
         writeService,
         timeProvider,
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       apiConfigManagementService
@@ -188,6 +203,7 @@ class ApiConfigManagementServiceSpec
         writeService,
         timeProvider,
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       apiConfigManagementService
@@ -220,9 +236,10 @@ class ApiConfigManagementServiceSpec
         TimeProvider.UTC,
         _ => Ref.SubmissionId.assertFromString("aSubmission"),
         telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
+        loggerFactory = loggerFactory,
       )
 
-      val span = anEmptySpan()
+      val span = testTelemetrySetup.anEmptySpan()
       val scope = span.makeCurrent()
       apiConfigManagementService
         .setTimeModel(aSetTimeModelRequest)
@@ -231,7 +248,7 @@ class ApiConfigManagementServiceSpec
           span.end()
         }
         .map { _ =>
-          spanExporter.finishedSpanAttributes should contain(anApplicationIdSpanAttribute)
+          testTelemetrySetup.reportedSpanAttributes should contain(anApplicationIdSpanAttribute)
           succeed
         }
     }
@@ -256,6 +273,7 @@ class ApiConfigManagementServiceSpec
         writeService,
         TimeProvider.UTC,
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       indexConfigManagementService.getNextConfigurationEntriesPromise.future

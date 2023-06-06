@@ -6,11 +6,12 @@ package com.digitalasset.canton.ledger.api.auth.services
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.user_management_service.*
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.*
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
-import com.digitalasset.canton.platform.server.api.ProxyCloseable
 import io.grpc.ServerServiceDefinition
+import scalapb.lenses.Lens
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
@@ -32,30 +33,27 @@ final class UserManagementServiceAuthorization(
   private def containsParticipantAdmin(rights: Seq[Right]): Boolean =
     rights.contains(Right(Right.Kind.ParticipantAdmin(Right.ParticipantAdmin())))
 
-  override def createUser(request: CreateUserRequest): Future[CreateUserResponse] =
-    request.user match {
-      case Some(user) =>
-        authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-          user.identityProviderId,
-          containsParticipantAdmin(request.rights),
-          service.createUser,
-        )(
-          request
-        )
-      case None =>
-        authorizer.requireIdpAdminClaims(service.createUser)(request)
-    }
+  override def createUser(request: CreateUserRequest): Future[CreateUserResponse] = {
+    authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId[CreateUserRequest, CreateUserResponse](
+      identityProviderIdL = Lens.unit[CreateUserRequest].user.identityProviderId,
+      mustBeParticipantAdmin = containsParticipantAdmin(request.rights),
+      call = service.createUser,
+    )(request)
+  }
 
   override def getUser(request: GetUserRequest): Future[GetUserResponse] =
     defaultToAuthenticatedUser(request.userId) match {
       case Failure(ex) => Future.failed(ex)
       case Success(Some(userId)) =>
-        authorizer.requireMatchingRequestIdpId(request.identityProviderId, service.getUser)(
+        authorizer.requireMatchingRequestIdpId(
+          Lens.unit[GetUserRequest].identityProviderId,
+          service.getUser,
+        )(
           request.copy(userId = userId)
         )
       case Success(None) =>
         authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-          request.identityProviderId,
+          Lens.unit[GetUserRequest].identityProviderId,
           service.getUser,
         )(
           request
@@ -64,19 +62,19 @@ final class UserManagementServiceAuthorization(
 
   override def deleteUser(request: DeleteUserRequest): Future[DeleteUserResponse] =
     authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-      request.identityProviderId,
+      Lens.unit[DeleteUserRequest].identityProviderId,
       service.deleteUser,
     )(request)
 
   override def listUsers(request: ListUsersRequest): Future[ListUsersResponse] =
     authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-      request.identityProviderId,
+      Lens.unit[ListUsersRequest].identityProviderId,
       service.listUsers,
     )(request)
 
   override def grantUserRights(request: GrantUserRightsRequest): Future[GrantUserRightsResponse] =
     authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-      request.identityProviderId,
+      Lens.unit[GrantUserRightsRequest].identityProviderId,
       containsParticipantAdmin(request.rights),
       service.grantUserRights,
     )(
@@ -87,7 +85,7 @@ final class UserManagementServiceAuthorization(
       request: RevokeUserRightsRequest
   ): Future[RevokeUserRightsResponse] =
     authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-      request.identityProviderId,
+      Lens.unit[RevokeUserRightsRequest].identityProviderId,
       containsParticipantAdmin(request.rights),
       service.revokeUserRights,
     )(
@@ -99,14 +97,14 @@ final class UserManagementServiceAuthorization(
       case Failure(ex) => Future.failed(ex)
       case Success(Some(userId)) =>
         authorizer.requireMatchingRequestIdpId(
-          request.identityProviderId,
+          Lens.unit[ListUserRightsRequest].identityProviderId,
           service.listUserRights,
         )(
           request.copy(userId = userId)
         )
       case Success(None) =>
         authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-          request.identityProviderId,
+          Lens.unit[ListUserRightsRequest].identityProviderId,
           service.listUserRights,
         )(
           request
@@ -117,7 +115,7 @@ final class UserManagementServiceAuthorization(
     request.user match {
       case Some(user) =>
         authorizer.requireIdpAdminClaimsAndMatchingRequestIdpId(
-          user.identityProviderId,
+          Lens.unit[UpdateUserRequest].user.identityProviderId,
           service.updateUser,
         )(
           request

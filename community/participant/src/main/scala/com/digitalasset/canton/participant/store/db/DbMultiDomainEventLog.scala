@@ -13,7 +13,6 @@ import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -429,11 +428,13 @@ class DbMultiDomainEventLog private[db] (
     }
   }
 
-  override def subscribe(beginWith: Option[GlobalOffset])(implicit
+  override def subscribe(startInclusive: Option[GlobalOffset])(implicit
       traceContext: TraceContext
   ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed] = {
     dispatcher.startingAt(
-      beginWith.getOrElse(MultiDomainEventLog.ledgerFirstOffset) - 1, // start index is exclusive
+      startInclusive.getOrElse(
+        MultiDomainEventLog.ledgerFirstOffset
+      ) - 1, // start index is exclusive
       RangeSource { (fromExcl, toIncl) =>
         Source(RangeUtil.partitionIndexRange(fromExcl, toIncl, maxBatchSize.unwrap.toLong))
           .mapAsync(1) { case (batchFromExcl, batchToIncl) =>
@@ -451,48 +452,6 @@ class DbMultiDomainEventLog private[db] (
           .mapConcat(identity)
       },
     )
-  }
-
-  override def subscribeForDomainUpdates(
-      startExclusive: GlobalOffset,
-      endInclusive: GlobalOffset,
-      domainId: DomainId,
-  )(implicit
-      traceContext: TraceContext
-  ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed] = {
-    // TODO(#11002) This is a crude approach to get all per-domain events.
-    //  There are no indexes supporting like operation on event_id and index for log_id also likely not helping with this query strategy.
-
-    // For matching rejection entries associated to a domain
-    val rejectionEventIdPattern =
-      String300(
-        TimestampedEvent.EventId.timelyRejectionEventIdPrefix + domainId.toProtoPrimitive + "%"
-      )(Some("rejection event LIKE id pattern"))
-    Source
-      .future(IndexedDomain.indexed(indexedStringStore)(domainId))
-      .flatMapConcat(domainIdIndex =>
-        dispatcher.startingAt(
-          // start index is exclusive
-          startExclusive = startExclusive,
-          subSource = RangeSource { (fromExcl, toIncl) =>
-            // TODO(#11002) this batching is not efficient for this use case (pagination with limit might help here)
-            Source(RangeUtil.partitionIndexRange(fromExcl, toIncl, maxBatchSize.unwrap.toLong))
-              .mapAsync(1) { case (batchFromExcl, batchToIncl) =>
-                storage.query(
-                  sql"""select /*+ INDEX (linearized_event_log pk_linearized_event_log, event_log pk_event_log) */ global_offset, content, trace_context
-                    from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
-                    where global_offset > $batchFromExcl and global_offset <= $batchToIncl and
-                    (el.log_id = $domainIdIndex or (el.log_id = $participantEventLogId and el.event_id like $rejectionEventIdPattern))
-                    order by global_offset asc"""
-                    .as[(GlobalOffset, Traced[LedgerSyncEvent])],
-                  functionFullName,
-                )
-              }
-              .mapConcat(identity)
-          },
-          endInclusive = Some(endInclusive),
-        )
-      )
   }
 
   override def lookupEventRange(upToInclusive: Option[GlobalOffset], limit: Option[Int])(implicit

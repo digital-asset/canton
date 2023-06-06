@@ -8,10 +8,10 @@ import com.daml.lf.data.Ref.UserId
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, ObjectMeta, User, UserRight}
+import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.*
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}
 import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
-import com.digitalasset.canton.platform.server.api.validation.ResourceAnnotationValidation
 
 import scala.collection.mutable
 import scala.concurrent.{Future, blocking}
@@ -223,7 +223,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
       annotations: Map[String, String],
       userId: Ref.UserId,
   ): Result[Unit] = {
-    if (!ResourceAnnotationValidation.isWithinMaxAnnotationsByteSize(annotations)) {
+    if (!ResourceAnnotationValidator.isWithinMaxAnnotationsByteSize(annotations)) {
       Left(MaxAnnotationsSizeExceeded(userId))
     } else {
       Right(())

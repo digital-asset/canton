@@ -3,24 +3,27 @@
 
 package com.digitalasset.canton.platform.apiserver.execution
 
-import com.daml.lf.command.{ApiCommands as LfCommands}
+import com.daml.lf.command.ApiCommands as LfCommands
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.transaction.test.TransactionBuilder
-import com.daml.lf.transaction.{ProcessedDisclosedContract, TransactionVersion}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.ledger.api.domain.{CommandId, Commands, LedgerId}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.participant.state.index.v2.MaximumLedgerTime
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.LedgerTime
+import com.digitalasset.canton.tracing.TraceContext
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -35,7 +38,8 @@ class LedgerTimeAwareCommandExecutorSpec
     with MockitoSugar
     with ArgumentMatchersSugar {
 
-  private val loggingContext = LoggingContext.ForTesting
+  private val loggingContext =
+    LoggingContextWithTrace(TraceContext.empty)(LoggingContext.ForTesting)
 
   private val submissionSeed = Hash.hashPrivateKey("a key")
   private val configuration = Configuration(
@@ -106,7 +110,7 @@ class LedgerTimeAwareCommandExecutorSpec
     val mockExecutor = mock[CommandExecutor]
     when(
       mockExecutor.execute(any[Commands], any[Hash], any[Configuration])(
-        any[LoggingContext]
+        any[LoggingContextWithTrace]
       )
     )
       .thenAnswer((c: Commands) =>
@@ -178,7 +182,7 @@ class LedgerTimeAwareCommandExecutorSpec
         any[Commands],
         any[Hash],
         any[Configuration],
-      )(any[LoggingContext])
+      )(any[LoggingContextWithTrace])
 
       actual shouldEqual expectedResult
     }

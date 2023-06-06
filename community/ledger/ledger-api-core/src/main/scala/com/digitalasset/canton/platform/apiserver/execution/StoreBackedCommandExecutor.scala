@@ -20,6 +20,7 @@ import com.daml.lf.engine.{
 import com.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{Metrics, Timed, Tracked}
+import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.domain.Commands as ApiCommands
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -27,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
 }
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.tracing.TraceContext
@@ -57,7 +59,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
       submissionSeed: crypto.Hash,
       ledgerConfiguration: Configuration,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Either[ErrorCause, CommandExecutionResult]] = {
     val interpretationTimeNanos = new AtomicLong(0L)
     val start = System.nanoTime()
@@ -95,6 +97,8 @@ private[apiserver] final class StoreBackedCommandExecutor(
       meta: Transaction.Metadata,
       interpretationTimeNanos: Long,
   ) = {
+    val disclosedContractsMap =
+      commands.disclosedContracts.toSeq.view.map(d => d.contractId -> d).toMap
     CommandExecutionResult(
       submitterInfo = state.SubmitterInfo(
         commands.actAs.toList,
@@ -122,7 +126,14 @@ private[apiserver] final class StoreBackedCommandExecutor(
       dependsOnLedgerTime = meta.dependsOnTime,
       interpretationTimeNanos = interpretationTimeNanos,
       globalKeyMapping = meta.globalKeyMapping,
-      processedDisclosedContracts = meta.processedDisclosedContracts,
+      processedDisclosedContracts = meta.disclosedEvents.map { event =>
+        val input = disclosedContractsMap(event.coid)
+        ProcessedDisclosedContract(
+          event,
+          input.createdAt,
+          input.driverMetadata,
+        )
+      },
     )
   }
 
@@ -147,7 +158,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
           commitAuthorizers,
           commands.readAs,
           commands.commands,
-          commands.disclosedContracts,
+          commands.disclosedContracts.map(_.toLf),
           participant,
           submissionSeed,
         )

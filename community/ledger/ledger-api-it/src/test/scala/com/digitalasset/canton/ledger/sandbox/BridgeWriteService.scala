@@ -10,11 +10,12 @@ import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.{ImmArray, Ref, Time}
-import com.daml.lf.transaction.{GlobalKey, ProcessedDisclosedContract, SubmittedTransaction}
+import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.InstrumentedGraph
 import com.daml.tracing.TelemetryContext
+import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy}
 import com.digitalasset.canton.ledger.configuration.Configuration
