@@ -16,6 +16,7 @@ import com.daml.lf.engine.Engine
 import com.daml.logging.LoggingContext
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.PackageServiceError.Validation
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -31,7 +32,6 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPackageManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
 import com.google.protobuf.ByteString
@@ -69,7 +69,8 @@ private[apiserver] final class ApiPackageManagementService private (
       packagesIndex,
       packagesWrite,
       loggerFactory,
-    )
+    ),
+    loggerFactory,
   )
 
   override def close(): Unit = synchronousResponse.close()
@@ -82,7 +83,7 @@ private[apiserver] final class ApiPackageManagementService private (
   ): Future[ListKnownPackagesResponse] = {
     implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
 
-    logger.info("Listing known packages")
+    logger.info("Listing known packages.")
     packagesIndex
       .listLfPackages()
       .map { pkgs =>
@@ -125,7 +126,7 @@ private[apiserver] final class ApiPackageManagementService private (
     LoggingContextWithTrace.withEnrichedLoggingContext(telemetry)(
       logging.submissionId(submissionId)
     ) { implicit loggingContext: LoggingContextWithTrace =>
-      logger.info(s"Uploading DAR file with submissionId: $submissionId")
+      logger.info(s"Uploading DAR file, ${loggingContext.serializeFiltered("submissionId")}.")
 
       implicit val telemetryContext: TelemetryContext =
         telemetry.contextFromGrpcThreadLocalContext()
@@ -150,7 +151,7 @@ private[apiserver] final class ApiPackageManagementService private (
         )
       } yield {
         for (archive <- dar.all) {
-          logger.info(s"Package ${archive.getHash} successfully uploaded")
+          logger.info(s"Package ${archive.getHash} successfully uploaded.")
         }
         UploadDarFileResponse()
       }

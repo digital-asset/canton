@@ -11,15 +11,15 @@ import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.GrpcEventQueryService
 import com.digitalasset.canton.ledger.api.messages.event.{
   GetEventsByContractIdRequest,
   GetEventsByContractKeyRequest,
 }
+import com.digitalasset.canton.ledger.api.services.EventQueryService
 import com.digitalasset.canton.ledger.api.validation.PartyNameChecker
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexEventQueryService
 import com.digitalasset.canton.platform.apiserver.services.logging
-import com.digitalasset.canton.platform.server.api.services.domain.EventQueryService
-import com.digitalasset.canton.platform.server.api.services.grpc.GrpcEventQueryService
 import io.grpc.*
 
 import scala.concurrent.{ExecutionContext, Future}

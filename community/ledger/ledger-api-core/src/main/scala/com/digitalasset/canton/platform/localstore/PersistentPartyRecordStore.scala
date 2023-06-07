@@ -11,6 +11,7 @@ import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
+import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
 import com.digitalasset.canton.platform.localstore.PersistentPartyRecordStore.{
   ConcurrentPartyRecordUpdateDetectedRuntimeException,
   MaxAnnotationsSizeExceededException,
@@ -26,7 +27,6 @@ import com.digitalasset.canton.platform.localstore.api.{
   PartyRecordUpdate,
 }
 import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
-import com.digitalasset.canton.platform.server.api.validation.ResourceAnnotationValidation
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.backend.localstore.PartyRecordStorageBackend
 
@@ -207,7 +207,7 @@ class PersistentPartyRecordStore(
       partyRecord: PartyRecord
   )(connection: Connection): Unit = {
     if (
-      !ResourceAnnotationValidation
+      !ResourceAnnotationValidator
         .isWithinMaxAnnotationsByteSize(partyRecord.metadata.annotations)
     ) {
       throw MaxAnnotationsSizeExceededException(partyRecord.party)
@@ -266,7 +266,7 @@ class PersistentPartyRecordStore(
         existing = existingAnnotations,
       )
       if (
-        !ResourceAnnotationValidation
+        !ResourceAnnotationValidator
           .isWithinMaxAnnotationsByteSize(updatedAnnotations)
       ) {
         throw MaxAnnotationsSizeExceededException(partyRecordUpdate.party)

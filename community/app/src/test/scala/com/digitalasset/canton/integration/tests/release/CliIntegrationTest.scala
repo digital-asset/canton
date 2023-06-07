@@ -242,6 +242,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
           isDaemon: Boolean,
           expectedExitCode: Int,
           expectedErrorLines: Seq[String],
+          logFileName: String,
       )(
           extraOutputAssertion: String => Assertion = _ => succeed
       )(processLogger: FixtureParam): Unit = {
@@ -253,7 +254,13 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
             else Seq("run", scriptFile.toString)
 
           val exitCode = Process(
-            Seq("bin/canton") ++ runModeArgs ++ Seq("-c", "demo/demo.conf"),
+            Seq("bin/canton") ++ runModeArgs ++ Seq(
+              "--debug",
+              "--log-file-name",
+              "log/" + logFileName,
+              "-c",
+              "demo/demo.conf",
+            ),
             Some(new java.io.File(cantonDir)),
           ) ! processLogger
 
@@ -282,6 +289,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
           isDaemon = false,
           expectedExitCode = 1,
           expectedErrorLines = Seq("Script execution failed: Compilation Failed"),
+          logFileName = "runDoesNotCompile.log",
         )(_ should include("not found: value I"))
       }
 
@@ -292,6 +300,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
           expectedExitCode = 1,
           expectedErrorLines =
             Seq("Script execution failed: java.lang.RuntimeException: some exception"),
+          logFileName = "runCompilesButThrows.log",
         )()
       }
 
@@ -301,6 +310,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
           isDaemon = true,
           expectedExitCode = 3, // Bootstrap scripts exit with 3
           expectedErrorLines = Seq("Bootstrap script terminated with an error"),
+          logFileName = "daemonDoesNotCompile.log",
         )(_ should include("not found: value I"))
       }
 
@@ -312,6 +322,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
           expectedErrorLines = Seq(
             "Bootstrap script terminated with an error: java.lang.RuntimeException: some exception"
           ),
+          logFileName = "daemonCompilesButThrows.log",
         )()
       }
     }

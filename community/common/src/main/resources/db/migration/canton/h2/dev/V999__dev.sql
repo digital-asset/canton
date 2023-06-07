@@ -78,13 +78,6 @@ CREATE INDEX topology_transactions_x_idx ON topology_transactions_x (store_id, t
 -- TODO(#11255): Decide whether we want additional indices by mapping_key_hash and tx_hash (e.g. for update/removal and lookups)
 -- TODO(#11255): Come up with columns/indexing for efficient ParticipantId => Seq[PartyId] lookup
 
--- TODO(#11255): Remove table that persists the sequencer_id to ensure that the mediator can always initialize itself with its sequencer
-CREATE TABLE sequencer_info_for_mediator_x (
-  -- this lock column ensures that there can only ever be a single row: https://stackoverflow.com/questions/3967372/sql-server-how-to-constrain-a-table-to-contain-a-single-row
-  lock char(1) not null default 'X' primary key check (lock = 'X'),
-  sequencer_id varchar(300) not null
-);
-
 -- TODO(#12373) Move this to stable when releasing BFT: END
 
 -- TODO(#13104) Move traffic control to stable release: BEGIN

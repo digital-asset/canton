@@ -13,7 +13,10 @@ import com.digitalasset.canton.tracing.TraceContext
 class LoggingContextWithTrace(
     override val entries: LoggingEntries,
     val traceContext: TraceContext,
-) extends LoggingContext(entries)
+) extends LoggingContext(entries) {
+  def serializeFiltered(toInclude: String*): String =
+    toPropertiesMap.filter(prop => toInclude.contains(prop._1)).mkString(", ")
+}
 object LoggingContextWithTrace {
   implicit def implicitExtractTraceContext(implicit source: LoggingContextWithTrace): TraceContext =
     source.traceContext
@@ -60,6 +63,17 @@ object LoggingContextWithTrace {
   )(implicit loggingContext: LoggingContext): A = {
     LoggingContext.withEnrichedLoggingContext(entry, entries: _*) { implicit loggingContext =>
       f(LoggingContextWithTrace(telemetry)(loggingContext))
+    }
+  }
+
+  def withEnrichedLoggingContext[A](
+      entry: LoggingEntry,
+      entries: LoggingEntry*
+  )(
+      f: LoggingContextWithTrace => A
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): A = {
+    LoggingContext.withEnrichedLoggingContext(entry, entries: _*) { implicit loggingContext =>
+      f(LoggingContextWithTrace(loggingContextWithTrace.traceContext)(loggingContext))
     }
   }
 }

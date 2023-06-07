@@ -5,7 +5,7 @@ package com.digitalasset.canton.crypto
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoConfig
-import com.digitalasset.canton.crypto.CryptoFactory.CryptoScheme
+import com.digitalasset.canton.crypto.CryptoFactory.{CryptoScheme, selectSchemes}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 
 object CryptoHandshakeValidator {
@@ -42,19 +42,19 @@ object CryptoHandshakeValidator {
     for {
       _ <- validateScheme(
         parameters.requiredSigningKeySchemes,
-        CryptoFactory.selectSchemes(config.signing, config.provider.signing),
+        selectSchemes(config.signing, config.provider.signing),
       )
       _ <- validateScheme(
         parameters.requiredEncryptionKeySchemes,
-        CryptoFactory.selectSchemes(config.encryption, config.provider.encryption),
+        selectSchemes(config.encryption, config.provider.encryption),
       )
       _ <- validateScheme(
         parameters.requiredSymmetricKeySchemes,
-        CryptoFactory.selectSchemes(config.symmetric, config.provider.symmetric),
+        selectSchemes(config.symmetric, config.provider.symmetric),
       )
       _ <- validateScheme(
         parameters.requiredHashAlgorithms,
-        CryptoFactory.selectSchemes(config.hash, config.provider.hash),
+        selectSchemes(config.hash, config.provider.hash),
       )
       requiredFormats = parameters.requiredCryptoKeyFormats
       unsupportedFormats = requiredFormats.diff(config.provider.supportedCryptoKeyFormats)

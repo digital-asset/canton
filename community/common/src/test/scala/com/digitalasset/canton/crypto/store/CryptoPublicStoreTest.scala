@@ -30,7 +30,7 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
     val encKey2WithName: EncryptionPublicKeyWithName = EncryptionPublicKeyWithName(encKey2, None)
 
     def newCrypto(): Future[Crypto] = {
-      CryptoFactory
+      new CommunityCryptoFactory()
         .create(
           CommunityCryptoConfig(),
           new MemoryStorage(loggerFactory, timeouts),

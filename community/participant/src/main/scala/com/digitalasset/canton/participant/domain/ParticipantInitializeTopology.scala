@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.domain
 import akka.stream.Materializer
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.common.domain.{
   RegisterTopologyTransactionHandleWithProcessor,
   SequencerBasedRegisterTopologyTransactionHandle,
@@ -39,7 +38,6 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   SequencerId,
   UnauthenticatedMemberId,
-  *,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
@@ -278,7 +276,6 @@ class ParticipantInitializeTopology(
 class ParticipantInitializeTopologyX(
     domainId: DomainId,
     alias: DomainAlias,
-    topologyRequestAddress: TopologyRequestAddressX,
     participantId: ParticipantId,
     authorizedStore: TopologyStoreX[AuthorizedStore],
     targetStore: TopologyStoreX[DomainStore],
@@ -317,7 +314,6 @@ class ParticipantInitializeTopologyX(
           Batch(List(env), protocolVersion)
         )(traceContext),
       domainId,
-      topologyRequestAddress,
       participantId,
       member,
       protocolVersion,

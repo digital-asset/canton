@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.provider.jce
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.config.CryptoProvider
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.tink.TinkJavaConverter
 import com.google.crypto.tink.subtle.EllipticCurves
@@ -31,7 +30,10 @@ import java.security.{
   PublicKey as JPublicKey,
 }
 
-class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
+class JceJavaConverter(
+    hashAlgorithm: HashAlgorithm,
+    supportedSigningSchemes: NonEmpty[Set[SigningKeyScheme]],
+) extends JavaKeyConverter {
 
   import com.digitalasset.canton.util.ShowUtil.*
 
@@ -191,11 +193,10 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
   ): Either[JavaKeyConversionError, SigningPublicKey] = {
 
     def ensureJceSupportedScheme(scheme: SigningKeyScheme): Either[JavaKeyConversionError, Unit] = {
-      val supportedSchemes = CryptoProvider.Jce.signing.supported
       Either.cond(
-        supportedSchemes.contains(scheme),
+        supportedSigningSchemes.contains(scheme),
         (),
-        JavaKeyConversionError.UnsupportedKeyScheme(scheme, supportedSchemes),
+        JavaKeyConversionError.UnsupportedKeyScheme(scheme, supportedSigningSchemes),
       )
     }
 

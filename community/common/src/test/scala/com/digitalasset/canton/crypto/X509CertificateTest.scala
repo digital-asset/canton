@@ -22,7 +22,7 @@ class X509CertificateTest extends FixtureAsyncWordSpec with BaseTest {
 
   override def withFixture(test: OneArgAsyncTest): FutureOutcome = {
     val fixtureE = for {
-      crypto <- CryptoFactory.create(
+      crypto <- new CommunityCryptoFactory().create(
         CommunityCryptoConfig(),
         new MemoryStorage(loggerFactory, timeouts),
         new CommunityCryptoPrivateStoreFactory,

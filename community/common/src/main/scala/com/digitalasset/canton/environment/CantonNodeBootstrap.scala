@@ -104,7 +104,7 @@ abstract class CantonNodeBootstrapBase[
       description = "initialize CryptoFactory",
       logFailing = Some(Level.ERROR),
     )(
-      CryptoFactory
+      arguments.cryptoFactory
         .create(
           cryptoConfig,
           storage,

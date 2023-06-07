@@ -18,9 +18,8 @@ import com.daml.ledger.api.v1.transaction_service.{
 }
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.ledger.EventId as LfEventId
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
+import com.daml.logging.LoggingContext
 import com.daml.logging.entries.{LoggingEntries, LoggingValue}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain
@@ -30,14 +29,25 @@ import com.digitalasset.canton.ledger.api.domain.{
   TransactionFilter,
   TransactionId,
 }
+import com.digitalasset.canton.ledger.api.grpc.GrpcTransactionService
 import com.digitalasset.canton.ledger.api.messages.transaction.*
+import com.digitalasset.canton.ledger.api.services.TransactionService
 import com.digitalasset.canton.ledger.api.validation.PartyNameChecker
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexTransactionsService
+import com.digitalasset.canton.logging.LoggingContextWithTrace.{
+  implicitExtractTraceContext,
+  withEnrichedLoggingContext,
+}
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.apiserver.services.{StreamMetrics, logging}
-import com.digitalasset.canton.platform.server.api.services.domain.TransactionService
-import com.digitalasset.canton.platform.server.api.services.grpc.GrpcTransactionService
 import io.grpc.*
 import scalaz.syntax.tag.*
 
@@ -49,6 +59,7 @@ private[apiserver] object ApiTransactionService {
       transactionsService: IndexTransactionsService,
       metrics: Metrics,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       mat: Materializer,
@@ -56,29 +67,32 @@ private[apiserver] object ApiTransactionService {
       loggingContext: LoggingContext,
   ): GrpcTransactionService with BindableService =
     new GrpcTransactionService(
-      new ApiTransactionService(transactionsService, metrics),
+      new ApiTransactionService(transactionsService, metrics, loggerFactory),
       ledgerId,
       PartyNameChecker.AllowAllParties,
       telemetry,
+      loggerFactory,
     )
 }
 
 private[apiserver] final class ApiTransactionService private (
     transactionsService: IndexTransactionsService,
     metrics: Metrics,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
-    extends TransactionService {
+    extends TransactionService
+    with NamedLogging {
 
-  private val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
-
-  override def getLedgerEnd(ledgerId: String): Future[domain.LedgerOffset.Absolute] =
+  override def getLedgerEnd(
+      ledgerId: String
+  )(implicit loggingContext: LoggingContextWithTrace): Future[domain.LedgerOffset.Absolute] =
     transactionsService
       .currentLedgerEnd()
       .andThen(logger.logErrorsOnCall[domain.LedgerOffset.Absolute])
 
   override def getTransactions(
       request: GetTransactionsRequest
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionsResponse, NotUsed] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Source[GetTransactionsResponse, NotUsed] = {
     withEnrichedLoggingContext(
       logging.ledgerId(request.ledgerId),
       logging.startExclusive(request.startExclusive),
@@ -86,9 +100,10 @@ private[apiserver] final class ApiTransactionService private (
       logging.filters(request.filter),
       logging.verbose(request.verbose),
     ) { implicit loggingContext =>
-      logger.info("Received request for transactions.")
+      logger.info(s"Received request for transactions, ${loggingContext
+          .serializeFiltered("ledgerId", "startExclusive", "endInclusive", "filters", "verbose")}.")
     }
-    logger.trace(s"Transaction request: $request")
+    logger.trace(s"Transaction request: $request.")
     transactionsService
       .transactions(request.startExclusive, request.endInclusive, request.filter, request.verbose)
       .via(logger.enrichedDebugStream("Responding with transactions.", transactionsLoggable))
@@ -98,7 +113,9 @@ private[apiserver] final class ApiTransactionService private (
 
   override def getTransactionTrees(
       request: GetTransactionTreesRequest
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionTreesResponse, NotUsed] = {
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[GetTransactionTreesResponse, NotUsed] = {
     withEnrichedLoggingContext(
       logging.ledgerId(request.ledgerId),
       logging.startExclusive(request.startExclusive),
@@ -106,7 +123,8 @@ private[apiserver] final class ApiTransactionService private (
       logging.parties(request.parties),
       logging.verbose(request.verbose),
     ) { implicit loggingContext =>
-      logger.info("Received request for transaction trees.")
+      logger.info(s"Received request for transaction trees, ${loggingContext
+          .serializeFiltered("ledgerId", "startExclusive", "endInclusive", "parties", "verbose")}.")
     }
     logger.trace(s"Transaction tree request: $request")
     transactionsService
@@ -125,16 +143,20 @@ private[apiserver] final class ApiTransactionService private (
 
   override def getTransactionByEventId(
       request: GetTransactionByEventIdRequest
-  )(implicit loggingContext: LoggingContext): Future[GetTransactionResponse] = {
-    implicit val enrichedLoggingContext: LoggingContext = LoggingContext.enriched(
-      logging.ledgerId(request.ledgerId),
-      logging.eventId(request.eventId),
-      logging.parties(request.requestingParties),
-    )(loggingContext)
-    logger.info("Received request for transaction by event ID.")(enrichedLoggingContext)
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetTransactionResponse] = {
+    implicit val enrichedLoggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggingContext.traceContext)(
+        LoggingContext.enriched(
+          logging.ledgerId(request.ledgerId),
+          logging.eventId(request.eventId),
+          logging.parties(request.requestingParties),
+        )(loggingContext)
+      )
+    logger.info(s"Received request for transaction by event ID, ${enrichedLoggingContext
+        .serializeFiltered("ledgerId", "eventId", "parties")}.")(loggingContext.traceContext)
     implicit val errorLogger: ContextualizedErrorLogger =
-      new DamlContextualizedErrorLogger(logger, enrichedLoggingContext, None)
-    logger.trace(s"Transaction by event ID request: $request")(loggingContext)
+      ErrorLoggingContext(logger, enrichedLoggingContext)
+    logger.trace(s"Transaction by event ID request: $request")(loggingContext.traceContext)
     LfEventId
       .fromString(request.eventId.unwrap)
       .map { case LfEventId(transactionId, _) =>
@@ -145,21 +167,23 @@ private[apiserver] final class ApiTransactionService private (
           invalidArgument(s"invalid eventId: ${request.eventId}")
         }
       }
-      .andThen(logger.logErrorsOnCall[GetTransactionResponse](loggingContext))
+      .andThen(logger.logErrorsOnCall[GetTransactionResponse](loggingContext.traceContext))
   }
 
   override def getTransactionById(
       request: GetTransactionByIdRequest
-  )(implicit loggingContext: LoggingContext): Future[GetTransactionResponse] = {
-    val errorLogger: DamlContextualizedErrorLogger = withEnrichedLoggingContext(
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetTransactionResponse] = {
+    val errorLogger: ErrorLoggingContext = withEnrichedLoggingContext(
       logging.ledgerId(request.ledgerId),
       logging.transactionId(request.transactionId),
       logging.parties(request.requestingParties),
     ) { implicit loggingContext =>
-      logger.info("Received request for transaction by ID.")
-      new DamlContextualizedErrorLogger(logger, loggingContext, None)
+      logger.info(
+        s"Received request for transaction by ID, ${loggingContext.serializeFiltered("ledgerId", "transactionId", "parties")}."
+      )
+      ErrorLoggingContext(logger, loggingContext)
     }
-    logger.trace(s"Transaction by ID request: $request")
+    logger.trace(s"Transaction by ID request: $request.")
 
     lookUpTreeByTransactionId(request.transactionId, request.requestingParties)(errorLogger)
       .andThen(logger.logErrorsOnCall[GetTransactionResponse])
@@ -167,14 +191,17 @@ private[apiserver] final class ApiTransactionService private (
 
   override def getFlatTransactionByEventId(
       request: GetTransactionByEventIdRequest
-  )(implicit loggingContext: LoggingContext): Future[GetFlatTransactionResponse] = {
-    implicit val errorLogger: DamlContextualizedErrorLogger = withEnrichedLoggingContext(
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetFlatTransactionResponse] = {
+    implicit val errorLoggingContext: ErrorLoggingContext = withEnrichedLoggingContext(
       logging.ledgerId(request.ledgerId),
       logging.eventId(request.eventId),
       logging.parties(request.requestingParties),
     ) { implicit loggingContext =>
-      logger.info("Received request for flat transaction by event ID.")
-      new DamlContextualizedErrorLogger(logger, loggingContext, None)
+      logger.info(
+        s"Received request for flat transaction by event ID, ${loggingContext
+            .serializeFiltered("ledgerId", "eventId", "parties")}."
+      )
+      ErrorLoggingContext(logger, loggingContext)
     }
     logger.trace(s"Flat transaction by event ID request: $request")
 
@@ -192,14 +219,15 @@ private[apiserver] final class ApiTransactionService private (
 
   override def getFlatTransactionById(
       request: GetTransactionByIdRequest
-  )(implicit loggingContext: LoggingContext): Future[GetFlatTransactionResponse] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetFlatTransactionResponse] = {
     val errorLogger = withEnrichedLoggingContext(
       logging.ledgerId(request.ledgerId),
       logging.transactionId(request.transactionId),
       logging.parties(request.requestingParties),
     ) { implicit loggingContext =>
-      logger.info("Received request for flat transaction by ID.")
-      new DamlContextualizedErrorLogger(logger, loggingContext, None)
+      logger.info(s"Received request for flat transaction by ID, ${loggingContext
+          .serializeFiltered("ledgerId", "transactionId", "parties")}.")
+      ErrorLoggingContext(logger, loggingContext)
     }
     logger.trace(s"Flat transaction by ID request: $request")
 

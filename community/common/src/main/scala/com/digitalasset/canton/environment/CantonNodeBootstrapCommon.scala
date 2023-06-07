@@ -91,6 +91,7 @@ final case class CantonNodeBootstrapCommonArguments[
     clock: Clock,
     metrics: M,
     storageFactory: StorageFactory,
+    cryptoFactory: CryptoFactory,
     cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
     grpcVaultServiceFactory: GrpcVaultServiceFactory,
     futureSupervisor: FutureSupervisor,

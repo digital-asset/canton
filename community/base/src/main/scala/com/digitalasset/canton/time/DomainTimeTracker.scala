@@ -5,6 +5,7 @@ package com.digitalasset.canton.time
 
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
@@ -135,17 +136,15 @@ class DomainTimeTracker(
       traceContext: TraceContext
   ): Unit = {
     val (toRequest, tooLarge) = timestamps.partition(_ < maxPendingTick)
-    if (tooLarge.nonEmpty) {
-      val first = tooLarge.minOption.getOrElse(
-        ErrorUtil.internalError(new RuntimeException("A non-empty Seq must have a minimum"))
-      )
-      val last = tooLarge.maxOption.getOrElse(
-        ErrorUtil.internalError(new RuntimeException("A non-empty Seq must have a maximum"))
-      )
+
+    NonEmpty.from(tooLarge).foreach { tooLarge =>
+      val first = tooLarge.min1
+      val last = tooLarge.max1
       logger.warn(
         s"Ignoring request for ${tooLarge.size} ticks from $first to $last as they are too large"
       )
     }
+
     if (toRequest.nonEmpty) {
       withLock {
         toRequest.foreach { tick =>
@@ -295,26 +294,42 @@ class DomainTimeTracker(
     Option(withLock(pendingTicks.peek())).map(_.ts.add(config.observationLatency.asJava))
 
   /** Local time of when we'd like to see the next event produced.
-    * If we are waiting to observe a timestamp, this value will be the greater of:
+    * If we are waiting to observe a timestamp, this value will be the greater (see note below) of:
     *  - the local time of when we'd like to see the earliest tick
     *  - the time we last received an event offset plus the configured patience duration
     *
     * This allows doing nothing for a long period if the timestamp we're looking at is far in the future.
     * However if the domain is far behind but regularly producing events we will wait until we haven't
     * witnessed an event for the patience duration.
+    *
+    * Note: for sim clock, we always take the earliestExpectedObservationTime. The reason is that progressing the
+    * clock may lead to sudden big differences between local clock and timestamps on sequencer messages
+    * which lead to some check that decides whether a time proof should be requested not being done.
+    *
+    * The issue arise in the following case:
+    *   - Check is scheduled at t1
+    *   - Time is progressed at t3 > t1
+    *   - An event is received with sequencing time t2, with t1 < t2 < t3
+    *   - Then, the max would lead to t3 which skips the request for a time proof
     */
   private def nextScheduledCheck()(implicit traceContext: TraceContext): Option[CantonTimestamp] = {
     // if we're not waiting for an event, then we don't need to see one
     // Only request an event if the time tracker has observed a time;
     // otherwise the submission may fail because the node does not have any signing keys registered
-    earliestExpectedObservationTime().flatMap { expectedEvent =>
+    earliestExpectedObservationTime().flatMap { earliestExpectedObservationTime =>
       val latest = timestampRef.get().latest
       if (latest.isEmpty) {
         logger.debug(
-          s"Not scheduling a next check at $expectedEvent because no timestamp has been observed from the domain"
+          s"Not scheduling a next check at $earliestExpectedObservationTime because no timestamp has been observed from the domain"
         )
       }
-      latest.map(_.receivedAt.add(config.patienceDuration.asJava).max(expectedEvent))
+
+      val timeFromReceivedEvent = latest.map(_.receivedAt.add(config.patienceDuration.asJava))
+
+      clock match {
+        case _: SimClock => latest.map(_ => earliestExpectedObservationTime)
+        case _ => timeFromReceivedEvent.map(_.max(earliestExpectedObservationTime))
+      }
     }
   }
 

@@ -25,7 +25,7 @@ import com.daml.lf.language.{Ast, LanguageVersion}
 import com.daml.lf.testing.parser.Implicits.defaultParserParameters
 import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
-import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, SpanAttribute, TelemetryContext}
+import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset.Absolute
 import com.digitalasset.canton.ledger.api.domain.PackageEntry
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -52,7 +52,6 @@ import java.util.concurrent.{CompletableFuture, CompletionStage}
 import java.util.zip.ZipInputStream
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.{Future, Promise}
-import scala.jdk.CollectionConverters.MapHasAsScala
 import scala.util.{Failure, Success}
 
 class ApiPackageManagementServiceSpec
@@ -94,16 +93,7 @@ class ApiPackageManagementServiceSpec
           span.end()
         }
         .map { _ =>
-          val spanData = testTelemetrySetup.reportedSpans()
-          val spanAttributes: Map[SpanAttribute, String] = spanData
-            .flatMap({ spanData =>
-              spanData.getAttributes.asMap.asScala.map { case (key, value) =>
-                SpanAttribute(key.toString) -> value.toString
-              }.toMap
-            })
-            .toMap
-
-          spanAttributes should contain(anApplicationIdSpanAttribute)
+          testTelemetrySetup.reportedSpanAttributes should contain(anApplicationIdSpanAttribute)
           succeed
         }
     }

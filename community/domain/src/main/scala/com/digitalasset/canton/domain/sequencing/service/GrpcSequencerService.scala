@@ -607,7 +607,9 @@ class GrpcSequencerService(
       .flatMap(_.recipients.allRecipients)
       .filter {
         case MemberRecipient(_: DomainTopologyManagerId) => false
-        case MemberRecipient(_: MediatorId) if enableMediatorUnauthenticatedMessages => false
+        case MediatorsOfDomain.TopologyTransactionMediatorGroup
+            if enableMediatorUnauthenticatedMessages =>
+          false
         case _ => true
       }
     Either.cond(

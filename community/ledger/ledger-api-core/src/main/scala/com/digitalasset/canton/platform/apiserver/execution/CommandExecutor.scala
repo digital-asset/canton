@@ -4,9 +4,9 @@
 package com.digitalasset.canton.platform.apiserver.execution
 
 import com.daml.lf.crypto
-import com.daml.logging.LoggingContext
-import com.digitalasset.canton.ledger.api.domain.{Commands as ApiCommands}
+import com.digitalasset.canton.ledger.api.domain.Commands as ApiCommands
 import com.digitalasset.canton.ledger.configuration.Configuration
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 
 import scala.concurrent.Future
@@ -17,6 +17,6 @@ private[apiserver] trait CommandExecutor {
       submissionSeed: crypto.Hash,
       ledgerConfiguration: Configuration,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Either[ErrorCause, CommandExecutionResult]]
 }

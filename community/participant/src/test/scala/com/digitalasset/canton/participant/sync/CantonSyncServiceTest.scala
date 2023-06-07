@@ -11,6 +11,7 @@ import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.CommittedTransaction
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.ValueRecord
+import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
@@ -92,6 +93,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     private val pruningProcessor = NoOpPruningProcessor
     private val commandDeduplicationStore = mock[CommandDeduplicationStore]
     private val inFlightSubmissionStore = mock[InFlightSubmissionStore]
+    private val sequencerInfoLoader = mock[SequencerInfoLoader]
 
     private val ledgerId = participantId.uid.id.unwrap
     private implicit val mat: Materializer = mock[Materializer] // not used
@@ -164,6 +166,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       SyncDomain.DefaultFactory,
       indexedStringStore,
       ParticipantTestMetrics,
+      sequencerInfoLoader,
       () => true,
       FutureSupervisor.Noop,
       SuppressingLogger(getClass),
@@ -200,7 +203,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
 
       val lfInputPartyId = LfPartyId.assertFromString("desiredPartyName")
       val partyId =
-        PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"${lfInputPartyId.toString}::default"))
+        PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"$lfInputPartyId::default"))
       when(
         f.partyNotifier.setDisplayName(
           ArgumentMatchers.eq(partyId),

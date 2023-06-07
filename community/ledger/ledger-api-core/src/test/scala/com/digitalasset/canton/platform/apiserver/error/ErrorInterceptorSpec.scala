@@ -15,8 +15,8 @@ import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.platform.hello.HelloServiceGrpc.HelloService
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.platform.testing.StreamConsumer
+import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
-import com.digitalasset.canton.platform.server.api.services.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.testing.TestingLogCollector.ThrowableEntry
 import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
 import io.grpc.*

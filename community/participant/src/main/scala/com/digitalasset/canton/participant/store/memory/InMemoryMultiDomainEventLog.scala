@@ -263,12 +263,12 @@ class InMemoryMultiDomainEventLog(
   }
 
   override def subscribe(
-      beginWith: Option[GlobalOffset]
+      startInclusive: Option[GlobalOffset]
   )(implicit tc: TraceContext): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed] = {
-    logger.debug(show"Subscribing at ${beginWith.showValueOrNone}...")
+    logger.debug(show"Subscribing at ${startInclusive.showValueOrNone}...")
 
     dispatcher.startingAt(
-      beginWith.getOrElse(entriesRef.get.firstOffset) - 1, // start index is exclusive
+      startInclusive.getOrElse(entriesRef.get.firstOffset) - 1, // start index is exclusive
       RangeSource { (fromExcl, toIncl) =>
         Source(entriesRef.get.referencesByOffset.range(fromExcl + 1, toIncl + 1))
           .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
@@ -280,51 +280,6 @@ class InMemoryMultiDomainEventLog(
               )
           }
       },
-    )
-  }
-
-  override def subscribeForDomainUpdates(
-      startExclusive: GlobalOffset,
-      endInclusive: GlobalOffset,
-      domainId: DomainId,
-  )(implicit
-      traceContext: TraceContext
-  ): Source[(GlobalOffset, Traced[LedgerSyncEvent]), NotUsed] = {
-    logger.debug(show"Subscribing for domain $domainId at $startExclusive...")
-
-    def eventBelongsToDomain(
-        eventLogId: EventLogId,
-        timestampedEvent: TimestampedEvent,
-    ): Boolean =
-      eventLogId match {
-        case EventLogId.DomainEventLogId(indexedDomain) =>
-          // Covers all events in the single domain event logs
-          indexedDomain.domainId == domainId
-
-        case `participantEventLogId` =>
-          // Covers CommandRejected events in the participant event log
-          timestampedEvent.eventId.exists(_.associatedDomain.exists(_ == domainId))
-
-        case _ => false
-      }
-
-    dispatcher.startingAt(
-      startExclusive = startExclusive,
-      subSource = RangeSource { (fromExcl, toIncl) =>
-        Source(entriesRef.get.referencesByOffset.range(fromExcl + 1, toIncl + 1))
-          .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
-            case (globalOffset, (id, localOffset, _processingTime)) =>
-              for {
-                event <- lookupEvent(namedLoggingContext)(id, localOffset)
-              } yield {
-                if (eventBelongsToDomain(id, event))
-                  List(globalOffset -> Traced(event.event)(event.traceContext))
-                else Nil
-              }
-          }
-          .flatMapConcat(Source(_))
-      },
-      endInclusive = Some(endInclusive),
     )
   }
 

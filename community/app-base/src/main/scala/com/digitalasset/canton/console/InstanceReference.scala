@@ -313,7 +313,7 @@ trait DomainReference
   def defaultDomainConnection: DomainConnectionConfig =
     DomainConnectionConfig(
       DomainAlias.tryCreate(name),
-      SequencerConnections.default(sequencerConnection),
+      SequencerConnections.single(sequencerConnection),
     )
 }
 

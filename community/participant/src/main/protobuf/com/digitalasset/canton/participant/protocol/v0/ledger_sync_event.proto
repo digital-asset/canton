@@ -169,6 +169,7 @@ message TransferredOut {
   string workflow_id = 10; // optional
   string template_id = 11; // optional
   bool is_transferring_participant = 12;
+  repeated string hosted_stakeholders = 13;
 }
 
 message TransferredIn {
@@ -185,4 +186,5 @@ message TransferredIn {
   bool create_transaction_accepted = 11;
   string workflow_id = 12; // optional
   bool is_transferring_participant = 13;
+  repeated string hosted_stakeholders = 14;
 }

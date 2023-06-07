@@ -12,7 +12,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
 
-trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
+trait EncryptionTest extends BaseTest with CryptoTestHelper { this: AsyncWordSpec =>
 
   case class Message(bytes: ByteString) extends HasVersionedToByteString {
     override def toByteString(version: ProtocolVersion): ByteString = bytes
@@ -132,7 +132,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
           val message = Message(ByteString.copyFromUtf8("foobar"))
           for {
             crypto <- newCrypto
-            publicKey <- newPublicKey(crypto, encryptionKeyScheme)
+            publicKey <- getEncryptionPublicKey(crypto, encryptionKeyScheme)
             encrypted1 = crypto.pureCrypto
               .encryptWith(message, publicKey, testedProtocolVersion)
               .valueOrFail("encrypt")
@@ -146,12 +146,8 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
 
       }
     }
-  }
 
-  def newPublicKey(crypto: Crypto, scheme: EncryptionKeyScheme): Future[EncryptionPublicKey] =
-    crypto.privateCrypto
-      .generateEncryptionKey(scheme)
-      .valueOrFail("generate enc key")
+  }
 
   def hybridEncrypt(
       encryptionKeyScheme: EncryptionKeyScheme,
@@ -166,7 +162,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
     "serialize and deserialize encryption public key via protobuf" in {
       for {
         crypto <- newCrypto
-        key <- newPublicKey(crypto, encryptionKeyScheme)
+        key <- getEncryptionPublicKey(crypto, encryptionKeyScheme)
         keyP = key.toProtoVersioned(testedProtocolVersion)
         key2 = EncryptionPublicKey.fromProtoVersioned(keyP).valueOrFail("serialize key")
       } yield key shouldEqual key2
@@ -176,7 +172,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
       val message = Message(ByteString.copyFromUtf8("foobar"))
       for {
         crypto <- newCrypto
-        publicKey <- newPublicKey(crypto, encryptionKeyScheme)
+        publicKey <- getEncryptionPublicKey(crypto, encryptionKeyScheme)
 
         encryptedE <- encryptWith(message, publicKey, testedProtocolVersion)
         encrypted = encryptedE.valueOrFail("encrypt")
@@ -190,8 +186,8 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
       val message = Message(ByteString.copyFromUtf8("foobar"))
       val res = for {
         crypto <- newCrypto
-        publicKey <- newPublicKey(crypto, encryptionKeyScheme)
-        publicKey2 <- newPublicKey(crypto, encryptionKeyScheme)
+        (publicKey, publicKey2) <- getTwoEncryptionPublicKeys(crypto, encryptionKeyScheme)
+        _ = assert(publicKey != publicKey2)
         encryptedE <- encryptWith(message, publicKey, testedProtocolVersion)
         encrypted = encryptedE.valueOrFail("encrypt")
         _ = assert(message.bytes != encrypted.ciphertext)

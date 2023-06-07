@@ -6,11 +6,12 @@ package com.digitalasset.canton.platform.apiserver.execution
 import com.daml.lf.crypto
 import com.daml.lf.data.Time
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.domain.Commands
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.index.v2.MaximumLedgerTime
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,7 +38,7 @@ private[apiserver] final class LedgerTimeAwareCommandExecutor(
       submissionSeed: crypto.Hash,
       ledgerConfiguration: Configuration,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Either[ErrorCause, CommandExecutionResult]] =
     loop(commands, submissionSeed, ledgerConfiguration, maxRetries)
 
@@ -47,7 +48,7 @@ private[apiserver] final class LedgerTimeAwareCommandExecutor(
       ledgerConfiguration: Configuration,
       retriesLeft: Int,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Either[ErrorCause, CommandExecutionResult]] =
     delegate
       .execute(commands, submissionSeed, ledgerConfiguration)

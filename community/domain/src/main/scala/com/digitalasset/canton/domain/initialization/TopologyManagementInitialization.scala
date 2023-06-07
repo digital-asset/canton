@@ -193,11 +193,7 @@ object TopologyManagementInitialization {
             loggerFactory,
           ),
           domainTopologyService,
-          (env, callback) =>
-            newClient.sendAsync(
-              Batch(List(env), protocolVersion),
-              callback = callback,
-            ),
+          newClient,
           protocolVersion,
           timeouts,
           loggerFactory,

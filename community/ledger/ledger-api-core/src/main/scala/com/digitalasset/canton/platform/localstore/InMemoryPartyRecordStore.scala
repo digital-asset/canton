@@ -9,6 +9,7 @@ import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, ObjectMeta}
+import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
 import com.digitalasset.canton.platform.localstore.api.PartyRecordStore.{
   MaxAnnotationsSizeExceeded,
   PartyRecordExistsFatal,
@@ -20,7 +21,6 @@ import com.digitalasset.canton.platform.localstore.api.{
   PartyRecordUpdate,
 }
 import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
-import com.digitalasset.canton.platform.server.api.validation.ResourceAnnotationValidation
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, blocking}
@@ -234,7 +234,7 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
       annotations: Map[String, String],
       party: Ref.Party,
   ): Result[Unit] = {
-    if (!ResourceAnnotationValidation.isWithinMaxAnnotationsByteSize(annotations)) {
+    if (!ResourceAnnotationValidator.isWithinMaxAnnotationsByteSize(annotations)) {
       Left(MaxAnnotationsSizeExceeded(party))
     } else {
       Right(())

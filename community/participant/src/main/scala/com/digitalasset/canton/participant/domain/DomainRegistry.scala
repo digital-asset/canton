@@ -5,8 +5,7 @@ package com.digitalasset.canton.participant.domain
 
 import com.daml.error.*
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.common.domain.SequencerConnectClient
-import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
+import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader.SequencerInfoLoaderError
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -32,14 +31,42 @@ trait DomainRegistry extends AutoCloseable {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[DomainRegistryError, DomainHandle]]
 
-  /** Returns a builder for the sequencer client */
-  def sequencerConnectClientBuilder: SequencerConnectClient.Builder
-
 }
 
 sealed trait DomainRegistryError extends Product with Serializable with CantonError
 
 object DomainRegistryError extends DomainRegistryErrorGroup {
+
+  def fromSequencerInfoLoaderError(
+      error: SequencerInfoLoaderError
+  )(implicit loggingContext: ErrorLoggingContext): DomainRegistryError = {
+    error match {
+      case SequencerInfoLoaderError.DeserializationFailure(cause) =>
+        DomainRegistryError.DomainRegistryInternalError.DeserializationFailure(cause)
+      case SequencerInfoLoaderError.InvalidResponse(cause) =>
+        DomainRegistryError.DomainRegistryInternalError.InvalidResponse(cause, None)
+      case SequencerInfoLoaderError.InvalidState(cause) =>
+        DomainRegistryError.DomainRegistryInternalError.InvalidState(cause)
+      case SequencerInfoLoaderError.DomainIsNotAvailableError(alias, cause) =>
+        DomainRegistryError.ConnectionErrors.DomainIsNotAvailable.Error(alias, cause)
+      case SequencerInfoLoaderError.HandshakeFailedError(cause) =>
+        DomainRegistryError.HandshakeErrors.HandshakeFailed.Error(cause)
+      case SequencerInfoLoaderError.DomainAliasDuplication(domainId, alias, previousDomainId) =>
+        DomainRegistryError.HandshakeErrors.DomainAliasDuplication.Error(
+          domainId,
+          alias,
+          previousDomainId,
+        )
+      case SequencerInfoLoaderError.SequencersFromDifferentDomainsAreConfigured(cause) =>
+        DomainRegistryError.ConfigurationErrors.SequencersFromDifferentDomainsAreConfigured
+          .Error(cause)
+      case SequencerInfoLoaderError.MisconfiguredStaticDomainParameters(cause) =>
+        DomainRegistryError.ConfigurationErrors.MisconfiguredStaticDomainParameters
+          .Error(cause)
+      case SequencerInfoLoaderError.FailedToConnectToSequencers(cause) =>
+        DomainRegistryError.ConnectionErrors.FailedToConnectToSequencers.Error(cause)
+    }
+  }
 
   object ConnectionErrors extends ErrorGroup() {
 
@@ -128,21 +155,6 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
     object SequencersFromDifferentDomainsAreConfigured
         extends ErrorCode(
           id = "SEQUENCERS_FROM_DIFFERENT_DOMAINS_ARE_CONFIGURED",
-          ErrorCategory.InvalidGivenCurrentSystemStateOther,
-        ) {
-      final case class Error(override val cause: String)(implicit
-          val loggingContext: ErrorLoggingContext
-      ) extends CantonError.Impl(cause)
-          with DomainRegistryError {}
-    }
-
-    @Explanation(
-      """This error indicates that the participant is configured to connect to multiple domain sequencers but their
-        |topologyRequestAddress is different from other sequencers."""
-    )
-    object MisconfiguredTopologyRequestAddress
-        extends ErrorCode(
-          id = "MISCONFIGURED_TOPOLOGY_REQUEST_ADDRESS",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
       final case class Error(override val cause: String)(implicit
@@ -402,7 +414,5 @@ trait DomainHandle extends AutoCloseable {
   def domainPersistentState: SyncDomainPersistentState
 
   def topologyFactory: TopologyComponentFactory
-
-  def topologyRequestAddress: Option[TopologyRequestAddressX]
 
 }

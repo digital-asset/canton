@@ -12,8 +12,8 @@ import com.daml.ledger.api.v1.ledger_identity_service.{
 }
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
 import io.grpc.{BindableService, ServerServiceDefinition}
 import scalaz.syntax.tag.*
 

@@ -936,6 +936,7 @@ private[store] final case class SerializableTransferredOut(
       transferInExclusivity,
       workflowId,
       isTransferringParticipant,
+      hostedStakeholders,
     ) = transferOut
     v0.TransferredOut(
       updateId = updateId,
@@ -951,6 +952,7 @@ private[store] final case class SerializableTransferredOut(
       transferInExclusivity = transferInExclusivity.map(SerializableLfTimestamp(_).toProtoV0),
       workflowId = workflowId.getOrElse(""),
       isTransferringParticipant = isTransferringParticipant,
+      hostedStakeholders = hostedStakeholders,
     )
   }
 }
@@ -972,6 +974,7 @@ private[store] object SerializableTransferredOut {
       workflowIdP,
       templateIdP,
       isTransferringParticipant,
+      hostedStakeholdersP,
     ) = transferOutP
 
     for {
@@ -991,6 +994,7 @@ private[store] object SerializableTransferredOut {
       )
       workflowId <- ProtoConverter.parseLFWorkflowIdO(workflowIdP)
       templateId <- ProtoConverter.parseTemplateIdO(templateIdP)
+      hostedStakeholders <- hostedStakeholdersP.traverse(ProtoConverter.parseLfPartyId)
     } yield LedgerSyncEvent.TransferredOut(
       updateId = updateId,
       optCompletionInfo = optCompletionInfo,
@@ -1003,6 +1007,7 @@ private[store] object SerializableTransferredOut {
       transferInExclusivity = transferInExclusivity,
       workflowId = workflowId,
       isTransferringParticipant = isTransferringParticipant,
+      hostedStakeholders = hostedStakeholders.toList,
     )
   }
 }
@@ -1023,6 +1028,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       createTransactionAccepted,
       workflowId,
       isTransferringParticipant,
+      hostedStakeholders,
     ) = transferIn
     val contractMetadataP = contractMetadata.toByteString
     val createNodeByteString = DamlLfSerializers
@@ -1046,6 +1052,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       createTransactionAccepted = createTransactionAccepted,
       workflowId = workflowId.getOrElse(""),
       isTransferringParticipant = isTransferringParticipant,
+      hostedStakeholders = hostedStakeholders,
     )
 
   }
@@ -1067,6 +1074,7 @@ private[store] object SerializableTransferredIn {
       createTransactionAcceptedP,
       workflowIdP,
       isTransferringParticipant,
+      hostedStakeholdersP,
     ) = transferInP
 
     for {
@@ -1096,6 +1104,7 @@ private[store] object SerializableTransferredIn {
       creatingTransactionId <- ProtoConverter.parseLedgerTransactionId(creatingTransactionIdP)
       rawTargetDomainId <- DomainId.fromProtoPrimitive(targetDomainIdP, "target_domain")
       workflowId <- ProtoConverter.parseLFWorkflowIdO(workflowIdP)
+      hostedStakeholders <- hostedStakeholdersP.traverse(ProtoConverter.parseLfPartyId)
     } yield LedgerSyncEvent.TransferredIn(
       updateId = updateId,
       optCompletionInfo = optCompletionInfo,
@@ -1110,6 +1119,7 @@ private[store] object SerializableTransferredIn {
       createTransactionAccepted = createTransactionAcceptedP,
       workflowId = workflowId,
       isTransferringParticipant = isTransferringParticipant,
+      hostedStakeholders = hostedStakeholders.toList,
     )
   }
 }

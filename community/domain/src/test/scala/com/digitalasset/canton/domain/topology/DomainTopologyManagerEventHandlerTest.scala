@@ -10,11 +10,18 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.InMemoryRegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.protocol.messages.{
+  DefaultOpenEnvelope,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
   RegisterTopologyTransactionResponseResult,
 }
-import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SendCallback, SendResult}
+import com.digitalasset.canton.sequencing.client.{
+  SendAsyncClientError,
+  SendCallback,
+  SendResult,
+  SendType,
+  SequencerClientSend,
+}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
@@ -87,32 +94,42 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
         )
           .thenReturn(FutureUnlessShutdown.pure(List(domainIdentityServiceResult)))
 
-        val sequencerSendResponse = mock[
-          (
-              OpenEnvelope[RegisterTopologyTransactionResponse.Result],
-              SendCallback,
-          ) => EitherT[Future, SendAsyncClientError, Unit]
-        ]
+        val sequencerClientSend = mock[SequencerClientSend]
         when(
-          sequencerSendResponse.apply(
+          sequencerClientSend.sendAsync(
             eqTo(
-              OpenEnvelope(response, Recipients.cc(response.requestedBy))(testedProtocolVersion)
+              Batch(
+                List(
+                  OpenEnvelope(response, Recipients.cc(response.requestedBy))(testedProtocolVersion)
+                ),
+                testedProtocolVersion,
+              )
             ),
+            any[SendType],
+            any[Option[CantonTimestamp]],
+            any[CantonTimestamp],
+            any[MessageId],
+            any[Option[AggregationRule]],
             any[SendCallback],
-          )
-        )
-          .thenAnswer(
-            (_: OpenEnvelope[RegisterTopologyTransactionResponse.Result], callback: SendCallback) =>
-              {
-                callback.apply(UnlessShutdown.Outcome(SendResult.Success(null)))
-                EitherT.rightT[Future, SendAsyncClientError](())
-              }
-          )
+          )(any[TraceContext])
+        ).thenAnswer {
+          (
+              _: Batch[DefaultOpenEnvelope],
+              _: SendType,
+              _: Option[CantonTimestamp],
+              _: CantonTimestamp,
+              _: MessageId,
+              _: Option[AggregationRule],
+              callback: SendCallback,
+          ) =>
+            callback.apply(UnlessShutdown.Outcome(SendResult.Success(null)))
+            EitherT.rightT[Future, SendAsyncClientError](())
+        }
 
         new DomainTopologyManagerEventHandler(
           store,
           requestHandler,
-          sequencerSendResponse,
+          sequencerClientSend,
           testedProtocolVersion,
           timeouts,
           loggerFactory,

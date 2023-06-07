@@ -292,7 +292,6 @@ class SequencerRuntime(
           new GrpcSequencerConnectService(
             domainId,
             sequencerId,
-            mediatorsProcessParticipantTopologyRequests,
             staticDomainParameters,
             syncCrypto,
             agreementManager,

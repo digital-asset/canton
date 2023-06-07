@@ -42,20 +42,14 @@ message GetUpdatesRequest {
   // Required
   // For the multi-domain, this currently replace the usual TransactionFilter
   string party = 4;
-
-  // Must be a valid domain ID
-  // Required
-  string domain_id = 5;
 }
 
 message GetTreeUpdatesResponse {
-  // The list of updates trees that matches the filter in the request.
-  repeated TreeUpdate updates = 1;
-}
-
-message TreeUpdate {
-  oneof tree_update {
+  // An update that matches the filter in the request.
+  oneof update {
     com.daml.ledger.api.v1.TransactionTree transaction_tree = 1;
     Transfer transfer = 2;
   }
+  // The ID of the domain that sequenced the transaction resulting in this update
+  string domain_id = 3;
 }

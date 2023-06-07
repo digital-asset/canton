@@ -175,33 +175,12 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         _ = advanceAndFlush(patienceDurationSecs)
       } yield requestSubmitter.hasRequestedTime shouldBe true
     }
+
     "request time proof immediately" in { env =>
       import env.*
 
       timeTracker.requestTick(ts(2), immediately = true)
       requestSubmitter.hasRequestedTime shouldBe true
-    }
-
-    "hold off requesting time proof if were getting regular updates" in { env =>
-      import env.*
-
-      timeTracker.requestTick(ts(20))
-
-      for {
-        // so our clock is already at where we're expecting
-        _ <- advanceTo(20)
-        // but we're going to observe timestamps far before what we're looking for
-        _ <- observeTimeProof(3)
-        _ <- advanceTo(23)
-        _ <- observeTimeProof(6)
-        _ <- advanceTo(26)
-        _ <- observeTimeProof(9)
-        _ <- advanceTo(29)
-        _ <- observeTimeProof(12)
-        _ = requestSubmitter.hasRequestedTime shouldBe false
-        // should only request time once we exceed our patience duration
-        _ <- advanceAndFlush(patienceDurationSecs)
-      } yield requestSubmitter.hasRequestedTime shouldBe true
     }
 
     "ignore requested tick if too large to track" in { env =>

@@ -694,8 +694,8 @@ object CantonConfig {
         .enableNestedOpt("auto-init", _.copy(identity = None))
     implicit val grpcHealthServerConfigReader: ConfigReader[GrpcHealthServerConfig] =
       deriveReader[GrpcHealthServerConfig]
-    lazy implicit val cryptoProviderReader: ConfigReader[CryptoProvider] =
-      deriveEnumerationReader[CryptoProvider]
+    lazy implicit val communityCryptoProviderReader: ConfigReader[CommunityCryptoProvider] =
+      deriveEnumerationReader[CommunityCryptoProvider]
     lazy implicit val cryptoSigningKeySchemeReader: ConfigReader[SigningKeyScheme] =
       deriveEnumerationReader[SigningKeyScheme]
     lazy implicit val cryptoEncryptionKeySchemeReader: ConfigReader[EncryptionKeyScheme] =
@@ -1043,8 +1043,8 @@ object CantonConfig {
       deriveWriter[ParticipantInitConfig]
     lazy implicit val domainInitConfigWriter: ConfigWriter[DomainInitConfig] =
       deriveWriter[DomainInitConfig]
-    lazy implicit val cryptoProviderWriter: ConfigWriter[CryptoProvider] =
-      deriveEnumerationWriter[CryptoProvider]
+    lazy implicit val communityCryptoProviderWriter: ConfigWriter[CommunityCryptoProvider] =
+      deriveEnumerationWriter[CommunityCryptoProvider]
     lazy implicit val cryptoSigningKeySchemeWriter: ConfigWriter[SigningKeyScheme] =
       deriveEnumerationWriter[SigningKeyScheme]
     lazy implicit val cryptoEncryptionKeySchemeWriter: ConfigWriter[EncryptionKeyScheme] =

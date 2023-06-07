@@ -9,11 +9,17 @@ import cats.instances.future.*
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{
+  CommunityCryptoProvider,
   CryptoConfig,
   CryptoProvider,
   CryptoProviderScheme,
   CryptoSchemeConfig,
   ProcessingTimeout,
+}
+import com.digitalasset.canton.crypto.CryptoFactory.{
+  CryptoStoresAndSchemes,
+  selectAllowedSigningKeyScheme,
+  selectSchemes,
 }
 import com.digitalasset.canton.crypto.provider.jce.{
   JceJavaConverter,
@@ -26,11 +32,7 @@ import com.digitalasset.canton.crypto.provider.tink.{
   TinkPureCrypto,
 }
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
-import com.digitalasset.canton.crypto.store.{
-  CryptoPrivateStore,
-  CryptoPrivateStoreExtended,
-  CryptoPublicStore,
-}
+import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.version.ReleaseProtocolVersion
@@ -39,9 +41,91 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
 import scala.concurrent.{ExecutionContext, Future}
 
+trait CryptoFactory {
+
+  def create(
+      config: CryptoConfig,
+      storage: Storage,
+      cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
+      releaseProtocolVersion: ReleaseProtocolVersion,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[Future, String, Crypto]
+
+  def createPureCrypto(
+      config: CryptoConfig,
+      loggerFactory: NamedLoggerFactory,
+  ): Either[String, CryptoPureApi] =
+    for {
+      symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
+        .map(_.default)
+      hashAlgorithm <- selectSchemes(config.hash, config.provider.hash).map(_.default)
+      requiredSigningKeySchemes <- selectAllowedSigningKeyScheme(config)
+      crypto <- config.provider match {
+        case _: CryptoProvider.TinkCryptoProvider =>
+          TinkPureCrypto.create(symmetricKeyScheme, hashAlgorithm)
+        case _: CryptoProvider.JceCryptoProvider =>
+          val javaKeyConverter = new JceJavaConverter(hashAlgorithm, requiredSigningKeySchemes)
+          Right(
+            new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
+          )
+        case prov =>
+          Left(s"Unsupported crypto provider: $prov")
+      }
+    } yield crypto
+
+  protected def initStoresAndSelectSchemes(
+      config: CryptoConfig,
+      storage: Storage,
+      cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
+      releaseProtocolVersion: ReleaseProtocolVersion,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[Future, String, CryptoStoresAndSchemes] =
+    for {
+      cryptoPublicStore <- EitherT.rightT[Future, String](
+        CryptoPublicStore.create(storage, releaseProtocolVersion, timeouts, loggerFactory)
+      )
+      cryptoPrivateStore <- cryptoPrivateStoreFactory
+        .create(storage, releaseProtocolVersion, timeouts, loggerFactory)
+        .leftMap(err => show"Failed to create crypto private store: $err")
+      symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
+        .map(_.default)
+        .toEitherT
+      hashAlgorithm <- selectSchemes(config.hash, config.provider.hash).map(_.default).toEitherT
+      signingKeyScheme <- selectSchemes(config.signing, config.provider.signing)
+        .map(_.default)
+        .toEitherT
+      encryptionKeyScheme <- selectSchemes(config.encryption, config.provider.encryption)
+        .map(_.default)
+        .toEitherT
+    } yield CryptoStoresAndSchemes(
+      cryptoPublicStore,
+      cryptoPrivateStore,
+      symmetricKeyScheme,
+      signingKeyScheme,
+      encryptionKeyScheme,
+      hashAlgorithm,
+    )
+
+}
+
 object CryptoFactory {
 
   final case class CryptoScheme[S](default: S, allowed: NonEmpty[Set[S]])
+
+  final case class CryptoStoresAndSchemes(
+      cryptoPublicStore: CryptoPublicStore,
+      cryptoPrivateStore: CryptoPrivateStore,
+      symmetricKeyScheme: SymmetricKeyScheme,
+      signingKeyScheme: SigningKeyScheme,
+      encryptionKeyScheme: EncryptionKeyScheme,
+      hashAlgorithm: HashAlgorithm,
+  )
 
   def selectSchemes[S](
       configured: CryptoSchemeConfig[S],
@@ -84,6 +168,10 @@ object CryptoFactory {
   ): Either[String, NonEmpty[Set[EncryptionKeyScheme]]] =
     selectSchemes(config.encryption, config.provider.encryption).map(_.allowed)
 
+}
+
+class CommunityCryptoFactory extends CryptoFactory {
+
   def create(
       config: CryptoConfig,
       storage: Storage,
@@ -93,103 +181,112 @@ object CryptoFactory {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext
-  ): EitherT[Future, String, Crypto] = {
-    val cryptoPublicStore =
-      CryptoPublicStore.create(storage, releaseProtocolVersion, timeouts, loggerFactory)
-
-    def toExtended(
-        cryptoPrivateStore: CryptoPrivateStore,
-        provider: CryptoProvider,
-    ): Either[String, CryptoPrivateStoreExtended] =
-      cryptoPrivateStore match {
-        case extended: CryptoPrivateStoreExtended => Right(extended)
-        case _ =>
-          Left(
-            s"The crypto private store does not implement all the functions necessary for the chosen provider $provider"
-          )
-      }
-
+  ): EitherT[Future, String, Crypto] =
     for {
-      cryptoPrivateStore <- cryptoPrivateStoreFactory
-        .create(storage, releaseProtocolVersion, timeouts, loggerFactory)
-        .leftMap(err => show"Failed to create crypto private store: $err")
-      symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
-        .map(_.default)
-        .toEitherT
-      hashAlgorithm <- selectSchemes(config.hash, config.provider.hash).map(_.default).toEitherT
-      signingKeyScheme <- selectSchemes(config.signing, config.provider.signing)
-        .map(_.default)
-        .toEitherT
-      encryptionKeyScheme <- selectSchemes(config.encryption, config.provider.encryption)
-        .map(_.default)
-        .toEitherT
+      storesAndSchemes <- initStoresAndSelectSchemes(
+        config,
+        storage,
+        cryptoPrivateStoreFactory,
+        releaseProtocolVersion,
+        timeouts,
+        loggerFactory,
+      )
       crypto <- config.provider match {
-        case CryptoProvider.Tink =>
-          for {
-            cryptoPrivateStoreExtended <- toExtended(cryptoPrivateStore, config.provider).toEitherT
-            pureCrypto <- TinkPureCrypto.create(symmetricKeyScheme, hashAlgorithm).toEitherT
-            privateCrypto = TinkPrivateCrypto.create(
-              pureCrypto,
-              signingKeyScheme,
-              encryptionKeyScheme,
-              cryptoPrivateStoreExtended,
-            )
-            javaKeyConverter = new TinkJavaConverter(pureCrypto.defaultHashAlgorithm)
-            crypto = new Crypto(
-              pureCrypto,
-              privateCrypto,
-              cryptoPrivateStore,
-              cryptoPublicStore,
-              javaKeyConverter,
-              timeouts,
-              loggerFactory,
-            )
-          } yield crypto
-        case CryptoProvider.Jce =>
-          for {
-            cryptoPrivateStoreExtended <- toExtended(cryptoPrivateStore, config.provider).toEitherT
-            _ = Security.addProvider(new BouncyCastleProvider)
-            javaKeyConverter = new JceJavaConverter(hashAlgorithm)
-            pureCrypto =
-              new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
-            privateCrypto =
-              new JcePrivateCrypto(
-                pureCrypto,
-                signingKeyScheme,
-                encryptionKeyScheme,
-                cryptoPrivateStoreExtended,
-              )
-            crypto = new Crypto(
-              pureCrypto,
-              privateCrypto,
-              cryptoPrivateStore,
-              cryptoPublicStore,
-              javaKeyConverter,
-              timeouts,
-              loggerFactory,
-            )
-          } yield crypto
+        case CommunityCryptoProvider.Tink =>
+          TinkCrypto.create(config, storesAndSchemes, timeouts, loggerFactory)
+        case CommunityCryptoProvider.Jce =>
+          JceCrypto.create(config, storesAndSchemes, timeouts, loggerFactory)
+        case prov =>
+          EitherT.leftT[Future, Crypto](s"Unsupported crypto provider: $prov")
       }
     } yield crypto
-  }
+}
 
-  def createPureCrypto(
+object TinkCrypto {
+
+  def create(
       config: CryptoConfig,
+      storesAndSchemes: CryptoStoresAndSchemes,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  ): Either[String, CryptoPureApi] =
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[Future, String, Crypto] =
     for {
-      symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
-        .map(_.default)
-      hashAlgorithm <- selectSchemes(config.hash, config.provider.hash).map(_.default)
-      crypto <- config.provider match {
-        case CryptoProvider.Tink =>
-          TinkPureCrypto.create(symmetricKeyScheme, hashAlgorithm)
-        case CryptoProvider.Jce =>
-          val javaKeyConverter = new JceJavaConverter(hashAlgorithm)
-          Right(
-            new JcePureCrypto(javaKeyConverter, symmetricKeyScheme, hashAlgorithm, loggerFactory)
-          )
-      }
+      cryptoPrivateStoreExtended <- storesAndSchemes.cryptoPrivateStore.toExtended
+        .toRight(
+          s"The crypto private store does not implement all the functions necessary " +
+            s"for the chosen provider ${config.provider}"
+        )
+        .toEitherT[Future]
+      pureCrypto <- TinkPureCrypto
+        .create(storesAndSchemes.symmetricKeyScheme, storesAndSchemes.hashAlgorithm)
+        .toEitherT
+      privateCrypto = TinkPrivateCrypto.create(
+        pureCrypto,
+        storesAndSchemes.signingKeyScheme,
+        storesAndSchemes.encryptionKeyScheme,
+        cryptoPrivateStoreExtended,
+      )
+      javaKeyConverter = new TinkJavaConverter(pureCrypto.defaultHashAlgorithm)
+      crypto = new Crypto(
+        pureCrypto,
+        privateCrypto,
+        storesAndSchemes.cryptoPrivateStore,
+        storesAndSchemes.cryptoPublicStore,
+        javaKeyConverter,
+        timeouts,
+        loggerFactory,
+      )
+    } yield crypto
+
+}
+
+object JceCrypto {
+  def create(
+      config: CryptoConfig,
+      storesAndSchemes: CryptoStoresAndSchemes,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[Future, String, Crypto] =
+    for {
+      cryptoPrivateStoreExtended <- storesAndSchemes.cryptoPrivateStore.toExtended
+        .toRight(
+          s"The crypto private store does not implement all the functions necessary " +
+            s"for the chosen provider ${config.provider}"
+        )
+        .toEitherT[Future]
+      _ = Security.addProvider(new BouncyCastleProvider)
+      requiredSigningKeySchemes <- selectAllowedSigningKeyScheme(config).toEitherT[Future]
+      javaKeyConverter = new JceJavaConverter(
+        storesAndSchemes.hashAlgorithm,
+        requiredSigningKeySchemes,
+      )
+      pureCrypto =
+        new JcePureCrypto(
+          javaKeyConverter,
+          storesAndSchemes.symmetricKeyScheme,
+          storesAndSchemes.hashAlgorithm,
+          loggerFactory,
+        )
+      privateCrypto =
+        new JcePrivateCrypto(
+          pureCrypto,
+          storesAndSchemes.signingKeyScheme,
+          storesAndSchemes.encryptionKeyScheme,
+          cryptoPrivateStoreExtended,
+        )
+      crypto = new Crypto(
+        pureCrypto,
+        privateCrypto,
+        storesAndSchemes.cryptoPrivateStore,
+        storesAndSchemes.cryptoPublicStore,
+        javaKeyConverter,
+        timeouts,
+        loggerFactory,
+      )
     } yield crypto
 
 }

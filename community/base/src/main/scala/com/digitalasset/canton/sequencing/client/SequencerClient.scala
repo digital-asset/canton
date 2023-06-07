@@ -682,12 +682,7 @@ class SequencerClientImpl(
           preSubscriptionEvent.fold(initialCounterLowerBound)(_.counter)
 
         val eventValidator = eventValidatorFactory.create(
-          // We validate events before we persist them in the SequencedEventStore
-          // so we do not need to revalidate the replayed events.
-          preSubscriptionEvent,
-          // we need to inform the validator if this connection is unauthenticated, as unauthenticated connections
-          // do not have the topology data to verify signatures
-          unauthenticated = !requiresAuthentication,
+          unauthenticated = !requiresAuthentication
         )
 
         // Set the new event validator and close any pre-existing one
@@ -724,7 +719,7 @@ class SequencerClientImpl(
           timeoutHandler,
           eventValidator,
           eventDelay,
-          preSubscriptionEvent.map(_.counter),
+          preSubscriptionEvent,
           expectedSequencers.head1._2, // TODO(i12076): Create multiple subscriptions with all expected sequencers
         )
 
@@ -801,15 +796,15 @@ class SequencerClientImpl(
       timeoutHandler: SendTimeoutHandler,
       eventValidator: SequencedEventValidator,
       processingDelay: DelaySequencedEvent,
-      initialPriorEventCounter: Option[SequencerCounter],
+      initialPriorEvent: Option[PossiblyIgnoredSerializedEvent],
       sequencerId: SequencerId,
   ) {
 
     // keep track of the last event that we processed. In the event the SequencerClient is recreated or that our [[ResilientSequencerSubscription]] reconnects
     // we'll restart from the last successfully processed event counter and we'll validate it is still the last event we processed and that we're not seeing
     // a sequencer fork.
-    private val priorEventCounter =
-      new AtomicReference[Option[SequencerCounter]](initialPriorEventCounter)
+    private val priorEvent =
+      new AtomicReference[Option[PossiblyIgnoredSerializedEvent]](initialPriorEvent)
 
     def handleEvent(
         serializedEvent: OrdinarySerializedEvent
@@ -824,7 +819,7 @@ class SequencerClientImpl(
         // did last process. However if successful, there's no need to give it to the application handler or to store
         // it as we're really sure we've already processed it.
         // we'll also see the last event replayed if the resilient sequencer subscription reconnects.
-        val isReplayOfPriorEvent = priorEventCounter.get().contains(serializedEvent.counter)
+        val isReplayOfPriorEvent = priorEvent.get().map(_.counter).contains(serializedEvent.counter)
 
         if (isReplayOfPriorEvent) {
           // just validate
@@ -832,7 +827,7 @@ class SequencerClientImpl(
             s"Do not handle event with sequencerCounter ${serializedEvent.counter}, as it is replayed and has already been handled."
           )
           eventValidator
-            .validateOnReconnect(serializedEvent, sequencerId)
+            .validateOnReconnect(priorEvent.get(), serializedEvent, sequencerId)
             .leftMap[SequencerClientSubscriptionError](EventValidationError)
             .value
         } else {
@@ -844,9 +839,9 @@ class SequencerClientImpl(
               performUnlessClosingF("processing-delay")(processingDelay.delay(serializedEvent))
             )
             _ <- eventValidator
-              .validate(serializedEvent, sequencerId)
+              .validate(priorEvent.get(), serializedEvent, sequencerId)
               .leftMap[SequencerClientSubscriptionError](EventValidationError)
-            _ = priorEventCounter.set(Some(serializedEvent.counter))
+            _ = priorEvent.set(Some(serializedEvent))
 
             sequencerIdToSignal <- EitherT(
               sequencerAggregator

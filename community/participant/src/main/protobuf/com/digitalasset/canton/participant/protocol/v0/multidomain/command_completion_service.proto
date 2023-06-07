@@ -69,10 +69,6 @@ message CompletionStreamRequest {
   // This offset is exclusive: the response will only contain commands whose offset is strictly greater than this.
   // Optional, if not set the ledger uses the current ledger end offset instead.
   com.daml.ledger.api.v1.LedgerOffset offset = 4;
-
-  // Must be a valid domain ID
-  // Required
-  string domain_id = 5;
 }
 
 message CompletionStreamResponse {
@@ -81,8 +77,11 @@ message CompletionStreamResponse {
   // Optional
   Checkpoint checkpoint = 1;
 
-  // If set, one or more completions.
-  repeated com.daml.ledger.api.v1.Completion completions = 2;
+  // A single item reporting the completion status of a command issued to this participant
+  com.daml.ledger.api.v1.Completion completion = 2;
+
+  // The ID of the domain that sequenced the transaction resulting from this command.
+  string domain_id = 3;
 }
 
 // Checkpoints may be used to:

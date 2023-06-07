@@ -5,10 +5,10 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc.CommandSubmissionService
 import com.daml.ledger.api.v1.command_submission_service.*
+import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.Authorizer
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
-import com.digitalasset.canton.platform.server.api.ProxyCloseable
 import com.google.protobuf.empty.Empty
 import io.grpc.ServerServiceDefinition
 import scalapb.lenses.Lens

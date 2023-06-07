@@ -89,7 +89,7 @@ class TopologyManagerX(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransactionX] = {
-    logger.debug(show"Attempting to build, sign, and ${op} ${mapping}")
+    logger.debug(show"Attempting to build, sign, and ${op} ${mapping} with serial $serial")
     for {
       tx <- build(op, mapping, serial, protocolVersion).mapK(FutureUnlessShutdown.outcomeK)
       signedTx <- signTransaction(tx, signingKeys, isProposal = !expectFullAuthorization)
@@ -153,7 +153,7 @@ class TopologyManagerX(
   ): EitherT[Future, TopologyManagerError, TopologyTransactionX[Op, M]] = {
     for {
       existingTransactions <- EitherT.right(
-        store.findTransactionsForMapping(EffectiveTime(clock.now), NonEmpty(Set, mapping.uniqueKey))
+        store.findTransactionsForMapping(EffectiveTime.MaxValue, NonEmpty(Set, mapping.uniqueKey))
       )
       _ = if (existingTransactions.size > 1)
         logger.warn(

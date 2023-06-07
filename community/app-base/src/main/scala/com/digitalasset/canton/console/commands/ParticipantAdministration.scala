@@ -114,7 +114,7 @@ private[console] object ParticipantCommands {
       val connection = domain.sequencerConnection
       DomainConnectionConfig(
         domainAlias,
-        SequencerConnections.default(connection),
+        SequencerConnections.single(connection),
         manualConnect = manualConnect,
         None,
         priority,
@@ -1256,7 +1256,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         .merge(firstConnection +: additionalConnections)
         .getOrElse(sys.error("Invalid sequencer connection"))
       val sequencerConnections =
-        SequencerConnections.default(sequencerConnection)
+        SequencerConnections.single(sequencerConnection)
       val config = DomainConnectionConfig(domainAlias, sequencerConnections)
       connect(config)
       config
@@ -1292,7 +1292,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       val sequencerConnection =
         SequencerConnection.merge(connections).getOrElse(sys.error("Invalid sequencer connection"))
       val sequencerConnections =
-        SequencerConnections.default(sequencerConnection)
+        SequencerConnections.single(sequencerConnection)
       val config = DomainConnectionConfig(
         domainAlias,
         sequencerConnections,

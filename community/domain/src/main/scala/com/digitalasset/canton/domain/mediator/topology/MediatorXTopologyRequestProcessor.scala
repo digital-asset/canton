@@ -7,20 +7,24 @@ import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.{
-  SendAsyncClientError,
-  SendCallback,
-  SequencerClient,
+import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientSend}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregationRule,
+  Batch,
+  Deliver,
+  OpenEnvelope,
+  Recipients,
 }
-import com.digitalasset.canton.sequencing.protocol.{Deliver, OpenEnvelope, Recipients}
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.{
+  DomainParametersStateX,
   DomainTrustCertificateX,
   MediatorDomainStateX,
   SequencerDomainStateX,
@@ -36,10 +40,7 @@ import scala.util.control.NonFatal
 
 class MediatorXTopologyRequestProcessor(
     domainId: DomainId,
-    sequencerSendResponse: (
-        OpenEnvelope[ProtocolMessage],
-        SendCallback,
-    ) => EitherT[Future, SendAsyncClientError, Unit],
+    client: SequencerClientSend,
     protocolVersion: ProtocolVersion,
     processor: TopologyStateProcessorX,
     val timeouts: ProcessingTimeout,
@@ -83,7 +84,11 @@ class MediatorXTopologyRequestProcessor(
   ): FutureUnlessShutdown[Unit] = event.withTraceContext { implicit traceContext => event =>
     {
       val (ts, request) = event
-      def genResponse(res: RegisterTopologyTransactionResponseResult.State) = {
+      def genResponse(
+          res: RegisterTopologyTransactionResponseResult.State,
+          aggregationRule: Option[AggregationRule],
+          maxSequencingTime: CantonTimestamp,
+      ) = {
         val response = OpenEnvelope(
           RegisterTopologyTransactionResponseX.create(
             requestedBy = request.requestedBy,
@@ -96,7 +101,7 @@ class MediatorXTopologyRequestProcessor(
           Recipients.cc(request.requestedBy),
         )(protocolVersion)
         logger.info(s"Sending ${res} for ${request.requestId}")
-        send(response, "responding to request")
+        send(response, "responding to request", aggregationRule, maxSequencingTime)
       }
 
       performUnlessClosingEitherU(functionFullName)(
@@ -114,12 +119,27 @@ class MediatorXTopologyRequestProcessor(
           failed => {
             logger.warn(s"Topology evaluation failed with ${failed}")
             EitherT
-              .right[String](genResponse(RegisterTopologyTransactionResponseResult.State.Failed))
+              .right[String](
+                buildSubmissionParameters(ts)
+                  .flatMap { case (aggregationRule, maxSequencingTime) =>
+                    genResponse(
+                      RegisterTopologyTransactionResponseResult.State.Failed,
+                      aggregationRule,
+                      maxSequencingTime,
+                    )
+                  }
+              )
           },
           _success => {
             EitherT.right[String](for {
-              _ <- acceptTransactions(ts, request)
-              _ <- genResponse(RegisterTopologyTransactionResponseResult.State.Accepted)
+              params <- buildSubmissionParameters(ts)
+              (aggregationRule, maxSequencingTime) = params
+              _ <- acceptTransactions(ts, request, aggregationRule, maxSequencingTime)
+              _ <- genResponse(
+                RegisterTopologyTransactionResponseResult.State.Accepted,
+                aggregationRule,
+                maxSequencingTime,
+              )
             } yield ())
           },
         )
@@ -127,9 +147,52 @@ class MediatorXTopologyRequestProcessor(
     }
   }
 
+  private def buildSubmissionParameters(
+      timestamp: CantonTimestamp
+  )(implicit traceContext: TraceContext) =
+    performUnlessClosingF(functionFullName) {
+      processor.store
+        .findPositiveTransactions(
+          asOf = timestamp,
+          asOfInclusive = false,
+          types = Seq(DomainParametersStateX.code, MediatorDomainStateX.code),
+          isProposal = false,
+          filterUid = None,
+          filterNamespace = None,
+        )
+        .map { stored =>
+          val aggregationRule = stored
+            .collectOfMapping[MediatorDomainStateX]
+            .collectLatestByUniqueKey
+            .result
+            .collectFirst {
+              case storedTx
+                  if storedTx.transaction.transaction.mapping.group == NonNegativeInt.zero =>
+                storedTx.transaction.transaction.mapping
+            }
+            .map(mds => Some(AggregationRule(mds.active, mds.threshold, protocolVersion)))
+            .getOrElse(ErrorUtil.invalidState(s"Unable to find mediator group 0 at $timestamp"))
+
+          val maxSequencingTime = stored
+            .collectOfMapping[DomainParametersStateX]
+            .collectLatestByUniqueKey
+            .result
+            .headOption
+            .map(_.transaction.transaction.mapping.parameters.mediatorReactionTimeout)
+            .map(timeout => timestamp + timeout)
+            .getOrElse(
+              ErrorUtil.invalidState(s"Unable to find dynamic domain parameters at $timestamp")
+            )
+
+          (aggregationRule, maxSequencingTime)
+        }
+    }
+
   private def acceptTransactions(
       ts: CantonTimestamp,
       request: RegisterTopologyTransactionRequestX,
+      aggregationRule: Option[AggregationRule],
+      maxSequencingTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val msg = AcceptedTopologyTransactionsX.create(
       accepted = List(
@@ -173,7 +236,12 @@ class MediatorXTopologyRequestProcessor(
       val members = participants ++ mediators ++ sequencers
       Recipients.ofSet(members.toSet) match {
         case Some(recipients) =>
-          send(OpenEnvelope(msg, recipients)(protocolVersion), "sending accepted txs to members")
+          send(
+            OpenEnvelope(msg, recipients)(protocolVersion),
+            "sending accepted txs to members",
+            aggregationRule,
+            maxSequencingTime,
+          )
         case None =>
           logger.error("Didn't find recipients")
           FutureUnlessShutdown.unit
@@ -182,12 +250,20 @@ class MediatorXTopologyRequestProcessor(
   }
 
   private def send(
-      batch: OpenEnvelope[ProtocolMessage],
+      envelope: OpenEnvelope[ProtocolMessage],
       description: String,
+      aggregationRule: Option[AggregationRule],
+      maxSequencingTimestamp: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     SequencerClient
       .sendWithRetries(
-        sequencerSendResponse(batch, _),
+        callback =>
+          client.sendAsync(
+            Batch(List(envelope), protocolVersion),
+            callback = callback,
+            aggregationRule = aggregationRule,
+            maxSequencingTime = maxSequencingTimestamp,
+          ),
         maxRetries = timeouts.unbounded.retries(1.second),
         delay = 1.second,
         sendDescription = description,

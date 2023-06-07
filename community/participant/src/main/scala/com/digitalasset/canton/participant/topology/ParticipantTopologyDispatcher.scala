@@ -9,7 +9,6 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
 import com.digitalasset.canton.common.domain.{
   RegisterTopologyTransactionHandleCommon,
   RegisterTopologyTransactionHandleWithProcessor,
@@ -93,7 +92,6 @@ trait ParticipantTopologyDispatcherCommon extends TopologyDispatcherCommon {
   ): EitherT[FutureUnlessShutdown, String, Unit]
   def onboardToDomain(
       domainId: DomainId,
-      topologyRequestAddress: Option[TopologyRequestAddressX],
       alias: DomainAlias,
       timeTrackerConfig: DomainTimeTrackerConfig,
       sequencerConnection: SequencerConnections,
@@ -116,7 +114,6 @@ trait ParticipantTopologyDispatcherCommon extends TopologyDispatcherCommon {
   def createHandler(
       domain: DomainAlias,
       domainId: DomainId,
-      topologyRequestAddress: Option[TopologyRequestAddressX],
       protocolVersion: ProtocolVersion,
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
@@ -222,7 +219,6 @@ class ParticipantTopologyDispatcher(
   override def createHandler(
       domain: DomainAlias,
       domainId: DomainId,
-      maybeTopologyRequestAddress: Option[TopologyRequestAddressX],
       protocolVersion: ProtocolVersion,
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
@@ -280,7 +276,6 @@ class ParticipantTopologyDispatcher(
 
   override def onboardToDomain(
       domainId: DomainId,
-      topologyRequestAddressUnusedInNonX: Option[TopologyRequestAddressX],
       alias: DomainAlias,
       timeTrackerConfig: DomainTimeTrackerConfig,
       sequencerConnection: SequencerConnections,
@@ -293,10 +288,6 @@ class ParticipantTopologyDispatcher(
       tracer: Tracer,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
-    require(
-      topologyRequestAddressUnusedInNonX.isEmpty,
-      s"Topology request address should never be set in daml 2.*, but instead found ${topologyRequestAddressUnusedInNonX}",
-    )
     getState(domainId).flatMap { state =>
       (new ParticipantInitializeTopology(
         domainId,
@@ -406,7 +397,6 @@ class ParticipantTopologyDispatcherX(
 
   override def onboardToDomain(
       domainId: DomainId,
-      maybeTopologyRequestAddress: Option[TopologyRequestAddressX],
       alias: DomainAlias,
       timeTrackerConfig: DomainTimeTrackerConfig,
       sequencerConnections: SequencerConnections,
@@ -419,14 +409,10 @@ class ParticipantTopologyDispatcherX(
       tracer: Tracer,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
-    val topologyRequestAddress = maybeTopologyRequestAddress.getOrElse(
-      throw new IllegalStateException("TopologyRequestAddressX needs to be set")
-    )
     getState(domainId).flatMap { state =>
       (new ParticipantInitializeTopologyX(
         domainId,
         alias,
-        topologyRequestAddress,
         participantId,
         manager.store,
         state.topologyStore,
@@ -446,14 +432,10 @@ class ParticipantTopologyDispatcherX(
   override def createHandler(
       domain: DomainAlias,
       domainId: DomainId,
-      maybeTopologyRequestAddress: Option[TopologyRequestAddressX],
       protocolVersion: ProtocolVersion,
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
   ): ParticipantTopologyDispatcherHandle = {
-    val topologyRequestAddress = maybeTopologyRequestAddress.getOrElse(
-      throw new IllegalStateException("TopologyRequestAddressX needs to be set")
-    )
     new ParticipantTopologyDispatcherHandle {
       val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
         (traceContext, env) =>
@@ -461,7 +443,6 @@ class ParticipantTopologyDispatcherX(
             Batch(List(env), protocolVersion)
           )(traceContext),
         domainId,
-        topologyRequestAddress,
         participantId,
         participantId,
         protocolVersion,

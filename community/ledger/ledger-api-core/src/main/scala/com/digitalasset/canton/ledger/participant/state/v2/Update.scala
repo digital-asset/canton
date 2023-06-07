@@ -290,6 +290,48 @@ object Update {
     }
   }
 
+  /** @param optCompletionInfo The information provided by the submitter of the command that
+    *                          created this reassignment. It must be provided if this participant
+    *                          hosts the submitter and shall output a completion event for this
+    *                          reassignment. This in particular applies if this participant has
+    *                          submitted the command to the [[WriteService]].
+    * @param workflowId        a submitter-provided identifier used for monitoring
+    *                          and to traffic-shape the work handled by Daml applications
+    *                          communicating over the ledger.
+    * @param updateId          A unique identifier for this update assigned by the ledger.
+    * @param recordTime        The ledger-provided timestamp at which the reassignment was recorded.
+    * @param reassignmentInfo  Common part of all type of reassignments.
+    */
+  final case class ReassignmentAccepted(
+      optCompletionInfo: Option[CompletionInfo],
+      workflowId: Option[Ref.WorkflowId],
+      updateId: Ref.TransactionId,
+      recordTime: Timestamp,
+      reassignmentInfo: ReassignmentInfo,
+      reassignment: Reassignment,
+  ) extends Update {
+    override def description: String = s"Accept reassignment $updateId"
+  }
+
+  object ReassignmentAccepted {
+    implicit val `ReassignmentAccepted to LoggingValue`: ToLoggingValue[ReassignmentAccepted] = {
+      case ReassignmentAccepted(
+            optCompletionInfo,
+            workflowId,
+            updateId,
+            recordTime,
+            _,
+            _,
+          ) =>
+        LoggingValue.Nested.fromEntries(
+          Logging.recordTime(recordTime),
+          Logging.completionInfo(optCompletionInfo),
+          Logging.transactionId(updateId),
+          Logging.workflowIdOpt(workflowId),
+        )
+    }
+  }
+
   /** Signal that a command submitted via [[WriteService]] was rejected.
     *
     * @param recordTime     The record time of the completion
@@ -392,6 +434,8 @@ object Update {
       TransactionAccepted.`TransactionAccepted to LoggingValue`.toLoggingValue(update)
     case update: CommandRejected =>
       CommandRejected.`CommandRejected to LoggingValue`.toLoggingValue(update)
+    case update: ReassignmentAccepted =>
+      ReassignmentAccepted.`ReassignmentAccepted to LoggingValue`.toLoggingValue(update)
   }
 
   private object Logging {

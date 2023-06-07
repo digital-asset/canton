@@ -18,17 +18,17 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.*
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.engine.Engine
-import com.daml.lf.transaction.ProcessedDisclosedContract
 import com.daml.logging.LoggingContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.*
+import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, ProcessedDisclosedContract}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
 import com.digitalasset.canton.error.*
@@ -137,6 +137,7 @@ class CantonSyncService(
     syncDomainFactory: SyncDomain.Factory[SyncDomain],
     indexedStringStore: IndexedStringStore,
     metrics: ParticipantMetrics,
+    sequencerInfoLoader: SequencerInfoLoader,
     val isActive: () => Boolean,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
@@ -573,7 +574,7 @@ class CantonSyncService(
               .map { case (offset, tracedEvent) =>
                 tracedEvent
                   .map(augmentTransactionStatistics)
-                  .map(_.toDamlUpdate)
+                  .map(_.toDamlUpdate())
                   .sequence
                   .map { tracedUpdate =>
                     implicit val traceContext: TraceContext = tracedEvent.traceContext
@@ -796,17 +797,29 @@ class CantonSyncService(
       SyncServiceError.SyncServiceDomainMustBeOffline.Error(alias): SyncServiceError,
     )
     for {
-      // TODO(i12076): Check each sequencer for the retrieved domainId and make they are aligned
       targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
-        DomainConnectionInfo
-          .fromConfig(domainRegistry.sequencerConnectClientBuilder)(target)
+        sequencerInfoLoader
+          .loadSequencerEndpoints(target.domain, target.sequencerConnections)
+          .leftMap(DomainRegistryError.fromSequencerInfoLoaderError)
           .leftMap[SyncServiceError](err =>
             SyncServiceError.SyncServiceFailedDomainConnection(
               target.domain,
-              DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message),
+              DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.cause),
             )
           )
       )
+      _ <- performUnlessClosingEitherU(functionFullName)(
+        aliasManager
+          .processHandshake(target.domain, targetDomainInfo.domainId)
+          .leftMap(DomainRegistryHelpers.fromDomainAliasManagerError)
+          .leftMap[SyncServiceError](err =>
+            SyncServiceError.SyncServiceFailedDomainConnection(
+              target.domain,
+              err,
+            )
+          )
+      )
+
       sourceDomainId <- EitherT.fromEither[FutureUnlessShutdown](
         aliasManager
           .domainIdForAlias(source)
@@ -1479,6 +1492,7 @@ object CantonSyncService {
         indexedStringStore: IndexedStringStore,
         schedulers: Schedulers,
         metrics: ParticipantMetrics,
+        sequencerInfoLoader: SequencerInfoLoader,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         skipRecipientsCheck: Boolean,
@@ -1509,6 +1523,7 @@ object CantonSyncService {
         indexedStringStore: IndexedStringStore,
         schedulers: Schedulers,
         metrics: ParticipantMetrics,
+        sequencerInfoLoader: SequencerInfoLoader,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         skipRecipientsCheck: Boolean,
@@ -1540,6 +1555,7 @@ object CantonSyncService {
         SyncDomain.DefaultFactory,
         indexedStringStore,
         metrics,
+        sequencerInfoLoader,
         () => storage.isActive,
         futureSupervisor,
         loggerFactory,

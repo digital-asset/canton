@@ -238,7 +238,7 @@ class LocalSecretKeyAdministration(
       keyPair: CryptoKeyPair[_ <: PublicKey, _ <: PrivateKey],
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
     for {
-      cryptoPrivateStore <- crypto.cryptoPrivateStoreExtended
+      cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
         .toRight(
           "The selected crypto provider does not support importing of private keys."
         )
@@ -267,7 +267,7 @@ class LocalSecretKeyAdministration(
   ): ByteString =
     TraceContext.withNewTraceContext { implicit traceContext =>
       val cmd = for {
-        cryptoPrivateStore <- crypto.cryptoPrivateStoreExtended
+        cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
           .toRight(
             "The selected crypto provider does not support exporting of private keys."
           )

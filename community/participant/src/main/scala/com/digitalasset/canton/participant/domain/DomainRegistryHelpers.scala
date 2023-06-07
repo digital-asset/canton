@@ -10,10 +10,9 @@ import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.lf.data.Ref.PackageId
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.domain.SequencerConnectClient
-import com.digitalasset.canton.common.domain.SequencerConnectClient.TopologyRequestAddressX
+import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader.SequencerAggregatedInfo
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoHandshakeValidator, SyncCryptoApiProvider}
@@ -21,10 +20,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainRegistryError.HandshakeErrors.DomainIdMismatch
-import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.{
-  DomainHandle,
-  SequencerAggregatedInfo,
-}
+import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.DomainHandle
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.store.{
   ParticipantSettingsLookup,
@@ -36,8 +32,8 @@ import com.digitalasset.canton.participant.topology.{
   TopologyComponentFactory,
 }
 import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.*
-import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
@@ -52,7 +48,6 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasFutureSupervision =>
   def participantId: ParticipantId
   protected def participantNodeParameters: ParticipantNodeParameters
-  def aliasManager: DomainAliasManager
 
   implicit def ec: ExecutionContextExecutor
   override protected def executionContext: ExecutionContext = ec
@@ -63,7 +58,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
 
   protected def getDomainHandle(
       config: DomainConnectionConfig,
-      sequencerConnections: SequencerConnections,
       syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
       sequencerAggregatedInfo: SequencerAggregatedInfo,
   )(
@@ -222,10 +216,9 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           for {
             success <- topologyDispatcher.onboardToDomain(
               sequencerAggregatedInfo.domainId,
-              sequencerAggregatedInfo.topologyRequestAddress,
               config.domain,
               config.timeTracker,
-              sequencerConnections,
+              sequencerAggregatedInfo.sequencerConnections,
               sequencerClientFactory,
               sequencerAggregatedInfo.staticDomainParameters.protocolVersion,
               sequencerAggregatedInfo.expectedSequencers,
@@ -251,7 +244,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         sequencerAggregatedInfo.staticDomainParameters.protocolVersion,
       )
       _ <- downloadDomainTopologyStateForInitializationIfNeeded(
-        sequencerConnections.default, // TODO(i12076): Support multiple sequencers
+        sequencerAggregatedInfo.sequencerConnections.default, // TODO(i12076): Support multiple sequencers
         syncDomainPersistentStateManager,
         sequencerAggregatedInfo.domainId,
         topologyClient,
@@ -265,7 +258,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           persistentState.sequencedEventStore,
           persistentState.sendTrackerStore,
           requestSigner,
-          sequencerConnections,
+          sequencerAggregatedInfo.sequencerConnections,
           sequencerAggregatedInfo.expectedSequencers,
         )
         .leftMap[DomainRegistryError](
@@ -279,7 +272,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       sequencerClient,
       topologyClient,
       topologyFactory,
-      sequencerAggregatedInfo.topologyRequestAddress,
       persistentState,
       timeouts,
     )
@@ -334,20 +326,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
     }
   }
 
-  def toDomainRegistryError(
-      error: DomainAliasManager.Error
-  )(implicit loggingContext: ErrorLoggingContext): DomainRegistryError =
-    error match {
-      case DomainAliasManager.GenericError(reason) =>
-        DomainRegistryError.HandshakeErrors.HandshakeFailed.Error(reason)
-      case DomainAliasManager.DomainAliasDuplication(domainId, alias, previousDomainId) =>
-        DomainRegistryError.HandshakeErrors.DomainAliasDuplication.Error(
-          domainId,
-          alias,
-          previousDomainId,
-        )
-    }
-
   // if participant has provided domain id previously, compare and make sure the domain being
   // connected to is the one expected
   private def verifyDomainId(config: DomainConnectionConfig, domainId: DomainId)(implicit
@@ -395,12 +373,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
 }
 
 object DomainRegistryHelpers {
-  private[domain] final case class SequencerAggregatedInfo(
-      domainId: DomainId,
-      staticDomainParameters: StaticDomainParameters,
-      topologyRequestAddress: Option[TopologyRequestAddressX], // only available in the X-code path
-      expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
-  )
 
   private[domain] final case class DomainHandle(
       domainId: DomainId,
@@ -409,7 +381,6 @@ object DomainRegistryHelpers {
       sequencer: SequencerClient,
       topologyClient: DomainTopologyClientWithInit,
       topologyFactory: TopologyComponentFactory,
-      topologyRequestAddress: Option[TopologyRequestAddressX],
       domainPersistentState: SyncDomainPersistentState,
       timeouts: ProcessingTimeout,
   )
@@ -426,6 +397,20 @@ object DomainRegistryHelpers {
         DomainRegistryError.DomainRegistryInternalError.InvalidState(cause)
       case SequencerConnectClient.Error.Transport(message) =>
         DomainRegistryError.ConnectionErrors.DomainIsNotAvailable.Error(alias, message)
+    }
+
+  def fromDomainAliasManagerError(
+      error: DomainAliasManager.Error
+  )(implicit loggingContext: ErrorLoggingContext): DomainRegistryError =
+    error match {
+      case DomainAliasManager.GenericError(reason) =>
+        DomainRegistryError.HandshakeErrors.HandshakeFailed.Error(reason)
+      case DomainAliasManager.DomainAliasDuplication(domainId, alias, previousDomainId) =>
+        DomainRegistryError.HandshakeErrors.DomainAliasDuplication.Error(
+          domainId,
+          alias,
+          previousDomainId,
+        )
     }
 
 }

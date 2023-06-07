@@ -38,9 +38,9 @@ class SequencedEventValidatorTest
     "accept the prior event" in { fixture =>
       import fixture.*
       val priorEvent = createEvent().futureValue
-      val validator = mkValidator(priorEvent)
+      val validator = mkValidator()
       validator
-        .validateOnReconnect(priorEvent, DefaultTestIdentities.sequencerId)
+        .validateOnReconnect(Some(priorEvent), priorEvent, DefaultTestIdentities.sequencerId)
         .valueOrFail("successful reconnect")
         .failOnShutdown
         .futureValue
@@ -49,7 +49,7 @@ class SequencedEventValidatorTest
     "accept a new signature on the prior event" in { fixture =>
       import fixture.*
       val priorEvent = createEvent().futureValue
-      val validator = mkValidator(priorEvent)
+      val validator = mkValidator()
       val sig = sign(
         priorEvent.signedEvent.content.getCryptographicEvidence,
         CantonTimestamp.Epoch,
@@ -60,7 +60,7 @@ class SequencedEventValidatorTest
           fixture.traceContext
         )
       validator
-        .validateOnReconnect(eventWithNewSig, DefaultTestIdentities.sequencerId)
+        .validateOnReconnect(Some(priorEvent), eventWithNewSig, DefaultTestIdentities.sequencerId)
         .valueOrFail("event with regenerated signature")
         .failOnShutdown
         .futureValue
@@ -75,9 +75,9 @@ class SequencedEventValidatorTest
         customSerialization = Some(ByteString.copyFromUtf8("Different serialization")),
       ).futureValue // changing serialization, but not the contents
 
-      val validator = mkValidator(deliver1)
+      val validator = mkValidator()
       validator
-        .validateOnReconnect(deliver2, DefaultTestIdentities.sequencerId)
+        .validateOnReconnect(Some(deliver1), deliver2, DefaultTestIdentities.sequencerId)
         .valueOrFail("Different serialization should be accepted")
         .failOnShutdown
         .futureValue
@@ -86,14 +86,18 @@ class SequencedEventValidatorTest
     "check the domain Id" in { fixture =>
       import fixture.*
       val incorrectDomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("wrong-domain::id"))
-      val validator = mkValidator(
-        IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(updatedCounter), None)(
-          fixture.traceContext
-        )
-      )
+      val validator = mkValidator()
       val wrongDomain = createEvent(incorrectDomainId).futureValue
       val err = validator
-        .validateOnReconnect(wrongDomain, DefaultTestIdentities.sequencerId)
+        .validateOnReconnect(
+          Some(
+            IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(updatedCounter), None)(
+              fixture.traceContext
+            )
+          ),
+          wrongDomain,
+          DefaultTestIdentities.sequencerId,
+        )
         .leftOrFail("wrong domain ID on reconnect")
         .failOnShutdown
         .futureValue
@@ -114,18 +118,26 @@ class SequencedEventValidatorTest
       }
 
       val priorEvent = createEvent().futureValue
-      val validator = mkValidator(priorEvent)
+      val validator = mkValidator()
       val differentCounter = createEvent(counter = 43L).futureValue
 
       val errCounter = expectLog(
         validator
-          .validateOnReconnect(differentCounter, DefaultTestIdentities.sequencerId)
+          .validateOnReconnect(
+            Some(priorEvent),
+            differentCounter,
+            DefaultTestIdentities.sequencerId,
+          )
           .leftOrFail("fork on counter")
       )
       val differentTimestamp = createEvent(timestamp = CantonTimestamp.MaxValue).futureValue
       val errTimestamp = expectLog(
         validator
-          .validateOnReconnect(differentTimestamp, DefaultTestIdentities.sequencerId)
+          .validateOnReconnect(
+            Some(priorEvent),
+            differentTimestamp,
+            DefaultTestIdentities.sequencerId,
+          )
           .leftOrFail("fork on timestamp")
       )
 
@@ -136,7 +148,11 @@ class SequencedEventValidatorTest
 
       val errContent = expectLog(
         validator
-          .validateOnReconnect(differentContent, DefaultTestIdentities.sequencerId)
+          .validateOnReconnect(
+            Some(priorEvent),
+            differentContent,
+            DefaultTestIdentities.sequencerId,
+          )
           .leftOrFail("fork on content")
       )
 
@@ -181,9 +197,9 @@ class SequencedEventValidatorTest
       val badSig =
         sign(ByteString.copyFromUtf8("not-the-message"), CantonTimestamp.Epoch).futureValue
       val badEvent = createEvent(signatureOverride = Some(badSig)).futureValue
-      val validator = mkValidator(priorEvent)
+      val validator = mkValidator()
       val result = validator
-        .validateOnReconnect(badEvent, DefaultTestIdentities.sequencerId)
+        .validateOnReconnect(Some(priorEvent), badEvent, DefaultTestIdentities.sequencerId)
         .leftOrFail("invalid signature on reconnect")
         .failOnShutdown
         .futureValue
@@ -195,10 +211,10 @@ class SequencedEventValidatorTest
     "reject messages with unexpected domain ids" in { fixture =>
       import fixture.*
       val incorrectDomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("wrong-domain::id"))
-      val event = createEvent(incorrectDomainId).futureValue
+      val event = createEvent(incorrectDomainId, counter = 0L).futureValue
       val validator = mkValidator()
       val result = validator
-        .validate(event, DefaultTestIdentities.sequencerId)
+        .validate(None, event, DefaultTestIdentities.sequencerId)
         .leftOrFail("wrong domain ID")
         .failOnShutdown
         .futureValue
@@ -215,9 +231,9 @@ class SequencedEventValidatorTest
         signatureOverride = Some(badSig),
         counter = priorEvent.counter.v + 1L,
       ).futureValue
-      val validator = mkValidator(priorEvent)
+      val validator = mkValidator()
       val result = validator
-        .validate(badEvent, DefaultTestIdentities.sequencerId)
+        .validate(Some(priorEvent), badEvent, DefaultTestIdentities.sequencerId)
         .leftOrFail("invalid signature")
         .failOnShutdown
         .futureValue
@@ -232,34 +248,34 @@ class SequencedEventValidatorTest
         .thenAnswer[CantonTimestamp](tm => subscriberCryptoApi.snapshotUS(tm)(fixture.traceContext))
       when(syncCrypto.topologyKnownUntilTimestamp).thenReturn(CantonTimestamp.MaxValue)
       val validator = mkValidator(
-        IgnoredSequencedEvent(ts(0), SequencerCounter(41), None)(fixture.traceContext),
-        syncCryptoApi = syncCrypto,
+        syncCryptoApi = syncCrypto
       )
+      val priorEvent =
+        IgnoredSequencedEvent(ts(0), SequencerCounter(41), None)(fixture.traceContext)
       val deliver =
         createEventWithCounterAndTs(42, ts(2), timestampOfSigningKey = Some(ts(1))).futureValue
 
-      valueOrFail(validator.validate(deliver, DefaultTestIdentities.sequencerId))(
+      valueOrFail(validator.validate(Some(priorEvent), deliver, DefaultTestIdentities.sequencerId))(
         "validate"
       ).failOnShutdown.futureValue
     }
 
     "reject the same counter-timestamp if passed in repeatedly" in { fixture =>
       import fixture.*
+      val priorEvent = IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(41), None)(
+        fixture.traceContext
+      )
       val validator =
-        mkValidator(
-          IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(41), None)(
-            fixture.traceContext
-          )
-        )
+        mkValidator()
 
       val deliver = createEventWithCounterAndTs(42, CantonTimestamp.Epoch).futureValue
       validator
-        .validate(deliver, DefaultTestIdentities.sequencerId)
+        .validate(Some(priorEvent), deliver, DefaultTestIdentities.sequencerId)
         .valueOrFail("validate1")
         .failOnShutdown
         .futureValue
       val err = validator
-        .validate(deliver, DefaultTestIdentities.sequencerId)
+        .validate(Some(deliver), deliver, DefaultTestIdentities.sequencerId)
         .leftOrFail("validate2")
         .failOnShutdown
         .futureValue
@@ -269,34 +285,33 @@ class SequencedEventValidatorTest
 
     "fail if the counter or timestamp do not increase" in { fixture =>
       import fixture.*
+      val priorEvent = IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(
+        fixture.traceContext
+      )
       val validator =
-        mkValidator(
-          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(
-            fixture.traceContext
-          )
-        )
+        mkValidator()
 
       val deliver1 = createEventWithCounterAndTs(42, CantonTimestamp.MinValue).futureValue
       val deliver2 = createEventWithCounterAndTs(0L, CantonTimestamp.MaxValue).futureValue
       val deliver3 = createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2)).futureValue
 
       val error1 = validator
-        .validate(deliver1, DefaultTestIdentities.sequencerId)
+        .validate(Some(priorEvent), deliver1, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver1")
         .failOnShutdown
         .futureValue
       val error2 = validator
-        .validate(deliver2, DefaultTestIdentities.sequencerId)
+        .validate(Some(priorEvent), deliver2, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver2")
         .failOnShutdown
         .futureValue
       validator
-        .validate(deliver3, DefaultTestIdentities.sequencerId)
+        .validate(Some(priorEvent), deliver3, DefaultTestIdentities.sequencerId)
         .valueOrFail("deliver3")
         .failOnShutdown
         .futureValue
       val error3 = validator
-        .validate(deliver2, DefaultTestIdentities.sequencerId)
+        .validate(Some(deliver3), deliver2, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver4")
         .failOnShutdown
         .futureValue
@@ -313,31 +328,30 @@ class SequencedEventValidatorTest
 
     "fail if there is a counter cap" in { fixture =>
       import fixture.*
+      val priorEvent = IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(
+        fixture.traceContext
+      )
       val validator =
-        mkValidator(
-          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(
-            fixture.traceContext
-          )
-        )
+        mkValidator()
 
       val deliver1 = createEventWithCounterAndTs(43L, CantonTimestamp.ofEpochSecond(1)).futureValue
       val deliver2 = createEventWithCounterAndTs(42L, CantonTimestamp.ofEpochSecond(2)).futureValue
       val deliver3 = createEventWithCounterAndTs(44L, CantonTimestamp.ofEpochSecond(3)).futureValue
 
       val result1 = validator
-        .validate(deliver1, DefaultTestIdentities.sequencerId)
+        .validate(Some(priorEvent), deliver1, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver1")
         .failOnShutdown
         .futureValue
 
       validator
-        .validate(deliver2, DefaultTestIdentities.sequencerId)
+        .validate(Some(priorEvent), deliver2, DefaultTestIdentities.sequencerId)
         .valueOrFail("deliver2")
         .failOnShutdown
         .futureValue
 
       val result3 = validator
-        .validate(deliver3, DefaultTestIdentities.sequencerId)
+        .validate(Some(deliver2), deliver3, DefaultTestIdentities.sequencerId)
         .leftOrFail("deliver3")
         .failOnShutdown
         .futureValue

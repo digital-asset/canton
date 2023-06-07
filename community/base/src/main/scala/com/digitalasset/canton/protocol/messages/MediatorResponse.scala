@@ -154,7 +154,7 @@ case class MediatorResponse private (
       param("requestId", _.requestId),
       paramIfDefined("viewHash", _.viewHash),
       paramIfDefined("rootHash", _.rootHash),
-      param("protocolVersion", _.representativeProtocolVersion),
+      param("representativeProtocolVersion", _.representativeProtocolVersion),
     )
 }
 

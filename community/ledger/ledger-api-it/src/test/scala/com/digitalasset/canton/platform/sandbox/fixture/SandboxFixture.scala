@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.sandbox.fixture
 import com.daml.ledger.api.testing.utils.{OwnedResource, Resource, SuiteResource}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.ports.Port
+import com.digitalasset.canton.ledger.api.grpc.GrpcClientResource
 import com.digitalasset.canton.ledger.sandbox.SandboxOnXForTest.{ConfigAdaptor, dataSource}
 import com.digitalasset.canton.ledger.sandbox.{SandboxOnXForTest, SandboxOnXRunner}
 import com.digitalasset.canton.platform.sandbox.UploadPackageHelper.*
@@ -13,7 +14,6 @@ import com.digitalasset.canton.platform.sandbox.{
   AbstractSandboxFixture,
   SandboxRequiringAuthorizationFuns,
 }
-import com.digitalasset.canton.platform.server.api.services.grpc.GrpcClientResource
 import io.grpc.Channel
 import org.scalatest.Suite
 

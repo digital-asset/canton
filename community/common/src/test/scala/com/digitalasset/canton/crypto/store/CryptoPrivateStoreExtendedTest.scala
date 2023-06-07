@@ -153,6 +153,16 @@ trait CryptoPrivateStoreExtendedTest extends CryptoPrivateStoreTest { this: Asyn
       }
     }
 
+    "check if private key is encrypted" in {
+      val store = newStore
+      for {
+        _ <- store
+          .storeDecryptionKey(encKey1, encKey1WithName.name)
+          .valueOrFail("store key 1")
+        encryptedRes <- store.encrypted(encKey1.id)
+      } yield encryptedRes.isDefined shouldBe encrypted
+    }
+
   }
 
 }

@@ -10,15 +10,14 @@ import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.Logging.traceId
+import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, GrpcPackageService}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPackagesService
 import com.digitalasset.canton.logging.LoggingContextWithTrace
-import com.digitalasset.canton.platform.api.grpc.GrpcApiService
-import com.digitalasset.canton.platform.server.api.ValidationLogger
-import com.digitalasset.canton.platform.server.api.services.grpc.Logging.traceId
-import com.digitalasset.canton.platform.server.api.validation.PackageServiceValidation
 import io.grpc.{BindableService, ServerServiceDefinition}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -142,7 +141,7 @@ private[platform] object ApiPackageService {
       backend = backend,
       telemetry = telemetry,
     )
-    new PackageServiceValidation(
+    new GrpcPackageService(
       service = service,
       ledgerId = ledgerId,
     ) with BindableService {

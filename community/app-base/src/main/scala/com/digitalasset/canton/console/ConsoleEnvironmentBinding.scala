@@ -43,7 +43,7 @@ class ConsoleEnvironmentBinding {
        |implicit val consoleEnvironment = ${ConsoleEnvironmentBinding.BindingName}
        |implicit val ec: ExecutionContextExecutor = consoleEnvironment.environment.executionContext
        |implicit def fromSequencerConnection(connection: SequencerConnection): SequencerConnections =
-       |    SequencerConnections.default(connection)
+       |    SequencerConnections.single(connection)
        |def help = consoleEnvironment.help
        |def help(s: String) = consoleEnvironment.help(s)
        |def health = consoleEnvironment.health

@@ -15,7 +15,7 @@ import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorServic
 import com.digitalasset.canton.config.InitConfigBase
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.CommunityGrpcVaultServiceFactory
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
-import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
+import com.digitalasset.canton.crypto.{CommunityCryptoFactory, CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.HealthReporting
@@ -507,6 +507,7 @@ object ParticipantNodeBootstrap {
       arguments
         .toCantonNodeBootstrapCommonArguments(
           new CommunityStorageFactory(arguments.config.storage),
+          new CommunityCryptoFactory,
           new CommunityCryptoPrivateStoreFactory,
           new CommunityGrpcVaultServiceFactory,
         )

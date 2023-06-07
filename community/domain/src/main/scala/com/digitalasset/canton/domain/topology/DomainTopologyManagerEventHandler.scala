@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.topology
 
-import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
@@ -15,11 +14,7 @@ import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionResponse,
 }
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.client.{
-  SendAsyncClientError,
-  SendCallback,
-  SequencerClient,
-}
+import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -37,10 +32,7 @@ import scala.util.control.NonFatal
 class DomainTopologyManagerEventHandler(
     store: RegisterTopologyTransactionResponseStore,
     requestHandler: DomainTopologyManagerRequestService.Handler,
-    sequencerSendResponse: (
-        OpenEnvelope[RegisterTopologyTransactionResponse.Result],
-        SendCallback,
-    ) => EitherT[Future, SendAsyncClientError, Unit],
+    client: SequencerClientSend,
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -126,10 +118,10 @@ class DomainTopologyManagerEventHandler(
   private def sendResponse(
       response: RegisterTopologyTransactionResponse.Result
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    val batch = OpenEnvelope(response, Recipients.cc(response.requestedBy))(protocolVersion)
+    val envelope = OpenEnvelope(response, Recipients.cc(response.requestedBy))(protocolVersion)
     SequencerClient
       .sendWithRetries(
-        sequencerSendResponse(batch, _),
+        callback => client.sendAsync(Batch(List(envelope), protocolVersion), callback = callback),
         maxRetries = timeouts.unbounded.retries(1.second),
         delay = 1.second,
         sendDescription =

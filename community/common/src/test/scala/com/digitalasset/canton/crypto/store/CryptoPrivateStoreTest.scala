@@ -64,14 +64,6 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
 
     }
 
-    "check if private key is encrypted" in {
-      val store = newStore
-      for {
-        _ <- storePrivateKey(store, sigKey1, sigKey1.id, sigKey1WithName.name)
-        encryptedRes <- store.encrypted(sigKey1.id)
-      } yield encryptedRes.isDefined shouldBe encrypted
-    }
-
     "delete key successfully" in {
       val store = newStore
       for {

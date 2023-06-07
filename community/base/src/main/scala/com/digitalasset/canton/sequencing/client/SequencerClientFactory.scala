@@ -131,8 +131,7 @@ object SequencerClientFactory {
           // pluggable send approach to support transitioning to the new async sends
           validatorFactory = new SequencedEventValidatorFactory {
             override def create(
-                initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
-                unauthenticated: Boolean,
+                unauthenticated: Boolean
             )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
               if (config.skipSequencedEventValidation) {
                 SequencedEventValidator.noValidation(domainId, processingTimeout)(
@@ -140,7 +139,6 @@ object SequencerClientFactory {
                 )
               } else {
                 new SequencedEventValidatorImpl(
-                  initialLastEventProcessedO,
                   unauthenticated,
                   config.optimisticSequencedEventValidation,
                   domainId,

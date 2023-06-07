@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.auth.Authorizer
 import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.{GrpcHealthService, GrpcTransactionService}
 import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.v2 as state
@@ -48,10 +49,6 @@ import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,
   PartyRecordStore,
   UserManagementStore,
-}
-import com.digitalasset.canton.platform.server.api.services.grpc.{
-  GrpcHealthService,
-  GrpcTransactionService,
 }
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import io.grpc.BindableService
@@ -168,7 +165,13 @@ object ApiServices {
     )(implicit executionContext: ExecutionContext): List[BindableService] = {
 
       val apiTransactionService =
-        ApiTransactionService.create(ledgerId, transactionsService, metrics, telemetry)
+        ApiTransactionService.create(
+          ledgerId,
+          transactionsService,
+          metrics,
+          telemetry,
+          loggerFactory,
+        )
 
       val apiEventQueryService =
         ApiEventQueryService.create(ledgerId, eventQueryService, telemetry)
@@ -194,6 +197,7 @@ object ApiServices {
           completionsService,
           metrics,
           telemetry,
+          loggerFactory,
         )
 
       val apiActiveContractsService =
@@ -202,6 +206,7 @@ object ApiServices {
           activeContractsService,
           metrics,
           telemetry,
+          loggerFactory,
         )
 
       val apiTimeServiceOpt =
@@ -298,8 +303,9 @@ object ApiServices {
           commandExecutor,
           checkOverloaded,
           metrics,
-          explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
-          telemetry = telemetry,
+          explicitDisclosureUnsafeEnabled,
+          telemetry,
+          loggerFactory,
         )
 
         // Note: the command service uses the command submission, command completion, and transaction
@@ -330,6 +336,7 @@ object ApiServices {
           writeService,
           managementServiceTimeout,
           telemetry = telemetry,
+          loggerFactory = loggerFactory,
         )
 
         val apiPackageManagementService = ApiPackageManagementService.createApiService(
@@ -347,6 +354,7 @@ object ApiServices {
           writeService,
           timeProvider,
           telemetry = telemetry,
+          loggerFactory = loggerFactory,
         )
 
         val apiParticipantPruningService =

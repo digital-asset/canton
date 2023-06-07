@@ -88,10 +88,36 @@ trait RequestCounterAllocatorTest extends PathAnyFunSpec with BaseTest {
       val cleanReplaySc = SequencerCounter(100)
       val rca = mk(RequestCounter(0), cleanReplaySc)
 
-      describe("skip allocations below") {
+      it("skip allocations below") {
         forEvery(Seq(SequencerCounter(Long.MinValue), SequencerCounter(0), SequencerCounter(99))) {
           sc => rca.allocateFor(sc) shouldBe None
         }
+      }
+    }
+
+    describe("when skiping repair requests") {
+      val cleanReplaySc = SequencerCounter(100)
+      val rca = mk(RequestCounter(2), cleanReplaySc)
+
+      it("interleave allocation and skipping") {
+        rca.allocateFor(SequencerCounter(100)) shouldBe Some(RequestCounter(2))
+        rca.skipRequestCounter(RequestCounter(3))
+        rca.skipRequestCounter(RequestCounter(4))
+        rca.allocateFor(SequencerCounter(101)) shouldBe Some(RequestCounter(5))
+        rca.skipRequestCounter(RequestCounter(6))
+        rca.allocateFor(SequencerCounter(102)) shouldBe Some(RequestCounter(7))
+      }
+
+      it("complain about gaps") {
+        loggerFactory.assertInternalError[IllegalArgumentException](
+          rca.skipRequestCounter(RequestCounter(3)),
+          _.getMessage shouldBe "Cannot skip request counter 3 other than the next request counter 2",
+        )
+        loggerFactory.assertInternalError[IllegalArgumentException](
+          rca.skipRequestCounter(RequestCounter(1)),
+          _.getMessage shouldBe "Cannot skip request counter 1 other than the next request counter 2",
+        )
+        rca.allocateFor(SequencerCounter(102)) shouldBe Some(RequestCounter(2))
       }
     }
   }

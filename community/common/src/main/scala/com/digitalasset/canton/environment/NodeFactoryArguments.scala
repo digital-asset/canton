@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{LocalNodeConfig, TestingConfigInternal}
+import com.digitalasset.canton.crypto.CryptoFactory
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.GrpcVaultServiceFactory
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
@@ -33,6 +34,7 @@ final case class NodeFactoryArguments[
 ) {
   def toCantonNodeBootstrapCommonArguments(
       storageFactory: StorageFactory,
+      cryptoFactory: CryptoFactory,
       cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
       grpcVaultServiceFactory: GrpcVaultServiceFactory,
   ): Either[String, CantonNodeBootstrapCommonArguments[NodeConfig, ParameterConfig, Metrics]] =
@@ -47,6 +49,7 @@ final case class NodeFactoryArguments[
           clock,
           metrics,
           storageFactory,
+          cryptoFactory,
           cryptoPrivateStoreFactory,
           grpcVaultServiceFactory,
           futureSupervisor,
