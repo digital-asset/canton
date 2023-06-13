@@ -8,13 +8,13 @@ import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.value.Value.{ContractId, VersionedContractInstance}
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractState,
   ContractStore,
   MaximumLedgerTime,
   MaximumLedgerTimeService,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import org.scalatest.Inside.inside
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -26,7 +26,7 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec extends AsyncFlatSpec with 
   import ContractState.*
   import com.digitalasset.canton.ledger.participant.state.index.v2.MaximumLedgerTime.*
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.empty
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   private val timestamp1 = timestampFromInstant(Instant.now())
   private val timestamp2 = timestamp1.addMicros(5000)
@@ -241,17 +241,17 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec extends AsyncFlatSpec with 
     val fixtureMap = fixture.toMap
     new ContractStoreBasedMaximumLedgerTimeService(new ContractStore {
       override def lookupActiveContract(readers: Set[Party], contractId: ContractId)(implicit
-          loggingContext: LoggingContext
+          loggingContext: LoggingContextWithTrace
       ): Future[Option[VersionedContractInstance]] =
         throw new UnsupportedOperationException
 
       override def lookupContractKey(readers: Set[Party], key: GlobalKey)(implicit
-          loggingContext: LoggingContext
+          loggingContext: LoggingContextWithTrace
       ): Future[Option[ContractId]] =
         throw new UnsupportedOperationException
 
       override def lookupContractStateWithoutDivulgence(contractId: ContractId)(implicit
-          loggingContext: LoggingContext
+          loggingContext: LoggingContextWithTrace
       ): Future[ContractState] =
         Future.successful(fixtureMap(contractId))
     })

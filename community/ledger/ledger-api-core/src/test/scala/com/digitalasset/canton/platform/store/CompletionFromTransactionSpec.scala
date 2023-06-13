@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store
 
-import com.daml.ledger.api.v1.completion.Completion.DeduplicationPeriod
+import com.daml.ledger.api.v2.completion.Completion.DeduplicationPeriod
 import com.daml.lf.data.Time
 import com.digitalasset.canton.ledger.offset.Offset
 import com.google.protobuf.duration.Duration
@@ -65,6 +65,7 @@ class CompletionFromTransactionSpec
             "commandId",
             "transactionId",
             "applicationId",
+            None,
             submissionId,
             deduplicationOffset,
             deduplicationDurationSeconds,
@@ -75,9 +76,9 @@ class CompletionFromTransactionSpec
           checkpoint.recordTime shouldBe Some(Timestamp(Instant.EPOCH))
           checkpoint.offset shouldBe a[Some[_]]
 
-          val completion = completionStream.completions.head
+          val completion = completionStream.completion.toList.head
           completion.commandId shouldBe "commandId"
-          completion.transactionId shouldBe "transactionId"
+          completion.updateId shouldBe "transactionId"
           completion.applicationId shouldBe "applicationId"
           completion.submissionId shouldBe expectedSubmissionId
           completion.deduplicationPeriod shouldBe expectedDeduplicationPeriod
@@ -99,6 +100,7 @@ class CompletionFromTransactionSpec
             "commandId",
             "transactionId",
             "applicationId",
+            None,
             Some("submissionId"),
             None,
             deduplicationDurationSeconds,
@@ -116,6 +118,7 @@ class CompletionFromTransactionSpec
         "commandId",
         status,
         "applicationId",
+        None,
         Some("submissionId"),
       )
 
@@ -123,7 +126,7 @@ class CompletionFromTransactionSpec
       checkpoint.recordTime shouldBe Some(Timestamp(Instant.EPOCH))
       checkpoint.offset shouldBe a[Some[_]]
 
-      val completion = completionStream.completions.head
+      val completion = completionStream.completion.toList.head
       completion.commandId shouldBe "commandId"
       completion.applicationId shouldBe "applicationId"
       completion.submissionId shouldBe "submissionId"

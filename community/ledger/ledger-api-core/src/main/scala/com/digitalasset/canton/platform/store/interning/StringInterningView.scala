@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.platform.store.interning
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.platform.{Identifier, Party}
+import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
 class DomainStringIterators(
     val parties: Iterator[String],
     val templateIds: Iterator[String],
+    val domainIds: Iterator[String],
 )
 
 trait InternizingStringInterningView {
@@ -40,7 +41,7 @@ trait UpdatingStringInterningView {
     */
   def update(lastStringInterningId: Int)(
       loadPrefixedEntries: LoadStringInterningEntries
-  )(implicit loggingContext: LoggingContext): Future[Unit]
+  ): Future[Unit]
 }
 
 /** Encapsulate the dependency to load a range of string-interning-entries from persistence
@@ -49,7 +50,7 @@ trait LoadStringInterningEntries {
   def apply(
       fromExclusive: Int,
       toInclusive: Int,
-  ): LoggingContext => Future[Iterable[(Int, String)]]
+  ): Future[Iterable[(Int, String)]]
 }
 
 /** This uses the prefixed raw representation internally similar to the persistence layer.
@@ -73,6 +74,7 @@ class StringInterningView()
 
   private val TemplatePrefix = "t|"
   private val PartyPrefix = "p|"
+  private val DomainIdPrefix = "d|"
 
   override val templateId: StringInterningDomain[Identifier] =
     StringInterningDomain.prefixing(
@@ -90,11 +92,20 @@ class StringInterningView()
       from = _.toString,
     )
 
+  override val domainId: StringInterningDomain[DomainId] =
+    StringInterningDomain.prefixing(
+      prefix = DomainIdPrefix,
+      prefixedAccessor = rawAccessor,
+      to = DomainId.tryFromString,
+      from = _.toProtoPrimitive,
+    )
+
   override def internize(domainStringIterators: DomainStringIterators): Iterable[(Int, String)] =
     blocking(synchronized {
       val allPrefixedStrings =
         domainStringIterators.parties.map(PartyPrefix + _) ++
-          domainStringIterators.templateIds.map(TemplatePrefix + _)
+          domainStringIterators.templateIds.map(TemplatePrefix + _) ++
+          domainStringIterators.domainIds.map(DomainIdPrefix + _)
       val newEntries = RawStringInterning.newEntries(
         strings = allPrefixedStrings,
         rawStringInterning = raw,
@@ -107,12 +118,12 @@ class StringInterningView()
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def update(lastStringInterningId: Int)(
       loadStringInterningEntries: LoadStringInterningEntries
-  )(implicit loggingContext: LoggingContext): Future[Unit] =
+  ): Future[Unit] =
     if (lastStringInterningId <= raw.lastId) {
       raw = RawStringInterning.resetTo(lastStringInterningId, raw)
       Future.unit
     } else {
-      loadStringInterningEntries(raw.lastId, lastStringInterningId)(loggingContext)
+      loadStringInterningEntries(raw.lastId, lastStringInterningId)
         .map(updateView)(ExecutionContext.parasitic)
     }
 

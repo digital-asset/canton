@@ -23,7 +23,7 @@ final case class UsedAndCreated(
     rootViewsWithSignatures: NonEmpty[Seq[(TransactionViewTree, Option[Signature])]],
     contracts: UsedAndCreatedContracts,
     keys: InputAndUpdatedKeys,
-    hostedInformeeStakeholders: Set[LfPartyId],
+    hostedWitnesses: Set[LfPartyId],
 ) {
   def activenessSet: ActivenessSet =
     ActivenessSet(

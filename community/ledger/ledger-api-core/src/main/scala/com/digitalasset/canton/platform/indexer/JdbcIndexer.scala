@@ -9,10 +9,11 @@ import akka.stream.scaladsl.{Sink, Source}
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.archive.ArchiveParser
 import com.daml.lf.data.Ref
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.metrics.{Metrics, Timed}
 import com.daml.timer.FutureCheck.*
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.indexer.parallel.{
   InitializeParallelIngestion,
@@ -34,14 +35,13 @@ import com.digitalasset.canton.platform.store.interning.UpdatingStringInterningV
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
 import com.digitalasset.canton.platform.{InMemoryState, PackageId}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
 object JdbcIndexer {
-  private val logger = ContextualizedLogger.get(this.getClass)
-
   final class Factory(
       participantId: Ref.ParticipantId,
       participantDataSourceConfig: ParticipantDataSourceConfig,
@@ -51,9 +51,12 @@ object JdbcIndexer {
       inMemoryState: InMemoryState,
       apiUpdaterFlow: InMemoryStateUpdater.UpdaterFlow,
       executionContext: ExecutionContext,
+      loggerFactory: NamedLoggerFactory,
   )(implicit materializer: Materializer) {
 
-    def initialized()(implicit loggingContext: LoggingContext): ResourceOwner[Indexer] = {
+    def initialized(
+        logger: TracedLogger
+    )(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
       val factory = StorageBackendFactory.of(DbType.jdbcType(participantDataSourceConfig.jdbcUrl))
       val dataSourceStorageBackend = factory.createDataSourceStorageBackend
       val ingestionStorageBackend = factory.createIngestionStorageBackend
@@ -77,6 +80,7 @@ object JdbcIndexer {
           ingestionStorageBackend = ingestionStorageBackend,
           stringInterningStorageBackend = stringInterningStorageBackend,
           metrics = metrics,
+          loggerFactory = loggerFactory,
         ),
         parallelIndexerSubscription = ParallelIndexerSubscription(
           parameterStorageBackend = parameterStorageBackend,
@@ -100,12 +104,14 @@ object JdbcIndexer {
           metrics = metrics,
           inMemoryStateUpdaterFlow = apiUpdaterFlow,
           stringInterningView = inMemoryState.stringInterningView,
+          loggerFactory = loggerFactory,
         ),
         meteringAggregator = new MeteringAggregator.Owner(
           meteringStore = meteringStoreBackend,
           meteringParameterStore = meteringParameterStorageBackend,
           parameterStore = parameterStorageBackend,
           metrics = metrics,
+          loggerFactory = loggerFactory,
         ).apply,
         mat = materializer,
         readService = readService,
@@ -129,8 +135,10 @@ object JdbcIndexer {
                 _,
                 executionContext,
                 config.packageMetadataView,
+                logger,
               ),
             ),
+        loggerFactory = loggerFactory,
       )
 
       indexer
@@ -143,16 +151,17 @@ object JdbcIndexer {
       dbDispatcher: DbDispatcher,
       updatingStringInterningView: UpdatingStringInterningView,
       ledgerEnd: ParameterStorageBackend.LedgerEnd,
-  )(implicit loggingContext: LoggingContext): Future[Unit] =
+  ): Future[Unit] =
     updatingStringInterningView.update(ledgerEnd.lastStringInterningId)(
-      (fromExclusive, toInclusive) =>
-        implicit loggingContext =>
-          dbDispatcher.executeSql(metrics.daml.index.db.loadStringInterningEntries) {
-            stringInterningStorageBackend.loadStringInterningEntries(
-              fromExclusive,
-              toInclusive,
-            )
-          }
+      (fromExclusive, toInclusive) => {
+        implicit val loggingContext: LoggingContext = LoggingContext.empty
+        dbDispatcher.executeSql(metrics.daml.index.db.loadStringInterningEntries) {
+          stringInterningStorageBackend.loadStringInterningEntries(
+            fromExclusive,
+            toInclusive,
+          )
+        }
+      }
     )
 
   private def updatePackageMetadataView(
@@ -162,7 +171,9 @@ object JdbcIndexer {
       packageMetadataView: PackageMetadataView,
       computationExecutionContext: ExecutionContext,
       config: PackageMetadataViewConfig,
-  )(implicit loggingContext: LoggingContext, materializer: Materializer): Future[Unit] = {
+      logger: TracedLogger,
+  )(implicit materializer: Materializer, traceContext: TraceContext): Future[Unit] = {
+    implicit val loggingContext: LoggingContext = LoggingContext.empty
     implicit val ec: ExecutionContext = computationExecutionContext
     logger.info("Package Metadata View initialization has been started.")
     val startedTime = System.nanoTime()

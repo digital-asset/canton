@@ -27,7 +27,7 @@ final class TransactionServiceAuthorization(
       responseObserver: StreamObserver[GetTransactionsResponse],
   ): Unit =
     authorizer.requireReadClaimsForTransactionFilterOnStream(
-      request.filter,
+      request.filter.map(_.filtersByParty),
       service.getTransactions,
     )(request, responseObserver)
 
@@ -36,7 +36,7 @@ final class TransactionServiceAuthorization(
       responseObserver: StreamObserver[GetTransactionTreesResponse],
   ): Unit =
     authorizer.requireReadClaimsForTransactionFilterOnStream(
-      request.filter,
+      request.filter.map(_.filtersByParty),
       service.getTransactionTrees,
     )(request, responseObserver)
 

@@ -24,6 +24,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexTransactionsService,
 }
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{
@@ -59,10 +60,11 @@ private[apiserver] final class ApiPackageManagementService private (
 )(implicit
     materializer: Materializer,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends PackageManagementService
     with GrpcApiService
     with NamedLogging {
+
+  private implicit val loggingContext = createLoggingContext(loggerFactory)(identity)
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
@@ -81,7 +83,7 @@ private[apiserver] final class ApiPackageManagementService private (
   override def listKnownPackages(
       request: ListKnownPackagesRequest
   ): Future[ListKnownPackagesResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
 
     logger.info("Listing known packages.")
     packagesIndex
@@ -182,7 +184,6 @@ private[apiserver] object ApiPackageManagementService {
   )(implicit
       materializer: Materializer,
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
   ): PackageManagementServiceGrpc.PackageManagementService with GrpcApiService =
     new ApiPackageManagementService(
       readBackend,

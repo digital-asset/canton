@@ -25,6 +25,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   PartyEntry,
 }
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementService.blindAndConvertToProto
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementServiceSpec.*
 import com.digitalasset.canton.platform.localstore.api.{PartyRecord, PartyRecordStore}
@@ -33,7 +34,7 @@ import com.digitalasset.canton.{BaseTest, DiscardOps}
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.sdk.OpenTelemetrySdk
-import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
+import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
@@ -198,6 +199,7 @@ class ApiPartyManagementServiceSpec
                     "submissionId" -> "'aSubmission'",
                     "category" -> "1",
                     "definite_answer" -> "false",
+                    "test" -> s"'${getClass.getSimpleName}'",
                   ),
                 ),
                 RetryInfoDetail(1.second),
@@ -222,7 +224,11 @@ class ApiPartyManagementServiceSpec
       .thenReturn(Future.successful(Absolute(Ref.LedgerString.assertFromString("0"))))
 
     val mockIdentityProviderExists = mock[IdentityProviderExists]
-    when(mockIdentityProviderExists.apply(IdentityProviderId.Default))
+    when(
+      mockIdentityProviderExists.apply(ArgumentMatchers.eq(IdentityProviderId.Default))(
+        any[LoggingContextWithTrace]
+      )
+    )
       .thenReturn(Future.successful(true))
 
     val mockIndexPartyManagementService = mock[IndexPartyManagementService]

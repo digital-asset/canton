@@ -462,6 +462,7 @@ private[store] final case class SerializableTransactionAccepted(
       recordTime,
       divulgedContracts,
       blindingInfo,
+      hostedWitnesses,
       contractMetadata,
     ) = transactionAccepted
     val contractMetadataP = contractMetadata.view.map { case (contractId, bytes) =>
@@ -483,6 +484,7 @@ private[store] final case class SerializableTransactionAccepted(
       divulgedContracts.map(SerializableDivulgedContract(_).toProtoV0),
       blindingInfo.map(SerializableBlindingInfo(_).toProtoV0),
       contractMetadata = contractMetadataP,
+      hostedWitnesses = hostedWitnesses,
     )
   }
 }
@@ -500,6 +502,7 @@ private[store] object SerializableTransactionAccepted {
       divulgedContractsP,
       blindingInfoP,
       contractMetadataP,
+      hostedWitnessesP,
     ) = transactionAcceptedP
     for {
       optCompletionInfo <- completionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
@@ -529,6 +532,7 @@ private[store] object SerializableTransactionAccepted {
             .map(_ -> LfBytes.fromByteString(driverContractMetadataBytes))
       }
       contractMetadata = contractMetadataSeq.toMap
+      hostedWitnesses <- hostedWitnessesP.traverse(ProtoConverter.parseLfPartyId)
     } yield LedgerSyncEvent.TransactionAccepted(
       optCompletionInfo,
       transactionMeta,
@@ -537,6 +541,7 @@ private[store] object SerializableTransactionAccepted {
       recordTime,
       divulgedContracts,
       blindingInfo,
+      hostedWitnesses.toList,
       contractMetadata = contractMetadata,
     )
   }

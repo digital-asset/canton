@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.platform.store.cache
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.caching.Cache
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.ContractReadThroughNotFound
 import com.digitalasset.canton.platform.store.cache.StateCache.PendingUpdatesState
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, blocking}
@@ -29,8 +30,9 @@ private[platform] case class StateCache[K, V](
     initialCacheIndex: Offset,
     cache: Cache[K, V],
     registerUpdateTimer: Timer,
-)(implicit ec: ExecutionContext) {
-  private val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
+    val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends NamedLogging {
   private[cache] val pendingUpdates = mutable.Map.empty[K, PendingUpdatesState]
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private[cache] var cacheIndex = initialCacheIndex
@@ -40,7 +42,7 @@ private[platform] case class StateCache[K, V](
     * @param key the key to query for
     * @return optionally [[V]]
     */
-  def get(key: K)(implicit loggingContext: LoggingContext): Option[V] =
+  def get(key: K)(implicit traceContext: TraceContext): Option[V] =
     cache.getIfPresent(key) match {
       case Some(value) =>
         logger.debug(s"Cache hit for $key -> ${truncateValueForLogging(value)}")
@@ -56,7 +58,7 @@ private[platform] case class StateCache[K, V](
     * @param validAt ordering discriminator for pending updates for the same key
     * @param batch the batch of events updating the cache at `validAt`
     */
-  def putBatch(validAt: Offset, batch: Map[K, V])(implicit loggingContext: LoggingContext): Unit =
+  def putBatch(validAt: Offset, batch: Map[K, V])(implicit traceContext: TraceContext): Unit =
     Timed.value(
       registerUpdateTimer, {
         blocking(pendingUpdates.synchronized {
@@ -95,7 +97,7 @@ private[platform] case class StateCache[K, V](
     * @param fetchAsync fetches asynchronously the value for key `key` at the current cache index
     */
   def putAsync(key: K, fetchAsync: Offset => Future[V])(implicit
-      loggingContext: LoggingContext
+      traceContext: TraceContext
   ): Future[V] = Timed.value(
     registerUpdateTimer,
     blocking(pendingUpdates.synchronized {
@@ -126,7 +128,7 @@ private[platform] case class StateCache[K, V](
       key: K,
       eventualUpdate: Future[V],
       validAt: Offset,
-  )(implicit loggingContext: LoggingContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] =
     eventualUpdate
       .map { (value: V) =>
         Timed.value(
@@ -174,7 +176,7 @@ private[platform] case class StateCache[K, V](
           logger.warn(s"Failure in pending cache update for key $key", err)
       }
 
-  private def removeFromPending(key: K)(implicit loggingContext: LoggingContext): Unit =
+  private def removeFromPending(key: K)(implicit traceContext: TraceContext): Unit =
     discard(
       pendingUpdates
         .get(key)

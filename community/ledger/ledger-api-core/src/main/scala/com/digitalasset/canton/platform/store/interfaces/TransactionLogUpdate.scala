@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.interfaces
 
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Bytes
 import com.daml.lf.data.Ref.Party
@@ -41,6 +41,7 @@ object TransactionLogUpdate {
       offset: Offset,
       events: Vector[Event],
       completionDetails: Option[CompletionDetails],
+      domainId: Option[String],
   ) extends TransactionLogUpdate
 
   /** A rejected submission.

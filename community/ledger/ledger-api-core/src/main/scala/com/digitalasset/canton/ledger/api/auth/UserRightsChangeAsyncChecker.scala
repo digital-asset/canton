@@ -5,9 +5,9 @@ package com.digitalasset.canton.ledger.api.auth
 
 import akka.actor.Scheduler
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.ledger.api.domain
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 
 import java.time.Instant
@@ -31,7 +31,7 @@ private[auth] final class UserRightsChangeAsyncChecker(
     */
   def schedule(
       userClaimsMismatchCallback: () => Unit
-  )(implicit loggingContext: LoggingContext): () => Unit = {
+  )(implicit loggingContext: LoggingContextWithTrace): () => Unit = {
     val delay = userRightsCheckIntervalInSeconds.seconds
     val identityProviderId = originalClaims.identityProviderId
     val userId = originalClaims.applicationId.fold[Ref.UserId](

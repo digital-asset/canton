@@ -6,12 +6,14 @@ package com.digitalasset.canton.participant.admin
 import cats.Eval
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.SyncStateInspection.SerializableContractWithDomainId
 import com.digitalasset.canton.participant.protocol.RequestJournal
@@ -150,7 +152,7 @@ class SyncStateInspection(
       protocolVersion: Option[ProtocolVersion],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, File] = {
+  ): EitherT[Future, RepairServiceError, File] = {
     val openStream =
       if (outputFile.getName.endsWith(".gz")) {
         // default gzip output buffer is 512, so setting it to the same as the
@@ -185,7 +187,7 @@ class SyncStateInspection(
       protocolVersion: Option[ProtocolVersion],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, List[(DomainId, Long)]] =
+  ): EitherT[Future, RepairServiceError, List[(DomainId, Long)]] =
     syncDomainPersistentStateManager.getAll.toList
       .parTraverseFilter { case (domainId, state) =>
         storeActiveContractsIntoStreamPerDomainId(
@@ -211,21 +213,40 @@ class SyncStateInspection(
       writer: OutputStreamWriter,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Option[(DomainId, Long)]] = {
+  ): EitherT[Future, RepairServiceError, Option[(DomainId, Long)]] = {
     val lfParties: Set[LfPartyId] = parties.map(_.toLf)
 
     if (filterDomain(domainId)) {
       for {
-        // fetch acs
-        acs <- EitherT.liftF(timestamp match {
-          case Some(value) => state.activeContractStore.snapshot(value)
-          case None => currentAcsSnapshot(state)
-        })
+        // fetch acs, checking that the requested timestamp is clean
+        acs <- timestamp match {
+          case Some(requestedTimestamp) =>
+            for {
+              cursorPreheadO <- EitherT.right[RepairServiceError](
+                state.requestJournalStore.preheadClean
+              )
+              _ <- cursorPreheadO.traverse_(cursorPrehead =>
+                EitherT.cond[Future](
+                  cursorPrehead.timestamp >= requestedTimestamp,
+                  (),
+                  RepairServiceError.InvalidAcsSnapshotTimestamp
+                    .Error(requestedTimestamp, cursorPrehead.timestamp, domainId),
+                )
+              )
+              snapshot <- EitherT.right[RepairServiceError](
+                state.activeContractStore.snapshot(requestedTimestamp)
+              )
+            } yield snapshot
+          case None => EitherT.right[RepairServiceError](currentAcsSnapshot(state))
+        }
         useProtocolVersion <- protocolVersion match {
           case Some(pv) if pv.isSupported => EitherT.right(Future.successful(pv))
           case Some(pv) =>
             EitherT.leftT[Future, ProtocolVersion](
-              s"Protocol version $pv is not supported on this domain. Supported protocol versions are: ${ProtocolVersion.supported ++ ProtocolVersion.unstable}"
+              RepairServiceError.UnsupportedProtocolVersionParticipant.Error(
+                pv,
+                ProtocolVersion.supported ++ ProtocolVersion.unstable,
+              )
             )
           case None =>
             EitherT.right(
@@ -246,7 +267,7 @@ class SyncStateInspection(
 
         })
       } yield Some(domainId -> numberOfContracts.sum.toLong)
-    } else EitherT.rightT[Future, String](None)
+    } else EitherT.rightT[Future, RepairServiceError](None)
   }
 
   private def writeToStream(
@@ -590,4 +611,6 @@ object SyncStateInspection {
         case line => Either.left(s"Failed parsing line $lineNumber: $line ")
       }
   }
+
+  sealed trait AcsDownloadError extends CantonError
 }

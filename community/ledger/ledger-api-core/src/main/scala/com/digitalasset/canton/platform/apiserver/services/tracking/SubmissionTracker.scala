@@ -4,20 +4,17 @@
 package com.digitalasset.canton.platform.apiserver.services.tracking
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.ledger.api.v1.commands.Commands
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator
-import com.digitalasset.canton.ledger.error.{
-  CommonErrors,
-  DamlContextualizedErrorLogger,
-  LedgerApiErrors,
-}
+import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.Submitters
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.empty.Empty
 
 import java.time.Duration
@@ -31,8 +28,7 @@ trait SubmissionTracker extends AutoCloseable {
       timeout: Duration,
       submit: SubmitRequest => Future[Empty],
   )(implicit
-      loggingContext: LoggingContext,
-      errorLogger: ContextualizedErrorLogger,
+      errorLogger: ContextualizedErrorLogger
   ): Future[CompletionResponse]
 
   /** [[com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse.completions]] do not have `act_as` populated,
@@ -45,13 +41,21 @@ trait SubmissionTracker extends AutoCloseable {
 object SubmissionTracker {
   type Submitters = Set[String]
 
-  def owner(maxCommandsInFlight: Int, metrics: Metrics): ResourceOwner[SubmissionTracker] =
+  def owner(maxCommandsInFlight: Int, metrics: Metrics, loggerFactory: NamedLoggerFactory)(implicit
+      traceContext: TraceContext
+  ): ResourceOwner[SubmissionTracker] =
     for {
       cancellableTimeoutSupport <- CancellableTimeoutSupport.owner(
-        "submission-tracker-timeout-timer"
+        "submission-tracker-timeout-timer",
+        loggerFactory,
       )
       tracker <- ResourceOwner.forCloseable(() =>
-        new SubmissionTrackerImpl(cancellableTimeoutSupport, maxCommandsInFlight, metrics)
+        new SubmissionTrackerImpl(
+          cancellableTimeoutSupport,
+          maxCommandsInFlight,
+          metrics,
+          loggerFactory,
+        )
       )
     } yield tracker
 
@@ -59,10 +63,12 @@ object SubmissionTracker {
       cancellableTimeoutSupport: CancellableTimeoutSupport,
       maxCommandsInFlight: Int,
       metrics: Metrics,
-  ) extends SubmissionTracker {
+      val loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext)
+      extends SubmissionTracker
+      with NamedLogging {
     private[tracking] val pending =
       TrieMap.empty[SubmissionKey, Promise[CompletionResponse]]
-    private val errorLogger = DamlContextualizedErrorLogger.forClass(getClass)
 
     // Set max-in-flight capacity
     metrics.daml.commands.maxInFlightCapacity.inc(maxCommandsInFlight.toLong)(MetricsContext.Empty)
@@ -74,8 +80,7 @@ object SubmissionTracker {
         timeout: Duration,
         submit: SubmitRequest => Future[Empty],
     )(implicit
-        loggingContext: LoggingContext,
-        errorLogger: ContextualizedErrorLogger,
+        errorLogger: ContextualizedErrorLogger
     ): Future[CompletionResponse] =
       ensuringSubmissionIdPopulated(commands) {
         ensuringMaximumInFlight {
@@ -90,7 +95,9 @@ object SubmissionTracker {
           val promise = Promise[CompletionResponse]()
           pending.putIfAbsent(submissionKey, promise) match {
             case Some(_) =>
-              promise.complete(CompletionResponse.duplicate(submissionKey.submissionId))
+              promise.complete(
+                CompletionResponse.duplicate(submissionKey.submissionId)(errorLogger)
+              )
 
             case None =>
               // Start the timeout timer before submit to ensure that the timer scheduling
@@ -99,7 +106,9 @@ object SubmissionTracker {
                 duration = timeout,
                 promise = promise,
                 onTimeout =
-                  CompletionResponse.timeout(submissionKey.commandId, submissionKey.submissionId),
+                  CompletionResponse.timeout(submissionKey.commandId, submissionKey.submissionId)(
+                    errorLogger
+                  ),
               )
 
               submit(SubmitRequest(Some(commands)))
@@ -117,12 +126,12 @@ object SubmissionTracker {
               }(ExecutionContext.parasitic)
           }
           promise.future
-        }
-      }
+        }(errorLogger)
+      }(errorLogger)
 
     override def onCompletion(completionResult: (CompletionStreamResponse, Submitters)): Unit = {
       val (completionStreamResponse, submitters) = completionResult
-      completionStreamResponse.completions.foreach { completion =>
+      completionStreamResponse.completion.foreach { completion =>
         attemptFinish(SubmissionKey.fromCompletion(completion, submitters))(
           CompletionResponse.fromCompletion(completion, completionStreamResponse.checkpoint)
         )
@@ -130,7 +139,7 @@ object SubmissionTracker {
     }
 
     override def close(): Unit = {
-      pending.values.foreach(_.complete(CompletionResponse.closing(errorLogger)))
+      pending.values.foreach(_.complete(CompletionResponse.closing))
     }
 
     private def attemptFinish(submissionKey: SubmissionKey)(
@@ -153,7 +162,7 @@ object SubmissionTracker {
       } else {
         Future.failed(
           LedgerApiErrors.ParticipantBackpressure
-            .Rejection("Maximum number of commands in-flight reached")
+            .Rejection("Maximum number of commands in-flight reached")(errorLogger)
             .asGrpcError
         )
       }
@@ -165,7 +174,7 @@ object SubmissionTracker {
       if (commands.submissionId.isEmpty) {
         Future.failed(
           CommonErrors.ServiceInternalError
-            .Generic("Missing submission id in submission tracker")
+            .Generic("Missing submission id in submission tracker")(errorLogger)
             .asGrpcError
         )
       } else {
@@ -181,7 +190,7 @@ object SubmissionTracker {
 
     private object SubmissionKey {
       def fromCompletion(
-          completion: com.daml.ledger.api.v1.completion.Completion,
+          completion: com.daml.ledger.api.v2.completion.Completion,
           submitters: Submitters,
       ): SubmissionKey =
         SubmissionKey(

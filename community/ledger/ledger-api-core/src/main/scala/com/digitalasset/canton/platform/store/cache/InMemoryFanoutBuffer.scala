@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.platform.store.cache
 
-import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.*
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.Searching.{Found, InsertionPoint, SearchResult}
 import scala.collection.View
@@ -31,8 +32,8 @@ class InMemoryFanoutBuffer(
     maxBufferSize: Int,
     metrics: Metrics,
     maxBufferedChunkSize: Int,
-) {
-  private val logger = ContextualizedLogger.get(getClass)
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
   @volatile private[cache] var _bufferLog =
     Vector.empty[(Offset, TransactionLogUpdate)]
   @volatile private[cache] var _lookupMap =
@@ -51,7 +52,7 @@ class InMemoryFanoutBuffer(
     *              Must be higher than the last appended entry's offset.
     * @param entry The buffer entry.
     */
-  def push(offset: Offset, entry: TransactionLogUpdate): Unit =
+  def push(offset: Offset, entry: TransactionLogUpdate)(implicit traceContext: TraceContext): Unit =
     Timed.value(
       pushTimer,
       blocking(synchronized {
@@ -140,26 +141,28 @@ class InMemoryFanoutBuffer(
     _lookupMap = Map.empty
   })
 
-  private def ensureSize(targetSize: Int): Unit = blocking(synchronized {
-    val currentBufferLogSize = _bufferLog.size
-    val currentLookupMapSize = _lookupMap.size
+  private def ensureSize(targetSize: Int)(implicit traceContext: TraceContext): Unit = blocking(
+    synchronized {
+      val currentBufferLogSize = _bufferLog.size
+      val currentLookupMapSize = _lookupMap.size
 
-    if (currentLookupMapSize <= currentBufferLogSize) {
-      bufferSizeHistogram.update(currentBufferLogSize)(MetricsContext.Empty)
+      if (currentLookupMapSize <= currentBufferLogSize) {
+        bufferSizeHistogram.update(currentBufferLogSize)(MetricsContext.Empty)
 
-      if (currentBufferLogSize > targetSize) {
-        dropOldest(dropCount = currentBufferLogSize - targetSize)
+        if (currentBufferLogSize > targetSize) {
+          dropOldest(dropCount = currentBufferLogSize - targetSize)
+        }
+      } else {
+        // This is an error condition. If encountered, clear the in-memory fan-out buffers.
+        logger
+          .error(
+            s"In-memory fan-out lookup map size ($currentLookupMapSize) exceeds the buffer log size ($currentBufferLogSize). Clearing in-memory fan-out.."
+          )
+
+        flush()
       }
-    } else {
-      // This is an error condition. If encountered, clear the in-memory fan-out buffers.
-      logger.withoutContext
-        .error(
-          s"In-memory fan-out lookup map size ($currentLookupMapSize) exceeds the buffer log size ($currentBufferLogSize). Clearing in-memory fan-out.."
-        )
-
-      flush()
     }
-  })
+  )
 
   private def dropOldest(dropCount: Int): Unit = blocking(synchronized {
     val (evicted, remainingBufferLog) = _bufferLog.splitAt(dropCount)

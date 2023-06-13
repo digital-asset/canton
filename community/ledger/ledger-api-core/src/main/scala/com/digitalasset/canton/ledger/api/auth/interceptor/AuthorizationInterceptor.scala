@@ -5,12 +5,19 @@ package com.digitalasset.canton.ledger.api.auth.interceptor
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.UserId
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User, UserRight}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import io.grpc.*
 
@@ -27,11 +34,12 @@ final class AuthorizationInterceptor(
     authService: AuthService,
     userManagementStoreO: Option[UserManagementStore],
     identityProviderAwareAuthService: IdentityProviderAwareAuthService,
+    telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
     implicit val ec: ExecutionContext,
 )(implicit loggingContext: LoggingContext)
-    extends ServerInterceptor {
-  private val logger = ContextualizedLogger.get(getClass)
-  private val errorLogger = new DamlContextualizedErrorLogger(logger, loggingContext, None)
+    extends ServerInterceptor
+    with NamedLogging {
 
   override def interceptCall[ReqT, RespT](
       call: ServerCall[ReqT, RespT],
@@ -41,6 +49,9 @@ final class AuthorizationInterceptor(
     // Note: Context uses ThreadLocal storage, we need to capture it outside of the async block below.
     // Contexts are immutable and safe to pass around.
     val prevCtx = Context.current
+
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     // The method interceptCall() must return a Listener.
     // The target listener is created by calling `Contexts.interceptCall()`.
@@ -65,7 +76,7 @@ final class AuthorizationInterceptor(
               .Reject(
                 message = "Failed to get claims from request metadata",
                 throwable = exception,
-              )(errorLogger)
+              )
               .asGrpcError
             closeWithError(error)
           case Success(claimSet) =>
@@ -80,13 +91,20 @@ final class AuthorizationInterceptor(
     }
   }
 
-  private def fallbackToIdpAuthService(headers: Metadata, claimSet: ClaimSet) =
+  private def fallbackToIdpAuthService(headers: Metadata, claimSet: ClaimSet)(implicit
+      loggingContext: LoggingContextWithTrace
+  ) =
     if (claimSet == ClaimSet.Unauthenticated)
       identityProviderAwareAuthService.decodeMetadata(headers)
     else
       Future.successful(claimSet)
 
-  private[this] def resolveAuthenticatedUserRights(claimSet: ClaimSet): Future[ClaimSet] =
+  private[this] def resolveAuthenticatedUserRights(
+      claimSet: ClaimSet
+  )(implicit
+      loggingContext: LoggingContextWithTrace,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Future[ClaimSet] =
     claimSet match {
       case ClaimSet.AuthenticatedUser(identityProviderId, userIdStr, participantId, expiration) =>
         for {
@@ -104,7 +122,7 @@ final class AuthorizationInterceptor(
                 LedgerApiErrors.AuthorizationChecks.PermissionDenied
                   .Reject(
                     s"Could not resolve rights for user '$userId' due to '$msg'"
-                  )(errorLogger)
+                  )
                   .asGrpcError
               )
             case Right(userRights: Set[UserRight]) =>
@@ -129,13 +147,13 @@ final class AuthorizationInterceptor(
   private def verifyUserIsWithinIdentityProvider(
       identityProviderId: IdentityProviderId,
       user: User,
-  ): Future[Unit] =
+  )(implicit errorLoggingContext: ErrorLoggingContext): Future[Unit] =
     if (user.identityProviderId != identityProviderId) {
       Future.failed(
         LedgerApiErrors.AuthorizationChecks.PermissionDenied
           .Reject(
             s"User is assigned to another identity provider"
-          )(errorLogger)
+          )
           .asGrpcError
       )
     } else Future.unit
@@ -144,6 +162,9 @@ final class AuthorizationInterceptor(
       userManagementStore: UserManagementStore,
       userId: UserId,
       identityProviderId: IdentityProviderId,
+  )(implicit
+      loggingContext: LoggingContextWithTrace,
+      errorLoggingContext: ErrorLoggingContext,
   ): Future[User] =
     for {
       userResult <- userManagementStore.getUser(id = userId, identityProviderId)
@@ -153,7 +174,7 @@ final class AuthorizationInterceptor(
             LedgerApiErrors.AuthorizationChecks.PermissionDenied
               .Reject(
                 s"Could not resolve is_deactivated status for user '$userId' and identity_provider_id '$identityProviderId' due to '$msg'"
-              )(errorLogger)
+              )
               .asGrpcError
           )
         case Right(user: domain.User) =>
@@ -162,7 +183,7 @@ final class AuthorizationInterceptor(
               LedgerApiErrors.AuthorizationChecks.PermissionDenied
                 .Reject(
                   s"User $userId is deactivated"
-                )(errorLogger)
+                )
                 .asGrpcError
             )
           } else {
@@ -173,23 +194,25 @@ final class AuthorizationInterceptor(
 
   private[this] def getUserManagementStore(
       userManagementStoreO: Option[UserManagementStore]
-  ): Future[UserManagementStore] =
+  )(implicit errorLoggingContext: ErrorLoggingContext): Future[UserManagementStore] =
     userManagementStoreO match {
       case None =>
         Future.failed(
           LedgerApiErrors.AuthorizationChecks.Unauthenticated
-            .UserBasedAuthenticationIsDisabled()(errorLogger)
+            .UserBasedAuthenticationIsDisabled()
             .asGrpcError
         )
       case Some(userManagementStore) =>
         Future.successful(userManagementStore)
     }
 
-  private[this] def getUserId(userIdStr: String): Future[Ref.UserId] =
+  private[this] def getUserId(
+      userIdStr: String
+  )(implicit errorLoggingContext: ErrorLoggingContext): Future[Ref.UserId] =
     Ref.UserId.fromString(userIdStr) match {
       case Left(err) =>
         Future.failed(
-          ValidationErrors.invalidArgument(s"token $err")(errorLogger)
+          ValidationErrors.invalidArgument(s"token $err")
         )
       case Right(userId) =>
         Future.successful(userId)
@@ -217,6 +240,8 @@ object AuthorizationInterceptor {
       authService: AuthService,
       userManagementStoreO: Option[UserManagementStore],
       identityProviderAwareAuthService: IdentityProviderAwareAuthService,
+      telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
       ec: ExecutionContext,
   ): AuthorizationInterceptor =
     LoggingContext.newLoggingContext { implicit loggingContext: LoggingContext =>
@@ -224,6 +249,8 @@ object AuthorizationInterceptor {
         authService,
         userManagementStoreO,
         identityProviderAwareAuthService,
+        telemetry,
+        loggerFactory,
         ec,
       )
     }

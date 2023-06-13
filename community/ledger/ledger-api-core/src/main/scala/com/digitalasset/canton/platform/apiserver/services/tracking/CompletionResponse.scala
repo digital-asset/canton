@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint as PbCheckpoint
-import com.daml.ledger.api.v1.completion.Completion as PbCompletion
+import com.daml.ledger.api.v2.completion.Completion as PbCompletion
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.error.{
   CommonErrors,
@@ -54,14 +54,14 @@ object CompletionResponse {
 
   def duplicate(
       submissionId: String
-  )(implicit loggingContext: ContextualizedErrorLogger): Try[CompletionResponse] =
+  )(implicit errorLogger: ContextualizedErrorLogger): Try[CompletionResponse] =
     Failure(
       LedgerApiErrors.ConsistencyErrors.DuplicateCommand
         .Reject(existingCommandSubmissionId = Some(submissionId))
         .asGrpcError
     )
 
-  def closing(implicit loggingContext: ContextualizedErrorLogger): Try[CompletionResponse] =
+  def closing(implicit errorLogger: ContextualizedErrorLogger): Try[CompletionResponse] =
     Failure(CommonErrors.ServerIsShuttingDown.Reject().asGrpcError)
 
   private def missingStatusError(completion: PbCompletion): StatusRuntimeException = {

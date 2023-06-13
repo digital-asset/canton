@@ -5,9 +5,15 @@ package com.digitalasset.canton.ledger.api.auth
 
 import akka.actor.Scheduler
 import com.daml.jwt.JwtTimestampLeeway
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.ServerCallStreamObserver
 
@@ -23,11 +29,13 @@ private[auth] final class OngoingAuthorizationObserver[A](
     userRightsCheckIntervalInSeconds: Int,
     lastUserRightsCheckTime: AtomicReference[Instant],
     jwtTimestampLeeway: Option[JwtTimestampLeeway],
-)(implicit loggingContext: LoggingContext)
-    extends ServerCallStreamObserver[A] {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit traceContext: TraceContext)
+    extends ServerCallStreamObserver[A]
+    with NamedLogging {
 
-  private val logger = ContextualizedLogger.get(getClass)
-  private val errorLogger = new DamlContextualizedErrorLogger(logger, loggingContext, None)
+  private implicit val loggingContext = LoggingContextWithTrace(loggerFactory)
+  private val errorLogger = ErrorLoggingContext(logger, loggerFactory.properties, traceContext)
 
   // Guards against propagating calls to delegate observer after either
   // [[onComplete]] or [[onError]] has already been called once.
@@ -149,7 +157,11 @@ private[auth] object OngoingAuthorizationObserver {
       userRightsCheckIntervalInSeconds: Int,
       akkaScheduler: Scheduler,
       jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
-  )(implicit loggingContext: LoggingContext, ec: ExecutionContext): ServerCallStreamObserver[A] = {
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): ServerCallStreamObserver[A] = {
 
     val lastUserRightsCheckTime = new AtomicReference(nowF())
     val userRightsCheckerO = if (originalClaims.resolvedFromUser) {
@@ -173,6 +185,7 @@ private[auth] object OngoingAuthorizationObserver {
       userRightsCheckIntervalInSeconds = userRightsCheckIntervalInSeconds,
       lastUserRightsCheckTime = lastUserRightsCheckTime,
       jwtTimestampLeeway = jwtTimestampLeeway,
+      loggerFactory = loggerFactory,
     )
   }
 

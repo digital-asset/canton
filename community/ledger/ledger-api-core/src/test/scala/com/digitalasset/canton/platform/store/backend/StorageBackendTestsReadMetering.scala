@@ -12,6 +12,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.{
   ReportData,
   TransactionMetering,
 }
+import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend.LedgerMeteringEnd
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -59,6 +60,7 @@ private[backend] trait StorageBackendTestsReadMetering
     )
     discard(participantMetering)
     val ledgerMeteringEnd = LedgerMeteringEnd(offset(5L), someTime.addMicros(6L))
+    val loggerFactory = SuppressingLogger(getClass)
 
     // Aggregated transaction metering should never be read
     val aggregatedTransactionMetering = Vector(
@@ -86,7 +88,9 @@ private[backend] trait StorageBackendTestsReadMetering
         )
       )
       executeSql(backend.metering.write.insertParticipantMetering(participantMetering))
-      executeSql(backend.meteringParameter.initializeLedgerMeteringEnd(ledgerMeteringEnd))
+      executeSql(
+        backend.meteringParameter.initializeLedgerMeteringEnd(ledgerMeteringEnd, loggerFactory)
+      )
     }
 
     def execute(

@@ -94,6 +94,7 @@ message TransactionAccepted {
   repeated DivulgedContract divulged_contracts = 6;
   BlindingInfo blinding_info = 7; // optional
   map<string, bytes> contract_metadata = 8; //optional
+  repeated string hosted_witnesses = 9; // not empty in case multi-domain deployment, empty otherwise
 }
 
 message CompletionInfo {

@@ -9,7 +9,6 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction_service.*
-import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.LedgerId
@@ -42,7 +41,6 @@ final class GrpcTransactionService(
     esf: ExecutionSequencerFactory,
     mat: Materializer,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends TransactionServiceGrpc.TransactionService
     with StreamingServiceLifecycleManagement
     with GrpcApiService
@@ -61,7 +59,7 @@ final class GrpcTransactionService(
       request: GetTransactionsRequest,
       responseObserver: StreamObserver[GetTransactionsResponse],
   ): Unit = registerStream(responseObserver) {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     logger.debug(s"Received new transaction request $request.")
@@ -81,7 +79,7 @@ final class GrpcTransactionService(
       request: GetTransactionsRequest,
       responseObserver: StreamObserver[GetTransactionTreesResponse],
   ): Unit = registerStream(responseObserver) {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     logger.debug(s"Received new transaction tree request $request.")
@@ -103,7 +101,7 @@ final class GrpcTransactionService(
       validate: Request => Result[DomainRequest],
       fetch: DomainRequest => Future[Response],
   ): Future[Response] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
 
     validate(request).fold(
       t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
@@ -114,7 +112,7 @@ final class GrpcTransactionService(
   override def getTransactionByEventId(
       request: GetTransactionByEventIdRequest
   ): Future[GetTransactionResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     getSingleTransaction(
@@ -127,7 +125,7 @@ final class GrpcTransactionService(
   override def getTransactionById(
       request: GetTransactionByIdRequest
   ): Future[GetTransactionResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
 
     getSingleTransaction(
       request,
@@ -139,7 +137,7 @@ final class GrpcTransactionService(
   override def getFlatTransactionByEventId(
       request: GetTransactionByEventIdRequest
   ): Future[GetFlatTransactionResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     getSingleTransaction(
@@ -152,7 +150,7 @@ final class GrpcTransactionService(
   override def getFlatTransactionById(
       request: GetTransactionByIdRequest
   ): Future[GetFlatTransactionResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     getSingleTransaction(
@@ -163,7 +161,7 @@ final class GrpcTransactionService(
   }
 
   override def getLedgerEnd(request: GetLedgerEndRequest): Future[GetLedgerEndResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     val validation = validator.validateLedgerEnd(request)

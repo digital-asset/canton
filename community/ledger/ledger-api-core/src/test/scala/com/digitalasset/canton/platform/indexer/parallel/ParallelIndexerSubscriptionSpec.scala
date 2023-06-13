@@ -19,6 +19,7 @@ import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.platform.indexer.ha.TestConnection
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
@@ -33,10 +34,10 @@ import java.sql.Connection
 import java.time.Instant
 import scala.concurrent.{Await, Future}
 
-class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
+class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with NamedLogging {
 
-  import TraceContext.Implicits.Empty.*
-  private implicit val lc: LoggingContext = LoggingContext.ForTesting
+  implicit val traceContext: TraceContext = TraceContext.empty
+  override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
   private val someParty = DbDto.PartyEntry(
     ledger_offset = "",
@@ -128,6 +129,49 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
     event_sequential_id = 0,
   )
 
+  private val someEventAssign = DbDto.EventAssign(
+    event_offset = "",
+    update_id = "",
+    command_id = None,
+    workflow_id = None,
+    submitter = "",
+    contract_id = "",
+    template_id = "",
+    flat_event_witnesses = Set.empty,
+    create_argument = Array.empty,
+    create_signatories = Set.empty,
+    create_observers = Set.empty,
+    create_agreement_text = None,
+    create_key_value = None,
+    create_key_hash = None,
+    create_argument_compression = None,
+    create_key_value_compression = None,
+    event_sequential_id = 0,
+    ledger_effective_time = 0,
+    driver_metadata = Array.empty,
+    source_domain_id = "",
+    target_domain_id = "",
+    unassign_id = "",
+    reassignment_counter = 0,
+  )
+
+  private val someEventUnassign = DbDto.EventUnassign(
+    event_offset = "",
+    update_id = "",
+    command_id = None,
+    workflow_id = None,
+    submitter = "",
+    contract_id = "",
+    template_id = "",
+    flat_event_witnesses = Set.empty,
+    event_sequential_id = 0,
+    source_domain_id = "",
+    target_domain_id = "",
+    unassign_id = "",
+    reassignment_counter = 0,
+    assignment_exclusivity = None,
+  )
+
   private val offsetsAndUpdates =
     Vector("00", "01", "02")
       .map(offset)
@@ -148,7 +192,8 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       metrics = metrics,
       toDbDto = _ => _ => Iterator(someParty, someParty),
       toMeteringDbDto = _ => Vector.empty,
-    )(lc)(
+      logger,
+    )(
       List(
         Offset.fromHexString(Ref.HexString.assertFromString("00")),
         Offset.fromHexString(Ref.HexString.assertFromString("01")),
@@ -160,6 +205,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       lastSeqEventId = 0,
       lastStringInterningId = 0,
       lastRecordTime = someTime.plusMillis(2).toEpochMilli,
+      lastTraceContext = TraceContext.empty,
       batch = Vector(
         someParty,
         someParty,
@@ -219,6 +265,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       recordTime = someRecordTime,
       divulgedContracts = List.empty,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       contractMetadata = Map.empty,
     )
 
@@ -236,7 +283,8 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
         metrics = metrics,
         toDbDto = _ => _ => Iterator.empty,
         toMeteringDbDto = _ => expected,
-      )(lc)(
+        logger,
+      )(
         List(
           (Offset.fromHexString(offset), Traced[Update](someTransactionAccepted))
         )
@@ -256,6 +304,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       lastSeqEventId = 123,
       lastStringInterningId = 234,
       lastRecordTime = 0,
+      lastTraceContext = TraceContext.empty,
       batch = Vector.empty,
       batchSize = 0,
       offsetsUpdates = Vector.empty,
@@ -275,6 +324,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
         lastSeqEventId = 0,
         lastStringInterningId = 0,
         lastRecordTime = someTime.toEpochMilli,
+        lastTraceContext = TraceContext.empty,
         batch = Vector(
           someParty,
           someEventDivulgence,
@@ -292,6 +342,16 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
           someEventExercise,
           DbDto.TransactionMeta("", "", 0L, 0L),
           someParty,
+          someEventAssign,
+          DbDto.IdFilterAssignStakeholder(0L, "", ""),
+          DbDto.IdFilterAssignStakeholder(0L, "", ""),
+          DbDto.TransactionMeta("", "", 0L, 0L),
+          someParty,
+          someEventUnassign,
+          DbDto.IdFilterUnassignStakeholder(0L, "", ""),
+          DbDto.IdFilterUnassignStakeholder(0L, "", ""),
+          DbDto.TransactionMeta("", "", 0L, 0L),
+          someParty,
         ),
         batchSize = 3,
         offsetsUpdates = offsetsAndUpdates,
@@ -299,7 +359,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
     )
     import scala.util.chaining.*
 
-    result.lastSeqEventId shouldBe 20
+    result.lastSeqEventId shouldBe 22
     result.lastStringInterningId shouldBe 1
     result.batch(1).asInstanceOf[DbDto.EventDivulgence].event_sequential_id shouldBe 16
     result.batch(3).asInstanceOf[DbDto.EventCreate].event_sequential_id shouldBe 17
@@ -323,10 +383,30 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       transactionMeta.event_sequential_id_first shouldBe 20L
       transactionMeta.event_sequential_id_last shouldBe 20L
     }
-    result.batch(16).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
-    result.batch(16).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
-    result.batch(17).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
-    result.batch(17).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
+    result.batch(16).asInstanceOf[DbDto.EventAssign].event_sequential_id shouldBe 21L
+    result.batch(17).asInstanceOf[DbDto.IdFilterAssignStakeholder].event_sequential_id shouldBe 21L
+    result.batch(18).asInstanceOf[DbDto.IdFilterAssignStakeholder].event_sequential_id shouldBe 21L
+    result.batch(19).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
+      transactionMeta.event_sequential_id_first shouldBe 21L
+      transactionMeta.event_sequential_id_last shouldBe 21L
+    }
+    result.batch(21).asInstanceOf[DbDto.EventUnassign].event_sequential_id shouldBe 22L
+    result
+      .batch(22)
+      .asInstanceOf[DbDto.IdFilterUnassignStakeholder]
+      .event_sequential_id shouldBe 22L
+    result
+      .batch(23)
+      .asInstanceOf[DbDto.IdFilterUnassignStakeholder]
+      .event_sequential_id shouldBe 22L
+    result.batch(24).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
+      transactionMeta.event_sequential_id_first shouldBe 22L
+      transactionMeta.event_sequential_id_last shouldBe 22L
+    }
+    result.batch(26).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
+    result.batch(26).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
+    result.batch(27).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
+    result.batch(27).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
   }
 
   it should "preserve sequence id if nothing to assign" in {
@@ -337,6 +417,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
         lastSeqEventId = 0,
         lastStringInterningId = 0,
         lastRecordTime = someTime.toEpochMilli,
+        lastTraceContext = TraceContext.empty,
         batch = Vector(
           someParty,
           someParty,
@@ -362,6 +443,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
         lastSeqEventId = 0,
         lastRecordTime = someTime.toEpochMilli,
         lastStringInterningId = 0,
+        lastTraceContext = TraceContext.empty,
         batch = Vector(
           someParty,
           someParty,
@@ -377,6 +459,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       lastSeqEventId = 0,
       lastStringInterningId = 0,
       lastRecordTime = someTime.toEpochMilli,
+      lastTraceContext = TraceContext.empty,
       batch = "bumm",
       batchSize = 3,
       offsetsUpdates = offsetsAndUpdates,
@@ -412,6 +495,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       lastSeqEventId = 2000,
       lastStringInterningId = 300,
       lastRecordTime = someTime.toEpochMilli,
+      lastTraceContext = TraceContext.empty,
       batch = batchPayload,
       batchSize = 0,
       offsetsUpdates = Vector.empty,
@@ -420,7 +504,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
     val zeroDbBatch = "zero"
     val outBatchF =
       ParallelIndexerSubscription.ingester(ingestFunction, "zero", dbDispatcher, metrics)(
-        LoggingContext.ForTesting
+        traceContext
       )(inBatch)
 
     val outBatch = Await.result(outBatchF, 10.seconds)
@@ -431,6 +515,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
         lastSeqEventId = 2000,
         lastStringInterningId = 300,
         lastRecordTime = someTime.toEpochMilli,
+        lastTraceContext = TraceContext.empty,
         batch = zeroDbBatch,
         batchSize = 0,
         offsetsUpdates = Vector.empty,
@@ -479,6 +564,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
       lastSeqEventId = ledgerEnd.lastEventSeqId,
       lastStringInterningId = ledgerEnd.lastStringInterningId,
       lastRecordTime = someTime.toEpochMilli,
+      lastTraceContext = TraceContext.empty,
       batch = "Some batch payload",
       batchSize = 0,
       offsetsUpdates = Vector.empty,
@@ -494,8 +580,8 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
     )
 
     val outBatchF =
-      ParallelIndexerSubscription.ingestTail(ingestTailFunction, dbDispatcher, metrics)(
-        LoggingContext.ForTesting
+      ParallelIndexerSubscription.ingestTail(ingestTailFunction, dbDispatcher, metrics, logger)(
+        traceContext
       )(batchOfBatches)
 
     val outBatch = Await.result(outBatchF, 10.seconds)
@@ -511,6 +597,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers {
         lastSeqEventId = 2000,
         lastStringInterningId = 300,
         lastRecordTime = someTime.toEpochMilli,
+        lastTraceContext = TraceContext.empty,
         batch = "zero",
         batchSize = 0,
         offsetsUpdates = Vector.empty,

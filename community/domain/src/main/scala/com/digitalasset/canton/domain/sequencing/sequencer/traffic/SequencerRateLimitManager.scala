@@ -34,7 +34,9 @@ trait SequencerRateLimitManager {
 
   /** Register a new member with its initial traffic status
     */
-  def register(member: Member, initialStatus: MemberTrafficStatus): Unit
+  def register(member: Member, initialStatus: MemberTrafficStatus)(implicit
+      ec: ExecutionContext
+  ): Future[Unit]
 
   /** Top up a member with its new extra traffic limit. Must be strictly increasing between subsequent calls.
     * @param member member to top up

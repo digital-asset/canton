@@ -257,6 +257,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
         recordTime = CantonTimestamp.Epoch.toLf,
         divulgedContracts = List.empty,
         blindingInfo = None,
+        hostedWitnesses = Nil,
         contractMetadata = Map(),
       )
 

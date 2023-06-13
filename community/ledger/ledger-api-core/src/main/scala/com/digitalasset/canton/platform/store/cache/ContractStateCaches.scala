@@ -4,9 +4,9 @@
 package com.digitalasset.canton.platform.store.cache
 
 import com.daml.lf.transaction.GlobalKey
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.{Assigned, Unassigned}
 import com.digitalasset.canton.platform.store.cache.ContractStateValue.{
   Active,
@@ -14,6 +14,7 @@ import com.digitalasset.canton.platform.store.cache.ContractStateValue.{
   ExistingContractValue,
 }
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
 
@@ -28,15 +29,15 @@ import scala.concurrent.ExecutionContext
 class ContractStateCaches(
     private[cache] val keyState: StateCache[GlobalKey, ContractKeyStateValue],
     private[cache] val contractState: StateCache[ContractId, ContractStateValue],
-)(implicit loggingContext: LoggingContext) {
-  private val logger = ContextualizedLogger.get(getClass)
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   /** Update the state caches with a batch of events.
     *
     * @param eventsBatch The contract state update events batch.
     *                    The updates batch must be non-empty and with strictly increasing event sequential ids.
     */
-  def push(eventsBatch: Vector[ContractStateEvent]): Unit =
+  def push(eventsBatch: Vector[ContractStateEvent])(implicit traceContext: TraceContext): Unit =
     if (eventsBatch.isEmpty) {
       logger.error("push triggered with empty events batch")
     } else {
@@ -84,12 +85,14 @@ object ContractStateCaches {
       maxContractsCacheSize: Long,
       maxKeyCacheSize: Long,
       metrics: Metrics,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
-      executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      executionContext: ExecutionContext
   ): ContractStateCaches =
     new ContractStateCaches(
-      contractState = ContractsStateCache(initialCacheIndex, maxContractsCacheSize, metrics),
-      keyState = ContractKeyStateCache(initialCacheIndex, maxKeyCacheSize, metrics),
+      contractState =
+        ContractsStateCache(initialCacheIndex, maxContractsCacheSize, metrics, loggerFactory),
+      keyState = ContractKeyStateCache(initialCacheIndex, maxKeyCacheSize, metrics, loggerFactory),
+      loggerFactory = loggerFactory,
     )
 }

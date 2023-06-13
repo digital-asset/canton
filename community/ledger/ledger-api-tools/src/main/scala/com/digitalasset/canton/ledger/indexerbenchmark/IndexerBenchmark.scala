@@ -10,8 +10,6 @@ import akka.stream.scaladsl.Source
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.data.Time
-import com.daml.logging.LoggingContext
-import com.daml.logging.LoggingContext.newLoggingContext
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, ProxyMetricsFactory}
@@ -27,9 +25,11 @@ import com.digitalasset.canton.ledger.configuration.{
 }
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.indexer.{Indexer, IndexerServiceOwner, JdbcIndexer}
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.slf4j.LoggerFactory
 
 import java.util.concurrent.{Executors, TimeUnit}
@@ -38,13 +38,15 @@ import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Futu
 import scala.io.StdIn
 
 // TODO(i12337): Use it or remove it
-class IndexerBenchmark() {
+class IndexerBenchmark() extends NamedLogging {
+
+  override val loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
 
   def run(
       createUpdates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
       config: Config,
   ): Future[Unit] = {
-    newLoggingContext { implicit loggingContext =>
+    withNewTraceContext { implicit traceContext =>
       val system = ActorSystem("IndexerBenchmark")
       implicit val materializer: Materializer = Materializer(system)
       implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
@@ -71,6 +73,7 @@ class IndexerBenchmark() {
               256,
               metrics,
               indexerExecutionContext,
+              loggerFactory,
             )
             .acquire()
         indexerFactory = new JdbcIndexer.Factory(
@@ -82,6 +85,7 @@ class IndexerBenchmark() {
           inMemoryState,
           inMemoryStateUpdaterFlow,
           servicesExecutionContext,
+          loggerFactory,
         )
         _ = println("Setting up the index database...")
         indexer <- indexer(config, indexerExecutionContext, indexerFactory)
@@ -123,14 +127,14 @@ class IndexerBenchmark() {
       indexerExecutionContext: ExecutionContextExecutor,
       indexerFactory: JdbcIndexer.Factory,
   )(implicit
-      loggingContext: LoggingContext,
+      traceContext: TraceContext,
       rc: ResourceContext,
   ): resources.Resource[ResourceContext, Indexer] =
     Await
       .result(
         IndexerServiceOwner
-          .migrateOnly(config.dataSource.jdbcUrl)
-          .map(_ => indexerFactory.initialized())(indexerExecutionContext),
+          .migrateOnly(config.dataSource.jdbcUrl, loggerFactory)
+          .map(_ => indexerFactory.initialized(logger))(indexerExecutionContext),
         Duration(5, "minute"),
       )
       .acquire()
@@ -183,7 +187,7 @@ class IndexerBenchmark() {
 
       override def stateUpdates(
           beginAfter: Option[Offset]
-      )(implicit loggingContext: LoggingContext): Source[(Offset, Traced[Update]), NotUsed] = {
+      )(implicit traceContext: TraceContext): Source[(Offset, Traced[Update]), NotUsed] = {
         assert(beginAfter.isEmpty, s"beginAfter is $beginAfter")
         updates
       }

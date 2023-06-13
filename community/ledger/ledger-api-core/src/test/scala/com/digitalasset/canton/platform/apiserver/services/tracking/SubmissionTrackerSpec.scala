@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.platform.apiserver.services.tracking
 
-import com.daml.error.{ContextualizedErrorLogger, ErrorsAssertions}
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.error.ErrorsAssertions
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.ledger.api.v1.commands.Commands
-import com.daml.ledger.api.v1.completion.Completion
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.completion.Completion
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.error.{
   CommonErrors,
   DamlContextualizedErrorLogger,
@@ -39,8 +40,6 @@ class SubmissionTrackerSpec
     with IntegrationPatience
     with Eventually {
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
-  private implicit val errorLogger: ContextualizedErrorLogger =
-    DamlContextualizedErrorLogger.forTesting(getClass)
 
   behavior of classOf[SubmissionTracker].getSimpleName
 
@@ -53,33 +52,33 @@ class SubmissionTrackerSpec
       // Completion with mismatching submissionId
       completionWithMismatchingSubmissionId = completionOk.copy(submissionId = "wrongSubmissionId")
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions =
-          Seq(completionWithMismatchingSubmissionId)
+        CompletionStreamResponse(completion =
+          Some(completionWithMismatchingSubmissionId)
         ) -> submitters
       )
 
       // Completion with mismatching commandId
       completionWithMismatchingCommandId = completionOk.copy(commandId = "wrongCommandId")
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions =
-          Seq(completionWithMismatchingCommandId)
+        CompletionStreamResponse(completion =
+          Some(completionWithMismatchingCommandId)
         ) -> submitters
       )
 
       // Completion with mismatching applicationId
       completionWithMismatchingAppId = completionOk.copy(applicationId = "wrongAppId")
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionWithMismatchingAppId)) -> submitters
+        CompletionStreamResponse(completion = Some(completionWithMismatchingAppId)) -> submitters
       )
 
       // Completion with mismatching actAs
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionOk)) -> (submitters + "another_party")
+        CompletionStreamResponse(completion = Some(completionOk)) -> (submitters + "another_party")
       )
 
       // Matching completion
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionOk)) -> submitters
+        CompletionStreamResponse(completion = Some(completionOk)) -> submitters
       )
 
       trackedSubmission <- trackedSubmissionF
@@ -110,7 +109,7 @@ class SubmissionTrackerSpec
       // Complete the submission with a failed completion
       _ = submissionTracker.onCompletion(
         CompletionStreamResponse(
-          completions = Seq(completionFailed),
+          completion = Some(completionFailed),
           checkpoint = None,
         ) -> submitters
       )
@@ -159,7 +158,7 @@ class SubmissionTrackerSpec
 
       // Complete the first submission to ensure clean pending map at the end
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionOk), checkpoint = None) -> submitters
+        CompletionStreamResponse(completion = Some(completionOk), checkpoint = None) -> submitters
       )
       _ <- firstSubmissionF
     } yield inside(actualException) { case actualStatusRuntimeException: StatusRuntimeException =>
@@ -231,7 +230,7 @@ class SubmissionTrackerSpec
       // Complete the submission with completion response
       _ = submissionTracker.onCompletion(
         CompletionStreamResponse(
-          completions = Seq(completionOk.copy(status = None)),
+          completion = Some(completionOk.copy(status = None)),
           checkpoint = None,
         ) -> submitters
       )
@@ -279,11 +278,16 @@ class SubmissionTrackerSpec
     }
   }
 
-  trait SubmissionTrackerFixture {
+  abstract class SubmissionTrackerFixture extends BaseTest with Eventually {
     private val timer = new Timer("test-timer")
-    val timeoutSupport = new CancellableTimeoutSupportImpl(timer)
+    val timeoutSupport = new CancellableTimeoutSupportImpl(timer, loggerFactory)
     val submissionTracker =
-      new SubmissionTrackerImpl(timeoutSupport, maxCommandsInFlight = 3, Metrics.ForTesting)
+      new SubmissionTrackerImpl(
+        timeoutSupport,
+        maxCommandsInFlight = 3,
+        Metrics.ForTesting,
+        loggerFactory,
+      )
 
     val zeroTimeout: Duration = Duration.ZERO
     val `1 day timeout`: Duration = Duration.ofDays(1L)

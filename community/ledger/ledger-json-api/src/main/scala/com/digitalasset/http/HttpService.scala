@@ -1,0 +1,272 @@
+// Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.daml.http
+
+import akka.actor.ActorSystem
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.Http.ServerBinding
+import akka.http.scaladsl.server.Route
+import akka.http.scaladsl.settings.ServerSettings
+import akka.stream.Materializer
+import ch.qos.logback.classic.Level as LogLevel
+import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.http.json.{
+  ApiValueToJsValueConverter,
+  DomainJsonDecoder,
+  DomainJsonEncoder,
+  JsValueToApiValueConverter,
+}
+import com.daml.http.metrics.HttpApiMetrics
+import com.daml.http.util.ApiValueToLfValueConverter
+import com.daml.http.util.FutureUtil.*
+import com.daml.http.util.Logging.InstanceUUID
+import com.daml.jwt.JwtDecoder
+import com.daml.jwt.domain.Jwt
+import com.daml.ledger.api.refinements.ApiTypes.ApplicationId
+import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
+import com.daml.ledger.service.LedgerReader
+import com.daml.ledger.service.LedgerReader.PackageStore
+import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
+import com.daml.metrics.akkahttp.HttpMetricsInterceptor
+import com.daml.ports.{Port, PortFiles}
+import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
+import com.digitalasset.canton.ledger.client.configuration.{
+  CommandClientConfiguration,
+  LedgerClientConfiguration,
+  LedgerIdRequirement,
+}
+import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.PackageClient
+import com.digitalasset.canton.ledger.client.withoutledgerid.LedgerClient as DamlLedgerClient
+import io.grpc.Channel
+import io.grpc.health.v1.health.{HealthCheckRequest, HealthGrpc}
+import scalaz.*
+import scalaz.Scalaz.*
+
+import java.nio.file.Path
+import scala.concurrent.{ExecutionContext, Future}
+
+class HttpService(
+    startSettings: StartSettings,
+    channel: Channel,
+)(implicit
+  asys: ActorSystem,
+  mat: Materializer,
+  esf: ExecutionSequencerFactory,
+  lc: LoggingContextOf[InstanceUUID],
+  metrics: HttpApiMetrics,
+) extends ResourceOwner[ServerBinding] {
+  private val logger = ContextualizedLogger.get(getClass)
+
+  private type ET[A] = EitherT[Future, HttpService.Error, A]
+
+  private def isLogLevelEqualOrBelowDebug(logLevel: Option[LogLevel]) =
+    logLevel.exists(!_.isGreaterOrEqual(LogLevel.INFO))
+
+  @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
+  def acquire()(implicit context: ResourceContext): Resource[ServerBinding] = Resource({
+    logger.info("Starting JSON API server")
+
+    import startSettings.*
+    val DummyApplicationId: ApplicationId = ApplicationId("HTTP-JSON-API-Gateway")
+
+    implicit val settings: ServerSettings = ServerSettings(asys).withTransparentHeadRequests(true)
+    val clientConfig = LedgerClientConfiguration(
+      applicationId = ApplicationId.unwrap(DummyApplicationId),
+      ledgerIdRequirement = LedgerIdRequirement.none,
+      commandClient = CommandClientConfiguration.default,
+    )
+
+    val ledgerClient = DamlLedgerClient(channel, clientConfig)
+    import akka.http.scaladsl.server.Directives.*
+    val bindingEt: EitherT[Future, HttpService.Error, ServerBinding] = for {
+      _ <- eitherT(Future.successful(\/-(ledgerClient)))
+      packageCache = LedgerReader.LoadCache.freshCache()
+
+      packageService = new PackageService(doLoad(ledgerClient.packageClient, packageCache))
+
+      commandService = new CommandService(
+        LedgerClientJwt.submitAndWaitForTransaction(ledgerClient),
+        LedgerClientJwt.submitAndWaitForTransactionTree(ledgerClient),
+      )
+
+      contractsService = new ContractsService(
+        packageService.resolveContractTypeId,
+        packageService.allTemplateIds,
+        LedgerClientJwt.getActiveContracts(ledgerClient),
+        LedgerClientJwt.getCreatesAndArchivesSince(ledgerClient),
+        LedgerReader.damlLfTypeLookup(() => packageService.packageStore),
+      )
+
+      partiesService = new PartiesService(
+        LedgerClientJwt.listKnownParties(ledgerClient),
+        LedgerClientJwt.getParties(ledgerClient),
+        LedgerClientJwt.allocateParty(ledgerClient),
+      )
+
+      packageManagementService = new PackageManagementService(
+        LedgerClientJwt.listPackages(ledgerClient),
+        LedgerClientJwt.getPackage(ledgerClient),
+        { case (jwt, ledgerId, byteString) =>
+          implicit lc =>
+            LedgerClientJwt
+              .uploadDar(ledgerClient)(ExecutionContext.parasitic)(
+                jwt,
+                ledgerId,
+                byteString,
+              )(lc)
+              .flatMap(_ => packageService.reload(jwt, ledgerId))
+              .map(_ => ())
+        },
+      )
+
+      meteringReportService = new MeteringReportService(
+        { case (jwt, request) =>
+          implicit lc =>
+            LedgerClientJwt
+              .getMeteringReport(ledgerClient)(ExecutionContext.parasitic)(jwt, request)(
+                lc
+              )
+        }
+      )
+
+      ledgerHealthService = HealthGrpc.stub(channel)
+
+      healthService = new HealthService(() => ledgerHealthService.check(HealthCheckRequest()))
+
+      _ = metrics.health.registerHealthGauge(
+        HttpApiMetrics.ComponentName,
+        () => healthService.ready().map(_.checks.forall(_.result)),
+      )
+
+      (encoder, decoder) = HttpService.buildJsonCodecs(packageService)
+
+      jsonEndpoints = new Endpoints(
+        allowNonHttps,
+        HttpService.decodeJwt,
+        commandService,
+        contractsService,
+        partiesService,
+        packageManagementService,
+        meteringReportService,
+        healthService,
+        encoder,
+        decoder,
+        debugLoggingOfHttpBodies,
+        ledgerClient.userManagementClient,
+        ledgerClient.identityClient,
+      )
+
+      websocketService = new WebSocketService(
+        contractsService,
+        packageService.resolveContractTypeId,
+        decoder,
+        LedgerReader.damlLfTypeLookup(() => packageService.packageStore),
+        wsConfig,
+      )
+
+      websocketEndpoints = new WebsocketEndpoints(
+        HttpService.decodeJwt,
+        websocketService,
+        ledgerClient.userManagementClient,
+        ledgerClient.identityClient,
+      )
+
+      rateDurationSizeMetrics = HttpMetricsInterceptor.rateDurationSizeMetrics(metrics.http)
+
+      defaultEndpoints =
+        rateDurationSizeMetrics apply concat(
+          jsonEndpoints.all: Route,
+          websocketEndpoints.transactionWebSocket,
+        )
+
+      allEndpoints = concat(
+        staticContentConfig.cata(
+          c => concat(StaticContentEndpoints.all(c), defaultEndpoints),
+          defaultEndpoints,
+        ),
+        EndpointsCompanion.notFound,
+      )
+
+      binding <- liftET[HttpService.Error](
+        Http()
+          .newServerAt(address, httpPort.getOrElse(0))
+          .withSettings(settings)
+          .bind(allEndpoints)
+      )
+
+      _ <- either(portFile.cata(f => HttpService.createPortFile(f, binding), \/-(()))): ET[Unit]
+
+    } yield binding
+
+    (bindingEt.run: Future[HttpService.Error \/ ServerBinding]).flatMap {
+      case -\/(error) => Future.failed(new RuntimeException(error.message))
+      case \/-(binding) => Future.successful(binding)
+    }
+  })(binding => {
+    logger.info("Stopping JSON API server...")
+    binding.unbind().void
+  })
+
+  private[http] def doLoad(
+      packageClient: PackageClient,
+      loadCache: LedgerReader.LoadCache,
+  )(jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(ids: Set[String])(implicit
+      ec: ExecutionContext,
+      lc: LoggingContextOf[InstanceUUID],
+  ): Future[PackageService.ServerError \/ Option[PackageStore]] =
+    LedgerReader
+      .loadPackageStoreUpdates(
+        packageClient,
+        loadCache,
+        some(jwt.value),
+        ledgerId,
+      )(ids)
+      .map(_.leftMap(e => PackageService.ServerError(e)))
+}
+
+object HttpService {
+  // TODO(#13303) Check that this is intended to be used as ValidateJwt in prod code
+  //              and inline.
+  // Decode JWT without any validation
+  private[http] val decodeJwt: EndpointsCompanion.ValidateJwt =
+    jwt => JwtDecoder.decode(jwt).leftMap(e => EndpointsCompanion.Unauthorized(e.shows))
+
+  private[http] def buildJsonCodecs(
+      packageService: PackageService
+  )(implicit ec: ExecutionContext): (DomainJsonEncoder, DomainJsonDecoder) = {
+
+    val lfTypeLookup = LedgerReader.damlLfTypeLookup(() => packageService.packageStore) _
+    val jsValueToApiValueConverter = new JsValueToApiValueConverter(lfTypeLookup)
+
+    val apiValueToJsValueConverter = new ApiValueToJsValueConverter(
+      ApiValueToLfValueConverter.apiValueToLfValue
+    )
+
+    val encoder = new DomainJsonEncoder(
+      apiValueToJsValueConverter.apiRecordToJsObject,
+      apiValueToJsValueConverter.apiValueToJsValue,
+    )
+
+    val decoder = new DomainJsonDecoder(
+      packageService.resolveContractTypeId,
+      packageService.resolveTemplateRecordType,
+      packageService.resolveChoiceArgType,
+      packageService.resolveKeyType,
+      jsValueToApiValueConverter.jsValueToApiValue,
+      jsValueToApiValueConverter.jsValueToLfValue,
+    )
+
+    (encoder, decoder)
+  }
+
+  private[http] def createPortFile(
+      file: Path,
+      binding: akka.http.scaladsl.Http.ServerBinding,
+  ): HttpService.Error \/ Unit = {
+    import util.ErrorOps.*
+    PortFiles.write(file, Port(binding.localAddress.getPort)).liftErr(Error.apply)
+  }
+
+  final case class Error(message: String)
+}

@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.index
 
 import akka.NotUsed
 import akka.stream.scaladsl.Flow
+import cats.implicits.toBifunctorOps
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.ResourceOwner
@@ -14,7 +15,6 @@ import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.Node.{Create, Exercise}
 import com.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.daml.lf.transaction.{Node, NodeId}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{Metrics, Timed}
 import com.daml.timer.FutureCheck.*
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.api.DeduplicationPeriod.{
 }
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{CompletionInfo, Update}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResult, UpdaterFlow}
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
@@ -31,7 +32,7 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CompletionDetails
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
 import com.digitalasset.canton.platform.{Contract, InMemoryState, Key, Party}
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
@@ -43,7 +44,6 @@ import scala.concurrent.{ExecutionContext, Future}
   * into the Index database) for populating the Ledger API server in-memory state (see [[InMemoryState]]).
   */
 private[platform] object InMemoryStateUpdaterFlow {
-  private val logger = ContextualizedLogger.get(getClass)
 
   private[index] def apply(
       prepareUpdatesParallelism: Int,
@@ -51,10 +51,11 @@ private[platform] object InMemoryStateUpdaterFlow {
       updateCachesExecutionContext: ExecutionContext,
       preparePackageMetadataTimeOutWarning: FiniteDuration,
       metrics: Metrics,
+      logger: TracedLogger,
   )(
       prepare: (Vector[(Offset, Traced[Update])], Long) => PrepareResult,
       update: PrepareResult => Unit,
-  )(implicit loggingContext: LoggingContext): UpdaterFlow =
+  )(implicit traceContext: TraceContext): UpdaterFlow =
     Flow[(Vector[(Offset, Traced[Update])], Long)]
       .filter(_._1.nonEmpty)
       .mapAsync(prepareUpdatesParallelism) { case (batch, lastEventSequentialId) =>
@@ -78,21 +79,20 @@ private[platform] object InMemoryStateUpdaterFlow {
 
 private[platform] object InMemoryStateUpdater {
   final case class PrepareResult(
-      updates: Vector[TransactionLogUpdate],
+      updates: Vector[Traced[TransactionLogUpdate]],
       lastOffset: Offset,
       lastEventSequentialId: Long,
+      lastTraceContext: TraceContext,
       packageMetadata: PackageMetadata,
   )
   type UpdaterFlow = Flow[(Vector[(Offset, Traced[Update])], Long), Unit, NotUsed]
-
-  private val logger = ContextualizedLogger.get(getClass)
-
   def owner(
       inMemoryState: InMemoryState,
       prepareUpdatesParallelism: Int,
       preparePackageMetadataTimeOutWarning: FiniteDuration,
       metrics: Metrics,
-  )(implicit loggingContext: LoggingContext): ResourceOwner[UpdaterFlow] = for {
+      loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext): ResourceOwner[UpdaterFlow] = for {
     prepareUpdatesExecutor <- ResourceOwner.forExecutorService(() =>
       InstrumentedExecutors.newWorkStealingExecutor(
         metrics.daml.lapi.threadpool.indexBypass.prepareUpdates,
@@ -107,17 +107,19 @@ private[platform] object InMemoryStateUpdater {
         metrics.executorServiceMetrics,
       )
     )
+    logger = loggerFactory.getTracedLogger(getClass)
   } yield InMemoryStateUpdaterFlow(
     prepareUpdatesParallelism = prepareUpdatesParallelism,
     prepareUpdatesExecutionContext = ExecutionContext.fromExecutorService(prepareUpdatesExecutor),
     updateCachesExecutionContext = ExecutionContext.fromExecutorService(updateCachesExecutor),
     preparePackageMetadataTimeOutWarning = preparePackageMetadataTimeOutWarning,
     metrics = metrics,
+    logger = logger,
   )(
     prepare = prepare(archive =>
       Timed.value(metrics.daml.index.packageMetadata.decodeArchive, PackageMetadata.from(archive))
     ),
-    update = update(inMemoryState, loggingContext),
+    update = update(inMemoryState, logger),
   )
 
   private[index] def extractMetadataFromUploadedPackages(
@@ -134,64 +136,78 @@ private[platform] object InMemoryStateUpdater {
   private[index] def prepare(archiveToMetadata: DamlLf.Archive => PackageMetadata)(
       batch: Vector[(Offset, Traced[Update])],
       lastEventSequentialId: Long,
-  ): PrepareResult =
+  ): PrepareResult = {
+    val (offset, traceContext) = batch.lastOption.fold(
+      throw new NoSuchElementException("empty batch")
+    )(_.bimap(identity, _.traceContext))
     PrepareResult(
       updates = batch.collect {
-        case (offset, Traced(u: Update.TransactionAccepted)) =>
-          convertTransactionAccepted(offset, u)
-        case (offset, Traced(u: Update.CommandRejected)) => convertTransactionRejected(offset, u)
+        case (offset, t @ Traced(u: Update.TransactionAccepted)) =>
+          t.map(_ => convertTransactionAccepted(offset, u))
+        case (offset, r @ Traced(u: Update.CommandRejected)) =>
+          r.map(_ => convertTransactionRejected(offset, u))
       },
-      lastOffset = batch.lastOption.fold(throw new NoSuchElementException("empty batch"))(_._1),
+      lastOffset = offset,
       lastEventSequentialId = lastEventSequentialId,
+      lastTraceContext = traceContext,
       packageMetadata = extractMetadataFromUploadedPackages(archiveToMetadata)(batch),
     )
+  }
 
   private[index] def update(
       inMemoryState: InMemoryState,
-      loggingContext: LoggingContext,
+      logger: TracedLogger,
   )(result: PrepareResult): Unit = {
     inMemoryState.packageMetadataView.update(result.packageMetadata)
     updateCaches(inMemoryState, result.updates)
     // must be the last update: see the comment inside the method for more details
     // must be after cache updates: see the comment inside the method for more details
-    updateLedgerEnd(inMemoryState, result.lastOffset, result.lastEventSequentialId)(loggingContext)
+    updateLedgerEnd(inMemoryState, result.lastOffset, result.lastEventSequentialId, logger)(
+      result.lastTraceContext
+    )
     // must be after LedgerEnd update because this could trigger API actions relating to this LedgerEnd
     trackSubmissions(inMemoryState.submissionTracker, result.updates)
   }
 
   private def trackSubmissions(
       submissionTracker: SubmissionTracker,
-      updates: Vector[TransactionLogUpdate],
+      updates: Vector[Traced[TransactionLogUpdate]],
   ): Unit =
     updates.view
       .collect {
-        case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, Some(completionDetails)) =>
+        case Traced(
+              TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, Some(completionDetails), _)
+            ) =>
           completionDetails.completionStreamResponse -> completionDetails.submitters
-        case rejected: TransactionLogUpdate.TransactionRejected =>
+        case Traced(rejected: TransactionLogUpdate.TransactionRejected) =>
           rejected.completionDetails.completionStreamResponse -> rejected.completionDetails.submitters
       }
       .foreach(submissionTracker.onCompletion)
 
   private def updateCaches(
       inMemoryState: InMemoryState,
-      updates: Vector[TransactionLogUpdate],
+      updates: Vector[Traced[TransactionLogUpdate]],
   ): Unit =
-    updates.foreach { transaction: TransactionLogUpdate =>
+    updates.foreach { tracedTransaction: Traced[TransactionLogUpdate] =>
       // TODO(i12283) LLP: Batch update caches
-      inMemoryState.inMemoryFanoutBuffer.push(transaction.offset, transaction)
-
-      val contractStateEventsBatch = convertToContractStateEvents(transaction)
-      if (contractStateEventsBatch.nonEmpty) {
-        inMemoryState.contractStateCaches.push(contractStateEventsBatch)
-      }
+      tracedTransaction.withTraceContext(implicit traceContext =>
+        transaction => {
+          inMemoryState.inMemoryFanoutBuffer.push(transaction.offset, transaction)
+          val contractStateEventsBatch = convertToContractStateEvents(transaction)
+          if (contractStateEventsBatch.nonEmpty) {
+            inMemoryState.contractStateCaches.push(contractStateEventsBatch)
+          }
+        }
+      )
     }
 
   private def updateLedgerEnd(
       inMemoryState: InMemoryState,
       lastOffset: Offset,
       lastEventSequentialId: Long,
+      logger: TracedLogger,
   )(implicit
-      loggingContext: LoggingContext
+      traceConext: TraceContext
   ): Unit = {
     inMemoryState.ledgerEndCache.set((lastOffset, lastEventSequentialId))
     // the order here is very important: first we need to make data available for point-wise lookups
@@ -329,6 +345,7 @@ private[platform] object InMemoryStateUpdater {
             optDeduplicationOffset = deduplicationOffset,
             optDeduplicationDurationSeconds = deduplicationDurationSeconds,
             optDeduplicationDurationNanos = deduplicationDurationNanos,
+            domainId = txAccepted.transactionMeta.optDomainId.map(_.toProtoPrimitive),
           ),
           submitters = completionInfo.actAs.toSet,
         )
@@ -342,6 +359,7 @@ private[platform] object InMemoryStateUpdater {
       offset = offset,
       events = events.toVector,
       completionDetails = completionDetails,
+      domainId = txAccepted.transactionMeta.optDomainId.map(_.toString),
     )
   }
 
@@ -365,6 +383,7 @@ private[platform] object InMemoryStateUpdater {
           optDeduplicationOffset = deduplicationOffset,
           optDeduplicationDurationSeconds = deduplicationDurationSeconds,
           optDeduplicationDurationNanos = deduplicationDurationNanos,
+          domainId = u.optDomainId.map(_.toProtoPrimitive),
         ),
         submitters = u.completionInfo.actAs.toSet,
       ),

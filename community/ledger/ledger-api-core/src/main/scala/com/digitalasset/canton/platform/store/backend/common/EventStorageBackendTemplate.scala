@@ -11,19 +11,17 @@ import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.backend.Conversions.{
-  contractId,
-  eventId,
   hashFromHexString,
   offset,
   timestampFromMicros,
 }
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawTransactionEvent
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlAsVectorOf.*
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.Raw
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.platform.{Identifier, Party}
 
 import java.sql.Connection
 import scala.collection.immutable.ArraySeq
@@ -55,6 +53,7 @@ object EventStorageBackendTemplate {
       "create_key_value_compression",
       "submitters",
       "driver_metadata",
+      "domain_id",
     )
 
   private val baseColumnsForFlatTransactionsExercise =
@@ -78,6 +77,7 @@ object EventStorageBackendTemplate {
       "create_key_value_compression",
       "submitters",
       "NULL as driver_metadata",
+      "domain_id",
     )
 
   val selectColumnsForFlatTransactionsCreate: String =
@@ -91,7 +91,7 @@ object EventStorageBackendTemplate {
 
   private type SharedRow =
     Offset ~ String ~ Int ~ Long ~ String ~ String ~ Timestamp ~ Int ~ Option[String] ~
-      Option[String] ~ Array[Int] ~ Option[Array[Int]]
+      Option[String] ~ Array[Int] ~ Option[Array[Int]] ~ Option[Int]
 
   private val sharedRow: RowParser[SharedRow] =
     offset("event_offset") ~
@@ -105,7 +105,8 @@ object EventStorageBackendTemplate {
       str("command_id").? ~
       str("workflow_id").? ~
       array[Int]("event_witnesses") ~
-      array[Int]("submitters").?
+      array[Int]("submitters").? ~
+      int("domain_id").?
 
   private type CreatedEventRow =
     SharedRow ~ Array[Byte] ~ Option[Int] ~ Array[Int] ~ Array[Int] ~ Option[String] ~
@@ -150,7 +151,7 @@ object EventStorageBackendTemplate {
   ): RowParser[EventStorageBackend.Entry[Raw.FlatEvent.Created]] =
     createdEventRow map {
       case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~
-          templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ createArgument ~ createArgumentCompression ~
+          templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ createArgument ~ createArgumentCompression ~
           createSignatories ~ createObservers ~ createAgreementText ~ createKeyValue ~ createKeyHash ~ createKeyValueCompression ~ driverMetadata =>
         // ArraySeq.unsafeWrapArray is safe here
         // since we get the Array from parsing and don't let it escape anywhere.
@@ -191,6 +192,7 @@ object EventStorageBackendTemplate {
             ),
             driverMetadata = driverMetadata,
           ),
+          domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
         )
     }
 
@@ -199,7 +201,7 @@ object EventStorageBackendTemplate {
       stringInterning: StringInterning,
   ): RowParser[EventStorageBackend.Entry[Raw.FlatEvent.Archived]] =
     archivedEventRow map {
-      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters =>
+      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId =>
         // ArraySeq.unsafeWrapArray is safe here
         // since we get the Array from parsing and don't let it escape anywhere.
         EventStorageBackend.Entry(
@@ -225,6 +227,7 @@ object EventStorageBackendTemplate {
                 .toArray
             ),
           ),
+          domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
         )
     }
 
@@ -242,7 +245,7 @@ object EventStorageBackendTemplate {
       stringInterning: StringInterning,
   ): RowParser[EventStorageBackend.Entry[Raw.TreeEvent.Created]] =
     createdEventRow map {
-      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ createArgument ~ createArgumentCompression ~ createSignatories ~ createObservers ~ createAgreementText ~ createKeyValue ~ createKeyHash ~ createKeyValueCompression ~ driverMetadata =>
+      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ createArgument ~ createArgumentCompression ~ createSignatories ~ createObservers ~ createAgreementText ~ createKeyValue ~ createKeyHash ~ createKeyValueCompression ~ driverMetadata =>
         // ArraySeq.unsafeWrapArray is safe here
         // since we get the Array from parsing and don't let it escape anywhere.
         EventStorageBackend.Entry(
@@ -282,6 +285,7 @@ object EventStorageBackendTemplate {
             ),
             driverMetadata = driverMetadata,
           ),
+          domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
         )
     }
 
@@ -290,7 +294,7 @@ object EventStorageBackendTemplate {
       stringInterning: StringInterning,
   ): RowParser[EventStorageBackend.Entry[Raw.TreeEvent.Exercised]] =
     exercisedEventRow map {
-      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ exerciseConsuming ~ qualifiedChoiceName ~ exerciseArgument ~ exerciseArgumentCompression ~ exerciseResult ~ exerciseResultCompression ~ exerciseActors ~ exerciseChildEventIds =>
+      case eventOffset ~ transactionId ~ nodeIndex ~ eventSequentialId ~ eventId ~ contractId ~ ledgerEffectiveTime ~ templateId ~ commandId ~ workflowId ~ eventWitnesses ~ submitters ~ internedDomainId ~ exerciseConsuming ~ qualifiedChoiceName ~ exerciseArgument ~ exerciseArgumentCompression ~ exerciseResult ~ exerciseResultCompression ~ exerciseActors ~ exerciseChildEventIds =>
         val Ref.QualifiedChoiceName(interfaceId, choiceName) =
           Ref.QualifiedChoiceName.assertFromString(qualifiedChoiceName)
         // ArraySeq.unsafeWrapArray is safe here
@@ -329,6 +333,7 @@ object EventStorageBackendTemplate {
                 .toArray
             ),
           ),
+          domainId = internedDomainId.map(stringInterning.domainId.unsafe.externalize),
         )
     }
 
@@ -405,6 +410,275 @@ object EventStorageBackendTemplate {
         (event_sequential_id_first, event_sequential_id_last)
     }
 
+  val assignEventRow =
+    str("command_id").? ~
+      str("workflow_id").? ~
+      str("event_offset") ~
+      int("source_domain_id") ~
+      int("target_domain_id") ~
+      str("unassign_id") ~
+      int("submitter") ~
+      long("reassignment_counter") ~
+      str("update_id") ~
+      str("contract_id") ~
+      int("template_id") ~
+      array[Int]("flat_event_witnesses") ~
+      array[Int]("create_signatories") ~
+      array[Int]("create_observers") ~
+      str("create_agreement_text").? ~
+      byteArray("create_argument") ~
+      int("create_argument_compression").? ~
+      byteArray("create_key_value").? ~
+      int("create_key_value_compression").? ~
+      timestampFromMicros("ledger_effective_time") ~
+      hashFromHexString("create_key_hash").? ~
+      byteArray("driver_metadata")
+
+  private def assignEventParser(
+      allQueryingParties: Set[Int],
+      stringInterning: StringInterning,
+  ): RowParser[EventStorageBackend.RawAssignEvent] =
+    assignEventRow map {
+      case commandId ~
+          workflowId ~
+          offset ~
+          sourceDomainId ~
+          targetDomainId ~
+          unassignId ~
+          submitter ~
+          reassignmentCounter ~
+          updateId ~
+          contractId ~
+          templateId ~
+          flatEventWitnesses ~
+          createSignatories ~
+          createObservers ~
+          createAgreementText ~
+          createArgument ~
+          createArgumentCompression ~
+          createKeyValue ~
+          createKeyValueCompression ~
+          ledgerEffectiveTime ~
+          createKeyHash ~
+          driverMetadata =>
+        EventStorageBackend.RawAssignEvent(
+          commandId = commandId,
+          workflowId = workflowId,
+          offset = offset,
+          sourceDomainId = stringInterning.domainId.unsafe.externalize(sourceDomainId),
+          targetDomainId = stringInterning.domainId.unsafe.externalize(targetDomainId),
+          unassignId = unassignId,
+          submitter = stringInterning.party.unsafe.externalize(submitter),
+          reassignmentCounter = reassignmentCounter,
+          rawCreatedEvent = EventStorageBackend.RawCreatedEvent(
+            updateId = updateId,
+            contractId = contractId,
+            templateId = stringInterning.templateId.externalize(templateId),
+            witnessParties = flatEventWitnesses.view
+              .filter(allQueryingParties)
+              .map(stringInterning.party.unsafe.externalize)
+              .toSet,
+            signatories =
+              createSignatories.view.map(stringInterning.party.unsafe.externalize).toSet,
+            observers = createObservers.view.map(stringInterning.party.unsafe.externalize).toSet,
+            agreementText = createAgreementText,
+            createArgument = createArgument,
+            createArgumentCompression = createArgumentCompression,
+            createKeyValue = createKeyValue,
+            createKeyValueCompression = createKeyValueCompression,
+            ledgerEffectiveTime = ledgerEffectiveTime,
+            createKeyHash = createKeyHash,
+            driverMetadata = driverMetadata,
+          ),
+        )
+    }
+
+  val unassignEventRow =
+    str("command_id").? ~
+      str("workflow_id").? ~
+      str("event_offset") ~
+      int("source_domain_id") ~
+      int("target_domain_id") ~
+      str("unassign_id") ~
+      int("submitter") ~
+      long("reassignment_counter") ~
+      str("update_id") ~
+      str("contract_id") ~
+      int("template_id") ~
+      array[Int]("flat_event_witnesses") ~
+      timestampFromMicros("assignment_exclusivity").?
+
+  private def unassignEventParser(
+      allQueryingParties: Set[Int],
+      stringInterning: StringInterning,
+  ): RowParser[EventStorageBackend.RawUnassignEvent] =
+    unassignEventRow map {
+      case commandId ~
+          workflowId ~
+          offset ~
+          sourceDomainId ~
+          targetDomainId ~
+          unassignId ~
+          submitter ~
+          reassignmentCounter ~
+          updateId ~
+          contractId ~
+          templateId ~
+          flatEventWitnesses ~
+          assignmentExclusivity =>
+        EventStorageBackend.RawUnassignEvent(
+          commandId = commandId,
+          workflowId = workflowId,
+          offset = offset,
+          sourceDomainId = stringInterning.domainId.unsafe.externalize(sourceDomainId),
+          targetDomainId = stringInterning.domainId.unsafe.externalize(targetDomainId),
+          unassignId = unassignId,
+          submitter = stringInterning.party.unsafe.externalize(submitter),
+          reassignmentCounter = reassignmentCounter,
+          updateId = updateId,
+          contractId = contractId,
+          templateId = stringInterning.templateId.unsafe.externalize(templateId),
+          witnessParties = flatEventWitnesses.view
+            .filter(allQueryingParties)
+            .map(stringInterning.party.unsafe.externalize)
+            .toSet,
+          assignmentExclusivity = assignmentExclusivity,
+        )
+    }
+
+  val assignActiveContractRow =
+    str("workflow_id").? ~
+      int("target_domain_id") ~
+      long("reassignment_counter") ~
+      str("update_id") ~
+      str("contract_id") ~
+      int("template_id") ~
+      array[Int]("flat_event_witnesses") ~
+      array[Int]("create_signatories") ~
+      array[Int]("create_observers") ~
+      str("create_agreement_text").? ~
+      byteArray("create_argument") ~
+      int("create_argument_compression").? ~
+      byteArray("create_key_value").? ~
+      int("create_key_value_compression").? ~
+      timestampFromMicros("ledger_effective_time") ~
+      hashFromHexString("create_key_hash").? ~
+      byteArray("driver_metadata")
+
+  private def assignActiveContractParser(
+      allQueryingParties: Set[Int],
+      stringInterning: StringInterning,
+  ): RowParser[EventStorageBackend.RawActiveContract] =
+    assignActiveContractRow map {
+      case workflowId ~
+          targetDomainId ~
+          reassignmentCounter ~
+          updateId ~
+          contractId ~
+          templateId ~
+          flatEventWitnesses ~
+          createSignatories ~
+          createObservers ~
+          createAgreementText ~
+          createArgument ~
+          createArgumentCompression ~
+          createKeyValue ~
+          createKeyValueCompression ~
+          ledgerEffectiveTime ~
+          createKeyHash ~
+          driverMetadata =>
+        EventStorageBackend.RawActiveContract(
+          workflowId = workflowId,
+          domainId = stringInterning.domainId.unsafe.externalize(targetDomainId),
+          reassignmentCounter = reassignmentCounter,
+          rawCreatedEvent = EventStorageBackend.RawCreatedEvent(
+            updateId = updateId,
+            contractId = contractId,
+            templateId = stringInterning.templateId.externalize(templateId),
+            witnessParties = flatEventWitnesses.view
+              .filter(allQueryingParties)
+              .map(stringInterning.party.unsafe.externalize)
+              .toSet,
+            signatories =
+              createSignatories.view.map(stringInterning.party.unsafe.externalize).toSet,
+            observers = createObservers.view.map(stringInterning.party.unsafe.externalize).toSet,
+            agreementText = createAgreementText,
+            createArgument = createArgument,
+            createArgumentCompression = createArgumentCompression,
+            createKeyValue = createKeyValue,
+            createKeyValueCompression = createKeyValueCompression,
+            ledgerEffectiveTime = ledgerEffectiveTime,
+            createKeyHash = createKeyHash,
+            driverMetadata = driverMetadata,
+          ),
+        )
+    }
+
+  val createActiveContractRow =
+    str("workflow_id").? ~
+      int("domain_id") ~
+      str("transaction_id") ~
+      str("contract_id") ~
+      int("template_id") ~
+      array[Int]("flat_event_witnesses") ~
+      array[Int]("create_signatories") ~
+      array[Int]("create_observers") ~
+      str("create_agreement_text").? ~
+      byteArray("create_argument") ~
+      int("create_argument_compression").? ~
+      byteArray("create_key_value").? ~
+      int("create_key_value_compression").? ~
+      timestampFromMicros("ledger_effective_time") ~
+      hashFromHexString("create_key_hash").? ~
+      byteArray("driver_metadata") // this should be present for multi-domain deployments
+
+  private def createActiveContractParser(
+      allQueryingParties: Set[Int],
+      stringInterning: StringInterning,
+  ): RowParser[EventStorageBackend.RawActiveContract] =
+    createActiveContractRow map {
+      case workflowId ~
+          targetDomainId ~
+          transactionId ~
+          contractId ~
+          templateId ~
+          flatEventWitnesses ~
+          createSignatories ~
+          createObservers ~
+          createAgreementText ~
+          createArgument ~
+          createArgumentCompression ~
+          createKeyValue ~
+          createKeyValueCompression ~
+          ledgerEffectiveTime ~
+          createKeyHash ~
+          driverMetadata =>
+        EventStorageBackend.RawActiveContract(
+          workflowId = workflowId,
+          domainId = stringInterning.domainId.unsafe.externalize(targetDomainId),
+          reassignmentCounter = 0L, // zero for create
+          rawCreatedEvent = EventStorageBackend.RawCreatedEvent(
+            updateId = transactionId,
+            contractId = contractId,
+            templateId = stringInterning.templateId.externalize(templateId),
+            witnessParties = flatEventWitnesses.view
+              .filter(allQueryingParties)
+              .map(stringInterning.party.unsafe.externalize)
+              .toSet,
+            signatories =
+              createSignatories.view.map(stringInterning.party.unsafe.externalize).toSet,
+            observers = createObservers.view.map(stringInterning.party.unsafe.externalize).toSet,
+            agreementText = createAgreementText,
+            createArgument = createArgument,
+            createArgumentCompression = createArgumentCompression,
+            createKeyValue = createKeyValue,
+            createKeyValueCompression = createKeyValueCompression,
+            ledgerEffectiveTime = ledgerEffectiveTime,
+            createKeyHash = createKeyHash,
+            driverMetadata = driverMetadata,
+          ),
+        )
+    }
 }
 
 abstract class EventStorageBackendTemplate(
@@ -414,8 +688,6 @@ abstract class EventStorageBackendTemplate(
     // This method is needed in pruneEvents, but belongs to [[ParameterStorageBackend]].
     participantAllDivulgedContractsPrunedUpToInclusive: Connection => Option[Offset],
 ) extends EventStorageBackend {
-  import com.digitalasset.canton.platform.store.backend.Conversions.ArrayColumnToIntArray.*
-
   import EventStorageBackendTemplate.*
 
   private val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
@@ -439,7 +711,7 @@ abstract class EventStorageBackendTemplate(
       stringInterning = stringInterning,
     )
 
-  override def activeContractEventBatch(
+  override def activeContractCreateEventBatch(
       eventSequentialIds: Iterable[Long],
       allFilterParties: Set[Ref.Party],
       endInclusive: Long,
@@ -613,193 +885,6 @@ abstract class EventStorageBackendTemplate(
     logger.info(s"$queryDescription finished: deleted $deletedRows rows.")(loggingContext)
   }
 
-  private val rawTransactionEventParser: RowParser[RawTransactionEvent] = {
-    import com.digitalasset.canton.platform.store.backend.Conversions.ArrayColumnToStringArray.arrayColumnToStringArray
-    (int("event_kind") ~
-      str("transaction_id") ~
-      int("node_index") ~
-      str("command_id").? ~
-      str("workflow_id").? ~
-      eventId("event_id") ~
-      contractId("contract_id") ~
-      int("template_id").? ~
-      timestampFromMicros("ledger_effective_time").? ~
-      array[Int]("create_signatories").? ~
-      array[Int]("create_observers").? ~
-      str("create_agreement_text").? ~
-      byteArray("create_key_value").? ~
-      hashFromHexString("create_key_hash").? ~
-      int("create_key_value_compression").? ~
-      byteArray("create_argument").? ~
-      int("create_argument_compression").? ~
-      array[Int]("tree_event_witnesses") ~
-      array[Int]("flat_event_witnesses") ~
-      array[Int]("submitters").? ~
-      str("exercise_choice").? ~
-      byteArray("exercise_argument").? ~
-      int("exercise_argument_compression").? ~
-      byteArray("exercise_result").? ~
-      int("exercise_result_compression").? ~
-      array[Int]("exercise_actors").? ~
-      array[String]("exercise_child_event_ids").? ~
-      long("event_sequential_id") ~
-      offset("event_offset")).map {
-      case eventKind ~ transactionId ~ nodeIndex ~ commandId ~ workflowId ~ eventId ~ contractId ~ templateId ~ ledgerEffectiveTime ~ createSignatories ~
-          createObservers ~ createAgreementText ~ createKeyValue ~ createKeyHash ~ createKeyCompression ~
-          createArgument ~ createArgumentCompression ~ treeEventWitnesses ~ flatEventWitnesses ~ submitters ~ qualifiedChoiceName ~
-          exerciseArgument ~ exerciseArgumentCompression ~ exerciseResult ~ exerciseResultCompression ~ exerciseActors ~
-          exerciseChildEventIds ~ eventSequentialId ~ offset =>
-        RawTransactionEvent(
-          eventKind,
-          transactionId,
-          nodeIndex,
-          commandId,
-          workflowId,
-          eventId,
-          contractId,
-          templateId.map(stringInterning.templateId.externalize),
-          ledgerEffectiveTime,
-          createSignatories.map(_.map(stringInterning.party.unsafe.externalize)),
-          createObservers.map(_.map(stringInterning.party.unsafe.externalize)),
-          createAgreementText,
-          createKeyValue,
-          createKeyHash,
-          createKeyCompression,
-          createArgument,
-          createArgumentCompression,
-          treeEventWitnesses.view.map(stringInterning.party.unsafe.externalize).toSet,
-          flatEventWitnesses.view.map(stringInterning.party.unsafe.externalize).toSet,
-          submitters
-            .map(_.view.map(stringInterning.party.unsafe.externalize).toSet)
-            .getOrElse(Set.empty),
-          qualifiedChoiceName,
-          exerciseArgument,
-          exerciseArgumentCompression,
-          exerciseResult,
-          exerciseResultCompression,
-          exerciseActors.map(_.map(stringInterning.party.unsafe.externalize)),
-          exerciseChildEventIds,
-          eventSequentialId,
-          offset,
-        )
-    }
-  }
-
-  override def rawEvents(startExclusive: Long, endInclusive: Long)(
-      connection: Connection
-  ): Vector[RawTransactionEvent] = {
-    SQL"""
-       (SELECT
-           10 as event_kind,
-           transaction_id,
-           node_index,
-           command_id,
-           workflow_id,
-           event_id,
-           contract_id,
-           template_id,
-           ledger_effective_time,
-           create_signatories,
-           create_observers,
-           create_agreement_text,
-           create_key_value,
-           create_key_hash,
-           create_key_value_compression,
-           create_argument,
-           create_argument_compression,
-           tree_event_witnesses,
-           flat_event_witnesses,
-           submitters,
-           NULL as exercise_choice,
-           NULL as exercise_argument,
-           NULL as exercise_argument_compression,
-           NULL as exercise_result,
-           NULL as exercise_result_compression,
-           NULL as exercise_actors,
-           NULL as exercise_child_event_ids,
-           event_sequential_id,
-           event_offset
-       FROM
-           participant_events_create
-       WHERE
-           event_sequential_id > $startExclusive
-           and event_sequential_id <= $endInclusive)
-       UNION ALL
-       (SELECT
-           20 as event_kind,
-           transaction_id,
-           node_index,
-           command_id,
-           workflow_id,
-           event_id,
-           contract_id,
-           template_id,
-           ledger_effective_time,
-           NULL as create_signatories,
-           NULL as create_observers,
-           NULL as create_agreement_text,
-           create_key_value,
-           NULL as create_key_hash,
-           create_key_value_compression,
-           NULL as create_argument,
-           NULL as create_argument_compression,
-           tree_event_witnesses,
-           flat_event_witnesses,
-           submitters,
-           exercise_choice,
-           exercise_argument,
-           exercise_argument_compression,
-           exercise_result,
-           exercise_result_compression,
-           exercise_actors,
-           exercise_child_event_ids,
-           event_sequential_id,
-           event_offset
-       FROM
-           participant_events_consuming_exercise
-       WHERE
-           event_sequential_id > $startExclusive
-           and event_sequential_id <= $endInclusive)
-       UNION ALL
-       (SELECT
-           25 as event_kind,
-           transaction_id,
-           node_index,
-           command_id,
-           workflow_id,
-           event_id,
-           contract_id,
-           template_id,
-           ledger_effective_time,
-           NULL as create_signatories,
-           NULL as create_observers,
-           NULL as create_agreement_text,
-           create_key_value,
-           NULL as create_key_hash,
-           create_key_value_compression,
-           NULL as create_argument,
-           NULL as create_argument_compression,
-           tree_event_witnesses,
-           flat_event_witnesses,
-           submitters,
-           exercise_choice,
-           exercise_argument,
-           exercise_argument_compression,
-           exercise_result,
-           exercise_result_compression,
-           exercise_actors,
-           exercise_child_event_ids,
-           event_sequential_id,
-           event_offset
-       FROM
-           participant_events_non_consuming_exercise
-       WHERE
-           event_sequential_id > $startExclusive
-           and event_sequential_id <= $endInclusive)
-       ORDER BY event_sequential_id ASC"""
-      .asVectorOf(rawTransactionEventParser)(connection)
-  }
-
   override def maxEventSequentialId(
       untilInclusiveOffset: Offset
   )(connection: Connection): Long = {
@@ -924,5 +1009,150 @@ abstract class EventStorageBackendTemplate(
           )"""
 
   }
+
+  override def assignEventBatch(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+  )(connection: Connection): Vector[EventStorageBackend.RawAssignEvent] = {
+    val allInternedFilterParties = allFilterParties.iterator
+      .map(stringInterning.party.tryInternalize)
+      .flatMap(_.iterator)
+      .toSet
+    SQL"""
+        SELECT *
+        FROM participant_events_assign assign_evs
+        WHERE assign_evs.event_sequential_id ${queryStrategy.anyOf(eventSequentialIds)}
+        ORDER BY assign_evs.event_sequential_id -- deliver in index order
+        """
+      .withFetchSize(Some(eventSequentialIds.size))
+      .asVectorOf(assignEventParser(allInternedFilterParties, stringInterning))(connection)
+  }
+
+  override def unassignEventBatch(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+  )(connection: Connection): Vector[EventStorageBackend.RawUnassignEvent] = {
+    val allInternedFilterParties = allFilterParties.iterator
+      .map(stringInterning.party.tryInternalize)
+      .flatMap(_.iterator)
+      .toSet
+    SQL"""
+          SELECT *
+          FROM participant_events_unassign unassign_evs
+          WHERE unassign_evs.event_sequential_id ${queryStrategy.anyOf(eventSequentialIds)}
+          ORDER BY unassign_evs.event_sequential_id -- deliver in index order
+          """
+      .withFetchSize(Some(eventSequentialIds.size))
+      .asVectorOf(unassignEventParser(allInternedFilterParties, stringInterning))(connection)
+  }
+
+  override def activeContractAssignEventBatch(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+      endInclusive: Long,
+  )(connection: Connection): Vector[EventStorageBackend.RawActiveContract] = {
+    val allInternedFilterParties = allFilterParties.iterator
+      .map(stringInterning.party.tryInternalize)
+      .flatMap(_.iterator)
+      .toSet
+    SQL"""
+        SELECT *
+        FROM participant_events_assign assign_evs
+        WHERE
+          assign_evs.event_sequential_id ${queryStrategy.anyOf(eventSequentialIds)}
+          AND NOT EXISTS (  -- check not archived as of snapshot in the same domain
+                SELECT 1
+                FROM participant_events_consuming_exercise consuming_evs
+                WHERE
+                  assign_evs.contract_id = consuming_evs.contract_id
+                  AND assign_evs.target_domain_id = consuming_evs.domain_id
+                  AND consuming_evs.event_sequential_id <= $endInclusive
+              )
+          AND NOT EXISTS (  -- check not unassigned after as of snapshot in the same domain
+                SELECT 1
+                FROM participant_events_unassign unassign_evs
+                WHERE
+                  assign_evs.contract_id = unassign_evs.contract_id
+                  AND assign_evs.target_domain_id = unassign_evs.source_domain_id
+                  AND unassign_evs.event_sequential_id > assign_evs.event_sequential_id
+                  AND unassign_evs.event_sequential_id <= $endInclusive
+                ${QueryStrategy.limitClause(Some(1))}
+              )
+        ORDER BY assign_evs.event_sequential_id -- deliver in index order
+        """
+      .withFetchSize(Some(eventSequentialIds.size))
+      .asVectorOf(assignActiveContractParser(allInternedFilterParties, stringInterning))(connection)
+  }
+
+  override def activeContractCreateEventBatchV2(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+      endInclusive: Long,
+  )(connection: Connection): Vector[EventStorageBackend.RawActiveContract] = {
+    val allInternedFilterParties = allFilterParties.iterator
+      .map(stringInterning.party.tryInternalize)
+      .flatMap(_.iterator)
+      .toSet
+    SQL"""
+        SELECT *
+        FROM participant_events_create create_evs
+        WHERE
+          create_evs.event_sequential_id ${queryStrategy.anyOf(eventSequentialIds)}
+          AND NOT EXISTS (  -- check not archived as of snapshot in the same domain
+                SELECT 1
+                FROM participant_events_consuming_exercise consuming_evs
+                WHERE
+                  create_evs.contract_id = consuming_evs.contract_id
+                  AND create_evs.domain_id = consuming_evs.domain_id
+                  AND consuming_evs.event_sequential_id <= $endInclusive
+              )
+          AND NOT EXISTS (  -- check not unassigned as of snapshot in the same domain
+                SELECT 1
+                FROM participant_events_unassign unassign_evs
+                WHERE
+                  create_evs.contract_id = unassign_evs.contract_id
+                  AND create_evs.domain_id = unassign_evs.source_domain_id
+                  AND unassign_evs.event_sequential_id <= $endInclusive
+                ${QueryStrategy.limitClause(Some(1))}
+              )
+        ORDER BY create_evs.event_sequential_id -- deliver in index order
+        """
+      .withFetchSize(Some(eventSequentialIds.size))
+      .asVectorOf(createActiveContractParser(allInternedFilterParties, stringInterning))(connection)
+  }
+
+  override def fetchAssignEventIdsForStakeholder(
+      stakeholder: Party,
+      templateId: Option[Identifier],
+      startExclusive: Long,
+      endInclusive: Long,
+      limit: Int,
+  )(connection: Connection): Vector[Long] =
+    TransactionStreamingQueries.fetchEventIds(
+      tableName = "pe_assign_id_filter_stakeholder",
+      witness = stakeholder,
+      templateIdO = templateId,
+      startExclusive = startExclusive,
+      endInclusive = endInclusive,
+      limit = limit,
+      stringInterning = stringInterning,
+    )(connection)
+
+  override def fetchUnassignEventIdsForStakeholder(
+      stakeholder: Party,
+      templateId: Option[Identifier],
+      startExclusive: Long,
+      endInclusive: Long,
+      limit: Int,
+  )(connection: Connection): Vector[Long] =
+    TransactionStreamingQueries.fetchEventIds(
+      tableName = "pe_unassign_id_filter_stakeholder",
+      witness = stakeholder,
+      templateIdO = templateId,
+      startExclusive = startExclusive,
+      endInclusive = endInclusive,
+      limit = limit,
+      stringInterning = stringInterning,
+    )(connection)
 
 }

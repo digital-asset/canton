@@ -6,9 +6,10 @@ package com.digitalasset.canton.platform.indexer.parallel
 import akka.stream.{KillSwitch, Materializer}
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.configuration.ServerRole
 import com.digitalasset.canton.platform.indexer.Indexer
 import com.digitalasset.canton.platform.indexer.ha.{
@@ -25,6 +26,7 @@ import com.digitalasset.canton.platform.store.backend.{
   DataSourceStorageBackend,
 }
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 
 import java.util.{Timer, concurrent}
@@ -43,12 +45,15 @@ object ParallelIndexerFactory {
       dbLockStorageBackend: DBLockStorageBackend,
       dataSourceStorageBackend: DataSourceStorageBackend,
       initializeParallelIngestion: InitializeParallelIngestion,
-      parallelIndexerSubscription: ParallelIndexerSubscription[_],
+      parallelIndexerSubscription: ParallelIndexerSubscription[?],
       meteringAggregator: DbDispatcher => ResourceOwner[Unit],
       mat: Materializer,
       readService: ReadService,
       initializeInMemoryState: DbDispatcher => LedgerEnd => Future[Unit],
-  )(implicit loggingContext: LoggingContext): ResourceOwner[Indexer] =
+      loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
+    implicit val loggingContext: LoggingContext = LoggingContext.empty
+    val logger = TracedLogger(loggerFactory.getLogger(getClass))
     for {
       inputMapperExecutor <- asyncPool(
         inputMappingParallelism,
@@ -57,6 +62,7 @@ object ParallelIndexerFactory {
           metrics.daml.parallelIndexer.inputMapping.executor,
           metrics.executorServiceMetrics,
         ),
+        loggerFactory,
       )
       batcherExecutor <- asyncPool(
         batchingParallelism,
@@ -65,6 +71,7 @@ object ParallelIndexerFactory {
           metrics.daml.parallelIndexer.batching.executor,
           metrics.executorServiceMetrics,
         ),
+        loggerFactory,
       )
       haCoordinator <-
         if (dbLockStorageBackend.dbLockSupported) {
@@ -78,8 +85,7 @@ object ParallelIndexerFactory {
                     new ThreadFactoryBuilder().setNameFormat("ha-coordinator-%d").build,
                     metrics.executorServiceMetrics,
                     throwable =>
-                      ContextualizedLogger
-                        .get(getClass)
+                      logger
                         .error(
                           "ExecutionContext has failed with an exception",
                           throwable,
@@ -114,6 +120,7 @@ object ParallelIndexerFactory {
             executionContext = executionContext,
             timer = timer,
             haConfig = haConfig,
+            loggerFactory,
           )
         } else
           ResourceOwner.successful(NoopHaCoordinator)
@@ -155,6 +162,7 @@ object ParallelIndexerFactory {
         }
       )
     }
+  }
 
   /** Helper function to combine a ResourceOwner and an initialization function to initialize a Handle.
     *

@@ -9,7 +9,6 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.*
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.daml.tracing.{Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
@@ -20,18 +19,12 @@ import com.digitalasset.canton.ledger.api.grpc.{GrpcHealthService, GrpcTransacti
 import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
 import com.digitalasset.canton.ledger.participant.state.v2 as state
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.configuration.{
   LedgerConfigurationInitializer,
   LedgerConfigurationSubscription,
 }
-import com.digitalasset.canton.platform.apiserver.execution.{
-  AuthorityResolver,
-  LedgerTimeAwareCommandExecutor,
-  ResolveMaximumLedgerTime,
-  StoreBackedCommandExecutor,
-  TimedCommandExecutor,
-}
+import com.digitalasset.canton.platform.apiserver.execution.*
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.apiserver.services.*
 import com.digitalasset.canton.platform.apiserver.services.admin.*
@@ -51,6 +44,7 @@ import com.digitalasset.canton.platform.localstore.api.{
   UserManagementStore,
 }
 import com.digitalasset.canton.platform.services.time.TimeProviderType
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.BindableService
 import io.grpc.protobuf.services.ProtoReflectionService
 
@@ -73,8 +67,6 @@ private final case class ApiServicesBundle(services: immutable.Seq[BindableServi
 }
 
 object ApiServices {
-
-  private val logger = ContextualizedLogger.get(this.getClass)
 
   final class Owner(
       participantId: Ref.ParticipantId,
@@ -106,12 +98,13 @@ object ApiServices {
       explicitDisclosureUnsafeEnabled: Boolean,
       createExternalServices: () => List[BindableService] = () => Nil,
       telemetry: Telemetry,
-      loggerFactory: NamedLoggerFactory,
+      val loggerFactory: NamedLoggerFactory,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
-      loggingContext: LoggingContext,
-  ) extends ResourceOwner[ApiServices] {
+      traceContext: TraceContext,
+  ) extends ResourceOwner[ApiServices]
+      with NamedLogging {
     private val configurationService: IndexConfigurationService = indexService
     private val identityService: IdentityProvider = indexService
     private val packagesService: IndexPackagesService = indexService
@@ -135,6 +128,9 @@ object ApiServices {
     )
 
     override def acquire()(implicit context: ResourceContext): Resource[ApiServices] = {
+      // TODO(#13422) remove when all services have been wired up with loggerFactory
+      implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+
       logger.info(engine.info.toString)
       for {
         currentLedgerConfiguration <- configurationInitializer.initialize(
@@ -162,7 +158,9 @@ object ApiServices {
         ledgerId: LedgerId,
         ledgerConfigurationSubscription: LedgerConfigurationSubscription,
         checkOverloaded: TelemetryContext => Option[state.SubmissionResult],
-    )(implicit executionContext: ExecutionContext): List[BindableService] = {
+    )(implicit
+        executionContext: ExecutionContext
+    ): List[BindableService] = {
 
       val apiTransactionService =
         ApiTransactionService.create(
@@ -174,22 +172,29 @@ object ApiServices {
         )
 
       val apiEventQueryService =
-        ApiEventQueryService.create(ledgerId, eventQueryService, telemetry)
+        ApiEventQueryService.create(ledgerId, eventQueryService, telemetry, loggerFactory)
 
       val apiLedgerIdentityService =
-        ApiLedgerIdentityService.create(ledgerId)
+        ApiLedgerIdentityService.create(ledgerId, telemetry, loggerFactory)
 
       val apiVersionService =
         ApiVersionService.create(
           ledgerFeatures,
           userManagementConfig = userManagementConfig,
+          telemetry = telemetry,
+          loggerFactory = loggerFactory,
         )
 
       val apiPackageService =
-        ApiPackageService.create(ledgerId, packagesService, telemetry)
+        ApiPackageService.create(ledgerId, packagesService, telemetry, loggerFactory)
 
       val apiConfigurationService =
-        ApiLedgerConfigurationService.create(ledgerId, configurationService)
+        ApiLedgerConfigurationService.create(
+          ledgerId,
+          configurationService,
+          telemetry,
+          loggerFactory,
+        )
 
       val apiCompletionService =
         ApiCommandCompletionService.create(
@@ -212,7 +217,8 @@ object ApiServices {
       val apiTimeServiceOpt =
         optTimeServiceBackend.map(tsb =>
           new TimeServiceAuthorization(
-            ApiTimeService.create(ledgerId, tsb, apiStreamShutdownTimeout),
+            ApiTimeService
+              .create(ledgerId, tsb, apiStreamShutdownTimeout, telemetry, loggerFactory),
             authorizer,
           )
         )
@@ -226,7 +232,7 @@ object ApiServices {
 
       val apiReflectionService = ProtoReflectionService.newInstance()
 
-      val apiHealthService = new GrpcHealthService(healthChecks)
+      val apiHealthService = new GrpcHealthService(healthChecks, telemetry, loggerFactory)
 
       val userManagementServices: List[BindableService] =
         if (userManagementConfig.enabled) {
@@ -238,11 +244,21 @@ object ApiServices {
               identityProviderExists = new IdentityProviderExists(identityProviderConfigStore),
               partyRecordExist = new PartyRecordsExist(partyRecordStore),
               indexPartyManagementService = partyManagementService,
+              telemetry = telemetry,
+              loggerFactory = loggerFactory,
             )
           val identityProvider =
-            new ApiIdentityProviderConfigService(identityProviderConfigStore)
+            new ApiIdentityProviderConfigService(
+              identityProviderConfigStore,
+              telemetry,
+              loggerFactory,
+            )
           List(
-            new UserManagementServiceAuthorization(apiUserManagementService, authorizer),
+            new UserManagementServiceAuthorization(
+              apiUserManagementService,
+              authorizer,
+              loggerFactory,
+            ),
             new IdentityProviderConfigServiceAuthorization(identityProvider, authorizer),
           )
         } else {
@@ -250,7 +266,13 @@ object ApiServices {
         }
 
       val apiMeteringReportService =
-        new ApiMeteringReportService(participantId, meteringStore, meteringReportKey, telemetry)
+        new ApiMeteringReportService(
+          participantId,
+          meteringStore,
+          meteringReportKey,
+          telemetry,
+          loggerFactory,
+        )
 
       apiTimeServiceOpt.toList :::
         writeServiceBackedApiServices :::
@@ -274,7 +296,9 @@ object ApiServices {
         ledgerConfigurationSubscription: LedgerConfigurationSubscription,
         apiTransactionService: GrpcTransactionService,
         checkOverloaded: TelemetryContext => Option[state.SubmissionResult],
-    )(implicit executionContext: ExecutionContext): List[BindableService] = {
+    )(implicit
+        executionContext: ExecutionContext
+    ): List[BindableService] = {
       optWriteService.toList.flatMap { writeService =>
         val commandExecutor = new TimedCommandExecutor(
           new LedgerTimeAwareCommandExecutor(
@@ -326,6 +350,8 @@ object ApiServices {
           timeProvider = timeProvider,
           ledgerConfigurationSubscription = ledgerConfigurationSubscription,
           explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
+          telemetry = telemetry,
+          loggerFactory = loggerFactory,
         )
 
         val apiPartyManagementService = ApiPartyManagementService.createApiService(
@@ -363,6 +389,7 @@ object ApiServices {
             writeService,
             metrics,
             telemetry,
+            loggerFactory,
           )
 
         List(

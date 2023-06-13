@@ -4,8 +4,8 @@
 package com.digitalasset.canton.platform.localstore.api
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User, UserRight}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -36,7 +36,7 @@ trait UserManagementStore {
   // read access
 
   def getUserInfo(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[UserInfo]]
 
   /** Always returns `maxResults` if possible, i.e. if a call to this method
@@ -47,42 +47,42 @@ trait UserManagementStore {
       maxResults: Int,
       identityProviderId: IdentityProviderId,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[UsersPage]]
 
   // write access
 
   def createUser(user: User, rights: Set[UserRight])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[User]]
 
   def updateUser(userUpdate: UserUpdate)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[User]]
 
   def deleteUser(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Unit]]
 
   def grantRights(id: Ref.UserId, rights: Set[UserRight], identityProviderId: IdentityProviderId)(
-      implicit loggingContext: LoggingContext
+      implicit loggingContext: LoggingContextWithTrace
   ): Future[Result[Set[UserRight]]]
 
   def revokeRights(id: Ref.UserId, rights: Set[UserRight], identityProviderId: IdentityProviderId)(
-      implicit loggingContext: LoggingContext
+      implicit loggingContext: LoggingContextWithTrace
   ): Future[Result[Set[UserRight]]]
 
   def updateUserIdp(
       id: Ref.UserId,
       sourceIdp: IdentityProviderId,
       targetIdp: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[User]]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]]
   // read helpers
 
   // TODO(#13019) Replace parasitic with DirectExecutionContext
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def getUser(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[User]] = {
     getUserInfo(id, identityProviderId).map(_.map(_.user))(ExecutionContext.parasitic)
   }
@@ -90,7 +90,7 @@ trait UserManagementStore {
   // TODO(#13019) Replace parasitic with DirectExecutionContext
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def listUserRights(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Set[UserRight]]] = {
     getUserInfo(id, identityProviderId).map(_.map(_.rights))(ExecutionContext.parasitic)
   }

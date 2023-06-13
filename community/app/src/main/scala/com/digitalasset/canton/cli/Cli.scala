@@ -123,10 +123,10 @@ final case class Cli(
 object Cli {
   // The `additionalVersions` parameter allows the enterprise CLI to output the version of additional,
   // enterprise-only dependencies (see `CantonAppDriver`).
-  def parse(args: Array[String], additionalVersions: Map[String, String] = Map.empty): Option[Cli] =
-    parser(additionalVersions).parse(args, Cli())
+  def parse(args: Array[String], printVersion: => Unit = ()): Option[Cli] =
+    parser(printVersion).parse(args, Cli())
 
-  private def parser(additionalVersions: Map[String, String]): OptionParser[Cli] =
+  private def parser(printVersion: => Unit): OptionParser[Cli] =
     new scopt.OptionParser[Cli]("canton") {
 
       private def inColumns(first: String = "", second: String = ""): String =
@@ -138,13 +138,7 @@ object Cli {
       opt[Unit]("version")
         .text("Print versions")
         .action { (_, _) =>
-          (Map(
-            "Canton" -> BuildInfo.version,
-            "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
-            "Supported Canton protocol versions" -> BuildInfo.protocolVersions.toString(),
-          ) ++ additionalVersions) foreach { case (name, version) =>
-            Console.out.println(s"$name: $version")
-          }
+          printVersion.discard
           sys.exit(0)
         }
 

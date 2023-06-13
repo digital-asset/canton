@@ -70,6 +70,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
       recordTime = LfTimestamp.Epoch,
       divulgedContracts = List.empty,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       contractMetadata = Map(), // TODO(#9795) wire proper value
     )
 

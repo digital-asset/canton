@@ -69,7 +69,7 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil
-import io.grpc.ServerServiceDefinition
+import io.grpc.{BindableService, ServerServiceDefinition}
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
@@ -410,6 +410,7 @@ object ParticipantNodeBootstrap {
       CantonNodeBootstrapCommonArguments[PC, ParticipantNodeParameters, ParticipantMetrics]
 
     protected def createEngine(arguments: Arguments): Engine
+
     protected def createResourceService(
         arguments: Arguments
     )(store: Eval[ParticipantSettingsStore]): ResourceManagementService
@@ -470,15 +471,20 @@ object ParticipantNodeBootstrap {
         actorSystem: ActorSystem,
     ): CantonLedgerApiServerFactory =
       new CantonLedgerApiServerFactory(
-        engine,
-        arguments.clock,
-        testingTimeService,
-        _dbConfig => Option.empty[IndexerLockIds].asRight,
+        engine = engine,
+        clock = arguments.clock,
+        testingTimeService = testingTimeService,
+        allocateIndexerLockIds = _dbConfig => Option.empty[IndexerLockIds].asRight,
         meteringReportKey = CommunityKey,
-        (_, _) => Nil,
-        arguments.futureSupervisor,
-        arguments.loggerFactory,
+        additionalGrpcServices = additionalGrpcServices(arguments),
+        futureSupervisor = arguments.futureSupervisor,
+        loggerFactory = arguments.loggerFactory,
       )
+
+    protected def additionalGrpcServices(arguments: Arguments)(implicit
+        executionContext: ExecutionContext,
+        actorSystem: ActorSystem,
+    ): (CantonSyncService, Eval[ParticipantNodePersistentState]) => List[BindableService]
 
     protected def createNode(
         arguments: Arguments,
@@ -549,8 +555,13 @@ object ParticipantNodeBootstrap {
         skipRecipientsCheck = false,
         ledgerApiServerFactory = ledgerApiServerFactory,
       )
-  }
 
+    override protected def additionalGrpcServices(arguments: Arguments)(implicit
+        executionContext: ExecutionContext,
+        actorSystem: ActorSystem,
+    ): (CantonSyncService, Eval[ParticipantNodePersistentState]) => List[BindableService] =
+      (_, _) => Nil
+  }
 }
 
 /** A participant node in the system.
@@ -598,22 +609,10 @@ class ParticipantNode(
     val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
     healthData: => Seq[ComponentStatus],
-) extends ParticipantNodeCommon
+) extends ParticipantNodeCommon(sync)
     with NoTracing {
 
   override def isActive = sync.isActive()
-
-  def reconnectDomainsIgnoreFailures()(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
-    if (sync.isActive())
-      sync.reconnectDomains(ignoreFailures = true).map(_ => ())
-    else {
-      logger.info("Not reconnecting to domains as instance is passive")
-      EitherTUtil.unitUS
-    }
-  }
 
   /** helper utility used to auto-connect to local domains
     *

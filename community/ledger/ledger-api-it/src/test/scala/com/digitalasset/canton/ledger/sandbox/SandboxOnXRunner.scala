@@ -32,6 +32,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.participant.state.v2.{Update, WriteService}
 import com.digitalasset.canton.ledger.runner.common.*
 import com.digitalasset.canton.ledger.sandbox.bridge.{BridgeMetrics, LedgerBridge}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
@@ -43,7 +44,7 @@ import com.digitalasset.canton.platform.apiserver.{LedgerFeatures, TimeServiceBa
 import com.digitalasset.canton.platform.config.ParticipantConfig
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.DbType
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContextExecutorService
@@ -52,6 +53,8 @@ import scala.util.Try
 object SandboxOnXRunner {
   val RunnerName = "sandbox-on-x"
   private val logger = ContextualizedLogger.get(getClass)
+  val loggerFactory: NamedLoggerFactory =
+    NamedLoggerFactory.root.appendUnnamedKey("sandbox", "SandboxOnX")
 
   def owner(
       configAdaptor: BridgeConfigAdaptor,
@@ -74,6 +77,7 @@ object SandboxOnXRunner {
   ): ResourceOwner[Port] = newLoggingContext { implicit loggingContext =>
     implicit val actorSystem: ActorSystem = ActorSystem(RunnerName)
     implicit val materializer: Materializer = Materializer(actorSystem)
+    implicit val traceContext: TraceContext = TraceContext.empty
 
     for {
       // Take ownership of the actor system and materializer so they're cleaned up properly.
@@ -151,6 +155,7 @@ object SandboxOnXRunner {
         ),
         telemetry = new DefaultOpenTelemetry(openTelemetry),
         tracer = openTelemetry.getTracer(DamlTracerName),
+        loggerFactory = loggerFactory,
       )(actorSystem, materializer).owner
     } yield {
       logInitializationHeader(
@@ -294,8 +299,8 @@ object SandboxOnXRunner {
 
   def buildRateLimitingInterceptor(
       metrics: Metrics,
-      indexDbExecutor: QueueAwareExecutor with NamedExecutor,
-      apiServicesExecutor: QueueAwareExecutor with NamedExecutor,
+      indexDbExecutor: QueueAwareExecutor & NamedExecutor,
+      apiServicesExecutor: QueueAwareExecutor & NamedExecutor,
   )(config: RateLimitingConfig): RateLimitingInterceptor = {
 
     val indexDbCheck = ThreadpoolCheck(

@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.timer.RetryStrategy
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.store.DbType
+import com.digitalasset.canton.tracing.TraceContext
 
 import javax.sql.DataSource
 import scala.concurrent.duration.DurationInt
@@ -17,12 +19,12 @@ object VerifiedDataSource {
 
   private val MaxInitialConnectRetryAttempts: Int = 600
 
-  private val logger = ContextualizedLogger.get(this.getClass)
-
-  def apply(jdbcUrl: String)(implicit
+  def apply(jdbcUrl: String, loggerFactory: NamedLoggerFactory)(implicit
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      traceContext: TraceContext,
   ): Future[DataSource] = {
+    val logger = TracedLogger(loggerFactory.getLogger(getClass))
+    implicit val loggingContext: LoggingContext = LoggingContext.empty
     val dataSourceStorageBackend =
       StorageBackendFactory
         .of(DbType.jdbcType(jdbcUrl))

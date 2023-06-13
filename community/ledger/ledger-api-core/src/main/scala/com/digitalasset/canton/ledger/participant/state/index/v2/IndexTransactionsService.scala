@@ -5,11 +5,11 @@ package com.digitalasset.canton.ledger.participant.state.index.v2
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
+import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
 }
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
@@ -26,24 +26,24 @@ trait IndexTransactionsService extends LedgerEndService {
       endAt: Option[LedgerOffset],
       filter: TransactionFilter,
       verbose: Boolean,
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionsResponse, NotUsed]
+  )(implicit loggingContext: LoggingContext): Source[GetUpdatesResponse, NotUsed]
 
   def transactionTrees(
       begin: LedgerOffset,
       endAt: Option[LedgerOffset],
       filter: TransactionFilter,
       verbose: Boolean,
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionTreesResponse, NotUsed]
+  )(implicit loggingContext: LoggingContext): Source[GetUpdateTreesResponse, NotUsed]
 
   def getTransactionById(
       transactionId: TransactionId,
       requestingParties: Set[Ref.Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetFlatTransactionResponse]]
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]]
 
   def getTransactionTreeById(
       transactionId: TransactionId,
       requestingParties: Set[Ref.Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]]
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionTreeResponse]]
 
   def latestPrunedOffsets()(implicit
       loggingContext: LoggingContext

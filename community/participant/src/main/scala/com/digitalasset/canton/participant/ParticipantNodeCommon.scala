@@ -9,6 +9,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.http.metrics.HttpApiMetrics
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.LedgerParticipantId
@@ -69,12 +70,12 @@ import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseProtocolVersion}
 import io.grpc.{BindableService, ServerServiceDefinition}
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 class CantonLedgerApiServerFactory(
     engine: Engine,
@@ -98,6 +99,7 @@ class CantonLedgerApiServerFactory(
       config: LocalParticipantConfig,
       parameters: ParticipantNodeParameters,
       metrics: LedgerApiServerMetrics,
+      httpApiMetrics: HttpApiMetrics,
       tracerProvider: TracerProvider,
       adminToken: CantonAdminToken,
   )(implicit
@@ -139,6 +141,7 @@ class CantonLedgerApiServerFactory(
         .initialize(
           CantonLedgerApiServerWrapper.Config(
             config.ledgerApi,
+            config.httpLedgerApiExperimental.map(_.toConfig),
             parameters.ledgerApiServerParameters.indexer,
             indexerLockIds,
             ledgerId,
@@ -152,6 +155,7 @@ class CantonLedgerApiServerFactory(
             loggerFactory,
             tracerProvider,
             metrics,
+            httpApiMetrics,
             meteringReportKey,
           ),
           // start ledger API server iff participant replica is active
@@ -485,6 +489,7 @@ trait ParticipantNodeBootstrapCommon {
           arguments.config,
           arguments.parameterConfig,
           arguments.metrics.ledgerApiServer,
+          arguments.metrics.httpApiServer,
           tracerProvider,
           adminToken,
         )
@@ -616,4 +621,20 @@ trait ParticipantNodeBootstrapCommon {
 
 }
 
-abstract class ParticipantNodeCommon extends CantonNode with NamedLogging with HasUptime {}
+abstract class ParticipantNodeCommon(
+    sync: CantonSyncService
+) extends CantonNode
+    with NamedLogging
+    with HasUptime {
+  def reconnectDomainsIgnoreFailures()(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
+    if (sync.isActive())
+      sync.reconnectDomains(ignoreFailures = true).map(_ => ())
+    else {
+      logger.info("Not reconnecting to domains as instance is passive")
+      EitherTUtil.unitUS
+    }
+  }
+}

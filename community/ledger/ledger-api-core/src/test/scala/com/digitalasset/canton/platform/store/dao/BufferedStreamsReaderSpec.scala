@@ -9,13 +9,14 @@ import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReaderSpec.*
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import org.scalatest.Assertion
-import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -245,7 +246,7 @@ class BufferedStreamsReaderSpec
 // TODO(#13019) Avoid the global execution context
 @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 object BufferedStreamsReaderSpec {
-  trait TestFixtures extends Matchers with ScalaFutures with IntegrationPatience {
+  trait TestFixtures extends Matchers with ScalaFutures with BaseTest {
     self: AkkaBeforeAndAfterAll =>
 
     implicit val lc: LoggingContext = LoggingContext.ForTesting
@@ -264,18 +265,21 @@ object BufferedStreamsReaderSpec {
       maxBufferSize = 3,
       metrics = metrics,
       maxBufferedChunkSize = 3,
+      loggerFactory = loggerFactory,
     ).tap(inMemoryFanoutBuffer => offsetUpdates.foreach(Function.tupled(inMemoryFanoutBuffer.push)))
 
     val inMemoryFanoutBufferWithSmallChunkSize: InMemoryFanoutBuffer = new InMemoryFanoutBuffer(
       maxBufferSize = 3,
       metrics = metrics,
       maxBufferedChunkSize = 1,
+      loggerFactory = loggerFactory,
     ).tap(inMemoryFanoutBuffer => offsetUpdates.foreach(Function.tupled(inMemoryFanoutBuffer.push)))
 
     val smallInMemoryFanoutBuffer: InMemoryFanoutBuffer = new InMemoryFanoutBuffer(
       maxBufferSize = 1,
       metrics = metrics,
       maxBufferedChunkSize = 1,
+      loggerFactory = loggerFactory,
     ).tap(inMemoryFanoutBuffer => offsetUpdates.foreach(Function.tupled(inMemoryFanoutBuffer.push)))
 
     trait StaticTestScope {
@@ -338,7 +342,7 @@ object BufferedStreamsReaderSpec {
         Vector.empty[(Offset, TransactionLogUpdate.TransactionAccepted)]
       @volatile private var ledgerEndIndex = 0L
       private val inMemoryFanoutBuffer =
-        new InMemoryFanoutBuffer(maxBufferSize, metrics, maxBufferChunkSize)
+        new InMemoryFanoutBuffer(maxBufferSize, metrics, maxBufferChunkSize, loggerFactory)
 
       private val fetchFromPersistence = new FetchFromPersistence[Object, String] {
         override def apply(startExclusive: Offset, endInclusive: Offset, filter: Object)(implicit
@@ -449,6 +453,7 @@ object BufferedStreamsReaderSpec {
       offset = Offset.beforeBegin,
       events = Vector(null),
       completionDetails = None,
+      domainId = None,
     )
 
   private def offset(idx: Long): Offset = {

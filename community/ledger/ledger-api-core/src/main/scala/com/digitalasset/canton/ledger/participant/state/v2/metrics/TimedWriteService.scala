@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{
   PruningResult,
+  ReassignmentCommand,
   SubmissionResult,
   SubmitterInfo,
   TransactionMeta,
@@ -47,6 +48,30 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
         estimatedInterpretationCost,
         globalKeyMapping,
         processedDisclosedContracts,
+      ),
+    )
+
+  def submitReassignment(
+      submitter: Ref.Party,
+      applicationId: Ref.ApplicationId,
+      commandId: Ref.CommandId,
+      submissionId: Option[Ref.SubmissionId],
+      workflowId: Option[Ref.WorkflowId],
+      reassignmentCommand: ReassignmentCommand,
+  )(implicit
+      loggingContext: LoggingContext,
+      telemetryContext: TelemetryContext,
+  ): CompletionStage[SubmissionResult] =
+    Timed.timedAndTrackedCompletionStage(
+      metrics.daml.services.write.submitTransaction,
+      metrics.daml.services.write.submitTransactionRunning,
+      delegate.submitReassignment(
+        submitter,
+        applicationId,
+        commandId,
+        submissionId,
+        workflowId,
+        reassignmentCommand,
       ),
     )
 

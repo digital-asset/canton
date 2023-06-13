@@ -100,5 +100,6 @@ class BufferedTransactionByIdReaderSpec extends AsyncFlatSpec with MockitoSugar 
       offset = Offset.beforeBegin,
       events = Vector(null),
       completionDetails = None,
+      domainId = None,
     )
 }

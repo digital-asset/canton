@@ -1,11 +1,10 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.util
+package com.digitalasset.canton.logging
 
 import com.daml.logging.LoggingContext
 import com.daml.logging.entries.{LoggingEntry, LoggingValue}
-import com.digitalasset.canton.logging.NamedLoggerFactory
 
 object LoggingContextUtil {
 

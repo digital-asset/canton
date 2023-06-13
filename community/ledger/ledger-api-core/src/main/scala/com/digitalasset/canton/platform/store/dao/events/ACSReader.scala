@@ -142,7 +142,7 @@ class ACSReader(
       globalPayloadQueriesLimiter.execute(
         dispatcher.executeSql(metrics.daml.index.db.getActiveContractBatch) { connection =>
           val result = queryNonPruned.executeSql(
-            eventStorageBackend.activeContractEventBatch(
+            eventStorageBackend.activeContractCreateEventBatch(
               eventSequentialIds = ids,
               allFilterParties = allFilterParties,
               endInclusive = activeAt._2,

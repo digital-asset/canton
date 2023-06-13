@@ -5,10 +5,10 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.UserId
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.*
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}
 import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
@@ -29,12 +29,12 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
   }
 
   override def getUserInfo(id: UserId, identityProviderId: IdentityProviderId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[UserManagementStore.UserInfo]] =
     withUser(id, identityProviderId)(info => Right(toDomainUserInfo(info)))
 
   override def createUser(user: User, rights: Set[UserRight])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[User]] =
     withoutUser(user.id, user.identityProviderId) {
       for {
@@ -57,7 +57,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
 
   override def updateUser(
       userUpdate: UserUpdate
-  )(implicit loggingContext: LoggingContext): Future[Result[User]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] = {
     withUser(userUpdate.id, userUpdate.identityProviderId) { userInfo =>
       val updatedPrimaryParty = userUpdate.primaryPartyUpdateO.getOrElse(userInfo.user.primaryParty)
       val updatedIsDeactivated =
@@ -103,7 +103,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
   override def deleteUser(
       id: Ref.UserId,
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[Unit]] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Unit]] =
     withUser(id, identityProviderId) { _ =>
       state.remove(id).discard
       Right(())
@@ -113,7 +113,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
       id: Ref.UserId,
       granted: Set[UserRight],
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[Set[UserRight]]] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[UserRight]]] =
     withUser(id, identityProviderId) { userInfo =>
       val newlyGranted = granted.diff(userInfo.rights) // faster than filter
       // we're not doing concurrent updates -- assert as backstop and a reminder to handle the collision case in the future
@@ -127,7 +127,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
       id: Ref.UserId,
       revoked: Set[UserRight],
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[Set[UserRight]]] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[UserRight]]] =
     withUser(id, identityProviderId) { userInfo =>
       val effectivelyRevoked = revoked.intersect(userInfo.rights) // faster than filter
       // we're not doing concurrent updates -- assert as backstop and a reminder to handle the collision case in the future
@@ -142,7 +142,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
       maxResults: Int,
       identityProviderId: IdentityProviderId,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[UsersPage]] = {
     withState {
       val iter: Iterator[InMemUserInfo] = fromExcl match {
@@ -166,7 +166,7 @@ class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManag
       id: Ref.UserId,
       sourceIdp: IdentityProviderId,
       targetIdp: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[User]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] = {
     withUser(id = id, identityProviderId = sourceIdp) { info =>
       val user = info.user.copy(identityProviderId = targetIdp)
       val updated = info.copy(user = user)

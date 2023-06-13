@@ -8,7 +8,7 @@ import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.value.Value.{ContractId, VersionedContractInstance}
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -23,11 +23,11 @@ trait ContractStore {
       readers: Set[Ref.Party],
       contractId: ContractId,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[VersionedContractInstance]]
 
   def lookupContractKey(readers: Set[Party], key: GlobalKey)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractId]]
 
   /** Querying the state of the contracts.
@@ -37,7 +37,7 @@ trait ContractStore {
   def lookupContractStateWithoutDivulgence(
       contractId: ContractId
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[ContractState]
 }
 

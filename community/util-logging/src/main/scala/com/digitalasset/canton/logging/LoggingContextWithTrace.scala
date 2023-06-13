@@ -6,6 +6,7 @@ package com.digitalasset.canton.logging
 import com.daml.logging.LoggingContext
 import com.daml.logging.entries.{LoggingEntries, LoggingEntry}
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Class to enrich [[com.digitalasset.canton.logging.ErrorLoggingContext]] with [[com.digitalasset.canton.tracing.TraceContext]]
@@ -29,10 +30,25 @@ object LoggingContextWithTrace {
     new LoggingContextWithTrace(loggingContext.entries, traceContext)
   }
 
+  def ForTesting: LoggingContextWithTrace =
+    LoggingContextWithTrace(TraceContext.empty)(LoggingContext.ForTesting)
+
   def apply(traceContext: TraceContext)(implicit
       loggingContext: LoggingContext
   ): LoggingContextWithTrace = {
     new LoggingContextWithTrace(loggingContext.entries, traceContext)
+  }
+
+  def apply(loggerFactory: NamedLoggerFactory)(implicit
+      traceContext: TraceContext
+  ): LoggingContextWithTrace = {
+    new LoggingContextWithTrace(createLoggingContext(loggerFactory)(identity).entries, traceContext)
+  }
+
+  def apply(loggerFactory: NamedLoggerFactory, telemetry: Telemetry): LoggingContextWithTrace = {
+    implicit val traceContext =
+      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
+    LoggingContextWithTrace(loggerFactory)
   }
 
   /** ## Principles to follow when enriching the logging context
@@ -75,5 +91,13 @@ object LoggingContextWithTrace {
     LoggingContext.withEnrichedLoggingContext(entry, entries: _*) { implicit loggingContext =>
       f(LoggingContextWithTrace(loggingContextWithTrace.traceContext)(loggingContext))
     }
+  }
+
+  def withNewLoggingContext[A](entries: LoggingEntry*)(
+      f: LoggingContextWithTrace => A
+  )(implicit traceContext: TraceContext): A = {
+    val loggingContextWithTrace: LoggingContextWithTrace =
+      new LoggingContextWithTrace(LoggingEntries(entries: _*), traceContext)
+    f(loggingContextWithTrace)
   }
 }

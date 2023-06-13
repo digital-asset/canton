@@ -9,7 +9,6 @@ import com.daml.ledger.api.v1.command_submission_service.{
   CommandSubmissionServiceGrpc,
   SubmitRequest as ApiSubmitRequest,
 }
-import com.daml.logging.LoggingContext
 import com.daml.metrics.{Metrics, Timed}
 import com.daml.tracing.{SpanAttribute, Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.LedgerId
@@ -39,7 +38,7 @@ class GrpcCommandSubmissionService(
     explicitDisclosureUnsafeEnabled: Boolean,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
+)(implicit executionContext: ExecutionContext)
     extends ApiCommandSubmissionService
     with ProxyCloseable
     with GrpcApiService
@@ -53,7 +52,7 @@ class GrpcCommandSubmissionService(
     implicit val telemetryContext: TelemetryContext =
       telemetry.contextFromGrpcThreadLocalContext()
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(telemetry)(loggingContext)
+      LoggingContextWithTrace(loggerFactory, telemetry)
 
     request.commands.foreach { commands =>
       telemetryContext
@@ -76,10 +75,11 @@ class GrpcCommandSubmissionService(
         .value(
           metrics.daml.commands.validation,
           validator.validate(
-            requestWithSubmissionId,
-            currentLedgerTime(),
-            currentUtcTime(),
-            maxDeduplicationDuration(),
+            req = requestWithSubmissionId,
+            currentLedgerTime = currentLedgerTime(),
+            currentUtcTime = currentUtcTime(),
+            maxDeduplicationDuration = maxDeduplicationDuration(),
+            domainIdString = None,
           )(errorLogger),
         )
         .fold(

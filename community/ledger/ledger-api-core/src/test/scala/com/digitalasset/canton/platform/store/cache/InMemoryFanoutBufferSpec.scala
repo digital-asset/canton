@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.platform.store.cache
 
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.data.Time
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.BufferSlice.LastBufferChunkSuffix
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
@@ -14,7 +15,6 @@ import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
 }
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.CompletionDetails
-import org.scalatest.Inside.inside
 import org.scalatest.Succeeded
 import org.scalatest.compatible.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -30,7 +30,8 @@ import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutorServic
 class InMemoryFanoutBufferSpec
     extends AnyWordSpec
     with Matchers
-    with ScalaCheckDrivenPropertyChecks {
+    with ScalaCheckDrivenPropertyChecks
+    with BaseTest {
   private val offsetIdx = Vector(2, 4, 6, 8, 10)
   private val BeginOffset = offset(0L)
   private val offsets = offsetIdx.map(i => offset(i.toLong))
@@ -469,6 +470,7 @@ class InMemoryFanoutBufferSpec
         maxBufferSize,
         Metrics.ForTesting,
         maxBufferedChunkSize = maxFetchSize,
+        loggerFactory = loggerFactory,
       )
       elems.foreach { case (offset, event) => buffer.push(offset, event) }
       test(buffer)
@@ -494,6 +496,7 @@ class InMemoryFanoutBufferSpec
       events = Vector.empty,
       completionDetails = None,
       commandId = "",
+      domainId = None,
     )
 
   private def txRejected(idx: Long, offset: Offset) =

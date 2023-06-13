@@ -228,6 +228,7 @@ object LedgerSyncEvent {
       recordTime: LfTimestamp,
       divulgedContracts: List[DivulgedContract],
       blindingInfo: Option[BlindingInfo],
+      hostedWitnesses: List[LfPartyId],
       contractMetadata: Map[LfContractId, Bytes],
   ) extends LedgerSyncEvent.WithDomainId {
     override def description: String = s"Accept transaction $transactionId"
@@ -499,6 +500,7 @@ object LedgerSyncEvent {
               recordTime = recordTime,
               divulgedContracts = Nil,
               blindingInfo = None,
+              hostedWitnesses = hostedStakeholders,
               contractMetadata = Map(createNode.coid -> contractMetadata),
             )
           }

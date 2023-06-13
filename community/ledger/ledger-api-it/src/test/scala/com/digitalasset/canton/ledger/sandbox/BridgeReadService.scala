@@ -16,7 +16,7 @@ import com.digitalasset.canton.ledger.configuration.{
 }
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import java.time.Duration
 import scala.concurrent.blocking
@@ -48,7 +48,7 @@ class BridgeReadService(
 
   override def stateUpdates(
       beginAfter: Option[Offset]
-  )(implicit loggingContext: LoggingContext): Source[(Offset, Traced[Update]), NotUsed] = {
+  )(implicit traceContext: TraceContext): Source[(Offset, Traced[Update]), NotUsed] = {
     // For PoC purposes:
     //   This method may only be called once, either with `beginAfter` set or unset.
     //   A second call will result in an error unless the server is restarted.

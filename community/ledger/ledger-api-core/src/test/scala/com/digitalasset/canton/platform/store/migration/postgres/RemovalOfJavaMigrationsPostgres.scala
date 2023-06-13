@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.migration.postgres
 
 import com.daml.ledger.resources.TestResourceContext
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.platform.store.FlywayMigrations
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -15,16 +15,15 @@ class RemovalOfJavaMigrationsPostgres
     extends AsyncFlatSpec
     with Matchers
     with TestResourceContext
-    with PostgresAroundEachForMigrations {
+    with PostgresAroundEachForMigrations
+    with TestEssentials {
   import com.digitalasset.canton.platform.store.migration.MigrationTestSupport.*
-
-  implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   behavior of "Flyway migrations after the removal of Java migrations"
 
   it should "migrate an empty database to the latest schema" in {
     val migration =
-      new FlywayMigrations(postgresDatabase.url)
+      new FlywayMigrations(postgresDatabase.url, loggerFactory = loggerFactory)
     for {
       _ <- migration.migrate()
     } yield {
@@ -35,7 +34,7 @@ class RemovalOfJavaMigrationsPostgres
   // Last version before the last Java migration
   it should "fail to migration from V37 to the latest schema" in {
     val migration =
-      new FlywayMigrations(postgresDatabase.url)
+      new FlywayMigrations(postgresDatabase.url, loggerFactory = loggerFactory)
     for {
       _ <- Future(migrateTo("37"))
       err <- migration.migrate().failed
@@ -47,7 +46,7 @@ class RemovalOfJavaMigrationsPostgres
   // Version of the last Java migration
   it should "migrate from V38 to the latest schema" in {
     val migration =
-      new FlywayMigrations(postgresDatabase.url)
+      new FlywayMigrations(postgresDatabase.url, loggerFactory = loggerFactory)
     for {
       _ <- Future(migrateTo("38"))
       _ <- migration.migrate()
@@ -59,7 +58,7 @@ class RemovalOfJavaMigrationsPostgres
   // First version after the last Java migration
   it should "migrate from V39 to the latest schema" in {
     val migration =
-      new FlywayMigrations(postgresDatabase.url)
+      new FlywayMigrations(postgresDatabase.url, loggerFactory = loggerFactory)
     for {
       _ <- Future(migrateTo("39"))
       _ <- migration.migrate()

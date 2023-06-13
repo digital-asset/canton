@@ -10,7 +10,7 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.Ref
 import com.daml.lf.transaction.{GlobalKey as LfGlobalKey, Transaction as LfTransaction}
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.InstrumentedGraph.*
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckingLedgerBridge.*
 import com.digitalasset.canton.ledger.sandbox.bridge.{BridgeMetrics, LedgerBridge}
 import com.digitalasset.canton.ledger.sandbox.domain.*
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -95,6 +96,6 @@ private[bridge] object ConflictCheckingLedgerBridge {
 
   private[validate] def withErrorLogger[T](submissionId: Option[String])(
       f: ContextualizedErrorLogger => T
-  )(implicit loggingContext: LoggingContext, logger: ContextualizedLogger) =
+  )(implicit loggingContext: LoggingContextWithTrace, logger: ContextualizedLogger) =
     f(new DamlContextualizedErrorLogger(logger, loggingContext, submissionId))
 }

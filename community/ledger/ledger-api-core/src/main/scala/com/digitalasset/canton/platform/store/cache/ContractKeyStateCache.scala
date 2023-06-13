@@ -7,11 +7,17 @@ import com.daml.lf.transaction.GlobalKey
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.caching.SizedCache
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.NamedLoggerFactory
 
 import scala.concurrent.ExecutionContext
 
 object ContractKeyStateCache {
-  def apply(initialCacheIndex: Offset, cacheSize: Long, metrics: Metrics)(implicit
+  def apply(
+      initialCacheIndex: Offset,
+      cacheSize: Long,
+      metrics: Metrics,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext
   ): StateCache[GlobalKey, ContractKeyStateValue] =
     StateCache(
@@ -21,6 +27,7 @@ object ContractKeyStateCache {
         metrics.daml.execution.cache.keyState.stateCache,
       ),
       registerUpdateTimer = metrics.daml.execution.cache.keyState.registerCacheUpdate,
+      loggerFactory = loggerFactory,
     )
 }
 

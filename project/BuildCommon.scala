@@ -487,6 +487,7 @@ object BuildCommon {
       `ledger-common`,
       `ledger-api-bench-tool`,
       `ledger-api-core`,
+      `ledger-json-api`,
       `ledger-api-it`,
       `ledger-api-tools`,
       `ledger-api-string-interning-benchmark`,
@@ -802,6 +803,7 @@ object BuildCommon {
         `community-testing` % Test,
         `ledger-common`,
         `ledger-api-core`,
+        `ledger-json-api`,
         DamlProjects.`daml-copy-testing` % "test",
       )
       .enablePlugins(DamlPlugin)
@@ -1184,6 +1186,39 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
+    lazy val `ledger-json-api` =
+      project
+        .in(file("community/ledger/ledger-json-api"))
+        .dependsOn(`ledger-api-core`, DamlProjects.`daml-copy-testing-0` % Test)
+        .disablePlugins(
+          ScalafixPlugin,
+          ScalafmtPlugin,
+          WartRemover,
+        ) // to accommodate different daml repo coding style
+        .settings(
+          sharedSettings,
+          scalacOptions --= DamlProjects.removeCompileFlagsForDaml
+            // needed for foo.bar.{this as that} imports
+            .filterNot(_ == "-Xsource:3"),
+          scalacOptions += "-Wconf:src=src_managed/.*:silent",
+          libraryDependencies ++= Seq(
+            akka_http,
+            akka_http_core,
+            spray_json_derived_codecs,
+            scalatest % Test,
+            scalacheck % Test,
+            scalaz_scalacheck % Test,
+            scalatestScalacheck % Test,
+          ),
+          // TODO(#13303): Split in their daml-copy-common modules
+          Compile / unmanagedSourceDirectories ++= Seq(
+            "observability/akka-http-metrics/src/main/scala",
+            "utils/src/main/scala",
+          ).map(f => DamlProjects.damlFolder.value / f),
+          coverageEnabled := false,
+          JvmRulesPlugin.damlRepoHeaderSettings,
+        )
+
     lazy val `ledger-api-tools` = project
       .in(file("community/ledger/ledger-api-tools"))
       .dependsOn(
@@ -1402,11 +1437,7 @@ object BuildCommon {
         dependencyOverrides ++= Seq(),
         // Without this, we get conflicts when the protofiles from the below sources
         // are copied by sbt to the target directory
-        excludeFilter := HiddenFileFilter || "*.bazel" || "scalapb.proto" || new sbt.io.ExactFileFilter(
-          // This is currently empty proto file with documentation which makes our code generation fail.
-          // We need to consider renaming it to README.md or something else so we dont exclude it here.
-          damlFolder.value / "ledger-api" / "grpc-definitions" / "com" / "daml" / "ledger" / "api" / "v2" / "package.proto"
-        ),
+        excludeFilter := HiddenFileFilter || "*.bazel" || "scalapb.proto",
         Compile / PB.protoSources ++= Seq(
           "ledger-api/grpc-definitions"
         ).map(f => damlFolder.value / f),
@@ -1635,6 +1666,7 @@ object BuildCommon {
         Compile / unmanagedSourceDirectories ++=
           Seq(
             // 5
+            "daml-lf/api-type-signature/src/main/scala",
             "daml-lf/interpreter/src/main/scala", // (daml-lf/data, daml-lf/language, daml-lf/transaction, daml-lf/validation, libs-scala/contextualized-logging, libs-scala/nameof, libs-scala/scala-utils)
             "observability/telemetry/src/main/scala", // (libs-scala/resources,ledger-resources)
           ).map(f => damlFolder.value / f),
@@ -1704,7 +1736,6 @@ object BuildCommon {
         ),
         Compile / unmanagedSourceDirectories ++=
           Seq(
-            "daml-lf/api-type-signature/src/main/scala",
             "daml-lf/archive/encoder/src/main/scala", // Needed by participant-integration-api
             "daml-lf/data-scalacheck/src/main/scala",
             "daml-lf/encoder/src/main/scala", // Needed by participant-integration-api

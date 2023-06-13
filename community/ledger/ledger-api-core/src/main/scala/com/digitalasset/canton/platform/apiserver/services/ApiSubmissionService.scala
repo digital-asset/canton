@@ -7,7 +7,6 @@ import com.daml.api.util.TimeProvider
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.error.ErrorCode.LoggedApiException
 import com.daml.lf.crypto
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.scalautil.future.FutureConversion.CompletionStageConversionOps
 import com.daml.timer.Delayed
@@ -59,8 +58,7 @@ private[apiserver] object ApiSubmissionService {
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      executionContext: ExecutionContext
   ): GrpcCommandSubmissionService with GrpcApiService =
     new GrpcCommandSubmissionService(
       service = new ApiSubmissionService(

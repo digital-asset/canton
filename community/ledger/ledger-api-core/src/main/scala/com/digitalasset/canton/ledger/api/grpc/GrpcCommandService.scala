@@ -5,14 +5,19 @@ package com.digitalasset.canton.ledger.api.grpc
 
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandService
 import com.daml.ledger.api.v1.command_service.*
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
   SubmitAndWaitRequestValidator,
 }
 import com.digitalasset.canton.ledger.api.{ProxyCloseable, SubmissionIdGenerator, ValidationLogger}
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.google.protobuf.empty.Empty
 import io.grpc.ServerServiceDefinition
 
@@ -20,19 +25,20 @@ import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcCommandService(
-    protected val service: CommandService with AutoCloseable,
+    protected val service: CommandService & AutoCloseable,
     val ledgerId: LedgerId,
     currentLedgerTime: () => Instant,
     currentUtcTime: () => Instant,
     maxDeduplicationDuration: () => Option[Duration],
     generateSubmissionId: SubmissionIdGenerator,
     explicitDisclosureUnsafeEnabled: Boolean,
-)(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
+    telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
     extends CommandService
     with GrpcApiService
-    with ProxyCloseable {
-
-  protected implicit val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
+    with ProxyCloseable
+    with NamedLogging {
 
   private[this] val validator = new SubmitAndWaitRequestValidator(
     CommandsValidator(ledgerId, explicitDisclosureUnsafeEnabled)
@@ -62,6 +68,8 @@ class GrpcCommandService(
   private def enrichRequestAndSubmit[T](
       request: SubmitAndWaitRequest
   )(submit: SubmitAndWaitRequest => Future[T]): Future[T] = {
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory, telemetry)
     val requestWithSubmissionId = generateSubmissionIdIfEmpty(request)
     validator
       .validate(
@@ -71,7 +79,8 @@ class GrpcCommandService(
         maxDeduplicationDuration(),
       )(contextualizedErrorLogger(requestWithSubmissionId))
       .fold(
-        t => Future.failed(ValidationLogger.logFailure(requestWithSubmissionId, t)),
+        t =>
+          Future.failed(ValidationLogger.logFailureWithTrace(logger, requestWithSubmissionId, t)),
         _ => submit(requestWithSubmissionId),
       )
   }
@@ -86,7 +95,7 @@ class GrpcCommandService(
     }
 
   private def contextualizedErrorLogger(request: SubmitAndWaitRequest)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ) =
-    new DamlContextualizedErrorLogger(logger, loggingContext, request.commands.map(_.submissionId))
+    ErrorLoggingContext.fromOption(logger, loggingContext, request.commands.map(_.submissionId))
 }

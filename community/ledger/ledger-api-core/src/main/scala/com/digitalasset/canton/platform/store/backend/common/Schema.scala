@@ -106,6 +106,9 @@ private[backend] object AppendOnlySchema {
         "create_argument_compression" -> fieldStrategy.smallintOptional(_ =>
           _.create_argument_compression
         ),
+        "domain_id" -> fieldStrategy.intOptional(stringInterning =>
+          _.domain_id.map(stringInterning.domainId.unsafe.internalize)
+        ),
       )
 
     val eventsCreate: Table[DbDto.EventCreate] =
@@ -149,6 +152,9 @@ private[backend] object AppendOnlySchema {
           _.create_key_value_compression
         ),
         "driver_metadata" -> fieldStrategy.byteaOptional(_ => _.driver_metadata),
+        "domain_id" -> fieldStrategy.intOptional(stringInterning =>
+          _.domain_id.map(stringInterning.domainId.unsafe.internalize)
+        ),
       )
 
     val exerciseFields: Vector[(String, Field[DbDto.EventExercise, _, _])] =
@@ -194,6 +200,82 @@ private[backend] object AppendOnlySchema {
         "exercise_result_compression" -> fieldStrategy.smallintOptional(_ =>
           _.exercise_result_compression
         ),
+        "domain_id" -> fieldStrategy.intOptional(stringInterning =>
+          _.domain_id.map(stringInterning.domainId.unsafe.internalize)
+        ),
+      )
+
+    val eventsUnassign: Table[DbDto.EventUnassign] =
+      fieldStrategy.insert("participant_events_unassign")(
+        "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
+        "event_offset" -> fieldStrategy.string(_ => _.event_offset),
+        "update_id" -> fieldStrategy.string(_ => _.update_id),
+        "workflow_id" -> fieldStrategy.stringOptional(_ => _.workflow_id),
+        "command_id" -> fieldStrategy.stringOptional(_ => _.command_id),
+        "submitter" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.party.unsafe.internalize(dbDto.submitter)
+        ),
+        "contract_id" -> fieldStrategy.string(_ => _.contract_id),
+        "template_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.templateId.unsafe.internalize(dbDto.template_id)
+        ),
+        "flat_event_witnesses" -> fieldStrategy.intArray(stringInterning =>
+          _.flat_event_witnesses.map(stringInterning.party.unsafe.internalize)
+        ),
+        "source_domain_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.domainId.unsafe.internalize(dbDto.source_domain_id)
+        ),
+        "target_domain_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.domainId.unsafe.internalize(dbDto.target_domain_id)
+        ),
+        "unassign_id" -> fieldStrategy.string(_ => _.unassign_id),
+        "reassignment_counter" -> fieldStrategy.bigint(_ => _.reassignment_counter),
+        "assignment_exclusivity" -> fieldStrategy.bigintOptional(_ => _.assignment_exclusivity),
+      )
+
+    val eventsAssign: Table[DbDto.EventAssign] =
+      fieldStrategy.insert("participant_events_assign")(
+        "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
+        "event_offset" -> fieldStrategy.string(_ => _.event_offset),
+        "update_id" -> fieldStrategy.string(_ => _.update_id),
+        "workflow_id" -> fieldStrategy.stringOptional(_ => _.workflow_id),
+        "command_id" -> fieldStrategy.stringOptional(_ => _.command_id),
+        "submitter" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.party.unsafe.internalize(dbDto.submitter)
+        ),
+        "contract_id" -> fieldStrategy.string(_ => _.contract_id),
+        "template_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.templateId.unsafe.internalize(dbDto.template_id)
+        ),
+        "flat_event_witnesses" -> fieldStrategy.intArray(stringInterning =>
+          _.flat_event_witnesses.map(stringInterning.party.unsafe.internalize)
+        ),
+        "source_domain_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.domainId.unsafe.internalize(dbDto.source_domain_id)
+        ),
+        "target_domain_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.domainId.unsafe.internalize(dbDto.target_domain_id)
+        ),
+        "unassign_id" -> fieldStrategy.string(_ => _.unassign_id),
+        "reassignment_counter" -> fieldStrategy.bigint(_ => _.reassignment_counter),
+        "create_argument" -> fieldStrategy.bytea(_ => _.create_argument),
+        "create_signatories" -> fieldStrategy.intArray(stringInterning =>
+          _.create_signatories.map(stringInterning.party.unsafe.internalize)
+        ),
+        "create_observers" -> fieldStrategy.intArray(stringInterning =>
+          _.create_observers.map(stringInterning.party.unsafe.internalize)
+        ),
+        "create_agreement_text" -> fieldStrategy.stringOptional(_ => _.create_agreement_text),
+        "create_key_value" -> fieldStrategy.byteaOptional(_ => _.create_key_value),
+        "create_key_hash" -> fieldStrategy.stringOptional(_ => _.create_key_hash),
+        "create_argument_compression" -> fieldStrategy.smallintOptional(_ =>
+          _.create_argument_compression
+        ),
+        "create_key_value_compression" -> fieldStrategy.smallintOptional(_ =>
+          _.create_key_value_compression
+        ),
+        "ledger_effective_time" -> fieldStrategy.bigint(_ => _.ledger_effective_time),
+        "driver_metadata" -> fieldStrategy.bytea(_ => _.driver_metadata),
       )
 
     val eventsConsumingExercise: Table[DbDto.EventExercise] =
@@ -272,6 +354,9 @@ private[backend] object AppendOnlySchema {
           _.deduplication_duration_nanos
         ),
         "deduplication_start" -> fieldStrategy.bigintOptional(_ => _.deduplication_start),
+        "domain_id" -> fieldStrategy.intOptional(stringInterning =>
+          _.domain_id.map(stringInterning.domainId.unsafe.internalize)
+        ),
       )
 
     val stringInterningTable: Table[DbDto.StringInterningDto] =
@@ -328,6 +413,28 @@ private[backend] object AppendOnlySchema {
         ),
       )
 
+    val idFilterUnassignStakeholderTable: Table[DbDto.IdFilterUnassignStakeholder] =
+      fieldStrategy.insert("pe_unassign_id_filter_stakeholder")(
+        "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
+        "template_id" -> fieldStrategy.int(stringInterning =>
+          dto => stringInterning.templateId.unsafe.internalize(dto.template_id)
+        ),
+        "party_id" -> fieldStrategy.int(stringInterning =>
+          dto => stringInterning.party.unsafe.internalize(dto.party_id)
+        ),
+      )
+
+    val idFilterAssignStakeholderTable: Table[DbDto.IdFilterAssignStakeholder] =
+      fieldStrategy.insert("pe_assign_id_filter_stakeholder")(
+        "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
+        "template_id" -> fieldStrategy.int(stringInterning =>
+          dto => stringInterning.templateId.unsafe.internalize(dto.template_id)
+        ),
+        "party_id" -> fieldStrategy.int(stringInterning =>
+          dto => stringInterning.party.unsafe.internalize(dto.party_id)
+        ),
+      )
+
     val transactionMeta: Table[DbDto.TransactionMeta] =
       fieldStrategy.insert("participant_transaction_meta")(
         "transaction_id" -> fieldStrategy.string(_ => _.transaction_id),
@@ -349,6 +456,8 @@ private[backend] object AppendOnlySchema {
       eventsCreate.executeUpdate,
       eventsConsumingExercise.executeUpdate,
       eventsNonConsumingExercise.executeUpdate,
+      eventsUnassign.executeUpdate,
+      eventsAssign.executeUpdate,
       configurationEntries.executeUpdate,
       packageEntries.executeUpdate,
       packages.executeUpdate,
@@ -360,6 +469,8 @@ private[backend] object AppendOnlySchema {
       idFilterConsumingStakeholderTable.executeUpdate,
       idFilterConsumingNonStakeholderInformeeTable.executeUpdate,
       idFilterNonConsumingInformeeTable.executeUpdate,
+      idFilterUnassignStakeholderTable.executeUpdate,
+      idFilterAssignStakeholderTable.executeUpdate,
       transactionMeta.executeUpdate,
       transactionMetering.executeUpdate,
     )
@@ -380,6 +491,8 @@ private[backend] object AppendOnlySchema {
             .prepareData(collectWithFilter[EventExercise](_.consuming), stringInterning),
           eventsNonConsumingExercise
             .prepareData(collectWithFilter[EventExercise](!_.consuming), stringInterning),
+          eventsUnassign.prepareData(collect[EventUnassign], stringInterning),
+          eventsAssign.prepareData(collect[EventAssign], stringInterning),
           configurationEntries.prepareData(collect[ConfigurationEntry], stringInterning),
           packageEntries.prepareData(collect[PackageEntry], stringInterning),
           packages.prepareData(collect[Package], stringInterning),
@@ -396,6 +509,10 @@ private[backend] object AppendOnlySchema {
             .prepareData(collect[IdFilterConsumingNonStakeholderInformee], stringInterning),
           idFilterNonConsumingInformeeTable
             .prepareData(collect[IdFilterNonConsumingInformee], stringInterning),
+          idFilterUnassignStakeholderTable
+            .prepareData(collect[IdFilterUnassignStakeholder], stringInterning),
+          idFilterAssignStakeholderTable
+            .prepareData(collect[IdFilterAssignStakeholder], stringInterning),
           transactionMeta.prepareData(collect[TransactionMeta], stringInterning),
           transactionMetering.prepareData(collect[TransactionMetering], stringInterning),
         )

@@ -373,16 +373,10 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
 
   override def findEssentialStateForMember(member: Member, asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[GenericStoredTopologyTransactionsX] =
-    findTransactionsSingleBatch(
-      asOf = asOfInclusive,
-      asOfInclusive = true,
-      isProposal = false,
-      types = TopologyMappingX.Code.all.toSet,
-      filterUid = None,
-      filterNamespace = None,
-      filterOp = None,
-    )
+  ): Future[GenericStoredTopologyTransactionsX] = {
+    val timeFilter = sql" AND sequenced <= $asOfInclusive"
+    queryForTransactions(timeFilter).map(_.asSnapshotAtMaxEffectiveTime)
+  }
 
   override def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
       traceContext: TraceContext

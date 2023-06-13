@@ -6,18 +6,15 @@ package com.digitalasset.canton.platform.store.dao.events
 import com.daml.api.util.TimestampConversion
 import com.daml.api.util.TimestampConversion.fromInstant
 import com.daml.ledger.api.v1.contract_metadata.ContractMetadata
-import com.daml.ledger.api.v1.transaction.{
-  Transaction as FlatTransaction,
-  TransactionTree,
-  TreeEvent,
-}
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
-  GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
-}
+import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v1.{event as apiEvent}
+import com.daml.ledger.api.v2.transaction.{Transaction as FlatTransaction, TransactionTree}
+import com.daml.ledger.api.v2.update_service.{
+  GetTransactionResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
+}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.value.Value.ContractId
@@ -75,7 +72,7 @@ private[events] object TransactionLogUpdatesConversions {
     )(implicit
         loggingContext: LoggingContext,
         executionContext: ExecutionContext,
-    ): TransactionLogUpdate.TransactionAccepted => Future[GetTransactionsResponse] =
+    ): TransactionLogUpdate.TransactionAccepted => Future[GetUpdatesResponse] =
       toFlatTransaction(
         _,
         filter,
@@ -83,7 +80,8 @@ private[events] object TransactionLogUpdatesConversions {
         lfValueTranslation,
       )
         .map(transaction =>
-          GetTransactionsResponse(Seq(transaction)).withPrecomputedSerializedSize()
+          GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(transaction))
+            .withPrecomputedSerializedSize()
         )
 
     def toGetFlatTransactionResponse(
@@ -93,7 +91,7 @@ private[events] object TransactionLogUpdatesConversions {
     )(implicit
         loggingContext: LoggingContext,
         executionContext: ExecutionContext,
-    ): Future[Option[GetFlatTransactionResponse]] =
+    ): Future[Option[GetTransactionResponse]] =
       filter(requestingParties, Map.empty, requestingParties)(transactionLogUpdate)
         .map(transactionAccepted =>
           toFlatTransaction(
@@ -106,7 +104,7 @@ private[events] object TransactionLogUpdatesConversions {
             lfValueTranslation = lfValueTranslation,
           )
         )
-        .map(_.map(flatTransaction => Some(GetFlatTransactionResponse(Some(flatTransaction)))))
+        .map(_.map(flatTransaction => Some(GetTransactionResponse(Some(flatTransaction)))))
         .getOrElse(Future.successful(None))
 
     private def toFlatTransaction(
@@ -130,12 +128,13 @@ private[events] object TransactionLogUpdatesConversions {
           )
           .map(flatEvents =>
             FlatTransaction(
-              transactionId = transactionAccepted.transactionId,
+              updateId = transactionAccepted.transactionId,
               commandId = transactionAccepted.commandId,
               workflowId = transactionAccepted.workflowId,
               effectiveAt = Some(timestampToTimestamp(transactionAccepted.effectiveAt)),
               events = flatEvents,
               offset = ApiOffset.toApiString(transactionAccepted.offset),
+              domainId = transactionAccepted.domainId.getOrElse(""),
             )
           )
       }
@@ -228,7 +227,7 @@ private[events] object TransactionLogUpdatesConversions {
     )(implicit
         loggingContext: LoggingContext,
         executionContext: ExecutionContext,
-    ): Future[Option[GetTransactionResponse]] =
+    ): Future[Option[GetTransactionTreeResponse]] =
       filter(requestingParties)(transactionLogUpdate)
         .map(tx =>
           toTransactionTree(
@@ -241,7 +240,7 @@ private[events] object TransactionLogUpdatesConversions {
             lfValueTranslation = lfValueTranslation,
           )
         )
-        .map(_.map(transactionTree => Some(GetTransactionResponse(Some(transactionTree)))))
+        .map(_.map(transactionTree => Some(GetTransactionTreeResponse(Some(transactionTree)))))
         .getOrElse(Future.successful(None))
 
     def toGetTransactionTreesResponse(
@@ -251,9 +250,12 @@ private[events] object TransactionLogUpdatesConversions {
     )(implicit
         loggingContext: LoggingContext,
         executionContext: ExecutionContext,
-    ): TransactionLogUpdate.TransactionAccepted => Future[GetTransactionTreesResponse] =
+    ): TransactionLogUpdate.TransactionAccepted => Future[GetUpdateTreesResponse] =
       toTransactionTree(_, requestingParties, eventProjectionProperties, lfValueTranslation)
-        .map(txTree => GetTransactionTreesResponse(Seq(txTree)).withPrecomputedSerializedSize())
+        .map(txTree =>
+          GetUpdateTreesResponse(GetUpdateTreesResponse.Update.TransactionTree(txTree))
+            .withPrecomputedSerializedSize()
+        )
 
     private def toTransactionTree(
         transactionAccepted: TransactionLogUpdate.TransactionAccepted,
@@ -295,13 +297,14 @@ private[events] object TransactionLogUpdatesConversions {
             val rootEventIds = visible.filterNot(children)
 
             TransactionTree(
-              transactionId = transactionAccepted.transactionId,
+              updateId = transactionAccepted.transactionId,
               commandId = getCommandId(transactionAccepted.events, requestingParties),
               workflowId = transactionAccepted.workflowId,
               effectiveAt = Some(timestampToTimestamp(transactionAccepted.effectiveAt)),
               offset = ApiOffset.toApiString(transactionAccepted.offset),
               eventsById = eventsById,
               rootEventIds = rootEventIds,
+              domainId = transactionAccepted.domainId.getOrElse(""),
             )
           }
       }

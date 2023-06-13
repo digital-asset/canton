@@ -1059,7 +1059,7 @@ class RepairService(
           )
         )
         val transactionId = repair.transactionId.tryAsLedgerTransactionId
-        val event = TimestampedEvent(
+        def eventFor(hostedWitnesses: List[LfPartyId]) = TimestampedEvent(
           LedgerSyncEvent.TransactionAccepted(
             optCompletionInfo = None,
             transactionMeta = TransactionMeta(
@@ -1077,6 +1077,7 @@ class RepairService(
             recordTime = repair.ts.toLf,
             divulgedContracts = List.empty, // create and plain archive don't involve divulgence
             blindingInfo = None,
+            hostedWitnesses = hostedWitnesses,
             contractMetadata = driverContractMetadata,
           ),
           repair.rc.asLocalOffset,
@@ -1084,6 +1085,10 @@ class RepairService(
         )
         val eventLog = repair.domainPersistence.eventLog
         for {
+          hostedWitnesses <- tx.informees.toList.parTraverseFilter(party =>
+            hostsParty(repair.topologySnapshot)(party).map(Option.when(_)(party))
+          )
+          event = eventFor(hostedWitnesses)
           existingEventO <- eventLog.eventByTransactionId(transactionId).value
           _ <- existingEventO match {
             case None => eventLog.insert(event)
@@ -1444,6 +1449,5 @@ object RepairService {
             ),
         )
     }
-
   }
 }

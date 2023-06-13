@@ -58,10 +58,7 @@ trait LfValueSerialization {
   ): Array[Byte]
 
   /** Returns (contract argument, contract key) */
-  def serialize(
-      eventId: EventId,
-      create: Create,
-  ): (Array[Byte], Option[Array[Byte]])
+  def serialize(create: Create): (Array[Byte], Option[Array[Byte]])
 
   /** Returns (choice argument, exercise result, contract key) */
   def serialize(
@@ -156,7 +153,7 @@ final class LfValueTranslation(
   ): Array[Byte] =
     serializeCreateArgOrThrow(contractId, contractArgument)
 
-  override def serialize(eventId: EventId, create: Create): (Array[Byte], Option[Array[Byte]]) =
+  override def serialize(create: Create): (Array[Byte], Option[Array[Byte]]) =
     serializeCreateArgOrThrow(create) -> serializeNullableKeyOrThrow(create)
 
   override def serialize(

@@ -8,14 +8,18 @@ package com.digitalasset.canton.config
 // SOME OF THE IMPLICIT IMPORTS NECESSARY TO COMPILE
 ////////////////////////////////////////////////////////
 
+import akka.stream.ThrottleMode
 import cats.Order
 import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import com.daml.http.{HttpApiConfig, StaticContentConfig, WebsocketConfig}
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.HistogramDefinition
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.daml.pureconfigutils.HttpServerConfig
+import com.daml.pureconfigutils.SharedConfigReaders.catchConvertError
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.{
   InvalidLengthString,
   defaultMaxLength,
@@ -63,6 +67,7 @@ import pureconfig.error.CannotConvert
 import pureconfig.generic.{FieldCoproductHint, ProductHint}
 
 import java.io.File
+import java.nio.file.{Path, Paths}
 import scala.annotation.nowarn
 import scala.concurrent.duration.*
 import scala.reflect.ClassTag
@@ -779,6 +784,28 @@ object CantonConfig {
       deriveReader[RateLimitingConfig]
     lazy implicit val ledgerApiServerConfigReader: ConfigReader[LedgerApiServerConfig] =
       deriveReader[LedgerApiServerConfig].applyDeprecations
+
+    implicit val throttleModeCfgReader: ConfigReader[ThrottleMode] =
+      ConfigReader.fromString[ThrottleMode](catchConvertError { s =>
+        s.toLowerCase() match {
+          case "enforcing" => Right(ThrottleMode.Enforcing)
+          case "shaping" => Right(ThrottleMode.Shaping)
+          case _ => Left("not one of 'shaping' or 'enforcing'")
+        }
+      })
+    lazy implicit val portFileReader: ConfigReader[Path] =
+      ConfigReader.fromString[Path](catchConvertError { s =>
+        scala.util.Try(Paths.get(s)).toEither.left.map(_.getMessage)
+      })
+    lazy implicit val staticContentConfigReader: ConfigReader[StaticContentConfig] =
+      deriveReader[StaticContentConfig]
+    lazy implicit val wsConfigReader: ConfigReader[WebsocketConfig] =
+      deriveReader[WebsocketConfig]
+
+    lazy implicit val httpServerConfigReader: ConfigReader[HttpServerConfig] =
+      deriveReader[HttpServerConfig]
+    lazy implicit val httpApiServerConfigReader: ConfigReader[HttpApiConfig] =
+      deriveReader[HttpApiConfig]
     lazy implicit val activeContractsServiceConfigReader
         : ConfigReader[ActiveContractsServiceConfig] =
       deriveReader[ActiveContractsServiceConfig].applyDeprecations
@@ -1133,6 +1160,24 @@ object CantonConfig {
       deriveWriter[RateLimitingConfig]
     lazy implicit val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] =
       deriveWriter[LedgerApiServerConfig]
+
+    implicit val throttleModeCfgWriter: ConfigWriter[ThrottleMode] =
+      ConfigWriter.toString[ThrottleMode] {
+        case ThrottleMode.Shaping => "shaping"
+        case ThrottleMode.Enforcing => "enforcing"
+      }
+
+    lazy implicit val portFileWriter: ConfigWriter[Path] =
+      ConfigWriter.toString(_.toFile.getAbsolutePath)
+    lazy implicit val staticContentConfigWriter: ConfigWriter[StaticContentConfig] =
+      deriveWriter[StaticContentConfig]
+    lazy implicit val wsConfigWriter: ConfigWriter[WebsocketConfig] =
+      deriveWriter[WebsocketConfig]
+
+    lazy implicit val httpServerConfigWriter: ConfigWriter[HttpServerConfig] =
+      deriveWriter[HttpServerConfig]
+    lazy implicit val httpApiServerConfigWriter: ConfigWriter[HttpApiConfig] =
+      deriveWriter[HttpApiConfig]
     lazy implicit val activeContractsServiceConfigWriter
         : ConfigWriter[ActiveContractsServiceConfig] = deriveWriter[ActiveContractsServiceConfig]
     lazy implicit val flatTransactionStreamsConfigWriter

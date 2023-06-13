@@ -7,11 +7,12 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
 import com.daml.lf.data.Ref
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, Update}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   IngestionStorageBackend,
@@ -19,19 +20,18 @@ import com.digitalasset.canton.platform.store.backend.{
   StringInterningStorageBackend,
 }
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 private[platform] final case class InitializeParallelIngestion(
     providedParticipantId: Ref.ParticipantId,
-    ingestionStorageBackend: IngestionStorageBackend[_],
+    ingestionStorageBackend: IngestionStorageBackend[?],
     parameterStorageBackend: ParameterStorageBackend,
     stringInterningStorageBackend: StringInterningStorageBackend,
     metrics: Metrics,
-) {
-
-  private val logger = ContextualizedLogger.get(classOf[InitializeParallelIngestion])
+    loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   def apply(
       dbDispatcher: DbDispatcher,
@@ -39,8 +39,9 @@ private[platform] final case class InitializeParallelIngestion(
       readService: ReadService,
       ec: ExecutionContext,
       mat: Materializer,
-  )(implicit loggingContext: LoggingContext): Future[InitializeParallelIngestion.Initialized] = {
+  )(implicit traceContext: TraceContext): Future[InitializeParallelIngestion.Initialized] = {
     implicit val executionContext: ExecutionContext = ec
+    implicit val loggingContext: LoggingContext = LoggingContext.empty
     for {
       initialConditions <- readService.ledgerInitialConditions().runWith(Sink.head)(mat)
       providedLedgerId = domain.LedgerId(initialConditions.ledgerId)

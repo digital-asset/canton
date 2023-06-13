@@ -31,6 +31,7 @@ object CantonErrorGroups {
     abstract class SyncServiceErrorGroup extends ErrorGroup()
     abstract class PackageServiceErrorGroup extends ErrorGroup()
     abstract class PruningServiceErrorGroup extends ErrorGroup()
+    abstract class RepairServiceErrorGroup extends ErrorGroup()
 
     object TransactionErrorGroup extends ErrorGroup() {
       // Errors emitted by Ledger Api server

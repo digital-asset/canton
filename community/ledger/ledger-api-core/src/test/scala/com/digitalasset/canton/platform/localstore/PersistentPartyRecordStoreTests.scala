@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.api.util.TimeProvider
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderConfig
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
@@ -34,8 +33,10 @@ trait PersistentPartyRecordStoreTests
     )
 
   def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig): Future[Unit] =
-    new PersistentIdentityProviderConfigStore(dbSupport, Metrics.ForTesting, 10)(executionContext)
-      .createIdentityProviderConfig(identityProviderConfig)(LoggingContext.ForTesting)
+    new PersistentIdentityProviderConfigStore(dbSupport, Metrics.ForTesting, 10, loggerFactory)(
+      executionContext
+    )
+      .createIdentityProviderConfig(identityProviderConfig)
       .flatMap {
         case Left(error) => Future.failed(new Exception(error.toString))
         case Right(_) => Future.unit

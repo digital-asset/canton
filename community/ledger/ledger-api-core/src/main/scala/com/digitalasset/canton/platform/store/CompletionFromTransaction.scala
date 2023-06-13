@@ -4,9 +4,10 @@
 package com.digitalasset.canton.platform.store
 
 import com.daml.api.util.TimestampConversion.fromInstant
-import com.daml.ledger.api.v1.command_completion_service.{Checkpoint, CompletionStreamResponse}
-import com.daml.ledger.api.v1.completion.Completion
+import com.daml.ledger.api.v1.command_completion_service.Checkpoint
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.completion.Completion
 import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
@@ -25,6 +26,7 @@ private[platform] object CompletionFromTransaction {
       commandId: String,
       transactionId: String,
       applicationId: String,
+      domainId: Option[String],
       optSubmissionId: Option[String] = None,
       optDeduplicationOffset: Option[String] = None,
       optDeduplicationDurationSeconds: Option[Long] = None,
@@ -32,7 +34,7 @@ private[platform] object CompletionFromTransaction {
   ): CompletionStreamResponse =
     CompletionStreamResponse.of(
       checkpoint = Some(toApiCheckpoint(recordTime, offset)),
-      completions = Seq(
+      completion = Some(
         toApiCompletion(
           commandId = commandId,
           transactionId = transactionId,
@@ -44,6 +46,7 @@ private[platform] object CompletionFromTransaction {
           optDeduplicationDurationNanos = optDeduplicationDurationNanos,
         )
       ),
+      domainId = domainId.getOrElse(""),
     )
 
   def rejectedCompletion(
@@ -52,6 +55,7 @@ private[platform] object CompletionFromTransaction {
       commandId: String,
       status: StatusProto,
       applicationId: String,
+      domainId: Option[String],
       optSubmissionId: Option[String] = None,
       optDeduplicationOffset: Option[String] = None,
       optDeduplicationDurationSeconds: Option[Long] = None,
@@ -59,7 +63,7 @@ private[platform] object CompletionFromTransaction {
   ): CompletionStreamResponse =
     CompletionStreamResponse.of(
       checkpoint = Some(toApiCheckpoint(recordTime, offset)),
-      completions = Seq(
+      completion = Some(
         toApiCompletion(
           commandId = commandId,
           transactionId = RejectionTransactionId,
@@ -71,6 +75,7 @@ private[platform] object CompletionFromTransaction {
           optDeduplicationDurationNanos = optDeduplicationDurationNanos,
         )
       ),
+      domainId = domainId.getOrElse(""),
     )
 
   private def toApiCheckpoint(recordTime: Timestamp, offset: Offset): Checkpoint =
@@ -92,7 +97,7 @@ private[platform] object CompletionFromTransaction {
     val completionWithMandatoryFields = Completion(
       commandId = commandId,
       status = optStatus,
-      transactionId = transactionId,
+      updateId = transactionId,
       applicationId = applicationId,
     )
     val optDeduplicationPeriod = toApiDeduplicationPeriod(

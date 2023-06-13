@@ -61,6 +61,14 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       dtoExercise(offset(5), 2L, true, hashCid("#4")),
       dtoDivulgence(Some(offset(5)), 3L, hashCid("#4")),
       dtoCompletion(offset(5)),
+      // 6: assign event
+      dtoAssign(offset(6), 4L, hashCid("#5")),
+      DbDto.IdFilterAssignStakeholder(4L, someTemplateId.toString, someParty.toString),
+      // 7: unassign event
+      dtoUnassign(offset(7), 5L, hashCid("#6")),
+      DbDto.IdFilterUnassignStakeholder(5L, someTemplateId.toString, someParty.toString),
+      // String interning
+      DbDto.StringInterningDto(10, "d|x:abc"),
     )
 
     // Initialize and insert some data
@@ -68,23 +76,24 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(ledgerEnd(5, 3L)))
 
-    // Reset
-    executeSql(backend.reset.resetAll)
+    // queries
+    def identity = executeSql(backend.parameter.ledgerIdentity)
 
-    // Check the contents (queries that do not depend on ledger end)
-    val identity = executeSql(backend.parameter.ledgerIdentity)
-    val end = executeSql(backend.parameter.ledgerEnd)
-    val events = executeSql(backend.contract.contractStateEvents(0, Long.MaxValue))
+    def end = executeSql(backend.parameter.ledgerEnd)
 
-    // Check the contents (queries that don't read beyond ledger end)
-    advanceLedgerEndToMakeOldDataVisible()
-    val parties = executeSql(backend.party.knownParties)
-    val config = executeSql(backend.configuration.ledgerConfiguration)
-    val packages = executeSql(backend.packageBackend.lfPackages)
-    val stringInterningEntries = executeSql(
+    def events = executeSql(backend.contract.contractStateEvents(0, Long.MaxValue))
+
+    def parties = executeSql(backend.party.knownParties)
+
+    def config = executeSql(backend.configuration.ledgerConfiguration)
+
+    def packages = executeSql(backend.packageBackend.lfPackages)
+
+    def stringInterningEntries = executeSql(
       backend.stringInterning.loadStringInterningEntries(0, 1000)
     )
-    val filterIds = executeSql(
+
+    def filterIds = executeSql(
       backend.event.transactionStreamingQueries.fetchIdsOfCreateEventsForStakeholder(
         stakeholder = someParty,
         templateIdO = None,
@@ -94,14 +103,74 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       )
     )
 
+    def assignEvents = executeSql(
+      backend.event.assignEventBatch(
+        eventSequentialIds = List(4),
+        allFilterParties = Set.empty,
+      )
+    )
+
+    def unassignEvents = executeSql(
+      backend.event.unassignEventBatch(
+        eventSequentialIds = List(5),
+        allFilterParties = Set.empty,
+      )
+    )
+
+    def assignIds = executeSql(
+      backend.event.fetchAssignEventIdsForStakeholder(
+        stakeholder = someParty,
+        templateId = None,
+        startExclusive = 0L,
+        endInclusive = 1000L,
+        1000,
+      )
+    )
+
+    def unassignIds = executeSql(
+      backend.event.fetchUnassignEventIdsForStakeholder(
+        stakeholder = someParty,
+        templateId = None,
+        startExclusive = 0L,
+        endInclusive = 1000L,
+        1000,
+      )
+    )
+
+    // verify queries indeed returning something
+    identity should not be None
+    end should not be ParameterStorageBackend.LedgerEnd.beforeBegin
+    events should not be empty
+    parties should not be empty
+    packages should not be empty
+    config should not be None
+    stringInterningEntries should not be empty
+    filterIds should not be empty
+    assignEvents should not be empty
+    unassignEvents should not be empty
+    assignIds should not be empty
+    unassignIds should not be empty
+
+    // Reset
+    executeSql(backend.reset.resetAll)
+
+    // Check the contents (queries that do not depend on ledger end)
     identity shouldBe None
     end shouldBe ParameterStorageBackend.LedgerEnd.beforeBegin
+    events shouldBe empty
+
+    // Check the contents (queries that don't read beyond ledger end)
+    advanceLedgerEndToMakeOldDataVisible()
+
     parties shouldBe empty
     packages shouldBe empty // Note: resetAll() does delete packages
-    events shouldBe empty
     config shouldBe None
     stringInterningEntries shouldBe empty
     filterIds shouldBe empty
+    assignEvents shouldBe empty
+    unassignEvents shouldBe empty
+    assignIds shouldBe empty
+    unassignIds shouldBe empty
   }
 
   // Some queries are protected to never return data beyond the current ledger end.

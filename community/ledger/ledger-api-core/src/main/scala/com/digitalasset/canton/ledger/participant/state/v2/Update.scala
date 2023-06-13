@@ -262,6 +262,7 @@ object Update {
       recordTime: Timestamp,
       divulgedContracts: List[DivulgedContract],
       blindingInfo: Option[BlindingInfo],
+      hostedWitnesses: List[Ref.Party],
       contractMetadata: Map[Value.ContractId, Bytes],
   ) extends Update {
     override def description: String = s"Accept transaction $transactionId"
@@ -275,6 +276,7 @@ object Update {
             _,
             transactionId,
             recordTime,
+            _,
             _,
             _,
             _,

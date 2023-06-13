@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
@@ -43,10 +43,10 @@ class BufferedCommandCompletionsReader(
       parties: Set[Party],
       applicationId: String,
   ): Option[CompletionStreamResponse] = (transactionLogUpdate match {
-    case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, Some(completionDetails)) =>
+    case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, Some(completionDetails), _) =>
       Some(completionDetails)
     case TransactionLogUpdate.TransactionRejected(_, completionDetails) => Some(completionDetails)
-    case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, None) =>
+    case TransactionLogUpdate.TransactionAccepted(_, _, _, _, _, _, None, _) =>
       // Completion details missing highlights submitter is not local to this participant
       None
   }).flatMap(toApiCompletion(_, parties, applicationId))
@@ -56,7 +56,7 @@ class BufferedCommandCompletionsReader(
       parties: Set[Party],
       applicationId: String,
   ): Option[CompletionStreamResponse] = {
-    val completion = completionDetails.completionStreamResponse.completions.headOption
+    val completion = completionDetails.completionStreamResponse.completion
       .getOrElse(throw new RuntimeException("No completion in completion stream response"))
 
     val visibilityPredicate =

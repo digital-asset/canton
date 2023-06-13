@@ -4,10 +4,11 @@
 package com.digitalasset.canton.platform.store
 
 import com.daml.ledger.resources.ResourceContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.timer.RetryStrategy
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.FlywayMigrations.*
 import com.digitalasset.canton.platform.store.backend.VerifiedDataSource
+import com.digitalasset.canton.tracing.TraceContext
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.MigrationVersion
 import org.flywaydb.core.api.configuration.FluentConfiguration
@@ -19,13 +20,16 @@ import scala.concurrent.{ExecutionContext, Future}
 class FlywayMigrations(
     jdbcUrl: String,
     additionalMigrationPaths: Seq[String] = Seq.empty,
-)(implicit resourceContext: ResourceContext, loggingContext: LoggingContext) {
-  private val logger = ContextualizedLogger.get(this.getClass)
+    val loggerFactory: NamedLoggerFactory,
+)(implicit resourceContext: ResourceContext, traceContext: TraceContext)
+    extends NamedLogging {
   private val dbType = DbType.jdbcType(jdbcUrl)
   implicit private val ec: ExecutionContext = resourceContext.executionContext
 
   private def runF[T](t: FluentConfiguration => Future[T]): Future[T] =
-    VerifiedDataSource(jdbcUrl).flatMap(dataSource => t(configurationBase(dataSource)))
+    VerifiedDataSource(jdbcUrl, loggerFactory).flatMap(dataSource =>
+      t(configurationBase(dataSource))
+    )
 
   private def run[T](t: FluentConfiguration => T): Future[T] =
     runF(fc => Future(t(fc)))

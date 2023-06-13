@@ -7,7 +7,7 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "2.7.0-snapshot.20230604.11848.0.v9f55d679"
+  val version: String = "2.7.0-snapshot.20230612.11864.0.v3514a4a0"
 
   /** Custom Daml artifacts override version.
     */

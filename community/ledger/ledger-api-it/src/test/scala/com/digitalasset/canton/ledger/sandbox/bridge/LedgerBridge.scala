@@ -154,6 +154,7 @@ object LedgerBridge {
       recordTime = currentTimestamp,
       divulgedContracts = Nil,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       contractMetadata = contractMetadata,
     )
   }

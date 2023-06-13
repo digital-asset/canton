@@ -7,16 +7,16 @@ import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v1.event_query_service.{
   GetEventsByContractIdResponse,
   GetEventsByContractKeyResponse,
 }
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
 }
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{ApplicationId, Identifier}
@@ -108,7 +108,7 @@ private[index] class IndexServiceImpl(
   override def currentHealth(): HealthStatus = ledgerDao.currentHealth()
 
   override def lookupContractKey(readers: Set[Ref.Party], key: GlobalKey)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractId]] =
     contractStore.lookupContractKey(readers, key)
 
@@ -117,7 +117,7 @@ private[index] class IndexServiceImpl(
       endInclusive: Option[domain.LedgerOffset],
       transactionFilter: domain.TransactionFilter,
       verbose: Boolean,
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionsResponse, NotUsed] =
+  )(implicit loggingContext: LoggingContext): Source[GetUpdatesResponse, NotUsed] =
     withValidatedFilter(transactionFilter, packageMetadataView.current()) {
       between(startExclusive, endInclusive) { (from, to) =>
         from.foreach(offset =>
@@ -154,11 +154,13 @@ private[index] class IndexServiceImpl(
           .map(_._2)
           .buffered(metrics.daml.index.flatTransactionsBufferSize, LedgerApiStreamsBufferSize)
       }.wireTap(
-        _.transactions.view
-          .map(transaction =>
-            Event(transaction.commandId, TraceIdentifiers.fromTransaction(transaction))
-          )
-          .foreach(Spans.addEventToCurrentSpan)
+        _.update match {
+          case GetUpdatesResponse.Update.Transaction(transaction) =>
+            Spans.addEventToCurrentSpan(
+              Event(transaction.commandId, TraceIdentifiers.fromTransaction(transaction))
+            )
+          case _ => ()
+        }
       )
     }
 
@@ -167,7 +169,7 @@ private[index] class IndexServiceImpl(
       endInclusive: Option[LedgerOffset],
       filter: domain.TransactionFilter,
       verbose: Boolean,
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionTreesResponse, NotUsed] =
+  )(implicit loggingContext: LoggingContext): Source[GetUpdateTreesResponse, NotUsed] =
     withValidatedFilter(filter, packageMetadataView.current()) {
       val parties = filter.filtersByParty.keySet
       val eventProjectionProperties = EventProjectionProperties(
@@ -196,11 +198,16 @@ private[index] class IndexServiceImpl(
           .map(_._2)
           .buffered(metrics.daml.index.transactionTreesBufferSize, LedgerApiStreamsBufferSize)
       }.wireTap(
-        _.transactions.view
-          .map(transaction =>
-            Event(transaction.commandId, TraceIdentifiers.fromTransactionTree(transaction))
-          )
-          .foreach(Spans.addEventToCurrentSpan)
+        _.update match {
+          case GetUpdateTreesResponse.Update.TransactionTree(transactionTree) =>
+            Spans.addEventToCurrentSpan(
+              Event(
+                transactionTree.commandId,
+                TraceIdentifiers.fromTransactionTree(transactionTree),
+              )
+            )
+          case _ => ()
+        }
       )
     }
 
@@ -283,21 +290,21 @@ private[index] class IndexServiceImpl(
       forParties: Set[Ref.Party],
       contractId: ContractId,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[VersionedContractInstance]] =
     contractStore.lookupActiveContract(forParties, contractId)
 
   override def getTransactionById(
       transactionId: TransactionId,
       requestingParties: Set[Ref.Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetFlatTransactionResponse]] =
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]] =
     transactionsReader
       .lookupFlatTransactionById(transactionId.unwrap, requestingParties)
 
   override def getTransactionTreeById(
       transactionId: TransactionId,
       requestingParties: Set[Ref.Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]] =
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionTreeResponse]] =
     transactionsReader
       .lookupTransactionTreeById(transactionId.unwrap, requestingParties)
 
@@ -512,12 +519,12 @@ private[index] class IndexServiceImpl(
       .asGrpcError
 
   override def lookupContractStateWithoutDivulgence(contractId: ContractId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[ContractState] =
     contractStore.lookupContractStateWithoutDivulgence(contractId)
 
   override def lookupMaximumLedgerTimeAfterInterpretation(ids: Set[ContractId])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[MaximumLedgerTime] =
     maximumLedgerTimeService.lookupMaximumLedgerTimeAfterInterpretation(ids)
 

@@ -124,7 +124,7 @@ class LedgerTimeAwareCommandExecutorSpec
           eqTo(processedDisclosedContracts),
           any[Set[ContractId]],
         )(
-          any[LoggingContext]
+          any[LoggingContextWithTrace]
         )
       )
         .thenReturn(Future.successful(resolveMaximumLedgerTimeResults.head))

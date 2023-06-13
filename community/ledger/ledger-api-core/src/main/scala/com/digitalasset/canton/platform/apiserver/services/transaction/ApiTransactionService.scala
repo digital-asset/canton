@@ -36,6 +36,7 @@ import com.digitalasset.canton.ledger.api.validation.PartyNameChecker
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexTransactionsService
+import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,
   withEnrichedLoggingContext,
@@ -47,7 +48,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.platform.apiserver.services.{StreamMetrics, logging}
+import com.digitalasset.canton.platform.apiserver.services.{ApiConversions, StreamMetrics, logging}
 import io.grpc.*
 import scalaz.syntax.tag.*
 
@@ -64,7 +65,6 @@ private[apiserver] object ApiTransactionService {
       ec: ExecutionContext,
       mat: Materializer,
       esf: ExecutionSequencerFactory,
-      loggingContext: LoggingContext,
   ): GrpcTransactionService with BindableService =
     new GrpcTransactionService(
       new ApiTransactionService(transactionsService, metrics, loggerFactory),
@@ -79,7 +79,7 @@ private[apiserver] final class ApiTransactionService private (
     transactionsService: IndexTransactionsService,
     metrics: Metrics,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
+)(implicit executionContext: ExecutionContext)
     extends TransactionService
     with NamedLogging {
 
@@ -106,6 +106,7 @@ private[apiserver] final class ApiTransactionService private (
     logger.trace(s"Transaction request: $request.")
     transactionsService
       .transactions(request.startExclusive, request.endInclusive, request.filter, request.verbose)
+      .flatMapConcat(update => Source(ApiConversions.toV1(update)))
       .via(logger.enrichedDebugStream("Responding with transactions.", transactionsLoggable))
       .via(logger.logErrorsOnStream)
       .via(StreamMetrics.countElements(metrics.daml.lapi.streams.transactions))
@@ -134,6 +135,7 @@ private[apiserver] final class ApiTransactionService private (
         TransactionFilter(request.parties.map(p => p -> Filters.noFilter).toMap),
         request.verbose,
       )
+      .flatMapConcat(updateTree => Source(ApiConversions.toV1(updateTree)))
       .via(
         logger.enrichedDebugStream("Responding with transaction trees.", transactionTreesLoggable)
       )
@@ -160,7 +162,10 @@ private[apiserver] final class ApiTransactionService private (
     LfEventId
       .fromString(request.eventId.unwrap)
       .map { case LfEventId(transactionId, _) =>
-        lookUpTreeByTransactionId(TransactionId(transactionId), request.requestingParties)
+        lookUpTreeByTransactionId(TransactionId(transactionId), request.requestingParties)(
+          enrichedLoggingContext,
+          errorLogger,
+        )
       }
       .getOrElse {
         Future.failed {
@@ -185,7 +190,10 @@ private[apiserver] final class ApiTransactionService private (
     }
     logger.trace(s"Transaction by ID request: $request.")
 
-    lookUpTreeByTransactionId(request.transactionId, request.requestingParties)(errorLogger)
+    lookUpTreeByTransactionId(request.transactionId, request.requestingParties)(
+      loggingContext,
+      errorLogger,
+    )
       .andThen(logger.logErrorsOnCall[GetTransactionResponse])
   }
 
@@ -231,14 +239,20 @@ private[apiserver] final class ApiTransactionService private (
     }
     logger.trace(s"Flat transaction by ID request: $request")
 
-    lookUpFlatByTransactionId(request.transactionId, request.requestingParties)(errorLogger)
+    lookUpFlatByTransactionId(request.transactionId, request.requestingParties)(
+      loggingContext,
+      errorLogger,
+    )
       .andThen(logger.logErrorsOnCall[GetFlatTransactionResponse])
   }
 
   private def lookUpTreeByTransactionId(
       transactionId: TransactionId,
       requestingParties: Set[Party],
-  )(implicit errorLogger: ContextualizedErrorLogger): Future[GetTransactionResponse] =
+  )(implicit
+      loggingContext: LoggingContext,
+      errorLogger: ContextualizedErrorLogger,
+  ): Future[GetTransactionResponse] =
     transactionsService
       .getTransactionTreeById(transactionId, requestingParties)
       .flatMap {
@@ -248,13 +262,16 @@ private[apiserver] final class ApiTransactionService private (
               .Reject(transactionId.unwrap)
               .asGrpcError
           )
-        case Some(transaction) => Future.successful(transaction)
+        case Some(transaction) => Future.successful(ApiConversions.toV1(transaction))
       }
 
   private def lookUpFlatByTransactionId(
       transactionId: TransactionId,
       requestingParties: Set[Party],
-  )(implicit errorLogger: ContextualizedErrorLogger): Future[GetFlatTransactionResponse] =
+  )(implicit
+      loggingContext: LoggingContext,
+      errorLogger: ContextualizedErrorLogger,
+  ): Future[GetFlatTransactionResponse] =
     transactionsService
       .getTransactionById(transactionId, requestingParties)
       .flatMap {
@@ -264,7 +281,7 @@ private[apiserver] final class ApiTransactionService private (
               .Reject(transactionId.unwrap)
               .asGrpcError
           )
-        case Some(transaction) => Future.successful(transaction)
+        case Some(transaction) => Future.successful(ApiConversions.toV1(transaction))
       }
 
   private def transactionTreesLoggable(trees: GetTransactionTreesResponse): LoggingEntries =
@@ -298,7 +315,7 @@ private[apiserver] final class ApiTransactionService private (
     )
 
   override def getLatestPrunedOffsets: Future[GetLatestPrunedOffsetsResponse] =
-    transactionsService.latestPrunedOffsets().map {
+    transactionsService.latestPrunedOffsets()(createLoggingContext(loggerFactory)(identity)).map {
       case (prunedUpToInclusive, divulgencePrunedUpTo) =>
         GetLatestPrunedOffsetsResponse(
           participantPrunedUpToInclusive =

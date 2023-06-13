@@ -9,8 +9,8 @@ import akka.stream.scaladsl.{Sink, Source}
 import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
-import com.daml.ledger.api.v1.completion.Completion
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.completion.Completion
 import com.daml.lf.crypto
 import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.data.Time.Timestamp
@@ -48,10 +48,11 @@ import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView
 import com.digitalasset.canton.platform.store.packagemeta.PackageMetadataView.PackageMetadata
 import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.{BaseTest, TestEssentials}
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.mockito.{InOrder, MockitoSugar}
-import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -64,7 +65,8 @@ class InMemoryStateUpdaterSpec
     extends AnyFlatSpec
     with Matchers
     with AkkaBeforeAndAfterAll
-    with MockitoSugar {
+    with MockitoSugar
+    with BaseTest {
 
   "flow" should "correctly process updates in order" in new Scope {
     runFlow(
@@ -113,6 +115,7 @@ class InMemoryStateUpdaterSpec
       Vector(txLogUpdate1),
       offset(1L),
       0L,
+      update1._2.traceContext,
       PackageMetadata(),
     )
   }
@@ -125,6 +128,7 @@ class InMemoryStateUpdaterSpec
       Vector(txLogUpdate1),
       offset(2L),
       6L,
+      metadataChangedUpdate._2.traceContext,
       PackageMetadata(),
     )
   }
@@ -143,12 +147,13 @@ class InMemoryStateUpdaterSpec
       Vector(),
       offset(6L),
       0L,
+      update6._2.traceContext,
       PackageMetadata(templates = Set(templateId, templateId2)),
     )
   }
 
   "update" should "update the in-memory state" in new Scope {
-    InMemoryStateUpdater.update(inMemoryState, loggingContext)(prepareResult)
+    InMemoryStateUpdater.update(inMemoryState, logger)(prepareResult)
 
     inOrder.verify(packageMetadataView).update(packageMetadata)
     // TODO(i12283) LLP: Unit test contract state event conversion and cache updating
@@ -185,7 +190,7 @@ class InMemoryStateUpdaterSpec
 object InMemoryStateUpdaterSpec {
 
   import TraceContext.Implicits.Empty.*
-  trait Scope extends Matchers with ScalaFutures with IntegrationPatience with MockitoSugar {
+  trait Scope extends Matchers with ScalaFutures with MockitoSugar with TestEssentials {
     val templateId = Identifier.assertFromString("noPkgId:Mod:I")
     val templateId2 = Identifier.assertFromString("noPkgId:Mod:I2")
 
@@ -202,20 +207,24 @@ object InMemoryStateUpdaterSpec {
       scala.concurrent.ExecutionContext.global,
       FiniteDuration(10, "seconds"),
       Metrics.ForTesting,
+      logger,
     )(
       prepare = (_, lastEventSequentialId) => result(lastEventSequentialId),
       update = cachesUpdateCaptor,
-    )(LoggingContext.empty)
+    )(emptyTraceContext)
 
-    val txLogUpdate1 = TransactionLogUpdate.TransactionAccepted(
-      transactionId = "tx1",
-      commandId = "",
-      workflowId = workflowId,
-      effectiveAt = Timestamp.Epoch,
-      offset = offset(1L),
-      events = Vector(),
-      completionDetails = None,
-    )
+    val txLogUpdate1 = Traced(
+      TransactionLogUpdate.TransactionAccepted(
+        transactionId = "tx1",
+        commandId = "",
+        workflowId = workflowId,
+        effectiveAt = Timestamp.Epoch,
+        offset = offset(1L),
+        events = Vector(),
+        completionDetails = None,
+        domainId = None,
+      )
+    )(emptyTraceContext)
 
     val ledgerEndCache: MutableLedgerEndCache = mock[MutableLedgerEndCache]
     val contractStateCaches: ContractStateCaches = mock[ContractStateCaches]
@@ -249,6 +258,7 @@ object InMemoryStateUpdaterSpec {
       dispatcherState = dispatcherState,
       packageMetadataView = packageMetadataView,
       submissionTracker = submissionTracker,
+      loggerFactory = loggerFactory,
     )(ExecutionContext.global)
 
     val loggingContext: LoggingContext = LoggingContext.ForTesting
@@ -262,23 +272,23 @@ object InMemoryStateUpdaterSpec {
     val tx_accepted_completion: Completion = Completion(
       commandId = tx_accepted_commandId,
       applicationId = "appId",
-      transactionId = tx_accepted_transactionId,
+      updateId = tx_accepted_transactionId,
       submissionId = "submissionId",
       actAs = Seq.empty,
     )
     val tx_rejected_completion: Completion =
-      tx_accepted_completion.copy(transactionId = tx_rejected_transactionId)
+      tx_accepted_completion.copy(updateId = tx_rejected_transactionId)
     val tx_accepted_completionDetails: TransactionLogUpdate.CompletionDetails =
       TransactionLogUpdate.CompletionDetails(
         completionStreamResponse =
-          CompletionStreamResponse(completions = Seq(tx_accepted_completion)),
+          CompletionStreamResponse(completion = Some(tx_accepted_completion)),
         submitters = tx_accepted_submitters,
       )
 
     val tx_rejected_completionDetails: TransactionLogUpdate.CompletionDetails =
       TransactionLogUpdate.CompletionDetails(
         completionStreamResponse =
-          CompletionStreamResponse(completions = Seq(tx_rejected_completion)),
+          CompletionStreamResponse(completion = Some(tx_rejected_completion)),
         submitters = tx_rejected_submitters,
       )
 
@@ -300,6 +310,7 @@ object InMemoryStateUpdaterSpec {
         offset = tx_accepted_withCompletionDetails_offset,
         events = (1 to 3).map(_ => mock[TransactionLogUpdate.Event]).toVector,
         completionDetails = Some(tx_accepted_completionDetails),
+        domainId = None,
       )
 
     val tx_accepted_withoutCompletionDetails: TransactionLogUpdate.TransactionAccepted =
@@ -317,17 +328,28 @@ object InMemoryStateUpdaterSpec {
 
     val lastOffset: Offset = tx_rejected_offset
     val lastEventSeqId = 123L
-    val updates: Vector[TransactionLogUpdate] =
-      Vector(tx_accepted_withCompletionDetails, tx_accepted_withoutCompletionDetails, tx_rejected)
+    val updates: Vector[Traced[TransactionLogUpdate]] =
+      Vector(
+        Traced(tx_accepted_withCompletionDetails)(emptyTraceContext),
+        Traced(tx_accepted_withoutCompletionDetails)(emptyTraceContext),
+        Traced(tx_rejected)(emptyTraceContext),
+      )
     val prepareResult: PrepareResult = PrepareResult(
       updates = updates,
       lastOffset = lastOffset,
       lastEventSequentialId = lastEventSeqId,
+      emptyTraceContext,
       packageMetadata = packageMetadata,
     )
 
     def result(lastEventSequentialId: Long): PrepareResult =
-      PrepareResult(Vector.empty, offset(1L), lastEventSequentialId, PackageMetadata())
+      PrepareResult(
+        Vector.empty,
+        offset(1L),
+        lastEventSequentialId,
+        emptyTraceContext,
+        PackageMetadata(),
+      )
 
     def runFlow(
         input: Seq[(Vector[(Offset, Traced[Update])], Long)]
@@ -366,6 +388,7 @@ object InMemoryStateUpdaterSpec {
       recordTime = Timestamp.Epoch,
       divulgedContracts = List.empty,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       contractMetadata = Map.empty,
     )
   )
@@ -385,6 +408,7 @@ object InMemoryStateUpdaterSpec {
       recordTime = Timestamp.Epoch,
       divulgedContracts = List.empty,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       contractMetadata = Map.empty,
     )
   )

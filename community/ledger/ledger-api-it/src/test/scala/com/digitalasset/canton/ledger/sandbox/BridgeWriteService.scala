@@ -9,6 +9,7 @@ import akka.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
 import cats.syntax.bifunctor.toBifunctorOps
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.error.ContextualizedErrorLogger
+import com.daml.lf.data.Ref.{ApplicationId, CommandId, Party, SubmissionId, WorkflowId}
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
@@ -28,11 +29,13 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.*
 import com.digitalasset.canton.ledger.sandbox.bridge.{BridgeMetrics, LedgerBridge}
 import com.digitalasset.canton.ledger.sandbox.domain.{Rejection, Submission}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.tracing.TraceContext.wrapWithNewTraceContext
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import java.time.Duration
 import java.util.concurrent.{CompletableFuture, CompletionStage}
+import javax.naming.OperationNotSupportedException
 
 class BridgeWriteService(
     feedSink: Sink[(Offset, Traced[Update]), NotUsed],
@@ -64,6 +67,10 @@ class BridgeWriteService(
   ): CompletionStage[SubmissionResult] = {
     implicit val errorLogger: ContextualizedErrorLogger =
       new DamlContextualizedErrorLogger(logger, loggingContext, submitterInfo.submissionId)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(TraceContext.fromDamlTelemetryContext(telemetryContext))(
+        loggingContext
+      )
     submitterInfo.deduplicationPeriod match {
       case DeduplicationPeriod.DeduplicationDuration(deduplicationDuration) =>
         validateDeduplicationDurationAndSubmit(
@@ -98,7 +105,7 @@ class BridgeWriteService(
         maxRecordTime = maxRecordTime,
         submissionId = submissionId,
         config = config,
-      )
+      )(LoggingContextWithTrace(TraceContext.fromDamlTelemetryContext(telemetryContext)))
     )
 
   override def currentHealth(): HealthStatus = Healthy
@@ -116,7 +123,7 @@ class BridgeWriteService(
         hint = hint,
         displayName = displayName,
         submissionId = submissionId,
-      )
+      )(LoggingContextWithTrace(TraceContext.fromDamlTelemetryContext(telemetryContext)))
     )
 
   override def uploadPackages(
@@ -132,7 +139,7 @@ class BridgeWriteService(
         submissionId = submissionId,
         archives = archives,
         sourceDescription = sourceDescription,
-      )
+      )(LoggingContextWithTrace(TraceContext.fromDamlTelemetryContext(telemetryContext)))
     )
 
   override def prune(
@@ -174,7 +181,10 @@ class BridgeWriteService(
       estimatedInterpretationCost: Long,
       deduplicationDuration: Duration,
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
-  )(implicit errorLogger: ContextualizedErrorLogger): CompletionStage[SubmissionResult] = {
+  )(implicit
+      errorLogger: ContextualizedErrorLogger,
+      loggingContext: LoggingContextWithTrace,
+  ): CompletionStage[SubmissionResult] = {
     val maxDeduplicationDuration = submitterInfo.ledgerConfiguration.maxDeduplicationDuration
     if (deduplicationDuration.compareTo(maxDeduplicationDuration) > 0)
       CompletableFuture.completedFuture(
@@ -199,6 +209,18 @@ class BridgeWriteService(
         )
       )
   }
+
+  override def submitReassignment(
+      submitter: Party,
+      applicationId: ApplicationId,
+      commandId: CommandId,
+      submissionId: Option[SubmissionId],
+      workflowId: Option[WorkflowId],
+      reassignmentCommand: ReassignmentCommand,
+  )(implicit
+      loggingContext: LoggingContext,
+      telemetryContext: TelemetryContext,
+  ): CompletionStage[SubmissionResult] = throw new OperationNotSupportedException()
 }
 
 object BridgeWriteService {

@@ -364,11 +364,17 @@ class LocalParticipantTestingGroup(
       filterId: String = "",
       filterPackage: String = "",
       filterTemplate: String = "",
+      filterStakeholder: Option[PartyId] = None,
       limit: PositiveInt = defaultLimit,
-  ): List[SerializableContract] = check(FeatureFlag.Testing) {
-    pcs_search(domainAlias, filterId, filterPackage, filterTemplate, activeSet = true, limit).map(
-      _._2
-    )
+  ): List[SerializableContract] = {
+    val predicate = (c: SerializableContract) =>
+      filterStakeholder.forall(s => c.metadata.stakeholders.contains(s.toLf))
+
+    check(FeatureFlag.Testing) {
+      pcs_search(domainAlias, filterId, filterPackage, filterTemplate, activeSet = true, limit)
+        .map(_._2)
+        .filter(predicate)
+    }
   }
 
   @Help.Summary("Lookup of events", FeatureFlag.Testing)

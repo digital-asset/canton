@@ -6,11 +6,11 @@ package com.digitalasset.canton.platform.store.dao.events
 import akka.stream.scaladsl.Source
 import akka.{Done, NotUsed}
 import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
+import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
 }
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
@@ -59,7 +59,7 @@ private[dao] final class TransactionsReader(
       endInclusive: Offset,
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, GetTransactionsResponse), NotUsed] = {
+  )(implicit loggingContext: LoggingContext): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val futureSource = getEventSeqIdRange(startExclusive, endInclusive)
       .map(queryRange =>
         flatTransactionsStreamReader.streamFlatTransactions(
@@ -76,7 +76,7 @@ private[dao] final class TransactionsReader(
   override def lookupFlatTransactionById(
       transactionId: Ref.TransactionId,
       requestingParties: Set[Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetFlatTransactionResponse]] = {
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]] = {
     flatTransactionPointwiseReader.lookupTransactionById(
       transactionId = transactionId,
       requestingParties = requestingParties,
@@ -90,7 +90,7 @@ private[dao] final class TransactionsReader(
   override def lookupTransactionTreeById(
       transactionId: Ref.TransactionId,
       requestingParties: Set[Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]] = {
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionTreeResponse]] = {
     treeTransactionPointwiseReader.lookupTransactionById(
       transactionId = transactionId,
       requestingParties = requestingParties,
@@ -108,7 +108,7 @@ private[dao] final class TransactionsReader(
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       loggingContext: LoggingContext
-  ): Source[(Offset, GetTransactionTreesResponse), NotUsed] = {
+  ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
     val futureSource = getEventSeqIdRange(startExclusive, endInclusive)
       .map(queryRange =>
         treeTransactionsStreamReader.streamTreeTransaction(

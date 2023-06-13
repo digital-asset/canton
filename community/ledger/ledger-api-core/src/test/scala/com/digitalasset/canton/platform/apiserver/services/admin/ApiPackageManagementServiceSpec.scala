@@ -171,6 +171,7 @@ class ApiPackageManagementServiceSpec
                     "submissionId" -> s"'$aSubmissionId'",
                     "category" -> "1",
                     "definite_answer" -> "false",
+                    "test" -> s"'${getClass.getSimpleName}'",
                   ),
                 ),
                 RetryInfoDetail(1.second),

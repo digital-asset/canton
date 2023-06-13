@@ -13,7 +13,7 @@ import com.daml.lf.language.Ast.Package
 import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.{ContractKeyUniquenessMode, Versioned}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe.{ContractWithMetadata, PackageResolver}

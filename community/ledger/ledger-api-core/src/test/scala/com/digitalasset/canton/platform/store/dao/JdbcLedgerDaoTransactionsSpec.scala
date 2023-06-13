@@ -6,9 +6,9 @@ package com.digitalasset.canton.platform.store.dao
 import akka.NotUsed
 import akka.stream.scaladsl.{Sink, Source}
 import com.daml.api.util.TimestampConversion
-import com.daml.ledger.api.v1
-import com.daml.ledger.api.v1.transaction.Transaction
-import com.daml.ledger.api.v1.transaction_service.GetTransactionsResponse
+import com.daml.ledger.api.v1.event.CreatedEvent
+import com.daml.ledger.api.v2.transaction.Transaction
+import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.ledger.EventId
@@ -67,7 +67,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
           transaction.effectiveAt.value,
           TimestampConversion.ConversionMode.Exact,
         ) shouldBe tx.ledgerEffectiveTime
-        transaction.transactionId shouldBe tx.transactionId
+        transaction.updateId shouldBe tx.transactionId
         transaction.workflowId shouldBe tx.workflowId.getOrElse("")
         inside(transaction.events.loneElement.event.created) { case Some(created) =>
           inside(tx.transaction.nodes.headOption) { case Some((nodeId, createNode: Node.Create)) =>
@@ -97,7 +97,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       inside(result.value.transaction) { case Some(transaction) =>
         transaction.commandId shouldBe exercise.commandId.value
         transaction.offset shouldBe ApiOffset.toApiString(offset)
-        transaction.transactionId shouldBe exercise.transactionId
+        transaction.updateId shouldBe exercise.transactionId
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
           TimestampConversion.ConversionMode.Exact,
@@ -106,7 +106,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
         inside(transaction.events.loneElement.event.archived) { case Some(archived) =>
           inside(exercise.transaction.nodes.headOption) {
             case Some((nodeId, exerciseNode: Node.Exercise)) =>
-              archived.eventId shouldBe EventId(transaction.transactionId, nodeId).toLedgerString
+              archived.eventId shouldBe EventId(transaction.updateId, nodeId).toLedgerString
               archived.witnessParties should contain only (exercise.actAs: _*)
               archived.contractId shouldBe exerciseNode.targetCoid.coid
               archived.templateId shouldNot be(None)
@@ -160,7 +160,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       inside(result.value.transaction) { case Some(transaction) =>
         transaction.commandId shouldBe tx.commandId.value
         transaction.offset shouldBe ApiOffset.toApiString(offset)
-        transaction.transactionId shouldBe tx.transactionId
+        transaction.updateId shouldBe tx.transactionId
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
           TimestampConversion.ConversionMode.Exact,
@@ -433,8 +433,8 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       val txs = extractAllTransactions(result)
 
       inside(txs) { case Vector(tx1, tx2) =>
-        tx1.transactionId shouldBe create.transactionId
-        tx2.transactionId shouldBe exercise.transactionId
+        tx1.updateId shouldBe create.transactionId
+        tx2.updateId shouldBe exercise.transactionId
         inside(tx1.events) { case Seq(Event(Created(createdEvent))) =>
           createdEvent.contractId shouldBe firstContractId.coid
         }
@@ -464,7 +464,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       import com.daml.ledger.api.v1.event.Event.Event.Created
 
       inside(extractAllTransactions(result)) { case Vector(tx) =>
-        tx.transactionId shouldBe create2.transactionId
+        tx.updateId shouldBe create2.transactionId
         inside(tx.events) { case Seq(Event(Created(createdEvent))) =>
           createdEvent.contractId shouldBe nonTransient(create2).loneElement.coid
         }
@@ -586,7 +586,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
               EventProjectionProperties(verbose = true),
             )
             .runWith(Sink.seq)
-          readOffsets = response flatMap { case (_, gtr) => gtr.transactions map (_.offset) }
+          readOffsets = response flatMap { case (_, gtr) => Seq(gtr.getTransaction.offset) }
           readCreates = extractAllTransactions(response) flatMap (_.events)
         } yield try {
           readCreates.size should ===(boolSeq count identity)
@@ -645,12 +645,12 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       .map(_.flatMap(_.toList.flatMap(_.transaction.toList)))
 
   private def transactionsOf(
-      source: Source[(Offset, GetTransactionsResponse), NotUsed]
+      source: Source[(Offset, GetUpdatesResponse), NotUsed]
   ): Future[Seq[Transaction]] =
     source
       .map(_._2)
       .runWith(Sink.seq)
-      .map(_.flatMap(_.transactions))
+      .map(_.map(_.getTransaction))
 
   // Ensure two sequences of transactions are comparable:
   // - witnesses do not have to appear in a specific order
@@ -658,9 +658,9 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
     txs.map(tx => tx.copy(events = tx.events.map(_.modifyWitnessParties(_.sorted))))
 
   private def extractAllTransactions(
-      responses: Seq[(Offset, GetTransactionsResponse)]
+      responses: Seq[(Offset, GetUpdatesResponse)]
   ): Vector[Transaction] =
-    responses.foldLeft(Vector.empty[Transaction])((b, a) => b ++ a._2.transactions.toVector)
+    responses.foldLeft(Vector.empty[Transaction])((b, a) => b :+ a._2.getTransaction)
 
   private def createLedgerDaoResourceOwner(
       pageSize: Int,
@@ -747,7 +747,7 @@ private[dao] object JdbcLedgerDaoTransactionsSpec {
       makeNonMatching: () => (Offset, LedgerEntry.Transaction),
       // TODO(i12297): SC we don't need discriminate unless we test the event contents
       // instead of just the offsets
-      discriminate: v1.event.CreatedEvent => Boolean = _ => false,
+      discriminate: CreatedEvent => Boolean = _ => false,
   )
 
   private def unfilteredTxSeq(length: Int): Gen[Vector[Boolean]] =

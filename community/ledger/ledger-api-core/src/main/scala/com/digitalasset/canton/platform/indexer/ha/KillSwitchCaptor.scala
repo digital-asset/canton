@@ -4,7 +4,8 @@
 package com.digitalasset.canton.platform.indexer.ha
 
 import akka.stream.KillSwitch
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
 
@@ -17,11 +18,11 @@ import java.util.concurrent.atomic.AtomicReference
   *
   * With setDelegate() we can set a delegate KillSwitch, which to usage will be replayed
   */
-class KillSwitchCaptor(implicit loggingContext: LoggingContext) extends KillSwitch {
+class KillSwitchCaptor(val loggerFactory: NamedLoggerFactory)(implicit traceContext: TraceContext)
+    extends KillSwitch
+    with NamedLogging {
   import KillSwitchCaptor.*
   import State.*
-
-  private val logger = ContextualizedLogger.get(this.getClass)
 
   private val _state = new AtomicReference[State](Unused)
   private val _delegate = new AtomicReference[Option[KillSwitch]](None)

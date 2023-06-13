@@ -36,7 +36,7 @@ final case class TransactionValidationResult(
     successfulActivenessCheck: Boolean,
     viewValidationResults: Map[ViewHash, ViewValidationResult],
     timeValidationResultE: Either[TimeCheckFailure, Unit],
-    hostedInformeeStakeholders: Set[LfPartyId],
+    hostedWitnesses: Set[LfPartyId],
 ) {
 
   def commitSet(requestId: RequestId)(implicit loggingContext: ErrorLoggingContext): CommitSet = {

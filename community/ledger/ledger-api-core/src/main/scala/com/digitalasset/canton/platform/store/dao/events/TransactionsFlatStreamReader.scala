@@ -7,7 +7,7 @@ import akka.NotUsed
 import akka.stream.Attributes
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v1.event.Event
-import com.daml.ledger.api.v1.transaction_service.GetTransactionsResponse
+import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
@@ -65,7 +65,7 @@ class TransactionsFlatStreamReader(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, GetTransactionsResponse), NotUsed] = {
+  )(implicit loggingContext: LoggingContext): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val span =
       Telemetry.Transactions.createSpan(
         tracer,
@@ -84,10 +84,11 @@ class TransactionsFlatStreamReader(
     )
       .wireTap(_ match {
         case (_, getTransactionsResponse) =>
-          getTransactionsResponse.transactions.foreach { transaction =>
-            val event =
-              tracing.Event("transaction", TraceIdentifiers.fromTransaction(transaction))
-            Spans.addEventToSpan(event, span)
+          getTransactionsResponse.update match {
+            case GetUpdatesResponse.Update.Transaction(value) =>
+              val event = tracing.Event("transaction", TraceIdentifiers.fromTransaction(value))
+              Spans.addEventToSpan(event, span)
+            case _ => ()
           }
       })
       .watchTermination()(endSpanOnTermination(span))
@@ -97,7 +98,7 @@ class TransactionsFlatStreamReader(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, GetTransactionsResponse), NotUsed] = {
+  )(implicit loggingContext: LoggingContext): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val createEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdCreateQueries, executionContext)
     val consumingEventIdQueriesLimiter =

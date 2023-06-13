@@ -18,7 +18,7 @@ import com.daml.lf.engine.{
   ResultNeedPackage,
 }
 import com.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.{Metrics, Timed, Tracked}
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.domain.Commands as ApiCommands
@@ -121,6 +121,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
             .collect { case (nodeId, node: Node.Action) if node.byKey => nodeId }
             .to(ImmArray)
         ),
+        commands.domainId,
       ),
       transaction = updateTx,
       dependsOnLedgerTime = meta.dependsOnTime,
@@ -142,7 +143,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
       submissionSeed: crypto.Hash,
       interpretationTimeNanos: AtomicLong,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[(SubmittedTransaction, Transaction.Metadata)]] =
     Tracked.future(
       metrics.daml.execution.engineRunning,
@@ -171,7 +172,7 @@ private[apiserver] final class StoreBackedCommandExecutor(
       result: Result[A],
       interpretationTimeNanos: AtomicLong,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Either[DamlLfError, A]] = {
     val readers = actAs ++ readAs
 

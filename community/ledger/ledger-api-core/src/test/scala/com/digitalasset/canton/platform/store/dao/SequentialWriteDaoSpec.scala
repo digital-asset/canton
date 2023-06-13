@@ -23,6 +23,7 @@ import com.digitalasset.canton.platform.store.interning.{
   StringInterning,
   StringInterningDomain,
 }
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.mockito.MockitoSugar.mock
 import org.scalatest.flatspec.AnyFlatSpec
@@ -305,8 +306,8 @@ object SequentialWriteDaoSpec {
 
   private val dbDtoToStringsForInterningFixture: Iterable[DbDto] => DomainStringIterators = {
     case iterable if iterable.size == 5 =>
-      new DomainStringIterators(Iterator.empty, List("1").iterator)
-    case _ => new DomainStringIterators(Iterator.empty, Iterator.empty)
+      new DomainStringIterators(Iterator.empty, List("1").iterator, Iterator.empty)
+    case _ => new DomainStringIterators(Iterator.empty, Iterator.empty, Iterator.empty)
   }
 
   private val stringInterningViewFixture: StringInterning with InternizingStringInterningView = {
@@ -315,6 +316,8 @@ object SequentialWriteDaoSpec {
         throw new NotImplementedException
 
       override def party: StringInterningDomain[Party] = throw new NotImplementedException
+
+      override def domainId: StringInterningDomain[DomainId] = throw new NotImplementedException
 
       override def internize(
           domainStringIterators: DomainStringIterators

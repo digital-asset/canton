@@ -362,13 +362,16 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
   override def findEssentialStateForMember(member: Member, asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[GenericStoredTopologyTransactionsX] = {
-    findTransactionsInStore(
-      asOf = asOfInclusive,
-      asOfInclusive = true,
-      isProposal = false,
-      types = TopologyMappingX.Code.all,
-      filterUid = None,
-      filterNamespace = None,
+    // asOfInclusive is the effective time of the transaction that onboarded the member.
+    // 1. load all transactions with a sequenced time <= asOfInclusive, including proposals
+    filteredState(
+      blocking(synchronized {
+        topologyTransactionStore.toSeq
+      }),
+      entry => entry.sequenced.value <= asOfInclusive,
+    ).map(
+      // 2. transform the result such that the validUntil fields are set as they were at maxEffective time of the snapshot
+      _.asSnapshotAtMaxEffectiveTime
     )
   }
 

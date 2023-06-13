@@ -620,6 +620,7 @@ private class JdbcLedgerDao(
       transaction: CommittedTransaction,
       divulgedContracts: Iterable[state.DivulgedContract],
       blindingInfo: Option[BlindingInfo],
+      hostedWitnesses: List[Party],
       recordTime: Timestamp,
   )(implicit
       loggingContext: LoggingContext,
@@ -649,6 +650,7 @@ private class JdbcLedgerDao(
                 recordTime = recordTime,
                 divulgedContracts = divulgedContracts.toList,
                 blindingInfo = blindingInfo,
+                hostedWitnesses = hostedWitnesses,
                 contractMetadata = Map.empty,
               )
             )

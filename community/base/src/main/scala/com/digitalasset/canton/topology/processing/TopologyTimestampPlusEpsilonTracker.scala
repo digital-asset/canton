@@ -37,7 +37,7 @@ import scala.util.{Failure, Success}
   *
   * Transaction validation and processing depends on the topology state at the given sequencer time.
   * Therefore, we would have to inspect every event first if there is a topology state and wait until all
-  * the topology processing has finished before evaluation the transaction. This would be slow and sequential.
+  * the topology processing has finished before evaluating the transaction. This would be slow and sequential.
   *
   * Therefore, we future date our topology transactions with an "effective time", computed from
   * the sequencerTime + domainParameters.topologyChangeDelay.

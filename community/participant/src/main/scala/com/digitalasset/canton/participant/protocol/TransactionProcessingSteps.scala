@@ -1001,8 +1001,7 @@ class TransactionProcessingSteps(
         successfulActivenessCheck = activenessResult.isSuccessful,
         viewValidationResults = viewResults.result(),
         timeValidationResultE = parallelChecksResult.timeValidationResultE,
-        hostedInformeeStakeholders =
-          enrichedTransaction.rootViewsWithUsedAndCreated.hostedInformeeStakeholders,
+        hostedWitnesses = enrichedTransaction.rootViewsWithUsedAndCreated.hostedWitnesses,
       )
     }
 
@@ -1309,6 +1308,7 @@ class TransactionProcessingSteps(
               DivulgedContract(divulgedCid, divulgedContract.contractInstance)
           }.toList,
         blindingInfo = None,
+        hostedWitnesses = pendingRequestData.transactionValidationResult.hostedWitnesses.toList,
         contractMetadata = contractMetadata,
       )
 

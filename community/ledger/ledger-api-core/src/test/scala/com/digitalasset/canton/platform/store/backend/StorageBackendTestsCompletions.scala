@@ -74,9 +74,9 @@ private[backend] trait StorageBackendTestsCompletions
         .commandCompletions(offset(1), offset(2), applicationId, Set(party), limit = 10)
     )
 
-    completions should have length 1
-    completions.head.completions should have length 1
-    completions.head.completions.head.applicationId should be(applicationId)
+    completions should not be empty
+    completions.head.completion should not be empty
+    completions.head.completion.toList.head.applicationId should be(applicationId)
   }
 
   it should "correctly persist and retrieve submission IDs" in {
@@ -99,10 +99,10 @@ private[backend] trait StorageBackendTestsCompletions
 
     completions should have length 2
     inside(completions) { case List(completionWithSubmissionId, completionWithoutSubmissionId) =>
-      completionWithSubmissionId.completions should have length 1
-      completionWithSubmissionId.completions.head.submissionId should be(someSubmissionId)
-      completionWithoutSubmissionId.completions should have length 1
-      completionWithoutSubmissionId.completions.head.submissionId should be("")
+      completionWithSubmissionId.completion should not be empty
+      completionWithSubmissionId.completion.toList.head.submissionId should be(someSubmissionId)
+      completionWithoutSubmissionId.completion should not be empty
+      completionWithoutSubmissionId.completion.toList.head.submissionId should be("")
     }
   }
 
@@ -132,12 +132,12 @@ private[backend] trait StorageBackendTestsCompletions
     completions should have length 2
     inside(completions) {
       case List(completionWithDeduplicationOffset, completionWithoutDeduplicationOffset) =>
-        completionWithDeduplicationOffset.completions should have length 1
-        completionWithDeduplicationOffset.completions.head.deduplicationPeriod.deduplicationOffset should be(
+        completionWithDeduplicationOffset.completion should not be empty
+        completionWithDeduplicationOffset.completion.toList.head.deduplicationPeriod.deduplicationOffset should be(
           Some(anOffsetHex)
         )
-        completionWithoutDeduplicationOffset.completions should have length 1
-        completionWithoutDeduplicationOffset.completions.head.deduplicationPeriod.deduplicationOffset should not be defined
+        completionWithoutDeduplicationOffset.completion should not be empty
+        completionWithoutDeduplicationOffset.completion.toList.head.deduplicationPeriod.deduplicationOffset should not be defined
     }
   }
 
@@ -175,12 +175,12 @@ private[backend] trait StorageBackendTestsCompletions
     completions should have length 2
     inside(completions) {
       case List(completionWithDeduplicationOffset, completionWithoutDeduplicationOffset) =>
-        completionWithDeduplicationOffset.completions should have length 1
-        completionWithDeduplicationOffset.completions.head.deduplicationPeriod.deduplicationDuration should be(
+        completionWithDeduplicationOffset.completion should not be empty
+        completionWithDeduplicationOffset.completion.toList.head.deduplicationPeriod.deduplicationDuration should be(
           Some(expectedDuration)
         )
-        completionWithoutDeduplicationOffset.completions should have length 1
-        completionWithoutDeduplicationOffset.completions.head.deduplicationPeriod.deduplicationDuration should not be defined
+        completionWithoutDeduplicationOffset.completion should not be empty
+        completionWithoutDeduplicationOffset.completion.toList.head.deduplicationPeriod.deduplicationDuration should not be defined
     }
   }
 

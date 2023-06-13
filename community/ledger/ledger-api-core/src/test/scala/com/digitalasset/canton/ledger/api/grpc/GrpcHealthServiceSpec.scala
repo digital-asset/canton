@@ -6,14 +6,14 @@ package com.digitalasset.canton.ledger.api.grpc
 import com.daml.grpc.GrpcException
 import com.daml.grpc.adapter.server.rs.MockServerCallStreamObserver
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
-import com.daml.logging.LoggingContext
 import com.daml.scalautil.Statement.discard
+import com.daml.tracing.NoOpTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthServiceSpec.*
 import com.digitalasset.canton.ledger.api.health.*
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse}
 import org.scalatest.concurrent.Eventually
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Second, Span}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -21,18 +21,20 @@ import scala.concurrent.duration.DurationInt
 
 final class GrpcHealthServiceSpec
     extends AsyncWordSpec
-    with Matchers
     with Eventually
-    with AkkaBeforeAndAfterAll {
+    with AkkaBeforeAndAfterAll
+    with BaseTest {
 
   implicit override val patienceConfig: PatienceConfig =
     PatienceConfig(timeout = scaled(Span(1, Second)))
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
-
   "HealthService" should {
     "report SERVING if there are no health checks" in {
-      val service = new GrpcHealthService(new HealthChecks)
+      val service = new GrpcHealthService(
+        new HealthChecks,
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
+      )
 
       for {
         response <- service.check(HealthCheckRequest())
@@ -43,7 +45,9 @@ final class GrpcHealthServiceSpec
 
     "report SERVING if there is one healthy check" in {
       val service = new GrpcHealthService(
-        new HealthChecks("component" -> healthyComponent)
+        new HealthChecks("component" -> healthyComponent),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -55,7 +59,9 @@ final class GrpcHealthServiceSpec
 
     "report NOT_SERVING if there is one unhealthy check" in {
       val service = new GrpcHealthService(
-        new HealthChecks("component" -> unhealthyComponent)
+        new HealthChecks("component" -> unhealthyComponent),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -71,7 +77,9 @@ final class GrpcHealthServiceSpec
           "component A" -> healthyComponent,
           "component B" -> healthyComponent,
           "component C" -> healthyComponent,
-        )
+        ),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       discard(service.check(HealthCheckRequest()))
@@ -88,7 +96,9 @@ final class GrpcHealthServiceSpec
           "component A" -> healthyComponent,
           "component B" -> unhealthyComponent,
           "component C" -> healthyComponent,
-        )
+        ),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -100,7 +110,9 @@ final class GrpcHealthServiceSpec
 
     "report SERVING when querying a single, healthy component" in {
       val service = new GrpcHealthService(
-        new HealthChecks("component" -> healthyComponent)
+        new HealthChecks("component" -> healthyComponent),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -112,7 +124,9 @@ final class GrpcHealthServiceSpec
 
     "report NOT_SERVING when querying a single, unhealthy component" in {
       val service = new GrpcHealthService(
-        new HealthChecks("component" -> unhealthyComponent)
+        new HealthChecks("component" -> unhealthyComponent),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -128,7 +142,9 @@ final class GrpcHealthServiceSpec
           "component A" -> healthyComponent,
           "component B" -> healthyComponent,
           "component C" -> unhealthyComponent,
-        )
+        ),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -144,7 +160,9 @@ final class GrpcHealthServiceSpec
           "component A" -> unhealthyComponent,
           "component B" -> healthyComponent,
           "component C" -> healthyComponent,
-        )
+        ),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -166,6 +184,8 @@ final class GrpcHealthServiceSpec
           "component B" -> componentWithHealthBackedBy(() => componentBHealth),
           "component C" -> componentWithHealthBackedBy(() => componentCHealth),
         ),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
         maximumWatchFrequency = 1.millisecond,
       )
 
@@ -231,6 +251,8 @@ final class GrpcHealthServiceSpec
           "component B" -> componentWithHealthBackedBy(() => componentBHealth),
           "component C" -> componentWithHealthBackedBy(() => componentCHealth),
         ),
+        telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
         maximumWatchFrequency = 1.millisecond,
       )
 
@@ -284,7 +306,9 @@ final class GrpcHealthServiceSpec
 
   "fail gracefully when a non-existent component is checked" in {
     val service = new GrpcHealthService(
-      new HealthChecks("component" -> unhealthyComponent)
+      new HealthChecks("component" -> unhealthyComponent),
+      telemetry = NoOpTelemetry,
+      loggerFactory = loggerFactory,
     )
 
     service.check(HealthCheckRequest("another component")).failed.map(assertErrorCode)
@@ -293,7 +317,9 @@ final class GrpcHealthServiceSpec
   "fail gracefully when a non-existent component is watched" in {
     val responseObserver = new MockServerCallStreamObserver[HealthCheckResponse]
     val service = new GrpcHealthService(
-      new HealthChecks("component" -> unhealthyComponent)
+      new HealthChecks("component" -> unhealthyComponent),
+      telemetry = NoOpTelemetry,
+      loggerFactory = loggerFactory,
     )
 
     service.watch(HealthCheckRequest("another component"), responseObserver)

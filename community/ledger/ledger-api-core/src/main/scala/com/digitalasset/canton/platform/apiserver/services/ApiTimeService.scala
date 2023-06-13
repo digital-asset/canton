@@ -10,16 +10,19 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc.TimeService
 import com.daml.ledger.api.v1.testing.time_service.*
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.timer.Timeout.*
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, optionalLedgerId}
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
 import com.digitalasset.canton.ledger.api.validation.FieldValidator
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SignalDispatcher
 import com.digitalasset.canton.platform.apiserver.TimeServiceBackend
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.empty.Empty
 import io.grpc.stub.StreamObserver
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
@@ -34,35 +37,41 @@ private[apiserver] final class ApiTimeService private (
     val ledgerId: LedgerId,
     backend: TimeServiceBackend,
     apiStreamShutdownTimeout: Duration,
+    telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
     mat: Materializer,
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends TimeServiceGrpc.TimeService
     with StreamingServiceLifecycleManagement
-    with GrpcApiService {
+    with GrpcApiService
+    with NamedLogging {
 
-  private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
-  protected implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-    new DamlContextualizedErrorLogger(logger, loggingContext, None)
+  // TODO(#13269) remove the contextualizedErrorLogger
+  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
+    errorLoggingContext(
+      TraceContext.empty
+    )
 
   private val dispatcher = SignalDispatcher[Instant]()
 
   import FieldValidator.*
 
   logger.debug(
-    s"${getClass.getSimpleName} initialized with ledger ID ${ledgerId.unwrap}, start time ${backend.getCurrentTime}"
-  )
+    s"${getClass.getSimpleName} initialized with ledger ID ${ledgerId.unwrap}, start time ${backend.getCurrentTime}."
+  )(TraceContext.empty)
 
   def getTime(
       request: GetTimeRequest,
       responseObserver: StreamObserver[GetTimeResponse],
   ): Unit = registerStream(responseObserver) {
+    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+
     val validated =
       matchLedgerId(ledgerId)(optionalLedgerId(request.ledgerId))
     validated.fold(
-      t => Source.failed(ValidationLogger.logFailure(request, t)),
+      t => Source.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
       { ledgerId =>
         logger.info(
           s"Received request for time with ledger ID ${ledgerId.getOrElse("<empty-ledger-id>")}"
@@ -85,6 +94,8 @@ private[apiserver] final class ApiTimeService private (
 
   @SuppressWarnings(Array("org.wartremover.warts.JavaSerializable"))
   override def setTime(request: SetTimeRequest): Future[Empty] = {
+    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+
     def updateTime(
         expectedTime: Instant,
         requestedTime: Instant,
@@ -152,7 +163,7 @@ private[apiserver] final class ApiTimeService private (
         .withTimeout(apiStreamShutdownTimeout)(
           logger.warn(
             s"Shutdown of TimeService API streams did not finish in ${apiStreamShutdownTimeout.toSeconds} seconds. System shutdown continues."
-          )
+          )(TraceContext.empty)
         ),
       Duration.Inf, // .withTimeout above will make sure it completes in apiStreamShutdownTimeout already
     )
@@ -164,11 +175,12 @@ private[apiserver] object ApiTimeService {
       ledgerId: LedgerId,
       backend: TimeServiceBackend,
       apiStreamShutdownTimeout: Duration,
+      telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       mat: Materializer,
       esf: ExecutionSequencerFactory,
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
   ): TimeService with GrpcApiService =
-    new ApiTimeService(ledgerId, backend, apiStreamShutdownTimeout)
+    new ApiTimeService(ledgerId, backend, apiStreamShutdownTimeout, telemetry, loggerFactory)
 }

@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.Result
 import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigStore,
@@ -25,7 +25,7 @@ class CachedIdentityProviderConfigStore(
     cacheExpiryAfterWrite: FiniteDuration,
     maximumCacheSize: Int,
     metrics: Metrics,
-)(implicit val executionContext: ExecutionContext, loggingContext: LoggingContext)
+)(implicit val executionContext: ExecutionContext, loggingContext: LoggingContextWithTrace)
     extends IdentityProviderConfigStore {
 
   private val idpByIssuer: CaffeineCache.AsyncLoadingCaffeineCache[
@@ -46,38 +46,38 @@ class CachedIdentityProviderConfigStore(
     )
 
   override def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]] =
     delegate
       .createIdentityProviderConfig(identityProviderConfig)
       .andThen(invalidateByIssuerOnSuccess(identityProviderConfig.issuer))
 
   override def getIdentityProviderConfig(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]] = delegate.getIdentityProviderConfig(id)
 
   override def deleteIdentityProviderConfig(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Unit]] =
     delegate.deleteIdentityProviderConfig(id).andThen(invalidateAllEntriesOnSuccess())
 
   override def listIdentityProviderConfigs()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Seq[IdentityProviderConfig]]] = delegate.listIdentityProviderConfigs()
 
   override def updateIdentityProviderConfig(update: IdentityProviderConfigUpdate)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]] = delegate
     .updateIdentityProviderConfig(update)
     .andThen(invalidateAllEntriesOnSuccess())
 
   override def getIdentityProviderConfig(issuer: String)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]] =
     idpByIssuer.get(issuer)
 
   override def identityProviderConfigExists(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Boolean] =
     delegate.identityProviderConfigExists(id)
 

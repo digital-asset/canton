@@ -7,16 +7,16 @@ import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v1.event_query_service.{
   GetEventsByContractIdResponse,
   GetEventsByContractKeyResponse,
 }
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
 }
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
@@ -51,12 +51,12 @@ private[platform] trait LedgerDaoTransactionsReader {
       endInclusive: Offset,
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, GetTransactionsResponse), NotUsed]
+  )(implicit loggingContext: LoggingContext): Source[(Offset, GetUpdatesResponse), NotUsed]
 
   def lookupFlatTransactionById(
       transactionId: TransactionId,
       requestingParties: Set[Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetFlatTransactionResponse]]
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]]
 
   def getTransactionTrees(
       startExclusive: Offset,
@@ -65,12 +65,12 @@ private[platform] trait LedgerDaoTransactionsReader {
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       loggingContext: LoggingContext
-  ): Source[(Offset, GetTransactionTreesResponse), NotUsed]
+  ): Source[(Offset, GetUpdateTreesResponse), NotUsed]
 
   def lookupTransactionTreeById(
       transactionId: TransactionId,
       requestingParties: Set[Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]]
+  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionTreeResponse]]
 
   def getActiveContracts(
       activeAt: Offset,
@@ -271,6 +271,7 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
       transaction: CommittedTransaction,
       divulgedContracts: Iterable[state.DivulgedContract],
       blindingInfo: Option[BlindingInfo],
+      hostedWitnesses: List[Party],
       recordTime: Timestamp,
   )(implicit
       loggingContext: LoggingContext,

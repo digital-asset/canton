@@ -11,7 +11,6 @@ import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractId, ValueTrue, VersionedContractInstance}
-import com.daml.logging.LoggingContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
@@ -27,6 +26,7 @@ import com.digitalasset.canton.ledger.sandbox.bridge.BridgeMetrics
 import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckWithCommittedSpec.*
 import com.digitalasset.canton.ledger.sandbox.domain.Rejection.*
 import com.digitalasset.canton.ledger.sandbox.domain.Submission
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.FixtureContext
 import org.scalatest.concurrent.{IntegrationPatience, ScalaFutures}
@@ -60,7 +60,9 @@ class ConflictCheckWithCommittedSpec
     ).futureValue
 
     verify(indexServiceMock, never)
-      .lookupMaximumLedgerTimeAfterInterpretation(any[Set[ContractId]])(any[LoggingContext])
+      .lookupMaximumLedgerTimeAfterInterpretation(any[Set[ContractId]])(
+        any[LoggingContextWithTrace]
+      )
     validationResult shouldBe Right(offset -> submissionWithEmptyReferredContracts)
   }
 
@@ -160,7 +162,7 @@ class ConflictCheckWithCommittedSpec
       indexServiceMock.lookupContractStateWithoutDivulgence(
         eqTo(processedDisclosedContract.contractId)
       )(
-        any[LoggingContext]
+        any[LoggingContextWithTrace]
       )
     )
       .thenReturn(
@@ -186,7 +188,7 @@ class ConflictCheckWithCommittedSpec
       indexServiceMock.lookupContractStateWithoutDivulgence(
         eqTo(processedDisclosedContract.contractId)
       )(
-        any[LoggingContext]
+        any[LoggingContextWithTrace]
       )
     )
       .thenReturn(
@@ -212,7 +214,7 @@ class ConflictCheckWithCommittedSpec
       indexServiceMock.lookupContractStateWithoutDivulgence(
         eqTo(processedDisclosedContract.contractId)
       )(
-        any[LoggingContext]
+        any[LoggingContextWithTrace]
       )
     )
       .thenReturn(
@@ -256,8 +258,8 @@ class ConflictCheckWithCommittedSpec
   }
 
   private class TestContext extends FixtureContext {
-    implicit val loggingContext: LoggingContext =
-      LoggingContext.ForTesting
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace.ForTesting
     implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
       DamlContextualizedErrorLogger.forTesting(getClass)
 
@@ -354,7 +356,7 @@ class ConflictCheckWithCommittedSpec
       indexServiceMock.lookupContractStateWithoutDivulgence(
         eqTo(processedDisclosedContract.contractId)
       )(
-        any[LoggingContext]
+        any[LoggingContextWithTrace]
       )
     )
       .thenReturn(

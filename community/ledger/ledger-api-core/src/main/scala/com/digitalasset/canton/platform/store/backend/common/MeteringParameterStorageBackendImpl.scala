@@ -4,24 +4,25 @@
 package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.{RowParser, ~}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.store.backend.Conversions.{offset, timestampFromMicros}
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend.LedgerMeteringEnd
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
 
 private[backend] object MeteringParameterStorageBackendImpl
     extends MeteringParameterStorageBackend {
 
-  private val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
-
   def initializeLedgerMeteringEnd(
-      init: LedgerMeteringEnd
-  )(connection: Connection)(implicit loggingContext: LoggingContext): Unit = {
+      init: LedgerMeteringEnd,
+      loggerFactory: NamedLoggerFactory,
+  )(connection: Connection)(implicit traceContext: TraceContext): Unit = {
+    val logger = TracedLogger(loggerFactory.getLogger(getClass))
     import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
     import com.digitalasset.canton.platform.store.backend.Conversions.TimestampToStatement
     ledgerMeteringEnd(connection) match {

@@ -7,7 +7,7 @@ import akka.NotUsed
 import akka.stream.Attributes
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v1.transaction.TreeEvent
-import com.daml.ledger.api.v1.transaction_service.GetTransactionTreesResponse
+import com.daml.ledger.api.v2.update_service.GetUpdateTreesResponse
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
@@ -67,7 +67,7 @@ class TransactionsTreeStreamReader(
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       loggingContext: LoggingContext
-  ): Source[(Offset, GetTransactionTreesResponse), NotUsed] = {
+  ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
     val span =
       Telemetry.Transactions.createSpan(
         tracer,
@@ -87,12 +87,14 @@ class TransactionsTreeStreamReader(
     sourceOfTreeTransactions
       .wireTap(_ match {
         case (_, response) =>
-          response.transactions.foreach(txn =>
-            Spans.addEventToSpan(
-              tracing.Event("transaction", TraceIdentifiers.fromTransactionTree(txn)),
-              span,
-            )
-          )
+          response.update match {
+            case GetUpdateTreesResponse.Update.TransactionTree(txn) =>
+              Spans.addEventToSpan(
+                tracing.Event("transaction", TraceIdentifiers.fromTransactionTree(txn)),
+                span,
+              )
+            case _ => ()
+          }
       })
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -103,7 +105,7 @@ class TransactionsTreeStreamReader(
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       loggingContext: LoggingContext
-  ): Source[(Offset, GetTransactionTreesResponse), NotUsed] = {
+  ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
     val createEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdCreateQueries, executionContext)
     val consumingEventIdQueriesLimiter =

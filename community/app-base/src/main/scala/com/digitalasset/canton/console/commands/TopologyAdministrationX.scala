@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   TopologyAdminCommandsX,
 }
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.{
   CommandErrors,
@@ -396,7 +397,24 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Manage party to participant mappings")
   @Help.Group("Party to participant mappings")
   object party_to_participant_mappings extends Helpful {
-    // TODO(#11255): implement write service
+    // TODO(#11255): implement write service properly
+    def authorize(
+        party: PartyId,
+        newParticipants: Seq[(ParticipantId, ParticipantPermissionX)],
+    ): ConsoleCommandResult[SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX]] =
+      adminCommand(
+        TopologyAdminCommandsX.Write.Propose(
+          mapping = PartyToParticipantX(
+            partyId = party,
+            domainId = None,
+            threshold = PositiveInt.one, // Increase this to switch to a real consortium party
+            participants = newParticipants.map((HostingParticipant.apply _) tupled),
+            groupAddressing = false,
+          ),
+          signedBy = Seq(instance.id.uid.namespace.fingerprint),
+          serial = None,
+        )
+      )
 
     def list(
         filterStore: String = "",
@@ -466,7 +484,33 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Inspect participant domain states")
   @Help.Group("Participant Domain States")
   object participant_domain_permissions extends Helpful {
-    // TODO(#11255): implement write service
+    // TODO(#11255): implement write service properly
+    def authorize(
+        domainId: DomainId,
+        participant: ParticipantId,
+        permission: ParticipantPermissionX,
+        trustLevel: TrustLevelX = TrustLevelX.Ordinary,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): ConsoleCommandResult[
+      SignedTopologyTransactionX[TopologyChangeOpX, ParticipantDomainPermissionX]
+    ] = {
+      val cmd = TopologyAdminCommandsX.Write.Propose(
+        mapping = ParticipantDomainPermissionX(
+          domainId = domainId,
+          participantId = participant,
+          permission = permission,
+          trustLevel = trustLevel,
+          limits = None,
+          loginAfter = None,
+        ),
+        signedBy = Seq(instance.id.uid.namespace.fingerprint),
+        serial = None,
+      )
+
+      synchronisation.run(synchronize)(adminCommand(cmd))
+    }
 
     def list(
         filterStore: String = "",

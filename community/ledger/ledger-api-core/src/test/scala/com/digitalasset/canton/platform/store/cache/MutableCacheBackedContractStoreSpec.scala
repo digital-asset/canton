@@ -12,8 +12,10 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.{ContractInstance, ValueRecord, ValueText}
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.ContractState
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.{cId_5, *}
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
@@ -28,8 +30,12 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.annotation.nowarn
 import scala.concurrent.Future
 
-class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers with MockitoSugar {
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+class MutableCacheBackedContractStoreSpec
+    extends AsyncWordSpec
+    with Matchers
+    with MockitoSugar
+    with TestEssentials {
+  implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   "push" should {
     "update the contract state caches" in {
@@ -38,6 +44,7 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
         metrics = Metrics.ForTesting,
         contractsReader = mock[LedgerDaoContractsReader],
         contractStateCaches = contractStateCaches,
+        loggerFactory = loggerFactory,
       )
 
       val event1 = ContractStateEvent.Archived(
@@ -62,7 +69,11 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
       val spyContractsReader = spy(ContractsReaderFixture())
 
       for {
-        store <- contractStore(cachesSize = 1L, spyContractsReader).asFuture
+        store <- contractStore(
+          cachesSize = 1L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
         _ = store.contractStateCaches.contractState.cacheIndex = offset1
         cId2_lookup <- store.lookupActiveContract(Set(alice), cId_2)
         another_cId2_lookup <- store.lookupActiveContract(Set(alice), cId_2)
@@ -95,7 +106,11 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
     "read-through the cache without storing negative lookups" in {
       val spyContractsReader = spy(ContractsReaderFixture())
       for {
-        store <- contractStore(cachesSize = 1L, spyContractsReader).asFuture
+        store <- contractStore(
+          cachesSize = 1L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
         _ = store.contractStateCaches.contractState.cacheIndex = offset1
         negativeLookup_cId6 <- store.lookupActiveContract(Set(alice), cId_6)
         positiveLookup_cId6 <- store.lookupActiveContract(Set(alice), cId_6)
@@ -112,7 +127,11 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
     "resort to resolveDivulgenceLookup on not found" in {
       val spyContractsReader = spy(ContractsReaderFixture())
       for {
-        store <- contractStore(cachesSize = 1L, spyContractsReader).asFuture
+        store <- contractStore(
+          cachesSize = 1L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
         _ = store.contractStateCaches.contractState.cacheIndex = offset1
         resolvedLookup_cId7 <- store.lookupActiveContract(Set(bob), cId_7)
       } yield {
@@ -125,7 +144,7 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
 
     "present the contract state if visible at specific cache offsets (with no cache)" in {
       for {
-        store <- contractStore(cachesSize = 0L).asFuture
+        store <- contractStore(cachesSize = 0L, loggerFactory).asFuture
         cId1_lookup0 <- store.lookupActiveContract(Set(alice), cId_1)
         cId2_lookup0 <- store.lookupActiveContract(Set(bob), cId_2)
 
@@ -157,7 +176,11 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
       val unassignedKey = globalKey("unassigned")
 
       for {
-        store <- contractStore(cachesSize = 1L, spyContractsReader).asFuture
+        store <- contractStore(
+          cachesSize = 1L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
         assigned_firstLookup <- store.lookupContractKey(Set(alice), someKey)
         assigned_secondLookup <- store.lookupContractKey(Set(alice), someKey)
 
@@ -180,7 +203,7 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
 
     "present the key state if visible at specific cache offsets (with no cache)" in {
       for {
-        store <- contractStore(cachesSize = 0L).asFuture
+        store <- contractStore(cachesSize = 0L, loggerFactory).asFuture
         key_lookup0 <- store.lookupContractKey(Set(alice), someKey)
 
         _ = store.contractStateCaches.keyState.cacheIndex = offset1
@@ -205,7 +228,7 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
   "lookupContractStateWithoutDivulgence" should {
     "resolve lookup from cache" in {
       for {
-        store <- contractStore(cachesSize = 2L).asFuture
+        store <- contractStore(cachesSize = 2L, loggerFactory).asFuture
         _ = store.contractStateCaches.contractState.putBatch(
           offset2,
           Map(
@@ -231,7 +254,7 @@ class MutableCacheBackedContractStoreSpec extends AsyncWordSpec with Matchers wi
 
     "resolve lookup from the ContractsReader when not cached" in {
       for {
-        store <- contractStore(cachesSize = 0L).asFuture
+        store <- contractStore(cachesSize = 0L, loggerFactory).asFuture
         activeContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_4)
         archivedContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_5)
         nonExistentContractLookupResult <- store.lookupContractStateWithoutDivulgence(cId_7)
@@ -265,20 +288,21 @@ object MutableCacheBackedContractStoreSpec {
 
   private def contractStore(
       cachesSize: Long,
+      loggerFactory: NamedLoggerFactory,
       readerFixture: LedgerDaoContractsReader = ContractsReaderFixture(),
-      startIndexExclusive: Offset = offset0,
-  )(implicit loggingContext: LoggingContext) = {
+  ) = {
     val metrics = Metrics.ForTesting
+    val startIndexExclusive: Offset = offset0
     // TODO(#13019) Avoid the global execution context
     @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val contractStore = new MutableCacheBackedContractStore(
       metrics,
       readerFixture,
-      contractStateCaches =
-        ContractStateCaches.build(startIndexExclusive, cachesSize, cachesSize, metrics)(
-          scala.concurrent.ExecutionContext.global,
-          loggingContext,
+      contractStateCaches = ContractStateCaches
+        .build(startIndexExclusive, cachesSize, cachesSize, metrics, loggerFactory)(
+          scala.concurrent.ExecutionContext.global
         ),
+      loggerFactory = loggerFactory,
     )(scala.concurrent.ExecutionContext.global)
 
     Resource.successful(contractStore)

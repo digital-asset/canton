@@ -10,11 +10,12 @@ import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplemen
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.testing.utils.TestingServerInterceptors.serverOwner
 import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.ports.Port
 import com.daml.scalautil.Statement.discard
+import com.daml.tracing.NoOpTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.grpc.{GrpcClientResource, GrpcHealthService}
 import com.digitalasset.canton.ledger.api.health.HealthChecks.ComponentName
 import com.digitalasset.canton.ledger.api.health.{HealthChecks, ReportsHealth}
@@ -34,7 +35,6 @@ import io.grpc.stub.StreamObserver
 import org.mockito.MockitoSugar
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Second, Span}
 import org.slf4j.LoggerFactory
 
@@ -46,10 +46,10 @@ import scala.concurrent.{Future, Promise}
 final class RateLimitingInterceptorSpec
     extends AsyncFlatSpec
     with AkkaBeforeAndAfterAll
-    with Matchers
     with Eventually
     with TestResourceContext
-    with MockitoSugar {
+    with MockitoSugar
+    with BaseTest {
 
   import RateLimitingInterceptorSpec.*
 
@@ -130,12 +130,12 @@ final class RateLimitingInterceptorSpec
       .meter(MetricRegistry.name(metrics.daml.lapi.threadpool.apiServices, "submitted"))
       .mark(config.maxApiServicesQueueSize.toLong + 1) // Over limit
 
-    val healthService = new GrpcHealthService(healthChecks)(
-      executionSequencerFactory,
-      materializer,
-      executionContext,
-      LoggingContext.ForTesting,
-    )
+    val healthService =
+      new GrpcHealthService(healthChecks, telemetry = NoOpTelemetry, loggerFactory = loggerFactory)(
+        executionSequencerFactory,
+        materializer,
+        executionContext,
+      )
 
     withChannel(metrics, healthService, config).use { channel: Channel =>
       val healthStub = HealthGrpc.stub(channel)

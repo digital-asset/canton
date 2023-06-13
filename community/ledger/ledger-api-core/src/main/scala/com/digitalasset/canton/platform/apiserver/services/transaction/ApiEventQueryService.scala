@@ -7,8 +7,6 @@ import com.daml.ledger.api.v1.event_query_service.{
   GetEventsByContractIdResponse,
   GetEventsByContractKeyResponse,
 }
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.GrpcEventQueryService
@@ -19,6 +17,12 @@ import com.digitalasset.canton.ledger.api.messages.event.{
 import com.digitalasset.canton.ledger.api.services.EventQueryService
 import com.digitalasset.canton.ledger.api.validation.PartyNameChecker
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexEventQueryService
+import com.digitalasset.canton.logging.LoggingContextWithTrace.{
+  implicitExtractTraceContext,
+  withEnrichedLoggingContext,
+}
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.logging
 import io.grpc.*
 
@@ -29,36 +33,39 @@ private[apiserver] object ApiEventQueryService {
       ledgerId: LedgerId,
       eventQueryService: IndexEventQueryService,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
-      ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      ec: ExecutionContext
   ): GrpcEventQueryService with BindableService =
     new GrpcEventQueryService(
-      new ApiEventQueryService(eventQueryService),
+      new ApiEventQueryService(eventQueryService, loggerFactory),
       ledgerId,
       PartyNameChecker.AllowAllParties,
       telemetry,
+      loggerFactory,
     )
 }
 
 private[apiserver] final class ApiEventQueryService private (
-    eventQueryService: IndexEventQueryService
+    eventQueryService: IndexEventQueryService,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends EventQueryService {
-
-  private val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
+    extends EventQueryService
+    with NamedLogging {
 
   override def getEventsByContractId(
       request: GetEventsByContractIdRequest
-  )(implicit loggingContext: LoggingContext): Future[GetEventsByContractIdResponse] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetEventsByContractIdResponse] = {
 
     withEnrichedLoggingContext(
       logging.contractId(request.contractId),
       logging.parties(request.requestingParties),
     ) { implicit loggingContext =>
-      logger.info("Received request for events by contract ID")
+      logger.info(
+        s"Received request for events by contract ID, ${loggingContext.serializeFiltered("contractId", "parties")}."
+      )
     }
-    logger.trace(s"Events by contract ID request: $request")
+    logger.trace(s"Events by contract ID request: $request.")
 
     eventQueryService
       .getEventsByContractId(
@@ -70,7 +77,7 @@ private[apiserver] final class ApiEventQueryService private (
 
   override def getEventsByContractKey(
       request: GetEventsByContractKeyRequest
-  )(implicit loggingContext: LoggingContext): Future[GetEventsByContractKeyResponse] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetEventsByContractKeyResponse] = {
 
     withEnrichedLoggingContext(
       logging.contractKey(request.contractKey),
@@ -78,9 +85,10 @@ private[apiserver] final class ApiEventQueryService private (
       logging.parties(request.requestingParties),
       logging.eventSequentialId(request.endExclusiveSeqId),
     ) { implicit loggingContext =>
-      logger.info("Received request for events by contract key")
+      logger.info(s"Received request for events by contract key, ${loggingContext
+          .serializeFiltered("contractKey", "templateId", "parties", "eventSequentialId")}.")
     }
-    logger.trace(s"Events by contract key request: $request")
+    logger.trace(s"Events by contract key request: $request.")
 
     eventQueryService
       .getEventsByContractKey(

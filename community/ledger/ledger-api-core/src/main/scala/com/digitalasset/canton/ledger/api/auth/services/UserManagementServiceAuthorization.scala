@@ -5,11 +5,17 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.user_management_service.*
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerServiceDefinition
 import scalapb.lenses.Lens
 
@@ -19,15 +25,17 @@ import scala.util.{Failure, Success, Try}
 final class UserManagementServiceAuthorization(
     protected val service: UserManagementServiceGrpc.UserManagementService with AutoCloseable,
     private val authorizer: Authorizer,
-)(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
+    val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
     extends UserManagementServiceGrpc.UserManagementService
     with ProxyCloseable
-    with GrpcApiService {
+    with GrpcApiService
+    with NamedLogging {
 
-  private val logger = ContextualizedLogger.get(this.getClass)
-
+  private implicit val loggingContextWithTrace =
+    LoggingContextWithTrace(loggerFactory)(TraceContext.empty)
   private implicit val errorLogger: ContextualizedErrorLogger =
-    new DamlContextualizedErrorLogger(logger, loggingContext, None)
+    ErrorLoggingContext(logger, loggingContextWithTrace)
 
   // Only ParticipantAdmin is allowed to grant ParticipantAdmin right
   private def containsParticipantAdmin(rights: Seq[Right]): Boolean =
