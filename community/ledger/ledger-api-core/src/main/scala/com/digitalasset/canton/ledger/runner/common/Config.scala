@@ -35,7 +35,6 @@ object Config {
     allowedLanguageVersions = LanguageVersion.StableVersions,
     profileDir = None,
     stackTraceMode = false,
-    forbidV0ContractId = true,
   )
   val DefaultParticipants: Map[Ref.ParticipantId, ParticipantConfig] = Map(
     ParticipantConfig.DefaultParticipantId -> ParticipantConfig()

@@ -35,7 +35,9 @@ import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.{
   ParticipantNode,
   ParticipantNodeBootstrap,
+  ParticipantNodeBootstrapCommon,
   ParticipantNodeBootstrapX,
+  ParticipantNodeCommon,
 }
 import com.digitalasset.canton.resource.DbMigrationsFactory
 import com.digitalasset.canton.sequencing.SequencerConnections
@@ -395,7 +397,9 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   private def reconnectParticipants(implicit
       traceContext: TraceContext
   ): Either[StartupError, Unit] = {
-    def reconnect(instance: ParticipantNodeBootstrap): Either[StartupError, Unit] = {
+    def reconnect(
+        instance: CantonNodeBootstrap[ParticipantNodeCommon] & ParticipantNodeBootstrapCommon
+    ): Either[StartupError, Unit] = {
       for {
         _ <- instance.getNode match {
           case None =>
@@ -419,8 +423,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         }
       } yield ()
     }
-    // TODO(#11255) implement the same for participantsX
-    participants.running.traverse_(reconnect)
+    (participants.running ++ participantsX.running).traverse_(reconnect)
   }
 
   /** Return current time of environment

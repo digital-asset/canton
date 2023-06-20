@@ -56,6 +56,8 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   RevokeUserRightsRequest,
   RevokeUserRightsResponse,
   Right as UserRight,
+  UpdateUserIdentityProviderRequest,
+  UpdateUserIdentityProviderResponse,
   UpdateUserRequest,
   UpdateUserResponse,
   User,
@@ -302,6 +304,7 @@ object LedgerApiCommands {
         partyIdHint: String,
         displayName: String,
         annotations: Map[String, String],
+        identityProviderId: String,
     ) extends BaseCommand[AllocatePartyRequest, AllocatePartyResponse, PartyDetails] {
       override def createRequest(): Either[String, AllocatePartyRequest] =
         Right(
@@ -309,6 +312,7 @@ object LedgerApiCommands {
             partyIdHint = partyIdHint,
             displayName = displayName,
             localMetadata = Some(ObjectMeta(annotations = annotations)),
+            identityProviderId = identityProviderId,
           )
         )
       override def submitRequest(
@@ -324,6 +328,7 @@ object LedgerApiCommands {
         party: PartyId,
         annotationsUpdate: Option[Map[String, String]],
         resourceVersionO: Option[String],
+        identityProviderId: String,
     ) extends BaseCommand[UpdatePartyDetailsRequest, UpdatePartyDetailsResponse, PartyDetails] {
 
       override def submitRequest(
@@ -338,7 +343,11 @@ object LedgerApiCommands {
           resourceVersion = resourceVersionO.getOrElse(""),
         )
         val partyDetails =
-          PartyDetails(party = party.toProtoPrimitive, localMetadata = Some(metadata))
+          PartyDetails(
+            party = party.toProtoPrimitive,
+            localMetadata = Some(metadata),
+            identityProviderId = identityProviderId,
+          )
         val updatePaths =
           annotationsUpdate.fold(Seq.empty[String])(_ => Seq("local_metadata.annotations"))
         val req = UpdatePartyDetailsRequest(
@@ -355,12 +364,16 @@ object LedgerApiCommands {
 
     }
 
-    final case class ListKnownParties()
+    final case class ListKnownParties(identityProviderId: String)
         extends BaseCommand[ListKnownPartiesRequest, ListKnownPartiesResponse, Seq[
           PartyDetails
         ]] {
       override def createRequest(): Either[String, ListKnownPartiesRequest] =
-        Right(ListKnownPartiesRequest())
+        Right(
+          ListKnownPartiesRequest(
+            identityProviderId = identityProviderId
+          )
+        )
       override def submitRequest(
           service: PartyManagementServiceStub,
           request: ListKnownPartiesRequest,
@@ -372,11 +385,16 @@ object LedgerApiCommands {
         Right(response.partyDetails)
     }
 
-    final case class GetParty(party: PartyId)
+    final case class GetParty(party: PartyId, identityProviderId: String)
         extends BaseCommand[GetPartiesRequest, GetPartiesResponse, PartyDetails] {
 
       override def createRequest(): Either[String, GetPartiesRequest] =
-        Right(GetPartiesRequest(parties = Seq(party.toProtoPrimitive)))
+        Right(
+          GetPartiesRequest(
+            parties = Seq(party.toProtoPrimitive),
+            identityProviderId = identityProviderId,
+          )
+        )
 
       override def submitRequest(
           service: PartyManagementServiceStub,
@@ -388,6 +406,36 @@ object LedgerApiCommands {
       ): Either[String, PartyDetails] = {
         response.partyDetails.headOption.toRight("PARTY_NOT_FOUND")
       }
+    }
+
+    final case class UpdateIdp(
+        party: PartyId,
+        sourceIdentityProviderId: String,
+        targetIdentityProviderId: String,
+    ) extends BaseCommand[
+          UpdatePartyIdentityProviderRequest,
+          UpdatePartyIdentityProviderResponse,
+          Unit,
+        ] {
+
+      override def submitRequest(
+          service: PartyManagementServiceStub,
+          request: UpdatePartyIdentityProviderRequest,
+      ): Future[UpdatePartyIdentityProviderResponse] =
+        service.updatePartyIdentityProviderId(request)
+
+      override def createRequest(): Either[String, UpdatePartyIdentityProviderRequest] = Right(
+        UpdatePartyIdentityProviderRequest(
+          party = party.toProtoPrimitive,
+          sourceIdentityProviderId = sourceIdentityProviderId,
+          targetIdentityProviderId = targetIdentityProviderId,
+        )
+      )
+
+      override def handleResponse(
+          response: UpdatePartyIdentityProviderResponse
+      ): Either[String, Unit] = Right(())
+
     }
   }
 
@@ -925,6 +973,7 @@ object LedgerApiCommands {
         participantAdmin: Boolean,
         isDeactivated: Boolean,
         annotations: Map[String, String],
+        identityProviderId: String,
     ) extends BaseCommand[CreateUserRequest, CreateUserResponse, LedgerApiUser]
         with HasRights {
 
@@ -942,6 +991,7 @@ object LedgerApiCommands {
               primaryParty = primaryParty.getOrElse(""),
               isDeactivated = isDeactivated,
               metadata = Some(ObjectMeta(annotations = annotations)),
+              identityProviderId = identityProviderId,
             )
           ),
           rights = getRights,
@@ -961,6 +1011,7 @@ object LedgerApiCommands {
         isDeactivatedUpdate: Option[Boolean],
         annotationsUpdate: Option[Map[String, String]],
         resourceVersionO: Option[String],
+        identityProviderId: String,
     ) extends BaseCommand[UpdateUserRequest, UpdateUserResponse, LedgerApiUser] {
 
       override def submitRequest(
@@ -980,6 +1031,7 @@ object LedgerApiCommands {
               resourceVersion = resourceVersionO.getOrElse(""),
             )
           ),
+          identityProviderId = identityProviderId,
         )
         val updatePaths: Seq[String] = Seq(
           primaryPartyUpdate.map(_ => "primary_party"),
@@ -1002,7 +1054,8 @@ object LedgerApiCommands {
     }
 
     final case class Get(
-        id: String
+        id: String,
+        identityProviderId: String,
     ) extends BaseCommand[GetUserRequest, GetUserResponse, LedgerApiUser] {
 
       override def submitRequest(
@@ -1013,7 +1066,8 @@ object LedgerApiCommands {
 
       override def createRequest(): Either[String, GetUserRequest] = Right(
         GetUserRequest(
-          userId = id
+          userId = id,
+          identityProviderId = identityProviderId,
         )
       )
 
@@ -1024,8 +1078,10 @@ object LedgerApiCommands {
 
     }
 
-    final case class Delete(id: String)
-        extends BaseCommand[DeleteUserRequest, DeleteUserResponse, Unit] {
+    final case class Delete(
+        id: String,
+        identityProviderId: String,
+    ) extends BaseCommand[DeleteUserRequest, DeleteUserResponse, Unit] {
 
       override def submitRequest(
           service: UserManagementServiceStub,
@@ -1034,15 +1090,52 @@ object LedgerApiCommands {
         service.deleteUser(request)
 
       override def createRequest(): Either[String, DeleteUserRequest] = Right(
-        DeleteUserRequest(userId = id)
+        DeleteUserRequest(
+          userId = id,
+          identityProviderId = identityProviderId,
+        )
       )
 
       override def handleResponse(response: DeleteUserResponse): Either[String, Unit] = Right(())
 
     }
 
-    final case class List(filterUser: String, pageToken: String, pageSize: Int)
-        extends BaseCommand[ListUsersRequest, ListUsersResponse, ListLedgerApiUsersResult] {
+    final case class UpdateIdp(
+        id: String,
+        sourceIdentityProviderId: String,
+        targetIdentityProviderId: String,
+    ) extends BaseCommand[
+          UpdateUserIdentityProviderRequest,
+          UpdateUserIdentityProviderResponse,
+          Unit,
+        ] {
+
+      override def submitRequest(
+          service: UserManagementServiceStub,
+          request: UpdateUserIdentityProviderRequest,
+      ): Future[UpdateUserIdentityProviderResponse] =
+        service.updateUserIdentityProviderId(request)
+
+      override def createRequest(): Either[String, UpdateUserIdentityProviderRequest] = Right(
+        UpdateUserIdentityProviderRequest(
+          userId = id,
+          sourceIdentityProviderId = sourceIdentityProviderId,
+          targetIdentityProviderId = targetIdentityProviderId,
+        )
+      )
+
+      override def handleResponse(
+          response: UpdateUserIdentityProviderResponse
+      ): Either[String, Unit] = Right(())
+
+    }
+
+    final case class List(
+        filterUser: String,
+        pageToken: String,
+        pageSize: Int,
+        identityProviderId: String,
+    ) extends BaseCommand[ListUsersRequest, ListUsersResponse, ListLedgerApiUsersResult] {
 
       override def submitRequest(
           service: UserManagementServiceStub,
@@ -1051,7 +1144,11 @@ object LedgerApiCommands {
         service.listUsers(request)
 
       override def createRequest(): Either[String, ListUsersRequest] = Right(
-        ListUsersRequest(pageToken = pageToken, pageSize = pageSize)
+        ListUsersRequest(
+          pageToken = pageToken,
+          pageSize = pageSize,
+          identityProviderId = identityProviderId,
+        )
       )
 
       override def handleResponse(
@@ -1067,6 +1164,7 @@ object LedgerApiCommands {
           actAs: Set[LfPartyId],
           readAs: Set[LfPartyId],
           participantAdmin: Boolean,
+          identityProviderId: String,
       ) extends BaseCommand[GrantUserRightsRequest, GrantUserRightsResponse, UserRights]
           with HasRights {
 
@@ -1080,6 +1178,7 @@ object LedgerApiCommands {
           GrantUserRightsRequest(
             userId = id,
             rights = getRights,
+            identityProviderId = identityProviderId,
           )
         )
 
@@ -1093,6 +1192,7 @@ object LedgerApiCommands {
           actAs: Set[LfPartyId],
           readAs: Set[LfPartyId],
           participantAdmin: Boolean,
+          identityProviderId: String,
       ) extends BaseCommand[RevokeUserRightsRequest, RevokeUserRightsResponse, UserRights]
           with HasRights {
 
@@ -1106,6 +1206,7 @@ object LedgerApiCommands {
           RevokeUserRightsRequest(
             userId = id,
             rights = getRights,
+            identityProviderId = identityProviderId,
           )
         )
 
@@ -1116,7 +1217,7 @@ object LedgerApiCommands {
 
       }
 
-      final case class List(id: String)
+      final case class List(id: String, identityProviderId: String)
           extends BaseCommand[ListUserRightsRequest, ListUserRightsResponse, UserRights] {
 
         override def submitRequest(
@@ -1126,7 +1227,7 @@ object LedgerApiCommands {
           service.listUserRights(request)
 
         override def createRequest(): Either[String, ListUserRightsRequest] = Right(
-          ListUserRightsRequest(userId = id)
+          ListUserRightsRequest(userId = id, identityProviderId = identityProviderId)
         )
 
         override def handleResponse(response: ListUserRightsResponse): Either[String, UserRights] =

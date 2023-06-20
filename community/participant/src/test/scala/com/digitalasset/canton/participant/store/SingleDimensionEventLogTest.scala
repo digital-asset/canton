@@ -7,7 +7,6 @@ import cats.syntax.option.*
 import com.daml.lf.data.{ImmArray, Time}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.TransactionMeta
-import com.digitalasset.canton.participant.protocol.TransactionUpdate
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
 import com.digitalasset.canton.participant.sync.LedgerSyncEvent.PublicPackageUploadRejected
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
@@ -70,6 +69,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
       recordTime = LfTimestamp.Epoch,
       divulgedContracts = List.empty,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       contractMetadata = Map(), // TODO(#9795) wire proper value
     )
 
@@ -77,14 +77,6 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
   }
 
   lazy val domain1: DomainId = DomainId.tryFromString("domain::one")
-  lazy val update: TransactionUpdate =
-    TransactionUpdate(
-      Set.empty,
-      CantonTimestamp.MinValue,
-      domain1,
-      RequestCounter(0),
-      testedProtocolVersion,
-    )
 
   def singleDimensionEventLog(mk: () => SingleDimensionEventLog[EventLogId]): Unit = {
 

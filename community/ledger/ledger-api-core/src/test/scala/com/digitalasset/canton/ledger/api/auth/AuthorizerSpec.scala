@@ -5,6 +5,7 @@ package com.digitalasset.canton.ledger.api.auth
 
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import io.grpc.{Status, StatusRuntimeException}
@@ -19,6 +20,7 @@ import scala.util.{Failure, Success, Try}
 
 class AuthorizerSpec
     extends AsyncFlatSpec
+    with BaseTest
     with Matchers
     with MockitoSugar
     with AkkaBeforeAndAfterAll {
@@ -77,5 +79,6 @@ class AuthorizerSpec
     mock[ExecutionContext],
     userRightsCheckIntervalInSeconds = 1,
     akkaScheduler = system.scheduler,
+    loggerFactory = loggerFactory,
   )(LoggingContext.ForTesting)
 }

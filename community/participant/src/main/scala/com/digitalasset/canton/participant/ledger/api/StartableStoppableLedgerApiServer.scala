@@ -6,17 +6,19 @@ package com.digitalasset.canton.participant.ledger.api
 import akka.actor.ActorSystem
 import com.daml.api.util.TimeProvider
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
+import com.daml.http.HttpApiServer
 import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationFeatures,
   CommandDeduplicationPeriodSupport,
   CommandDeduplicationType,
   ExperimentalExplicitDisclosure,
 }
-import com.daml.ledger.resources.{Resource, ResourceContext}
+import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.logging.LoggingContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.ports.Port
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -29,15 +31,9 @@ import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
   TimedReadService,
   TimedWriteService,
 }
-import com.digitalasset.canton.lifecycle.{
-  AsyncCloseable,
-  AsyncOrSyncCloseable,
-  FlagCloseableAsync,
-  FutureUnlessShutdown,
-  SyncCloseable,
-}
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.ApiRequestLogger
+import com.digitalasset.canton.networking.grpc.{ApiRequestLogger, ClientChannelBuilder}
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.apiserver.ratelimiting.{
@@ -58,14 +54,8 @@ import com.digitalasset.canton.platform.indexer.{
   IndexerServiceOwner,
   IndexerStartupMode,
 }
+import com.digitalasset.canton.platform.localstore.*
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
-import com.digitalasset.canton.platform.localstore.{
-  CachedIdentityProviderConfigStore,
-  IdentityProviderManagementConfig,
-  PersistentIdentityProviderConfigStore,
-  PersistentPartyRecordStore,
-  PersistentUserManagementStore,
-}
 import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
@@ -97,6 +87,7 @@ class StartableStoppableLedgerApiServer(
     createExternalServices: () => List[BindableService] = () => Nil,
     telemetry: Telemetry,
     futureSupervisor: FutureSupervisor,
+    multiDomainEnabled: Boolean,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -245,6 +236,8 @@ class StartableStoppableLedgerApiServer(
           config.serverConfig.commandService.maxCommandsInFlight,
           config.metrics,
           executionContext,
+          loggerFactory,
+          multiDomainEnabled = multiDomainEnabled,
         )
       timedReadService = new TimedReadService(config.syncService, config.metrics)
       indexerHealth <- new IndexerServiceOwner(
@@ -259,12 +252,15 @@ class StartableStoppableLedgerApiServer(
         inMemoryStateUpdaterFlow,
         config.serverConfig.additionalMigrationPaths,
         executionContext,
+        loggerFactory,
+        multiDomainEnabled = multiDomainEnabled,
       )
       dbSupport <- DbSupport
         .owner(
           serverRole = ServerRole.ApiServer,
           metrics = config.metrics,
           dbConfig = dbConfig,
+          loggerFactory = loggerFactory,
         )
       indexService <- new IndexServiceOwner(
         dbSupport = dbSupport,
@@ -276,8 +272,9 @@ class StartableStoppableLedgerApiServer(
         engine = config.engine,
         inMemoryState = inMemoryState,
         tracer = config.tracerProvider.tracer,
+        loggerFactory = loggerFactory,
       )
-      userManagementStore = getUserManagementStore(dbSupport)
+      userManagementStore = getUserManagementStore(dbSupport, loggerFactory)
       partyRecordStore = new PersistentPartyRecordStore(
         dbSupport = dbSupport,
         metrics = config.metrics,
@@ -292,7 +289,8 @@ class StartableStoppableLedgerApiServer(
         submissionTracker = inMemoryState.submissionTracker,
         indexService = indexService,
         userManagementStore = userManagementStore,
-        identityProviderConfigStore = getIdentityProviderConfigStore(dbSupport, apiServerConfig),
+        identityProviderConfigStore =
+          getIdentityProviderConfigStore(dbSupport, apiServerConfig, loggerFactory),
         partyRecordStore = partyRecordStore,
         ledgerId = config.ledgerId,
         participantId = config.participantId,
@@ -321,21 +319,28 @@ class StartableStoppableLedgerApiServer(
         explicitDisclosureUnsafeEnabled = config.serverConfig.explicitDisclosureUnsafe,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
+        multiDomainEnabled = multiDomainEnabled,
       )
+      _ <- startHttpApiIfEnabled
     } yield ()
   }
 
   private def getIdentityProviderConfigStore(
       dbSupport: DbSupport,
       apiServerConfig: ApiServerConfig,
-  ): CachedIdentityProviderConfigStore = PersistentIdentityProviderConfigStore.cached(
-    dbSupport = dbSupport,
-    metrics = config.metrics,
-    cacheExpiryAfterWrite = apiServerConfig.identityProviderManagement.cacheExpiryAfterWrite,
-    maxIdentityProviders = IdentityProviderManagementConfig.MaxIdentityProviders,
-  )(executionContext, loggingContext)
+      loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext): CachedIdentityProviderConfigStore =
+    PersistentIdentityProviderConfigStore.cached(
+      dbSupport = dbSupport,
+      metrics = config.metrics,
+      cacheExpiryAfterWrite = apiServerConfig.identityProviderManagement.cacheExpiryAfterWrite,
+      maxIdentityProviders = IdentityProviderManagementConfig.MaxIdentityProviders,
+      loggerFactory = loggerFactory,
+    )
 
-  private def getUserManagementStore(dbSupport: DbSupport): UserManagementStore =
+  private def getUserManagementStore(dbSupport: DbSupport, loggerFactory: NamedLoggerFactory)(
+      implicit traceContext: TraceContext
+  ): UserManagementStore =
     PersistentUserManagementStore.cached(
       dbSupport = dbSupport,
       metrics = config.metrics,
@@ -344,10 +349,11 @@ class StartableStoppableLedgerApiServer(
         config.serverConfig.userManagementService.cacheExpiryAfterWriteInSeconds,
       maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,
       maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
-    )(executionContext, loggingContext)
+      loggerFactory = loggerFactory,
+    )(executionContext, traceContext)
 
   private def getInterceptors(
-      indexerExecutor: QueueAwareExecutor with NamedExecutor
+      indexerExecutor: QueueAwareExecutor & NamedExecutor
   ): List[ServerInterceptor] = List(
     new ApiRequestLogger(
       config.loggerFactory,
@@ -360,6 +366,7 @@ class StartableStoppableLedgerApiServer(
   ) ::: config.serverConfig.rateLimit
     .map(rateLimit =>
       RateLimitingInterceptor(
+        loggerFactory = loggerFactory,
         metrics = config.metrics,
         config = rateLimit,
         additionalChecks = List(
@@ -367,11 +374,13 @@ class StartableStoppableLedgerApiServer(
             name = "Environment Execution Threadpool",
             limit = rateLimit.maxApiServicesQueueSize,
             queue = executionContext,
+            loggerFactory = loggerFactory,
           ),
           ThreadpoolCheck(
             name = "Index DB Threadpool",
             limit = rateLimit.maxApiServicesIndexDbQueueSize,
             queue = indexerExecutor,
+            loggerFactory = loggerFactory,
           ),
         ),
       )
@@ -416,4 +425,16 @@ class StartableStoppableLedgerApiServer(
       .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
     userManagement = config.serverConfig.userManagementService.damlConfig,
   )
+
+  private def startHttpApiIfEnabled: ResourceOwner[Unit] =
+    config.jsonApiConfig
+      .fold(ResourceOwner.unit) { jsonApiConfig =>
+        for {
+          channel <- ResourceOwner
+            .forReleasable(() =>
+              ClientChannelBuilder.createChannelToTrustedServer(config.serverConfig.clientConfig)
+            ) { channel => Future(channel.shutdown().discard) }
+          _ <- HttpApiServer(jsonApiConfig, channel)(config.jsonApiMetrics, loggingContext)
+        } yield ()
+      }
 }

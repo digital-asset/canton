@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
@@ -26,9 +26,8 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Future
 
-class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
+class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers with TestEssentials {
   private val className = classOf[InMemoryState].getSimpleName
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   s"$className.initialized" should "return false if not initialized" in withTestFixture {
     case (inMemoryState, _, _, _, _, _, _, _, _, _, _) =>
@@ -180,6 +179,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
       dispatcherState = dispatcherState,
       packageMetadataView = packageMetadataView,
       submissionTracker = submissionTracker,
+      loggerFactory = loggerFactory,
     )
 
     test(

@@ -55,6 +55,7 @@ object SequentialWriteDao {
           ),
           compressionStrategy = compressionStrategy,
           metrics,
+          multiDomainEnabled = false,
         ),
         ledgerEndCache = ledgerEndCache,
         stringInterningView = stringInterningView,

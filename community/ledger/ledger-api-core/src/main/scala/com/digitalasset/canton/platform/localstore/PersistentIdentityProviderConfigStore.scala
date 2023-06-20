@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.Ops.*
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.*
 import com.digitalasset.canton.platform.localstore.api.{
@@ -14,6 +15,7 @@ import com.digitalasset.canton.platform.localstore.api.{
   IdentityProviderConfigUpdate,
 }
 import com.digitalasset.canton.platform.store.DbSupport
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
 import scala.concurrent.duration.FiniteDuration
@@ -23,15 +25,16 @@ class PersistentIdentityProviderConfigStore(
     dbSupport: DbSupport,
     metrics: Metrics,
     maxIdentityProviders: Int,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends IdentityProviderConfigStore {
+    extends IdentityProviderConfigStore
+    with NamedLogging {
 
   private val backend = dbSupport.storageBackendFactory.createIdentityProviderConfigStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher
-  private val logger = ContextualizedLogger.get(getClass)
 
   override def createIdentityProviderConfig(identityProviderConfig: domain.IdentityProviderConfig)(
-      implicit loggingContext: LoggingContext
+      implicit loggingContext: LoggingContextWithTrace
   ): Future[Result[domain.IdentityProviderConfig]] =
     inTransaction(_.createIdpConfig) { implicit connection =>
       val id = identityProviderConfig.identityProviderId
@@ -54,7 +57,7 @@ class PersistentIdentityProviderConfigStore(
     })
 
   override def getIdentityProviderConfig(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[domain.IdentityProviderConfig]] =
     inTransaction(_.getIdpConfig) { implicit connection =>
       backend
@@ -63,7 +66,7 @@ class PersistentIdentityProviderConfigStore(
     }
 
   override def deleteIdentityProviderConfig(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Unit]] =
     inTransaction(_.deleteIdpConfig) { implicit connection =>
       if (!backend.deleteIdentityProviderConfig(id)(connection)) {
@@ -78,7 +81,7 @@ class PersistentIdentityProviderConfigStore(
     })
 
   override def listIdentityProviderConfigs()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Seq[domain.IdentityProviderConfig]]] = {
     inTransaction(_.listIdpConfigs) { implicit connection =>
       Right(backend.listIdentityProviderConfigs()(connection))
@@ -86,7 +89,7 @@ class PersistentIdentityProviderConfigStore(
   }
 
   override def updateIdentityProviderConfig(update: IdentityProviderConfigUpdate)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[domain.IdentityProviderConfig]] = {
     inTransaction(_.updateIdpConfig) { implicit connection =>
       val id = update.identityProviderId
@@ -109,7 +112,7 @@ class PersistentIdentityProviderConfigStore(
   }
 
   override def getIdentityProviderConfig(issuer: String)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]] = inTransaction(_.getIdpConfig) { implicit connection =>
     for {
       identityProviderConfig <- backend
@@ -119,7 +122,7 @@ class PersistentIdentityProviderConfigStore(
   }
 
   def identityProviderConfigExists(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Boolean] = {
     dbDispatcher.executeSql(metrics.daml.identityProviderConfigStore.getIdpConfig) { connection =>
       backend.idpConfigByIdExists(id)(connection)
@@ -200,7 +203,9 @@ class PersistentIdentityProviderConfigStore(
 
   private def inTransaction[T](
       dbMetric: metrics.daml.identityProviderConfigStore.type => DatabaseMetrics
-  )(thunk: Connection => Result[T])(implicit loggingContext: LoggingContext): Future[Result[T]] =
+  )(
+      thunk: Connection => Result[T]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[T]] =
     dbDispatcher
       .executeSqlEither(dbMetric(metrics.daml.identityProviderConfigStore))(thunk)
 
@@ -217,13 +222,19 @@ object PersistentIdentityProviderConfigStore {
       metrics: Metrics,
       cacheExpiryAfterWrite: FiniteDuration,
       maxIdentityProviders: Int,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      traceContext: TraceContext,
   ) = new CachedIdentityProviderConfigStore(
-    delegate = new PersistentIdentityProviderConfigStore(dbSupport, metrics, maxIdentityProviders),
+    delegate = new PersistentIdentityProviderConfigStore(
+      dbSupport,
+      metrics,
+      maxIdentityProviders,
+      loggerFactory,
+    ),
     cacheExpiryAfterWrite = cacheExpiryAfterWrite,
     maximumCacheSize = maxIdentityProviders,
     metrics = metrics,
-  )
+  )(executionContext, LoggingContextWithTrace(loggerFactory))
 }

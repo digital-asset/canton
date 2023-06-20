@@ -4,11 +4,16 @@
 package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.{Metrics, Timed}
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, IndexErrors}
+import com.digitalasset.canton.ledger.error.IndexErrors
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.ContractsReader.*
@@ -24,9 +29,10 @@ private[dao] sealed class ContractsReader(
     storageBackend: ContractStorageBackend,
     dispatcher: DbDispatcher,
     metrics: Metrics,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends LedgerDaoContractsReader {
-  private val logger = ContextualizedLogger.get(getClass)
+    extends LedgerDaoContractsReader
+    with NamedLogging {
 
   /** Lookup a contract key state at a specific ledger offset.
     *
@@ -35,7 +41,7 @@ private[dao] sealed class ContractsReader(
     * @return the key state.
     */
   override def lookupKeyState(key: Key, validAt: Offset)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[KeyState] =
     Timed.future(
       metrics.daml.index.db.lookupKey,
@@ -45,10 +51,10 @@ private[dao] sealed class ContractsReader(
     )
 
   override def lookupContractState(contractId: ContractId, before: Offset)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractState]] = {
     implicit val errorLogger: ContextualizedErrorLogger =
-      new DamlContextualizedErrorLogger(logger, loggingContext, None)
+      ErrorLoggingContext(logger, loggingContext)
     Timed.future(
       metrics.daml.index.db.lookupActiveContract,
       dispatcher
@@ -91,7 +97,7 @@ private[dao] sealed class ContractsReader(
   override def lookupActiveContractAndLoadArgument(
       readers: Set[Party],
       contractId: ContractId,
-  )(implicit loggingContext: LoggingContext): Future[Option[Contract]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
 
     Timed.future(
       metrics.daml.index.db.lookupActiveContract,
@@ -120,7 +126,7 @@ private[dao] sealed class ContractsReader(
       readers: Set[Party],
       contractId: ContractId,
       createArgument: Value,
-  )(implicit loggingContext: LoggingContext): Future[Option[Contract]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
 
     Timed.future(
       metrics.daml.index.db.lookupActiveContract,
@@ -146,11 +152,13 @@ private[dao] object ContractsReader {
       dispatcher: DbDispatcher,
       metrics: Metrics,
       storageBackend: ContractStorageBackend,
+      loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): ContractsReader = {
     new ContractsReader(
       storageBackend = storageBackend,
       dispatcher = dispatcher,
       metrics = metrics,
+      loggerFactory = loggerFactory,
     )
   }
 

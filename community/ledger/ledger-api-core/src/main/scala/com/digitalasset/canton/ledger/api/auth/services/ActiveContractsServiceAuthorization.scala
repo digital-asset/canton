@@ -30,7 +30,7 @@ final class ActiveContractsServiceAuthorization(
       responseObserver: StreamObserver[GetActiveContractsResponse],
   ): Unit =
     authorizer.requireReadClaimsForTransactionFilterOnStream(
-      request.filter,
+      request.filter.map(_.filtersByParty),
       service.getActiveContracts,
     )(request, responseObserver)
 

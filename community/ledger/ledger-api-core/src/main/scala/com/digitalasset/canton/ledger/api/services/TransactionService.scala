@@ -49,5 +49,7 @@ trait TransactionService {
       req: GetTransactionByEventIdRequest
   )(implicit loggingContext: LoggingContextWithTrace): Future[GetFlatTransactionResponse]
 
-  def getLatestPrunedOffsets: Future[GetLatestPrunedOffsetsResponse]
+  def getLatestPrunedOffsets()(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[GetLatestPrunedOffsetsResponse]
 }

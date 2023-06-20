@@ -7,7 +7,6 @@ import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.lf.data.Ref.PackageId
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 
@@ -23,9 +22,9 @@ trait IndexPackagesService {
 
   def getLfArchive(
       packageId: PackageId
-  )(implicit loggingContext: LoggingContext): Future[Option[Archive]]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Archive]]
 
   def packageEntries(
       startExclusive: Option[LedgerOffset.Absolute]
-  )(implicit loggingContext: LoggingContext): Source[PackageEntry, NotUsed]
+  )(implicit loggingContext: LoggingContextWithTrace): Source[PackageEntry, NotUsed]
 }

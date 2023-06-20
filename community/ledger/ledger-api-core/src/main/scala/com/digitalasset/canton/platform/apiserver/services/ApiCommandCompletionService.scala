@@ -8,7 +8,6 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.command_completion_service.*
-import com.daml.logging.LoggingContext
 import com.daml.logging.entries.{LoggingEntries, LoggingValue}
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
@@ -88,6 +87,7 @@ private[apiserver] final class ApiCommandCompletionService private (
 
     completionsService
       .getCompletions(offset, request.applicationId, request.parties)
+      .map(ApiConversions.toV1)
       .via(
         logger.enrichedDebugStream(
           "Responding with completions.",
@@ -124,7 +124,6 @@ private[apiserver] object ApiCommandCompletionService {
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
   ): GrpcCommandCompletionService & GrpcApiService = {
     val validator = new CompletionServiceRequestValidator(
       ledgerId,

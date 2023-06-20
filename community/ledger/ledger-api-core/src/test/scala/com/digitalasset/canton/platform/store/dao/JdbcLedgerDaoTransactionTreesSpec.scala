@@ -6,8 +6,8 @@ package com.digitalasset.canton.platform.store.dao
 import akka.NotUsed
 import akka.stream.scaladsl.{Sink, Source}
 import com.daml.api.util.TimestampConversion
-import com.daml.ledger.api.v1.transaction.TransactionTree
-import com.daml.ledger.api.v1.transaction_service.GetTransactionTreesResponse
+import com.daml.ledger.api.v2.transaction.TransactionTree
+import com.daml.ledger.api.v2.update_service.GetUpdateTreesResponse
 import com.daml.lf.data.Ref
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.{Node, NodeId}
@@ -63,7 +63,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
             transaction.effectiveAt.value,
             TimestampConversion.ConversionMode.Exact,
           ) shouldBe tx.ledgerEffectiveTime
-          transaction.transactionId shouldBe tx.transactionId
+          transaction.updateId shouldBe tx.transactionId
           transaction.workflowId shouldBe tx.workflowId.getOrElse("")
           val created = transaction.eventsById.values.loneElement.getCreated
           transaction.rootEventIds.loneElement shouldEqual created.eventId
@@ -98,11 +98,11 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               transaction.effectiveAt.value,
               TimestampConversion.ConversionMode.Exact,
             ) shouldBe exercise.ledgerEffectiveTime
-            transaction.transactionId shouldBe exercise.transactionId
+            transaction.updateId shouldBe exercise.transactionId
             transaction.workflowId shouldBe exercise.workflowId.getOrElse("")
             val exercised = transaction.eventsById.values.loneElement.getExercised
             transaction.rootEventIds.loneElement shouldEqual exercised.eventId
-            exercised.eventId shouldBe EventId(transaction.transactionId, nodeId).toLedgerString
+            exercised.eventId shouldBe EventId(transaction.updateId, nodeId).toLedgerString
             exercised.witnessParties should contain only (exercise.actAs: _*)
             exercised.contractId shouldBe exerciseNode.targetCoid.coid
             exercised.templateId shouldNot be(None)
@@ -135,7 +135,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
 
         transaction.commandId shouldBe tx.commandId.value
         transaction.offset shouldBe ApiOffset.toApiString(offset)
-        transaction.transactionId shouldBe tx.transactionId
+        transaction.updateId shouldBe tx.transactionId
         transaction.workflowId shouldBe tx.workflowId.getOrElse("")
         TimestampConversion.toLf(
           transaction.effectiveAt.value,
@@ -144,22 +144,22 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
 
         transaction.rootEventIds should have size 2
         transaction.rootEventIds(0) shouldBe EventId(
-          transaction.transactionId,
+          transaction.updateId,
           createNodeId,
         ).toLedgerString
         transaction.rootEventIds(1) shouldBe EventId(
-          transaction.transactionId,
+          transaction.updateId,
           exerciseNodeId,
         ).toLedgerString
 
         val created = transaction
-          .eventsById(EventId(transaction.transactionId, createNodeId).toLedgerString)
+          .eventsById(EventId(transaction.updateId, createNodeId).toLedgerString)
           .getCreated
         val exercised = transaction
-          .eventsById(EventId(transaction.transactionId, exerciseNodeId).toLedgerString)
+          .eventsById(EventId(transaction.updateId, exerciseNodeId).toLedgerString)
           .getExercised
 
-        created.eventId shouldBe EventId(transaction.transactionId, createNodeId).toLedgerString
+        created.eventId shouldBe EventId(transaction.updateId, createNodeId).toLedgerString
         created.witnessParties should contain only (tx.actAs: _*)
         created.agreementText.getOrElse("") shouldBe createNode.agreementText
         created.contractKey shouldBe None
@@ -170,7 +170,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
         )
         created.templateId shouldNot be(None)
 
-        exercised.eventId shouldBe EventId(transaction.transactionId, exerciseNodeId).toLedgerString
+        exercised.eventId shouldBe EventId(transaction.updateId, exerciseNodeId).toLedgerString
         exercised.witnessParties should contain only (tx.actAs: _*)
         exercised.contractId shouldBe exerciseNode.targetCoid.coid
         exercised.templateId shouldNot be(None)
@@ -198,11 +198,11 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
 
         transaction.rootEventIds should have size 2
         transaction.rootEventIds(0) shouldBe EventId(
-          transaction.transactionId,
+          transaction.updateId,
           NodeId(2),
         ).toLedgerString
         transaction.rootEventIds(1) shouldBe EventId(
-          transaction.transactionId,
+          transaction.updateId,
           NodeId(3),
         ).toLedgerString
       }
@@ -226,6 +226,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               witnessTemplateIdFilter =
                 Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -259,6 +260,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               verbose = true,
               witnessTemplateIdFilter = Map(alice -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultForBob <- transactionsOf(
@@ -271,6 +273,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               verbose = true,
               witnessTemplateIdFilter = Map(bob -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultForCharlie <- transactionsOf(
@@ -283,6 +286,7 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
               verbose = true,
               witnessTemplateIdFilter = Map(charlie -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -316,12 +320,15 @@ private[dao] trait JdbcLedgerDaoTransactionTreesSpec
       .map(_.flatMap(_.toList.flatMap(_.transaction.toList)))
 
   private def transactionsOf(
-      source: Source[(Offset, GetTransactionTreesResponse), NotUsed]
+      source: Source[(Offset, GetUpdateTreesResponse), NotUsed]
   ): Future[Seq[TransactionTree]] =
     source
       .map(_._2)
       .runWith(Sink.seq)
-      .map(_.flatMap(_.transactions))
+      .map(_.flatMap(_.update match {
+        case GetUpdateTreesResponse.Update.TransactionTree(txTree) => Seq(txTree)
+        case _ => Nil
+      }))
 
   // Ensure two sequences of transaction trees are comparable:
   // - witnesses do not have to appear in a specific order

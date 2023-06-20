@@ -61,6 +61,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     recordTime = CantonTimestamp.Epoch.toLf,
     divulgedContracts = List.empty,
     blindingInfo = None,
+    hostedWitnesses = Nil,
     contractMetadata = Map(),
   )
   private lazy val changeId1 = event1.optCompletionInfo.value.changeId

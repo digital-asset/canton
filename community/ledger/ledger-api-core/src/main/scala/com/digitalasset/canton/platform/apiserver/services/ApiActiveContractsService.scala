@@ -9,7 +9,6 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.active_contracts_service.ActiveContractsServiceGrpc.ActiveContractsService
 import com.daml.ledger.api.v1.active_contracts_service.*
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
@@ -22,7 +21,10 @@ import com.digitalasset.canton.ledger.api.grpc.{
 import com.digitalasset.canton.ledger.api.validation.{FieldValidator, TransactionFilterValidator}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexActiveContractsService as ACSBackend
-import com.digitalasset.canton.logging.LoggingContextWithTrace.withEnrichedLoggingContext
+import com.digitalasset.canton.logging.LoggingContextWithTrace.{
+  implicitExtractTraceContext,
+  withEnrichedLoggingContext,
+}
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.ApiOffset
@@ -41,7 +43,6 @@ private[apiserver] final class ApiActiveContractsService private (
     mat: Materializer,
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends ActiveContractsServiceGrpc.ActiveContractsService
     with StreamingServiceLifecycleManagement
     with GrpcApiService
@@ -57,8 +58,7 @@ private[apiserver] final class ApiActiveContractsService private (
       request: GetActiveContractsRequest,
       responseObserver: StreamObserver[GetActiveContractsResponse],
   ): Unit = registerStream(responseObserver) {
-    implicit val traceContext =
-      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
+    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
 
     val result = for {
       filters <- TransactionFilterValidator.validate(request.getFilter)
@@ -80,20 +80,21 @@ private[apiserver] final class ApiActiveContractsService private (
         logger.info(
           s"Received request for active contracts: $request, ${loggingContext.serializeFiltered("filters")}."
         )
-        backend.getActiveContracts(
-          filter = filters,
-          verbose = request.verbose,
-          activeAtO = activeAtO,
-        )
+        backend
+          .getActiveContracts(
+            filter = filters,
+            verbose = request.verbose,
+            activeAtO = activeAtO,
+            multiDomainEnabled = false,
+          )
+          .map(ApiConversions.toV1)
       }
     }
     result
       .fold(
         t =>
           Source.failed(
-            ValidationLogger.logFailureWithTrace(logger, request, t)(
-              LoggingContextWithTrace(traceContext)
-            )
+            ValidationLogger.logFailureWithTrace(logger, request, t)
           ),
         identity,
       )
@@ -117,8 +118,7 @@ private[apiserver] object ApiActiveContractsService {
       mat: Materializer,
       esf: ExecutionSequencerFactory,
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
-  ): ActiveContractsService with GrpcApiService = {
+  ): ActiveContractsService & GrpcApiService = {
     val service = new ApiActiveContractsService(
       backend = backend,
       metrics = metrics,
@@ -128,6 +128,8 @@ private[apiserver] object ApiActiveContractsService {
     new GrpcActiveContractsService(
       service = service,
       ledgerId = ledgerId,
+      telemetry = telemetry,
+      loggerFactory = loggerFactory,
     ) with BindableService {
       override def bindService(): ServerServiceDefinition =
         ActiveContractsServiceGrpc.bindService(this, executionContext)

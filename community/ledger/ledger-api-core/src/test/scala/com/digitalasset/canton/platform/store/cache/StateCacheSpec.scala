@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.platform.store.cache
 
-import com.daml.logging.LoggingContext
 import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.noop.{NoOpMetricsFactory, NoOpTimer}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.caching.{CaffeineCache, ConcurrentCache, SizedCache}
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.github.benmanes.caffeine.cache.Caffeine
 import org.mockito.MockitoSugar
 import org.scalatest.Assertion
@@ -22,10 +23,15 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.math.BigInt.long2bigInt
 import scala.util.Success
 
-class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with Eventually {
+class StateCacheSpec
+    extends AsyncFlatSpec
+    with Matchers
+    with MockitoSugar
+    with Eventually
+    with BaseTest {
   private val className = classOf[StateCache[_, _]].getSimpleName
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   // TODO(#13019) Avoid the global execution context
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
@@ -43,6 +49,7 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
       initialCacheIndex = someOffset,
       cache = cache,
       registerUpdateTimer = cacheUpdateTimer,
+      loggerFactory = loggerFactory,
     )
 
     val asyncUpdatePromise = Promise[String]()
@@ -122,6 +129,7 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
       initialCacheIndex = initialOffset,
       cache = cache,
       registerUpdateTimer = cacheUpdateTimer,
+      loggerFactory = loggerFactory,
     )
 
     val asyncUpdatePromise = Promise[String]()
@@ -148,7 +156,7 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
 
   it should "not update the cache if called with a non-increasing `validAt`" in {
     val cache = mock[ConcurrentCache[String, String]]
-    val stateCache = StateCache[String, String](offset(0L), cache, cacheUpdateTimer)
+    val stateCache = StateCache[String, String](offset(0L), cache, cacheUpdateTimer, loggerFactory)
 
     stateCache.putBatch(offset(2L), Map("key" -> "value"))
     // `Put` at a decreasing validAt
@@ -174,6 +182,7 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
           ),
         ),
         registerUpdateTimer = cacheUpdateTimer,
+        loggerFactory = loggerFactory,
       )
 
     val syncUpdateKey = "key"
@@ -213,6 +222,7 @@ class StateCacheSpec extends AsyncFlatSpec with Matchers with MockitoSugar with 
         None,
       ),
       registerUpdateTimer = cacheUpdateTimer,
+      loggerFactory = loggerFactory,
     )(scala.concurrent.ExecutionContext.global)
 
   private def prepare(

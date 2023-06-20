@@ -5,15 +5,15 @@ package com.digitalasset.canton.ledger.participant.state.index.v2
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
+import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
 }
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, TransactionFilter, TransactionId}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -26,26 +26,28 @@ trait IndexTransactionsService extends LedgerEndService {
       endAt: Option[LedgerOffset],
       filter: TransactionFilter,
       verbose: Boolean,
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionsResponse, NotUsed]
+      multiDomainEnabled: Boolean,
+  )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed]
 
   def transactionTrees(
       begin: LedgerOffset,
       endAt: Option[LedgerOffset],
       filter: TransactionFilter,
       verbose: Boolean,
-  )(implicit loggingContext: LoggingContext): Source[GetTransactionTreesResponse, NotUsed]
+      multiDomainEnabled: Boolean,
+  )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdateTreesResponse, NotUsed]
 
   def getTransactionById(
       transactionId: TransactionId,
       requestingParties: Set[Ref.Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetFlatTransactionResponse]]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetTransactionResponse]]
 
   def getTransactionTreeById(
       transactionId: TransactionId,
       requestingParties: Set[Ref.Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetTransactionTreeResponse]]
 
   def latestPrunedOffsets()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[(LedgerOffset.Absolute, LedgerOffset.Absolute)]
 }

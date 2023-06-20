@@ -3,7 +3,7 @@
 -- Proprietary code. All rights reserved.
 
 create table blocks (
-    id bigint generated always as identity primary key,
+    id bigint primary key,
     event binary large object not null,
     uuid varchar(36) unique not null
 );

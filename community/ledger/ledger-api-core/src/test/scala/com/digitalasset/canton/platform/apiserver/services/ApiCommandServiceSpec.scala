@@ -10,21 +10,25 @@ import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandService
 import com.daml.ledger.api.v1.command_service.{CommandServiceGrpc, SubmitAndWaitRequest}
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.ledger.api.v1.commands.{Command, Commands, CreateCommand}
-import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
-import com.daml.logging.LoggingContext
+import com.daml.tracing.DefaultOpenTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandServiceSpec.*
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
 import com.digitalasset.canton.platform.apiserver.services.tracking.{
   CompletionResponse,
   SubmissionTracker,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.empty.Empty
 import com.google.rpc.Code
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.{Deadline, Status}
+import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
@@ -39,27 +43,34 @@ class ApiCommandServiceSpec
     extends AsyncWordSpec
     with Matchers
     with MockitoSugar
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
   private implicit val resourceContext: ResourceContext = ResourceContext(executionContext)
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private val telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build())
 
   s"the command service" should {
     val trackerCompletionResponse = tracking.CompletionResponse(
       completion = Completion(
         commandId = "command ID",
         status = Some(OkStatus),
-        transactionId = "transaction ID",
+        updateId = "transaction ID",
       ),
       checkpoint =
         Some(Checkpoint(offset = Some(LedgerOffset(LedgerOffset.Value.Absolute("offset"))))),
     )
     val commands = someCommands()
+    val expectedSubmissionKey = SubmissionKey(
+      commandId = "command ID",
+      submissionId = "",
+      applicationId = "",
+      parties = Set.empty,
+    )
     val submissionTracker = mock[SubmissionTracker]
     val submit = mock[SubmitRequest => Future[Empty]]
     when(
-      submissionTracker.track(eqTo(commands), any[Duration], eqTo(submit))(
-        any[LoggingContext],
+      submissionTracker.track(eqTo(expectedSubmissionKey), any[Duration], any[() => Future[Any]])(
         any[ContextualizedErrorLogger],
+        any[TraceContext],
       )
     ).thenReturn(Future.successful(trackerCompletionResponse))
 
@@ -70,15 +81,17 @@ class ApiCommandServiceSpec
           submissionTracker,
           submit,
           Duration.ofSeconds(1000L),
+          telemetry,
+          loggerFactory,
         )
       ).use { stub =>
         val request = SubmitAndWaitRequest.of(Some(commands))
         stub.submitAndWaitForTransactionId(request).map { response =>
           verify(submissionTracker).track(
-            eqTo(commands),
+            eqTo(expectedSubmissionKey),
             eqTo(Duration.ofSeconds(1000L)),
-            eqTo(submit),
-          )(any[LoggingContext], any[ContextualizedErrorLogger])
+            any[() => Future[Any]],
+          )(any[ContextualizedErrorLogger], any[TraceContext])
           response.transactionId should be("transaction ID")
           response.completionOffset shouldBe "offset"
         }
@@ -98,6 +111,8 @@ class ApiCommandServiceSpec
           submissionTracker,
           submit,
           Duration.ofSeconds(1L),
+          telemetry,
+          loggerFactory,
         ),
         deadlineTicker,
       ).use { stub =>
@@ -107,10 +122,10 @@ class ApiCommandServiceSpec
           .submitAndWaitForTransactionId(request)
           .map { response =>
             verify(submissionTracker).track(
-              eqTo(commands),
-              eqTo(Duration.ofSeconds(3600L)),
-              eqTo(submit),
-            )(any[LoggingContext], any[ContextualizedErrorLogger])
+              eqTo(expectedSubmissionKey),
+              eqTo(Duration.ofSeconds(1000L)),
+              any[() => Future[Any]],
+            )(any[ContextualizedErrorLogger], any[TraceContext])
             response.transactionId should be("transaction ID")
             succeed
           }
@@ -119,9 +134,9 @@ class ApiCommandServiceSpec
 
     "time out if the tracker times out" in {
       when(
-        submissionTracker.track(eqTo(commands), any[Duration], eqTo(submit))(
-          any[LoggingContext],
+        submissionTracker.track(eqTo(expectedSubmissionKey), any[Duration], any[() => Future[Any]])(
           any[ContextualizedErrorLogger],
+          any[TraceContext],
         )
       ).thenReturn(
         Future.fromTry(
@@ -136,6 +151,8 @@ class ApiCommandServiceSpec
         submissionTracker,
         submit,
         Duration.ofSeconds(1337L),
+        telemetry,
+        loggerFactory,
       )
 
       openChannel(
@@ -157,6 +174,8 @@ class ApiCommandServiceSpec
         submissionTracker,
         submit,
         Duration.ofSeconds(1337L),
+        telemetry,
+        loggerFactory,
       )
 
       verifyZeroInteractions(submissionTracker)

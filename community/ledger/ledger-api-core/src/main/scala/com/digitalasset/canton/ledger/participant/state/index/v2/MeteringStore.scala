@@ -6,9 +6,9 @@ package com.digitalasset.canton.ledger.participant.state.index.v2
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.ApplicationId
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -18,7 +18,7 @@ trait MeteringStore {
       from: Timestamp,
       to: Option[Timestamp],
       applicationId: Option[Ref.ApplicationId],
-  )(implicit loggingContext: LoggingContext): Future[ReportData]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ReportData]
 
 }
 

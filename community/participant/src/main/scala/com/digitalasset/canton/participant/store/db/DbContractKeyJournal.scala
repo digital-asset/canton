@@ -238,29 +238,36 @@ class DbContractKeyJournal(
             );
           """
         case _: DbStorage.Profile.Postgres =>
-          // If Unique Contract Keys become widely used, we may consider applying a partial-index based optimization
-          // similar to how we prune the DbActiveContractStore. Contract keys are a bit more involved because we cannot
-          // rely purely on the presence of "unassigned" entries (the DbActiveContractStore can depend on "deactivation"s
-          // to narrow down pruning entries).
-          sqlu"""
-          with ordered_changes(domain_id, contract_key_hash, status, ts, request_counter, row_num) as (
-            select domain_id, contract_key_hash, status, ts, request_counter,
-               ROW_NUMBER() OVER (partition by domain_id, contract_key_hash order by ts desc, request_counter desc)
-             from contract_key_journal
-             where domain_id = $domainId and ts <= $beforeAndIncluding
-          ),
-          latest_change(domain_id, contract_key_hash, ts, request_counter) as (
-            select domain_id, contract_key_hash, ts, request_counter
-            from ordered_changes
-            where row_num = 1
-          )
-          delete from contract_key_journal as ckj
-          using latest_change as lc
-          where
-            ckj.domain_id = lc.domain_id and
-            ckj.contract_key_hash = lc.contract_key_hash and
-            (ckj.ts, ckj.request_counter, ckj.status) <= (lc.ts, lc.request_counter, CAST(${ContractKeyJournal.Unassigned} as key_status));
+          val deleteAssignedSql = sqlu"""
+            delete from contract_key_journal ckj1
+            where domain_id = $domainId
+            and ts <=  $beforeAndIncluding
+            and status = CAST(${ContractKeyJournal.Assigned} as key_status)
+            and exists (
+                select 1 from contract_key_journal ckj2
+                where ckj2.domain_id = ckj1.domain_id
+                and ckj2.contract_key_hash = ckj1.contract_key_hash
+                and (ckj2.ts, ckj2.request_counter) > (ckj1.ts, ckj1.request_counter)
+                and ckj2.ts <= $beforeAndIncluding
+            );
           """
+
+          val deleteUnassignedSql = sqlu"""
+            delete from contract_key_journal ckj1
+            where domain_id = $domainId
+            and ts <=  $beforeAndIncluding
+            and status = CAST(${ContractKeyJournal.Unassigned} as key_status)
+            and not exists (
+              select 1 from contract_key_journal ckj2
+              where ckj2.domain_id = ckj1.domain_id
+              and ckj2.contract_key_hash = ckj1.contract_key_hash
+              and (ckj2.ts, ckj2.request_counter) < (ckj1.ts, ckj1.request_counter)
+              and ckj2.status = CAST(${ContractKeyJournal.Assigned} as key_status)
+            );
+          """
+
+          deleteAssignedSql.andThen(deleteUnassignedSql)
+
         case _: DbStorage.Profile.Oracle =>
           sqlu"""
           delete from contract_key_journal

@@ -4,7 +4,7 @@
 package com.daml.error
 
 import com.daml.error.utils.ErrorDetails
-import com.daml.error.utils.ErrorDetails.ErrorInfoDetail
+import com.daml.error.utils.ErrorDetails.{ErrorInfoDetail, RequestInfoDetail}
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.grpc.protobuf.StatusProto
@@ -97,6 +97,31 @@ trait ErrorsAssertions extends Matchers with OptionValues with AppendedClues {
     }
     cp { actual.getCause shouldBe null }
     cp.reportAll()
+  }
+
+  /** Asserts that the error has the expected code and matches the form of the message and details.
+    */
+  def assertError(
+      actual: StatusRuntimeException,
+      expectedStatusCode: Code,
+      expectedMessage: String => String,
+      expectedDetails: String => String => Seq[ErrorDetails.ErrorDetail],
+  ): Unit = {
+    val actualStatus = StatusProto.fromThrowable(actual)
+    val actualDetails = actualStatus.getDetailsList.asScala.toSeq
+    val errorDetails = ErrorDetails.from(actualDetails)
+    val tid = errorDetails.collectFirst({ case RequestInfoDetail(tid) => tid }).value
+    val errorInfoDetail =
+      errorDetails.collectFirst({ case detail: ErrorInfoDetail => detail }).value
+    val submissionId = errorInfoDetail.metadata.get("submissionId").value
+    assertError(
+      actual,
+      expectedStatusCode,
+      expectedMessage(tid),
+      expectedDetails(tid)(submissionId),
+      false,
+    )
+
   }
 
 }

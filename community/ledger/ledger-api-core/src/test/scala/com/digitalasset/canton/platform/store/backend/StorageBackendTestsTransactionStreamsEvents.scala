@@ -81,7 +81,7 @@ private[backend] trait StorageBackendTestsTransactionStreamsEvents
   ): Assertion = {
     val someParty = Ref.Party.assertFromString(signatory)
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(Vector(create), _))
     executeSql(updateLedgerEnd(offset(1), 1L))
 
@@ -101,7 +101,7 @@ private[backend] trait StorageBackendTestsTransactionStreamsEvents
     val transactionTree = executeSql(
       backend.event.transactionPointwiseQueries.fetchTreeTransactionEvents(1L, 1L, Set(someParty))
     )
-    val acs = executeSql(backend.event.activeContractEventBatch(Seq(1L), Set(someParty), 1L))
+    val acs = executeSql(backend.event.activeContractCreateEventBatch(Seq(1L), Set(someParty), 1L))
 
     extractContractMetadataFrom[FlatEvent.Created, FlatEvent](
       in = flatTransactionEvents,

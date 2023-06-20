@@ -18,6 +18,8 @@ import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.sandbox.BridgeConfig
 import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckingLedgerBridge
 import com.digitalasset.canton.ledger.sandbox.domain.Submission
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.primitives.Longs
 
 import java.util.UUID
@@ -62,7 +64,9 @@ object LedgerBridge {
   )(implicit
       loggingContext: LoggingContext,
       servicesExecutionContext: ExecutionContext,
-  ) =
+  ) = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(TraceContext.empty)
+
     for {
       initialLedgerEnd <- ResourceOwner.forFuture(() => indexService.currentLedgerEnd())
       initialLedgerConfiguration <- ResourceOwner.forFuture(() =>
@@ -86,7 +90,7 @@ object LedgerBridge {
         .getOrElse(BridgeConfig.DefaultMaximumDeduplicationDuration),
       stageBufferSize = stageBufferSize,
     )
-
+  }
   private[bridge] def packageUploadSuccess(
       s: Submission.UploadPackages,
       currentTimestamp: Time.Timestamp,
@@ -154,6 +158,7 @@ object LedgerBridge {
       recordTime = currentTimestamp,
       divulgedContracts = Nil,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       contractMetadata = contractMetadata,
     )
   }

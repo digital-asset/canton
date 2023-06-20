@@ -12,7 +12,6 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
-import com.digitalasset.canton.protocol.v2
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.BaseQueryX
 import com.digitalasset.canton.topology.admin.v1
@@ -589,8 +588,9 @@ object TopologyAdminCommandsX {
     final case class Propose[M <: TopologyMappingX: ClassTag](
         mapping: Either[String, M],
         signedBy: Seq[Fingerprint],
-        serial: Option[PositiveInt] = None,
-        mustFullyAuthorize: Boolean = true,
+        change: TopologyChangeOpX,
+        serial: Option[PositiveInt],
+        mustFullyAuthorize: Boolean,
     ) extends BaseWriteCommand[
           AuthorizeRequest,
           AuthorizeResponse,
@@ -601,7 +601,7 @@ object TopologyAdminCommandsX {
         AuthorizeRequest(
           Proposal(
             AuthorizeRequest.Proposal(
-              v2.TopologyChangeOpX.Replace,
+              change.toProto,
               serial.map(_.value).getOrElse(0),
               Some(m.toProtoV2),
             )
@@ -636,9 +636,11 @@ object TopologyAdminCommandsX {
       def apply[M <: TopologyMappingX: ClassTag](
           mapping: M,
           signedBy: Seq[Fingerprint],
-          serial: Option[PositiveInt],
+          serial: Option[PositiveInt] = None,
+          change: TopologyChangeOpX = TopologyChangeOpX.Replace,
+          mustFullyAuthorize: Boolean = true,
       ): Propose[M] =
-        Propose(Right(mapping), signedBy, serial)
+        Propose(Right(mapping), signedBy, change, serial, mustFullyAuthorize)
 
     }
   }

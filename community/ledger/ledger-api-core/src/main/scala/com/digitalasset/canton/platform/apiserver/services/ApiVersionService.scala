@@ -3,26 +3,20 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v1.experimental_features.{
-  AcsActiveAtOffsetFeature,
-  ExperimentalFeatures,
-  ExperimentalOptionalLedgerId,
-  ExperimentalSelfServiceErrorCodes,
-  ExperimentalStaticTime,
-  ExperimentalUserAndPartyLocalMetadataExtensions,
-}
+import com.daml.ledger.api.v1.experimental_features.*
 import com.daml.ledger.api.v1.version_service.VersionServiceGrpc.VersionService
-import com.daml.ledger.api.v1.version_service.{
-  FeaturesDescriptor,
-  GetLedgerApiVersionRequest,
-  GetLedgerApiVersionResponse,
-  UserManagementFeature,
-  VersionServiceGrpc,
-}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.ledger.api.v1.version_service.*
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.apiserver.LedgerFeatures
 import com.digitalasset.canton.platform.localstore.UserManagementConfig
 import io.grpc.ServerServiceDefinition
@@ -36,15 +30,13 @@ import scala.util.control.NonFatal
 private[apiserver] final class ApiVersionService private (
     ledgerFeatures: LedgerFeatures,
     userManagementConfig: UserManagementConfig,
+    telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
-    loggingContext: LoggingContext,
-    executionContext: ExecutionContext,
+    executionContext: ExecutionContext
 ) extends VersionService
-    with GrpcApiService {
-
-  private val logger = ContextualizedLogger.get(this.getClass)
-  private implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-    new DamlContextualizedErrorLogger(logger, loggingContext, None)
+    with GrpcApiService
+    with NamedLogging {
 
   private val versionFile: String = "VERSION"
   private val apiVersion: Try[String] = readVersion(versionFile)
@@ -86,7 +78,10 @@ private[apiserver] final class ApiVersionService private (
 
   override def getLedgerApiVersion(
       request: GetLedgerApiVersionRequest
-  ): Future[GetLedgerApiVersionResponse] =
+  ): Future[GetLedgerApiVersionResponse] = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
+
     Future
       .fromTry(apiVersion)
       .map(apiVersionResponse)
@@ -98,7 +93,7 @@ private[apiserver] final class ApiVersionService private (
             .asGrpcError
         )
       }
-
+  }
   private def apiVersionResponse(version: String) =
     GetLedgerApiVersionResponse(version, Some(featuresDescriptor))
 
@@ -123,9 +118,13 @@ private[apiserver] object ApiVersionService {
   def create(
       ledgerFeatures: LedgerFeatures,
       userManagementConfig: UserManagementConfig,
-  )(implicit loggingContext: LoggingContext, ec: ExecutionContext): ApiVersionService =
+      telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit ec: ExecutionContext): ApiVersionService =
     new ApiVersionService(
       ledgerFeatures,
       userManagementConfig = userManagementConfig,
+      telemetry = telemetry,
+      loggerFactory = loggerFactory,
     )
 }

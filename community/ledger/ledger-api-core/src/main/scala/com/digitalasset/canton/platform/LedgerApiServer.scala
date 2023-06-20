@@ -10,8 +10,6 @@ import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
-import com.daml.logging.LoggingContext
-import com.daml.logging.LoggingContext.newLoggingContextWith
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.DiscardOps
@@ -25,6 +23,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
   TimedWriteService,
 }
 import com.digitalasset.canton.ledger.participant.state.v2.{ReadService, WriteService}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.*
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.platform.apiserver.ratelimiting.RateLimitingInterceptor
@@ -36,6 +35,7 @@ import com.digitalasset.canton.platform.indexer.IndexerServiceOwner
 import com.digitalasset.canton.platform.localstore.*
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
+import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutorService}
@@ -61,86 +61,94 @@ class LedgerApiServer(
     //          in order to ensure that participants cannot be configured to accept explicitly disclosed contracts.
     explicitDisclosureUnsafeEnabled: Boolean = false,
     rateLimitingInterceptor: Option[
-      QueueAwareExecutor with NamedExecutor => RateLimitingInterceptor
+      QueueAwareExecutor & NamedExecutor => RateLimitingInterceptor
     ] = None,
     telemetry: Telemetry,
     tracer: Tracer,
-)(implicit actorSystem: ActorSystem, materializer: Materializer) {
+    val loggerFactory: NamedLoggerFactory,
+    multiDomainEnabled: Boolean, // serving V1 and V2 Ledger API endpoints, and indexing domainIds and reassignments
+)(implicit actorSystem: ActorSystem, materializer: Materializer)
+    extends NamedLogging {
 
-  def owner: ResourceOwner[ApiService] = {
-    newLoggingContextWith("participantId" -> participantId) { implicit loggingContext =>
-      for {
-        (inMemoryState, inMemoryStateUpdaterFlow) <-
-          LedgerApiServer.createInMemoryStateAndUpdater(
-            participantConfig.indexService,
-            participantConfig.apiServer.command.maxCommandsInFlight,
-            metrics,
-            servicesExecutionContext,
-          )
-
-        timedReadService = new TimedReadService(readService, metrics)
-        indexerHealthChecks <-
-          for {
-            indexerHealth <- new IndexerServiceOwner(
-              participantId = participantId,
-              participantDataSourceConfig = participantDataSourceConfig,
-              readService = timedReadService,
-              config = participantConfig.indexer,
-              metrics = metrics,
-              inMemoryState = inMemoryState,
-              inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
-              executionContext = servicesExecutionContext,
-            )
-          } yield new HealthChecks(
-            "read" -> timedReadService,
-            "indexer" -> indexerHealth,
-          )
-
-        readDbSupport <- DbSupport
-          .owner(
-            serverRole = ServerRole.ApiServer,
-            metrics = metrics,
-            dbConfig = participantConfig.dataSourceProperties.createDbConfig(
-              participantDataSourceConfig
-            ),
-          )
-
-        // TODO(i12284): Add test asserting that the indexService retries until IndexDB persistence comes up
-        indexService <- new IndexServiceOwner(
-          config = participantConfig.indexService,
-          dbSupport = readDbSupport,
-          initialLedgerId = domain.LedgerId(ledgerId),
-          metrics = metrics,
-          engine = engine,
-          servicesExecutionContext = servicesExecutionContext,
-          participantId = participantId,
-          inMemoryState = inMemoryState,
-          tracer = tracer,
-        )(loggingContext)
-
-        writeService <- buildWriteService(indexService)
-
-        apiService <- buildApiService(
-          ledgerFeatures,
-          engine,
-          authorityResolver,
-          indexService,
-          inMemoryState.submissionTracker,
+  def owner(implicit traceContext: TraceContext): ResourceOwner[ApiService] = {
+    for {
+      (inMemoryState, inMemoryStateUpdaterFlow) <-
+        LedgerApiServer.createInMemoryStateAndUpdater(
+          participantConfig.indexService,
+          participantConfig.apiServer.command.maxCommandsInFlight,
           metrics,
           servicesExecutionContext,
-          new TimedWriteService(writeService, metrics),
-          indexerHealthChecks,
-          timeServiceBackendO,
-          readDbSupport,
-          ledgerId,
-          participantConfig.apiServer,
-          participantId,
-          explicitDisclosureUnsafeEnabled,
-          jwtVerifierLoader,
-          telemetry = telemetry,
+          loggerFactory,
+          multiDomainEnabled = multiDomainEnabled,
         )
-      } yield apiService
-    }
+
+      timedReadService = new TimedReadService(readService, metrics)
+      indexerHealthChecks <-
+        for {
+          indexerHealth <- new IndexerServiceOwner(
+            participantId = participantId,
+            participantDataSourceConfig = participantDataSourceConfig,
+            readService = timedReadService,
+            config = participantConfig.indexer,
+            metrics = metrics,
+            inMemoryState = inMemoryState,
+            inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
+            executionContext = servicesExecutionContext,
+            loggerFactory = loggerFactory,
+            multiDomainEnabled = multiDomainEnabled,
+          )
+        } yield new HealthChecks(
+          "read" -> timedReadService,
+          "indexer" -> indexerHealth,
+        )
+
+      readDbSupport <- DbSupport
+        .owner(
+          serverRole = ServerRole.ApiServer,
+          metrics = metrics,
+          dbConfig = participantConfig.dataSourceProperties.createDbConfig(
+            participantDataSourceConfig
+          ),
+          loggerFactory = loggerFactory,
+        )
+
+      // TODO(i12284): Add test asserting that the indexService retries until IndexDB persistence comes up
+      indexService <- new IndexServiceOwner(
+        config = participantConfig.indexService,
+        dbSupport = readDbSupport,
+        initialLedgerId = domain.LedgerId(ledgerId),
+        metrics = metrics,
+        engine = engine,
+        servicesExecutionContext = servicesExecutionContext,
+        participantId = participantId,
+        inMemoryState = inMemoryState,
+        tracer = tracer,
+        loggerFactory = loggerFactory,
+      )
+
+      writeService <- buildWriteService(indexService)
+
+      apiService <- buildApiService(
+        ledgerFeatures,
+        engine,
+        authorityResolver,
+        indexService,
+        inMemoryState.submissionTracker,
+        metrics,
+        servicesExecutionContext,
+        new TimedWriteService(writeService, metrics),
+        indexerHealthChecks,
+        timeServiceBackendO,
+        readDbSupport,
+        ledgerId,
+        participantConfig.apiServer,
+        participantId,
+        explicitDisclosureUnsafeEnabled,
+        jwtVerifierLoader,
+        telemetry = telemetry,
+        loggerFactory = loggerFactory,
+      )(actorSystem, traceContext)
+    } yield apiService
   }
 
   private def buildApiService(
@@ -161,9 +169,10 @@ class LedgerApiServer(
       explicitDisclosureUnsafeEnabled: Boolean,
       jwtVerifierLoader: JwtVerifierLoader,
       telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       actorSystem: ActorSystem,
-      loggingContext: LoggingContext,
+      traceContext: TraceContext,
   ): ResourceOwner[ApiService] = {
     val identityProviderStore =
       PersistentIdentityProviderConfigStore.cached(
@@ -171,7 +180,8 @@ class LedgerApiServer(
         metrics = metrics,
         cacheExpiryAfterWrite = apiServerConfig.identityProviderManagement.cacheExpiryAfterWrite,
         maxIdentityProviders = IdentityProviderManagementConfig.MaxIdentityProviders,
-      )(servicesExecutionContext, loggingContext)
+        loggerFactory = loggerFactory,
+      )(servicesExecutionContext, traceContext)
 
     val healthChecks = healthChecksWithIndexer + ("write" -> writeService)
     metrics.daml.health
@@ -200,7 +210,8 @@ class LedgerApiServer(
         maxCacheSize = apiServerConfig.userManagement.maxCacheSize,
         maxRightsPerUser = apiServerConfig.userManagement.maxRightsPerUser,
         timeProvider = TimeProvider.UTC,
-      )(servicesExecutionContext, loggingContext),
+        loggerFactory = loggerFactory,
+      )(servicesExecutionContext, traceContext),
       identityProviderConfigStore = identityProviderStore,
       partyRecordStore = new PersistentPartyRecordStore(
         dbSupport = dbSupport,
@@ -215,6 +226,8 @@ class LedgerApiServer(
       jwtTimestampLeeway = participantConfig.jwtTimestampLeeway,
       explicitDisclosureUnsafeEnabled = explicitDisclosureUnsafeEnabled,
       telemetry = telemetry,
+      loggerFactory = loggerFactory,
+      multiDomainEnabled = multiDomainEnabled,
     )
   }
 }
@@ -225,9 +238,11 @@ object LedgerApiServer {
       maxCommandsInFlight: Int,
       metrics: Metrics,
       executionContext: ExecutionContext,
+      loggerFactory: NamedLoggerFactory,
+      multiDomainEnabled: Boolean,
   )(implicit
-      loggingContext: LoggingContext
-  ): ResourceOwner[(InMemoryState, InMemoryStateUpdater.UpdaterFlow)] =
+      traceContext: TraceContext
+  ): ResourceOwner[(InMemoryState, InMemoryStateUpdater.UpdaterFlow)] = {
     for {
       inMemoryState <- InMemoryState.owner(
         apiStreamShutdownTimeout = indexServiceConfig.apiStreamShutdownTimeout,
@@ -239,6 +254,7 @@ object LedgerApiServer {
         executionContext = executionContext,
         maxCommandsInFlight = maxCommandsInFlight,
         metrics = metrics,
+        loggerFactory = loggerFactory,
       )
 
       inMemoryStateUpdater <- InMemoryStateUpdater.owner(
@@ -247,6 +263,9 @@ object LedgerApiServer {
         preparePackageMetadataTimeOutWarning =
           indexServiceConfig.preparePackageMetadataTimeOutWarning,
         metrics = metrics,
+        loggerFactory = loggerFactory,
+        multiDomainEnabled = multiDomainEnabled,
       )
     } yield inMemoryState -> inMemoryStateUpdater
+  }
 }

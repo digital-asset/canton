@@ -5,18 +5,18 @@ package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.api.util.TimestampConversion
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
 import com.daml.ledger.api.v1.event.Event
-import com.daml.ledger.api.v1.transaction.{
+import com.daml.ledger.api.v1.transaction.TreeEvent
+import com.daml.ledger.api.v2.state_service.{ActiveContract, GetActiveContractsResponse}
+import com.daml.ledger.api.v2.transaction.{
   Transaction as ApiTransaction,
   TransactionTree as ApiTransactionTree,
-  TreeEvent,
 }
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
+import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
 }
 import com.digitalasset.canton.ledger.error.IndexErrors
 import com.digitalasset.canton.platform.ApiOffset
@@ -38,12 +38,13 @@ object EventsTable {
         if (flatEvents.nonEmpty || first.commandId.nonEmpty)
           Some(
             ApiTransaction(
-              transactionId = first.transactionId,
+              updateId = first.transactionId,
               commandId = first.commandId,
               effectiveAt = Some(TimestampConversion.fromLf(first.ledgerEffectiveTime)),
               workflowId = first.workflowId,
               offset = ApiOffset.toApiString(first.eventOffset),
               events = flatEvents,
+              domainId = first.domainId.getOrElse(""),
             )
           )
         else None
@@ -51,15 +52,16 @@ object EventsTable {
 
     def toGetTransactionsResponse(
         events: Vector[Entry[Event]]
-    ): List[(String, GetTransactionsResponse)] =
+    ): List[(String, GetUpdatesResponse)] =
       flatTransaction(events).toList.map(tx =>
-        tx.offset -> GetTransactionsResponse(Seq(tx)).withPrecomputedSerializedSize()
+        tx.offset -> GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(tx))
+          .withPrecomputedSerializedSize()
       )
 
     def toGetFlatTransactionResponse(
         events: Vector[Entry[Event]]
-    ): Option[GetFlatTransactionResponse] =
-      flatTransaction(events).map(tx => GetFlatTransactionResponse(Some(tx)))
+    ): Option[GetTransactionResponse] =
+      flatTransaction(events).map(tx => GetTransactionResponse(Some(tx)))
 
     def toGetActiveContractsResponse(
         events: Vector[Entry[Event]]
@@ -71,7 +73,13 @@ object EventsTable {
           GetActiveContractsResponse(
             offset = "", // only the last response will have an offset.
             workflowId = entry.workflowId,
-            activeContracts = Seq(entry.event.getCreated),
+            contractEntry = GetActiveContractsResponse.ContractEntry.ActiveContract(
+              ActiveContract(
+                createdEvent = Some(entry.event.getCreated),
+                domainId = "", // not used for V1
+                reassignmentCounter = 0L, // not used for V1
+              )
+            ),
           ).withPrecomputedSerializedSize()
         case entry =>
           throw IndexErrors.DatabaseErrors.ResultSetError
@@ -123,27 +131,29 @@ object EventsTable {
       events.headOption.map { first =>
         val (eventsById, rootEventIds) = treeOf(events)
         ApiTransactionTree(
-          transactionId = first.transactionId,
+          updateId = first.transactionId,
           commandId = first.commandId,
           workflowId = first.workflowId,
           effectiveAt = Some(TimestampConversion.fromLf(first.ledgerEffectiveTime)),
           offset = ApiOffset.toApiString(first.eventOffset),
           eventsById = eventsById,
           rootEventIds = rootEventIds,
+          domainId = first.domainId.getOrElse(""),
         )
       }
 
     def toGetTransactionTreesResponse(
         events: Vector[Entry[TreeEvent]]
-    ): List[(String, GetTransactionTreesResponse)] =
+    ): List[(String, GetUpdateTreesResponse)] =
       transactionTree(events).toList.map(tx =>
-        tx.offset -> GetTransactionTreesResponse(Seq(tx)).withPrecomputedSerializedSize()
+        tx.offset -> GetUpdateTreesResponse(GetUpdateTreesResponse.Update.TransactionTree(tx))
+          .withPrecomputedSerializedSize()
       )
 
     def toGetTransactionResponse(
         events: Vector[Entry[TreeEvent]]
-    ): Option[GetTransactionResponse] =
-      transactionTree(events).map(tx => GetTransactionResponse(Some(tx)))
+    ): Option[GetTransactionTreeResponse] =
+      transactionTree(events).map(tx => GetTransactionTreeResponse(Some(tx)))
 
   }
 

@@ -7,14 +7,14 @@ import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.lf.data.Ref.SubmissionId
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.SubmittedTransaction
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 private[sandbox] sealed trait Submission extends Product with Serializable {
   def submissionId: Ref.SubmissionId
-  def loggingContext: LoggingContext
+  def loggingContext: LoggingContextWithTrace
 }
 
 private[sandbox] object Submission {
@@ -24,7 +24,7 @@ private[sandbox] object Submission {
       transaction: SubmittedTransaction,
       estimatedInterpretationCost: Long,
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
-  )(implicit val loggingContext: LoggingContext)
+  )(implicit val loggingContext: LoggingContextWithTrace)
       extends Submission {
     @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     val submissionId: SubmissionId = {
@@ -38,19 +38,19 @@ private[sandbox] object Submission {
       maxRecordTime: Time.Timestamp,
       submissionId: Ref.SubmissionId,
       config: Configuration,
-  )(implicit val loggingContext: LoggingContext)
+  )(implicit val loggingContext: LoggingContextWithTrace)
       extends Submission
   final case class AllocateParty(
       hint: Option[Ref.Party],
       displayName: Option[String],
       submissionId: Ref.SubmissionId,
-  )(implicit val loggingContext: LoggingContext)
+  )(implicit val loggingContext: LoggingContextWithTrace)
       extends Submission
 
   final case class UploadPackages(
       submissionId: Ref.SubmissionId,
       archives: List[Archive],
       sourceDescription: Option[String],
-  )(implicit val loggingContext: LoggingContext)
+  )(implicit val loggingContext: LoggingContextWithTrace)
       extends Submission
 }

@@ -8,13 +8,14 @@ import akka.stream.scaladsl.{Keep, RestartSource, Sink}
 import akka.stream.{KillSwitches, Materializer, RestartSettings, UniqueKillSwitch}
 import akka.{Done, NotUsed}
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscriptionFromIndex.*
 
 import java.util.concurrent.atomic.AtomicReference
@@ -39,14 +40,13 @@ private[apiserver] final class LedgerConfigurationSubscriptionFromIndex(
     scheduler: Scheduler,
     materializer: Materializer,
     servicesExecutionContext: ExecutionContext,
-) {
-
-  private val logger = ContextualizedLogger.get(getClass)
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   def subscription(
       configurationLoadTimeout: Duration
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): ResourceOwner[LedgerConfigurationSubscription with IsReady] =
     new ResourceOwner[LedgerConfigurationSubscription with IsReady] {
       override def acquire()(implicit
@@ -64,7 +64,7 @@ private[apiserver] final class LedgerConfigurationSubscriptionFromIndex(
   private final class Subscription(
       startingConfiguration: Option[(LedgerOffset.Absolute, Configuration)],
       configurationLoadTimeout: Duration,
-  )(implicit loggingContext: LoggingContext)
+  )(implicit loggingContext: LoggingContextWithTrace)
       extends LedgerConfigurationSubscription
       with IsReady {
     private val readyPromise = Promise[Unit]()

@@ -7,6 +7,7 @@ import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.ResourceContext
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.DbType
 import com.digitalasset.canton.platform.store.backend.{
   DataSourceStorageBackend,
@@ -29,6 +30,8 @@ trait IndexerStabilitySpec
     with Eventually {
 
   import IndexerStabilitySpec.*
+
+  private val loggerFactory = SuppressingLogger(getClass)
 
   // To be overriden by the spec implementation
   def jdbcUrl: String
@@ -58,9 +61,11 @@ trait IndexerStabilitySpec
         materializer,
       )
       .use[Unit] { indexers =>
-        val factory = StorageBackendFactory.of(DbType.jdbcType(jdbcUrl))
+        val factory =
+          StorageBackendFactory.of(dbType = DbType.jdbcType(jdbcUrl), loggerFactory = loggerFactory)
         val dataSource = factory.createDataSourceStorageBackend.createDataSource(
-          DataSourceStorageBackend.DataSourceConfig(jdbcUrl)
+          DataSourceStorageBackend.DataSourceConfig(jdbcUrl),
+          loggerFactory,
         )
         val parameterStorageBackend = factory.createParameterStorageBackend
         val integrityStorageBackend = factory.createIntegrityStorageBackend

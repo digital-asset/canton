@@ -27,6 +27,7 @@ import java.util.concurrent.Executor
   * need to actually connect.
   */
 sealed trait SequencerConnection extends PrettyPrinting {
+  def withAlias(alias: SequencerAlias): SequencerConnection
 
   def toProtoV0: v0.SequencerConnection
 
@@ -109,6 +110,8 @@ final case class GrpcSequencerConnection(
 
   override def withCertificates(certificates: ByteString): SequencerConnection =
     copy(customTrustCertificates = Some(certificates))
+
+  override def withAlias(alias: SequencerAlias): SequencerConnection = copy(sequencerAlias = alias)
 }
 
 object GrpcSequencerConnection {

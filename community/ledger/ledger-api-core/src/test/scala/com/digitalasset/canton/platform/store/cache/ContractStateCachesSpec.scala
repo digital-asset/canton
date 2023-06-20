@@ -8,8 +8,8 @@ import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, ValueRecord}
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import org.mockito.MockitoSugar
@@ -23,8 +23,8 @@ class ContractStateCachesSpec
     extends AnyFlatSpec
     with Matchers
     with MockitoSugar
-    with OptionValues {
-  private val loggingContext = LoggingContext.ForTesting
+    with OptionValues
+    with TestEssentials {
   behavior of classOf[ContractStateCaches].getSimpleName
 
   "build" should "set the cache index to the initialization index" in {
@@ -36,7 +36,8 @@ class ContractStateCachesSpec
       1L,
       1L,
       metrics = Metrics.ForTesting,
-    )(scala.concurrent.ExecutionContext.global, loggingContext)
+      loggerFactory,
+    )(scala.concurrent.ExecutionContext.global)
 
     contractStateCaches.keyState.cacheIndex shouldBe cacheInitializationOffset
     contractStateCaches.contractState.cacheIndex shouldBe cacheInitializationOffset
@@ -63,8 +64,8 @@ class ContractStateCachesSpec
     )
 
     contractStateCaches.push(batch)
-    verify(contractStateCache).putBatch(offset(4), expectedContractStateUpdates)(loggingContext)
-    verify(keyStateCache).putBatch(offset(4), expectedKeyStateUpdates)(loggingContext)
+    verify(contractStateCache).putBatch(offset(4), expectedContractStateUpdates)
+    verify(keyStateCache).putBatch(offset(4), expectedKeyStateUpdates)
   }
 
   "push" should "not update the key state cache if no key updates" in new TestScope {
@@ -74,7 +75,7 @@ class ContractStateCachesSpec
     val expectedContractStateUpdates = Map(create1.contractId -> contractActive(create1))
 
     contractStateCaches.push(batch)
-    verify(contractStateCache).putBatch(offset(2), expectedContractStateUpdates)(loggingContext)
+    verify(contractStateCache).putBatch(offset(2), expectedContractStateUpdates)
     verifyZeroInteractions(keyStateCache)
   }
 
@@ -103,7 +104,8 @@ class ContractStateCachesSpec
     val contractStateCaches = new ContractStateCaches(
       keyStateCache,
       contractStateCache,
-    )(loggingContext)
+      loggerFactory,
+    )
 
     def createEvent(
         offset: Offset,

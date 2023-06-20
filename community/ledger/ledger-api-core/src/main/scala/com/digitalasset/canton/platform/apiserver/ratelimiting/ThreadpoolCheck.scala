@@ -3,27 +3,30 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.ThreadpoolOverloaded
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.{
   LimitResultCheck,
   OverLimit,
   UnderLimit,
 }
+import com.digitalasset.canton.tracing.TraceContext
 
 object ThreadpoolCheck {
-
-  private implicit val logger: ContextualizedErrorLogger =
-    DamlContextualizedErrorLogger.forClass(getClass)
 
   def apply(
       name: String,
       queue: QueueAwareExecutor with NamedExecutor,
       limit: Int,
+      loggerFactory: NamedLoggerFactory,
   ): LimitResultCheck =
     (fullMethodName, _) => {
+      implicit val errorLogger = ErrorLoggingContext(
+        loggerFactory.getTracedLogger(getClass),
+        loggerFactory.properties,
+        TraceContext.empty,
+      )
       val queued = queue.queueSize
       if (queued > limit) {
         OverLimit(

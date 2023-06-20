@@ -12,6 +12,7 @@
 //
 
 syntax = "proto3";
+
 package com.daml.ledger.configuration;
 
 import "google/protobuf/duration.proto";

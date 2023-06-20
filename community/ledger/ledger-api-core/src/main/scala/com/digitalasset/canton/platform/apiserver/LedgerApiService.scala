@@ -4,10 +4,11 @@
 package com.digitalasset.canton.platform.apiserver
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.daml.ports.Port
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerInterceptor
 
 import java.util.concurrent.Executor
@@ -22,12 +23,13 @@ final class LedgerApiService(
     interceptors: List[ServerInterceptor] = List.empty,
     servicesExecutor: Executor,
     metrics: Metrics,
-)(implicit loggingContext: LoggingContext)
-    extends ResourceOwner[ApiService] {
+    val loggerFactory: NamedLoggerFactory,
+) extends ResourceOwner[ApiService]
+    with NamedLogging {
 
-  private val logger = ContextualizedLogger.get(this.getClass)
+  override def acquire()(implicit context: ResourceContext): Resource[ApiService] = {
+    implicit val traceContext = TraceContext.empty
 
-  override def acquire()(implicit context: ResourceContext): Resource[ApiService] =
     (for {
       apiServices <- apiServicesOwner.acquire()
       _ = tlsConfiguration.map(_.setJvmTlsProperties())
@@ -59,4 +61,5 @@ final class LedgerApiService(
         Resource.failed(ex)
       case Success(s) => Resource.successful(s)
     }
+  }
 }

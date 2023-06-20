@@ -14,7 +14,6 @@ import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.{ContractId, ContractInstance, ValueText, VersionedContractInstance}
 import com.daml.lf.value.Value as LfValue
-import com.daml.logging.LoggingContext
 import com.daml.testing.utils.{TestModels, TestResourceUtils}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.offset.Offset
@@ -23,7 +22,6 @@ import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoSuite.*
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
-import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.{AsyncTestSuite, OptionValues}
 
 import java.time.Duration
@@ -37,9 +35,8 @@ import scala.util.chaining.*
 private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionValues {
   this: AsyncTestSuite =>
 
-  import TraceContext.Implicits.Empty.*
   protected implicit final val loggingContext: LoggingContextWithTrace =
-    LoggingContextWithTrace(TraceContext.empty)(LoggingContext.ForTesting)
+    LoggingContextWithTrace.ForTesting
 
   val previousOffset: AtomicReference[Option[Offset]] =
     new AtomicReference[Option[Offset]](Option.empty)
@@ -188,6 +185,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         transaction = tx.transaction,
         divulgedContracts = divulgedContracts,
         blindingInfo = blindingInfo,
+        hostedWitnesses = Nil,
         recordTime = tx.recordedAt,
       )
     } yield offset -> tx
@@ -886,7 +884,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
   ): Future[Seq[(String, Int)]] =
     ledgerDao.completions
       .getCommandCompletions(startExclusive, endInclusive, applicationId, parties)
-      .map(_._2.completions.head)
+      .map(_._2.completion.toList.head)
       .map(c => c.commandId -> c.status.value.code)
       .runWith(Sink.seq)
 

@@ -7,21 +7,21 @@ import com.daml.ledger.api.v1.event_query_service.{
   GetEventsByContractIdResponse,
   GetEventsByContractKeyResponse,
 }
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.messages.event.{
   GetEventsByContractIdRequest,
   GetEventsByContractKeyRequest,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
 trait EventQueryService {
   def getEventsByContractId(
       req: GetEventsByContractIdRequest
-  )(implicit loggingContext: LoggingContext): Future[GetEventsByContractIdResponse]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetEventsByContractIdResponse]
 
   def getEventsByContractKey(
       req: GetEventsByContractKeyRequest
-  )(implicit loggingContext: LoggingContext): Future[GetEventsByContractKeyResponse]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetEventsByContractKeyResponse]
 
 }

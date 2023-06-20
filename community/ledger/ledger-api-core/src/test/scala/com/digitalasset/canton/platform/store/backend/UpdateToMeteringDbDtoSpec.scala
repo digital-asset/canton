@@ -73,6 +73,7 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
       recordTime = someRecordTime,
       divulgedContracts = List.empty,
       blindingInfo = None,
+      hostedWitnesses = Nil,
       Map.empty,
     )
 

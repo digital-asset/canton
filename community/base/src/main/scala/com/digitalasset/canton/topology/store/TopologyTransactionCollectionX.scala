@@ -88,6 +88,22 @@ final case class StoredTopologyTransactionsX[+Op <: TopologyChangeOpX, +M <: Top
   def lastChangeTimestamp: Option[CantonTimestamp] = result
     .map(_.sequenced.value)
     .maxOption
+
+  def asSnapshotAtMaxEffectiveTime: StoredTopologyTransactionsX[Op, M] = {
+    result
+      .map(_.validFrom.value)
+      .maxOption
+      .map { maxEffective =>
+        // all transactions with a validUntil > the maxEffective should set validUntil to None, to reflect
+        // the state of the transactions as of maxEffective
+        StoredTopologyTransactionsX(result.map { storedTx =>
+          if (storedTx.validUntil.exists(_.value > maxEffective)) {
+            storedTx.copy(validUntil = None)
+          } else storedTx
+        })
+      }
+      .getOrElse(this) // this case is triggered by `result` being empty
+  }
 }
 
 object StoredTopologyTransactionsX

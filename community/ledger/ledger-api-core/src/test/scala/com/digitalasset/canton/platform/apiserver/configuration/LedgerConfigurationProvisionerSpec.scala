@@ -11,15 +11,15 @@ import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.SubmissionId
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
-import com.daml.tracing.{NoOpTelemetry, TelemetryContext}
+import com.daml.tracing.NoOpTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.configuration.InitialLedgerConfiguration
-import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
+import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.concurrent.Eventually
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Duration, Instant}
@@ -28,14 +28,12 @@ import scala.concurrent.duration.DurationInt
 
 final class LedgerConfigurationProvisionerSpec
     extends AsyncWordSpec
-    with Matchers
     with Eventually
     with AkkaBeforeAndAfterAll
-    with MockitoSugar
-    with ArgumentMatchersSugar {
+    with BaseTest {
 
   private implicit val resourceContext: ResourceContext = ResourceContext(executionContext)
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   override implicit val patienceConfig: PatienceConfig =
     super.patienceConfig.copy(timeout = 1.second)
@@ -74,13 +72,14 @@ final class LedgerConfigurationProvisionerSpec
         submissionIdGenerator = submissionIdGenerator,
         scheduler = scheduler,
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       ).submit(initialLedgerConfiguration)
         .use { _ =>
           verify(writeService, never).submitConfiguration(
             any[Timestamp],
             any[Ref.SubmissionId],
             any[Configuration],
-          )(any[LoggingContext], any[TelemetryContext])
+          )(any[TraceContext])
 
           scheduler.timePasses(100.millis)
           eventually {
@@ -88,7 +87,7 @@ final class LedgerConfigurationProvisionerSpec
               eqTo(Timestamp.assertFromInstant(timeProvider.getCurrentTime.plusSeconds(60))),
               eqTo(submissionId),
               eqTo(configurationToSubmit),
-            )(any[LoggingContext], any[TelemetryContext])
+            )(any[TraceContext])
           }
           succeed
         }
@@ -119,6 +118,7 @@ final class LedgerConfigurationProvisionerSpec
         submissionIdGenerator = SubmissionIdGenerator.Random,
         scheduler = scheduler,
         telemetry = NoOpTelemetry,
+        loggerFactory = loggerFactory,
       ).submit(initialLedgerConfiguration)
         .use { _ =>
           scheduler.timePasses(1.second)
@@ -126,7 +126,7 @@ final class LedgerConfigurationProvisionerSpec
             any[Timestamp],
             any[Ref.SubmissionId],
             any[Configuration],
-          )(any[LoggingContext], any[TelemetryContext])
+          )(any[TraceContext])
           succeed
         }
     }
@@ -158,6 +158,7 @@ final class LedgerConfigurationProvisionerSpec
       submissionIdGenerator = SubmissionIdGenerator.Random,
       scheduler = scheduler,
       telemetry = NoOpTelemetry,
+      loggerFactory = loggerFactory,
     ).submit(initialLedgerConfiguration)
       .use { _ =>
         scheduler.scheduleOnce(
@@ -173,7 +174,7 @@ final class LedgerConfigurationProvisionerSpec
           any[Timestamp],
           any[Ref.SubmissionId],
           any[Configuration],
-        )(any[LoggingContext], any[TelemetryContext])
+        )(any[TraceContext])
         succeed
       }
   }
@@ -201,6 +202,7 @@ final class LedgerConfigurationProvisionerSpec
       submissionIdGenerator = SubmissionIdGenerator.Random,
       scheduler = scheduler,
       telemetry = NoOpTelemetry,
+      loggerFactory = loggerFactory,
     ).submit(initialLedgerConfiguration).acquire()
 
     resource.asFuture
@@ -211,7 +213,7 @@ final class LedgerConfigurationProvisionerSpec
           any[Timestamp],
           any[Ref.SubmissionId],
           any[Configuration],
-        )(any[LoggingContext], any[TelemetryContext])
+        )(any[TraceContext])
         succeed
       }
   }

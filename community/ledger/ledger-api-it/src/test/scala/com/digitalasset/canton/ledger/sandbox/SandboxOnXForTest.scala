@@ -37,7 +37,6 @@ object SandboxOnXForTest {
     allowedLanguageVersions = LanguageVersion.StableVersions,
     profileDir = None,
     stackTraceMode = true,
-    forbidV0ContractId = true,
   )
   val DevEngineConfig: _EngineConfig = EngineConfig.copy(
     allowedLanguageVersions = LanguageVersion.DevVersions

@@ -356,8 +356,8 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
     LocalInstanceReferenceCommon,
   ] = {
     NodeReferences(
-      mergeLocalInstances(participants.local, domains.local),
-      mergeRemoteInstances(participants.remote, domains.remote),
+      mergeLocalInstances(participants.local, participantsX.local, domains.local),
+      mergeRemoteInstances(participants.remote, participantsX.remote, domains.remote),
     )
   }
 

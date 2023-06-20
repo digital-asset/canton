@@ -4,14 +4,15 @@
 package com.digitalasset.canton.platform.localstore
 
 import com.daml.ledger.resources.ResourceContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.daml.resources.Resource
-import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressingLogger}
 import com.digitalasset.canton.platform.configuration.ServerRole
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
 import com.digitalasset.canton.platform.store.{DbSupport, FlywayMigrations}
+import com.digitalasset.canton.{BaseTest, DiscardOps}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Suite}
 
 import java.util.concurrent.Executors
@@ -26,13 +27,13 @@ import scala.concurrent.{Await, ExecutionContext, Future}
   * - Before each test case resets the contents of the database.
   * - Ensures that at most one test case runs at a time.
   */
-trait PersistentStoreSpecBase extends BeforeAndAfterEach with BeforeAndAfterAll {
-  this: Suite with StorageBackendProvider =>
+trait PersistentStoreSpecBase extends BaseTest with BeforeAndAfterEach with BeforeAndAfterAll {
+  this: Suite & StorageBackendProvider =>
 
-  implicit protected val loggingContext: LoggingContext = LoggingContext.ForTesting
+  implicit protected val loggingContext: LoggingContextWithTrace =
+    LoggingContextWithTrace(traceContext)(LoggingContext.ForTesting)
 
-  protected val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
-
+  override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
   private val runningTests = new AtomicInteger(0)
   private val thisSimpleName = getClass.getSimpleName
 
@@ -88,12 +89,13 @@ trait PersistentStoreSpecBase extends BeforeAndAfterEach with BeforeAndAfterAll 
         ),
         serverRole = ServerRole.Testing(getClass),
         metrics = Metrics.ForTesting,
+        loggerFactory = loggerFactory,
       )
       .acquire()
     val initializeDbAndGetDbSupportFuture: Future[DbSupport] = for {
       dbSupport <- dbSupportResource.asFuture
       _ = logger.warn(s"$thisSimpleName About to do Flyway migrations")
-      _ <- new FlywayMigrations(jdbcUrl).migrate()
+      _ <- new FlywayMigrations(jdbcUrl, loggerFactory = loggerFactory).migrate()
       _ = logger.warn(s"$thisSimpleName Completed Flyway migrations")
     } yield dbSupport
     dbSupport = Await.result(initializeDbAndGetDbSupportFuture, 2.minutes)

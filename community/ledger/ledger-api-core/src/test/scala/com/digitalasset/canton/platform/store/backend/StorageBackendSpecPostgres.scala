@@ -17,7 +17,7 @@ final class StorageBackendSpecPostgres
   behavior of "StorageBackend (Postgres)"
 
   it should "find the Postgres version" in {
-    val version = executeSql(PostgresDataSourceStorageBackend().getPostgresVersion)
+    val version = executeSql(PostgresDataSourceStorageBackend(loggerFactory).getPostgresVersion)
 
     inside(version) { case Some(versionNumbers) =>
       // Minimum Postgres version used in tests
@@ -27,7 +27,7 @@ final class StorageBackendSpecPostgres
   }
 
   it should "correctly parse a Postgres version" in {
-    val backend = PostgresDataSourceStorageBackend()
+    val backend = PostgresDataSourceStorageBackend(loggerFactory)
     backend.parsePostgresVersion("1.2") shouldBe Some((1, 2))
     backend.parsePostgresVersion("1.2.3") shouldBe Some((1, 2))
     backend.parsePostgresVersion("1.2.3-alpha.4.5") shouldBe Some((1, 2))
@@ -35,12 +35,15 @@ final class StorageBackendSpecPostgres
   }
 
   it should "fail the compatibility check for Postgres versions lower than minimum" in {
-    val version = executeSql(PostgresDataSourceStorageBackend().getPostgresVersion)
+    val version = executeSql(PostgresDataSourceStorageBackend(loggerFactory).getPostgresVersion)
     val currentlyUsedMajorVersion = inside(version) { case Some((majorVersion, _)) =>
       majorVersion
     }
     val backend =
-      new PostgresDataSourceStorageBackend(minMajorVersionSupported = currentlyUsedMajorVersion + 1)
+      new PostgresDataSourceStorageBackend(
+        minMajorVersionSupported = currentlyUsedMajorVersion + 1,
+        loggerFactory = loggerFactory,
+      )
     an[PostgresDataSourceStorageBackend.UnsupportedPostgresVersion] should be thrownBy executeSql(
       backend.checkCompatibility
     )

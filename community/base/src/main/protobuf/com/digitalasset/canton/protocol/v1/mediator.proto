@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 syntax = "proto3";
+
 package com.digitalasset.canton.protocol.v1;
 
 import "com/digitalasset/canton/protocol/v0/common.proto";

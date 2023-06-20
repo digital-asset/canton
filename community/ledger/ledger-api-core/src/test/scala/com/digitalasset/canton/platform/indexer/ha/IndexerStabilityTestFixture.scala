@@ -6,12 +6,11 @@ package com.digitalasset.canton.platform.indexer.ha
 import akka.stream.Materializer
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.LoggingContext.{newLoggingContext, withEnrichedLoggingContext}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
+import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.configuration.{CommandConfiguration, IndexServiceConfig}
 import com.digitalasset.canton.platform.indexer.{
@@ -20,6 +19,8 @@ import com.digitalasset.canton.platform.indexer.{
   IndexerStartupMode,
 }
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
@@ -41,7 +42,8 @@ final case class Indexers(indexers: List[ReadServiceAndIndexer]) {
 
 object IndexerStabilityTestFixture {
 
-  private val logger = ContextualizedLogger.get(this.getClass)
+  private val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
+  private val logger: TracedLogger = TracedLogger(loggerFactory.getLogger(getClass))
 
   def owner(
       updatesPerSecond: Int,
@@ -78,15 +80,12 @@ object IndexerStabilityTestFixture {
         i: Int,
         participantDataSourceConfig: ParticipantDataSourceConfig,
         executionContext: ExecutionContext,
-    )(implicit loggingContext: LoggingContext): Resource[ReadServiceAndIndexer] =
+    )(implicit traceContext: TraceContext): Resource[ReadServiceAndIndexer] = {
+      val loggerFactoryForIteration = loggerFactory.appendUnnamedKey("name", s"ReadService$i")
       for {
         // Create a read service
         readService <- ResourceOwner
-          .forCloseable(() =>
-            withEnrichedLoggingContext("name" -> s"ReadService$i") { readServiceLoggingContext =>
-              EndlessReadService(updatesPerSecond, s"$i")(readServiceLoggingContext)
-            }
-          )
+          .forCloseable(() => EndlessReadService(updatesPerSecond, s"$i", loggerFactory))
           .acquire()
         // create a new MetricRegistry for each indexer, so they don't step on each other toes:
         // Gauges can only be registered once. A subsequent attempt results in an exception for the
@@ -106,6 +105,8 @@ object IndexerStabilityTestFixture {
               CommandConfiguration.DefaultMaxCommandsInFlight,
               metrics,
               executionContext,
+              loggerFactory,
+              multiDomainEnabled = false,
             )
             .acquire()
 
@@ -119,10 +120,13 @@ object IndexerStabilityTestFixture {
           inMemoryState = inMemoryState,
           inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
           executionContext = executionContext,
+          loggerFactory = loggerFactoryForIteration,
+          multiDomainEnabled = false,
         ).acquire()
       } yield ReadServiceAndIndexer(readService, indexing)
+    }
 
-    newLoggingContext { implicit loggingContext =>
+    withNewTraceContext { implicit traceContext =>
       val participantDataSourceConfig = ParticipantDataSourceConfig(jdbcUrl)
       for {
         // This execution context is not used for indexing in the append-only schema, it can be shared

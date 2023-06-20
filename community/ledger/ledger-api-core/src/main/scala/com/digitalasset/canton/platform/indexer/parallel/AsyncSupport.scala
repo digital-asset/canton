@@ -5,9 +5,10 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricName
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -30,7 +31,9 @@ object AsyncSupport {
       size: Int,
       namePrefix: String,
       withMetric: (MetricName, ExecutorServiceMetrics),
-  )(implicit loggingContext: LoggingContext): ResourceOwner[Executor] =
+      loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext): ResourceOwner[Executor] = {
+    val logger = TracedLogger(loggerFactory.getLogger(getClass))
     ResourceOwner
       .forExecutorService { () =>
         val (executorName, executorServiceMetrics) = withMetric
@@ -42,10 +45,10 @@ object AsyncSupport {
             .build,
           executorServiceMetrics,
           throwable =>
-            ContextualizedLogger
-              .get(this.getClass)
+            logger
               .error(s"ExecutionContext $namePrefix has failed with an exception", throwable),
         )
       }
       .map(Executor.forExecutionContext)
+  }
 }

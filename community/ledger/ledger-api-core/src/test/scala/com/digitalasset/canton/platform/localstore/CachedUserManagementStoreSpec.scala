@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.ledger.api.domain.{
@@ -14,6 +13,7 @@ import com.digitalasset.canton.ledger.api.domain.{
   User,
   UserRight,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.{
   UserInfo,
   UserNotFound,
@@ -131,13 +131,13 @@ class CachedUserManagementStoreSpec
       order.verify(delegate, times(1)).getUserInfo(user.id, idpId)
       order
         .verify(delegate, times(1))
-        .grantRights(eqTo(user.id), any[Set[UserRight]], eqTo(idpId))(any[LoggingContext])
+        .grantRights(eqTo(user.id), any[Set[UserRight]], eqTo(idpId))(any[LoggingContextWithTrace])
       order.verify(delegate, times(1)).getUserInfo(userInfo.user.id, idpId)
       order
         .verify(delegate, times(1))
-        .revokeRights(eqTo(user.id), any[Set[UserRight]], eqTo(idpId))(any[LoggingContext])
+        .revokeRights(eqTo(user.id), any[Set[UserRight]], eqTo(idpId))(any[LoggingContextWithTrace])
       order.verify(delegate, times(1)).getUserInfo(userInfo.user.id, idpId)
-      order.verify(delegate, times(1)).updateUser(any[UserUpdate])(any[LoggingContext])
+      order.verify(delegate, times(1)).updateUser(any[UserUpdate])(any[LoggingContextWithTrace])
       order.verify(delegate, times(1)).getUserInfo(userInfo.user.id, idpId)
       order.verify(delegate, times(1)).deleteUser(userInfo.user.id, idpId)
       order.verify(delegate, times(1)).getUserInfo(userInfo.user.id, idpId)
@@ -194,10 +194,10 @@ class CachedUserManagementStoreSpec
       val order = inOrder(delegate)
       order
         .verify(delegate, times(1))
-        .createUser(any[User], any[Set[UserRight]])(any[LoggingContext])
+        .createUser(any[User], any[Set[UserRight]])(any[LoggingContextWithTrace])
       order
         .verify(delegate, times(2))
-        .getUserInfo(any[Ref.UserId], eqTo(idpId))(any[LoggingContext])
+        .getUserInfo(any[Ref.UserId], eqTo(idpId))(any[LoggingContextWithTrace])
       order.verifyNoMoreInteractions()
       create1 shouldBe Right(createdUser1)
       get1 shouldBe Right(createdUserInfo)

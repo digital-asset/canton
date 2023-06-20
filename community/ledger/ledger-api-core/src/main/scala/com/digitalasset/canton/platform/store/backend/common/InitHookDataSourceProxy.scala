@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.platform.store.backend.common
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.io.PrintWriter
 import java.sql.Connection
@@ -11,25 +12,26 @@ import java.util.logging.Logger
 import javax.sql.DataSource
 
 private[backend] object InitHookDataSourceProxy {
-  val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
 
   def apply(
       delegate: DataSource,
       initHooks: List[Connection => Unit],
-  )(implicit loggingContext: LoggingContext): DataSource =
+      loggerFactory: NamedLoggerFactory,
+  ): DataSource =
     if (initHooks.isEmpty) delegate
-    else InitHookDataSourceProxy(delegate, c => initHooks.foreach(_(c)))
+    else InitHookDataSourceProxy(delegate, c => initHooks.foreach(_(c)), loggerFactory)
 }
-
-import com.digitalasset.canton.platform.store.backend.common.InitHookDataSourceProxy.*
 
 private[backend] final case class InitHookDataSourceProxy(
     delegate: DataSource,
     initHook: Connection => Unit,
-)(implicit loggingContext: LoggingContext)
-    extends DataSource {
+    loggerFactory: NamedLoggerFactory,
+) extends DataSource
+    with NamedLogging {
 
   private def getConnection(connectionBody: => Connection): Connection = {
+    implicit val traceContext: TraceContext = TraceContext.empty
+
     logger.debug(s"Creating new connection")
     val connection = connectionBody
     try {

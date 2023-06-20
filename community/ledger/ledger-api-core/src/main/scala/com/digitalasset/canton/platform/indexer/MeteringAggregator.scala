@@ -5,10 +5,11 @@ package com.digitalasset.canton.platform.indexer
 
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ParticipantMetering
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.indexer.MeteringAggregator.{toOffsetDateTime, toTimestamp}
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend.LedgerMeteringEnd
 import com.digitalasset.canton.platform.store.backend.{
@@ -17,6 +18,7 @@ import com.digitalasset.canton.platform.store.backend.{
   ParameterStorageBackend,
 }
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
 import java.time.temporal.ChronoUnit
@@ -28,8 +30,6 @@ import scala.util.{Failure, Success, Try}
 
 object MeteringAggregator {
 
-  private val logger = ContextualizedLogger.get(getClass)
-
   class Owner(
       meteringStore: MeteringStorageWriteBackend,
       parameterStore: ParameterStorageBackend,
@@ -37,17 +37,19 @@ object MeteringAggregator {
       metrics: Metrics,
       period: FiniteDuration = 6.minutes,
       maxTaskDuration: FiniteDuration = 6.hours,
+      loggerFactory: NamedLoggerFactory,
   ) {
 
     private[platform] def apply(
         dbDispatcher: DbDispatcher
-    )(implicit loggingContext: LoggingContext): ResourceOwner[Unit] = {
+    )(implicit traceContext: TraceContext): ResourceOwner[Unit] = {
       val aggregator = new MeteringAggregator(
         meteringStore,
         parameterStore,
         meteringParameterStore,
         metrics,
         dbDispatcher,
+        loggerFactory = loggerFactory,
       )
       for {
         _ <- ResourceOwner.forFuture(() => aggregator.initialize())
@@ -60,7 +62,9 @@ object MeteringAggregator {
                 } match {
                   case Success(_) => ()
                   case Failure(e) =>
-                    logger.error(s"Metering not aggregated after $maxTaskDuration", e)
+                    aggregator.logger.error(s"Metering not aggregated after $maxTaskDuration", e)(
+                      TraceContext.empty
+                    )
                 }
               }
             },
@@ -86,19 +90,21 @@ class MeteringAggregator(
     metrics: Metrics,
     dbDispatcher: DbDispatcher,
     clock: () => Timestamp = () => Timestamp.now(),
-)(implicit loggingContext: LoggingContext) {
-
+    val loggerFactory: NamedLoggerFactory,
+)(implicit traceContext: TraceContext)
+    extends NamedLogging {
+  implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace(traceContext)(
+    LoggingContext.empty
+  )
   // TODO(#13019) Replace parasitic with DirectExecutionContext
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private val parasitic: ExecutionContext = ExecutionContext.parasitic
-
-  private val logger = ContextualizedLogger.get(getClass)
 
   private[platform] def initialize(): Future[Unit] = {
     val initTimestamp = toOffsetDateTime(clock()).truncatedTo(ChronoUnit.HOURS).minusHours(1)
     val initLedgerMeteringEnd = LedgerMeteringEnd(Offset.beforeBegin, toTimestamp(initTimestamp))
     dbDispatcher.executeSql(metrics.daml.index.db.initializeMeteringAggregator) {
-      meteringParameterStore.initializeLedgerMeteringEnd(initLedgerMeteringEnd)
+      meteringParameterStore.initializeLedgerMeteringEnd(initLedgerMeteringEnd, loggerFactory)
     }
   }
 

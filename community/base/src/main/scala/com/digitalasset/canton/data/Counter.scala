@@ -15,6 +15,9 @@ final case class Counter[Discr](v: Long) extends Ordered[Counter[Discr]] with Pr
 
   def +(i: Int): Counter[Discr] = Counter(v + i)
 
+  def increment: Either[String, Counter[Discr]] =
+    Either.cond(this.isNotMaxValue, this + 1, "Counter Overflow")
+
   def -(i: Int): Counter[Discr] = Counter(v - i)
 
   def +(other: Counter[Discr]): Counter[Discr] = Counter(v + other.v)
@@ -38,6 +41,7 @@ trait CounterCompanion[T] {
   /** The request counter assigned to the first request in the lifetime of a participant */
   val Genesis: Counter[T] = Counter[T](0)
   val MaxValue: Counter[T] = Counter[T](Long.MaxValue)
+  val MinValue: Counter[T] = Counter[T](Long.MinValue)
 
   def apply(i: Long): Counter[T] = Counter[T](i)
 
@@ -53,7 +57,7 @@ object Counter {
   implicit def getResult[Discr]: GetResult[Counter[Discr]] =
     GetResult(r => Counter[Discr](r.nextLong()))
   implicit def getResultO[Discr]: GetResult[Option[Counter[Discr]]] =
-    GetResult(r => r.nextLongOption().map(Counter[Discr](_)))
+    GetResult(r => r.nextLongOption().map(Counter[Discr]))
 
   implicit def setParameter[Discr]: SetParameter[Counter[Discr]] = { (value, pp) => pp >> value.v }
   implicit def setParameterO[Discr]: SetParameter[Option[Counter[Discr]]] = { (value, pp) =>

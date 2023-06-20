@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.api.services
 
-import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 
@@ -13,7 +12,6 @@ trait CommandSubmissionService {
   def submit(
       request: SubmitRequest
   )(implicit
-      telemetryContext: TelemetryContext,
-      loggingContext: LoggingContextWithTrace,
+      loggingContext: LoggingContextWithTrace
   ): Future[Unit]
 }

@@ -26,6 +26,7 @@ import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.{
   ParticipantNode,
   ParticipantNodeBootstrapX,
+  ParticipantNodeCommon,
   ParticipantNodeX,
 }
 import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
@@ -587,7 +588,7 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
 
 }
 
-trait LocalParticipantReferenceCommon
+sealed trait LocalParticipantReferenceCommon
     extends LedgerApiCommandRunner
     with ParticipantReferenceCommon
     with LocalInstanceReferenceCommon {
@@ -603,6 +604,10 @@ trait LocalParticipantReferenceCommon
       consoleEnvironment.grpcAdminCommandRunner
         .runCommand(name, command, config.clientLedgerApi, adminToken)
     )
+
+  @Help.Summary("Commands to repair the local participant contract state", FeatureFlag.Repair)
+  @Help.Group("Repair")
+  def repair: LocalParticipantRepairAdministration
 }
 
 class LocalParticipantReference(
@@ -638,7 +643,7 @@ class LocalParticipantReference(
 
   private lazy val repair_ =
     new LocalParticipantRepairAdministration(consoleEnvironment, this, loggerFactory) {
-      override protected def access[T](handler: ParticipantNode => T): T =
+      override protected def access[T](handler: ParticipantNodeCommon => T): T =
         LocalParticipantReference.this.access(handler)
     }
   @Help.Summary("Commands to repair the local participant contract state", FeatureFlag.Repair)
@@ -778,4 +783,13 @@ class LocalParticipantReferenceX(
   @Help.Group("Participant Pruning")
   def pruning: ParticipantPruningAdministrationGroup = pruning_
 
+  private lazy val repair_ =
+    new LocalParticipantRepairAdministration(consoleEnvironment, this, loggerFactory) {
+      override protected def access[T](handler: ParticipantNodeCommon => T): T =
+        LocalParticipantReferenceX.this.access(handler)
+    }
+
+  @Help.Summary("Commands to repair the local participant contract state", FeatureFlag.Repair)
+  @Help.Group("Repair")
+  def repair: LocalParticipantRepairAdministration = repair_
 }

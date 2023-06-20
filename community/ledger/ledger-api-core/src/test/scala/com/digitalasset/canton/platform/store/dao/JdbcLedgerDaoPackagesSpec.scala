@@ -10,7 +10,6 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.PackageDetails
 import com.digitalasset.canton.platform.store.dao.*
 import com.digitalasset.canton.platform.store.entries.PackageLedgerEntry
-import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -19,7 +18,6 @@ import java.util.UUID
 private[dao] trait JdbcLedgerDaoPackagesSpec {
   this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
 
-  import TraceContext.Implicits.Empty.*
   behavior of "JdbcLedgerDao (packages)"
 
   it should "upload packages in an idempotent fashion, maintaining existing descriptions" in {

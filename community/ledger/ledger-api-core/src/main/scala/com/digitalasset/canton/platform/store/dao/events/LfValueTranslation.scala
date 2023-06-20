@@ -16,9 +16,10 @@ import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.VersionedValue
 import com.daml.lf.engine as LfEngine
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.{ErrorCause, RejectionGenerators}
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
@@ -58,10 +59,7 @@ trait LfValueSerialization {
   ): Array[Byte]
 
   /** Returns (contract argument, contract key) */
-  def serialize(
-      eventId: EventId,
-      create: Create,
-  ): (Array[Byte], Option[Array[Byte]])
+  def serialize(create: Create): (Array[Byte], Option[Array[Byte]])
 
   /** Returns (choice argument, exercise result, contract key) */
   def serialize(
@@ -74,7 +72,7 @@ trait LfValueSerialization {
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[CreatedEvent]
 
   def deserialize(
@@ -82,7 +80,7 @@ trait LfValueSerialization {
       verbose: Boolean,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[ExercisedEvent]
 }
 
@@ -94,7 +92,7 @@ final class LfValueTranslation(
     engineO: Option[Engine],
     loadPackage: (
         LfPackageId,
-        LoggingContext,
+        LoggingContextWithTrace,
     ) => Future[Option[com.daml.daml_lf_dev.DamlLf.Archive]],
 ) extends LfValueSerialization {
 
@@ -156,7 +154,7 @@ final class LfValueTranslation(
   ): Array[Byte] =
     serializeCreateArgOrThrow(contractId, contractArgument)
 
-  override def serialize(eventId: EventId, create: Create): (Array[Byte], Option[Array[Byte]]) =
+  override def serialize(create: Create): (Array[Byte], Option[Array[Byte]]) =
     serializeCreateArgOrThrow(create) -> serializeNullableKeyOrThrow(create)
 
   override def serialize(
@@ -173,7 +171,7 @@ final class LfValueTranslation(
       result: LfEngine.Result[V]
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[V] = {
     result match {
       case LfEngine.ResultDone(r) => Future.successful(r)
@@ -198,7 +196,7 @@ final class LfValueTranslation(
       enrich: LfValue => LfEngine.Result[com.daml.lf.value.Value],
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[ApiValue] = for {
     enrichedValue <-
       if (verbose)
@@ -247,7 +245,7 @@ final class LfValueTranslation(
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[CreatedEvent] = {
     @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     lazy val templateId: LfIdentifier = apiIdentifierToDamlLfIdentifier(raw.partial.templateId.get)
@@ -279,7 +277,7 @@ final class LfValueTranslation(
       verbose: Boolean,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[ExercisedEvent] = {
     // Deserialize contract argument and contract key
     // This returns the values in Daml-LF format.
@@ -323,6 +321,35 @@ final class LfValueTranslation(
     }
   }
 
+  def deserializeRaw(
+      createArgument: Array[Byte],
+      createArgumentCompression: Compression.Algorithm,
+      createKeyValue: Option[Array[Byte]],
+      createKeyValueCompression: Compression.Algorithm,
+      templateId: LfIdentifier,
+      witnesses: Set[String],
+      eventProjectionProperties: EventProjectionProperties,
+  )(implicit
+      ec: ExecutionContext,
+      loggingContext: LoggingContextWithTrace,
+  ): Future[ApiContractData] = {
+    for {
+      createKey <- Future(
+        createKeyValue.map(decompressAndDeserialize(createKeyValueCompression, _))
+      )
+      createArgument <- Future(
+        decompressAndDeserialize(createArgumentCompression, createArgument)
+      )
+      apiContractData <- toApiContractData(
+        value = createArgument,
+        key = createKey,
+        templateId = templateId,
+        witnesses = witnesses,
+        eventProjectionProperties = eventProjectionProperties,
+      )
+    } yield apiContractData
+  }
+
   def toApiContractData(
       value: LfValue,
       key: Option[VersionedValue],
@@ -331,7 +358,7 @@ final class LfValueTranslation(
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[ApiContractData] = {
 
     val renderResult =
@@ -375,7 +402,7 @@ final class LfValueTranslation(
 
   private def toInterfaceView(verbose: Boolean, interfaceId: Identifier)(
       result: Either[Status, Versioned[Value]]
-  )(implicit ec: ExecutionContext, loggingContext: LoggingContext): Future[InterfaceView] =
+  )(implicit ec: ExecutionContext, loggingContext: LoggingContextWithTrace): Future[InterfaceView] =
     result match {
       case Right(versionedValue) =>
         enrichAsync(verbose, versionedValue.unversioned, enricher.enrichView(interfaceId, _))
@@ -398,7 +425,7 @@ final class LfValueTranslation(
   private def enrichAsync(verbose: Boolean, value: Value, enrich: Value => LfEngine.Result[Value])(
       implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[Value] =
     condFuture(verbose)(
       Future(enrich(value)).flatMap(consumeEnricherResult)
@@ -432,7 +459,7 @@ final class LfValueTranslation(
       value: com.daml.lf.value.Value,
       interfaceId: LfIdentifier,
   )(implicit
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
   ): Future[Either[Status, Versioned[Value]]] = Timed.future(
     metrics.daml.index.lfValue.computeInterfaceView, {

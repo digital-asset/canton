@@ -107,7 +107,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   protected def acsSetup(
       lifespan: Map[LfContractId, (CantonTimestamp, CantonTimestamp)]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[ActiveContractSnapshot] = {
-    val acs = new InMemoryActiveContractStore(loggerFactory)
+    val acs = new InMemoryActiveContractStore(testedProtocolVersion, loggerFactory)
     lifespan.toList
       .parTraverse_ { case (cid, (createdTs, archivedTs)) =>
         for {

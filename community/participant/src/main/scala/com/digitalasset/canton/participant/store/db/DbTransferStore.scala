@@ -39,7 +39,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
-import com.digitalasset.canton.{LfPartyId, RequestCounter, TransferCounter}
+import com.digitalasset.canton.{LfPartyId, RequestCounter}
 import com.google.protobuf.ByteString
 import slick.jdbc.TransactionIsolation.Serializable
 import slick.jdbc.canton.SQLActionBuilder
@@ -128,7 +128,6 @@ class DbTransferStore(
       transferOutRequest = getResultFullTransferOutTree(r),
       transferOutDecisionTime = GetResult[CantonTimestamp].apply(r),
       contract = GetResult[SerializableContract].apply(r),
-      transferCounter = TransferCounter.Genesis, // TODO(#12286) add a transfer counter to DB
       creatingTransactionId = GetResult[TransactionId].apply(r),
       transferOutResult = getResultDeliveredTransferOutResult(fixedSourceProtocolVersion).apply(r),
       transferOutGlobalOffset = r.nextLongOption(),

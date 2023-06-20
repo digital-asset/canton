@@ -8,12 +8,12 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.daml.metrics.{DatabaseMetrics, Metrics}
-import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.{
   ParticipantMetering,
   TransactionMetering,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend.LedgerMeteringEnd
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
@@ -22,7 +22,7 @@ import com.digitalasset.canton.platform.store.backend.{
   ParameterStorageBackend,
 }
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
-import org.mockito.ArgumentMatchersSugar.any
+import com.digitalasset.canton.{DiscardOps, TestEssentials}
 import org.mockito.MockitoSugar
 import org.mockito.captor.ArgCaptor
 import org.scalatest.matchers.should.Matchers
@@ -34,7 +34,11 @@ import java.time.{LocalDate, LocalTime, OffsetDateTime, ZoneOffset}
 import scala.concurrent.Future
 
 //noinspection TypeAnnotation
-final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar with Matchers {
+final class MeteringAggregatorSpec
+    extends AnyWordSpecLike
+    with MockitoSugar
+    with Matchers
+    with TestEssentials {
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
   private val metrics = Metrics.ForTesting
@@ -56,7 +60,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
       val conn: Connection = mock[Connection]
       val dispatcher: DbDispatcher = new DbDispatcher {
         override def executeSql[T](databaseMetrics: DatabaseMetrics)(sql: Connection => T)(implicit
-            loggingContext: LoggingContext
+            loggingContext: LoggingContextWithTrace
         ): Future[T] = Future.successful {
           sql(conn)
         }
@@ -104,6 +108,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
           metrics,
           dispatcher,
           () => toTS(timeNow),
+          loggerFactory = loggerFactory,
         )
           .run()
 
@@ -216,6 +221,7 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
             metrics,
             dispatcher,
             () => toTS(timeNow),
+            loggerFactory = loggerFactory,
           )
         underTest.run()
       }
@@ -230,13 +236,14 @@ final class MeteringAggregatorSpec extends AnyWordSpecLike with MockitoSugar wit
           metrics,
           dispatcher,
           () => toTS(timeNow),
+          loggerFactory = loggerFactory,
         )
       underTest.initialize().discard
       val expected = LedgerMeteringEnd(
         Offset.beforeBegin,
         toTS(timeNow.truncatedTo(ChronoUnit.HOURS).minusHours(1)),
       )
-      verify(meteringParameterStore).initializeLedgerMeteringEnd(expected)(conn)
+      verify(meteringParameterStore).initializeLedgerMeteringEnd(expected, loggerFactory)(conn)
     }
 
   }

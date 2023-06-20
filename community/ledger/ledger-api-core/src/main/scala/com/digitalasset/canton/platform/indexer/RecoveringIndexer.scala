@@ -6,9 +6,10 @@ package com.digitalasset.canton.platform.indexer
 import akka.actor.Scheduler
 import akka.pattern.after
 import com.daml.ledger.resources.{Resource, ResourceContext}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy, ReportsHealth, Unhealthy}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.time.temporal.ChronoUnit
 import java.time.{Clock, Instant}
@@ -28,10 +29,11 @@ private[indexer] final class RecoveringIndexer(
     restartDelay: FiniteDuration,
     updateHealthStatus: HealthStatus => Unit,
     healthReporter: ReportsHealth,
-)(implicit loggingContext: LoggingContext) {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit traceContext: TraceContext)
+    extends NamedLogging {
   private implicit val ec: ExecutionContext = executionContext
   private implicit val resourceContext: ResourceContext = ResourceContext(executionContext)
-  private val logger = ContextualizedLogger.get(this.getClass)
   private val clock = Clock.systemUTC()
 
   /** Starts an indexer, and restarts it after the given delay whenever an error occurs.
@@ -161,8 +163,13 @@ private[indexer] final class RecoveringIndexer(
 }
 
 private[indexer] object RecoveringIndexer {
-  def apply(scheduler: Scheduler, executionContext: ExecutionContext, restartDelay: FiniteDuration)(
-      implicit loggingContext: LoggingContext
+  def apply(
+      scheduler: Scheduler,
+      executionContext: ExecutionContext,
+      restartDelay: FiniteDuration,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      traceContext: TraceContext
   ): RecoveringIndexer = {
     val healthStatusRef = new AtomicReference[HealthStatus](Unhealthy)
 
@@ -174,6 +181,7 @@ private[indexer] object RecoveringIndexer {
       restartDelay = restartDelay,
       updateHealthStatus = healthStatusRef.set,
       healthReporter = healthReporter,
+      loggerFactory = loggerFactory,
     )
   }
 }

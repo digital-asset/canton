@@ -12,6 +12,7 @@ object TestModels {
   //              and copied from `bazel-bin/test-common/model-tests-1.15.dar`.
   val com_daml_ledger_test_ModelTestDar_1_15_path = "test-models/model-tests-1.15.dar"
   val com_daml_ledger_test_BenchtoolTestDar_1_15_path = "test-models/benchtool-tests-1.15.dar"
+  val com_daml_ledger_test_SemanticTestDar_1_15_path = "test-models/semantic-tests-1.15.dar"
 
   // TODO(#12303) Dar files generated in Daml SDK with `bazel build //daml-lf/encoder:testing-dar-<lf-version>`
   //              and copied from `bazel-bin/daml-lf/encoder/test-<lf-version>.dar`.

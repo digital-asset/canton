@@ -47,12 +47,14 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{
   LfPartyId,
   RequestCounter,
   SequencerCounter,
   TransferCounter,
+  TransferCounterO,
   checked,
 }
 
@@ -160,25 +162,25 @@ private[transfer] class TransferInProcessingSteps(
 
       transferInUuid = seedGenerator.generateUuid()
       seed = seedGenerator.generateSaltSeed()
-      fullTree <- EitherT
-        .fromEither[Future](
-          makeFullTransferInTree(
-            pureCrypto,
-            seed,
-            submitterMetadata,
-            stakeholders,
-            transferData.contract,
-            transferData.transferCounter,
-            transferData.creatingTransactionId,
-            targetDomain,
-            mediator,
-            transferOutResult,
-            transferInUuid,
-            sourceProtocolVersion,
-            targetProtocolVersion,
-          )
+
+      fullTree <- EitherT.fromEither[Future](
+        makeFullTransferInTree(
+          pureCrypto,
+          seed,
+          submitterMetadata,
+          stakeholders,
+          transferData.contract,
+          transferData.transferCounter,
+          transferData.creatingTransactionId,
+          targetDomain,
+          mediator,
+          transferOutResult,
+          transferInUuid,
+          sourceProtocolVersion,
+          targetProtocolVersion,
         )
-        .leftMap(GenericError)
+      )
+
       rootHash = fullTree.rootHash
       mediatorMessage = fullTree.mediatorMessage
       recipientsSet <- {
@@ -392,6 +394,7 @@ private[transfer] class TransferInProcessingSteps(
         sc,
         txInRequest.tree.rootHash,
         txInRequest.contract,
+        txInRequest.transferCounter,
         txInRequest.submitterMetadata,
         txInRequest.creatingTransactionId,
         transferringParticipant,
@@ -485,6 +488,7 @@ private[transfer] class TransferInProcessingSteps(
       requestSequencerCounter,
       rootHash,
       contract,
+      transferCounter,
       submitterMetadata,
       creatingTransactionId,
       transferringParticipant,
@@ -502,7 +506,10 @@ private[transfer] class TransferInProcessingSteps(
           transferOuts = Map.empty,
           transferIns = Map(
             contract.contractId -> WithContractHash
-              .fromContract(contract, WithContractMetadata(transferId, contract.metadata))
+              .fromContract(
+                contract,
+                CommitSet.TransferInCommit(transferId, contract.metadata, transferCounter),
+              )
           ),
           keyUpdates = Map.empty,
         )
@@ -518,6 +525,7 @@ private[transfer] class TransferInProcessingSteps(
             transferId,
             rootHash,
             isTransferringParticipant = transferringParticipant,
+            transferCounter,
             hostedStakeholders.toList,
           )
           timestampEvent = Some(
@@ -549,6 +557,7 @@ private[transfer] class TransferInProcessingSteps(
       transferId: TransferId,
       rootHash: RootHash,
       isTransferringParticipant: Boolean,
+      transferCounter: TransferCounterO,
       hostedStakeholders: List[LfPartyId],
   ): EitherT[Future, TransferProcessorError, LedgerSyncEvent.TransferredIn] = {
     val targetDomain = domainId
@@ -605,10 +614,15 @@ private[transfer] class TransferInProcessingSteps(
       contractMetadata = driverContractMetadata,
       transferId = transferId,
       targetDomain = targetDomain,
-      workflowId = submitterMetadata.workflowId,
       createTransactionAccepted = !isTransferringParticipant,
+      workflowId = submitterMetadata.workflowId,
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders,
+      transferCounter = transferCounter.getOrElse(
+        // Default value for protocol version earlier than dev
+        // TODO(#12373) Adapt when releasing BFT
+        TransferCounter.MinValue
+      ),
     )
   }
 }
@@ -631,6 +645,7 @@ object TransferInProcessingSteps {
       override val requestSequencerCounter: SequencerCounter,
       rootHash: RootHash,
       contract: SerializableContract,
+      transferCounter: TransferCounterO,
       submitterMetadata: TransferSubmitterMetadata,
       creatingTransactionId: TransactionId,
       isTransferringParticipant: Boolean,
@@ -648,7 +663,7 @@ object TransferInProcessingSteps {
       submitterMetadata: TransferSubmitterMetadata,
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,
-      transferCounter: TransferCounter,
+      transferCounterO: TransferCounterO,
       creatingTransactionId: TransactionId,
       targetDomain: TargetDomainId,
       targetMediator: MediatorRef,
@@ -656,31 +671,39 @@ object TransferInProcessingSteps {
       transferInUuid: UUID,
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
-  ): Either[String, FullTransferInTree] = {
+  ): Either[TransferProcessorError, FullTransferInTree] = {
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, pureCrypto)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, pureCrypto)
-    val commonDataE = TransferInCommonData.create(pureCrypto)(
-      commonDataSalt,
-      targetDomain,
-      targetMediator,
-      stakeholders,
-      transferInUuid,
-      transferCounter,
-      targetProtocolVersion,
-    )
-    val view = TransferInView.create(pureCrypto)(
-      viewSalt,
-      submitterMetadata,
-      contract,
-      creatingTransactionId,
-      transferOutResult,
-      sourceProtocolVersion,
-      targetProtocolVersion,
-    )
-    commonDataE.map { commonData =>
-      val tree = TransferInViewTree(commonData, view)(pureCrypto)
-      FullTransferInTree(tree)
-    }
+
+    // if transfer is initiated from a domain where the transfers counters are not yet defined, we set it to 0
+    // TODO(#12373) Adapt when releasing BFT
+    val transferCounter =
+      if (sourceProtocolVersion.v < ProtocolVersion.dev) Some(TransferCounter.Genesis)
+      else transferCounterO
+
+    for {
+      commonData <- TransferInCommonData
+        .create(pureCrypto)(
+          commonDataSalt,
+          targetDomain,
+          targetMediator,
+          stakeholders,
+          transferInUuid,
+          transferCounter,
+          targetProtocolVersion,
+        )
+        .leftMap(reason => InvalidTransferCommonData(reason))
+      view = TransferInView.create(pureCrypto)(
+        viewSalt,
+        submitterMetadata,
+        contract,
+        creatingTransactionId,
+        transferOutResult,
+        sourceProtocolVersion,
+        targetProtocolVersion,
+      )
+      tree = TransferInViewTree(commonData, view)(pureCrypto)
+    } yield FullTransferInTree(tree)
   }
 
   final case class PendingDataAndResponseArgs(

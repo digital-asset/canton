@@ -134,6 +134,7 @@ abstract class TopologyStoreX[+StoreID <: TopologyStoreId](implicit
       removeMapping: Set[MappingHash],
       removeTxs: Set[TxHash],
       additions: Seq[GenericValidatedTopologyTransactionX],
+      expiredAdditions: Set[TxHash],
   )(implicit
       traceContext: TraceContext
   ): Future[Unit]

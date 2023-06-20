@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.store.interning
 
-import com.daml.logging.LoggingContext
 import org.openjdk.jmh.annotations.{
   Benchmark,
   BenchmarkMode,
@@ -34,9 +33,7 @@ class InitializationTimeBenchmark extends BenchmarkState {
   def run(): Unit = {
     Await.result(
       interning
-        .update(stringCount)(BenchmarkState.loadStringInterningEntries(entries))(
-          LoggingContext.ForTesting
-        ),
+        .update(stringCount)(BenchmarkState.loadStringInterningEntries(entries)),
       perfTestTimeout,
     )
   }

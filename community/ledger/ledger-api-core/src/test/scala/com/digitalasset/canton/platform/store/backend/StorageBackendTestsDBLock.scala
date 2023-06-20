@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend.{Lock, LockId, LockMode}
 import org.scalatest.concurrent.Eventually
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
@@ -171,15 +171,14 @@ private[platform] trait StorageBackendTestsDBLock
 
 trait StorageBackendTestsDBLockForSuite
     extends StorageBackendTestsDBLock
-    with StorageBackendProvider {
+    with StorageBackendProvider
+    with BaseTest {
   this: AnyFlatSpec =>
 
   override val dbLock: DBLockStorageBackend = backend.dbLock
 
   override def getConnection: Connection =
     backend.dataSource
-      .createDataSource(DataSourceStorageBackend.DataSourceConfig(jdbcUrl))(
-        LoggingContext.ForTesting
-      )
+      .createDataSource(DataSourceStorageBackend.DataSourceConfig(jdbcUrl), loggerFactory)
       .getConnection
 }

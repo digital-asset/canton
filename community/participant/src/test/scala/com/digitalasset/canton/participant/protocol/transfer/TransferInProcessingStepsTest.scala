@@ -86,6 +86,9 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     UniqueIdentifier.tryFromProtoPrimitive("bothdomains::participant")
   )
 
+  private val initialTransferCounter: TransferCounterO =
+    TransferCounter.forCreatedContract(testedProtocolVersion)
+
   private def submitterInfo(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
       submitter,
@@ -214,26 +217,26 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           timestamp = CantonTimestamp.Epoch,
           targetDomain = targetDomain,
         ),
-        TransferCounter.Genesis,
+        initialTransferCounter,
       )
       val uuid = new UUID(1L, 2L)
       val seed = seedGenerator.generateSaltSeed()
       val transferData2 = {
-        val fullTransferOutTree =
-          transferOutRequest.toFullTransferOutTree(
+        val fullTransferOutTree = transferOutRequest
+          .toFullTransferOutTree(
             pureCrypto,
             pureCrypto,
             seed,
             uuid,
           )
+          .value
         TransferData(
           SourceProtocolVersion(testedProtocolVersion),
           transferId.transferOutTimestamp,
           RequestCounter(0),
-          valueOrFail(fullTransferOutTree)("Failed to create fullTransferOutTree"),
+          fullTransferOutTree,
           CantonTimestamp.ofEpochSecond(10),
           contract,
-          TransferCounter.Genesis, // TODO(#12286) test different values.
           transactionId1,
           None,
           None,
@@ -625,6 +628,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         SequencerCounter(1),
         rootHash,
         contract,
+        initialTransferCounter,
         submitterInfo(submitter),
         transactionId1,
         isTransferringParticipant = false,
@@ -702,7 +706,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         submitterInfo(submitter),
         stakeholders,
         contract,
-        transferCounter,
+        initialTransferCounter,
         creatingTransactionId,
         targetDomain,
         targetMediator,

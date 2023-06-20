@@ -16,7 +16,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.topology.MediatorRef
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
-import com.digitalasset.canton.{RequestCounter, TransferCounter}
+import com.digitalasset.canton.{RequestCounter, TransferCounterO}
 
 /** Stores the data for a transfer that needs to be passed from the source domain to the target domain. */
 final case class TransferData(
@@ -26,7 +26,6 @@ final case class TransferData(
     transferOutRequest: FullTransferOutTree,
     transferOutDecisionTime: CantonTimestamp,
     contract: SerializableContract,
-    transferCounter: TransferCounter,
     creatingTransactionId: TransactionId,
     transferOutResult: Option[DeliveredTransferOutResult],
     transferOutGlobalOffset: Option[GlobalOffset],
@@ -45,6 +44,7 @@ final case class TransferData(
   def transferId: TransferId = TransferId(transferOutRequest.sourceDomain, transferOutTimestamp)
 
   def sourceMediator: MediatorRef = transferOutRequest.mediator
+  def transferCounter: TransferCounterO = transferOutRequest.transferCounter
 
   def addTransferOutResult(result: DeliveredTransferOutResult): Option[TransferData] =
     mergeTransferOutResult(Some(result))
@@ -66,7 +66,6 @@ final case class TransferData(
               `transferOutRequest`,
               `transferOutDecisionTime`,
               `contract`,
-              `transferCounter`,
               `creatingTransactionId`,
               otherResult,
               otherTransferOutGlobalOffset,

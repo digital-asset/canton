@@ -14,9 +14,8 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
 }
 import com.daml.ledger.api.v1.admin.user_management_service as proto
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.platform.apiserver.page_tokens.ListUsersPageTokenPayload
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.auth.ClaimAdmin
 import com.digitalasset.canton.ledger.api.auth.ClaimSet.Claims
@@ -24,8 +23,16 @@ import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationIntercep
 import com.digitalasset.canton.ledger.api.domain.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.FieldValidator
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexPartyManagementService
+import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
+import com.digitalasset.canton.logging.LoggingContextWithTrace.withEnrichedLoggingContext
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.UserUpdateMapper
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
@@ -46,18 +53,15 @@ private[apiserver] final class ApiUserManagementService(
     maxUsersPageSize: Int,
     submissionIdGenerator: SubmissionIdGenerator,
     indexPartyManagementService: IndexPartyManagementService,
+    telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
-    executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
+    executionContext: ExecutionContext
 ) extends proto.UserManagementServiceGrpc.UserManagementService
-    with GrpcApiService {
+    with GrpcApiService
+    with NamedLogging {
 
   import ApiUserManagementService.*
-
-  private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
-  private implicit val contextualizedErrorLogger: DamlContextualizedErrorLogger =
-    new DamlContextualizedErrorLogger(logger, loggingContext, None)
-
   import FieldValidator.*
 
   override def close(): Unit = ()
@@ -65,11 +69,12 @@ private[apiserver] final class ApiUserManagementService(
   override def bindService(): ServerServiceDefinition =
     proto.UserManagementServiceGrpc.bindService(this, executionContext)
 
-  override def createUser(request: proto.CreateUserRequest): Future[CreateUserResponse] =
-    withSubmissionId { implicit loggingContext =>
+  override def createUser(request: proto.CreateUserRequest): Future[CreateUserResponse] = {
+    withSubmissionId(loggerFactory, telemetry) { implicit loggingContext =>
+      implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       // Retrieving the authenticated user context from the thread-local context
       val authorizedUserContextF: Future[AuthenticatedUserContext] =
-        resolveAuthenticatedUserContext()
+        resolveAuthenticatedUserContext
       withValidation {
         for {
           pUser <- requirePresence(request.user, "user")
@@ -123,11 +128,12 @@ private[apiserver] final class ApiUserManagementService(
         } yield CreateUserResponse(Some(toProtoUser(createdUser)))
       }
     }
-
+  }
   override def updateUser(request: UpdateUserRequest): Future[UpdateUserResponse] = {
-    withSubmissionId { implicit loggingContext =>
+    withSubmissionId(loggerFactory, telemetry) { implicit loggingContext =>
+      implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       val authorizedUserContextF: Future[AuthenticatedUserContext] =
-        resolveAuthenticatedUserContext()
+        resolveAuthenticatedUserContext
       withValidation {
         for {
           pUser <- requirePresence(request.user, "user")
@@ -198,7 +204,9 @@ private[apiserver] final class ApiUserManagementService(
     }
   }
 
-  private def resolveAuthenticatedUserContext(): Future[AuthenticatedUserContext] = {
+  private def resolveAuthenticatedUserContext(implicit
+      errorLogger: ContextualizedErrorLogger
+  ): Future[AuthenticatedUserContext] = {
     AuthorizationInterceptor
       .extractClaimSetFromContext()
       .fold(
@@ -223,7 +231,9 @@ private[apiserver] final class ApiUserManagementService(
       )
   }
 
-  override def getUser(request: proto.GetUserRequest): Future[GetUserResponse] =
+  override def getUser(request: proto.GetUserRequest): Future[GetUserResponse] = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation {
       for {
         userId <- requireUserId(request.userId, "user_id")
@@ -238,9 +248,11 @@ private[apiserver] final class ApiUserManagementService(
         .flatMap(handleResult("getting user"))
         .map(u => GetUserResponse(Some(toProtoUser(u))))
     }
+  }
 
   override def deleteUser(request: proto.DeleteUserRequest): Future[proto.DeleteUserResponse] =
-    withSubmissionId { implicit loggingContext =>
+    withSubmissionId(loggerFactory, telemetry) { implicit loggingContext =>
+      implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       withValidation {
         for {
           userId <- requireUserId(request.userId, "user_id")
@@ -258,6 +270,8 @@ private[apiserver] final class ApiUserManagementService(
     }
 
   override def listUsers(request: proto.ListUsersRequest): Future[proto.ListUsersResponse] = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation(
       for {
         fromExcl <- decodeUserIdFromPageToken(request.pageToken)
@@ -294,75 +308,81 @@ private[apiserver] final class ApiUserManagementService(
 
   override def grantUserRights(
       request: proto.GrantUserRightsRequest
-  ): Future[proto.GrantUserRightsResponse] = withSubmissionId { implicit loggingContext =>
-    // Retrieving the authenticated user context from the thread-local context
-    val authorizedUserContextF: Future[AuthenticatedUserContext] =
-      resolveAuthenticatedUserContext()
-    withValidation(
-      for {
-        userId <- requireUserId(request.userId, "user_id")
-        rights <- fromProtoRights(request.rights)
-        identityProviderId <- optionalIdentityProviderId(
-          request.identityProviderId,
-          "identity_provider_id",
-        )
-      } yield (userId, rights, identityProviderId)
-    ) { case (userId, rights, identityProviderId) =>
-      for {
-        authorizedUserContext <- authorizedUserContextF
-        _ <- verifyPartiesExistInIdp(
-          rights,
-          identityProviderId,
-          authorizedUserContext.isParticipantAdmin,
-        )
-        result <- userManagementStore
-          .grantRights(
-            id = userId,
-            rights = rights,
-            identityProviderId = identityProviderId,
+  ): Future[proto.GrantUserRightsResponse] = withSubmissionId(loggerFactory, telemetry) {
+    implicit loggingContext =>
+      implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
+      // Retrieving the authenticated user context from the thread-local context
+      val authorizedUserContextF: Future[AuthenticatedUserContext] =
+        resolveAuthenticatedUserContext
+      withValidation(
+        for {
+          userId <- requireUserId(request.userId, "user_id")
+          rights <- fromProtoRights(request.rights)
+          identityProviderId <- optionalIdentityProviderId(
+            request.identityProviderId,
+            "identity_provider_id",
           )
-        handledResult <- handleResult("grant user rights")(result)
-      } yield proto.GrantUserRightsResponse(handledResult.view.map(toProtoRight).toList)
-    }
+        } yield (userId, rights, identityProviderId)
+      ) { case (userId, rights, identityProviderId) =>
+        for {
+          authorizedUserContext <- authorizedUserContextF
+          _ <- verifyPartiesExistInIdp(
+            rights,
+            identityProviderId,
+            authorizedUserContext.isParticipantAdmin,
+          )
+          result <- userManagementStore
+            .grantRights(
+              id = userId,
+              rights = rights,
+              identityProviderId = identityProviderId,
+            )
+          handledResult <- handleResult("grant user rights")(result)
+        } yield proto.GrantUserRightsResponse(handledResult.view.map(toProtoRight).toList)
+      }
   }
 
   override def revokeUserRights(
       request: proto.RevokeUserRightsRequest
-  ): Future[proto.RevokeUserRightsResponse] = withSubmissionId { implicit loggingContext =>
-    // Retrieving the authenticated user context from the thread-local context
-    val authorizedUserContextF: Future[AuthenticatedUserContext] =
-      resolveAuthenticatedUserContext()
-    withValidation(
-      for {
-        userId <- FieldValidator.requireUserId(request.userId, "user_id")
-        rights <- fromProtoRights(request.rights)
-        identityProviderId <- optionalIdentityProviderId(
-          request.identityProviderId,
-          "identity_provider_id",
-        )
-      } yield (userId, rights, identityProviderId)
-    ) { case (userId, rights, identityProviderId) =>
-      for {
-        authorizedUserContext <- authorizedUserContextF
-        _ <- verifyPartiesExistInIdp(
-          rights,
-          identityProviderId,
-          authorizedUserContext.isParticipantAdmin,
-        )
-        result <- userManagementStore
-          .revokeRights(
-            id = userId,
-            rights = rights,
-            identityProviderId = identityProviderId,
+  ): Future[proto.RevokeUserRightsResponse] = withSubmissionId(loggerFactory, telemetry) {
+    implicit loggingContext =>
+      implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
+      // Retrieving the authenticated user context from the thread-local context
+      val authorizedUserContextF: Future[AuthenticatedUserContext] =
+        resolveAuthenticatedUserContext
+      withValidation(
+        for {
+          userId <- FieldValidator.requireUserId(request.userId, "user_id")
+          rights <- fromProtoRights(request.rights)
+          identityProviderId <- optionalIdentityProviderId(
+            request.identityProviderId,
+            "identity_provider_id",
           )
-        handledResult <- handleResult("revoke user rights")(result)
-      } yield proto.RevokeUserRightsResponse(handledResult.view.map(toProtoRight).toList)
-    }
+        } yield (userId, rights, identityProviderId)
+      ) { case (userId, rights, identityProviderId) =>
+        for {
+          authorizedUserContext <- authorizedUserContextF
+          _ <- verifyPartiesExistInIdp(
+            rights,
+            identityProviderId,
+            authorizedUserContext.isParticipantAdmin,
+          )
+          result <- userManagementStore
+            .revokeRights(
+              id = userId,
+              rights = rights,
+              identityProviderId = identityProviderId,
+            )
+          handledResult <- handleResult("revoke user rights")(result)
+        } yield proto.RevokeUserRightsResponse(handledResult.view.map(toProtoRight).toList)
+      }
   }
 
   override def listUserRights(
       request: proto.ListUserRightsRequest
-  ): Future[proto.ListUserRightsResponse] =
+  ): Future[proto.ListUserRightsResponse] = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation {
       for {
         userId <- requireUserId(request.userId, "user_id")
@@ -378,10 +398,12 @@ private[apiserver] final class ApiUserManagementService(
         .map(_.view.map(toProtoRight).toList)
         .map(proto.ListUserRightsResponse(_))
     }
-
+  }
   override def updateUserIdentityProviderId(
       request: UpdateUserIdentityProviderRequest
   ): Future[UpdateUserIdentityProviderResponse] = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     withValidation {
       for {
         userId <- requireUserId(request.userId, "user_id")
@@ -410,7 +432,9 @@ private[apiserver] final class ApiUserManagementService(
     }
   }
 
-  private def handleUpdatePathResult[T](userId: Ref.UserId, result: update.Result[T]): Future[T] =
+  private def handleUpdatePathResult[T](userId: Ref.UserId, result: update.Result[T])(implicit
+      errorLogger: ContextualizedErrorLogger
+  ): Future[T] =
     result match {
       case Left(e: update.UpdatePathError) =>
         Future.failed(
@@ -426,6 +450,9 @@ private[apiserver] final class ApiUserManagementService(
       rights: Set[UserRight],
       identityProviderId: IdentityProviderId,
       isParticipantAdmin: Boolean,
+  )(implicit
+      loggingContext: LoggingContextWithTrace,
+      errorLogger: ContextualizedErrorLogger,
   ): Future[Unit] = {
     val parties = userParties(rights)
     val partiesExistingInPartyRecordStore =
@@ -447,6 +474,9 @@ private[apiserver] final class ApiUserManagementService(
   private def verifyPartiesExistsInIdp(
       partiesWithoutRecord: Set[Ref.Party],
       identityProviderId: IdentityProviderId,
+  )(implicit
+      loggingContext: LoggingContextWithTrace,
+      errorLogger: ContextualizedErrorLogger,
   ): Future[Unit] =
     indexKnownParties(partiesWithoutRecord.toList).flatMap { partiesKnown =>
       val unknownParties = partiesWithoutRecord -- partiesKnown
@@ -455,7 +485,9 @@ private[apiserver] final class ApiUserManagementService(
         partiesNotExistsError(unknownParties, identityProviderId)
     }
 
-  private def indexKnownParties(parties: Seq[Ref.Party]): Future[Set[Ref.Party]] =
+  private def indexKnownParties(
+      parties: Seq[Ref.Party]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Set[Ref.Party]] =
     indexPartyManagementService.getParties(parties).map { partyDetails =>
       partyDetails.map(_.party).toSet
     }
@@ -463,7 +495,7 @@ private[apiserver] final class ApiUserManagementService(
   private def partiesNotExistsError(
       unknownParties: Set[Ref.Party],
       identityProviderId: IdentityProviderId,
-  ) = {
+  )(implicit errorLogger: ContextualizedErrorLogger) = {
     val message =
       s"Provided parties have not been found in " +
         s"identity_provider_id=`${identityProviderId.toRequestString}`: [${unknownParties.mkString(",")}]."
@@ -474,7 +506,12 @@ private[apiserver] final class ApiUserManagementService(
     )
   }
 
-  private def identityProviderExistsOrError(id: IdentityProviderId): Future[Unit] =
+  private def identityProviderExistsOrError(
+      id: IdentityProviderId
+  )(implicit
+      loggingContext: LoggingContextWithTrace,
+      errorLogger: ContextualizedErrorLogger,
+  ): Future[Unit] =
     identityProviderExists(id)
       .flatMap { idpExists =>
         if (idpExists)
@@ -487,7 +524,9 @@ private[apiserver] final class ApiUserManagementService(
           )
       }
 
-  private def handleResult[T](operation: String)(result: UserManagementStore.Result[T]): Future[T] =
+  private def handleResult[T](operation: String)(
+      result: UserManagementStore.Result[T]
+  )(implicit errorLogger: ContextualizedErrorLogger): Future[T] =
     result match {
       case Left(UserManagementStore.PermissionDenied(id)) =>
         Future.failed(
@@ -543,38 +582,47 @@ private[apiserver] final class ApiUserManagementService(
   ): Future[B] =
     validatedResult.fold(Future.failed, Future.successful).flatMap(f)
 
-  private val fromProtoRight: proto.Right => Either[StatusRuntimeException, UserRight] = {
-    case proto.Right(_: proto.Right.Kind.ParticipantAdmin) =>
-      Right(UserRight.ParticipantAdmin)
+  private def fromProtoRight(
+      right: proto.Right
+  )(implicit errorLogger: ContextualizedErrorLogger): Either[StatusRuntimeException, UserRight] =
+    right match {
+      case proto.Right(_: proto.Right.Kind.ParticipantAdmin) =>
+        Right(UserRight.ParticipantAdmin)
 
-    case proto.Right(_: proto.Right.Kind.IdentityProviderAdmin) =>
-      Right(UserRight.IdentityProviderAdmin)
+      case proto.Right(_: proto.Right.Kind.IdentityProviderAdmin) =>
+        Right(UserRight.IdentityProviderAdmin)
 
-    case proto.Right(proto.Right.Kind.CanActAs(r)) =>
-      requireParty(r.party).map(UserRight.CanActAs(_))
+      case proto.Right(proto.Right.Kind.CanActAs(r)) =>
+        requireParty(r.party).map(UserRight.CanActAs(_))
 
-    case proto.Right(proto.Right.Kind.CanReadAs(r)) =>
-      requireParty(r.party).map(UserRight.CanReadAs(_))
+      case proto.Right(proto.Right.Kind.CanReadAs(r)) =>
+        requireParty(r.party).map(UserRight.CanReadAs(_))
 
-    case proto.Right(proto.Right.Kind.Empty) =>
-      Left(
-        LedgerApiErrors.RequestValidation.InvalidArgument
-          .Reject(
-            "unknown kind of right - check that the Ledger API version of the server is recent enough"
-          )
-          .asGrpcError
-      )
-  }
+      case proto.Right(proto.Right.Kind.Empty) =>
+        Left(
+          LedgerApiErrors.RequestValidation.InvalidArgument
+            .Reject(
+              "unknown kind of right - check that the Ledger API version of the server is recent enough"
+            )
+            .asGrpcError
+        )
+    }
 
   private def fromProtoRights(
       rights: Seq[proto.Right]
+  )(implicit
+      errorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Set[UserRight]] =
     rights.toList.traverse(fromProtoRight).map(_.toSet)
 
-  private def withSubmissionId[A](
-      f: LoggingContext => A
-  )(implicit loggingContext: LoggingContext): A =
-    withEnrichedLoggingContext("submissionId" -> submissionIdGenerator.generate())(f)
+  private def withSubmissionId[A](loggerFactory: NamedLoggerFactory, telemetry: Telemetry)(
+      f: LoggingContextWithTrace => A
+  ): A = {
+    val loggingContext = createLoggingContext(loggerFactory)(identity)
+    withEnrichedLoggingContext(telemetry)("submissionId" -> submissionIdGenerator.generate())(f)(
+      loggingContext
+    )
+  }
 
 }
 

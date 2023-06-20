@@ -5,8 +5,8 @@ package com.digitalasset.canton.platform.store.interfaces
 
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.GlobalKey
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
 
@@ -23,7 +23,7 @@ private[platform] trait LedgerDaoContractsReader {
   def lookupActiveContractAndLoadArgument(
       readers: Set[Party],
       contractId: ContractId,
-  )(implicit loggingContext: LoggingContext): Future[Option[Contract]]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]]
 
   /** Looks up an active or divulged contract if it is visible for the given party.
     * This method uses the provided create argument for building the [[Contract]] value
@@ -38,7 +38,7 @@ private[platform] trait LedgerDaoContractsReader {
       readers: Set[Party],
       contractId: ContractId,
       createArgument: Value,
-  )(implicit loggingContext: LoggingContext): Future[Option[Contract]]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]]
 
   /** Looks up the contract by id at a specific ledger event sequential id.
     *
@@ -47,7 +47,7 @@ private[platform] trait LedgerDaoContractsReader {
     * @return the optional [[ContractState]]
     */
   def lookupContractState(contractId: ContractId, validAt: Offset)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractState]]
 
   /** Looks up the state of a contract key at a specific event sequential id.
@@ -57,12 +57,12 @@ private[platform] trait LedgerDaoContractsReader {
     * @return the [[KeyState]]
     */
   def lookupKeyState(key: GlobalKey, validAt: Offset)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[KeyState]
 }
 
 object LedgerDaoContractsReader {
-  import com.daml.lf.value.{Value as lfval}
+  import com.daml.lf.value.Value as lfval
   private type ContractId = lfval.ContractId
   private type Value = lfval.VersionedValue
   private type Contract = lfval.VersionedContractInstance

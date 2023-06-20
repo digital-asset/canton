@@ -25,7 +25,6 @@ import com.digitalasset.canton.participant.protocol.{
   SerializableContractAuthenticator,
   SerializableContractAuthenticatorImpl,
 }
-import com.digitalasset.canton.participant.store.ActiveContractStore.Active
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.{
   MultiDomainSupportNotEnabled,
@@ -363,7 +362,7 @@ object DomainRouter {
           // grab the approximate state and check if the contract is currently active on the given domain
           syncDomain.ephemeral.requestTracker.getApproximateStates(pending).map { res =>
             val done = acc ++ res.collect {
-              case (cid, status) if status.status == Active => (cid, syncDomain.domainId)
+              case (cid, status) if status.status.isActive => (cid, syncDomain.domainId)
             }
             (pending.filterNot(cid => done.contains(cid)), done)
           }

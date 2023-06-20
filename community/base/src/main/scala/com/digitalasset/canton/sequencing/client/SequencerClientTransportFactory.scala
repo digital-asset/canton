@@ -5,6 +5,8 @@ package com.digitalasset.canton.sequencing.client
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
@@ -22,6 +24,37 @@ import io.grpc.ConnectivityState
 import scala.concurrent.*
 
 trait SequencerClientTransportFactory {
+
+  def makeTransport(
+      sequencerConnections: SequencerConnections,
+      member: Member,
+      requestSigner: RequestSigner,
+  )(implicit
+      executionContext: ExecutionContextExecutor,
+      materializer: Materializer,
+      traceContext: TraceContext,
+  ): EitherT[Future, String, NonEmpty[Map[SequencerAlias, SequencerClientTransport]]] =
+    MonadUtil
+      .sequentialTraverse(sequencerConnections.connections)(conn =>
+        makeTransport(conn, member, requestSigner)
+          .map(transport => conn.sequencerAlias -> transport)
+      )
+      .map(transports => NonEmptyUtil.fromUnsafe(transports.toMap))
+
+  def validateTransport(
+      sequencerConnections: SequencerConnections,
+      logWarning: Boolean,
+  )(implicit
+      executionContext: ExecutionContextExecutor,
+      errorLoggingContext: ErrorLoggingContext,
+      closeContext: CloseContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    MonadUtil
+      .sequentialTraverse(sequencerConnections.connections)(conn =>
+        validateTransport(conn, logWarning)
+      )
+      .map(_ => ())
+
   def makeTransport(
       connection: SequencerConnection,
       member: Member,

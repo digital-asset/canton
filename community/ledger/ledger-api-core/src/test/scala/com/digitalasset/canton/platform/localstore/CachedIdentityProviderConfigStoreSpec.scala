@@ -3,8 +3,11 @@
 
 package com.digitalasset.canton.platform.localstore
 
+import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.{
   IdentityProviderConfigByIssuerNotFound,
   IdentityProviderConfigNotFound,
@@ -22,7 +25,11 @@ class CachedIdentityProviderConfigStoreSpec
     extends AsyncFreeSpec
     with IdentityProviderConfigStoreTests
     with MockitoSugar
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
+
+  private implicit val loggingContext =
+    LoggingContextWithTrace(traceContext)(LoggingContext.ForTesting)
 
   override def newStore(): IdentityProviderConfigStore = createTested(
     new InMemoryIdentityProviderConfigStore()

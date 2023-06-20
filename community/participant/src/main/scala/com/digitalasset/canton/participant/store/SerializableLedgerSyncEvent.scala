@@ -55,6 +55,7 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfPackageId,
   ProtoDeserializationError,
+  TransferCounter,
 }
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as RpcStatus
@@ -462,6 +463,7 @@ private[store] final case class SerializableTransactionAccepted(
       recordTime,
       divulgedContracts,
       blindingInfo,
+      hostedWitnesses,
       contractMetadata,
     ) = transactionAccepted
     val contractMetadataP = contractMetadata.view.map { case (contractId, bytes) =>
@@ -483,6 +485,7 @@ private[store] final case class SerializableTransactionAccepted(
       divulgedContracts.map(SerializableDivulgedContract(_).toProtoV0),
       blindingInfo.map(SerializableBlindingInfo(_).toProtoV0),
       contractMetadata = contractMetadataP,
+      hostedWitnesses = hostedWitnesses,
     )
   }
 }
@@ -500,6 +503,7 @@ private[store] object SerializableTransactionAccepted {
       divulgedContractsP,
       blindingInfoP,
       contractMetadataP,
+      hostedWitnessesP,
     ) = transactionAcceptedP
     for {
       optCompletionInfo <- completionInfoP.traverse(SerializableCompletionInfo.fromProtoV0)
@@ -529,6 +533,7 @@ private[store] object SerializableTransactionAccepted {
             .map(_ -> LfBytes.fromByteString(driverContractMetadataBytes))
       }
       contractMetadata = contractMetadataSeq.toMap
+      hostedWitnesses <- hostedWitnessesP.traverse(ProtoConverter.parseLfPartyId)
     } yield LedgerSyncEvent.TransactionAccepted(
       optCompletionInfo,
       transactionMeta,
@@ -537,6 +542,7 @@ private[store] object SerializableTransactionAccepted {
       recordTime,
       divulgedContracts,
       blindingInfo,
+      hostedWitnesses.toList,
       contractMetadata = contractMetadata,
     )
   }
@@ -937,6 +943,7 @@ private[store] final case class SerializableTransferredOut(
       workflowId,
       isTransferringParticipant,
       hostedStakeholders,
+      transferCounter,
     ) = transferOut
     v0.TransferredOut(
       updateId = updateId,
@@ -953,6 +960,7 @@ private[store] final case class SerializableTransferredOut(
       workflowId = workflowId.getOrElse(""),
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders,
+      transferCounter = transferCounter.toProtoPrimitive,
     )
   }
 }
@@ -975,6 +983,7 @@ private[store] object SerializableTransferredOut {
       templateIdP,
       isTransferringParticipant,
       hostedStakeholdersP,
+      transferCounterP,
     ) = transferOutP
 
     for {
@@ -1008,6 +1017,7 @@ private[store] object SerializableTransferredOut {
       workflowId = workflowId,
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders.toList,
+      transferCounter = TransferCounter(transferCounterP),
     )
   }
 }
@@ -1029,6 +1039,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       workflowId,
       isTransferringParticipant,
       hostedStakeholders,
+      transferCounter,
     ) = transferIn
     val contractMetadataP = contractMetadata.toByteString
     val createNodeByteString = DamlLfSerializers
@@ -1053,6 +1064,7 @@ final case class SerializableTransferredIn(transferIn: LedgerSyncEvent.Transferr
       workflowId = workflowId.getOrElse(""),
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders,
+      transferCounter = transferCounter.toProtoPrimitive,
     )
 
   }
@@ -1075,6 +1087,7 @@ private[store] object SerializableTransferredIn {
       workflowIdP,
       isTransferringParticipant,
       hostedStakeholdersP,
+      transferCounterP,
     ) = transferInP
 
     for {
@@ -1120,6 +1133,7 @@ private[store] object SerializableTransferredIn {
       workflowId = workflowId,
       isTransferringParticipant = isTransferringParticipant,
       hostedStakeholders = hostedStakeholders.toList,
+      transferCounter = TransferCounter(transferCounterP),
     )
   }
 }

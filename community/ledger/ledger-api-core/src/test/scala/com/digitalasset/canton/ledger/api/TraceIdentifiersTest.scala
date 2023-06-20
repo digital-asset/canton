@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.api
 
-import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
+import com.daml.ledger.api.v2.transaction.{Transaction, TransactionTree}
 import com.daml.tracing.SpanAttribute
 import org.scalatest.matchers.should.Matchers.*
 import org.scalatest.wordspec.AnyWordSpec

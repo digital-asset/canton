@@ -103,6 +103,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
       removeMapping: Set[TopologyMappingX.MappingHash],
       removeTxs: Set[TopologyTransactionX.TxHash],
       additions: Seq[GenericValidatedTopologyTransactionX],
+      expiredAdditions: Set[TopologyTransactionX.TxHash],
   )(implicit traceContext: TraceContext): Future[Unit] =
     blocking {
       synchronized {
@@ -126,7 +127,9 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
               sequenced,
               from = effective,
               rejected = tx.rejectionReason.map(_.toString),
-              until = Option.when(tx.rejectionReason.nonEmpty)(effective),
+              until = Option.when(
+                tx.rejectionReason.nonEmpty || expiredAdditions(tx.transaction.transaction.hash)
+              )(effective),
             )
           )
         )
@@ -362,13 +365,16 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
   override def findEssentialStateForMember(member: Member, asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[GenericStoredTopologyTransactionsX] = {
-    findTransactionsInStore(
-      asOf = asOfInclusive,
-      asOfInclusive = true,
-      isProposal = false,
-      types = TopologyMappingX.Code.all,
-      filterUid = None,
-      filterNamespace = None,
+    // asOfInclusive is the effective time of the transaction that onboarded the member.
+    // 1. load all transactions with a sequenced time <= asOfInclusive, including proposals
+    filteredState(
+      blocking(synchronized {
+        topologyTransactionStore.toSeq
+      }),
+      entry => entry.sequenced.value <= asOfInclusive,
+    ).map(
+      // 2. transform the result such that the validUntil fields are set as they were at maxEffective time of the snapshot
+      _.asSnapshotAtMaxEffectiveTime
     )
   }
 
@@ -430,7 +436,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
     blocking(synchronized {
       val selected = topologyTransactionStore
         .filter(x =>
-          x.from.value > timestampExclusive && (x.until.isEmpty || x.transaction.transaction.op == TopologyChangeOpX.Remove) && x.rejected.isEmpty
+          x.from.value > timestampExclusive && (!x.transaction.isProposal || x.until.isEmpty) && x.rejected.isEmpty
         )
         .map(_.toStoredTransaction)
         .toSeq
@@ -470,7 +476,7 @@ class InMemoryTopologyStoreX[+StoreId <: TopologyStoreId](
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransactionX]] = {
     val res = blocking(synchronized {
       topologyTransactionStore.filter(x =>
-        x.until.isEmpty && TopologyStoreX.initialParticipantDispatchingSet.contains(
+        !x.transaction.isProposal && TopologyStoreX.initialParticipantDispatchingSet.contains(
           x.transaction.transaction.mapping.code
         )
       )

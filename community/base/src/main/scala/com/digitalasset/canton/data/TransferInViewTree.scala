@@ -47,6 +47,7 @@ import com.digitalasset.canton.{
   LfWorkflowId,
   ProtoDeserializationError,
   TransferCounter,
+  TransferCounterO,
 }
 import com.google.protobuf.ByteString
 
@@ -118,6 +119,7 @@ object TransferInViewTree
     )((commonData, view) => new TransferInViewTree(commonData, view)(hashOps))(transferInViewTreeP)
 }
 
+// TODO(#12373) replace "protocol version dev" in the documentation for transferCounter
 /** Aggregates the data of a transfer-in request that is sent to the mediator and the involved participants.
   *
   * @param salt Salt for blinding the Merkle hash
@@ -125,7 +127,9 @@ object TransferInViewTree
   * @param targetMediator The mediator that coordinates the transfer-in request on the target domain
   * @param stakeholders The stakeholders of the transferred contract
   * @param uuid The uuid of the transfer-in request
-  * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract
+  * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
+  *                        The value is defined iff the protocol versions is at least
+  *                        [[com.digitalasset.canton.version.ProtocolVersion.dev]].
   */
 final case class TransferInCommonData private (
     override val salt: Salt,
@@ -133,7 +137,8 @@ final case class TransferInCommonData private (
     targetMediator: MediatorRef,
     stakeholders: Set[LfPartyId],
     uuid: UUID,
-    transferCounter: TransferCounter,
+    // TODO(#9014) Remove the option
+    transferCounter: TransferCounterO,
 )(
     hashOps: HashOps,
     val targetProtocolVersion: TargetProtocolVersion,
@@ -141,6 +146,12 @@ final case class TransferInCommonData private (
 ) extends MerkleTreeLeaf[TransferInCommonData](hashOps)
     with HasProtocolVersionedWrapper[TransferInCommonData]
     with ProtocolVersionedMemoizedEvidence {
+
+  // TODO(#12373) Adapt when releasing BFT
+  require(
+    targetProtocolVersion.v < ProtocolVersion.dev || transferCounter.isDefined,
+    s"Transfer counter must be defined in protocol version ${targetProtocolVersion.v}",
+  )
 
   override val representativeProtocolVersion
       : RepresentativeProtocolVersion[TransferInCommonData.type] =
@@ -179,7 +190,13 @@ final case class TransferInCommonData private (
       stakeholders = stakeholders.toSeq,
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
       targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
-      transferCounter = transferCounter.toProtoPrimitive,
+      transferCounter = transferCounter
+        .map(_.toProtoPrimitive)
+        .getOrElse(
+          throw new RuntimeException(
+            s"Transfer counter must be defined at $targetProtocolVersion"
+          )
+        ),
     )
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInCommonData
@@ -193,7 +210,7 @@ final case class TransferInCommonData private (
     param("stakeholders", _.stakeholders),
     param("uuid", _.uuid),
     param("salt", _.salt),
-    param("transfer counter", _.transferCounter),
+    paramIfDefined("transfer counter", _.transferCounter),
   )
 }
 
@@ -223,26 +240,20 @@ object TransferInCommonData
       targetMediator: MediatorRef,
       stakeholders: Set[LfPartyId],
       uuid: UUID,
-      transferCounter: TransferCounter,
+      transferCounter: TransferCounterO,
       targetProtocolVersion: TargetProtocolVersion,
   ): Either[String, TransferInCommonData] = {
-    // TODO(#12373) Adapt when releasing BFT
-    Either.cond(
-      targetMediator.isSingle || targetProtocolVersion.v >= ProtocolVersion.dev,
-      TransferInCommonData(
-        salt,
-        targetDomain,
-        targetMediator,
-        stakeholders,
-        uuid,
-        transferCounter,
-      )(
-        hashOps,
-        targetProtocolVersion,
-        None,
-      ),
-      s"Invariant violation: Mediator groups are not supported in protocol version $targetProtocolVersion",
-    )
+    for {
+      _ <- TransferCommonData.checkMediatorGroup(targetMediator, targetProtocolVersion.v)
+      _ <- TransferCommonData.checkTransferCounter(transferCounter, targetProtocolVersion.v)
+    } yield TransferInCommonData(
+      salt,
+      targetDomain,
+      targetMediator,
+      stakeholders,
+      uuid,
+      transferCounter,
+    )(hashOps, targetProtocolVersion, None)
   }
 
   private[this] def enforceInvariantFailForMediatorGroup(
@@ -277,7 +288,7 @@ object TransferInCommonData
       commonData.targetMediator,
       commonData.stakeholders,
       commonData.uuid,
-      TransferCounter.Genesis,
+      None,
     )(
       hashOps,
       TargetProtocolVersion(
@@ -315,7 +326,7 @@ object TransferInCommonData
       commonData.targetMediator,
       commonData.stakeholders,
       commonData.uuid,
-      TransferCounter.Genesis,
+      None,
     )(
       hashOps,
       TargetProtocolVersion(protocolVersion), // TODO(#12626)
@@ -352,7 +363,7 @@ object TransferInCommonData
       commonData.targetMediator,
       commonData.stakeholders,
       commonData.uuid,
-      transferCounter,
+      Some(transferCounter),
     )(
       hashOps,
       TargetProtocolVersion(protocolVersion), // TODO(#12626)
@@ -718,6 +729,8 @@ final case class FullTransferInTree(tree: TransferInViewTree)
   def stakeholders: Set[LfPartyId] = commonData.stakeholders
 
   def contract: SerializableContract = view.contract
+
+  def transferCounter: TransferCounterO = commonData.transferCounter
 
   def creatingTransactionId: TransactionId = view.creatingTransactionId
 

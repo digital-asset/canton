@@ -22,10 +22,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.{ExecutionContext, Future}
 
-private[conflictdetection] class LockableStatesTest
-    extends AsyncWordSpec
-    with BaseTest
-    with HasExecutorService {
+class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorService {
   import ConflictDetectionHelpers.*
   import LockableStatesTest.*
 
@@ -87,7 +84,7 @@ private[conflictdetection] class LockableStatesTest
       PendingWriteCounter.assertFromInt(writes),
     )
 
-  def pendingAndCheck(
+  private def pendingAndCheck(
       sut: LockableStates[StateId, Status, StoreError],
       rc: RequestCounter,
       check: ActivenessCheck[StateId],

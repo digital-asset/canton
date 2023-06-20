@@ -4,23 +4,24 @@
 package com.digitalasset.canton.ledger.runner.common
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.LoggingContext.newLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.logging.LoggingContextWithTrace.withNewLoggingContext
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.IndexMetadata
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
 object DumpIndexMetadata {
-  val logger = ContextualizedLogger.get(this.getClass)
-
-  def dumpIndexMetadata(
+  def dumpIndexMetadata(loggerFactory: NamedLoggerFactory)(
       jdbcUrl: String
   )(implicit
       executionContext: ExecutionContext,
       context: ResourceContext,
   ): Future[Unit] = {
-    newLoggingContext { implicit loggingContext: LoggingContext =>
-      val metadataFuture = IndexMetadata.read(jdbcUrl).use { metadata =>
+    val logger = loggerFactory.getTracedLogger(getClass)
+    implicit val traceContext: TraceContext = TraceContext.empty
+    withNewLoggingContext() { implicit loggingContext =>
+      val metadataFuture = IndexMetadata.read(jdbcUrl, loggerFactory).use { metadata =>
         logger.warn(s"ledger_id: ${metadata.ledgerId}")
         logger.warn(s"participant_id: ${metadata.participantId}")
         logger.warn(s"ledger_end: ${metadata.ledgerEnd}")
@@ -35,11 +36,14 @@ object DumpIndexMetadata {
   }
 
   def apply(
-      jdbcUrls: Seq[String]
+      jdbcUrls: Seq[String],
+      loggerFactory: NamedLoggerFactory,
   ): ResourceOwner[Unit] = {
     new ResourceOwner[Unit] {
       override def acquire()(implicit context: ResourceContext): Resource[Unit] = {
-        Resource.sequenceIgnoringValues(jdbcUrls.map(dumpIndexMetadata).map(Resource.fromFuture))
+        Resource.sequenceIgnoringValues(
+          jdbcUrls.map(dumpIndexMetadata(loggerFactory)).map(Resource.fromFuture)
+        )
       }
     }
   }

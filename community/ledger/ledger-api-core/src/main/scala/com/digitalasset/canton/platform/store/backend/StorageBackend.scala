@@ -3,12 +3,10 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.ledger.EventId
 import com.daml.logging.LoggingContext
-import com.daml.scalautil.NeverEqualsOverride
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
@@ -20,7 +18,13 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexerPartyDetails,
   PackageDetails,
 }
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.EventSequentialId
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
+  RawActiveContract,
+  RawAssignEvent,
+  RawUnassignEvent,
+}
 import com.digitalasset.canton.platform.store.backend.MeteringParameterStorageBackend.LedgerMeteringEnd
 import com.digitalasset.canton.platform.store.backend.common.{
   EventReaderQueries,
@@ -44,6 +48,7 @@ import com.digitalasset.canton.platform.{
   PackageId,
   Party,
 }
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
 import javax.sql.DataSource
@@ -134,9 +139,10 @@ trait ParameterStorageBackend {
     *
     * This method is NOT safe to call concurrently.
     */
-  def initializeParameters(params: ParameterStorageBackend.IdentityParams)(connection: Connection)(
-      implicit loggingContext: LoggingContext
-  ): Unit
+  def initializeParameters(
+      params: ParameterStorageBackend.IdentityParams,
+      loggerFactory: NamedLoggerFactory,
+  )(connection: Connection): Unit
 
   /** Returns the ledger identity parameters, or None if the database hasn't been initialized yet. */
   def ledgerIdentity(connection: Connection): Option[ParameterStorageBackend.IdentityParams]
@@ -149,8 +155,10 @@ object MeteringParameterStorageBackend {
 trait MeteringParameterStorageBackend {
 
   /** Initialize the ledger metering end parameters if unset */
-  def initializeLedgerMeteringEnd(init: LedgerMeteringEnd)(connection: Connection)(implicit
-      loggingContext: LoggingContext
+  def initializeLedgerMeteringEnd(init: LedgerMeteringEnd, loggerFactory: NamedLoggerFactory)(
+      connection: Connection
+  )(implicit
+      traceContext: TraceContext
   ): Unit
 
   /** The timestamp and offset for which billable metering is available */
@@ -291,54 +299,56 @@ trait EventStorageBackend {
       connection: Connection,
   ): Boolean
 
-  def activeContractEventBatch(
+  def activeContractCreateEventBatch(
       eventSequentialIds: Iterable[Long],
       allFilterParties: Set[Party],
       endInclusive: Long,
   )(connection: Connection): Vector[EventStorageBackend.Entry[Raw.FlatEvent]]
 
+  def activeContractCreateEventBatchV2(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+      endInclusive: Long,
+  )(connection: Connection): Vector[RawActiveContract]
+
+  def activeContractAssignEventBatch(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+      endInclusive: Long,
+  )(connection: Connection): Vector[RawActiveContract]
+
+  def fetchAssignEventIdsForStakeholder(
+      stakeholder: Party,
+      templateId: Option[Identifier],
+      startExclusive: Long,
+      endInclusive: Long,
+      limit: Int,
+  )(connection: Connection): Vector[Long]
+
+  def fetchUnassignEventIdsForStakeholder(
+      stakeholder: Party,
+      templateId: Option[Identifier],
+      startExclusive: Long,
+      endInclusive: Long,
+      limit: Int,
+  )(connection: Connection): Vector[Long]
+
+  def assignEventBatch(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+  )(connection: Connection): Vector[RawAssignEvent]
+
+  def unassignEventBatch(
+      eventSequentialIds: Iterable[Long],
+      allFilterParties: Set[Party],
+  )(connection: Connection): Vector[RawUnassignEvent]
+
   def maxEventSequentialId(untilInclusiveOffset: Offset)(
       connection: Connection
   ): Long
-
-  def rawEvents(startExclusive: Long, endInclusive: Long)(
-      connection: Connection
-  ): Vector[EventStorageBackend.RawTransactionEvent]
 }
 
 object EventStorageBackend {
-  final case class RawTransactionEvent(
-      eventKind: Int,
-      transactionId: String,
-      nodeIndex: Int,
-      commandId: Option[String],
-      workflowId: Option[String],
-      eventId: EventId,
-      contractId: ContractId,
-      templateId: Option[Identifier],
-      ledgerEffectiveTime: Option[Timestamp],
-      createSignatories: Option[Array[String]],
-      createObservers: Option[Array[String]],
-      createAgreementText: Option[String],
-      createKeyValue: Option[Array[Byte]],
-      createKeyHash: Option[Hash],
-      createKeyCompression: Option[Int],
-      createArgument: Option[Array[Byte]],
-      createArgumentCompression: Option[Int],
-      treeEventWitnesses: Set[String],
-      flatEventWitnesses: Set[String],
-      submitters: Set[String],
-      qualifiedChoiceName: Option[String],
-      exerciseArgument: Option[Array[Byte]],
-      exerciseArgumentCompression: Option[Int],
-      exerciseResult: Option[Array[Byte]],
-      exerciseResultCompression: Option[Int],
-      exerciseActors: Option[Array[String]],
-      exerciseChildEventIds: Option[Array[String]],
-      eventSequentialId: Long,
-      offset: Offset,
-  ) extends NeverEqualsOverride
-
   final case class Entry[+E](
       eventOffset: Offset,
       transactionId: String,
@@ -347,18 +357,73 @@ object EventStorageBackend {
       ledgerEffectiveTime: Timestamp,
       commandId: String,
       workflowId: String,
+      domainId: Option[String],
       event: E,
+  )
+
+  final case class RawCreatedEvent(
+      updateId: String,
+      contractId: String,
+      templateId: Identifier,
+      witnessParties: Set[String],
+      signatories: Set[String],
+      observers: Set[String],
+      agreementText: Option[String],
+      createArgument: Array[Byte],
+      createArgumentCompression: Option[Int],
+      createKeyValue: Option[Array[Byte]],
+      createKeyValueCompression: Option[Int],
+      ledgerEffectiveTime: Timestamp,
+      createKeyHash: Option[Hash],
+      driverMetadata: Array[Byte],
+  )
+
+  final case class RawActiveContract(
+      workflowId: Option[String],
+      domainId: String,
+      reassignmentCounter: Long,
+      rawCreatedEvent: RawCreatedEvent,
+      eventSequentialId: Long,
+  )
+
+  final case class RawUnassignEvent(
+      updateId: String,
+      commandId: Option[String],
+      workflowId: Option[String],
+      offset: String,
+      sourceDomainId: String,
+      targetDomainId: String,
+      unassignId: String,
+      submitter: String,
+      reassignmentCounter: Long,
+      contractId: String,
+      templateId: Identifier,
+      witnessParties: Set[String],
+      assignmentExclusivity: Option[Timestamp],
+  )
+
+  final case class RawAssignEvent(
+      commandId: Option[String],
+      workflowId: Option[String],
+      offset: String,
+      sourceDomainId: String,
+      targetDomainId: String,
+      unassignId: String,
+      submitter: String,
+      reassignmentCounter: Long,
+      rawCreatedEvent: RawCreatedEvent,
   )
 }
 
 trait DataSourceStorageBackend {
   def createDataSource(
       dataSourceConfig: DataSourceStorageBackend.DataSourceConfig,
+      loggerFactory: NamedLoggerFactory,
       connectionInitHook: Option[Connection => Unit] = None,
-  )(implicit loggingContext: LoggingContext): DataSource
+  ): DataSource
 
   def checkCompatibility(@unused connection: Connection)(implicit
-      @unused loggingContext: LoggingContext
+      @unused traceContext: TraceContext
   ): Unit = ()
 
   def checkDatabaseAvailable(connection: Connection): Unit

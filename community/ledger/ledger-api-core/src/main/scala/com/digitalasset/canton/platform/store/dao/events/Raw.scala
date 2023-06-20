@@ -14,7 +14,7 @@ import com.daml.ledger.api.v1.event.{
 import com.daml.ledger.api.v1.transaction.{TreeEvent as PbTreeEvent}
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.Identifier
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
@@ -43,7 +43,7 @@ sealed trait Raw[+E] {
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[E]
 
   def witnesses: Seq[String]
@@ -70,7 +70,7 @@ object Raw {
         eventProjectionProperties: EventProjectionProperties,
     )(implicit
         ec: ExecutionContext,
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace,
     ): Future[E] =
       deserializeCreateEvent(lfValueTranslation, eventProjectionProperties).map(wrapInEvent)
 
@@ -79,7 +79,7 @@ object Raw {
         eventProjectionProperties: EventProjectionProperties,
     )(implicit
         ec: ExecutionContext,
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace,
     ): Future[PbCreatedEvent] =
       lfValueTranslation.deserialize(this, eventProjectionProperties)
 
@@ -192,7 +192,7 @@ object Raw {
           eventProjectionProperties: EventProjectionProperties,
       )(implicit
           ec: ExecutionContext,
-          loggingContext: LoggingContext,
+          loggingContext: LoggingContextWithTrace,
       ): Future[PbFlatEvent] =
         Future.successful(PbFlatEvent(PbFlatEvent.Event.Archived(raw)))
 
@@ -294,7 +294,7 @@ object Raw {
           eventProjectionProperties: EventProjectionProperties,
       )(implicit
           ec: ExecutionContext,
-          loggingContext: LoggingContext,
+          loggingContext: LoggingContextWithTrace,
       ): Future[PbTreeEvent] =
         lfValueTranslation
           .deserialize(this, eventProjectionProperties.verbose)

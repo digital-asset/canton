@@ -40,6 +40,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   LfTimestamp,
   LfWorkflowId,
+  TransferCounter,
 }
 import com.google.rpc.status.Status as RpcStatus
 import io.scalaland.chimney.Transformer
@@ -228,6 +229,7 @@ object LedgerSyncEvent {
       recordTime: LfTimestamp,
       divulgedContracts: List[DivulgedContract],
       blindingInfo: Option[BlindingInfo],
+      hostedWitnesses: List[LfPartyId],
       contractMetadata: Map[LfContractId, Bytes],
   ) extends LedgerSyncEvent.WithDomainId {
     override def description: String = s"Accept transaction $transactionId"
@@ -274,7 +276,7 @@ object LedgerSyncEvent {
     def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] = {
       val selector = kind match {
         case RequestType.Transaction => Some(())
-        case _: RequestType.Transfer => None
+        case _: RequestType.Transfer => Option.when(populateTransfers)(())
       }
 
       selector.map(_ => this.transformInto[Update.CommandRejected])
@@ -303,8 +305,10 @@ object LedgerSyncEvent {
     def targetDomain: TargetDomainId
     def kind: String
     def isTransferringParticipant: Boolean
+    def workflowId: Option[LfWorkflowId]
   }
 
+  // TODO(#12373) Adapt when releasing BFT
   /** Signal the transfer-out of a contract from source to target domain.
     *
     * @param updateId              Uniquely identifies the update.
@@ -313,19 +317,22 @@ object LedgerSyncEvent {
     * @param transferId            Uniquely identifies the transfer. See [[com.digitalasset.canton.protocol.TransferId]].
     * @param contractId            The contract-id that's being transferred-out.
     * @param templateId            The template-id of the contract that's being transferred-out.
-    * @param targetDomain        The target domain of the transfer.
+    * @param targetDomain          The target domain of the transfer.
     * @param transferInExclusivity The timestamp of the timeout before which only the submitter can initiate the
     *                              corresponding transfer-in. Must be provided for the participant that submitted the transfer-out.
     * @param workflowId            The workflowId specified by the submitter in the transfer command.
     * @param isTransferringParticipant True if the participant is transferring.
     *                                  Note: false if the data comes from an old serialized event
+    * @param transferCounter        The [[com.digitalasset.canton.TransferCounter]] of the contract.
+    *                               For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.dev]],
+    *                               its value is Long.MinValue
     */
   final case class TransferredOut(
       updateId: LedgerTransactionId,
       optCompletionInfo: Option[CompletionInfo],
       submitter: LfPartyId,
       contractId: LfContractId,
-      templateId: Option[LfTemplateId], // TODO(#9014): make this field not optional anymore
+      templateId: Option[LfTemplateId],
       contractStakeholders: Set[LfPartyId],
       transferId: TransferId,
       targetDomain: TargetDomainId,
@@ -333,6 +340,7 @@ object LedgerSyncEvent {
       workflowId: Option[LfWorkflowId],
       isTransferringParticipant: Boolean,
       hostedStakeholders: List[LfPartyId],
+      transferCounter: TransferCounter,
   ) extends TransferEvent {
 
     override def recordTime: LfTimestamp = transferId.transferOutTimestamp.underlying
@@ -357,6 +365,7 @@ object LedgerSyncEvent {
       param("target", _.targetDomain),
       paramIfDefined("transferInExclusivity", _.transferInExclusivity),
       paramIfDefined("workflowId", _.workflowId),
+      param("transferCounter", _.transferCounter),
     )
 
     def toDamlUpdate(populateTransfers: Boolean = false): Option[Update] =
@@ -388,6 +397,7 @@ object LedgerSyncEvent {
       }
   }
 
+  // TODO(#12373) Adapt when releasing BFT
   /**  Signal the transfer-in of a contract from the source domain to the target domain.
     *
     * @param updateId                  Uniquely identifies the update.
@@ -404,6 +414,9 @@ object LedgerSyncEvent {
     * @param workflowId                The workflowId specified by the submitter in the transfer command.
     * @param isTransferringParticipant True if the participant is transferring.
     *                                  Note: false if the data comes from an old serialized event
+    * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
+    *                        For protocol version earlier than [[com.digitalasset.canton.version.ProtocolVersion.dev]],
+    *                        its value is Long.MinValue
     */
   final case class TransferredIn(
       updateId: LedgerTransactionId,
@@ -420,6 +433,7 @@ object LedgerSyncEvent {
       workflowId: Option[LfWorkflowId],
       isTransferringParticipant: Boolean,
       hostedStakeholders: List[LfPartyId],
+      transferCounter: TransferCounter,
   ) extends TransferEvent {
 
     override def description: String =
@@ -436,6 +450,7 @@ object LedgerSyncEvent {
       paramWithoutValue("contractMetadata"),
       paramWithoutValue("createdEvent"),
       paramIfDefined("workflowId", _.workflowId),
+      param("transferCounter", _.transferCounter),
     )
 
     override def kind: String = "in"
@@ -499,6 +514,7 @@ object LedgerSyncEvent {
               recordTime = recordTime,
               divulgedContracts = Nil,
               blindingInfo = None,
+              hostedWitnesses = hostedStakeholders,
               contractMetadata = Map(createNode.coid -> contractMetadata),
             )
           }

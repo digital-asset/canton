@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import ch.qos.logback.classic.{Logger, LoggerContext}
 import ch.qos.logback.core.status.{ErrorStatus, Status, StatusListener, WarnStatus}
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.cli.{Cli, Command, LogFileAppender}
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
 import com.digitalasset.canton.config.{CantonConfig, ConfigErrors, Generate}
@@ -33,10 +34,20 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
 
   protected def additionalVersions: Map[String, String] = Map.empty
 
+  protected def printVersion(): Unit = {
+    (Map(
+      "Canton" -> BuildInfo.version,
+      "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
+      "Supported Canton protocol versions" -> BuildInfo.protocolVersions.toString(),
+    ) ++ additionalVersions) foreach { case (name, version) =>
+      Console.out.println(s"$name: $version")
+    }
+  }
+
   // BE CAREFUL: Set the environment variables before you touch anything related to
   // logback as otherwise, the logback configuration will be read without these
   // properties being considered
-  private val cliOptions = Cli.parse(args, additionalVersions).getOrElse(sys.exit(1))
+  private val cliOptions = Cli.parse(args, printVersion()).getOrElse(sys.exit(1))
   cliOptions.installLogging()
 
   // Fail, if the log configuration cannot be read.

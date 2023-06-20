@@ -10,14 +10,16 @@ import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplemen
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.testing.utils.TestingServerInterceptors.serverOwner
 import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.ports.Port
 import com.daml.scalautil.Statement.discard
+import com.daml.tracing.NoOpTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.grpc.{GrpcClientResource, GrpcHealthService}
 import com.digitalasset.canton.ledger.api.health.HealthChecks.ComponentName
 import com.digitalasset.canton.ledger.api.health.{HealthChecks, ReportsHealth}
+import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.LimitResultCheck
 import com.google.protobuf.ByteString
@@ -34,9 +36,7 @@ import io.grpc.stub.StreamObserver
 import org.mockito.MockitoSugar
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Second, Span}
-import org.slf4j.LoggerFactory
 
 import java.io.IOException
 import java.lang.management.*
@@ -46,10 +46,10 @@ import scala.concurrent.{Future, Promise}
 final class RateLimitingInterceptorSpec
     extends AsyncFlatSpec
     with AkkaBeforeAndAfterAll
-    with Matchers
     with Eventually
     with TestResourceContext
-    with MockitoSugar {
+    with MockitoSugar
+    with BaseTest {
 
   import RateLimitingInterceptorSpec.*
 
@@ -77,6 +77,7 @@ final class RateLimitingInterceptorSpec
           threadPoolHumanReadableName,
           executorWithQueueSize,
           config.maxApiServicesQueueSize,
+          loggerFactory,
         )
       ),
     ).use { channel: Channel =>
@@ -130,12 +131,12 @@ final class RateLimitingInterceptorSpec
       .meter(MetricRegistry.name(metrics.daml.lapi.threadpool.apiServices, "submitted"))
       .mark(config.maxApiServicesQueueSize.toLong + 1) // Over limit
 
-    val healthService = new GrpcHealthService(healthChecks)(
-      executionSequencerFactory,
-      materializer,
-      executionContext,
-      LoggingContext.ForTesting,
-    )
+    val healthService =
+      new GrpcHealthService(healthChecks, telemetry = NoOpTelemetry, loggerFactory = loggerFactory)(
+        executionSequencerFactory,
+        materializer,
+        executionContext,
+      )
 
     withChannel(metrics, healthService, config).use { channel: Channel =>
       val healthStub = HealthGrpc.stub(channel)
@@ -369,7 +370,8 @@ final class RateLimitingInterceptorSpec
 
 object RateLimitingInterceptorSpec extends MockitoSugar {
 
-  private val logger = LoggerFactory.getLogger(getClass)
+  private val loggerFactory = SuppressingLogger(getClass)
+  private val logger = loggerFactory.getLogger(getClass)
   private val healthChecks = new HealthChecks(Map.empty[ComponentName, ReportsHealth])
 
   private def metrics = Metrics.ForTesting
@@ -395,6 +397,7 @@ object RateLimitingInterceptorSpec extends MockitoSugar {
     for {
       server <- serverOwner(
         RateLimitingInterceptor(
+          loggerFactory,
           metrics,
           config,
           pool,

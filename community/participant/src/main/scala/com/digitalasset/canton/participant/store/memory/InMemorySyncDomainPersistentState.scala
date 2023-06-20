@@ -37,7 +37,7 @@ abstract class InMemorySyncDomainPersistentStateCommon(
 
   val eventLog = new InMemorySingleDimensionEventLog(DomainEventLogId(domainId), loggerFactory)
   val contractStore = new InMemoryContractStore(loggerFactory)
-  val activeContractStore = new InMemoryActiveContractStore(loggerFactory)
+  val activeContractStore = new InMemoryActiveContractStore(protocolVersion, loggerFactory)
   val contractKeyJournal = new InMemoryContractKeyJournal(loggerFactory)
   val transferStore = new InMemoryTransferStore(TargetDomainId(domainId.item), loggerFactory)
   val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)

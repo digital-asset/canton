@@ -4,11 +4,12 @@
 package com.digitalasset.canton.console
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.DomainAlias
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.commands.ParticipantCommands
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
+import com.digitalasset.canton.{DomainAlias, SequencerAlias}
 
 class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(implicit
     override val consoleEnvironment: ConsoleEnvironment
@@ -119,7 +120,11 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): Unit = {
-      val config = ParticipantCommands.domains.referenceToConfig(domain, manualConnect)
+      val config =
+        ParticipantCommands.domains.referenceToConfig(
+          NonEmpty.mk(Seq, SequencerAlias.Default -> domain).toMap,
+          manualConnect,
+        )
       register(config)
       synchronize.foreach { timeout =>
         ConsoleMacros.utils.synchronize_topology(Some(timeout))(consoleEnvironment)

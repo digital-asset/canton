@@ -11,6 +11,7 @@ import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.ledger.EventId
 import com.daml.lf.value.Value
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.topology.DomainId
 import spray.json.DefaultJsonProtocol.*
 import spray.json.*
 
@@ -239,4 +240,8 @@ private[backend] object Conversions {
 
   def hashFromHexString(name: String): RowParser[Hash] =
     SqlParser.get[String](name).map(Hash.assertFromString)
+
+  def domainId(name: String): RowParser[DomainId] =
+    SqlParser.get[String](name).map(DomainId.tryFromString)
+
 }

@@ -6,8 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{KillSwitches, Materializer}
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
-import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.participant.state.v2.SubmissionResult
@@ -48,8 +46,7 @@ class SynchronousResponse[Input, Entry, AcceptedEntry](
       ledgerEndBeforeRequest: Option[LedgerOffset.Absolute],
       timeToLive: FiniteDuration,
   )(implicit
-      telemetryContext: TelemetryContext,
-      loggingContext: LoggingContextWithTrace,
+      loggingContext: LoggingContextWithTrace
   ): Future[AcceptedEntry] = {
     for {
       submissionResult <- strategy.submit(submissionId, input)
@@ -132,12 +129,13 @@ object SynchronousResponse {
 
     /** Submits a request to the ledger. */
     def submit(submissionId: Ref.SubmissionId, input: Input)(implicit
-        telemetryContext: TelemetryContext,
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace
     ): Future[state.SubmissionResult]
 
     /** Opens a stream of entries from before the submission. */
-    def entries(offset: Option[LedgerOffset.Absolute]): Source[Entry, _]
+    def entries(offset: Option[LedgerOffset.Absolute])(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Source[Entry, ?]
 
     /** Filters the entry stream for accepted submissions. */
     def accept(submissionId: Ref.SubmissionId): PartialFunction[Entry, AcceptedEntry]

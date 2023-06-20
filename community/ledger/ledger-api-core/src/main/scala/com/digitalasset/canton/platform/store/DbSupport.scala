@@ -4,9 +4,9 @@
 package com.digitalasset.canton.platform.store
 
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.configuration.ServerRole
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.backend.{
@@ -58,17 +58,19 @@ object DbSupport {
       dbConfig: DbConfig,
       serverRole: ServerRole,
       metrics: Metrics,
-  )(implicit loggingContext: LoggingContext): ResourceOwner[DbSupport] = {
+      loggerFactory: NamedLoggerFactory,
+  ): ResourceOwner[DbSupport] = {
     val dbType = DbType.jdbcType(dbConfig.jdbcUrl)
-    val storageBackendFactory = StorageBackendFactory.of(dbType)
+    val storageBackendFactory = StorageBackendFactory.of(dbType, loggerFactory)
     DbDispatcher
       .owner(
         dataSource = storageBackendFactory.createDataSourceStorageBackend
-          .createDataSource(dbConfig.dataSourceConfig),
+          .createDataSource(dbConfig.dataSourceConfig, loggerFactory),
         serverRole = serverRole,
         connectionPoolSize = dbConfig.connectionPool.connectionPoolSize,
         connectionTimeout = dbConfig.connectionPool.connectionTimeout,
         metrics = metrics,
+        loggerFactory = loggerFactory,
       )
       .map(dbDispatcher =>
         DbSupport(

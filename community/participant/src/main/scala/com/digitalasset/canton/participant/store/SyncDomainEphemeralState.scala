@@ -17,6 +17,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ConflictDetector,
   NaiveRequestTracker,
   RequestTracker,
+  RequestTrackerLookup,
 }
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -178,5 +179,6 @@ trait SyncDomainEphemeralStateLookup {
 
   def transferLookup: TransferLookup = transferCache
 
+  def tracker: RequestTrackerLookup = requestTracker
   def observedTimestampLookup: WatermarkLookup[CantonTimestamp] = observedTimestampTracker
 }

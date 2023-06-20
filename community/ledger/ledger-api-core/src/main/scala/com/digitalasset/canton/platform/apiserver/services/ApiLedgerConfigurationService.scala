@@ -8,40 +8,49 @@ import com.daml.api.util.DurationConversion.*
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.ledger_configuration_service.*
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.{
   GrpcApiService,
   GrpcLedgerConfigurationService,
   StreamingServiceLifecycleManagement,
 }
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigurationService
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{BindableService, ServerServiceDefinition}
 
 import scala.concurrent.ExecutionContext
 
 private[apiserver] final class ApiLedgerConfigurationService private (
-    configurationService: IndexConfigurationService
+    configurationService: IndexConfigurationService,
+    telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
     esf: ExecutionSequencerFactory,
     mat: Materializer,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends LedgerConfigurationServiceGrpc.LedgerConfigurationService
     with StreamingServiceLifecycleManagement
-    with GrpcApiService {
+    with GrpcApiService
+    with NamedLogging {
 
-  private val logger = ContextualizedLogger.get(this.getClass)
-  protected implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-    new DamlContextualizedErrorLogger(logger, loggingContext, None)
+  // TODO(#13269) remove the contextualizedErrorLogger
+  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
+    errorLoggingContext(
+      TraceContext.empty
+    )
 
   def getLedgerConfiguration(
       request: GetLedgerConfigurationRequest,
       responseObserver: StreamObserver[GetLedgerConfigurationResponse],
   ): Unit = registerStream(responseObserver) {
-    logger.info(s"Received request for configuration subscription: $request")
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+
+    logger.info(s"Received request for configuration subscription: $request.")
     configurationService
       .getLedgerConfiguration()
       .map(configuration =>
@@ -64,15 +73,18 @@ private[apiserver] object ApiLedgerConfigurationService {
   def create(
       ledgerId: LedgerId,
       configurationService: IndexConfigurationService,
+      telemetry: Telemetry,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       esf: ExecutionSequencerFactory,
       materializer: Materializer,
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
   ): LedgerConfigurationServiceGrpc.LedgerConfigurationService with GrpcApiService = {
     new GrpcLedgerConfigurationService(
-      service = new ApiLedgerConfigurationService(configurationService),
+      service = new ApiLedgerConfigurationService(configurationService, telemetry, loggerFactory),
       ledgerId = ledgerId,
+      telemetry = telemetry,
+      loggerFactory = loggerFactory,
     ) with BindableService {
       override def bindService(): ServerServiceDefinition =
         LedgerConfigurationServiceGrpc.bindService(this, executionContext)

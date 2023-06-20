@@ -15,7 +15,6 @@ import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
@@ -33,6 +32,7 @@ import com.digitalasset.canton.ledger.sandbox.bridge.BridgeMetrics
 import com.digitalasset.canton.ledger.sandbox.bridge.LedgerBridge.toOffset
 import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckingLedgerBridge.Validation
 import com.digitalasset.canton.ledger.sandbox.domain.{Rejection, Submission}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.google.rpc.status.Status.toJavaProto
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.flatspec.AnyFlatSpec
@@ -50,7 +50,7 @@ class SequenceSpec
     with Matchers
     with ArgumentMatchersSugar
     with OptionValues {
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   behavior of classOf[SequenceImpl].getSimpleName
 
@@ -433,7 +433,7 @@ class SequenceSpec
     // Rejection conversion mocks
     val rejectionMock: Rejection = mock[Rejection]
     val commandRejectedUpdateMock: CommandRejected =
-      CommandRejected(currentRecordTime, completionInfo, mock[RejectionReasonTemplate])
+      CommandRejected(currentRecordTime, completionInfo, mock[RejectionReasonTemplate], None)
     when(rejectionMock.toCommandRejectedUpdate(currentRecordTime))
       .thenReturn(commandRejectedUpdateMock)
 
@@ -537,6 +537,7 @@ class SequenceSpec
         recordTime = recordTime,
         divulgedContracts = List.empty,
         blindingInfo = None,
+        hostedWitnesses = Nil,
         contractMetadata = contractMetadata,
       )
 

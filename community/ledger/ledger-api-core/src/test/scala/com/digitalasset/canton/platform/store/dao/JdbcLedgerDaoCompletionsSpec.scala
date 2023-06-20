@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.dao
 
 import akka.stream.scaladsl.Sink
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.TransactionNodeStatistics
@@ -12,7 +12,6 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoCompletionsSpec.*
-import com.digitalasset.canton.tracing.TraceContext
 import com.google.rpc.status.Status as RpcStatus
 import io.grpc.Status
 import org.scalatest.flatspec.AsyncFlatSpec
@@ -25,7 +24,6 @@ import scala.concurrent.Future
 private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneElement {
   this: AsyncFlatSpec with Matchers with JdbcLedgerDaoSuite =>
 
-  import TraceContext.Implicits.Empty.*
   behavior of "JdbcLedgerDao (completions)"
 
   it should "return the expected completion for an accepted transaction" in {
@@ -44,9 +42,9 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
     } yield {
       offsetOf(response) shouldBe offset
 
-      val completion = response.completions.loneElement
+      val completion = response.completion.toList.head
 
-      completion.transactionId shouldBe tx.transactionId
+      completion.updateId shouldBe tx.transactionId
       completion.commandId shouldBe tx.commandId.value
       completion.status.value.code shouldBe io.grpc.Status.Code.OK.value()
     }
@@ -85,9 +83,9 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         )
         .runWith(Sink.head)
     } yield {
-      response1.completions.loneElement.commandId shouldBe tx.commandId.value
-      response2.completions.loneElement.commandId shouldBe tx.commandId.value
-      response3.completions.loneElement.commandId shouldBe tx.commandId.value
+      response1.completion.toList.head.commandId shouldBe tx.commandId.value
+      response2.completion.toList.head.commandId shouldBe tx.commandId.value
+      response3.completion.toList.head.commandId shouldBe tx.commandId.value
     }
   }
 
@@ -106,9 +104,9 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
     } yield {
       offsetOf(response) shouldBe offset
 
-      val completion = response.completions.loneElement
+      val completion = response.completion.toList.head
 
-      completion.transactionId shouldBe empty
+      completion.updateId shouldBe empty
       completion.commandId shouldBe expectedCmdId
       completion.status shouldBe Some(rejection.status)
     }
@@ -136,9 +134,9 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(from.lastOffset, to.lastOffset, applicationId, parties + "UNRELATED")
         .runWith(Sink.head)
     } yield {
-      response1.completions.loneElement.commandId shouldBe expectedCmdId
-      response2.completions.loneElement.commandId shouldBe expectedCmdId
-      response3.completions.loneElement.commandId shouldBe expectedCmdId
+      response1.completion.toList.head.commandId shouldBe expectedCmdId
+      response2.completion.toList.head.commandId shouldBe expectedCmdId
+      response3.completion.toList.head.commandId shouldBe expectedCmdId
     }
   }
 

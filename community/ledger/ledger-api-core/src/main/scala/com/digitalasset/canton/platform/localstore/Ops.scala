@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import com.daml.logging.LoggingContext
 import com.daml.metrics.DatabaseMetrics
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 
 import java.sql.Connection
@@ -26,7 +26,7 @@ object Ops {
       In case of Left value on that Either - transaction is rolled back.
      */
     def executeSqlEither[E, T](databaseMetrics: DatabaseMetrics)(sql: Connection => Either[E, T])(
-        implicit loggingContext: LoggingContext
+        implicit loggingContext: LoggingContextWithTrace
     ): Future[Either[E, T]] =
       dbDispatcher.executeSql(databaseMetrics)(rollbackOnLeft(sql))
   }

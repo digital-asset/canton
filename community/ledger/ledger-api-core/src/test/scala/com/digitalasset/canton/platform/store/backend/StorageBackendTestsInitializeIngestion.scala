@@ -7,6 +7,7 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.TransactionMetering
+import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.common.EventIdSourceForInformees
 import org.scalatest.Inside
 import org.scalatest.compatible.Assertion
@@ -338,9 +339,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       checkContentsBefore: () => Assertion,
       checkContentsAfter: () => Assertion,
   ): Assertion = {
+    val loggerFactory = SuppressingLogger(getClass)
     // Initialize
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
-    executeSql(backend.meteringParameter.initializeLedgerMeteringEnd(someLedgerMeteringEnd))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(
+      backend.meteringParameter.initializeLedgerMeteringEnd(someLedgerMeteringEnd, loggerFactory)
+    )
     // Start the indexer (a no-op in this case)
     val end1 = executeSql(backend.parameter.ledgerEnd)
     executeSql(backend.ingestion.deletePartiallyIngestedData(end1))
@@ -366,9 +370,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       lastEventSeqId: Long,
       checkContentsAfter: () => Assertion,
   ): Assertion = {
+    val loggerFactory = SuppressingLogger(getClass)
     // Initialize
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
-    executeSql(backend.meteringParameter.initializeLedgerMeteringEnd(someLedgerMeteringEnd))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(
+      backend.meteringParameter.initializeLedgerMeteringEnd(someLedgerMeteringEnd, loggerFactory)
+    )
     // Start the indexer (a no-op in this case)
     val end1 = executeSql(backend.parameter.ledgerEnd)
     executeSql(backend.ingestion.deletePartiallyIngestedData(end1))

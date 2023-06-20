@@ -228,6 +228,7 @@ object DomainId {
   // Instances for slick (db) queries
   implicit val getResultDomainId: GetResult[DomainId] =
     UniqueIdentifier.getResult.andThen(DomainId(_))
+
   implicit val getResultDomainIdO: GetResult[Option[DomainId]] =
     UniqueIdentifier.getResultO.andThen(_.map(DomainId(_)))
 

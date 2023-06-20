@@ -12,13 +12,14 @@ import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.daml.timer.Delayed
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.configuration.LedgerConfigurationSubscriptionFromIndexSpec.*
 import org.scalatest.Inside
 import org.scalatest.concurrent.Eventually
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
@@ -28,13 +29,14 @@ import scala.util.{Failure, Success}
 
 final class LedgerConfigurationSubscriptionFromIndexSpec
     extends AsyncWordSpec
-    with Matchers
     with Eventually
     with Inside
-    with AkkaBeforeAndAfterAll {
+    with AkkaBeforeAndAfterAll
+    with BaseTest {
 
   private implicit val resourceContext: ResourceContext = ResourceContext(executionContext)
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext =
+    LoggingContextWithTrace(traceContext)(LoggingContext.ForTesting)
 
   override implicit def patienceConfig: PatienceConfig =
     super.patienceConfig.copy(timeout = 1.second)
@@ -55,6 +57,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         scheduler = scheduler,
         materializer = materializer,
         servicesExecutionContext = system.dispatcher,
+        loggerFactory = loggerFactory,
       )
 
       subscriptionBuilder
@@ -101,6 +104,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         scheduler = scheduler,
         materializer = materializer,
         servicesExecutionContext = system.dispatcher,
+        loggerFactory = loggerFactory,
       )
 
       subscriptionBuilder
@@ -141,6 +145,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         scheduler = scheduler,
         materializer = materializer,
         servicesExecutionContext = system.dispatcher,
+        loggerFactory = loggerFactory,
       )
 
       subscriptionBuilder
@@ -196,6 +201,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         scheduler = scheduler,
         materializer = materializer,
         servicesExecutionContext = system.dispatcher,
+        loggerFactory = loggerFactory,
       )
 
       subscriptionBuilder
@@ -220,6 +226,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         scheduler = scheduler,
         materializer = materializer,
         servicesExecutionContext = system.dispatcher,
+        loggerFactory = loggerFactory,
       )
 
       subscriptionBuilder
@@ -243,6 +250,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         scheduler = scheduler,
         materializer = materializer,
         servicesExecutionContext = system.dispatcher,
+        loggerFactory = loggerFactory,
       )
       val resource = subscriptionBuilder
         .subscription(configurationLoadTimeout)
@@ -272,6 +280,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         scheduler = scheduler,
         materializer = materializer,
         servicesExecutionContext = system.dispatcher,
+        loggerFactory = loggerFactory,
       )
       val resource = subscriptionBuilder
         .subscription(configurationLoadTimeout)
@@ -295,14 +304,14 @@ object LedgerConfigurationSubscriptionFromIndexSpec {
 
   object EmptyIndexConfigManagementService extends IndexConfigManagementService {
     override def lookupConfiguration()(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Future[Option[(LedgerOffset.Absolute, Configuration)]] =
       Future.successful(None)
 
     override def configurationEntries(
         startExclusive: Option[LedgerOffset.Absolute]
     )(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Source[(LedgerOffset.Absolute, ConfigurationEntry), NotUsed] =
       Source.never
   }
@@ -312,14 +321,14 @@ object LedgerConfigurationSubscriptionFromIndexSpec {
       streamingConfigurations: List[(LedgerOffset.Absolute, ConfigurationEntry)],
   ) extends IndexConfigManagementService {
     override def lookupConfiguration()(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Future[Option[(LedgerOffset.Absolute, Configuration)]] =
       Future.successful(currentConfiguration)
 
     override def configurationEntries(
         startExclusive: Option[LedgerOffset.Absolute]
     )(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Source[(LedgerOffset.Absolute, ConfigurationEntry), NotUsed] = {
       val futureConfigurations = startExclusive match {
         case None => streamingConfigurations
@@ -332,14 +341,14 @@ object LedgerConfigurationSubscriptionFromIndexSpec {
   final class FailingIndexConfigManagementService(lookupFailure: Exception)
       extends IndexConfigManagementService {
     override def lookupConfiguration()(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Future[Option[(LedgerOffset.Absolute, Configuration)]] =
       Future.failed(lookupFailure)
 
     override def configurationEntries(
         startExclusive: Option[LedgerOffset.Absolute]
     )(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Source[(LedgerOffset.Absolute, ConfigurationEntry), NotUsed] =
       Source.never
   }

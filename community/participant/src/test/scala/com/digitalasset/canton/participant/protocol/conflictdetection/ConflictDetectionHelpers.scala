@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.syntax.functor.*
+import com.digitalasset.canton.BaseTest.testedProtocolVersion
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
@@ -27,7 +28,14 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{DomainId, MediatorId, MediatorRef}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, ScalaFuturesWithPatience}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutorService,
+  LfPartyId,
+  ScalaFuturesWithPatience,
+  TransferCounter,
+  TransferCounterO,
+}
 import org.scalactic.source.Position
 import org.scalatest.AsyncTestSuite
 import org.scalatest.exceptions.TestFailedException
@@ -41,9 +49,10 @@ private[protocol] trait ConflictDetectionHelpers {
 
   def parallelExecutionContext: ExecutionContext = executorService
 
-  def mkEmptyAcs(): ActiveContractStore = new InMemoryActiveContractStore(loggerFactory)(
-    parallelExecutionContext
-  )
+  def mkEmptyAcs(): ActiveContractStore =
+    new InMemoryActiveContractStore(testedProtocolVersion, loggerFactory)(
+      parallelExecutionContext
+    )
 
   def mkAcs(
       entries: (LfContractId, TimeOfChange, ActiveContractStore.Status)*
@@ -89,16 +98,23 @@ private[protocol] trait ConflictDetectionHelpers {
 
 private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatience {
 
+  private val initialTransferCounter: TransferCounterO =
+    TransferCounter.forCreatedContract(testedProtocolVersion)
+
   def insertEntriesAcs(
       acs: ActiveContractStore,
       entries: Seq[(LfContractId, TimeOfChange, ActiveContractStore.Status)],
   )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[Unit] = {
     Future
       .traverse(entries) {
-        case (coid, toc, Active) => acs.createContract(coid, toc).value
+        // TODO(#12754) allow to create contracts with positive transfer counters
+        case (coid, toc, Active(_transferCounter)) =>
+          acs
+            .createContract(coid, toc)
+            .value
         case (coid, toc, Archived) => acs.archiveContract(coid, toc).value
-        case (coid, toc, TransferredAway(targetDomain)) =>
-          acs.transferOutContract(coid, toc, targetDomain).value
+        case (coid, toc, TransferredAway(targetDomain, transferCounter)) =>
+          acs.transferOutContract(coid, toc, targetDomain, transferCounter).value
       }
       .void
   }
@@ -212,11 +228,36 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
     val contractHash = ExampleTransactionFactory.lfHash(0)
     CommitSet(
       archivals = arch.map(_ -> WithContractHash(Set.empty[LfPartyId], contractHash)).toMap,
-      creations = create.map(_ -> WithContractHash(ContractMetadata.empty, contractHash)).toMap,
-      transferOuts =
-        txOut.fmap(id => WithContractHash((TargetDomainId(id), Set.empty), contractHash)),
+      creations = create
+        .map(
+          _ -> WithContractHash(
+            CommitSet.CreationCommit(
+              ContractMetadata.empty,
+              initialTransferCounter,
+            ),
+            contractHash,
+          )
+        )
+        .toMap,
+      transferOuts = txOut.fmap(id =>
+        WithContractHash(
+          CommitSet.TransferOutCommit(
+            TargetDomainId(id),
+            Set.empty,
+            initialTransferCounter,
+          ),
+          contractHash,
+        )
+      ),
       transferIns = txIn.fmap(id =>
-        WithContractHash(WithContractMetadata(id, ContractMetadata.empty), contractHash)
+        WithContractHash(
+          CommitSet.TransferInCommit(
+            id,
+            ContractMetadata.empty,
+            initialTransferCounter,
+          ),
+          contractHash,
+        )
       ),
       keyUpdates = keys,
     )

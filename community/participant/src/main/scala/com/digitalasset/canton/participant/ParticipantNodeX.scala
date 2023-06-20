@@ -53,13 +53,13 @@ import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
 import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStoreId, TopologyStoreX}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SingleUseCell
+import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.grpc.ServerServiceDefinition
+import io.grpc.{BindableService, ServerServiceDefinition}
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 class ParticipantNodeBootstrapX(
     arguments: CantonNodeBootstrapCommonArguments[
@@ -207,24 +207,26 @@ class ParticipantNodeBootstrapX(
             .map(_.transaction.transaction.mapping.packageIds)
             .getOrElse(Seq.empty)
           nextSerial = currentMapping.map(_.transaction.transaction.serial + PositiveInt.one)
-          _ <- performUnlessClosingEitherUSF(functionFullName)(
-            topologyManager
-              .proposeAndAuthorize(
-                TopologyChangeOpX.Replace,
-                VettedPackagesX(
-                  participantId = participantId,
-                  domainId = None,
-                  (currentPackages ++ packages).distinct,
-                ),
-                serial = nextSerial,
-                // TODO(#11255) auto-determine signing keys
-                signingKeys = Seq(participantId.uid.namespace.fingerprint),
-                parameters.initialProtocolVersion,
-                expectFullAuthorization = true,
-              )
-              .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
-              .map(_ => ())
-          )
+          _ <- EitherTUtil.ifThenET(packages.diff(currentPackages).nonEmpty) {
+            performUnlessClosingEitherUSF(functionFullName)(
+              topologyManager
+                .proposeAndAuthorize(
+                  TopologyChangeOpX.Replace,
+                  VettedPackagesX(
+                    participantId = participantId,
+                    domainId = None,
+                    (currentPackages ++ packages).distinct,
+                  ),
+                  serial = nextSerial,
+                  // TODO(#11255) auto-determine signing keys
+                  signingKeys = Seq(participantId.uid.namespace.fingerprint),
+                  parameters.initialProtocolVersion,
+                  expectFullAuthorization = true,
+                )
+                .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
+                .map(_ => ())
+            )
+          }
         } yield ()
       }
 
@@ -393,7 +395,7 @@ object ParticipantNodeBootstrapX {
         scheduler: ScheduledExecutorService,
         actorSystem: ActorSystem,
         executionSequencerFactory: ExecutionSequencerFactory,
-    ): ParticipantNodeBootstrapX =
+    ): ParticipantNodeBootstrapX = {
       new ParticipantNodeBootstrapX(
         arguments,
         createEngine(arguments),
@@ -405,6 +407,15 @@ object ParticipantNodeBootstrapX {
         ledgerApiServerFactory = ledgerApiServerFactory,
         skipRecipientsCheck = true,
       )
+    }
+
+    override protected def additionalGrpcServices(arguments: Arguments)(implicit
+        executionContext: ExecutionContext,
+        actorSystem: ActorSystem,
+    ): (CantonSyncService, Eval[ParticipantNodePersistentState]) => List[BindableService] =
+      AdditionalMultiDomainServices.get(arguments)
+
+    override protected def multiDomainEnabledForLedgerApiServer: Boolean = false
   }
 }
 
@@ -418,14 +429,14 @@ class ParticipantNodeX(
     val cryptoPureApi: CryptoPureApi,
     identityPusher: ParticipantTopologyDispatcherCommon,
     private[canton] val ips: IdentityProvidingServiceClient,
-    private[canton] val sync: CantonSyncService,
+    override private[canton] val sync: CantonSyncService,
     val adminToken: CantonAdminToken,
     val recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     val schedulers: SchedulersWithPruning,
     val loggerFactory: NamedLoggerFactory,
     healthData: => Seq[ComponentStatus],
-) extends ParticipantNodeCommon {
+) extends ParticipantNodeCommon(sync) {
 
   override def close(): Unit = () // closing is done in the bootstrap class
 

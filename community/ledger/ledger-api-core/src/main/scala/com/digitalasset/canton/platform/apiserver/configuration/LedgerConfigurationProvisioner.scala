@@ -7,16 +7,21 @@ import akka.actor.Scheduler
 import com.daml.api.util.TimeProvider
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.entries.LoggingEntry
 import com.daml.tracing.{SpanKind, SpanName, Telemetry}
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace.{
+  implicitExtractTraceContext,
+  withEnrichedLoggingContext,
+}
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.configuration.InitialLedgerConfiguration
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{Duration as ScalaDuration}
+import scala.concurrent.duration.Duration as ScalaDuration
 import scala.jdk.FutureConverters.CompletionStageOps
 import scala.util.{Failure, Success}
 
@@ -32,8 +37,8 @@ final class LedgerConfigurationProvisioner(
     submissionIdGenerator: SubmissionIdGenerator,
     scheduler: Scheduler,
     telemetry: Telemetry,
-) {
-  private val logger = ContextualizedLogger.get(getClass)
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   /** Submits the initial configuration after the specified delay.
     *
@@ -48,7 +53,7 @@ final class LedgerConfigurationProvisioner(
       initialLedgerConfiguration: InitialLedgerConfiguration
   )(implicit
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): ResourceOwner[Unit] =
     ResourceOwner
       .forCancellable(() =>
@@ -65,32 +70,36 @@ final class LedgerConfigurationProvisioner(
 
   private def submitImmediately(
       initialConfiguration: Configuration
-  )(implicit executionContext: ExecutionContext, loggingContext: LoggingContext): Unit =
+  )(implicit executionContext: ExecutionContext, loggingContext: LoggingContextWithTrace): Unit =
     if (ledgerConfigurationSubscription.latestConfiguration().isEmpty) {
       val submissionId = submissionIdGenerator.generate()
-      withEnrichedLoggingContext("submissionId" -> submissionId) { implicit loggingContext =>
-        logger.info("No ledger configuration found, submitting an initial configuration.")
-        telemetry
-          .runFutureInSpan(
-            SpanName.LedgerConfigProviderInitialConfig,
-            SpanKind.Internal,
-          ) { implicit telemetryContext =>
-            val maxRecordTime =
-              Timestamp.assertFromInstant(timeProvider.getCurrentTime.plusSeconds(60))
-            writeService
-              .submitConfiguration(maxRecordTime, submissionId, initialConfiguration)
-              .asScala
-          }
-          .onComplete {
-            case Success(state.SubmissionResult.Acknowledged) =>
-              logger.info("Initial configuration submission was successful.")
-            case Success(result: state.SubmissionResult.SynchronousError) =>
-              withEnrichedLoggingContext("error" -> result) { implicit loggingContext =>
-                logger.warn("Initial configuration submission failed.")
-              }
-            case Failure(exception) =>
-              logger.error("Initial configuration submission failed.", exception)
-          }
+      withEnrichedLoggingContext(("submissionId" -> submissionId): LoggingEntry) {
+        implicit loggingContext =>
+          logger.info("No ledger configuration found, submitting an initial configuration.")
+          telemetry
+            .runFutureInSpan(
+              SpanName.LedgerConfigProviderInitialConfig,
+              SpanKind.Internal,
+            ) { implicit telemetryContext =>
+              val maxRecordTime =
+                Timestamp.assertFromInstant(timeProvider.getCurrentTime.plusSeconds(60))
+              writeService
+                .submitConfiguration(maxRecordTime, submissionId, initialConfiguration)(
+                  TraceContext.fromDamlTelemetryContext(telemetryContext)
+                )
+                .asScala
+            }
+            .onComplete {
+              case Success(state.SubmissionResult.Acknowledged) =>
+                logger.info("Initial configuration submission was successful.")
+              case Success(result: state.SubmissionResult.SynchronousError) =>
+                withEnrichedLoggingContext(("error" -> result): LoggingEntry) {
+                  implicit loggingContext =>
+                    logger.warn("Initial configuration submission failed.")
+                }
+              case Failure(exception) =>
+                logger.error("Initial configuration submission failed.", exception)
+            }
       }
     }
 }

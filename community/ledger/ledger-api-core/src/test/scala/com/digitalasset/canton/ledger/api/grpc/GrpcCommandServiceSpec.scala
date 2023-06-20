@@ -14,9 +14,11 @@ import com.daml.ledger.api.v1.command_service.{
 import com.daml.ledger.api.v1.commands.{Command, CreateCommand, DisclosedContract}
 import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
+import com.daml.tracing.DefaultOpenTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.google.protobuf.empty.Empty
+import io.opentelemetry.sdk.OpenTelemetrySdk
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -31,17 +33,18 @@ class GrpcCommandServiceSpec
     extends AsyncWordSpec
     with MockitoSugar
     with Matchers
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
 
   import GrpcCommandServiceSpec.*
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private val telemetry = new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build())
 
   "GrpcCommandService" should {
     "generate a submission ID if it's empty" in {
       val submissionCounter = new AtomicInteger
 
-      val mockCommandService = mock[CommandService with AutoCloseable]
+      val mockCommandService = mock[CommandService & AutoCloseable]
       when(mockCommandService.submitAndWait(any[SubmitAndWaitRequest]))
         .thenReturn(Future.successful(Empty.defaultInstance))
       when(mockCommandService.submitAndWaitForTransaction(any[SubmitAndWaitRequest]))
@@ -62,6 +65,8 @@ class GrpcCommandServiceSpec
             s"$submissionIdPrefix${submissionCounter.incrementAndGet()}"
           ),
         explicitDisclosureUnsafeEnabled = false,
+        telemetry = telemetry,
+        loggerFactory = loggerFactory,
       )
 
       for {
@@ -89,7 +94,7 @@ class GrpcCommandServiceSpec
       }
     }
     "reject submission on explicit disclosure disabled with provided disclosed contracts" in {
-      val mockCommandService = mock[CommandService with AutoCloseable]
+      val mockCommandService = mock[CommandService & AutoCloseable]
 
       val grpcCommandService = new GrpcCommandService(
         mockCommandService,
@@ -99,13 +104,15 @@ class GrpcCommandServiceSpec
         maxDeduplicationDuration = () => Some(Duration.ZERO),
         generateSubmissionId = () => Ref.SubmissionId.assertFromString(s"submissionId"),
         explicitDisclosureUnsafeEnabled = false,
+        telemetry = telemetry,
+        loggerFactory = loggerFactory,
       )
 
       val submissionWithDisclosedContracts = aSubmitAndWaitRequestWithNoSubmissionId.update(
         _.commands.disclosedContracts.set(Seq(DisclosedContract()))
       )
 
-      def expectFailedOnProvidedDisclosedContracts(f: Future[_]): Future[Assertion] = f.transform {
+      def expectFailedOnProvidedDisclosedContracts(f: Future[?]): Future[Assertion] = f.transform {
         case Failure(exception)
             if exception.getMessage.contains(
               "feature in development: disclosed_contracts should not be set"

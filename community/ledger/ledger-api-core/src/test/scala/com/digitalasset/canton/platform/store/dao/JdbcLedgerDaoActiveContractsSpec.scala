@@ -5,8 +5,8 @@ package com.digitalasset.canton.platform.store.dao
 
 import akka.NotUsed
 import akka.stream.scaladsl.{Sink, Source}
-import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
 import com.daml.ledger.api.v1.event.CreatedEvent
+import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.digitalasset.canton.platform.TemplatePartiesFilter
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
@@ -46,6 +46,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               witnessTemplateIdFilter =
                 Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
       activeContractsAfter <- activeContractsOf(
@@ -58,6 +59,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               witnessTemplateIdFilter =
                 Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -85,6 +87,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               witnessTemplateIdFilter =
                 Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
       (_, _) <- store(singleCreate)
@@ -103,6 +106,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               witnessTemplateIdFilter =
                 Map(alice -> Set.empty, bob -> Set.empty, charlie -> Set.empty),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -134,6 +138,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               verbose = true,
               witnessTemplateIdFilter = Map(party1 -> Set(otherTemplateId)),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -175,6 +180,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 party2 -> Set(otherTemplateId),
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -224,6 +230,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 party2 -> Set(otherTemplateId),
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -272,6 +279,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 party2 -> Set.empty,
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -326,6 +334,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 party2 -> Set.empty,
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultUnknownParty <- activeContractsOf(
@@ -346,6 +355,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 unknownParty -> Set.empty,
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultUnknownTemplate <- activeContractsOf(
@@ -366,6 +376,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 party2 -> Set.empty,
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultUnknownPartyAndTemplate <- activeContractsOf(
@@ -387,6 +398,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 unknownParty -> Set.empty,
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
       resultUnknownsOnly <- activeContractsOf(
@@ -405,6 +417,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 unknownParty -> Set(unknownTemplate)
               ),
             ),
+            multiDomainEnabled = false,
           )
       )
     } yield {
@@ -428,6 +441,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
           filter = TemplatePartiesFilter(Map.empty, Set(alice)),
           eventProjectionProperties =
             EventProjectionProperties(verbose = true, Map(alice -> Set.empty)),
+          multiDomainEnabled = false,
         )
         .runWith(Sink.seq)
 
@@ -442,5 +456,5 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
   private def activeContractsOf(
       source: Source[GetActiveContractsResponse, NotUsed]
   ): Future[Seq[CreatedEvent]] =
-    source.runWith(Sink.seq).map(_.flatMap(_.activeContracts))
+    source.runWith(Sink.seq).map(_.flatMap(_.contractEntry.activeContract.flatMap(_.createdEvent)))
 }

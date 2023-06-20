@@ -6,18 +6,18 @@ package com.digitalasset.canton.platform.apiserver.tls
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.TestResourceContext
 import com.daml.testing.utils.TestResourceUtils
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.apiserver.LedgerApiService
 import org.mockito.MockitoSugar
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 final class TlsCertificateRevocationCheckingSpec
     extends AsyncWordSpec
-    with Matchers
     with MockitoSugar
     with AkkaBeforeAndAfterAll
     with TestResourceContext
-    with OcspResponderFixture {
+    with OcspResponderFixture
+    with BaseTest {
   import TlsCertificateRevocationCheckingSpec.resource
 
   val serverCrt = resource("server.crt")
@@ -41,6 +41,7 @@ final class TlsCertificateRevocationCheckingSpec
     "certificate revocation checking is enabled" should {
       "allow TLS connections with valid certificates" in {
         TlsFixture(
+          loggerFactory,
           tlsEnabled = true,
           serverCrt,
           serverKey,
@@ -55,6 +56,7 @@ final class TlsCertificateRevocationCheckingSpec
 
       "block TLS connections with revoked certificates" in {
         TlsFixture(
+          loggerFactory,
           tlsEnabled = true,
           serverCrt,
           serverKey,
@@ -77,6 +79,7 @@ final class TlsCertificateRevocationCheckingSpec
     "certificate revocation checking is not enabled" should {
       "allow TLS connections with valid certificates" in {
         TlsFixture(
+          loggerFactory,
           tlsEnabled = false,
           serverCrt,
           serverKey,
@@ -90,6 +93,7 @@ final class TlsCertificateRevocationCheckingSpec
 
       "allow TLS connections with revoked certificates" in {
         TlsFixture(
+          loggerFactory,
           tlsEnabled = false,
           serverCrt,
           serverKey,

@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.ledger.client.services.commands.tracker
 
-import com.daml.error.{ContextualizedErrorLogger, GrpcStatuses}
+import com.daml.error.GrpcStatuses
 import com.daml.grpc.GrpcStatus
 import com.daml.ledger.api.v1.completion.Completion
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.*
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.google.protobuf.any.Any
 import com.google.rpc.error_details.{ErrorInfo, RequestInfo}
 import com.google.rpc.status.Status
@@ -16,12 +16,11 @@ import io.grpc
 import io.grpc.Status.Code
 import io.grpc.Status.Code.OK
 import io.grpc.protobuf
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.jdk.CollectionConverters.*
 
-class CompletionResponseTest extends AnyWordSpec with Matchers {
+class CompletionResponseTest extends AnyWordSpec with BaseTest {
 
   "Completion response" when {
 
@@ -71,8 +70,6 @@ class CompletionResponseTest extends AnyWordSpec with Matchers {
     }
 
     "convert to exception" should {
-      implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-        DamlContextualizedErrorLogger.forTesting(getClass)
 
       "convert queue completion failure" in {
         val exception =

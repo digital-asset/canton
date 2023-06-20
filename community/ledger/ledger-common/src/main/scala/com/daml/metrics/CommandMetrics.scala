@@ -24,6 +24,15 @@ class CommandMetrics(
   val validation: Timer = factory.timer(prefix :+ "validation")
 
   @MetricDoc.Tag(
+    summary = "The time to validate a reassignment command.",
+    description = """The time to validate a submitted Daml command before is fed to the
+                    |interpreter.""",
+    qualification = Debug,
+  )
+  @nowarn("cat=deprecation")
+  val reassignmentValidation: Timer = factory.timer(prefix :+ "reassignment_validation")
+
+  @MetricDoc.Tag(
     summary = "The time to fully process a Daml command.",
     description = """The time to validate and interpret a command before it is handed over to the
                     |synchronization services to be finalized (either committed or rejected).""",

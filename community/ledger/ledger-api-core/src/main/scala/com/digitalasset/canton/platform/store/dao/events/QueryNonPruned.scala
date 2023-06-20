@@ -3,9 +3,14 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
 
 import java.sql.Connection
@@ -17,15 +22,15 @@ trait QueryNonPruned {
       error: Offset => String,
   )(implicit
       conn: Connection,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): T
 }
 
 final case class QueryNonPrunedImpl(
-    storageBackend: ParameterStorageBackend
-) extends QueryNonPruned {
-
-  private val logger = ContextualizedLogger.get(getClass)
+    storageBackend: ParameterStorageBackend,
+    val loggerFactory: NamedLoggerFactory,
+) extends QueryNonPruned
+    with NamedLogging {
 
   /** Runs a query and throws an error if the query accesses pruned offsets.
     *
@@ -45,7 +50,7 @@ final case class QueryNonPrunedImpl(
   override def executeSql[T](query: => T, minOffsetExclusive: Offset, error: Offset => String)(
       implicit
       conn: Connection,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): T = {
     val result = query
 
@@ -62,7 +67,7 @@ final case class QueryNonPrunedImpl(
             cause = error(pruningOffsetUpToInclusive),
             earliestOffset = pruningOffsetUpToInclusive.toHexString,
           )(
-            new DamlContextualizedErrorLogger(logger, loggingContext, None)
+            ErrorLoggingContext(logger, loggingContext)
           )
           .asGrpcError
     }

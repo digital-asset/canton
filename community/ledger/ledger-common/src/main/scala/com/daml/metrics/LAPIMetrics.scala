@@ -50,6 +50,24 @@ class LAPIMetrics(
     val transactions: Counter = factory.counter(prefix :+ "transactions_sent")
 
     @MetricDoc.Tag(
+      summary = "The number of the update trees sent over the ledger api.",
+      description = """The total number of the update trees sent over the ledger api streams
+                      |to all clients.""",
+      qualification = Traffic,
+    )
+    @nowarn("cat=deprecation")
+    val updateTrees: Counter = factory.counter(prefix :+ "update_trees_sent")
+
+    @MetricDoc.Tag(
+      summary = "The number of the flat updates sent over the ledger api.",
+      description = """The total number of the flat updates sent over the ledger api streams to
+                      |all clients.""",
+      qualification = Traffic,
+    )
+    @nowarn("cat=deprecation")
+    val updates: Counter = factory.counter(prefix :+ "transactions_sent")
+
+    @MetricDoc.Tag(
       summary = "The number of the command completions sent by the ledger api.",
       description = """The total number of completions sent over the ledger api streams to all
                       |clients.""",

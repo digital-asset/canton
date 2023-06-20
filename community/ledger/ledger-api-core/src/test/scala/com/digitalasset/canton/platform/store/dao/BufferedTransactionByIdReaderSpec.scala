@@ -6,8 +6,9 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedTransactionByIdReader.{
   FetchTransactionByIdFromPersistence,
@@ -16,14 +17,13 @@ import com.digitalasset.canton.platform.store.dao.BufferedTransactionByIdReader.
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import org.mockito.MockitoSugar
 import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Future
 
-class BufferedTransactionByIdReaderSpec extends AsyncFlatSpec with MockitoSugar with Matchers {
+class BufferedTransactionByIdReaderSpec extends AsyncFlatSpec with MockitoSugar with BaseTest {
   private val className = classOf[BufferedTransactionByIdReader[_]].getSimpleName
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext = LoggingContextWithTrace(loggerFactory)
 
   private val requestingParties = Set("p1", "p2").map(Ref.Party.assertFromString)
 
@@ -51,7 +51,7 @@ class BufferedTransactionByIdReaderSpec extends AsyncFlatSpec with MockitoSugar 
     override def apply(
         transactionId: String,
         requestingParties: Set[Party],
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace,
     ): Future[Option[String]] =
       transactionId match {
         case `notBufferedTransactionId` => Future.successful(Some(notBufferedTransactionId))
@@ -100,5 +100,6 @@ class BufferedTransactionByIdReaderSpec extends AsyncFlatSpec with MockitoSugar 
       offset = Offset.beforeBegin,
       events = Vector(null),
       completionDetails = None,
+      domainId = None,
     )
 }

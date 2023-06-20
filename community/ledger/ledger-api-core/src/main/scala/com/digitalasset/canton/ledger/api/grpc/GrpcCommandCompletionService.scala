@@ -9,7 +9,6 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.command_completion_service.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
-import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.services.CommandCompletionService
@@ -34,7 +33,6 @@ class GrpcCommandCompletionService(
     mat: Materializer,
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends CommandCompletionServiceGrpc.CommandCompletionService
     with StreamingServiceLifecycleManagement
     with NamedLogging {
@@ -42,7 +40,7 @@ class GrpcCommandCompletionService(
   protected implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
     ErrorLoggingContext(
       logger,
-      loggerFactory.properties ++ loggingContext.toPropertiesMap,
+      loggerFactory.properties,
       TraceContext.empty,
     )
 
@@ -51,7 +49,7 @@ class GrpcCommandCompletionService(
       responseObserver: StreamObserver[CompletionStreamResponse],
   ): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(telemetry)(loggingContext)
+      LoggingContextWithTrace(loggerFactory, telemetry)
     registerStream(responseObserver) {
       validator
         .validateGrpcCompletionStreamRequest(request)(
@@ -73,7 +71,7 @@ class GrpcCommandCompletionService(
 
   override def completionEnd(request: CompletionEndRequest): Future[CompletionEndResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
-      LoggingContextWithTrace(telemetry)(loggingContext)
+      LoggingContextWithTrace(loggerFactory, telemetry)
     validator
       .validateCompletionEndRequest(request)(
         ErrorLoggingContext(

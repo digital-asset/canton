@@ -7,13 +7,13 @@ import com.codahale.metrics.MetricRegistry
 import com.daml.buildinfo.BuildInfo
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.tracing.DamlTracerName
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.configuration.{
   AcsStreamsConfig,
@@ -34,20 +34,21 @@ import scala.concurrent.{ExecutionContext, Future}
 object IndexMetadata {
 
   def read(
-      jdbcUrl: String
+      jdbcUrl: String,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): ResourceOwner[IndexMetadata] = {
     for {
-      dao <- ownDao(jdbcUrl)
+      dao <- ownDao(jdbcUrl, loggerFactory)
       matadata <- ResourceOwner.forFuture(() => metadata(dao))
     } yield matadata
   }
 
   private def metadata(dao: LedgerReadDao)(implicit
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[IndexMetadata] = {
     for {
       ledgerId <- dao.lookupLedgerId()
@@ -60,10 +61,10 @@ object IndexMetadata {
   }
 
   private def ownDao(
-      jdbcUrl: String
+      jdbcUrl: String,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
-      executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+      executionContext: ExecutionContext
   ) = {
     val registry = new MetricRegistry
     val metrics = new Metrics(
@@ -82,6 +83,7 @@ object IndexMetadata {
             connectionTimeout = 250.millis,
           ),
         ),
+        loggerFactory = loggerFactory,
       )
       .map(dbSupport =>
         JdbcLedgerDao.read(
@@ -99,6 +101,7 @@ object IndexMetadata {
           globalMaxEventIdQueries = 20,
           globalMaxEventPayloadQueries = 10,
           tracer = GlobalOpenTelemetry.getTracer(DamlTracerName),
+          loggerFactory = loggerFactory,
         )
       )
   }

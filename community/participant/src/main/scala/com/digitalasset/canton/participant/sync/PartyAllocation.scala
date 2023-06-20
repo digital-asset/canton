@@ -8,7 +8,6 @@ import cats.implicits.showInterpolator
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.participant.state.v2.*
@@ -51,10 +50,7 @@ private[sync] class PartyAllocation(
       hint: Option[LfPartyId],
       displayName: Option[String],
       rawSubmissionId: LedgerSubmissionId,
-  )(implicit telemetryContext: TelemetryContext): CompletionStage[SubmissionResult] = {
-    implicit val traceContext: TraceContext =
-      TraceContext.fromDamlTelemetryContext(telemetryContext)
-
+  )(implicit traceContext: TraceContext): CompletionStage[SubmissionResult] = {
     withSpan("CantonSyncService.allocateParty") { implicit traceContext => span =>
       span.setAttribute("submission_id", rawSubmissionId)
 

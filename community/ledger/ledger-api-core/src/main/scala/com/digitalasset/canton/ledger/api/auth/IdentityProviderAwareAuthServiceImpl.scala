@@ -6,9 +6,10 @@ package com.digitalasset.canton.ledger.api.auth
 import com.auth0.jwt.JWT
 import com.daml.jwt.domain.DecodedJwt
 import com.daml.jwt.{Error as JwtError, JwtFromBearerHeader, JwtVerifier}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.auth.interceptor.IdentityProviderAwareAuthService
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import io.grpc.Metadata
 import spray.json.*
 
@@ -17,14 +18,15 @@ import scala.concurrent.{ExecutionContext, Future}
 class IdentityProviderAwareAuthServiceImpl(
     identityProviderConfigLoader: IdentityProviderConfigLoader,
     jwtVerifierLoader: JwtVerifierLoader,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit
-    executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
-) extends IdentityProviderAwareAuthService {
+    executionContext: ExecutionContext
+) extends IdentityProviderAwareAuthService
+    with NamedLogging {
 
-  private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
-
-  def decodeMetadata(headers: Metadata): Future[ClaimSet] =
+  def decodeMetadata(
+      headers: Metadata
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ClaimSet] =
     getAuthorizationHeader(headers) match {
       case None => Future.successful(ClaimSet.Unauthenticated)
       case Some(header) =>
@@ -41,7 +43,7 @@ class IdentityProviderAwareAuthServiceImpl(
 
   private def parseJWTPayload(
       header: String
-  ): Future[ClaimSet] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ClaimSet] =
     for {
       token <- toFuture(JwtFromBearerHeader(header))
       decodedJWT <- Future(JWT.decode(token))
@@ -56,7 +58,7 @@ class IdentityProviderAwareAuthServiceImpl(
       token: String,
       issuer: Option[String],
       keyId: Option[String],
-  ): Future[ClaimSet] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ClaimSet] = {
     issuer match {
       case None => Future.successful(ClaimSet.Unauthenticated)
       case Some(issuer) =>

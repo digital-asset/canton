@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.console.commands
 
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.{
   TopologyAdminCommands,
   TopologyAdminCommandsX,
 }
 import com.digitalasset.canton.admin.api.client.data.topologyx.*
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.{
   CommandErrors,
@@ -31,6 +33,7 @@ import com.digitalasset.canton.topology.store.{StoredTopologyTransactionsX, Time
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -263,7 +266,9 @@ class TopologyAdministrationGroupX(
                       ownersNE.map(Namespace(_)),
                     ),
                   signedBy = signedBy.toList,
-                  serial,
+                  serial = serial,
+                  change = TopologyChangeOpX.Replace,
+                  mustFullyAuthorize = true,
                 )
               }
             )
@@ -396,7 +401,76 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Manage party to participant mappings")
   @Help.Group("Party to participant mappings")
   object party_to_participant_mappings extends Helpful {
-    // TODO(#11255): implement write service
+    // TODO(#11255): implement properly
+    def proposeDelta(
+        party: PartyId,
+        adds: List[(ParticipantId, ParticipantPermissionX)] = Nil,
+        removes: List[ParticipantId] = Nil,
+        domainId: Option[DomainId] = None,
+        serial: Option[PositiveInt] = None,
+    ) = {
+
+      val currentO = list(
+        filterStore = "Authorized",
+        filterParty = party.filterString,
+      ).groupBy(_.item.domainId).get(domainId).flatMap(_.maxByOption(_.context.serial))
+
+      val (newDomainId, existingPermissions, newSerial) = currentO match {
+        case Some(current) =>
+          val newDomainId = current.item.domainId
+
+          val currentPermissions =
+            current.item.participants.map(p => p.participantId -> p.permission).toMap
+
+          (newDomainId, currentPermissions, Some(current.context.serial + PositiveInt.one))
+
+        case None =>
+          (domainId, Map.empty[ParticipantId, ParticipantPermissionX], serial)
+      }
+
+      val newPermissions = new PartyToParticipantComputations(loggerFactory)
+        .computeNewPermissions(
+          existingPermissions = existingPermissions,
+          adds = adds,
+          removes = removes,
+        )(TraceContext.empty)
+        .valueOr(err => throw new RuntimeException(err))
+
+      propose(
+        party = party,
+        newParticipants = newPermissions.toSeq,
+        domainId = newDomainId,
+        serial = newSerial,
+      )
+    }
+
+    // TODO(#11255): implement write service properly
+    def propose(
+        party: PartyId,
+        newParticipants: Seq[(ParticipantId, ParticipantPermissionX)],
+        domainId: Option[DomainId] = None,
+        serial: Option[PositiveInt] = None,
+    ): ConsoleCommandResult[SignedTopologyTransactionX[TopologyChangeOpX, PartyToParticipantX]] = {
+      val op = NonEmpty.from(newParticipants) match {
+        case Some(_) => TopologyChangeOpX.Replace
+        case None => TopologyChangeOpX.Remove
+      }
+
+      val command = TopologyAdminCommandsX.Write.Propose(
+        mapping = PartyToParticipantX(
+          partyId = party,
+          domainId = domainId,
+          threshold = PositiveInt.one, // Increase this to switch to a real consortium party
+          participants = newParticipants.map((HostingParticipant.apply _) tupled),
+          groupAddressing = false,
+        ),
+        signedBy = Seq(instance.id.uid.namespace.fingerprint),
+        serial = serial,
+        change = op,
+      )
+
+      adminCommand(command)
+    }
 
     def list(
         filterStore: String = "",
@@ -466,7 +540,33 @@ class TopologyAdministrationGroupX(
   @Help.Summary("Inspect participant domain states")
   @Help.Group("Participant Domain States")
   object participant_domain_permissions extends Helpful {
-    // TODO(#11255): implement write service
+    // TODO(#11255): implement write service properly
+    def authorize(
+        domainId: DomainId,
+        participant: ParticipantId,
+        permission: ParticipantPermissionX,
+        trustLevel: TrustLevelX = TrustLevelX.Ordinary,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): ConsoleCommandResult[
+      SignedTopologyTransactionX[TopologyChangeOpX, ParticipantDomainPermissionX]
+    ] = {
+      val cmd = TopologyAdminCommandsX.Write.Propose(
+        mapping = ParticipantDomainPermissionX(
+          domainId = domainId,
+          participantId = participant,
+          permission = permission,
+          trustLevel = trustLevel,
+          limits = None,
+          loginAfter = None,
+        ),
+        signedBy = Seq(instance.id.uid.namespace.fingerprint),
+        serial = None,
+      )
+
+      synchronisation.run(synchronize)(adminCommand(cmd))
+    }
 
     def list(
         filterStore: String = "",
@@ -490,6 +590,20 @@ class TopologyAdministrationGroupX(
           filterUid,
         )
       )
+    }
+  }
+
+  @Help.Summary("Inspect participant domain states")
+  @Help.Group("Participant Domain States")
+  object participant_domain_states extends Helpful {
+    @Help.Summary("Returns true if the given participant is currently active on the given domain")
+    @Help.Description(
+      """Active means that the participant has been granted at least observation rights on the domain
+         |and that the participant has registered a domain trust certificate"""
+    )
+    def active(domainId: DomainId, participantId: ParticipantId): Boolean = {
+      // TODO(#11255) Should we check the other side (domain accepts participant)?
+      domain_trust_certificates.active(domainId, participantId)
     }
   }
 
@@ -544,7 +658,9 @@ class TopologyAdministrationGroupX(
                 newTotalTrafficAmount,
               ),
             signedBy = signedBy.toList,
-            serial,
+            serial = serial,
+            change = TopologyChangeOpX.Replace,
+            mustFullyAuthorize = true,
           )
         )
       }
@@ -705,10 +821,12 @@ class TopologyAdministrationGroupX(
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommandsX.Write.Propose(
-            MediatorDomainStateX
+            mapping = MediatorDomainStateX
               .create(domainId, group, threshold, active, passive),
-            signedBy.toList,
-            serial,
+            signedBy = signedBy.toList,
+            serial = serial,
+            change = TopologyChangeOpX.Replace,
+            mustFullyAuthorize = true,
           )
         )
       }
@@ -754,10 +872,11 @@ class TopologyAdministrationGroupX(
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommandsX.Write.Propose(
-            SequencerDomainStateX
-              .create(domainId, threshold, active, passive),
-            signedBy.toList,
-            serial,
+            mapping = SequencerDomainStateX.create(domainId, threshold, active, passive),
+            signedBy = signedBy.toList,
+            serial = serial,
+            change = TopologyChangeOpX.Replace,
+            mustFullyAuthorize = true,
           )
         )
       }

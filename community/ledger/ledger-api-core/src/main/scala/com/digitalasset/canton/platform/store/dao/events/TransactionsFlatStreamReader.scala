@@ -7,14 +7,15 @@ import akka.NotUsed
 import akka.stream.Attributes
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v1.event.Event
-import com.daml.ledger.api.v1.transaction_service.GetTransactionsResponse
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.Spans
 import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.configuration.TransactionFlatStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
@@ -24,6 +25,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
 }
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPaginationState
 import com.digitalasset.canton.platform.store.dao.events.EventsTable.TransactionConversions
+import com.digitalasset.canton.platform.store.dao.events.ReassignmentStreamReader.ReassignmentStreamQueryParams
 import com.digitalasset.canton.platform.store.dao.{
   DbDispatcher,
   EventProjectionProperties,
@@ -35,6 +37,7 @@ import com.digitalasset.canton.platform.store.utils.{
   Telemetry,
 }
 import com.digitalasset.canton.platform.{ApiOffset, TemplatePartiesFilter}
+import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.mutable.ArrayBuffer
@@ -51,11 +54,13 @@ class TransactionsFlatStreamReader(
     lfValueTranslation: LfValueTranslation,
     metrics: Metrics,
     tracer: Tracer,
-)(implicit executionContext: ExecutionContext) {
+    reassignmentStreamReader: ReassignmentStreamReader,
+    val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends NamedLogging {
   import TransactionsReader.*
   import config.*
 
-  private val logger = ContextualizedLogger.get(getClass)
   private val dbMetrics = metrics.daml.index.db
 
   private val orderBySequentialEventId =
@@ -65,7 +70,10 @@ class TransactionsFlatStreamReader(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, GetTransactionsResponse), NotUsed] = {
+      multiDomainEnabled: Boolean,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val span =
       Telemetry.Transactions.createSpan(
         tracer,
@@ -81,13 +89,20 @@ class TransactionsFlatStreamReader(
       queryRange,
       filteringConstraints,
       eventProjectionProperties,
+      multiDomainEnabled,
     )
       .wireTap(_ match {
         case (_, getTransactionsResponse) =>
-          getTransactionsResponse.transactions.foreach { transaction =>
-            val event =
-              tracing.Event("transaction", TraceIdentifiers.fromTransaction(transaction))
-            Spans.addEventToSpan(event, span)
+          getTransactionsResponse.update match {
+            case GetUpdatesResponse.Update.Transaction(value) =>
+              val event = tracing.Event("transaction", TraceIdentifiers.fromTransaction(value))
+              Spans.addEventToSpan(event, span)
+            case GetUpdatesResponse.Update.Reassignment(reassignment) =>
+              Spans.addEventToSpan(
+                tracing.Event("transaction", TraceIdentifiers.fromReassignment(reassignment)),
+                span,
+              )
+            case _ => ()
           }
       })
       .watchTermination()(endSpanOnTermination(span))
@@ -97,19 +112,26 @@ class TransactionsFlatStreamReader(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, GetTransactionsResponse), NotUsed] = {
+      multiDomainEnabled: Boolean,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val createEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdCreateQueries, executionContext)
     val consumingEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdConsumingQueries, executionContext)
     val payloadQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelPayloadQueries, executionContext)
+    val deserializationQueriesLimiter =
+      new QueueBasedConcurrencyLimiter(transactionsProcessingParallelism, executionContext)
     val decomposedFilters = FilterUtils.decomposeFilters(filteringConstraints).toVector
     val idPageSizing = IdPageSizing.calculateFrom(
       maxIdPageSize = maxIdsPerIdPage,
       // The ids for flat transactions are retrieved from two separate id tables.
       // To account for that we assign a half of the working memory to each table.
-      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / 2,
+      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / (
+        if (multiDomainEnabled) 4 else 2
+      ),
       numOfDecomposedFilters = decomposedFilters.size,
       numOfPagesInIdPageBuffer = maxPagesPerIdPagesBuffer,
     )
@@ -179,7 +201,7 @@ class TransactionsFlatStreamReader(
                   error = (prunedOffset: Offset) =>
                     s"Transactions request from ${queryRange.startExclusiveOffset.toHexString} to ${queryRange.endInclusiveOffset.toHexString} precedes pruned offset ${prunedOffset.toHexString}",
                 )
-              }
+              }(LoggingContextWithTrace(TraceContext.empty))
             }
           }
         )
@@ -215,21 +237,55 @@ class TransactionsFlatStreamReader(
         dbMetric = dbMetrics.flatTxStream.fetchEventConsumingPayloads,
       )
     val allSortedPayloads = payloadsConsuming.mergeSorted(payloadsCreate)(orderBySequentialEventId)
-    TransactionsReader
+    val sourceOfTransactions = TransactionsReader
       .groupContiguous(allSortedPayloads)(by = _.transactionId)
-      .mapAsync(transactionsProcessingParallelism)(
-        deserializeLfValues(_, eventProjectionProperties)
+      .mapAsync(transactionsProcessingParallelism)(rawEvents =>
+        deserializationQueriesLimiter.execute(
+          deserializeLfValues(rawEvents, eventProjectionProperties)
+        )
       )
       .mapConcat { groupOfPayloads: Vector[EventStorageBackend.Entry[Event]] =>
         val responses = TransactionConversions.toGetTransactionsResponse(groupOfPayloads)
         responses.map { case (offset, response) => ApiOffset.assertFromString(offset) -> response }
       }
+
+    if (multiDomainEnabled) {
+      reassignmentStreamReader
+        .streamReassignments(
+          ReassignmentStreamQueryParams(
+            queryRange = queryRange,
+            filteringConstraints = filteringConstraints,
+            eventProjectionProperties = eventProjectionProperties,
+            payloadQueriesLimiter = payloadQueriesLimiter,
+            deserializationQueriesLimiter = deserializationQueriesLimiter,
+            idPageSizing = idPageSizing,
+            decomposedFilters = decomposedFilters,
+            maxParallelIdAssignQueries = maxParallelIdAssignQueries,
+            maxParallelIdUnassignQueries = maxParallelIdUnassignQueries,
+            maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
+            maxPayloadsPerPayloadsPage = maxPayloadsPerPayloadsPage,
+            maxParallelPayloadAssignQueries = maxParallelPayloadAssignQueries,
+            maxParallelPayloadUnassignQueries = maxParallelPayloadUnassignQueries,
+            deserializationProcessingParallelism = transactionsProcessingParallelism,
+          )
+        )
+        .map { case (offset, reassignment) =>
+          offset -> GetUpdatesResponse(
+            GetUpdatesResponse.Update.Reassignment(reassignment)
+          )
+        }
+        .mergeSorted(sourceOfTransactions)(
+          Ordering.by(_._1)
+        )
+    } else {
+      sourceOfTransactions
+    }
   }
 
   private def deserializeLfValues(
       rawEvents: Vector[EventStorageBackend.Entry[Raw.FlatEvent]],
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit lc: LoggingContext): Future[Vector[EventStorageBackend.Entry[Event]]] = {
+  )(implicit lc: LoggingContextWithTrace): Future[Vector[EventStorageBackend.Entry[Event]]] = {
     Timed.future(
       future =
         Future.traverse(rawEvents)(deserializeEntry(eventProjectionProperties, lfValueTranslation)),

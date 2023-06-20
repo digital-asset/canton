@@ -5,167 +5,36 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.{Fingerprint, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.StoredTopologyTransactionsX.{
-  GenericStoredTopologyTransactionsX,
-  PositiveStoredTopologyTransactionsX,
-}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
-import com.digitalasset.canton.topology.transaction.TopologyMappingX.MappingHash
-import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
-import com.digitalasset.canton.topology.transaction.{
-  DomainTrustCertificateX,
-  HostingParticipant,
-  IdentifierDelegationX,
-  MediatorDomainStateX,
-  NamespaceDelegationX,
-  OwnerToKeyMappingX,
-  ParticipantPermissionX,
-  PartyToParticipantX,
-  SignedTopologyTransactionX,
-  TopologyChangeOpX,
-  TopologyMappingX,
-  TopologyTransactionX,
-  UnionspaceDefinitionX,
-}
-import com.digitalasset.canton.topology.{
-  DomainId,
-  Identifier,
-  MediatorId,
-  Namespace,
-  ParticipantId,
-  PartyId,
-  SequencerId,
-  TestingOwnerWithKeys,
-  UniqueIdentifier,
-}
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
-import org.scalatest.{Assertion, BeforeAndAfterAll}
 
-import scala.annotation.nowarn
-import scala.concurrent.Future
+trait TopologyStoreXTest extends AsyncWordSpec with TopologyStoreXTestBase {
 
-@nowarn("msg=match may not be exhaustive")
-trait TopologyStoreXTest
-    extends AsyncWordSpec
-    with BaseTest
-    with HasExecutionContext
-    with BeforeAndAfterAll {
-
-  private val Seq(ts1, ts2, ts3, ts4, ts5, ts6) = (1L to 6L).map(CantonTimestamp.Epoch.plusSeconds)
+  val testData = new TopologyStoreXTestData(loggerFactory, executionContext)
+  import testData.*
 
   // TODO(#11255): Test coverage is rudimentary - enough to convince ourselves that queries basically seem to work.
   //  Increase coverage.
   def topologyStore(mk: () => TopologyStoreX[TopologyStoreId]): Unit = {
 
-    val factory: TestingOwnerWithKeys =
-      new TestingOwnerWithKeys(
-        SequencerId(
-          UniqueIdentifier(
-            Identifier.tryCreate("da"),
-            Namespace(Fingerprint.tryCreate("sequencer")),
-          )
-        ),
-        loggerFactory,
-        executorService,
-      )
-
-    val daDomainNamespace = Namespace(Fingerprint.tryCreate("default"))
-    val daDomainUid = UniqueIdentifier(
-      Identifier.tryCreate("da"),
-      daDomainNamespace,
-    )
-    val Seq(participantId1, participantId2) = Seq("participant1", "participant2").map(p =>
-      ParticipantId(
-        UniqueIdentifier(
-          Identifier.tryCreate(p),
-          Namespace(Fingerprint.tryCreate("participants")),
-        )
-      )
-    )
-    val domainId1 = DomainId(
-      UniqueIdentifier(
-        Identifier.tryCreate("domain1"),
-        Namespace(Fingerprint.tryCreate("domains")),
-      )
-    )
-    val mediatorId1 = MediatorId(
-      Identifier.tryCreate("mediator1"),
-      Namespace(Fingerprint.tryCreate("mediators")),
-    )
-    val signingKeys = NonEmpty(Seq, factory.SigningKeys.key1)
-    val owners = NonEmpty(Set, Namespace(Fingerprint.tryCreate("owner1")))
-    val fredOfCanton = PartyId(
-      Identifier.tryCreate("fred"),
-      Namespace(Fingerprint.tryCreate("canton")),
-    )
-
-    val tx_NSD_Proposal = makeSignedTx(
-      NamespaceDelegationX
-        .create(daDomainNamespace, signingKeys.head1, isRootDelegation = false)
-        .getOrElse(fail()),
-      isProposal = true,
-    )
-    val tx2_OTK = makeSignedTx(
-      OwnerToKeyMappingX(participantId1, domain = None, signingKeys)
-    )
-    val tx3_IDD_Removal = makeSignedTx(
-      IdentifierDelegationX(daDomainUid, signingKeys.head1),
-      op = TopologyChangeOpX.Remove,
-      serial = PositiveInt.tryCreate(1),
-    )
-    val tx4_USD = makeSignedTx(
-      UnionspaceDefinitionX
-        .create(
-          Namespace(Fingerprint.tryCreate("unionspace")),
-          PositiveInt.one,
-          owners = owners,
-        )
-        .getOrElse(fail())
-    )
-    val tx5_PTP = makeSignedTx(
-      PartyToParticipantX(
-        partyId = fredOfCanton,
-        domainId = None,
-        threshold = PositiveInt.one,
-        participants = Seq(HostingParticipant(participantId1, ParticipantPermissionX.Submission)),
-        groupAddressing = true,
-      )
-    )
-    val tx5_DTC = makeSignedTx(
-      DomainTrustCertificateX(
-        participantId2,
-        domainId1,
-        transferOnlyToGivenTargetDomains = false,
-        targetDomains = Seq.empty,
-      )
-    )
-    val tx6_MDS = makeSignedTx(
-      MediatorDomainStateX
-        .create(
-          domain = domainId1,
-          group = NonNegativeInt.one,
-          threshold = PositiveInt.one,
-          active = Seq(mediatorId1),
-          observers = Seq.empty,
-        )
-        .getOrElse(fail())
-    )
-
     val bootstrapTransactions = StoredTopologyTransactionsX(
       Seq[
         (CantonTimestamp, (GenericSignedTopologyTransactionX, Option[CantonTimestamp]))
       ](
+        ts1 -> (tx1_NSD_Proposal, ts3.some),
         ts2 -> (tx2_OTK, ts3.some),
         ts3 -> (tx3_IDD_Removal, ts3.some),
+        ts3 -> (tx3_NSD, None),
+        ts3 -> (tx3_PTP_Proposal, ts5.some),
         ts4 -> (tx4_USD, None),
+        ts4 -> (tx4_OTK_Proposal, None),
         ts5 -> (tx5_PTP, None),
-        ts5 -> (tx5_DTC, None),
+        ts5 -> (tx5_DTC, ts6.some),
+        ts6 -> (tx6_DTC_Update, None),
       ).map { case (from, (tx, until)) =>
         StoredTopologyTransactionX(
           SequencedTime(from),
@@ -184,19 +53,19 @@ trait TopologyStoreXTest
           val store = mk()
 
           for {
-            _ <- update(store, ts1, add = Seq(tx_NSD_Proposal))
+            _ <- update(store, ts1, add = Seq(tx1_NSD_Proposal))
             _ <- update(store, ts2, add = Seq(tx2_OTK))
             _ <- update(store, ts5, add = Seq(tx5_DTC))
             _ <- update(store, ts6, add = Seq(tx6_MDS))
 
             maxTs <- store.maxTimestamp()
-            retrievedTx <- store.findStored(tx_NSD_Proposal)
+            retrievedTx <- store.findStored(tx1_NSD_Proposal)
             txProtocolVersion <- store.findStoredForVersion(
-              tx_NSD_Proposal.transaction,
+              tx1_NSD_Proposal.transaction,
               ProtocolVersion.dev,
             )
             txBadProtocolVersion <- store.findStoredForVersion(
-              tx_NSD_Proposal.transaction,
+              tx1_NSD_Proposal.transaction,
               ProtocolVersion.v4,
             )
 
@@ -209,7 +78,7 @@ trait TopologyStoreXTest
 
             txByTxHash <- store.findProposalsByTxHash(
               EffectiveTime(ts1.immediateSuccessor), // increase since exclusive
-              NonEmpty(Set, tx_NSD_Proposal.transaction.hash),
+              NonEmpty(Set, tx1_NSD_Proposal.transaction.hash),
             )
             txByMappingHash <- store.findTransactionsForMapping(
               EffectiveTime(ts2.immediateSuccessor), // increase since exclusive
@@ -222,9 +91,9 @@ trait TopologyStoreXTest
             _ <- update(
               store,
               ts4,
-              removeMapping = Set(tx_NSD_Proposal.transaction.mapping.uniqueKey),
+              removeMapping = Set(tx1_NSD_Proposal.transaction.mapping.uniqueKey),
             )
-            removedByMappingHash <- store.findStored(tx_NSD_Proposal)
+            removedByMappingHash <- store.findStored(tx1_NSD_Proposal)
             _ <- update(store, ts4, removeTxs = Set(tx2_OTK.transaction.hash))
             removedByTxHash <- store.findStored(tx2_OTK)
 
@@ -240,19 +109,19 @@ trait TopologyStoreXTest
             store.dumpStoreContent()
 
             assert(maxTs.contains((SequencedTime(ts6), EffectiveTime(ts6))))
-            retrievedTx.map(_.transaction) shouldBe Some(tx_NSD_Proposal)
-            txProtocolVersion.map(_.transaction) shouldBe Some(tx_NSD_Proposal)
+            retrievedTx.map(_.transaction) shouldBe Some(tx1_NSD_Proposal)
+            txProtocolVersion.map(_.transaction) shouldBe Some(tx1_NSD_Proposal)
             txBadProtocolVersion shouldBe None
 
             expectTransactions(
               proposalTransactions,
               Seq(
-                tx_NSD_Proposal
+                tx1_NSD_Proposal
               ), // only proposal transaction, TimeQueryX.Range is inclusive on both sides
             )
-            expectTransactions(positiveProposals, Seq(tx_NSD_Proposal))
+            expectTransactions(positiveProposals, Seq(tx1_NSD_Proposal))
 
-            txByTxHash shouldBe Seq(tx_NSD_Proposal)
+            txByTxHash shouldBe Seq(tx1_NSD_Proposal)
             txByMappingHash shouldBe Seq(tx2_OTK)
 
             tsWatermark shouldBe Some(ts1)
@@ -314,9 +183,12 @@ trait TopologyStoreXTest
           } yield {
             expectTransactions(
               headStateTransactions,
-              Seq(tx4_USD, tx5_PTP, tx5_DTC),
+              Seq(tx3_NSD, tx4_USD, tx5_PTP, tx6_DTC_Update),
             )
-            expectTransactions(rangeBetweenTs2AndTs3Transactions, Seq(tx2_OTK, tx3_IDD_Removal))
+            expectTransactions(
+              rangeBetweenTs2AndTs3Transactions,
+              Seq(tx2_OTK, tx3_IDD_Removal, tx3_NSD),
+            )
             expectTransactions(
               snapshotAtTs3Transactions,
               Seq(tx2_OTK), // tx2 include as until is inclusive, tx3 missing as from exclusive
@@ -378,7 +250,7 @@ trait TopologyStoreXTest
 
             essentialStateTransactions <- store.findEssentialStateForMember(
               tx2_OTK.transaction.mapping.member,
-              asOfInclusive = ts6,
+              asOfInclusive = ts5,
             )
 
             upcomingTransactions <- store.findUpcomingEffectiveChanges(asOfInclusive = ts4)
@@ -395,8 +267,8 @@ trait TopologyStoreXTest
               )
               .unwrap // FutureUnlessShutdown[_] -> Future[UnlessShutdown[_]]
           } yield {
-            expectTransactions(positiveTransactions, Seq(tx4_USD, tx5_PTP, tx5_DTC))
-            expectTransactions(positiveTransactionsExclusive, Seq(tx4_USD))
+            expectTransactions(positiveTransactions, Seq(tx3_NSD, tx4_USD, tx5_PTP, tx5_DTC))
+            expectTransactions(positiveTransactionsExclusive, Seq(tx3_NSD, tx4_USD))
             expectTransactions(
               positiveTransactionsInclusive,
               positiveTransactions.result.map(_.transaction),
@@ -408,10 +280,20 @@ trait TopologyStoreXTest
             expectTransactions(uidFilterTransactions, Seq(tx5_PTP, tx5_DTC))
             expectTransactions(namespaceFilterTransactions, Seq(tx4_USD, tx5_DTC))
 
-            // Essential state currently encompasses all positive transactions at specified time
+            // Essential state currently encompasses all transactions at the specified time
             expectTransactions(
               essentialStateTransactions,
-              Seq(tx4_USD, tx5_PTP, tx5_DTC),
+              Seq(
+                tx1_NSD_Proposal,
+                tx2_OTK,
+                tx3_IDD_Removal,
+                tx3_NSD,
+                tx3_PTP_Proposal,
+                tx4_USD,
+                tx4_OTK_Proposal,
+                tx5_PTP,
+                tx5_DTC,
+              ),
             )
 
             upcomingTransactions shouldBe bootstrapTransactions.result.collect {
@@ -421,120 +303,27 @@ trait TopologyStoreXTest
 
             expectTransactions(
               dispatchingTransactionsAfter,
-              Seq(tx3_IDD_Removal, tx4_USD, tx5_PTP, tx5_DTC),
+              Seq(
+                tx2_OTK,
+                tx3_IDD_Removal,
+                tx3_NSD,
+                tx4_USD,
+                tx4_OTK_Proposal,
+                tx5_PTP,
+                tx5_DTC,
+                tx6_DTC_Update,
+              ),
             )
 
-            onboardingTransactionUnlessShutdown.toRight(fail()).getOrElse(fail()) shouldBe Seq(
+            onboardingTransactionUnlessShutdown.onShutdown(fail()) shouldBe Seq(
               tx4_USD,
               tx5_DTC,
+              tx6_DTC_Update,
             )
 
           }
         }
       }
     }
-
-    def update(
-        store: TopologyStoreX[TopologyStoreId],
-        ts: CantonTimestamp,
-        add: Seq[GenericSignedTopologyTransactionX] = Seq.empty,
-        removeMapping: Set[MappingHash] = Set.empty,
-        removeTxs: Set[TxHash] = Set.empty,
-    ): Future[Unit] = {
-      store.update(
-        SequencedTime(ts),
-        EffectiveTime(ts),
-        removeMapping,
-        removeTxs,
-        add.map(ValidatedTopologyTransactionX(_)),
-      )
-    }
-
-    def inspect(
-        store: TopologyStoreX[TopologyStoreId],
-        timeQuery: TimeQueryX,
-        proposals: Boolean = false,
-        recentTimestampO: Option[CantonTimestamp] = None,
-        op: Option[TopologyChangeOpX] = None,
-        typ: Option[TopologyMappingX.Code] = None,
-        idFilter: String = "",
-        namespaceOnly: Boolean = false,
-    ): Future[StoredTopologyTransactionsX[TopologyChangeOpX, TopologyMappingX]] =
-      store.inspect(
-        proposals,
-        timeQuery,
-        recentTimestampO,
-        op,
-        typ,
-        idFilter,
-        namespaceOnly,
-      )
-
-    def inspectKnownParties(
-        store: TopologyStoreX[TopologyStoreId],
-        timestamp: CantonTimestamp,
-        filterParty: String = "",
-        filterParticipant: String = "",
-    ): Future[Set[PartyId]] =
-      store.inspectKnownParties(
-        timestamp,
-        filterParty,
-        filterParticipant,
-        limit = 1000,
-      )
-
-    def findPositiveTransactions(
-        store: TopologyStoreX[TopologyStoreId],
-        asOf: CantonTimestamp,
-        asOfInclusive: Boolean = false,
-        isProposal: Boolean = false,
-        types: Seq[TopologyMappingX.Code] = TopologyMappingX.Code.all,
-        filterUid: Option[Seq[UniqueIdentifier]] = None,
-        filterNamespace: Option[Seq[Namespace]] = None,
-    ): Future[PositiveStoredTopologyTransactionsX] =
-      store.findPositiveTransactions(
-        asOf,
-        asOfInclusive,
-        isProposal,
-        types,
-        filterUid,
-        filterNamespace,
-      )
-
-    def expectTransactions(
-        actual: GenericStoredTopologyTransactionsX,
-        expected: Seq[GenericSignedTopologyTransactionX],
-    ): Assertion = {
-      logger.info(s"Actual: ${actual.result.map(_.transaction).mkString(",")}")
-      logger.info(s"Expected: ${expected.mkString(",")}")
-      // run more readable assert first since mapping codes are easier to identify than hashes ;-)
-      actual.result.map(_.transaction.transaction.mapping.code.code) shouldBe expected.map(
-        _.transaction.mapping.code.code
-      )
-      actual.result.map(_.transaction.transaction.hash) shouldBe expected.map(_.transaction.hash)
-    }
   }
-
-  def makeSignedTx[Op <: TopologyChangeOpX, M <: TopologyMappingX](
-      mapping: M,
-      op: Op = TopologyChangeOpX.Replace,
-      isProposal: Boolean = false,
-      serial: PositiveInt = PositiveInt.one,
-  ): SignedTopologyTransactionX[Op, M] =
-    SignedTopologyTransactionX.apply[Op, M](
-      TopologyTransactionX(
-        op,
-        serial,
-        mapping,
-        ProtocolVersion.dev,
-      ),
-      signatures = NonEmpty(Set, Signature.noSignature),
-      isProposal = isProposal,
-    )(
-      SignedTopologyTransactionX.supportedProtoVersions
-        .protocolVersionRepresentativeFor(
-          ProtocolVersion.dev
-        )
-    )
-
 }

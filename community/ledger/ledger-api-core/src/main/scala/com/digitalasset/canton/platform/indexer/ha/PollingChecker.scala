@@ -4,8 +4,9 @@
 package com.digitalasset.canton.platform.indexer.ha
 
 import akka.stream.KillSwitch
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.{Timer, TimerTask}
 import scala.concurrent.blocking
@@ -26,10 +27,10 @@ class PollingChecker(
     periodMillis: Long,
     checkBody: => Unit,
     killSwitch: KillSwitch,
-)(implicit loggingContext: LoggingContext)
-    extends AutoCloseable {
-  private val logger = ContextualizedLogger.get(this.getClass)
-
+    val loggerFactory: NamedLoggerFactory,
+)(implicit traceContext: TraceContext)
+    extends AutoCloseable
+    with NamedLogging {
   private val timer = new Timer("ha-polling-checker-timer-thread", true)
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))

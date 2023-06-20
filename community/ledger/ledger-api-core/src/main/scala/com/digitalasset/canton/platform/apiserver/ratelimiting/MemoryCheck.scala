@@ -4,8 +4,8 @@
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
 import com.daml.error.ContextualizedErrorLogger
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.HeapMemoryOverLimit
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.{
   LimitResultCheck,
@@ -20,16 +20,16 @@ import scala.concurrent.duration.{Duration, DurationInt}
 
 object MemoryCheck {
 
-  private implicit val logger: ContextualizedErrorLogger =
-    DamlContextualizedErrorLogger.forClass(getClass)
-
   def apply(
       tenuredMemoryPools: List[MemoryPoolMXBean],
       memoryMxBean: MemoryMXBean,
       config: RateLimitingConfig,
+      loggerFactory: NamedLoggerFactory,
   ): LimitResultCheck = {
+    implicit val logger = ErrorLoggingContext.forClass(loggerFactory, getClass)
+
     apply(
-      findTenuredMemoryPool(config, tenuredMemoryPools),
+      findTenuredMemoryPool(config, tenuredMemoryPools, logger),
       new GcThrottledMemoryBean(memoryMxBean),
       config,
     )
@@ -39,7 +39,7 @@ object MemoryCheck {
       tenuredMemoryPool: Option[MemoryPoolMXBean],
       memoryMxBean: GcThrottledMemoryBean,
       config: RateLimitingConfig,
-  ): LimitResultCheck = (fullMethodName, _) => {
+  )(implicit logger: ContextualizedErrorLogger): LimitResultCheck = (fullMethodName, _) => {
 
     tenuredMemoryPool.fold[LimitResult](UnderLimit) { p =>
       if (p.isCollectionUsageThresholdExceeded) {
@@ -115,6 +115,7 @@ object MemoryCheck {
   private[ratelimiting] def findTenuredMemoryPool(
       config: RateLimitingConfig,
       memoryPoolMxBeans: List[MemoryPoolMXBean],
+      logger: ContextualizedErrorLogger,
   ): Option[MemoryPoolMXBean] = {
     candidates(memoryPoolMxBeans).sortBy(_.getCollectionUsage.getMax).lastOption match {
       case None =>

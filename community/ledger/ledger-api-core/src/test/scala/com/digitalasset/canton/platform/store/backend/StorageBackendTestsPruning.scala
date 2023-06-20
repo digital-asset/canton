@@ -43,7 +43,7 @@ private[backend] trait StorageBackendTestsPruning
     val offset_2 = offset(2)
     val offset_3 = offset(4)
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     val initialPruningOffset = executeSql(backend.parameter.prunedUpToInclusive)
 
     executeSql(backend.parameter.updatePrunedUptoInclusive(offset_1))
@@ -66,7 +66,7 @@ private[backend] trait StorageBackendTestsPruning
     val offset_1 = offset(3)
     val offset_2 = offset(2)
     val offset_3 = offset(4)
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     val initialPruningOffset = executeSql(
       backend.parameter.participantAllDivulgedContractsPrunedUpToInclusive
     )
@@ -96,7 +96,7 @@ private[backend] trait StorageBackendTestsPruning
   }
 
   it should "prune consuming and non-consuming events" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest a create and archive event
     executeSql(
       ingest(
@@ -193,7 +193,7 @@ private[backend] trait StorageBackendTestsPruning
       contractId = hashCid("#1"),
       signatory = signatoryParty,
     )
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest a create and archive event
     executeSql(
       ingest(
@@ -268,7 +268,7 @@ private[backend] trait StorageBackendTestsPruning
       nonStakeholderInformees = Set(nonStakeholderInformeeParty),
     )
     val createTxId = dtoTransactionId(create)
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest a create and archive event
     executeSql(
       ingest(
@@ -334,7 +334,7 @@ private[backend] trait StorageBackendTestsPruning
         contractId = contract1_id,
         divulgee = partyName,
       )
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest
     executeSql(
       ingest(
@@ -392,7 +392,7 @@ private[backend] trait StorageBackendTestsPruning
       contractId = contract2_id,
       divulgee = divulgee,
     )
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest
     executeSql(
       ingest(
@@ -438,7 +438,7 @@ private[backend] trait StorageBackendTestsPruning
       offset = offset(1),
       submitter = someParty,
     )
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest a completion
     executeSql(ingest(Vector(completion), _))
     executeSql(updateLedgerEnd(offset(1), 1L))

@@ -5,10 +5,10 @@ package com.digitalasset.canton.platform.store.dao
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import com.daml.logging.LoggingContext
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.{Metrics, Timed}
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.BufferSlice
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
@@ -55,8 +55,9 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
       persistenceFetchArgs: PERSISTENCE_FETCH_ARGS,
       bufferFilter: TransactionLogUpdate => Option[BUFFER_OUT],
       toApiResponse: BUFFER_OUT => Future[API_RESPONSE],
+      multiDomainEnabled: Boolean,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Source[(Offset, API_RESPONSE), NotUsed] = {
     // TODO(#13019) Replace parasitic with DirectExecutionContext
     @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
@@ -101,6 +102,7 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
                     startExclusive = scannedToInclusive,
                     endInclusive = bufferedStartExclusive,
                     filter = persistenceFetchArgs,
+                    multiDomainEnabled = multiDomainEnabled,
                   )(loggingContext)
                     .concat(toApiResponseStream(slice))
                 Some(endInclusive -> sourceFromBuffer)
@@ -125,6 +127,7 @@ private[platform] object BufferedStreamsReader {
         startExclusive: Offset,
         endInclusive: Offset,
         filter: FILTER,
-    )(implicit loggingContext: LoggingContext): Source[(Offset, API_RESPONSE), NotUsed]
+        multiDomainEnabled: Boolean,
+    )(implicit loggingContext: LoggingContextWithTrace): Source[(Offset, API_RESPONSE), NotUsed]
   }
 }

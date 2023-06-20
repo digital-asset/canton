@@ -171,6 +171,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       FutureSupervisor.Noop,
       SuppressingLogger(getClass),
       skipRecipientsCheck = false,
+      multiDomainLedgerAPIEnabled = false,
     )
   }
 
@@ -216,8 +217,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
 
       val fut = f.sync
         .allocateParty(Some(lfInputPartyId), Some("displayName"), submissionId)(
-          com.daml.logging.LoggingContext.ForTesting,
-          com.daml.tracing.NoOpTelemetryContext,
+          TraceContext.empty
         )
         .asScala
 
@@ -257,6 +257,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
         recordTime = CantonTimestamp.Epoch.toLf,
         divulgedContracts = List.empty,
         blindingInfo = None,
+        hostedWitnesses = Nil,
         contractMetadata = Map(),
       )
 

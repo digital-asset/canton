@@ -45,7 +45,7 @@ private[backend] trait StorageBackendTestsEvents
       dtoCreateFilter(2L, someTemplateId, partyObserver2),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     val resultSignatory = executeSql(
@@ -107,7 +107,7 @@ private[backend] trait StorageBackendTestsEvents
       dtoCreateFilter(2L, someTemplateId, partyObserver2),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     val resultSignatory = executeSql(
@@ -170,7 +170,7 @@ private[backend] trait StorageBackendTestsEvents
       dtoCreateFilter(2L, someTemplateId, partyObserver2),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     val resultSignatory = executeSql(
@@ -218,7 +218,7 @@ private[backend] trait StorageBackendTestsEvents
       dtoCreateFilter(1L, someTemplateId, partyObserver),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(1), 1L))
     val resultUnknownParty = executeSql(
@@ -280,7 +280,7 @@ private[backend] trait StorageBackendTestsEvents
       dtoCreateFilter(2L, someTemplateId, partyObserver2),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     val result01L2 = executeSql(
@@ -335,7 +335,7 @@ private[backend] trait StorageBackendTestsEvents
       dtoTransactionMeta(offset(1000), 1119, 1120),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(25), 1115))
     val maxEventSequentialId: Long => Long =

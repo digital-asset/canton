@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.ledger.api.auth
 
+import com.daml.tracing.NoOpTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.interceptor.{
   AuthorizationInterceptor,
   IdentityProviderAwareAuthService,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import io.grpc.protobuf.StatusProto
 import io.grpc.{Metadata, ServerCall, Status}
@@ -25,7 +28,8 @@ class AuthorizationInterceptorSpec
     extends AsyncFlatSpec
     with MockitoSugar
     with Matchers
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
   private val className = classOf[AuthorizationInterceptor].getSimpleName
 
   behavior of s"$className.interceptCall"
@@ -63,13 +67,17 @@ class AuthorizationInterceptorSpec
         authService,
         Some(userManagementService),
         identityProviderAwareAuthService,
+        NoOpTelemetry,
+        loggerFactory,
         global,
       )
 
     val statusCaptor = ArgCaptor[Status]
     val metadataCaptor = ArgCaptor[Metadata]
 
-    when(identityProviderAwareAuthService.decodeMetadata(any[Metadata]))
+    when(
+      identityProviderAwareAuthService.decodeMetadata(any[Metadata])(any[LoggingContextWithTrace])
+    )
       .thenReturn(Future.successful(ClaimSet.Unauthenticated))
     when(authService.decodeMetadata(any[Metadata])).thenReturn(failedMetadataDecode)
     authorizationInterceptor.interceptCall[Nothing, Nothing](serverCall, new Metadata(), null)

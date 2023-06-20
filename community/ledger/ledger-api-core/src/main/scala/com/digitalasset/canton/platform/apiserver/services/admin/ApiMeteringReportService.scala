@@ -9,16 +9,20 @@ import com.daml.ledger.api.v1.admin.metering_report_service.*
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.ApplicationId
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.grpc.Logging.traceId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.apiserver.meteringreport.{
   MeteringReportGenerator,
   MeteringReportKey,
@@ -37,16 +41,13 @@ private[apiserver] final class ApiMeteringReportService(
     store: MeteringStore,
     meteringReportKey: MeteringReportKey,
     telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
     clock: () => ProtoTimestamp = () => toProtoTimestamp(Timestamp.now()),
 )(implicit
-    executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
+    executionContext: ExecutionContext
 ) extends MeteringReportService
-    with GrpcApiService {
-
-  private implicit val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
-  private implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-    new DamlContextualizedErrorLogger(logger, loggingContext, None)
+    with GrpcApiService
+    with NamedLogging {
 
   private val generator = new MeteringReportGenerator(participantId, meteringReportKey.key)
 
@@ -57,6 +58,8 @@ private[apiserver] final class ApiMeteringReportService(
 
   private def validateRequest(
       request: GetMeteringReportRequest
+  )(implicit
+      errorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, (Timestamp, Option[Timestamp], Option[ApplicationId])] = {
     (for {
       protoFrom <- request.from.toRight("from date must be specified")
@@ -77,6 +80,8 @@ private[apiserver] final class ApiMeteringReportService(
       to: Option[Timestamp],
       applicationId: Option[Ref.ApplicationId],
       reportData: ReportData,
+  )(implicit
+      errorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, GetMeteringReportResponse] = {
     generator.generate(request, from, to, applicationId, reportData, clock()).left.map { e =>
       LedgerApiErrors.Admin.InternallyInvalidKey.Reject(e).asGrpcError
@@ -85,24 +90,25 @@ private[apiserver] final class ApiMeteringReportService(
 
   override def getMeteringReport(
       request: GetMeteringReportRequest
-  ): Future[GetMeteringReportResponse] =
-    withEnrichedLoggingContext(traceId(telemetry.traceIdFromGrpcContext)) {
-      implicit loggingContext =>
-        logger.info(s"Received metering report request: $request")
+  ): Future[GetMeteringReportResponse] = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
-        implicit class WrapEither[T](either: Either[StatusRuntimeException, T]) {
-          def toFuture: Future[T] = either.fold(
-            e => Future.failed(ValidationLogger.logFailure(request, e)),
-            Future.successful,
-          )
-        }
+    logger.info(s"Received metering report request: $request.")
 
-        for {
-          (from, to, applicationId) <- validateRequest(request).toFuture
-          reportData <- store.getMeteringReportData(from, to, applicationId)
-          report <- generateReport(request, from, to, applicationId, reportData).toFuture
-        } yield report
+    implicit class WrapEither[T](either: Either[StatusRuntimeException, T]) {
+      def toFuture: Future[T] = either.fold(
+        e => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, e)),
+        Future.successful,
+      )
     }
+
+    for {
+      (from, to, applicationId) <- validateRequest(request).toFuture
+      reportData <- store.getMeteringReportData(from, to, applicationId)
+      report <- generateReport(request, from, to, applicationId, reportData).toFuture
+    } yield report
+  }
 }
 
 private[apiserver] object ApiMeteringReportService {

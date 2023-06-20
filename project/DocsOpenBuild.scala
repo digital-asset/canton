@@ -22,15 +22,15 @@ object DocsOpenBuild {
 
   def getCantonRoot(docsOpenDir: File): File = docsOpenDir / ".."
 
-  def getDocsCantonFolder(cantonRoot: File, cantonVersion: String): File =
+  def getDocsCantonDirectory(cantonRoot: File, cantonVersion: String): File =
     cantonRoot / "docs.daml.com" / "docs" / extractVersion(cantonVersion)
 
   def getCantonDocsSourcePath(cantonRoot: File, cantonVersion: String): File = {
-    getDocsCantonFolder(cantonRoot, cantonVersion) / "docs" / "canton"
+    getDocsCantonDirectory(cantonRoot, cantonVersion) / "docs" / "canton"
   }
 
   def getSnippetDirectiveScriptPath(cantonRoot: File, cantonVersion: String): File = {
-    getDocsCantonFolder(cantonRoot, cantonVersion) / "bin" / "canton"
+    getDocsCantonDirectory(cantonRoot, cantonVersion) / "bin" / "canton"
   }
 
   def updateManifest() = {
@@ -183,14 +183,6 @@ object DocsOpenBuild {
           s"python $scriptPath $cantonRoot ${generateReferenceJson.value} $source $manifest $target $assemblyTarget",
           log,
         )
-
-        log.info(
-          "[generateRst][docs-open-assembly] Copying preprocessed-sphinx-assembly to docs-open-assembly ..."
-        )
-
-        // copy data for the docs-open-assembly generation
-        IO.createDirectory(cantonRoot / "docs-open-assembly" / "src")
-        IO.copyDirectory(assemblyTarget, cantonRoot / "docs-open-assembly" / "src" / "sphinx")
       }
   }
 

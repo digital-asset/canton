@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.dao
 
 import com.daml.lf.data.Ref.Party
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedTransactionByIdReader.{
   FetchTransactionByIdFromPersistence,
@@ -40,7 +40,7 @@ class BufferedTransactionByIdReader[API_RESPONSE](
     * @return A future wrapping the API response if found.
     */
   def fetch(transactionId: String, requestingParties: Set[Party])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[API_RESPONSE]] =
     inMemoryFanoutBuffer.lookup(transactionId) match {
       case Some(value) => toApiResponse(value, requestingParties, loggingContext)
@@ -54,7 +54,7 @@ object BufferedTransactionByIdReader {
     def apply(
         transactionId: String,
         requestingParties: Set[Party],
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace,
     ): Future[Option[API_RESPONSE]]
   }
 
@@ -62,7 +62,7 @@ object BufferedTransactionByIdReader {
     def apply(
         transactionAccepted: TransactionAccepted,
         requestingParties: Set[Party],
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace,
     ): Future[Option[API_RESPONSE]]
   }
 }

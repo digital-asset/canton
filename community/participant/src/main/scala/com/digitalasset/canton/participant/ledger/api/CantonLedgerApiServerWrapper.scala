@@ -6,6 +6,8 @@ package com.digitalasset.canton.participant.ledger.api
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.http.JsonApiConfig
+import com.daml.http.metrics.HttpApiMetrics
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
@@ -18,11 +20,15 @@ import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, StorageConfi
 import com.digitalasset.canton.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{
+  LoggingContextUtil,
+  NamedLoggerFactory,
+  NamedLogging,
+  TracedLogger,
+}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.config.{IndexerConfig, LedgerApiServerConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.participant.util.LoggingContextUtil
 import com.digitalasset.canton.platform.apiserver.*
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey
 import com.digitalasset.canton.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
@@ -53,6 +59,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
   /** Config for ledger API server and indexer
     *
     * @param serverConfig          ledger API server configuration
+    * @param jsonApiConfig         JSON API configuration
     * @param indexerConfig         indexer configuration
     * @param indexerLockIds        Optional lock IDs to be used for indexer HA
     * @param ledgerId              unique ledger id used by the ledger API server
@@ -69,6 +76,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     */
   final case class Config(
       serverConfig: LedgerApiServerConfig,
+      jsonApiConfig: Option[JsonApiConfig],
       indexerConfig: IndexerConfig,
       indexerLockIds: Option[IndexerLockIds],
       ledgerId: LedgerId,
@@ -82,6 +90,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       override val loggerFactory: NamedLoggerFactory,
       tracerProvider: TracerProvider,
       metrics: Metrics,
+      jsonApiMetrics: HttpApiMetrics,
       meteringReportKey: MeteringReportKey,
   ) extends NamedLogging {
     override def logger: TracedLogger = super.logger
@@ -104,6 +113,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       startLedgerApiServer: Boolean,
       createExternalServices: () => List[BindableService] = () => Nil,
       futureSupervisor: FutureSupervisor,
+      multiDomainEnabled: Boolean,
   )(implicit
       ec: ExecutionContextIdlenessExecutorService,
       actorSystem: ActorSystem,
@@ -141,6 +151,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
               createExternalServices = createExternalServices,
               telemetry = new DefaultOpenTelemetry(config.tracerProvider.openTelemetry),
               futureSupervisor = futureSupervisor,
+              multiDomainEnabled = multiDomainEnabled,
             )
           }
         }
@@ -203,18 +214,17 @@ object CantonLedgerApiServerWrapper extends NoTracing {
 
     val logger = loggerFactory.getTracedLogger(getClass)
 
-    LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
-      for {
-        ledgerApiStorage <- LedgerApiStorage
-          .fromDbConfig(config.dbConfig)
-          .fold(t => Future.failed(t.asRuntimeException()), Future.successful)
-        _ <- tryCreateSchema(ledgerApiStorage, logger)
-        _ <- IndexerServiceOwner.migrateOnly(
-          ledgerApiStorage.jdbcUrl,
-          additionalMigrationPaths = config.additionalMigrationPaths,
-        )
-      } yield ()
-    }
+    for {
+      ledgerApiStorage <- LedgerApiStorage
+        .fromDbConfig(config.dbConfig)
+        .fold(t => Future.failed(t.asRuntimeException()), Future.successful)
+      _ <- tryCreateSchema(ledgerApiStorage, logger)
+      _ <- IndexerServiceOwner.migrateOnly(
+        ledgerApiStorage.jdbcUrl,
+        loggerFactory,
+        additionalMigrationPaths = config.additionalMigrationPaths,
+      )
+    } yield ()
   }
 
   final case class LedgerApiServerState(

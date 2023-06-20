@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.daml.lf.data.Ref
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -27,18 +28,23 @@ private[backend] trait StorageBackendTestsTimestamps extends Matchers with Stora
       ledgerEffectiveTime = Some(let),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
 
     executeSql(ingest(Vector(create), _))
     executeSql(updateLedgerEnd(offset(1), 1L))
 
-    val events1 = executeSql(backend.event.rawEvents(0L, 1L))
-    val events2 = executeSql(withDefaultTimeZone("GMT-1")(backend.event.rawEvents(0L, 1L)))
-    val events3 = executeSql(withDefaultTimeZone("GMT+1")(backend.event.rawEvents(0L, 1L)))
+    val events = backend.event.activeContractCreateEventBatch(
+      List(1L),
+      Set(Ref.Party.assertFromString("signatory")),
+      1L,
+    )(_)
+    val events1 = executeSql(events)
+    val events2 = executeSql(withDefaultTimeZone("GMT-1")(events))
+    val events3 = executeSql(withDefaultTimeZone("GMT+1")(events))
 
-    withClue("UTC") { events1.head.ledgerEffectiveTime shouldBe Some(let) }
-    withClue("GMT-1") { events2.head.ledgerEffectiveTime shouldBe Some(let) }
-    withClue("GMT+1") { events3.head.ledgerEffectiveTime shouldBe Some(let) }
+    withClue("UTC") { events1.head.ledgerEffectiveTime shouldBe let }
+    withClue("GMT-1") { events2.head.ledgerEffectiveTime shouldBe let }
+    withClue("GMT+1") { events3.head.ledgerEffectiveTime shouldBe let }
   }
 
   // Some JDBC operations depend on the JVM default time zone.

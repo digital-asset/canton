@@ -23,6 +23,8 @@ object H2ResetStorageBackend extends ResetStorageBackend {
       truncate table participant_events_create;
       truncate table participant_events_consuming_exercise;
       truncate table participant_events_non_consuming_exercise;
+      truncate table participant_events_assign;
+      truncate table participant_events_unassign;
       truncate table party_entries;
       truncate table participant_party_records;
       truncate table participant_party_record_annotations;
@@ -32,6 +34,8 @@ object H2ResetStorageBackend extends ResetStorageBackend {
       truncate table pe_consuming_id_filter_stakeholder;
       truncate table pe_consuming_id_filter_non_stakeholder_informee;
       truncate table pe_non_consuming_id_filter_informee;
+      truncate table pe_assign_id_filter_stakeholder;
+      truncate table pe_unassign_id_filter_stakeholder;
       truncate table participant_transaction_meta;
       truncate table participant_users;
       truncate table participant_user_rights;

@@ -5,14 +5,15 @@ package com.digitalasset.canton.platform.store.backend.postgresql
 
 import anorm.SqlParser.get
 import anorm.SqlStringInterpolation
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.resources.ProgramResource.StartupException
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.{
   DataSourceStorageBackendImpl,
   InitHookDataSourceProxy,
 }
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig.SynchronousCommitValue
+import com.digitalasset.canton.tracing.TraceContext
 import org.postgresql.ds.PGSimpleDataSource
 
 import java.sql.Connection
@@ -44,14 +45,17 @@ object PostgresDataSourceConfig {
   }
 }
 
-class PostgresDataSourceStorageBackend(minMajorVersionSupported: Int)
-    extends DataSourceStorageBackend {
-  private val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
+class PostgresDataSourceStorageBackend(
+    minMajorVersionSupported: Int,
+    val loggerFactory: NamedLoggerFactory,
+) extends DataSourceStorageBackend
+    with NamedLogging {
 
   override def createDataSource(
       dataSourceConfig: DataSourceStorageBackend.DataSourceConfig,
+      loggerFactory: NamedLoggerFactory,
       connectionInitHook: Option[Connection => Unit],
-  )(implicit loggingContext: LoggingContext): DataSource = {
+  ): DataSource = {
     import DataSourceStorageBackendImpl.exe
     val pgSimpleDataSource = new PGSimpleDataSource()
     pgSimpleDataSource.setUrl(dataSourceConfig.jdbcUrl)
@@ -67,12 +71,12 @@ class PostgresDataSourceStorageBackend(minMajorVersionSupported: Int)
         .map(i => exe(s"SET tcp_keepalives_count TO $i")),
       connectionInitHook.toList,
     ).flatten
-    InitHookDataSourceProxy(pgSimpleDataSource, hookFunctions)
+    InitHookDataSourceProxy(pgSimpleDataSource, hookFunctions, loggerFactory)
   }
 
   override def checkCompatibility(
       connection: Connection
-  )(implicit loggingContext: LoggingContext): Unit = {
+  )(implicit traceContext: TraceContext): Unit = {
     getPostgresVersion(connection) match {
       case Some((major, minor)) =>
         if (major < minMajorVersionSupported) {
@@ -94,7 +98,7 @@ class PostgresDataSourceStorageBackend(minMajorVersionSupported: Int)
 
   private[backend] def getPostgresVersion(
       connection: Connection
-  )(implicit loggingContext: LoggingContext): Option[(Int, Int)] = {
+  )(implicit traceContext: TraceContext): Option[(Int, Int)] = {
     val version = SQL"SHOW server_version".as(get[String](1).single)(connection)
     logger.debug(s"Found Postgres version $version")
     parsePostgresVersion(version)
@@ -113,8 +117,8 @@ class PostgresDataSourceStorageBackend(minMajorVersionSupported: Int)
 }
 
 object PostgresDataSourceStorageBackend {
-  def apply(): PostgresDataSourceStorageBackend =
-    new PostgresDataSourceStorageBackend(minMajorVersionSupported = 10)
+  def apply(loggerFactory: NamedLoggerFactory): PostgresDataSourceStorageBackend =
+    new PostgresDataSourceStorageBackend(minMajorVersionSupported = 10, loggerFactory)
 
   final class UnsupportedPostgresVersion(message: String)
       extends RuntimeException(message)

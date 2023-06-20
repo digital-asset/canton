@@ -32,7 +32,7 @@ private[backend] trait StorageBackendTestsIngestion
       dtoConfiguration(someOffset, someConfiguration)
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     val configBeforeLedgerEndUpdate = executeSql(backend.configuration.ledgerConfiguration)
     executeSql(
@@ -59,7 +59,7 @@ private[backend] trait StorageBackendTestsIngestion
       dtoPackageEntry(someOffset),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     val packagesBeforeLedgerEndUpdate = executeSql(backend.packageBackend.lfPackages)
     executeSql(
@@ -81,7 +81,7 @@ private[backend] trait StorageBackendTestsIngestion
       dtoPartyEntry(someOffset)
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     val partiesBeforeLedgerEndUpdate = executeSql(backend.party.knownParties)
     executeSql(
@@ -107,7 +107,7 @@ private[backend] trait StorageBackendTestsIngestion
       ),
       dtoPartyEntry(offset(3), party = "party3", displayNameOverride = Some(None)),
     )
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(3), 0)
@@ -158,7 +158,7 @@ private[backend] trait StorageBackendTestsIngestion
 
       def test() = {
 
-        executeSql(backend.parameter.initializeParameters(someIdentityParams))
+        executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
 
         def ingestPackagesF(
             connection: Connection,

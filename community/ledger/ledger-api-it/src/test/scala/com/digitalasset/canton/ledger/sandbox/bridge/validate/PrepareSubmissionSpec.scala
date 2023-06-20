@@ -10,7 +10,6 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractId, ValueNil}
-import com.daml.logging.LoggingContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
@@ -23,6 +22,7 @@ import com.digitalasset.canton.ledger.sandbox.domain.Rejection.{
   TransactionInternallyInconsistentKey,
 }
 import com.digitalasset.canton.ledger.sandbox.domain.Submission
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import org.mockito.MockitoSugar.mock
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -30,7 +30,7 @@ import org.scalatest.matchers.should.Matchers
 import java.time.Duration
 
 class PrepareSubmissionSpec extends AsyncFlatSpec with Matchers {
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
   private implicit val errorLogger: ContextualizedErrorLogger =
     DamlContextualizedErrorLogger.forTesting(getClass)
 

@@ -7,20 +7,20 @@ import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
-import com.daml.logging.LoggingContext
 import com.daml.metrics.{Metrics, Timed}
-import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.{
   PruningResult,
+  ReassignmentCommand,
   SubmissionResult,
   SubmitterInfo,
   TransactionMeta,
   WriteService,
 }
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.CompletionStage
 
@@ -34,8 +34,7 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
       globalKeyMapping: Map[GlobalKey, Option[Value.ContractId]],
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
   )(implicit
-      loggingContext: LoggingContext,
-      telemetryContext: TelemetryContext,
+      traceContext: TraceContext
   ): CompletionStage[SubmissionResult] =
     Timed.timedAndTrackedCompletionStage(
       metrics.daml.services.write.submitTransaction,
@@ -50,13 +49,35 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
       ),
     )
 
+  def submitReassignment(
+      submitter: Ref.Party,
+      applicationId: Ref.ApplicationId,
+      commandId: Ref.CommandId,
+      submissionId: Option[Ref.SubmissionId],
+      workflowId: Option[Ref.WorkflowId],
+      reassignmentCommand: ReassignmentCommand,
+  )(implicit
+      traceContext: TraceContext
+  ): CompletionStage[SubmissionResult] =
+    Timed.timedAndTrackedCompletionStage(
+      metrics.daml.services.write.submitTransaction,
+      metrics.daml.services.write.submitTransactionRunning,
+      delegate.submitReassignment(
+        submitter,
+        applicationId,
+        commandId,
+        submissionId,
+        workflowId,
+        reassignmentCommand,
+      ),
+    )
+
   override def uploadPackages(
       submissionId: Ref.SubmissionId,
       archives: List[DamlLf.Archive],
       sourceDescription: Option[String],
   )(implicit
-      loggingContext: LoggingContext,
-      telemetryContext: TelemetryContext,
+      traceContext: TraceContext
   ): CompletionStage[SubmissionResult] =
     Timed.completionStage(
       metrics.daml.services.write.uploadPackages,
@@ -68,8 +89,7 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
       displayName: Option[String],
       submissionId: Ref.SubmissionId,
   )(implicit
-      loggingContext: LoggingContext,
-      telemetryContext: TelemetryContext,
+      traceContext: TraceContext
   ): CompletionStage[SubmissionResult] =
     Timed.completionStage(
       metrics.daml.services.write.allocateParty,
@@ -81,8 +101,7 @@ final class TimedWriteService(delegate: WriteService, metrics: Metrics) extends 
       submissionId: Ref.SubmissionId,
       config: Configuration,
   )(implicit
-      loggingContext: LoggingContext,
-      telemetryContext: TelemetryContext,
+      traceContext: TraceContext
   ): CompletionStage[SubmissionResult] =
     Timed.completionStage(
       metrics.daml.services.write.submitConfiguration,

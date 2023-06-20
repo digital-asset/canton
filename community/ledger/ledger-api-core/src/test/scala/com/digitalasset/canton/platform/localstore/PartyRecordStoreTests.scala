@@ -5,13 +5,13 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{LedgerString, Party}
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{
   IdentityProviderConfig,
   IdentityProviderId,
   JwksUrl,
   ObjectMeta,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.PartyRecordStore.{
   PartyNotFound,
   PartyRecordExistsFatal,
@@ -28,7 +28,7 @@ import scala.language.implicitConversions
 
 trait PartyRecordStoreTests extends PartyRecordStoreSpecBase { self: AsyncFreeSpec =>
 
-  implicit val lc: LoggingContext = LoggingContext.ForTesting
+  implicit val lc = LoggingContextWithTrace.ForTesting
 
   private implicit def toParty(s: String): Party =
     Party.assertFromString(s)

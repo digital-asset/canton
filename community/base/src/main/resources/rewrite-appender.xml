@@ -188,23 +188,6 @@
             <testing>true</testing>
         </rewrite>
 
-        <!-- Some UserManagementServiceIT conformance tests (RaceConditionCreateUsers, RaceConditionGrantRights)
-             log some duplicate key violation errors.
-        -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- for Postgres -->
-            <logger>com.digitalasset.canton.platform.store.dao.DbDispatcherImpl</logger>
-            <contains>Processing the request failed due to a non-transient database error: ERROR: duplicate key value violates unique constraint</contains>
-            <exceptionMessage>ERROR: duplicate key value violates unique constraint</exceptionMessage>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
-        <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- for Oracle -->
-            <logger>com.digitalasset.canton.platform.store.dao.DbDispatcherImpl</logger>
-            <contains>Processing the request failed due to a non-transient database error: ORA-00001: unique constraint</contains>
-            <exceptionMessage>ORA-00001: unique constraint</exceptionMessage>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.integration.tests.LoggingIntegrationTestDefault</logger>
             <maxLevel>INFO</maxLevel>

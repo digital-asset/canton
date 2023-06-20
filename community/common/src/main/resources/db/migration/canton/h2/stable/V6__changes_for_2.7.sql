@@ -9,3 +9,5 @@ ALTER TABLE transfers DROP COLUMN request_timestamp;
 ALTER TABLE transfers ADD PRIMARY KEY (target_domain, origin_domain, transfer_out_timestamp);
 ALTER TABLE transfers ADD COLUMN transfer_out_global_offset bigint;
 ALTER TABLE transfers ADD COLUMN transfer_in_global_offset bigint;
+
+ALTER TABLE active_contracts ADD COLUMN transfer_counter bigint default null;

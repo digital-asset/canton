@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.platform.store.interfaces
 
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Bytes
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.ledger.EventId
-import com.daml.lf.value.{Value as LfValue}
+import com.daml.lf.value.Value as LfValue
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.ledger.participant.state.v2.ReassignmentInfo
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.EventSequentialId
 import com.digitalasset.canton.platform.{ContractId, Identifier}
 
@@ -41,6 +42,7 @@ object TransactionLogUpdate {
       offset: Offset,
       events: Vector[Event],
       completionDetails: Option[CompletionDetails],
+      domainId: Option[String],
   ) extends TransactionLogUpdate
 
   /** A rejected submission.
@@ -52,6 +54,24 @@ object TransactionLogUpdate {
       offset: Offset,
       completionDetails: CompletionDetails,
   ) extends TransactionLogUpdate
+
+  final case class ReassignmentAccepted(
+      updateId: String,
+      commandId: String,
+      workflowId: String,
+      offset: Offset,
+      completionDetails: Option[CompletionDetails],
+      reassignmentInfo: ReassignmentInfo,
+      reassignment: ReassignmentAccepted.Reassignment,
+  ) extends TransactionLogUpdate
+
+  object ReassignmentAccepted {
+    sealed trait Reassignment
+    final case class Assigned(createdEvent: CreatedEvent) extends Reassignment
+    final case class Unassigned(
+        unassign: com.digitalasset.canton.ledger.participant.state.v2.Reassignment.Unassign
+    ) extends Reassignment
+  }
 
   /** The transaction's completion details.
     *
