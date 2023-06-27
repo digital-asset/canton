@@ -150,7 +150,7 @@ class DbSequencedEventStore(
   private def bulkInsertQuery(
       events: Seq[PossiblyIgnoredSerializedEvent]
   )(implicit traceContext: TraceContext): DBIOAction[Unit, NoStream, Effect.All] = {
-    // TOOD(i13104): Move traffic control to stable release
+    // TODO(i13104): Move traffic control to stable release
     if (protocolVersion >= ProtocolVersion.dev) {
       // DEV protocol version supports sequencer traffic control
       val insertSql = storage.profile match {
@@ -210,7 +210,7 @@ class DbSequencedEventStore(
       traceContext: TraceContext
   ): EitherT[Future, SequencedEventNotFoundError, PossiblyIgnoredSerializedEvent] =
     processingTime.eitherTEvent {
-      // TOOD(i13104): Move traffic control to stable release
+      // TODO(i13104): Move traffic control to stable release
       val query = if (protocolVersion >= ProtocolVersion.dev) {
         criterion match {
           case ByTimestamp(timestamp) =>
@@ -249,7 +249,7 @@ class DbSequencedEventStore(
         case ByTimestampRange(lowerInclusive, upperInclusive) =>
           for {
             events <-
-              // TOOD(i13104): Move traffic control to stable release
+              // TODO(i13104): Move traffic control to stable release
               if (protocolVersion >= ProtocolVersion.dev) {
                 storage.query(
                   sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder from sequenced_events
@@ -282,7 +282,7 @@ class DbSequencedEventStore(
   override def sequencedEvents(
       limit: Option[Int] = None
   )(implicit traceContext: TraceContext): Future[Seq[PossiblyIgnoredSerializedEvent]] = {
-    // TOOD(i13104): Move traffic control to stable release
+    // TODO(i13104): Move traffic control to stable release
     if (protocolVersion >= ProtocolVersion.dev) {
       processingTime.event {
         storage.query(

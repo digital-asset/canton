@@ -51,12 +51,6 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
         DomainRegistryError.ConnectionErrors.DomainIsNotAvailable.Error(alias, cause)
       case SequencerInfoLoaderError.HandshakeFailedError(cause) =>
         DomainRegistryError.HandshakeErrors.HandshakeFailed.Error(cause)
-      case SequencerInfoLoaderError.DomainAliasDuplication(domainId, alias, previousDomainId) =>
-        DomainRegistryError.HandshakeErrors.DomainAliasDuplication.Error(
-          domainId,
-          alias,
-          previousDomainId,
-        )
       case SequencerInfoLoaderError.SequencersFromDifferentDomainsAreConfigured(cause) =>
         DomainRegistryError.ConfigurationErrors.SequencersFromDifferentDomainsAreConfigured
           .Error(cause)

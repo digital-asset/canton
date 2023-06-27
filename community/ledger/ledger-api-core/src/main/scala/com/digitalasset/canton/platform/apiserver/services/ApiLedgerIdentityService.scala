@@ -3,17 +3,19 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.ledger_identity_service.LedgerIdentityServiceGrpc.LedgerIdentityService as GrpcLedgerIdentityService
 import com.daml.ledger.api.v1.ledger_identity_service.{
   GetLedgerIdentityRequest,
   GetLedgerIdentityResponse,
   LedgerIdentityServiceGrpc,
 }
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
+import com.digitalasset.canton.ledger.error.CommonErrors
+import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.{BindableService, ServerServiceDefinition}
 import scalaz.syntax.tag.*
 
@@ -22,13 +24,13 @@ import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 private[apiserver] final class ApiLedgerIdentityService private (
-    getLedgerId: () => Future[LedgerId]
-)(implicit executionContext: ExecutionContext, loggingContext: LoggingContext)
+    getLedgerId: () => Future[LedgerId],
+    telemetry: Telemetry,
+    val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
     extends GrpcLedgerIdentityService
-    with GrpcApiService {
-  private val logger = ContextualizedLogger.get(this.getClass)
-  private implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-    new DamlContextualizedErrorLogger(logger, loggingContext, None)
+    with GrpcApiService
+    with NamedLogging {
 
   val closed: AtomicBoolean = new AtomicBoolean(false)
 
@@ -36,7 +38,10 @@ private[apiserver] final class ApiLedgerIdentityService private (
   override def getLedgerIdentity(
       request: GetLedgerIdentityRequest
   ): Future[GetLedgerIdentityResponse] = {
-    logger.info(s"Received request for ledger identity: $request")
+    implicit val traceContext =
+      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
+
+    logger.info(s"Received request for ledger identity: $request.")
     if (closed.get())
       Future.failed(CommonErrors.ServiceNotRunning.Reject("Ledger Identity Service").asGrpcError)
     else
@@ -54,10 +59,9 @@ private[apiserver] final class ApiLedgerIdentityService private (
 }
 
 private[apiserver] object ApiLedgerIdentityService {
-  def create(ledgerId: LedgerId)(implicit
-      executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
+  def create(ledgerId: LedgerId, telemetry: Telemetry, loggerFactory: NamedLoggerFactory)(implicit
+      executionContext: ExecutionContext
   ): ApiLedgerIdentityService with BindableService = {
-    new ApiLedgerIdentityService(() => Future.successful(ledgerId))
+    new ApiLedgerIdentityService(() => Future.successful(ledgerId), telemetry, loggerFactory)
   }
 }

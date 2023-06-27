@@ -124,7 +124,8 @@ CREATE TABLE participant_command_completions (
     -- (decided by the ledger driver), and may be `NULL` even if the other two columns are set.
     rejection_status_code INTEGER,
     rejection_status_message VARCHAR,
-    rejection_status_details BINARY LARGE OBJECT
+    rejection_status_details BINARY LARGE OBJECT,
+    domain_id INTEGER
 );
 
 CREATE INDEX participant_command_completions_application_id_offset_idx ON participant_command_completions USING btree (application_id, completion_offset);
@@ -156,7 +157,9 @@ CREATE TABLE participant_events_divulgence (
     create_argument BINARY LARGE OBJECT,
 
     -- * compression flags
-    create_argument_compression SMALLINT
+    create_argument_compression SMALLINT,
+
+    domain_id INTEGER
 );
 
 -- offset index: used to translate to sequential_id
@@ -211,7 +214,9 @@ CREATE TABLE participant_events_create (
     create_key_value_compression SMALLINT,
 
     -- * contract driver metadata
-    driver_metadata BINARY LARGE OBJECT
+    driver_metadata BINARY LARGE OBJECT,
+
+    domain_id INTEGER
 );
 
 -- offset index: used to translate to sequential_id
@@ -269,7 +274,9 @@ CREATE TABLE participant_events_consuming_exercise (
     -- * compression flags
     create_key_value_compression SMALLINT,
     exercise_argument_compression SMALLINT,
-    exercise_result_compression SMALLINT
+    exercise_result_compression SMALLINT,
+
+    domain_id INTEGER
 );
 
 -- offset index: used to translate to sequential_id
@@ -324,7 +331,9 @@ CREATE TABLE participant_events_non_consuming_exercise (
     -- * compression flags
     create_key_value_compression SMALLINT,
     exercise_argument_compression SMALLINT,
-    exercise_result_compression SMALLINT
+    exercise_result_compression SMALLINT,
+
+    domain_id INTEGER
 );
 
 -- offset index: used to translate to sequential_id
@@ -337,6 +346,92 @@ CREATE TABLE string_interning (
     internal_id integer PRIMARY KEY NOT NULL,
     external_string text
 );
+
+---------------------------------------------------------------------------------------------------
+-- Events table: Unassign
+---------------------------------------------------------------------------------------------------
+CREATE TABLE participant_events_unassign (
+    -- * fixed-size columns first to avoid padding
+    event_sequential_id bigint NOT NULL,      -- event identification: same ordering as event_offset
+
+    -- * event identification
+    event_offset VARCHAR NOT NULL,
+
+    -- * transaction metadata
+    update_id VARCHAR NOT NULL,
+    workflow_id VARCHAR,
+
+    -- * submitter info (only visible on submitting participant)
+    command_id VARCHAR,
+
+    submitter INTEGER NOT NULL,
+
+    -- * shared event information
+    contract_id VARCHAR NOT NULL,
+    template_id INTEGER NOT NULL,
+    flat_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- stakeholders
+
+    -- * common reassignment
+    source_domain_id INTEGER NOT NULL,
+    target_domain_id INTEGER NOT NULL,
+    unassign_id VARCHAR NOT NULL,
+    reassignment_counter BIGINT NOT NULL,
+
+    -- * unassigned specific
+    assignment_exclusivity BIGINT
+);
+
+-- sequential_id index for paging
+CREATE INDEX participant_events_unassign_event_sequential_id ON participant_events_unassign (event_sequential_id);
+
+-- multi-column index supporting per contract per domain lookup before/after sequential id query
+CREATE INDEX participant_events_unassign_contract_id_composite ON participant_events_unassign (contract_id, source_domain_id, event_sequential_id);
+
+---------------------------------------------------------------------------------------------------
+-- Events table: Assign
+---------------------------------------------------------------------------------------------------
+CREATE TABLE participant_events_assign (
+    -- * fixed-size columns first to avoid padding
+    event_sequential_id bigint NOT NULL,      -- event identification: same ordering as event_offset
+
+    -- * event identification
+    event_offset VARCHAR NOT NULL,
+
+    -- * transaction metadata
+    update_id VARCHAR NOT NULL,
+    workflow_id VARCHAR,
+
+    -- * submitter info (only visible on submitting participant)
+    command_id VARCHAR,
+
+    submitter INTEGER NOT NULL,
+
+    -- * shared event information
+    contract_id VARCHAR NOT NULL,
+    template_id INTEGER NOT NULL,
+    flat_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- stakeholders
+
+    -- * common reassignment
+    source_domain_id INTEGER NOT NULL,
+    target_domain_id INTEGER NOT NULL,
+    unassign_id VARCHAR NOT NULL,
+    reassignment_counter BIGINT NOT NULL,
+
+    -- * assigned specific
+    create_argument BINARY LARGE OBJECT NOT NULL,
+    create_signatories INTEGER ARRAY NOT NULL,
+    create_observers INTEGER ARRAY NOT NULL,
+    create_agreement_text VARCHAR,
+    create_key_value BINARY LARGE OBJECT,
+    create_key_hash VARCHAR,
+    create_argument_compression SMALLINT,
+    create_key_value_compression SMALLINT,
+    ledger_effective_time BIGINT NOT NULL,
+    driver_metadata BINARY LARGE OBJECT NOT NULL
+);
+
+-- sequential_id index for paging
+CREATE INDEX participant_events_assign_event_sequential_id ON participant_events_assign (event_sequential_id);
 
 -----------------------------
 -- Filter tables for events
@@ -367,6 +462,24 @@ CREATE TABLE pe_consuming_id_filter_stakeholder (
 CREATE INDEX pe_consuming_id_filter_stakeholder_pts_idx ON pe_consuming_id_filter_stakeholder(party_id, template_id, event_sequential_id);
 CREATE INDEX pe_consuming_id_filter_stakeholder_ps_idx  ON pe_consuming_id_filter_stakeholder(party_id, event_sequential_id);
 CREATE INDEX pe_consuming_id_filter_stakeholder_s_idx   ON pe_consuming_id_filter_stakeholder(event_sequential_id);
+
+CREATE TABLE pe_unassign_id_filter_stakeholder (
+   event_sequential_id BIGINT NOT NULL,
+   template_id INTEGER NOT NULL,
+   party_id INTEGER NOT NULL
+);
+CREATE INDEX pe_unassign_id_filter_stakeholder_pts_idx ON pe_unassign_id_filter_stakeholder(party_id, template_id, event_sequential_id);
+CREATE INDEX pe_unassign_id_filter_stakeholder_ps_idx  ON pe_unassign_id_filter_stakeholder(party_id, event_sequential_id);
+CREATE INDEX pe_unassign_id_filter_stakeholder_s_idx   ON pe_unassign_id_filter_stakeholder(event_sequential_id);
+
+CREATE TABLE pe_assign_id_filter_stakeholder (
+   event_sequential_id BIGINT NOT NULL,
+   template_id INTEGER NOT NULL,
+   party_id INTEGER NOT NULL
+);
+CREATE INDEX pe_assign_id_filter_stakeholder_pts_idx ON pe_assign_id_filter_stakeholder(party_id, template_id, event_sequential_id);
+CREATE INDEX pe_assign_id_filter_stakeholder_ps_idx  ON pe_assign_id_filter_stakeholder(party_id, event_sequential_id);
+CREATE INDEX pe_assign_id_filter_stakeholder_s_idx   ON pe_assign_id_filter_stakeholder(event_sequential_id);
 
 CREATE TABLE pe_consuming_id_filter_non_stakeholder_informee (
    event_sequential_id BIGINT NOT NULL,

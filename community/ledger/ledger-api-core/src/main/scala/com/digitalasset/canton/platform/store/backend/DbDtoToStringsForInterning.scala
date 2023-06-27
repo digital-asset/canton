@@ -11,6 +11,7 @@ object DbDtoToStringsForInterning {
     new DomainStringIterators(
       templateIds = dbDtos.iterator.flatMap(templateIdsOf),
       parties = dbDtos.iterator.flatMap(partiesOf),
+      domainIds = dbDtos.iterator.flatMap(domainIdsOf),
     )
 
   private def templateIdsOf(dbDto: DbDto): Iterator[String] =
@@ -23,6 +24,12 @@ object DbDtoToStringsForInterning {
 
       case dbDto: DbDto.EventCreate =>
         dbDto.template_id.iterator
+
+      case dbDto: DbDto.EventUnassign =>
+        Iterator(dbDto.template_id)
+
+      case dbDto: DbDto.EventAssign =>
+        Iterator(dbDto.template_id)
 
       case _ => Iterator.empty
     }
@@ -46,6 +53,16 @@ object DbDtoToStringsForInterning {
           dbDto.create_observers.getOrElse(Set.empty).iterator ++
           dbDto.create_signatories.getOrElse(Set.empty).iterator
 
+      case dbDto: DbDto.EventUnassign =>
+        Iterator(dbDto.submitter) ++
+          dbDto.flat_event_witnesses.iterator
+
+      case dbDto: DbDto.EventAssign =>
+        Iterator(dbDto.submitter) ++
+          dbDto.flat_event_witnesses.iterator ++
+          dbDto.create_observers.iterator ++
+          dbDto.create_signatories.iterator
+
       case dbDto: DbDto.CommandCompletion =>
         dbDto.submitters.iterator
 
@@ -57,4 +74,14 @@ object DbDtoToStringsForInterning {
       case _ => Iterator.empty
     }
 
+  private def domainIdsOf(dbDto: DbDto): Iterator[String] =
+    dbDto match {
+      case dbDto: DbDto.EventDivulgence => dbDto.domain_id.iterator
+      case dbDto: DbDto.EventExercise => dbDto.domain_id.iterator
+      case dbDto: DbDto.EventCreate => dbDto.domain_id.iterator
+      case dbDto: DbDto.EventUnassign => Iterator(dbDto.source_domain_id, dbDto.target_domain_id)
+      case dbDto: DbDto.EventAssign => Iterator(dbDto.source_domain_id, dbDto.target_domain_id)
+      case dbDto: DbDto.CommandCompletion => dbDto.domain_id.iterator
+      case _ => Iterator.empty
+    }
 }

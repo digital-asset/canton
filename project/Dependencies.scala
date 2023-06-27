@@ -103,7 +103,11 @@ object Dependencies {
   lazy val akka_slf4j =
     "com.typesafe.akka" %% "akka-slf4j" % akka_version excludeAll (incompatibleLogging: _*)
   lazy val akka_http = "com.typesafe.akka" %% "akka-http" % akka_http_version
+  lazy val akka_http_core = "com.typesafe.akka" %% "akka-http-core" % akka_http_version
   lazy val akka_http_testkit = "com.typesafe.akka" %% "akka-http-testkit" % akka_http_version
+
+  lazy val spray_json_derived_codecs =
+    "io.github.paoloboni" %% "spray-json-derived-codecs" % "2.3.10"
 
   lazy val scala_logging =
     "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5" excludeAll (incompatibleLogging: _*)

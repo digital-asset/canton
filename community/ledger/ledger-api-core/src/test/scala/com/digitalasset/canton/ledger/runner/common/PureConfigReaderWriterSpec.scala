@@ -295,7 +295,6 @@ class PureConfigReaderWriterSpec
     """
       |allowed-language-versions = stable
       |contract-key-uniqueness = strict
-      |forbid-v-0-contract-id = true
       |limits {
       |  choice-controllers = 2147483647
       |  choice-observers = 2147483647

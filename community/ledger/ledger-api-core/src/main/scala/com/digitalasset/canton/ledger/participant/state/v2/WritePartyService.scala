@@ -4,8 +4,7 @@
 package com.digitalasset.canton.ledger.participant.state.v2
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
-import com.daml.tracing.TelemetryContext
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.CompletionStage
 
@@ -37,7 +36,6 @@ trait WritePartyService {
       displayName: Option[String],
       submissionId: Ref.SubmissionId,
   )(implicit
-      loggingContext: LoggingContext,
-      telemetryContext: TelemetryContext,
+      traceContext: TraceContext
   ): CompletionStage[SubmissionResult]
 }

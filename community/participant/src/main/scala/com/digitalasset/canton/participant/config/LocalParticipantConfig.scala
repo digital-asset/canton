@@ -4,13 +4,14 @@
 package com.digitalasset.canton.participant.config
 
 import cats.syntax.option.*
+import com.daml.http.HttpApiConfig
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
 import com.digitalasset.canton.config.NonNegativeFiniteDuration.*
 import com.digitalasset.canton.config.RequireTypes.*
-import com.digitalasset.canton.config.{NonNegativeFiniteDuration, *}
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
@@ -96,6 +97,12 @@ trait LocalParticipantConfig extends BaseParticipantConfig with LocalNodeConfig 
   /** parameters of the interfaces that applications use to change and query the ledger */
   def ledgerApi: LedgerApiServerConfig
 
+  /** parameters for configuring the interaction with ledger via the HTTP JSON API.
+    * Configuring this key will enable the HTTP JSON API server.
+    * NOTE: This feature is experimental and MUST NOT be used in production code.
+    */
+  def httpLedgerApiExperimental: Option[HttpApiConfig]
+
   /** parameters of the interface used to administrate the participant */
   def adminApi: AdminServerConfig
 
@@ -150,6 +157,7 @@ final case class CommunityParticipantConfig(
     override val init: ParticipantInitConfig = ParticipantInitConfig(),
     override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
     override val ledgerApi: LedgerApiServerConfig = LedgerApiServerConfig(),
+    override val httpLedgerApiExperimental: Option[HttpApiConfig] = None,
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig(),
     override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory(),
     override val testingTime: Option[TestingTimeServiceConfig] = None,
@@ -267,6 +275,7 @@ final case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultPreparePackageMetadataTimeOutWarning,
     completionsPageSize: Int = LedgerApiServerConfig.DefaultCompletionsPageSize,
     explicitDisclosureUnsafe: Boolean = false,
+    adminToken: Option[String] = None,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
@@ -404,9 +413,13 @@ object LedgerApiServerConfig {
         _maxParallelIdCreateQueries,
         _maxParallelIdConsumingQueries,
         _maxParallelIdNonConsumingQueries,
+        _maxParallelIdAssignQueries,
+        _maxParallelIdUnassignQueries,
         _maxParallelPayloadCreateQueries,
         _maxParallelPayloadConsumingQueries,
         _maxParallelPayloadNonConsumingQueries,
+        _maxParallelPayloadAssignQueries,
+        _maxParallelPayloadunassignQueries,
         _maxParallelPayloadQueries,
         _transactionsProcessingParallelism,
       ) = transactionTreeStreams
@@ -419,8 +432,12 @@ object LedgerApiServerConfig {
         _maxPayloadsPerPayloadsPage,
         _maxParallelIdCreateQueries,
         _maxParallelIdConsumingQueries,
+        _maxParallelIdAssignQueries,
+        _maxParallelIdUnassignQueries,
         _maxParallelPayloadCreateQueries,
         _maxParallelPayloadConsumingQueries,
+        _maxParallelPayloadAssignQueries,
+        _maxParallelPayloadunassignQueries,
         _maxParallelPayloadQueries,
         _transactionsProcessingParallelism,
       ) = transactionFlatStreams

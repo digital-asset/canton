@@ -10,6 +10,7 @@ import com.daml.metrics.Metrics
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.ports.Port
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.client.GrpcChannel
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration
 import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
@@ -21,7 +22,6 @@ import com.digitalasset.canton.platform.apiserver.ratelimiting.{
 }
 import com.google.protobuf.ByteString
 import io.grpc.{ManagedChannel, ServerInterceptor, StatusRuntimeException}
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.Executors
@@ -29,7 +29,7 @@ import scala.concurrent.Future
 
 final class GrpcServerSpec
     extends AsyncWordSpec
-    with Matchers
+    with BaseTest
     with TestResourceContext
     with MetricValues {
   "a GRPC server" should {
@@ -104,6 +104,7 @@ final class GrpcServerSpec
         "test",
       )(DamlContextualizedErrorLogger.forTesting(getClass))
       val rateLimitingInterceptor = RateLimitingInterceptor(
+        loggerFactory,
         metrics,
         rateLimitingConfig,
         additionalChecks = List((_, _) => {

@@ -46,7 +46,6 @@ final case class SequencerConnections private (
     )
   }
 
-  // TODO(i12076): We should only need this method in case of non-bft setup
   def default: SequencerConnection =
     aliasToConnection.head1._2
 

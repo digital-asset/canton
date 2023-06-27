@@ -13,6 +13,7 @@ import com.daml.logging.entries.LoggingValue.OfString
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.Configuration
+import com.digitalasset.canton.topology.DomainId
 import scalaz.syntax.tag.*
 import scalaz.{@@, Tag}
 
@@ -80,6 +81,7 @@ final case class Commands(
     deduplicationPeriod: DeduplicationPeriod,
     commands: LfCommands,
     disclosedContracts: ImmArray[DisclosedContract],
+    domainId: Option[DomainId] = None,
 )
 
 final case class DisclosedContract(

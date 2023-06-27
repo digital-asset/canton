@@ -4,15 +4,9 @@
 package com.digitalasset.canton.util.retry
 
 import cats.syntax.flatMap.*
-import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
-import com.digitalasset.canton.lifecycle.{
-  FlagCloseable,
-  FutureUnlessShutdown,
-  RunOnShutdown,
-  UnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -27,7 +21,7 @@ import com.digitalasset.canton.util.{DelayUtil, LoggerUtil}
 import org.slf4j.event.Level
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 import scala.util.{Failure, Try}
 
@@ -232,92 +226,61 @@ abstract class RetryWithDelay(
                 // No need to log the exception in outcome, as this has been logged by retryable.retryOk.
               )
 
-              val invocationP = Promise[Future[RetryOutcome[T]]]()
-              val abortedOnShutdownTask = new RunOnShutdown {
-                override def done: Boolean = invocationP.isCompleted
-
-                override def name: String = s"'$operationName' / $longDescription"
-
-                override def run(): Unit = logOnThrow {
-                  val wrappedOutcome =
-                    Future.successful(RetryOutcome(outcome, RetryTermination.Shutdown))
-                  val promiseCompleted = invocationP.trySuccess(wrappedOutcome)
-                  if (promiseCompleted) {
-                    logger.info(
-                      s"The operation '$operationName' has been cancelled. Aborting. $longDescription"
+              val delayedF = DelayUtil.delayIfNotClosing(operationName, delay, flagCloseable)
+              delayedF
+                .flatMap { _ =>
+                  logOnThrow {
+                    LoggerUtil.logAtLevel(
+                      level,
+                      s"Now retrying operation '$operationName'. $longDescription$actionableMessage",
                     )
+                    // Run the task again on the normal execution context as the task might take a long time.
+                    // `performUnlessClosingF` guards against closing the execution context.
+                    val nextRunUnlessShutdown =
+                      flagCloseable
+                        .performUnlessClosingF(operationName)(runTask())(
+                          executionContext,
+                          traceContext,
+                        )
+                    @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
+                    val nextRunF = nextRunUnlessShutdown
+                      .onShutdown {
+                        // If we're closing, report the previous `outcome` and recurse.
+                        // This will enter the case branch with `flagCloseable.isClosing`
+                        // and therefore yield the termination reason `Shutdown`.
+                        outcome.get
+                      }(
+                        // Use the direct execution context as this is a small task.
+                        // The surrounding `performUnlessClosing` ensures that this post-processing
+                        // is registered with the normal execution context before it can close.
+                        directExecutionContext
+                      )
+                    FutureUnlessShutdown.outcomeF(
+                      run(
+                        nextRunF,
+                        totalRetries + 1,
+                        errorKind,
+                        retriesOfErrorKind + 1,
+                        nextDelay(totalRetries + 1, delay),
+                      )
+                    )(executionContext)
                   }
-                }
-              }
-              flagCloseable.runOnShutdown(abortedOnShutdownTask)
-
-              val delayedF = DelayUtil.delay(operationName, delay, flagCloseable)
-              flagCloseable
-                .performUnlessClosing(operationName) {
-                  // if delayedF doesn't complete, then we can be sure that the `abortedOnShutdownTask.run` will run due to shutdown
-                  delayedF.onComplete {
-                    case util.Success(()) =>
-                      logOnThrow { // if this one doesn't run, then the `abortedOnShutdownTask` will run
-                        flagCloseable.performUnlessClosing(operationName) {
-                          val retryP = Promise[RetryOutcome[T]]()
-                          // ensure that the abort task doesn't get executed anymore (because we
-                          // want to return the "last outcome" and here, we can be sure that `run` will give us a new outcome
-                          invocationP.trySuccess(retryP.future).discard
-                          LoggerUtil.logAtLevel(
-                            level,
-                            s"Now retrying operation '$operationName'. $longDescription$actionableMessage",
-                          )
-                          // Run the task again on the normal execution context as the task might take a long time.
-                          // `performUnlessClosingF` guards against closing the execution context.
-                          val nextRunUnlessShutdown =
-                            flagCloseable
-                              .performUnlessClosingF(operationName)(runTask())(
-                                executionContext,
-                                traceContext,
-                              )
-                          @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
-                          val nextRunF = nextRunUnlessShutdown
-                            .onShutdown {
-                              // If we're closing, report the previous `outcome` and recurse.
-                              // This will enter the case branch with `flagCloseable.isClosing`
-                              // and therefore yield the termination reason `Shutdown`.
-                              outcome.get
-                            }(
-                              // Use the direct execution context as this is a small task.
-                              // The surrounding `performUnlessClosing` ensures that this post-processing
-                              // is registered with the normal execution context before it can close.
-                              directExecutionContext
-                            )
-                          val retryF = run(
-                            nextRunF,
-                            totalRetries + 1,
-                            errorKind,
-                            retriesOfErrorKind + 1,
-                            nextDelay(totalRetries + 1, delay),
-                          )
-                          retryP.completeWith(retryF)
-                        }(traceContext)
-                      }
-                    case failure: Failure[_] =>
-                      logger.error("DelayUtil failed unexpectedly", failure)
-                  }(
-                    // It is safe to use the general execution context here by the following argument.
-                    // - If the `onComplete` executes before `DelayUtil` completes the returned promise,
-                    //   then the completion of the promise will schedule the function immediately.
-                    //   Since this completion is guarded by `performUnlessClosing`,
-                    //   the body gets scheduled with `executionContext` before `flagCloseable`'s close method completes.
-                    // - If `DelayUtil` completes the returned promise before the `onComplete` call executes,
-                    //   the `onComplete` call itself will schedule the body
-                    //   and this is guarded by the `performUnlessClosing` above.
-                    // Therefore the execution context is still open when the scheduling happens.
-                    executionContext
-                  )
-                }
-                .onShutdown(
-                  // If the `onComplete` does not run, then `abortedDueToShutdownTask.run` will run due to shutdown
-                  ()
+                }(
+                  // It is safe to use the general execution context here by the following argument.
+                  // - If the `onComplete` executes before `DelayUtil` completes the returned promise,
+                  //   then the completion of the promise will schedule the function immediately.
+                  //   Since this completion is guarded by `performUnlessClosing`,
+                  //   the body gets scheduled with `executionContext` before `flagCloseable`'s close method completes.
+                  // - If `DelayUtil` completes the returned promise before the `onComplete` call executes,
+                  //   the `onComplete` call itself will schedule the body
+                  //   and this is guarded by the `performUnlessClosing` above.
+                  // Therefore the execution context is still open when the scheduling happens.
+                  executionContext
                 )
-              invocationP.future.flatten
+                .onShutdown(
+                  RetryOutcome(outcome, RetryTermination.Shutdown)
+                )(executionContext)
+
             } else {
               logger.info(
                 messageOfOutcome(

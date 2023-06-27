@@ -52,9 +52,10 @@ import com.digitalasset.canton.{
   RequestCounter,
   SequencerCounter,
   TransferCounter,
+  TransferCounterO,
 }
-import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{Assertion, EitherValues}
 
 import java.util.UUID
 import scala.concurrent.duration.*
@@ -1150,7 +1151,7 @@ trait TransferStoreTest {
   }
 }
 
-object TransferStoreTest {
+object TransferStoreTest extends EitherValues {
 
   val alice = LfPartyId.assertFromString("alice")
   val bob = LfPartyId.assertFromString("bob")
@@ -1214,13 +1215,14 @@ object TransferStoreTest {
     )
   }
 
-  private val protocolVersion = BaseTest.testedProtocolVersion
+  private val initialTransferCounter: TransferCounterO =
+    TransferCounter.forCreatedContract(BaseTest.testedProtocolVersion)
 
   val seedGenerator = new SeedGenerator(pureCryptoApi)
 
   private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
     val submittingParticipant: LedgerParticipantId =
-      if (protocolVersion >= ProtocolVersion.v5)
+      if (BaseTest.testedProtocolVersion >= ProtocolVersion.v5)
         LedgerParticipantId.assertFromString("participant1")
       else
         LedgerParticipantId.assertFromString(
@@ -1228,7 +1230,7 @@ object TransferStoreTest {
         ) // default value in TransferOutView/TransferInView
 
     val applicationId: LedgerApplicationId =
-      if (protocolVersion >= ProtocolVersion.v5)
+      if (BaseTest.testedProtocolVersion >= ProtocolVersion.v5)
         LedgerApplicationId.assertFromString("application-tests")
       else
         LedgerApplicationId.assertFromString(
@@ -1236,7 +1238,7 @@ object TransferStoreTest {
         ) // default value in TransferOutView/TransferInView
 
     val commandId: LedgerCommandId =
-      if (protocolVersion >= ProtocolVersion.v5)
+      if (BaseTest.testedProtocolVersion >= ProtocolVersion.v5)
         LedgerCommandId.assertFromString("transfer-store-command-id")
       else
         LedgerCommandId.assertFromString(
@@ -1254,7 +1256,7 @@ object TransferStoreTest {
   }
 
   private[participant] val templateId: LfTemplateId = {
-    if (protocolVersion >= ProtocolVersion.v5)
+    if (BaseTest.testedProtocolVersion >= ProtocolVersion.v5)
       contract.contractInstance.unversioned.template
     else
       LfTemplateId.assertFromString(
@@ -1276,10 +1278,10 @@ object TransferStoreTest {
       Method TransferOutView.fromProtoV0 set protocol version to v3 (not present in Protobuf v0).
      */
     val targetProtocolVersion =
-      if (protocolVersion <= ProtocolVersion.v3)
+      if (BaseTest.testedProtocolVersion <= ProtocolVersion.v3)
         TargetProtocolVersion(ProtocolVersion.v3)
       else
-        TargetProtocolVersion(protocolVersion)
+        TargetProtocolVersion(BaseTest.testedProtocolVersion)
 
     val transferOutRequest = TransferOutRequest(
       submitterMetadata(submittingParty),
@@ -1288,7 +1290,7 @@ object TransferStoreTest {
       contract.contractId,
       templateId = templateId,
       transferId.sourceDomain,
-      SourceProtocolVersion(protocolVersion),
+      SourceProtocolVersion(BaseTest.testedProtocolVersion),
       sourceMediator,
       targetDomainId,
       targetProtocolVersion,
@@ -1296,32 +1298,26 @@ object TransferStoreTest {
         timestamp = CantonTimestamp.Epoch,
         targetDomain = targetDomainId,
       ),
-      TransferCounter.Genesis,
+      initialTransferCounter,
     )
     val uuid = new UUID(10L, 0L)
     val seed = seedGenerator.generateSaltSeed()
-    val fullTransferOutViewTree =
-      transferOutRequest.toFullTransferOutTree(
+    val fullTransferOutViewTree = transferOutRequest
+      .toFullTransferOutTree(
         pureCryptoApi,
         pureCryptoApi,
         seed,
         uuid,
       )
+      .value
     Future.successful(
       TransferData(
-        sourceProtocolVersion = SourceProtocolVersion(protocolVersion),
+        sourceProtocolVersion = SourceProtocolVersion(BaseTest.testedProtocolVersion),
         transferOutTimestamp = transferId.transferOutTimestamp,
         transferOutRequestCounter = RequestCounter(0),
-        transferOutRequest = fullTransferOutViewTree.fold(
-          err =>
-            throw new IllegalArgumentException(
-              s"Failed to create fullTransferOutViewTree with: $err"
-            ),
-          identity,
-        ),
+        transferOutRequest = fullTransferOutViewTree,
         transferOutDecisionTime = CantonTimestamp.ofEpochSecond(10),
         contract = contract,
-        transferCounter = TransferCounter.Genesis,
         creatingTransactionId = transactionId1,
         transferOutResult = None,
         transferOutGlobalOffset = transferOutGlobalOffset,
@@ -1357,8 +1353,13 @@ object TransferStoreTest {
         mediatorMessage.allInformees,
       )
       val signedResult =
-        SignedProtocolMessage.tryFrom(result, protocolVersion, sign("TransferOutResult-mediator"))
-      val batch = Batch.of(protocolVersion, signedResult -> RecipientsTest.testInstance)
+        SignedProtocolMessage.tryFrom(
+          result,
+          BaseTest.testedProtocolVersion,
+          sign("TransferOutResult-mediator"),
+        )
+      val batch =
+        Batch.of(BaseTest.testedProtocolVersion, signedResult -> RecipientsTest.testInstance)
       val deliver =
         Deliver.create(
           SequencerCounter(1),
@@ -1366,13 +1367,13 @@ object TransferStoreTest {
           transferData.sourceDomain.unwrap,
           Some(MessageId.tryCreate("1")),
           batch,
-          protocolVersion,
+          BaseTest.testedProtocolVersion,
         )
       SignedContent(
         deliver,
         sign("TransferOutResult-sequencer"),
         Some(transferData.transferOutTimestamp),
-        protocolVersion,
+        BaseTest.testedProtocolVersion,
       )
     }
 }

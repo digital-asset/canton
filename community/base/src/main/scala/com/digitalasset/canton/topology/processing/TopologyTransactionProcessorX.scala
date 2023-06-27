@@ -18,7 +18,7 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   ProtocolMessage,
 }
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClientWithInitX,
   StoreBasedDomainTopologyClient,
@@ -62,13 +62,8 @@ class TopologyTransactionProcessorX(
 
   override protected def epsilonForTimestamp(asOfExclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Change.TopologyDelay] = FutureUnlessShutdown.pure(
-    Change.TopologyDelay(
-      SequencedTime(CantonTimestamp.Epoch),
-      EffectiveTime(CantonTimestamp.Epoch),
-      epsilon = NonNegativeFiniteDuration.tryOfMillis(250),
-    )
-  )
+  ): FutureUnlessShutdown[Change.TopologyDelay] =
+    TopologyTimestampPlusEpsilonTracker.epsilonForTimestamp(store, asOfExclusive)
 
   override protected def maxTimestampFromStore()(implicit
       traceContext: TraceContext
@@ -110,6 +105,9 @@ class TopologyTransactionProcessorX(
           sequencingTimestamp,
           effectiveTimestamp,
           validated,
+        )
+        logger.debug(
+          s"Notifying listeners of ${sequencingTimestamp}, ${effectiveTimestamp} and SC ${sc}"
         )
         import cats.syntax.parallel.*
         performUnlessClosingUSF("notify-topology-transaction-observers")(

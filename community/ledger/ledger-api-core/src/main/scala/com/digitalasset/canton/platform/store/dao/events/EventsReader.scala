@@ -4,16 +4,14 @@
 package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.ledger.api.v1.event.CreatedEvent
-import com.daml.ledger.api.v1.event_query_service.{
-  GetEventsByContractIdResponse,
-  GetEventsByContractKeyResponse,
-}
+import com.daml.ledger.api.v1.event_query_service.GetEventsByContractKeyResponse
+import com.daml.ledger.api.v2.event_query_service.{Archived, Created, GetEventsByContractIdResponse}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{Identifier, Party}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform
 import com.digitalasset.canton.platform.store.backend.{EventStorageBackend, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
@@ -40,7 +38,7 @@ private[dao] sealed class EventsReader(
   protected val dbMetrics: metrics.daml.index.db.type = metrics.daml.index.db
 
   override def getEventsByContractId(contractId: ContractId, requestingParties: Set[Party])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[GetEventsByContractIdResponse] = {
 
     val eventProjectionProperties = EventProjectionProperties(
@@ -61,15 +59,25 @@ private[dao] sealed class EventsReader(
         )
       )
 
-      deserialized <- Future.traverse(rawEvents) {
-        _.event.applyDeserialization(lfValueTranslation, eventProjectionProperties)
+      deserialized <- Future.traverse(rawEvents) { event =>
+        event.event
+          .applyDeserialization(lfValueTranslation, eventProjectionProperties)
+          .map(_ -> event.domainId)
       }
 
-      createEvent = deserialized.flatMap(_.event.created).headOption
-      archiveEvent = deserialized.flatMap(_.event.archived).headOption
+      createEvent = deserialized.flatMap { case (event, domainId) =>
+        event.event.created.map(create => Created(Some(create), domainId.getOrElse("")))
+      }.headOption
+      archiveEvent = deserialized.flatMap { case (event, domainId) =>
+        event.event.archived.map(archive => Archived(Some(archive), domainId.getOrElse("")))
+      }.headOption
 
     } yield {
-      if (createEvent.exists(stakeholders(_).exists(requestingParties.map(identity[String])))) {
+      if (
+        createEvent
+          .flatMap(_.createdEvent)
+          .exists(stakeholders(_).exists(requestingParties.map(identity[String])))
+      ) {
         GetEventsByContractIdResponse(createEvent, archiveEvent)
       } else {
         GetEventsByContractIdResponse(None, None)
@@ -85,7 +93,7 @@ private[dao] sealed class EventsReader(
       requestingParties: Set[Party],
       endExclusiveSeqId: Option[EventSequentialId],
       maxIterations: Int,
-  )(implicit loggingContext: LoggingContext): Future[GetEventsByContractKeyResponse] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[GetEventsByContractKeyResponse] = {
     val keyHash: String = platform.Key.assertBuild(templateId, contractKey).hash.bytes.toHexString
 
     val eventProjectionProperties = EventProjectionProperties(

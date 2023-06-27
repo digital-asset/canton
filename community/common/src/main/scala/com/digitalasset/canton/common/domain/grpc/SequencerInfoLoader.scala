@@ -118,7 +118,7 @@ class SequencerInfoLoader(
         .getDomainClientBootstrapInfo(domainAlias)
         .leftMap(SequencerInfoLoader.fromSequencerConnectClientError(domainAlias))
 
-      _ <- performHandshake(client, domainAlias, sequencerAlias, bootstrapInfo.domainId)
+      _ <- performHandshake(client, domainAlias, sequencerAlias)
 
       domainParameters <- client
         .getDomainParameters(domainAlias)
@@ -152,7 +152,6 @@ class SequencerInfoLoader(
       sequencerConnectClient: SequencerConnectClient,
       alias: DomainAlias,
       sequencerAlias: SequencerAlias,
-      domainId: DomainId,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencerInfoLoaderError, Unit] =
@@ -210,14 +209,6 @@ object SequencerInfoLoader {
     final case class InvalidResponse(cause: String) extends SequencerInfoLoaderError
     final case class InvalidState(cause: String) extends SequencerInfoLoaderError
     final case class HandshakeFailedError(cause: String) extends SequencerInfoLoaderError
-    final case class DomainAliasDuplication(
-        domainId: DomainId,
-        alias: DomainAlias,
-        previousDomainId: DomainId,
-    ) extends SequencerInfoLoaderError {
-      def cause =
-        "The domain with the given alias reports a different domain id than the participant is expecting"
-    }
     final case class SequencersFromDifferentDomainsAreConfigured(cause: String)
         extends SequencerInfoLoaderError
 

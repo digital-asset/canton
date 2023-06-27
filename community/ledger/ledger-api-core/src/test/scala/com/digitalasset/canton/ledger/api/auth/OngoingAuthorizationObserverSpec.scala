@@ -7,9 +7,10 @@ import akka.actor.{Cancellable, Scheduler}
 import com.daml.clock.AdjustableClock
 import com.daml.error.ErrorsAssertions
 import com.daml.jwt.JwtTimestampLeeway
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.AuthorizationError.Expired
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
 import com.digitalasset.canton.testing.ErrorAssertionsWithLogCollectorAssertions
 import io.grpc.StatusRuntimeException
@@ -25,6 +26,7 @@ import scala.concurrent.duration.FiniteDuration
 
 class OngoingAuthorizationObserverSpec
     extends AsyncFlatSpec
+    with BaseTest
     with Matchers
     with Eventually
     with IntegrationPatience
@@ -59,7 +61,8 @@ class OngoingAuthorizationObserverSpec
       // This is also the user rights state refresh timeout
       userRightsCheckIntervalInSeconds = userRightsCheckIntervalInSeconds,
       akkaScheduler = mockScheduler,
-    )(LoggingContext.ForTesting, executionContext)
+      loggerFactory = loggerFactory,
+    )(executionContext, traceContext)
 
     // After 20 seconds pass we expect onError to be called due to lack of user rights state refresh task inactivity
     tested.onNext(1)
@@ -79,8 +82,14 @@ class OngoingAuthorizationObserverSpec
     verify(cancellableMock, times(1)).cancel()
     assertError(
       actual = captor.getValue,
-      expectedF = LedgerApiErrors.AuthorizationChecks.StaleUserManagementBasedStreamClaims
-        .Reject()(_)
+      expected = LedgerApiErrors.AuthorizationChecks.StaleUserManagementBasedStreamClaims
+        .Reject()(
+          ErrorLoggingContext(
+            loggerFactory.getTracedLogger(getClass),
+            loggerFactory.properties,
+            traceContext,
+          )
+        )
         .asGrpcError,
     )
 
@@ -121,7 +130,8 @@ class OngoingAuthorizationObserverSpec
       akkaScheduler = mockScheduler,
       // defined default leeway of 1 second for authorization
       jwtTimestampLeeway = Some(JwtTimestampLeeway(default = Some(1))),
-    )(LoggingContext.ForTesting, executionContext)
+      loggerFactory = loggerFactory,
+    )(executionContext, traceContext)
 
     tested.onNext(1)
     clock.fastForward(Duration.ofSeconds(1))
@@ -163,7 +173,8 @@ class OngoingAuthorizationObserverSpec
       userRightsCheckIntervalInSeconds = 10,
       akkaScheduler = mockScheduler,
       jwtTimestampLeeway = Some(JwtTimestampLeeway(default = Some(1))),
-    )(LoggingContext.ForTesting, executionContext)
+      loggerFactory = loggerFactory,
+    )(executionContext, traceContext)
 
     // After 2 seconds have passed we expect onError to be called due to invalid expiration claim
     tested.onNext(1)

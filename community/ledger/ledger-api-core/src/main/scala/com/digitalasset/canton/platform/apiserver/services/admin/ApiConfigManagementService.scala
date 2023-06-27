@@ -10,8 +10,7 @@ import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.admin.config_management_service.ConfigManagementServiceGrpc.ConfigManagementService
 import com.daml.ledger.api.v1.admin.config_management_service.*
 import com.daml.lf.data.{Ref, Time}
-import com.daml.logging.LoggingContext
-import com.daml.tracing.{Telemetry, TelemetryContext}
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.FieldValidator
@@ -21,6 +20,7 @@ import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeMo
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,
   withEnrichedLoggingContext,
@@ -29,7 +29,6 @@ import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiConfigManagementService.*
 import com.digitalasset.canton.platform.apiserver.services.logging
-import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -47,10 +46,11 @@ private[apiserver] final class ApiConfigManagementService private (
 )(implicit
     materializer: Materializer,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends ConfigManagementService
     with GrpcApiService
     with NamedLogging {
+
+  private implicit val loggingContext = createLoggingContext(loggerFactory)(identity)
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
@@ -67,8 +67,8 @@ private[apiserver] final class ApiConfigManagementService private (
     ConfigManagementServiceGrpc.bindService(this, executionContext)
 
   override def getTimeModel(request: GetTimeModelRequest): Future[GetTimeModelResponse] = {
-    implicit val traceContext =
-      TraceContext.fromDamlTelemetryContext(telemetry.contextFromGrpcThreadLocalContext())
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory, telemetry)
 
     logger.info("Getting time model.")
     index
@@ -83,7 +83,7 @@ private[apiserver] final class ApiConfigManagementService private (
                 ErrorLoggingContext(
                   logger,
                   loggingContext.toPropertiesMap,
-                  traceContext,
+                  loggingContext.traceContext,
                 )
               )
               .asGrpcError
@@ -112,8 +112,6 @@ private[apiserver] final class ApiConfigManagementService private (
     ) { implicit loggingContext =>
       logger.info(s"Setting time model, ${loggingContext.serializeFiltered("submissionId")}.")
 
-      implicit val telemetryContext: TelemetryContext =
-        telemetry.contextFromGrpcThreadLocalContext()
       implicit val errorLoggingContext: ContextualizedErrorLogger =
         LedgerErrorLoggingContext(
           logger,
@@ -238,8 +236,7 @@ private[apiserver] object ApiConfigManagementService {
   )(implicit
       materializer: Materializer,
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
-  ): ConfigManagementServiceGrpc.ConfigManagementService with GrpcApiService =
+  ): ConfigManagementServiceGrpc.ConfigManagementService & GrpcApiService =
     new ApiConfigManagementService(
       readBackend,
       writeBackend,
@@ -253,8 +250,7 @@ private[apiserver] object ApiConfigManagementService {
       writeConfigService: state.WriteConfigService,
       configManagementService: IndexConfigManagementService,
       val loggerFactory: NamedLoggerFactory,
-  )(implicit loggingContext: LoggingContext)
-      extends SynchronousResponse.Strategy[
+  ) extends SynchronousResponse.Strategy[
         (Time.Timestamp, Configuration),
         ConfigurationEntry,
         ConfigurationEntry.Accepted,
@@ -265,8 +261,7 @@ private[apiserver] object ApiConfigManagementService {
         submissionId: Ref.SubmissionId,
         input: (Time.Timestamp, Configuration),
     )(implicit
-        telemetryContext: TelemetryContext,
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace
     ): Future[state.SubmissionResult] = {
       val (maximumRecordTime, newConfiguration) = input
       writeConfigService
@@ -274,7 +269,9 @@ private[apiserver] object ApiConfigManagementService {
         .asScala
     }
 
-    override def entries(offset: Option[LedgerOffset.Absolute]): Source[ConfigurationEntry, _] =
+    override def entries(offset: Option[LedgerOffset.Absolute])(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Source[ConfigurationEntry, _] =
       configManagementService.configurationEntries(offset).map(_._2)
 
     override def accept(

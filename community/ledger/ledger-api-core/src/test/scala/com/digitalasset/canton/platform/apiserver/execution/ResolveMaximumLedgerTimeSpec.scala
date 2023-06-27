@@ -9,12 +9,12 @@ import com.daml.lf.data.{Bytes, ImmArray, Time}
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   MaximumLedgerTime,
   MaximumLedgerTimeService,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import org.mockito.captor.{ArgCaptor, Captor}
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
@@ -32,7 +32,7 @@ class ResolveMaximumLedgerTimeSpec
     with ScalaFutures
     with ArgumentMatchersSugar {
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   behavior of classOf[ResolveMaximumLedgerTime].getSimpleName
 

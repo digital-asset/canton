@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.api.util.{DurationConversion, TimestampConversion}
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v1.commands
 import com.daml.ledger.api.v1.commands.Command.Command.{
   Create as ProtoCreate,
   CreateAndExercise as ProtoCreateAndExercise,
@@ -13,7 +12,8 @@ import com.daml.ledger.api.v1.commands.Command.Command.{
   Exercise as ProtoExercise,
   ExerciseByKey as ProtoExerciseByKey,
 }
-import com.daml.ledger.api.v1.commands.{Command as ProtoCommand, Commands as ProtoCommands}
+import com.daml.ledger.api.v1.{commands as V1}
+import com.daml.ledger.api.v2.{commands as V2}
 import com.daml.lf.command.*
 import com.daml.lf.data.*
 import com.daml.lf.value.Value as Lf
@@ -43,7 +43,7 @@ final class CommandsValidator(
   import ValueValidator.*
 
   def validateCommands(
-      commands: ProtoCommands,
+      commands: V1.Commands,
       currentLedgerTime: Instant,
       currentUtcTime: Instant,
       maxDeduplicationDuration: Option[Duration],
@@ -95,7 +95,7 @@ final class CommandsValidator(
 
   private def validateLedgerTime(
       currentTime: Instant,
-      commands: ProtoCommands,
+      commands: V1.Commands,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Instant] = {
@@ -118,7 +118,7 @@ final class CommandsValidator(
 
   // Public because it is used by Canton.
   def validateInnerCommands(
-      commands: Seq[ProtoCommand]
+      commands: Seq[V1.Command]
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, immutable.Seq[ApiCommand]] =
@@ -133,7 +133,7 @@ final class CommandsValidator(
 
   // Public so that clients have an easy way to convert ProtoCommand.Command to ApiCommand.
   def validateInnerCommand(
-      command: ProtoCommand.Command
+      command: V1.Command.Command
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, ApiCommand] =
@@ -202,7 +202,7 @@ final class CommandsValidator(
     }
 
   private def validateSubmitters(
-      commands: ProtoCommands
+      commands: V1.Commands
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Submitters[Ref.Party]] = {
@@ -229,7 +229,7 @@ final class CommandsValidator(
     "msg=class DeduplicationTime in object DeduplicationPeriod is deprecated"
   )
   def validateDeduplicationPeriod(
-      deduplicationPeriod: commands.Commands.DeduplicationPeriod,
+      deduplicationPeriod: V1.Commands.DeduplicationPeriod,
       optMaxDeduplicationDuration: Option[Duration],
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -242,19 +242,19 @@ final class CommandsValidator(
       )
     ) { maxDeduplicationDuration =>
       deduplicationPeriod match {
-        case commands.Commands.DeduplicationPeriod.Empty =>
+        case V1.Commands.DeduplicationPeriod.Empty =>
           Right(DeduplicationPeriod.DeduplicationDuration(maxDeduplicationDuration))
-        case commands.Commands.DeduplicationPeriod.DeduplicationTime(duration) =>
+        case V1.Commands.DeduplicationPeriod.DeduplicationTime(duration) =>
           val deduplicationDuration = DurationConversion.fromProto(duration)
           DeduplicationPeriodValidator
             .validateNonNegativeDuration(deduplicationDuration)
             .map(DeduplicationPeriod.DeduplicationDuration)
-        case commands.Commands.DeduplicationPeriod.DeduplicationDuration(duration) =>
+        case V1.Commands.DeduplicationPeriod.DeduplicationDuration(duration) =>
           val deduplicationDuration = DurationConversion.fromProto(duration)
           DeduplicationPeriodValidator
             .validateNonNegativeDuration(deduplicationDuration)
             .map(DeduplicationPeriod.DeduplicationDuration)
-        case commands.Commands.DeduplicationPeriod.DeduplicationOffset(offset) =>
+        case V1.Commands.DeduplicationPeriod.DeduplicationOffset(offset) =>
           Ref.HexString
             .fromString(offset)
             .fold(
@@ -288,17 +288,33 @@ object CommandsValidator {
     */
   final case class Submitters[T](actAs: Set[T], readAs: Set[T])
 
-  def effectiveSubmitters(commands: Option[ProtoCommands]): Submitters[String] = {
+  def effectiveSubmitters(commands: Option[V1.Commands]): Submitters[String] = {
     commands.fold(noSubmitters)(effectiveSubmitters)
   }
 
-  def effectiveSubmitters(commands: ProtoCommands): Submitters[String] = {
+  def effectiveSubmittersV2(commands: Option[V2.Commands]): Submitters[String] = {
+    commands.fold(noSubmitters)(effectiveSubmitters)
+  }
+
+  def effectiveSubmitters(commands: V1.Commands): Submitters[String] = {
     val actAs = effectiveActAs(commands)
     val readAs = commands.readAs.toSet -- actAs
     Submitters(actAs, readAs)
   }
 
-  def effectiveActAs(commands: ProtoCommands): Set[String] =
+  def effectiveSubmitters(commands: V2.Commands): Submitters[String] = {
+    val actAs = effectiveActAs(commands)
+    val readAs = commands.readAs.toSet -- actAs
+    Submitters(actAs, readAs)
+  }
+
+  def effectiveActAs(commands: V1.Commands): Set[String] =
+    if (commands.party.isEmpty)
+      commands.actAs.toSet
+    else
+      commands.actAs.toSet + commands.party
+
+  def effectiveActAs(commands: V2.Commands): Set[String] =
     if (commands.party.isEmpty)
       commands.actAs.toSet
     else

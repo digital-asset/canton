@@ -9,6 +9,6 @@ import org.scalatest.{BeforeAndAfterAll, Suite}
 trait CloseableTest extends BeforeAndAfterAll with FlagCloseable with HasCloseContext {
   self: Suite =>
 
-  override def afterAll(): Unit = close()
+  override protected def afterAll(): Unit = close()
 
 }

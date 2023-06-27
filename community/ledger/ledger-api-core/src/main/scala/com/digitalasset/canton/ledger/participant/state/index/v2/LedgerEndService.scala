@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.participant.state.index.v2
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset
 
 import scala.concurrent.Future
@@ -11,5 +10,5 @@ import scala.concurrent.Future
 /** Serves as a backend to implement ledger end related API calls.
   */
 trait LedgerEndService {
-  def currentLedgerEnd()(implicit loggingContext: LoggingContext): Future[LedgerOffset.Absolute]
+  def currentLedgerEnd(): Future[LedgerOffset.Absolute]
 }

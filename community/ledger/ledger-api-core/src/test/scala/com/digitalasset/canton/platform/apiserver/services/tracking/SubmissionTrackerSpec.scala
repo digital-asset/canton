@@ -4,19 +4,17 @@
 package com.digitalasset.canton.platform.apiserver.services.tracking
 
 import com.daml.error.{ContextualizedErrorLogger, ErrorsAssertions}
-import com.daml.ledger.api.v1.command_completion_service.CompletionStreamResponse
-import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
-import com.daml.ledger.api.v1.commands.Commands
-import com.daml.ledger.api.v1.completion.Completion
+import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.completion.Completion
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
-import com.digitalasset.canton.ledger.error.{
-  CommonErrors,
-  DamlContextualizedErrorLogger,
-  LedgerApiErrors,
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
+import com.digitalasset.canton.logging.LedgerErrorLoggingContext
+import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.{
+  SubmissionKey,
+  SubmissionTrackerImpl,
 }
-import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionTrackerImpl
-import com.google.protobuf.empty.Empty
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
 import org.mockito.MockitoSugar
@@ -39,8 +37,6 @@ class SubmissionTrackerSpec
     with IntegrationPatience
     with Eventually {
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
-  private implicit val errorLogger: ContextualizedErrorLogger =
-    DamlContextualizedErrorLogger.forTesting(getClass)
 
   behavior of classOf[SubmissionTracker].getSimpleName
 
@@ -48,38 +44,38 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] = for {
       _ <- Future.unit
       // Track new submission
-      trackedSubmissionF = submissionTracker.track(commands, `1 day timeout`, submit)
+      trackedSubmissionF = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
 
       // Completion with mismatching submissionId
       completionWithMismatchingSubmissionId = completionOk.copy(submissionId = "wrongSubmissionId")
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions =
-          Seq(completionWithMismatchingSubmissionId)
+        CompletionStreamResponse(completion =
+          Some(completionWithMismatchingSubmissionId)
         ) -> submitters
       )
 
       // Completion with mismatching commandId
       completionWithMismatchingCommandId = completionOk.copy(commandId = "wrongCommandId")
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions =
-          Seq(completionWithMismatchingCommandId)
+        CompletionStreamResponse(completion =
+          Some(completionWithMismatchingCommandId)
         ) -> submitters
       )
 
       // Completion with mismatching applicationId
       completionWithMismatchingAppId = completionOk.copy(applicationId = "wrongAppId")
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionWithMismatchingAppId)) -> submitters
+        CompletionStreamResponse(completion = Some(completionWithMismatchingAppId)) -> submitters
       )
 
       // Completion with mismatching actAs
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionOk)) -> (submitters + "another_party")
+        CompletionStreamResponse(completion = Some(completionOk)) -> (submitters + "another_party")
       )
 
       // Matching completion
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionOk)) -> submitters
+        CompletionStreamResponse(completion = Some(completionOk)) -> submitters
       )
 
       trackedSubmission <- trackedSubmissionF
@@ -92,7 +88,7 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] = for {
       _ <- Future.unit
       // Track new submission
-      trackedSubmissionF = submissionTracker.track(commandsThatFail, `1 day timeout`, submit)
+      trackedSubmissionF = submissionTracker.track(submissionKey, `1 day timeout`, submitFails)
 
       failure <- trackedSubmissionF.failed
     } yield {
@@ -105,12 +101,12 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] = for {
       _ <- Future.unit
       // Track new submission
-      trackedSubmissionF = submissionTracker.track(commands, `1 day timeout`, submit)
+      trackedSubmissionF = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
 
       // Complete the submission with a failed completion
       _ = submissionTracker.onCompletion(
         CompletionStreamResponse(
-          completions = Seq(completionFailed),
+          completion = Some(completionFailed),
           checkpoint = None,
         ) -> submitters
       )
@@ -131,7 +127,7 @@ class SubmissionTrackerSpec
   it should "fail if timeout reached" in new SubmissionTrackerFixture {
     override def run: Future[Assertion] =
       submissionTracker
-        .track(commands, zeroTimeout, submit)
+        .track(submissionKey, zeroTimeout, submitSucceeds)
         .failed
         .map(inside(_) { case actualStatusRuntimeException: StatusRuntimeException =>
           assertError(
@@ -152,14 +148,16 @@ class SubmissionTrackerSpec
       _ <- Future.unit
 
       // Track new submission
-      firstSubmissionF = submissionTracker.track(commands, `1 day timeout`, submit)
+      firstSubmissionF = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
 
       // Track the same submission again
-      actualException <- submissionTracker.track(commands, `1 day timeout`, submit).failed
+      actualException <- submissionTracker
+        .track(submissionKey, `1 day timeout`, submitSucceeds)
+        .failed
 
       // Complete the first submission to ensure clean pending map at the end
       _ = submissionTracker.onCompletion(
-        CompletionStreamResponse(completions = Seq(completionOk), checkpoint = None) -> submitters
+        CompletionStreamResponse(completion = Some(completionOk), checkpoint = None) -> submitters
       )
       _ <- firstSubmissionF
     } yield inside(actualException) { case actualStatusRuntimeException: StatusRuntimeException =>
@@ -178,9 +176,9 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] =
       submissionTracker
         .track(
-          commands = commands.copy(submissionId = ""),
+          submissionKey = submissionKey.copy(submissionId = ""),
           timeout = `1 day timeout`,
-          submit = submit,
+          submit = submitSucceeds,
         )
         .failed
         .map(inside(_) { case actualStatusRuntimeException: StatusRuntimeException =>
@@ -198,14 +196,26 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] = for {
       _ <- Future.unit
 
-      _ = submissionTracker.track(commands.copy(commandId = "c1"), `1 day timeout`, submit)
-      _ = submissionTracker.track(commands.copy(commandId = "c2"), `1 day timeout`, submit)
-      _ = submissionTracker.track(commands.copy(commandId = "c3"), `1 day timeout`, submit)
+      _ = submissionTracker.track(
+        submissionKey.copy(commandId = "c1"),
+        `1 day timeout`,
+        submitSucceeds,
+      )
+      _ = submissionTracker.track(
+        submissionKey.copy(commandId = "c2"),
+        `1 day timeout`,
+        submitSucceeds,
+      )
+      _ = submissionTracker.track(
+        submissionKey.copy(commandId = "c3"),
+        `1 day timeout`,
+        submitSucceeds,
+      )
       // max-commands-in-flight = 3. Expect rejection
       submissionOverLimitF = submissionTracker.track(
-        commands.copy(commandId = "c4"),
+        submissionKey.copy(commandId = "c4"),
         `1 day timeout`,
-        submit,
+        submitSucceeds,
       )
 
       // Close the tracker to ensure clean pending map at the end
@@ -226,12 +236,12 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] = for {
       _ <- Future.unit
       // Track new submission
-      trackedSubmissionF = submissionTracker.track(commands, `1 day timeout`, submit)
+      trackedSubmissionF = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
 
       // Complete the submission with completion response
       _ = submissionTracker.onCompletion(
         CompletionStreamResponse(
-          completions = Seq(completionOk.copy(status = None)),
+          completion = Some(completionOk.copy(status = None)),
           checkpoint = None,
         ) -> submitters
       )
@@ -241,9 +251,7 @@ class SubmissionTrackerSpec
       assertError(
         actual = ex,
         expected = CommonErrors.ServiceInternalError
-          .Generic("Command completion is missing completion status")(
-            DamlContextualizedErrorLogger.forTesting(getClass, Some(submissionId))
-          )
+          .Generic("Command completion is missing completion status")
           .asGrpcError,
       )
       succeed
@@ -254,8 +262,8 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] = for {
       _ <- Future.unit
       // Track some submissions
-      submission1 = submissionTracker.track(commands, `1 day timeout`, submit)
-      submission2 = submissionTracker.track(otherCommands, `1 day timeout`, submit)
+      submission1 = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
+      submission2 = submissionTracker.track(otherSubmissionKey, `1 day timeout`, submitSucceeds)
 
       // Close the tracker
       _ = submissionTracker.close()
@@ -279,11 +287,16 @@ class SubmissionTrackerSpec
     }
   }
 
-  trait SubmissionTrackerFixture {
+  abstract class SubmissionTrackerFixture extends BaseTest with Eventually {
     private val timer = new Timer("test-timer")
-    val timeoutSupport = new CancellableTimeoutSupportImpl(timer)
+    val timeoutSupport = new CancellableTimeoutSupportImpl(timer, loggerFactory)
     val submissionTracker =
-      new SubmissionTrackerImpl(timeoutSupport, maxCommandsInFlight = 3, Metrics.ForTesting)
+      new SubmissionTrackerImpl(
+        timeoutSupport,
+        maxCommandsInFlight = 3,
+        Metrics.ForTesting,
+        loggerFactory,
+      )
 
     val zeroTimeout: Duration = Duration.ZERO
     val `1 day timeout`: Duration = Duration.ofDays(1L)
@@ -293,21 +306,16 @@ class SubmissionTrackerSpec
     val applicationId = "apId_1"
     val actAs = Seq("p1", "p2")
     val party = "p3"
-    val commands: Commands = Commands(
+    val submissionKey: SubmissionKey = SubmissionKey(
       submissionId = submissionId,
       commandId = commandId,
       applicationId = applicationId,
-      actAs = actAs,
-      party = party,
+      parties = Set(party) ++ actAs,
     )
-    val otherCommands: Commands = commands.copy(commandId = "cId_2")
-    val commandsThatFail: Commands = Commands(submissionId = "failing", commandId = "failing")
+    val otherSubmissionKey: SubmissionKey = submissionKey.copy(commandId = "cId_2")
     val failureInSubmit = new RuntimeException("failure in submit")
-    val submit: Map[SubmitRequest, Future[Empty]] =
-      Map(
-        SubmitRequest(Some(commandsThatFail)) -> Future.failed(failureInSubmit)
-      )
-        .withDefaultValue(Future.successful(com.google.protobuf.empty.Empty()))
+    val submitFails: () => Future[Any] = () => Future.failed(failureInSubmit)
+    val submitSucceeds: () => Future[Any] = () => Future.successful(())
 
     val submitters: Set[String] = (actAs :+ party).toSet
 
@@ -317,6 +325,9 @@ class SubmissionTrackerSpec
       status = Some(Status(code = io.grpc.Status.Code.OK.value())),
       applicationId = applicationId,
     )
+
+    val errorLogger: ContextualizedErrorLogger =
+      LedgerErrorLoggingContext(logger, Map(), traceContext, submissionId)
 
     val completionFailedGrpcCode = io.grpc.Status.Code.NOT_FOUND
     val completionFailedMessage: String = "ledger rejection"

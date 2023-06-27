@@ -117,6 +117,7 @@ class DomainOutboxXTest
                 .toList
                 .toSet,
               removeTxs = Set.empty,
+              expiredAdditions = Set.empty,
             )
           })
           _ = if (buffer.length >= expect.get()) {
@@ -326,7 +327,7 @@ class DomainOutboxXTest
       }
     }
 
-    "not push deprecated transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "also push deprecated transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val (source, target, manager, handle, client) =
         mk(transactions.length - 1)
       val midRevertSerialBumped = transactions(2).reverse
@@ -344,11 +345,12 @@ class DomainOutboxXTest
         ) shouldBe Seq(
           (Replace, None),
           (Replace, Some("alpha")),
+          (Replace, Some("beta")),
           (Replace, Some("gamma")),
           (Replace, Some("delta")),
           (Remove, Some("beta")),
         )
-        handle.buffer should have length (5)
+        handle.buffer should have length (6)
       }
     }
 

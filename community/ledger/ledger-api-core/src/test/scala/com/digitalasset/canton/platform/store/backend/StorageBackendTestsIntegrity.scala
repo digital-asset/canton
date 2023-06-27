@@ -19,7 +19,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtoCreate(offset(7), 7L, hashCid("#7")), // duplicate id
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(7), 7L))
     val failure = intercept[RuntimeException](executeSql(backend.integrity.verifyIntegrity()))
@@ -34,7 +34,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtoCreate(offset(3), 3L, hashCid("#3")), // non-consecutive id
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(3), 3L))
     val failure = intercept[RuntimeException](executeSql(backend.integrity.verifyIntegrity()))
@@ -52,7 +52,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtoCreate(offset(9), 9L, hashCid("#9")), // non-consecutive id (beyond ledger end)
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     executeSql(backend.integrity.verifyIntegrity())

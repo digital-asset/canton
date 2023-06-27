@@ -8,13 +8,13 @@ import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
-import com.daml.logging.LoggingContext
-import com.daml.logging.LoggingContext.newLoggingContext
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.dropwizard.DropwizardMetricsFactory
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.resources.PureResource
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
+import com.digitalasset.canton.logging.LoggingContextWithTrace.withNewLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.configuration.{
   AcsStreamsConfig,
   ServerRole,
@@ -31,6 +31,7 @@ import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoBackend.{
 import com.digitalasset.canton.platform.store.dao.events.CompressionStrategy
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.store.{DbSupport, DbType, FlywayMigrations}
+import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.OpenTelemetry
 import org.scalatest.AsyncTestSuite
 
@@ -63,9 +64,9 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
       acsIdPageSize: Int,
       acsIdFetchingParallelism: Int,
       acsContractFetchingParallelism: Int,
-  )(implicit
-      loggingContext: LoggingContext
   ): ResourceOwner[LedgerDao] = {
+    val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
+    implicit val traceContext: TraceContext = TraceContext.empty
     val metrics = {
       val registry = new MetricRegistry
       new Metrics(
@@ -75,7 +76,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
       )
     }
     val dbType = DbType.jdbcType(jdbcUrl)
-    val storageBackendFactory = StorageBackendFactory.of(dbType)
+    val storageBackendFactory = StorageBackendFactory.of(dbType, loggerFactory)
     val dbConfig = DbConfig(
       jdbcUrl,
       connectionPool = ConnectionPoolConfig(
@@ -85,13 +86,16 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
     )
     new ResourceOwner[Unit] {
       override def acquire()(implicit context: ResourceContext): Resource[Unit] =
-        PureResource(new FlywayMigrations(dbConfig.jdbcUrl).migrate())
+        PureResource(
+          new FlywayMigrations(dbConfig.jdbcUrl, loggerFactory = loggerFactory).migrate()
+        )
     }
       .flatMap(_ =>
         DbSupport.owner(
           serverRole = ServerRole.Testing(getClass),
           metrics = metrics,
           dbConfig = dbConfig,
+          loggerFactory = loggerFactory,
         )
       )
       .map { dbSupport =>
@@ -127,6 +131,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
           globalMaxEventIdQueries = 20,
           globalMaxEventPayloadQueries = 10,
           tracer = OpenTelemetry.noop().getTracer("test"),
+          loggerFactory = loggerFactory,
         )
       }
   }
@@ -144,7 +149,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
     ledgerEndCache = MutableLedgerEndCache()
     stringInterningView = new StringInterningView()
-    resource = newLoggingContext { implicit loggingContext =>
+    resource = withNewLoggingContext() { implicit loggingContext =>
       for {
         dao <- daoOwner(
           eventsPageSize = 4,
@@ -157,7 +162,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
         initialLedgerEnd <- Resource.fromFuture(dao.lookupLedgerEnd())
         _ = ledgerEndCache.set(initialLedgerEnd.lastOffset -> initialLedgerEnd.lastEventSeqId)
       } yield dao
-    }
+    }(TraceContext.empty)
     ledgerDao = Await.result(resource.asFuture, 180.seconds)
   }
 

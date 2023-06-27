@@ -15,7 +15,7 @@ import com.daml.ledger.api.v1.admin.party_management_service.{
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.daml.tracing.TelemetrySpecBase.*
-import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry, TelemetryContext}
+import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry}
 import com.digitalasset.canton.ledger.api.domain.LedgerOffset.Absolute
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -25,15 +25,17 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   PartyEntry,
 }
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementService.blindAndConvertToProto
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementServiceSpec.*
 import com.digitalasset.canton.platform.localstore.api.{PartyRecord, PartyRecordStore}
-import com.digitalasset.canton.tracing.TestTelemetrySetup
+import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.{BaseTest, DiscardOps}
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
+import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.OpenTelemetrySdk
-import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
+import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
@@ -112,7 +114,9 @@ class ApiPartyManagementServiceSpec
       ) = mockedServices()
 
       when(
-        mockIndexPartyManagementService.partyEntries(any[Option[Absolute]])(any[LoggingContext])
+        mockIndexPartyManagementService.partyEntries(any[Option[Absolute]])(
+          any[LoggingContextWithTrace]
+        )
       )
         .thenReturn(
           Source.single(
@@ -128,7 +132,7 @@ class ApiPartyManagementServiceSpec
         mockIdentityProviderExists,
         mockPartyRecordStore,
         mockIndexTransactionsService,
-        TestWritePartyService,
+        TestWritePartyService(testTelemetrySetup.tracer),
         Duration.Zero,
         _ => Ref.SubmissionId.assertFromString("aSubmission"),
         new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
@@ -159,7 +163,9 @@ class ApiPartyManagementServiceSpec
       val promise = Promise[Unit]()
 
       when(
-        mockIndexPartyManagementService.partyEntries(any[Option[Absolute]])(any[LoggingContext])
+        mockIndexPartyManagementService.partyEntries(any[Option[Absolute]])(
+          any[LoggingContextWithTrace]
+        )
       )
         .thenReturn({
           promise.success(())
@@ -171,7 +177,7 @@ class ApiPartyManagementServiceSpec
         mockIdentityProviderExists,
         mockPartyRecordStore,
         mockIndexTransactionsService,
-        TestWritePartyService,
+        TestWritePartyService(testTelemetrySetup.tracer),
         Duration.Zero,
         _ => Ref.SubmissionId.assertFromString("aSubmission"),
         NoOpTelemetry,
@@ -198,6 +204,7 @@ class ApiPartyManagementServiceSpec
                     "submissionId" -> "'aSubmission'",
                     "category" -> "1",
                     "definite_answer" -> "false",
+                    "test" -> s"'${getClass.getSimpleName}'",
                   ),
                 ),
                 RetryInfoDetail(1.second),
@@ -218,25 +225,29 @@ class ApiPartyManagementServiceSpec
       PartyRecordStore,
   ) = {
     val mockIndexTransactionsService = mock[IndexTransactionsService]
-    when(mockIndexTransactionsService.currentLedgerEnd()((any[LoggingContext])))
+    when(mockIndexTransactionsService.currentLedgerEnd())
       .thenReturn(Future.successful(Absolute(Ref.LedgerString.assertFromString("0"))))
 
     val mockIdentityProviderExists = mock[IdentityProviderExists]
-    when(mockIdentityProviderExists.apply(IdentityProviderId.Default))
+    when(
+      mockIdentityProviderExists.apply(ArgumentMatchers.eq(IdentityProviderId.Default))(
+        any[LoggingContextWithTrace]
+      )
+    )
       .thenReturn(Future.successful(true))
 
     val mockIndexPartyManagementService = mock[IndexPartyManagementService]
 
     val mockPartyRecordStore = mock[PartyRecordStore]
     when(
-      mockPartyRecordStore.createPartyRecord(any[PartyRecord])(any[LoggingContext])
+      mockPartyRecordStore.createPartyRecord(any[PartyRecord])(any[LoggingContextWithTrace])
     ).thenReturn(
       Future.successful(
         Right(PartyRecord(aParty, ObjectMeta.empty, IdentityProviderId.Default))
       )
     )
     when(
-      mockPartyRecordStore.getPartyRecordO(any[Ref.Party])(any[LoggingContext])
+      mockPartyRecordStore.getPartyRecordO(any[Ref.Party])(any[LoggingContextWithTrace])
     ).thenReturn(Future.successful(Right(None)))
 
     (
@@ -270,15 +281,15 @@ object ApiPartyManagementServiceSpec {
 
   val aParty = Ref.Party.assertFromString("aParty")
 
-  private object TestWritePartyService extends state.WritePartyService {
+  private final case class TestWritePartyService(tracer: Tracer) extends state.WritePartyService {
     override def allocateParty(
         hint: Option[Ref.Party],
         displayName: Option[String],
         submissionId: Ref.SubmissionId,
     )(implicit
-        loggingContext: LoggingContext,
-        telemetryContext: TelemetryContext,
+        traceContext: TraceContext
     ): CompletionStage[state.SubmissionResult] = {
+      val telemetryContext = traceContext.toDamlTelemetryContext(tracer)
       telemetryContext.setAttribute(
         anApplicationIdSpanAttribute._1,
         anApplicationIdSpanAttribute._2,

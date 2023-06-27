@@ -5,9 +5,9 @@ package com.digitalasset.canton.platform.apiserver.tls
 
 import com.daml.ledger.resources.TestResourceContext
 import com.daml.testing.utils.TestResourceUtils
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.apiserver.LedgerApiService
 import io.netty.handler.ssl.ClientAuth
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -15,9 +15,9 @@ import java.io.File
 
 class TlsSpec
     extends AsyncWordSpec
-    with Matchers
     with TableDrivenPropertyChecks
-    with TestResourceContext {
+    with TestResourceContext
+    with BaseTest {
   import TlsSpec.resource
 
   val serverCrt = resource("server.crt")
@@ -85,7 +85,16 @@ class TlsSpec
       clientKey: Option[File],
       clientAuth: ClientAuth,
   ) =
-    TlsFixture(tlsEnabled = true, serverCrt, serverKey, caCrt, clientCrt, clientKey, clientAuth)
+    TlsFixture(
+      loggerFactory,
+      tlsEnabled = true,
+      serverCrt,
+      serverKey,
+      caCrt,
+      clientCrt,
+      clientKey,
+      clientAuth,
+    )
       .makeARequest()
 
   private def assertResponseSuccess(

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 syntax = "proto3";
+
 package com.digitalasset.canton.protobuf;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";

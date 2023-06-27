@@ -27,7 +27,7 @@ private[validate] class TagWithLedgerEndImpl(
       Timed.future(
         bridgeMetrics.Stages.TagWithLedgerEnd.timer,
         indexService
-          .currentLedgerEnd()(preparedSubmission.submission.loggingContext)
+          .currentLedgerEnd()
           .map(ledgerEnd =>
             Right(ApiOffset.assertFromString(ledgerEnd.value) -> preparedSubmission)
           ),

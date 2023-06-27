@@ -4,15 +4,19 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.option.*
+import cats.implicits.catsSyntaxOptionId
 import com.daml.metrics.Timed
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.HealthReporting
-import com.digitalasset.canton.health.HealthReporting.MutableHealthComponent
+import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.health.HealthReporting.{
+  DelegatingMutableHealthComponent,
+  HealthComponent,
+}
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
@@ -25,8 +29,9 @@ import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SendCallback.CallbackFuture
+import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
-import com.digitalasset.canton.sequencing.client.transports.*
+import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handlers.{
   CleanSequencerCounterTracker,
   StoreSequencedEvent,
@@ -41,7 +46,6 @@ import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
@@ -144,7 +148,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   def completion: Future[SequencerClient.CloseReason]
 
   def changeTransport(
-      newTransport: SequencerClientTransport
+      sequencerTransports: SequencerTransports
   )(implicit traceContext: TraceContext): Future[Unit]
 
   /** Returns a future that completes after asynchronous processing has completed for all events
@@ -154,7 +158,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   @VisibleForTesting
   def flush(): Future[Unit]
 
-  def healthComponent: HealthReporting.MutableHealthComponent
+  def healthComponent: HealthComponent
 
   /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
     * The client should then never subscribe for events from before this point.
@@ -175,7 +179,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
 class SequencerClientImpl(
     val domainId: DomainId,
     val member: Member,
-    sequencerClientTransport: SequencerClientTransport,
+    sequencerTransports: SequencerTransports,
     val config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
     val protocolVersion: ProtocolVersion,
@@ -192,7 +196,6 @@ class SequencerClientImpl(
     cryptoPureApi: CryptoPureApi,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
-    expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
     initialCounterLowerBound: SequencerCounter = SequencerCounter.Genesis,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends SequencerClient
@@ -212,32 +215,59 @@ class SequencerClientImpl(
       cryptoPureApi,
       config.eventInboxSize,
       loggerFactory,
-      NonEmpty(
-        Set,
-        expectedSequencers.head1._2,
-      ), // TODO(i12076): use expectedSequencers.map(_._2).toSet
+      sequencerTransports.expectedSequencers,
+      PositiveInt.tryCreate(sequencerTransports.expectedSequencers.size),
     )
 
-  private val currentTransport =
-    new AtomicReference[SequencerClientTransport](sequencerClientTransport)
-  private def transport: SequencerClientTransport = currentTransport.get
+  private val sequencersTransportState =
+    new SequencersTransportState(
+      sequencerTransports,
+      timeouts,
+      loggerFactory,
+    )
+
+  sequencersTransportState.completion.onComplete { _ =>
+    logger.debug(
+      "The sequencer subscriptions have been closed. Closing sequencer client."
+    )(TraceContext.empty)
+    close()
+  }
+
+  private def aggregateHealthResult(
+      healthResult: Map[SequencerId, ComponentHealthState]
+  ): ComponentHealthState =
+    if (healthResult.sizeIs == 1) {
+      healthResult.headOption.map(_._2).getOrElse(ComponentHealthState.Ok())
+    } else {
+      if (healthResult.values.count(_.isOk) >= sequencerTransports.sequencerToTransportMap.size) {
+        ComponentHealthState.Ok()
+      } else {
+        val unhealthySequencers = healthResult
+          .collect {
+            case (sequencerId, health) if !health.isOk => sequencerId
+          }
+        ComponentHealthState.Degraded(
+          ComponentHealthState.UnhealthyState(
+            description =
+              Some(s"Unhealthy sequencer subscriptions for [${unhealthySequencers.mkString(",")}]"),
+            error = None,
+            elc = None,
+          )
+        )
+      }
+    }
 
   private lazy val deferredSubscriptionHealth =
-    MutableHealthComponent(loggerFactory, SequencerClient.healthName, timeouts)
-
-  val healthComponent: HealthReporting.MutableHealthComponent = deferredSubscriptionHealth
-
-  private val closeReasonPromise = Promise[SequencerClient.CloseReason]()
-  // Keeps track of the subscription.
-  private val currentSubscription =
-    new AtomicReference[Option[ResilientSequencerSubscription[SequencerClientSubscriptionError]]](
-      None
+    new DelegatingMutableHealthComponent[SequencerId](
+      loggerFactory,
+      SequencerClient.healthName,
+      timeouts,
+      ComponentHealthState.ShutdownState,
+      aggregateHealthResult,
     )
 
-  // Kept here as a ref so we can close it when the sequencer client is closed. This is needed to cleanly
-  // stop processing of event validation during shutdown.
-  private val eventValidatorRef = new AtomicReference[Option[SequencedEventValidator]](None)
-  // Optional reference as is only created when tracking is subscribed
+  val healthComponent: HealthComponent = deferredSubscriptionHealth
+
   private val periodicAcknowledgementsRef =
     new AtomicReference[Option[PeriodicAcknowledgements]](None)
 
@@ -254,10 +284,6 @@ class SequencerClientImpl(
 
   private lazy val printer =
     new CantonPrettyPrinter(loggingConfig.api.maxStringLength, loggingConfig.api.maxMessageLines)
-
-  /** returns true if the sequencer subscription is healthy */
-  def subscriptionIsHealthy: Boolean =
-    currentSubscription.get().exists(!_.isFailed)
 
   override def sendAsyncUnauthenticatedOrNot(
       batch: Batch[DefaultOpenEnvelope],
@@ -481,12 +507,12 @@ class SequencerClientImpl(
                   logger.error(message)
                   SendAsyncClientError.RequestRefused(SendAsyncError.RequestRefused(message))
                 }
-              _ <- transport.sendAsyncSigned(signedContent, timeout)
+              _ <- sequencersTransportState.transport.sendAsyncSigned(signedContent, timeout)
             } yield ()
           } else
-            transport.sendAsync(request, timeout)
+            sequencersTransportState.transport.sendAsync(request, timeout)
         } else
-          transport.sendAsyncUnauthenticated(request, timeout)
+          sequencersTransportState.transport.sendAsyncUnauthenticated(request, timeout)
       }
       .leftSemiflatMap { err =>
         // increment appropriate error metrics
@@ -674,79 +700,16 @@ class SequencerClientImpl(
             .valueOr(err => throw SequencerClientSubscriptionException(err))
         )
       } yield {
-        val lastEvent = replayEvents.lastOption
-        val preSubscriptionEvent = lastEvent.orElse(initialPriorEventO)
-
-        val nextCounter =
-          // previously seen counter takes precedence over the lower bound
-          preSubscriptionEvent.fold(initialCounterLowerBound)(_.counter)
-
-        val eventValidator = eventValidatorFactory.create(
-          unauthenticated = !requiresAuthentication
-        )
-
-        // Set the new event validator and close any pre-existing one
-        eventValidatorRef
-          .getAndSet(Some(eventValidator))
-          .foreach(_.close())
-
-        logger.info(
-          s"Starting subscription at timestamp ${preSubscriptionEvent.map(_.timestamp)}; next counter $nextCounter"
-        )
-
-        val eventDelay: DelaySequencedEvent = {
-          val first = testingConfig.testSequencerClientFor.find(elem =>
-            elem.memberName == member.uid.id.unwrap
-              &&
-              elem.domainName == domainId.unwrap.id.unwrap
-          )
-
-          first match {
-            case Some(value) =>
-              DelayedSequencerClient.registerAndCreate(
-                value.environmentId,
-                domainId,
-                member.uid.toString,
-              )
-            case None => NoDelay
-          }
-        }
-
-        val subscriptionHandler = new SubscriptionHandler(
-          StoreSequencedEvent(sequencedEventStore, domainId, loggerFactory).apply(
-            timeTracker.wrapHandler(eventHandler)
-          ),
-          timeoutHandler,
-          eventValidator,
-          eventDelay,
-          preSubscriptionEvent,
-          expectedSequencers.head1._2, // TODO(i12076): Create multiple subscriptions with all expected sequencers
-        )
-
-        val subscription = ResilientSequencerSubscription[SequencerClientSubscriptionError](
-          domainId,
-          protocolVersion,
-          member,
-          transport,
-          subscriptionHandler.handleEvent,
-          nextCounter,
-          config.initialConnectionRetryDelay.underlying,
-          config.warnDisconnectDelay.underlying,
-          config.maxConnectionRetryDelay.underlying,
-          timeouts,
-          requiresAuthentication,
-          loggerFactory,
-        )
-
-        deferredSubscriptionHealth.set(subscription)
-
-        val replaced = currentSubscription.compareAndSet(None, Some(subscription))
-        if (!replaced) {
-          // there's an existing subscription!
-          logger.warn(
-            "Cannot create additional subscriptions to the sequencer from the same client"
-          )
-          sys.error("The sequencer client already has a running subscription")
+        sequencerTransports.sequencerIdToTransportMap.foreach { case (sequencerId, _) =>
+          createSubscription(
+            sequencerId,
+            replayEvents,
+            initialPriorEventO,
+            requiresAuthentication,
+            timeTracker,
+            eventHandler,
+            timeoutHandler,
+          ).discard
         }
 
         // periodically acknowledge that we've successfully processed up to the clean counter
@@ -758,7 +721,7 @@ class SequencerClientImpl(
             PeriodicAcknowledgements
               .create(
                 config.acknowledgementInterval.underlying,
-                subscriptionIsHealthy,
+                deferredSubscriptionHealth.getState.isOk,
                 SequencerClientImpl.this,
                 fetchCleanTimestamp,
                 clock,
@@ -768,15 +731,7 @@ class SequencerClientImpl(
               )
               .some,
           )
-        }
-
-        // pipe the eventual close reason of the subscription to the client itself
-        subscription.closeReason.onComplete(closeWithSubscriptionReason)
-
-        // now start the subscription
-        subscription.start
-
-        subscription
+        } else None
       }
     }
 
@@ -789,6 +744,90 @@ class SequencerClientImpl(
         ()
     }
     FutureUtil.logOnFailure(loggedAbortF, "Sequencer subscription failed")
+  }
+
+  private def createSubscription(
+      sequencerId: SequencerId,
+      replayEvents: Seq[PossiblyIgnoredSerializedEvent],
+      initialPriorEventO: Option[PossiblyIgnoredSerializedEvent],
+      requiresAuthentication: Boolean,
+      timeTracker: DomainTimeTracker,
+      eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
+      timeoutHandler: SendTimeoutHandler,
+  )(implicit traceContext: TraceContext) = {
+    val lastEvent = replayEvents.lastOption
+    val preSubscriptionEvent = lastEvent.orElse(initialPriorEventO)
+
+    val nextCounter =
+      // previously seen counter takes precedence over the lower bound
+      preSubscriptionEvent.fold(initialCounterLowerBound)(_.counter)
+
+    val eventValidator = eventValidatorFactory.create(
+      unauthenticated = !requiresAuthentication
+    )
+
+    logger.info(
+      s"Starting subscription for alias=$sequencerId at timestamp ${preSubscriptionEvent
+          .map(_.timestamp)}; next counter $nextCounter"
+    )
+
+    val eventDelay: DelaySequencedEvent = {
+      val first = testingConfig.testSequencerClientFor.find(elem =>
+        elem.memberName == member.uid.id.unwrap
+          &&
+          elem.domainName == domainId.unwrap.id.unwrap
+      )
+
+      first match {
+        case Some(value) =>
+          DelayedSequencerClient.registerAndCreate(
+            value.environmentId,
+            domainId,
+            member.uid.toString,
+          )
+        case None => NoDelay
+      }
+    }
+
+    val subscriptionHandler = new SubscriptionHandler(
+      StoreSequencedEvent(sequencedEventStore, domainId, loggerFactory).apply(
+        timeTracker.wrapHandler(eventHandler)
+      ),
+      timeoutHandler,
+      eventValidator,
+      eventDelay,
+      preSubscriptionEvent,
+      sequencerId,
+    )
+
+    val subscription = ResilientSequencerSubscription[SequencerClientSubscriptionError](
+      domainId,
+      protocolVersion,
+      member,
+      sequencersTransportState.transport(sequencerId),
+      subscriptionHandler.handleEvent,
+      nextCounter,
+      config.initialConnectionRetryDelay.underlying,
+      config.warnDisconnectDelay.underlying,
+      config.maxConnectionRetryDelay.underlying,
+      timeouts,
+      requiresAuthentication,
+      loggerFactory,
+    )
+
+    deferredSubscriptionHealth.set(sequencerId, subscription)
+
+    sequencersTransportState
+      .addSubscription(
+        sequencerId,
+        subscription,
+        eventValidator,
+      )
+
+    // now start the subscription
+    subscription.start
+
+    subscription
   }
 
   private class SubscriptionHandler(
@@ -832,7 +871,7 @@ class SequencerClientImpl(
             .value
         } else {
           logger.debug(
-            s"Validating sequenced event with counter ${serializedEvent.counter} and timestamp ${serializedEvent.timestamp}"
+            s"Validating sequenced event coming from $sequencerId with counter ${serializedEvent.counter} and timestamp ${serializedEvent.timestamp}"
           )
           (for {
             _ <- EitherT.liftF(
@@ -843,7 +882,7 @@ class SequencerClientImpl(
               .leftMap[SequencerClientSubscriptionError](EventValidationError)
             _ = priorEvent.set(Some(serializedEvent))
 
-            sequencerIdToSignal <- EitherT(
+            toSignalHandler <- EitherT(
               sequencerAggregator
                 .combineAndMergeEvent(
                   sequencerId,
@@ -853,7 +892,7 @@ class SequencerClientImpl(
               .leftMap[SequencerClientSubscriptionError](EventAggregationError)
               .mapK(FutureUnlessShutdown.outcomeK)
           } yield
-            if (sequencerIdToSignal == sequencerId) {
+            if (toSignalHandler) {
               signalHandler(applicationHandler)
             }).value
         }
@@ -1051,58 +1090,6 @@ class SequencerClientImpl(
         }(EitherT.leftT[Future, Unit](_))
     }
 
-  private def closeWithSubscriptionReason(
-      subscriptionCloseReason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
-  ): Unit = {
-
-    val maybeCloseReason: Try[Either[SequencerClient.CloseReason, Unit]] =
-      subscriptionCloseReason.map[Either[SequencerClient.CloseReason, Unit]] {
-        case SubscriptionCloseReason.HandlerException(ex) =>
-          Left(SequencerClient.CloseReason.UnrecoverableException(ex))
-        case SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(_reason)) =>
-          Left(SequencerClient.CloseReason.BecamePassive)
-        case SubscriptionCloseReason.HandlerError(ApplicationHandlerShutdown) =>
-          Left(SequencerClient.CloseReason.ClientShutdown)
-        case SubscriptionCloseReason.HandlerError(err) =>
-          Left(SequencerClient.CloseReason.UnrecoverableError(s"handler returned error: $err"))
-        case permissionDenied: SubscriptionCloseReason.PermissionDeniedError =>
-          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
-          Left(SequencerClient.CloseReason.PermissionDenied(s"$permissionDenied"))
-        case subscriptionError: SubscriptionCloseReason.SubscriptionError =>
-          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
-          Left(
-            SequencerClient.CloseReason.UnrecoverableError(
-              s"subscription implementation failed: $subscriptionError"
-            )
-          )
-        case SubscriptionCloseReason.Closed =>
-          // TODO(i12076) This reason should not be closing sequencer client, but should depend on aggregation logic
-          Left(SequencerClient.CloseReason.ClientShutdown)
-        case SubscriptionCloseReason.Shutdown => Left(SequencerClient.CloseReason.ClientShutdown)
-        case SubscriptionCloseReason.TransportChange =>
-          Right(()) // we don't want to close the sequencer client when changing transport
-      }
-
-    def complete(reason: Try[SequencerClient.CloseReason]): Unit =
-      closeReasonPromise.tryComplete(reason).discard
-
-    lazy val closeReason: Try[SequencerClient.CloseReason] = maybeCloseReason.collect {
-      case Left(error) =>
-        error
-    }
-    maybeCloseReason match {
-      case Failure(_) => complete(closeReason)
-      case Success(Left(_)) => complete(closeReason)
-      case Success(Right(())) =>
-    }
-    if (closeReasonPromise.isCompleted) {
-      logger.debug(
-        "The sequencer subscriptions have been closed. Closing sequencer client."
-      )(TraceContext.empty)
-      close()
-    }
-  }
-
   /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
     * The client should then never subscribe for events from before this point.
     */
@@ -1110,7 +1097,7 @@ class SequencerClientImpl(
       traceContext: TraceContext
   ): Future[Unit] = {
     val request = AcknowledgeRequest(member, timestamp, protocolVersion)
-    transport.acknowledge(request)
+    sequencersTransportState.transport.acknowledge(request)
   }
 
   def acknowledgeSigned(timestamp: CantonTimestamp)(implicit
@@ -1119,46 +1106,33 @@ class SequencerClientImpl(
     val request = AcknowledgeRequest(member, timestamp, protocolVersion)
     for {
       signedRequest <- requestSigner.signRequest(request, HashPurpose.AcknowledgementSignature)
-      _ <- transport.acknowledgeSigned(signedRequest)
+      _ <- sequencersTransportState.transport.acknowledgeSigned(signedRequest)
     } yield ()
   }
 
   def changeTransport(
-      newTransport: SequencerClientTransport
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val oldTransport = currentTransport.getAndSet(newTransport)
-    currentSubscription
-      .get()
-      .map(_.resubscribeOnTransportChange())
-      .getOrElse(Future.unit)
-      .thereafter { _ => oldTransport.close() }
-  }
+      sequencerTransports: SequencerTransports
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    sequencersTransportState.changeTransport(sequencerTransports)
 
   /** Future which is completed when the client is not functional any more and is ready to be closed.
     * The value with which the future is completed will indicate the reason for completion.
     */
-  def completion: Future[SequencerClient.CloseReason] = closeReasonPromise.future
+  def completion: Future[SequencerClient.CloseReason] = sequencersTransportState.completion
 
-  def closeSubscription(): Unit = {
-    currentSubscription.getAndSet(None).foreach { subscription =>
-      import TraceContext.Implicits.Empty.*
-      logger.debug(s"Closing sequencer subscription...")
-      subscription.close()
-      logger.trace(s"Wait for the subscription to complete")
-      timeouts.shutdownNetwork
-        .await_("closing resilient sequencer client subscription")(subscription.closeReason)
-
-      logger.trace(s"Wait for the handler to become idle")
-
-      // This logs a warn if the handle does not become idle within 60 seconds.
-      // This happen because the handler is not making progress, for example due to a db outage.
-
-      FutureUtil.valueOrLog(
+  def closeAllSubscriptions(): Unit = {
+    import TraceContext.Implicits.Empty.*
+    sequencersTransportState.closeAllSubscriptions()
+    logger.trace(s"Wait for the handler to become idle")
+    // This logs a warn if the handle does not become idle within 60 seconds.
+    // This happen because the handler is not making progress, for example due to a db outage.
+    FutureUtil
+      .valueOrLog(
         handlerIdle.get().future,
-        timeoutMessage = s"Clean close of the sequencer subscription $subscription timed out",
+        timeoutMessage = s"Clean close of the sequencer subscriptions timed out",
         timeout = timeouts.shutdownProcessing.unwrap,
       )
-    }
+      .discard
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
@@ -1171,18 +1145,10 @@ class SequencerClientImpl(
         "sequencer-client-periodic-ack",
         toCloseableOption(periodicAcknowledgementsRef.get()).close(),
       ),
-      SyncCloseable("sequencer-event-validator", eventValidatorRef.get().foreach(_.close())),
-      SyncCloseable("sequencer-client-subscription", closeSubscription()),
-      SyncCloseable("sequencer-client-transport", transport.close()),
+      SyncCloseable("sequencer-client-subscription", closeAllSubscriptions()),
       SyncCloseable("sequencer-client-recorder", recorderO.foreach(_.close())),
       SyncCloseable("sequenced-event-store", sequencedEventStore.close()),
-      SyncCloseable(
-        "sequencer-client-close-reason", {
-          closeReasonPromise
-            .tryComplete(Success(SequencerClient.CloseReason.ClientShutdown))
-            .discard
-        },
-      ),
+      // TODO(i12076): What do we do on close? should we close all the delegates as well?
       SyncCloseable("deferred-subscription-health", deferredSubscriptionHealth.close()),
     )
   }
@@ -1197,6 +1163,61 @@ class SequencerClientImpl(
 
 object SequencerClient {
   val healthName: String = "sequencer-client"
+
+  final case class SequencerTransportContainer(
+      sequencerId: SequencerId,
+      clientTransport: SequencerClientTransport,
+  )
+
+  final case class SequencerTransports(
+      sequencerToTransportMap: NonEmpty[Map[SequencerAlias, SequencerTransportContainer]]
+  ) {
+    def expectedSequencers: NonEmpty[Set[SequencerId]] =
+      sequencerToTransportMap.map(_._2.sequencerId).toSet
+
+    def sequencerIdToTransportMap: NonEmpty[Map[SequencerId, SequencerTransportContainer]] = {
+      sequencerToTransportMap.map { case (_, transport) =>
+        transport.sequencerId -> transport
+      }.toMap
+    }
+
+    def transports: Set[SequencerClientTransport] =
+      sequencerToTransportMap.values.map(_.clientTransport).toSet
+  }
+
+  object SequencerTransports {
+    def from(
+        sequencerTransportsMap: NonEmpty[Map[SequencerAlias, SequencerClientTransport]],
+        expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
+    ): Either[String, SequencerTransports] =
+      if (sequencerTransportsMap.keySet != expectedSequencers.keySet) {
+        Left("Inconsistent map of sequencer transports and their ids.")
+      } else
+        Right(SequencerTransports(sequencerTransportsMap.map { case (sequencerAlias, transport) =>
+          val sequencerId = expectedSequencers(sequencerAlias)
+          sequencerAlias -> SequencerTransportContainer(sequencerId, transport)
+        }.toMap))
+
+    def single(
+        sequencerAlias: SequencerAlias,
+        sequencerId: SequencerId,
+        transport: SequencerClientTransport,
+    ): SequencerTransports =
+      SequencerTransports(
+        NonEmpty
+          .mk(
+            Seq,
+            sequencerAlias -> SequencerTransportContainer(sequencerId, transport),
+          )
+          .toMap
+      )
+
+    def default(
+        sequencerId: SequencerId,
+        transport: SequencerClientTransport,
+    ): SequencerTransports =
+      single(SequencerAlias.Default, sequencerId, transport)
+  }
 
   sealed trait CloseReason
 

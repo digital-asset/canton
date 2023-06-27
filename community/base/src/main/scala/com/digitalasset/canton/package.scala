@@ -9,6 +9,7 @@ import com.daml.lf.transaction.{ContractStateMachine, Versioned}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.data.{Counter, CounterCompanion}
 import com.digitalasset.canton.ledger.configuration
+import com.digitalasset.canton.version.ProtocolVersion
 
 package object canton {
 
@@ -109,7 +110,17 @@ package object canton {
   /** The counter assigned to a contract to count the number of its transfers */
   type TransferCounterDiscriminator
   type TransferCounter = Counter[TransferCounterDiscriminator]
-  object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {}
+  object TransferCounter extends CounterCompanion[TransferCounterDiscriminator] {
+    def forCreatedContract(protocolVersion: ProtocolVersion): TransferCounterO =
+      // TODO(#12373) Adapt when releasing BFT
+      if (protocolVersion >= ProtocolVersion.dev) Some(TransferCounter.Genesis)
+      else None
+  }
+
+  /** A transfer counter if available. Transfer counters are defined from protocol version
+    * [[com.digitalasset.canton.version.ProtocolVersion.dev]] on
+    */
+  type TransferCounterO = Option[TransferCounter]
 
   object RequestCounter extends CounterCompanion[RequestCounterDiscriminator] {
 

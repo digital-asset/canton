@@ -262,6 +262,7 @@ object Update {
       recordTime: Timestamp,
       divulgedContracts: List[DivulgedContract],
       blindingInfo: Option[BlindingInfo],
+      hostedWitnesses: List[Ref.Party],
       contractMetadata: Map[Value.ContractId, Bytes],
   ) extends Update {
     override def description: String = s"Accept transaction $transactionId"
@@ -275,6 +276,7 @@ object Update {
             _,
             transactionId,
             recordTime,
+            _,
             _,
             _,
             _,
@@ -343,8 +345,9 @@ object Update {
       recordTime: Timestamp,
       completionInfo: CompletionInfo,
       reasonTemplate: CommandRejected.RejectionReasonTemplate,
-      optDomainId: Option[DomainId] =
-        None, // TODO(#13173) None for backwards compatibility, expected to be set for X nodes
+      domainId: Option[
+        DomainId
+      ], // TODO(#13173) None for backwards compatibility, expected to be set for X nodes
   ) extends Update {
     override def description: String =
       s"Reject command ${completionInfo.commandId}${if (definiteAnswer)

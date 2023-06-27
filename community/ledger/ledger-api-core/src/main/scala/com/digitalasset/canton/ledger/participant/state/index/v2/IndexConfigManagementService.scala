@@ -5,9 +5,9 @@ package com.digitalasset.canton.ledger.participant.state.index.v2
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
 import com.digitalasset.canton.ledger.configuration.Configuration
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -20,12 +20,12 @@ trait IndexConfigManagementService {
     * to subscribe to new configuration entries using [[configurationEntries]].
     */
   def lookupConfiguration()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[(LedgerOffset.Absolute, Configuration)]]
 
   /** Retrieve configuration entries. */
   def configurationEntries(startExclusive: Option[LedgerOffset.Absolute])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Source[(LedgerOffset.Absolute, ConfigurationEntry), NotUsed]
 
 }

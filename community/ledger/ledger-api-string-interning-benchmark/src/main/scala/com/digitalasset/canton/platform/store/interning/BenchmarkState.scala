@@ -58,9 +58,8 @@ object BenchmarkState {
 
   def loadStringInterningEntries(
       entries: Array[(Int, String)]
-  ): LoadStringInterningEntries = {
-    (fromExclusive, toInclusive) =>
-      // Note: for slice(), the begin is inclusive and the end is exclusive (opposite of the enclosing call)
-      _ => Future.successful(entries.view.slice(fromExclusive + 1, toInclusive + 1))
+  ): LoadStringInterningEntries = { (fromExclusive, toInclusive) =>
+    // Note: for slice(), the begin is inclusive and the end is exclusive (opposite of the enclosing call)
+    Future.successful(entries.view.slice(fromExclusive + 1, toInclusive + 1))
   }
 }

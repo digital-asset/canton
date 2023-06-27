@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology
 
 import com.daml.error.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
@@ -141,6 +142,16 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     final case class Failure(error: SignatureCheckError)(implicit
         override val loggingContext: ErrorLoggingContext
     ) extends Alarm(cause = "Transaction signature verification failed")
+        with TopologyManagerError
+  }
+
+  object SerialMismatch
+      extends ErrorCode(id = "SERIAL_MISMATCH", ErrorCategory.InvalidGivenCurrentSystemStateOther) {
+    final case class Failure(expected: PositiveInt, actual: PositiveInt)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"The given serial $actual did not match the expected serial $expected."
+        )
         with TopologyManagerError
   }
 

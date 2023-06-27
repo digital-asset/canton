@@ -11,7 +11,7 @@ import io.grpc.Metadata
 
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 
-final case class CantonAdminToken private (secret: String)
+final case class CantonAdminToken(secret: String)
 object CantonAdminToken {
   def create(randomOps: RandomOps): CantonAdminToken = {
     val secret = HexString.toHexString(randomOps.generateRandomByteString(64))

@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.backend.oracle
 
 import anorm.SqlParser.get
 import anorm.SqlStringInterpolation
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.InitHookDataSourceProxy
 
@@ -15,11 +15,12 @@ import javax.sql.DataSource
 object OracleDataSourceStorageBackend extends DataSourceStorageBackend {
   override def createDataSource(
       dataSourceConfig: DataSourceStorageBackend.DataSourceConfig,
+      loggerFactory: NamedLoggerFactory,
       connectionInitHook: Option[Connection => Unit],
-  )(implicit loggingContext: LoggingContext): DataSource = {
+  ): DataSource = {
     val oracleDataSource = new oracle.jdbc.pool.OracleDataSource
     oracleDataSource.setURL(dataSourceConfig.jdbcUrl)
-    InitHookDataSourceProxy(oracleDataSource, connectionInitHook.toList)
+    InitHookDataSourceProxy(oracleDataSource, connectionInitHook.toList, loggerFactory)
   }
 
   override def checkDatabaseAvailable(connection: Connection): Unit =

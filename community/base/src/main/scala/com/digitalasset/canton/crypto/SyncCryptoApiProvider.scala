@@ -102,6 +102,10 @@ trait SyncCryptoClient[+T <: SyncCryptoApi] extends TopologyClientApi[T] {
 
   /** Returns a snapshot of the current member topology for the given domain.
     * The future will log a warning and await the snapshot if the data is not there yet.
+    *
+    * The snapshot returned by this method should be used for validating transaction and transfer requests (Phase 2 - 7).
+    * Use the request timestamp as parameter for this method.
+    * Do not use a response or result timestamp, because all validation steps must use the same topology snapshot.
     */
   def ipsSnapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -110,6 +114,10 @@ trait SyncCryptoClient[+T <: SyncCryptoApi] extends TopologyClientApi[T] {
   /** Returns a snapshot of the current member topology for the given domain
     *
     * The future will wait for the data if the data is not there yet.
+    *
+    * The snapshot returned by this method should be used for validating transaction and transfer requests (Phase 2 - 7).
+    * Use the request timestamp as parameter for this method.
+    * Do not use a response or result timestamp, because all validation steps must use the same topology snapshot.
     */
   def awaitIpsSnapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.syntax.functor.*
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.*
 import com.digitalasset.canton.participant.store.ContractKeyJournal
 import com.digitalasset.canton.protocol.{
   ContractMetadata,
@@ -14,9 +13,9 @@ import com.digitalasset.canton.protocol.{
   TargetDomainId,
   TransferId,
   WithContractHash,
-  WithContractMetadata,
 }
 import com.digitalasset.canton.util.SetsUtil.requireDisjoint
+import com.digitalasset.canton.{LfPartyId, TransferCounterO}
 
 /** Describes the effect of a confirmation request on the active contracts, contract keys, and transfers.
   * Transient contracts appear the following two sets:
@@ -36,9 +35,9 @@ import com.digitalasset.canton.util.SetsUtil.requireDisjoint
   */
 final case class CommitSet(
     archivals: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
-    creations: Map[LfContractId, WithContractHash[ContractMetadata]],
-    transferOuts: Map[LfContractId, WithContractHash[(TargetDomainId, Set[LfPartyId])]],
-    transferIns: Map[LfContractId, WithContractHash[WithContractMetadata[TransferId]]],
+    creations: Map[LfContractId, WithContractHash[CreationCommit]],
+    transferOuts: Map[LfContractId, WithContractHash[TransferOutCommit]],
+    transferIns: Map[LfContractId, WithContractHash[TransferInCommit]],
     keyUpdates: Map[LfGlobalKey, ContractKeyJournal.Status],
 ) extends PrettyPrinting {
   // In a request by a malicious submitter,
@@ -51,11 +50,43 @@ final case class CommitSet(
     paramIfNonEmpty("archivals", _.archivals),
     paramIfNonEmpty("creations", _.creations),
     paramIfNonEmpty("transfer outs", _.transferOuts),
-    paramIfNonEmpty("transfer ins", _.transferIns.fmap(_.unwrap.unwrap)),
+    paramIfNonEmpty("transfer ins", _.transferIns),
     paramIfNonEmpty("key updates", _.keyUpdates),
   )
 }
 
 object CommitSet {
   val empty = CommitSet(Map.empty, Map.empty, Map.empty, Map.empty, Map.empty)
+
+  final case class CreationCommit(
+      contractMetadata: ContractMetadata,
+      transferCounter: TransferCounterO,
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[CreationCommit] = prettyOfClass(
+      param("contractMetadata", _.contractMetadata),
+      paramIfDefined("transferCounter", _.transferCounter),
+    )
+  }
+  final case class TransferOutCommit(
+      targetDomainId: TargetDomainId,
+      stakeholders: Set[LfPartyId],
+      transferCounter: TransferCounterO,
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[TransferOutCommit] = prettyOfClass(
+      param("targetDomainId", _.targetDomainId),
+      paramIfNonEmpty("stakeholders", _.stakeholders),
+      paramIfDefined("transferCounter", _.transferCounter),
+    )
+  }
+  final case class TransferInCommit(
+      transferId: TransferId,
+      contractMetadata: ContractMetadata,
+      transferCounter: TransferCounterO,
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[TransferInCommit] = prettyOfClass(
+      param("transferId", _.transferId),
+      param("contractMetadata", _.contractMetadata),
+      paramIfDefined("transferCounter", _.transferCounter),
+    )
+  }
 }

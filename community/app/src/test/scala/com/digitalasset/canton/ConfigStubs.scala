@@ -25,6 +25,7 @@ object ConfigStubs {
       ParticipantInitConfig(),
       CommunityCryptoConfig(),
       null,
+      None,
       adminApi,
       CommunityStorageConfig.Memory(),
     )

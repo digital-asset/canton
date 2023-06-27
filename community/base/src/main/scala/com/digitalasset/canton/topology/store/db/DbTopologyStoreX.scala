@@ -121,6 +121,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       removeMapping: Set[TopologyMappingX.MappingHash],
       removeTxs: Set[TopologyTransactionX.TxHash],
       additions: Seq[GenericValidatedTopologyTransactionX],
+      expiredAdditions: Set[TopologyTransactionX.TxHash],
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
     val effectiveTs = effective.value
@@ -140,7 +141,9 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       TransactionEntry(
         sequenced,
         effective,
-        Option.when(vtx.rejectionReason.nonEmpty)(effective),
+        Option.when(
+          vtx.rejectionReason.nonEmpty || expiredAdditions(vtx.transaction.transaction.hash)
+        )(effective),
         vtx.transaction,
         vtx.rejectionReason,
       )
@@ -149,12 +152,8 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     updatingTime.event {
       storage.update_(
         DBIO.seq(
-          Seq(
-            (transactionRemovals.nonEmpty, updateRemovals),
-            (additions.nonEmpty, insertAdditionsX),
-          ).collect {
-            case (filter, action) if filter => action
-          }: _*
+          if (transactionRemovals.nonEmpty) updateRemovals else DBIO.successful(0),
+          if (additions.nonEmpty) insertAdditionsX else DBIO.successful(0),
         ),
         operationName = "update-topology-transactions",
       )
@@ -373,16 +372,10 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
 
   override def findEssentialStateForMember(member: Member, asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[GenericStoredTopologyTransactionsX] =
-    findTransactionsSingleBatch(
-      asOf = asOfInclusive,
-      asOfInclusive = true,
-      isProposal = false,
-      types = TopologyMappingX.Code.all.toSet,
-      filterUid = None,
-      filterNamespace = None,
-      filterOp = None,
-    )
+  ): Future[GenericStoredTopologyTransactionsX] = {
+    val timeFilter = sql" AND sequenced <= $asOfInclusive"
+    queryForTransactions(timeFilter).map(_.asSnapshotAtMaxEffectiveTime)
+  }
 
   override def bootstrap(snapshot: GenericStoredTopologyTransactionsX)(implicit
       traceContext: TraceContext
@@ -415,7 +408,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[GenericStoredTopologyTransactionsX] = {
     val subQuery =
-      sql" AND valid_from > $timestampExclusive AND (valid_until is NULL OR operation = ${TopologyChangeOpX.Remove})"
+      sql" AND valid_from > $timestampExclusive AND (not is_proposal OR valid_until is NULL)"
     val limitQ = limitO.fold("")(storage.limit(_))
     queryForTransactions(subQuery, limitQ)
   }
@@ -447,7 +440,7 @@ class DbTopologyStoreX[StoreId <: TopologyStoreId](
     transactions <- FutureUnlessShutdown
       .outcomeF(
         queryForTransactions(
-          sql" AND valid_until IS NULL " ++
+          sql" AND not is_proposal " ++
             sql" AND transaction_type IN (" ++ TopologyStoreX.initialParticipantDispatchingSet.toList
               .map(s => sql"$s")
               .intercalate(sql", ") ++ sql") "

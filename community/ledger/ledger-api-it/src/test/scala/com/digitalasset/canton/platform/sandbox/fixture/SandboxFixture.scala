@@ -9,6 +9,7 @@ import com.daml.ports.Port
 import com.digitalasset.canton.ledger.api.grpc.GrpcClientResource
 import com.digitalasset.canton.ledger.sandbox.SandboxOnXForTest.{ConfigAdaptor, dataSource}
 import com.digitalasset.canton.ledger.sandbox.{SandboxOnXForTest, SandboxOnXRunner}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.platform.sandbox.UploadPackageHelper.*
 import com.digitalasset.canton.platform.sandbox.{
   AbstractSandboxFixture,
@@ -30,6 +31,7 @@ trait SandboxFixture
   override protected def channel: Channel = suiteResource.value._2
 
   override protected lazy val suiteResource: Resource[(Port, Channel)] = {
+    val loggerFactory: NamedLoggerFactory = SuppressingLogger(getClass)
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
     new OwnedResource[ResourceContext, (Port, Channel)](
       for {
@@ -46,6 +48,7 @@ trait SandboxFixture
           cfg,
           bridgeConfig,
           registerGlobalOpenTelemetry = false,
+          loggerFactory = loggerFactory,
         )
         channel <- GrpcClientResource.owner(port)
         client = adminLedgerClient(port, cfg, jwtSecret)(

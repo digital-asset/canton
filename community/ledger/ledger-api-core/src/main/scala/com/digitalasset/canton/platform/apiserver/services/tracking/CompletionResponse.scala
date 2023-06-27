@@ -5,14 +5,8 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint as PbCheckpoint
-import com.daml.ledger.api.v1.completion.Completion as PbCompletion
-import com.daml.logging.LoggingContext
-import com.digitalasset.canton.ledger.error.{
-  CommonErrors,
-  DamlContextualizedErrorLogger,
-  LedgerApiErrors,
-}
-import com.digitalasset.canton.platform.apiserver.services.logging
+import com.daml.ledger.api.v2.completion.Completion as PbCompletion
+import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.google.rpc.status
 import io.grpc.StatusRuntimeException
 import io.grpc.protobuf.StatusProto
@@ -23,11 +17,12 @@ final case class CompletionResponse(checkpoint: Option[PbCheckpoint], completion
 
 object CompletionResponse {
   def fromCompletion(
+      errorLogger: ContextualizedErrorLogger,
       completion: PbCompletion,
       checkpoint: Option[PbCheckpoint],
   ): Try[CompletionResponse] =
     completion.status
-      .toRight(missingStatusError(completion))
+      .toRight(missingStatusError(errorLogger))
       .toTry
       .flatMap {
         case status if status.code == 0 =>
@@ -54,29 +49,17 @@ object CompletionResponse {
 
   def duplicate(
       submissionId: String
-  )(implicit loggingContext: ContextualizedErrorLogger): Try[CompletionResponse] =
+  )(implicit errorLogger: ContextualizedErrorLogger): Try[CompletionResponse] =
     Failure(
       LedgerApiErrors.ConsistencyErrors.DuplicateCommand
         .Reject(existingCommandSubmissionId = Some(submissionId))
         .asGrpcError
     )
 
-  def closing(implicit loggingContext: ContextualizedErrorLogger): Try[CompletionResponse] =
+  def closing(implicit errorLogger: ContextualizedErrorLogger): Try[CompletionResponse] =
     Failure(CommonErrors.ServerIsShuttingDown.Reject().asGrpcError)
 
-  private def missingStatusError(completion: PbCompletion): StatusRuntimeException = {
-    val loggingContext = LoggingContext(
-      logging.submissionId(completion.submissionId),
-      logging.commandId(completion.commandId),
-      logging.actAsStrings(completion.actAs),
-    )
-
-    val errorLogger = DamlContextualizedErrorLogger.forClass(
-      getClass,
-      loggingContext,
-      Some(completion.submissionId),
-    )
-
+  private def missingStatusError(errorLogger: ContextualizedErrorLogger): StatusRuntimeException = {
     CommonErrors.ServiceInternalError
       .Generic(
         "Missing status in completion response",

@@ -14,6 +14,7 @@ import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, JwksUrl, LedgerId}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.StatusRuntimeException
@@ -85,6 +86,11 @@ object FieldValidator {
       contextualizedErrorLogger: ContextualizedErrorLogger
   ): Either[StatusRuntimeException, Ref.Party] =
     Ref.Party.fromString(s).left.map(invalidArgument)
+
+  def requirePartyField(s: String, fieldName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.Party] =
+    Ref.Party.fromString(s).left.map(invalidField(fieldName, _))
 
   def requireResourceVersion(raw: String, fieldName: String)(implicit
       errorLogger: ContextualizedErrorLogger
@@ -206,6 +212,38 @@ object FieldValidator {
         .map(invalidField("submission_id", _))
     }
 
+  def requireSubmissionId(s: String, fieldName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.SubmissionId] =
+    Ref.SubmissionId
+      .fromString(s)
+      .left
+      .map(invalidField(fieldName, _))
+
+  def requireCommandId(s: String, fieldName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.CommandId] =
+    Ref.CommandId
+      .fromString(s)
+      .left
+      .map(invalidField(fieldName, _))
+
+  def requireWorkflowId(s: String, fieldName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, Ref.WorkflowId] =
+    Ref.WorkflowId
+      .fromString(s)
+      .left
+      .map(invalidField(fieldName, _))
+
+  def requireDomainId(s: String, fieldName: String)(implicit
+      contextualizedErrorLogger: ContextualizedErrorLogger
+  ): Either[StatusRuntimeException, DomainId] =
+    DomainId
+      .fromString(s)
+      .left
+      .map(invalidField(fieldName, _))
+
   def requireContractId(
       s: String,
       fieldName: String,
@@ -314,4 +352,9 @@ object FieldValidator {
           s"Can not represent $fieldName ($timestamp) as a Daml timestamp: ${errMsg.getMessage}"
         )
       )
+
+  def validateOptional[T, U](t: Option[T])(
+      validation: T => Either[StatusRuntimeException, U]
+  ): Either[StatusRuntimeException, Option[U]] =
+    t.map(validation).map(_.map(Some(_))).getOrElse(Right(None))
 }

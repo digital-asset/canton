@@ -7,7 +7,7 @@ import akka.stream.scaladsl.Source
 import com.daml.error.utils.ErrorDetails
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.akkastreams.dispatcher.{Dispatcher, SubSource}
@@ -25,8 +25,8 @@ class DispatcherStateSpec
     extends AsyncFlatSpec
     with MockitoSugar
     with Matchers
-    with AkkaBeforeAndAfterAll {
-  private val loggingContext = LoggingContext.ForTesting
+    with AkkaBeforeAndAfterAll
+    with BaseTest {
   private val className = classOf[DispatcherState].getSimpleName
 
   private val initialInitializationOffset =
@@ -39,7 +39,7 @@ class DispatcherStateSpec
   s"$className.{startDispatcher, stopDispatcher}" should "handle correctly the Dispatcher lifecycle" in {
     for {
       _ <- Future.unit
-      dispatcherState = new DispatcherState(Duration.Zero)(loggingContext)
+      dispatcherState = new DispatcherState(Duration.Zero, loggerFactory)
       // Start the initial Dispatcher
       _ = dispatcherState.startDispatcher(initialInitializationOffset)
 
@@ -78,7 +78,7 @@ class DispatcherStateSpec
   s"$className.shutdown" should "shutdown the DispatcherState" in {
     for {
       _ <- Future.unit
-      dispatcherState = new DispatcherState(Duration.Zero)(loggingContext)
+      dispatcherState = new DispatcherState(Duration.Zero, loggerFactory)
       // Start the initial Dispatcher
       _ = dispatcherState.startDispatcher(initialInitializationOffset)
 
@@ -109,7 +109,7 @@ class DispatcherStateSpec
     for {
       _ <- Future.unit
       // Start a new dispatcher state
-      dispatcherState = new DispatcherState(Duration.Zero)(loggingContext)
+      dispatcherState = new DispatcherState(Duration.Zero, loggerFactory)
 
       // Shutting down the state
       _ <- dispatcherState.shutdown()

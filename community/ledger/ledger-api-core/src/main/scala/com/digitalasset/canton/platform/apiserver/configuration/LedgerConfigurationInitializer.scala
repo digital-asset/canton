@@ -6,12 +6,13 @@ package com.digitalasset.canton.platform.apiserver.configuration
 import akka.stream.Materializer
 import com.daml.api.util.TimeProvider
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigManagementService
-import com.digitalasset.canton.ledger.participant.state.{v2 as state}
+import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.configuration.InitialLedgerConfiguration
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
@@ -23,22 +24,24 @@ final class LedgerConfigurationInitializer(
     materializer: Materializer,
     servicesExecutionContext: ExecutionContext,
     telemetry: Telemetry,
-) {
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
   private val scheduler = materializer.system.scheduler
   private val subscriptionBuilder = new LedgerConfigurationSubscriptionFromIndex(
     indexService,
     scheduler,
     materializer,
     servicesExecutionContext,
+    loggerFactory,
   )
 
   def initialize(
       initialLedgerConfiguration: Option[InitialLedgerConfiguration],
       configurationLoadTimeout: Duration,
   )(implicit
-      resourceContext: ResourceContext,
-      loggingContext: LoggingContext,
+      resourceContext: ResourceContext
   ): Resource[LedgerConfigurationSubscription] = {
+    implicit val loggingContext = LoggingContextWithTrace(loggerFactory)(TraceContext.empty)
     val owner = for {
       // First, we acquire the mechanism for looking up the current ledger configuration.
       ledgerConfigurationSubscription <- subscriptionBuilder.subscription(configurationLoadTimeout)
@@ -54,6 +57,7 @@ final class LedgerConfigurationInitializer(
             submissionIdGenerator,
             scheduler,
             telemetry,
+            loggerFactory,
           ).submit(initialConfiguration)(servicesExecutionContext, loggingContext)
       }
       // Finally, we wait until either an existing configuration or the provisioned configuration

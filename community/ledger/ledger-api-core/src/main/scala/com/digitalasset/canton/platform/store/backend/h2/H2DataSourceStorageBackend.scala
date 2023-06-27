@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.h2
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.{
   DataSourceStorageBackendImpl,
@@ -16,8 +16,9 @@ import javax.sql.DataSource
 object H2DataSourceStorageBackend extends DataSourceStorageBackend {
   override def createDataSource(
       dataSourceConfig: DataSourceStorageBackend.DataSourceConfig,
+      loggerFactory: NamedLoggerFactory,
       connectionInitHook: Option[Connection => Unit],
-  )(implicit loggingContext: LoggingContext): DataSource = {
+  ): DataSource = {
     val h2DataSource = new org.h2.jdbcx.JdbcDataSource()
 
     // H2 (org.h2.jdbcx.JdbcDataSource) does not support setting the user/password within the jdbcUrl, so remove
@@ -32,7 +33,7 @@ object H2DataSourceStorageBackend extends DataSourceStorageBackend {
     password.foreach(h2DataSource.setPassword)
     h2DataSource.setUrl(urlNoUserNoPassword)
 
-    InitHookDataSourceProxy(h2DataSource, connectionInitHook.toList)
+    InitHookDataSourceProxy(h2DataSource, connectionInitHook.toList, loggerFactory)
   }
 
   def extractUserPasswordAndRemoveFromUrl(

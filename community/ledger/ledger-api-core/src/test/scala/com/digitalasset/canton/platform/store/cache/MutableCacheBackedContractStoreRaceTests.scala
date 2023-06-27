@@ -13,9 +13,11 @@ import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, VersionedValue}
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreRaceTests.{
   IndexViewContractsReader,
   assert_sync_vs_async_race_contract,
@@ -36,7 +38,10 @@ import scala.collection.immutable.{TreeMap, VectorMap}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Random
 
-class MutableCacheBackedContractStoreRaceTests extends AsyncFlatSpec with AkkaBeforeAndAfterAll {
+class MutableCacheBackedContractStoreRaceTests
+    extends AsyncFlatSpec
+    with AkkaBeforeAndAfterAll
+    with TestEssentials {
   behavior of "Mutable state cache updates"
 
   private val unboundedExecutionContext =
@@ -45,7 +50,8 @@ class MutableCacheBackedContractStoreRaceTests extends AsyncFlatSpec with AkkaBe
   it should "preserve causal monotonicity under contention for key state" in {
     val workload = generateWorkload(keysCount = 10L, contractsCount = 1000L)
     val indexViewContractsReader = IndexViewContractsReader()(unboundedExecutionContext)
-    val contractStore = buildContractStore(indexViewContractsReader, unboundedExecutionContext)
+    val contractStore =
+      buildContractStore(indexViewContractsReader, unboundedExecutionContext, loggerFactory)
 
     for {
       _ <- test(indexViewContractsReader, workload, unboundedExecutionContext) { ec => event =>
@@ -57,7 +63,8 @@ class MutableCacheBackedContractStoreRaceTests extends AsyncFlatSpec with AkkaBe
   it should "preserve causal monotonicity under contention for contract state" in {
     val workload = generateWorkload(keysCount = 10L, contractsCount = 1000L)
     val indexViewContractsReader = IndexViewContractsReader()(unboundedExecutionContext)
-    val contractStore = buildContractStore(indexViewContractsReader, unboundedExecutionContext)
+    val contractStore =
+      buildContractStore(indexViewContractsReader, unboundedExecutionContext, loggerFactory)
 
     for {
       _ <- test(indexViewContractsReader, workload, unboundedExecutionContext) { ec => event =>
@@ -68,7 +75,7 @@ class MutableCacheBackedContractStoreRaceTests extends AsyncFlatSpec with AkkaBe
 }
 
 private object MutableCacheBackedContractStoreRaceTests {
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
+  private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
   private val stakeholders = Set(Ref.Party.assertFromString("some-stakeholder"))
 
   private def test(
@@ -303,6 +310,7 @@ private object MutableCacheBackedContractStoreRaceTests {
   private def buildContractStore(
       indexViewContractsReader: IndexViewContractsReader,
       ec: ExecutionContext,
+      loggerFactory: NamedLoggerFactory,
   ) = {
     val metrics = Metrics.ForTesting
     new MutableCacheBackedContractStore(
@@ -313,7 +321,9 @@ private object MutableCacheBackedContractStoreRaceTests {
         maxContractsCacheSize = 1L,
         maxKeyCacheSize = 1L,
         metrics = metrics,
-      )(ec, loggingContext),
+        loggerFactory = loggerFactory,
+      )(ec),
+      loggerFactory = loggerFactory,
     )(ec)
   }
 
@@ -407,7 +417,7 @@ private object MutableCacheBackedContractStoreRaceTests {
       }
 
     override def lookupContractState(contractId: ContractId, validAt: Offset)(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Future[Option[ContractState]] =
       Future {
         val _ = loggingContext
@@ -422,7 +432,7 @@ private object MutableCacheBackedContractStoreRaceTests {
       }(ec)
 
     override def lookupKeyState(key: Key, validAt: Offset)(implicit
-        loggingContext: LoggingContext
+        loggingContext: LoggingContextWithTrace
     ): Future[KeyState] = Future {
       val _ = loggingContext
       keyStateStore
@@ -439,7 +449,7 @@ private object MutableCacheBackedContractStoreRaceTests {
     }(ec)
 
     override def lookupActiveContractAndLoadArgument(readers: Set[Party], contractId: ContractId)(
-        implicit loggingContext: LoggingContext
+        implicit loggingContext: LoggingContextWithTrace
     ): Future[Option[Contract]] = {
       val _ = (loggingContext, readers, contractId)
       // Needs to return None for divulgence lookups
@@ -450,7 +460,7 @@ private object MutableCacheBackedContractStoreRaceTests {
         readers: Set[Party],
         contractId: ContractId,
         createArgument: VersionedValue,
-    )(implicit loggingContext: LoggingContext): Future[Option[Contract]] = {
+    )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Contract]] = {
       val _ = (loggingContext, readers, contractId, createArgument)
       // Needs to return None for divulgence lookups
       Future.successful(None)

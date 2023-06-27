@@ -6,9 +6,10 @@ package com.digitalasset.canton.platform.indexer.ha
 import akka.stream.KillSwitch
 import akka.testkit.TestProbe
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend
+import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -27,8 +28,9 @@ class HaCoordinatorSpec
     with Eventually {
   implicit val ec: ExecutionContext =
     system.dispatcher // we need this to not use the default EC which is coming from AsyncTestSuite, and which is serial
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
-  private val logger = ContextualizedLogger.get(this.getClass)
+  private val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
+  private implicit val traceContext: TraceContext = TraceContext.empty
+  private val logger = TracedLogger(loggerFactory.getLogger(getClass))
   private val timer = new Timer(true)
 
   private val mainLockAcquireRetryMillis = 20L
@@ -871,6 +873,7 @@ class HaCoordinatorSpec
           indexerLockId = 10,
           indexerWorkerLockId = 20,
         ),
+        loggerFactory = loggerFactory,
       )
       .protectedExecution { connectionInitializer =>
         connectionInitializerPromise.success(connectionInitializer)

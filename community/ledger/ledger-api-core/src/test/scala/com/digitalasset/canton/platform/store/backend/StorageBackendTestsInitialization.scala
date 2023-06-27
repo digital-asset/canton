@@ -25,7 +25,8 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
         ParameterStorageBackend.IdentityParams(
           ledgerId = ledgerId,
           participantId = participantId,
-        )
+        ),
+        loggerFactory,
       )
     )
     val error1 = intercept[RuntimeException](
@@ -34,7 +35,8 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
           ParameterStorageBackend.IdentityParams(
             ledgerId = otherLedgerId,
             participantId = participantId,
-          )
+          ),
+          loggerFactory,
         )
       )
     )
@@ -44,7 +46,8 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
           ParameterStorageBackend.IdentityParams(
             ledgerId = ledgerId,
             participantId = otherParticipantId,
-          )
+          ),
+          loggerFactory,
         )
       )
     )
@@ -54,7 +57,8 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
           ParameterStorageBackend.IdentityParams(
             ledgerId = otherLedgerId,
             participantId = otherParticipantId,
-          )
+          ),
+          loggerFactory,
         )
       )
     )
@@ -63,7 +67,8 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
         ParameterStorageBackend.IdentityParams(
           ledgerId = ledgerId,
           participantId = participantId,
-        )
+        ),
+        loggerFactory,
       )
     )
 

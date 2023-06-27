@@ -5,21 +5,20 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.SqlParser.{int, long}
 import anorm.{RowParser, ~}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.common.MismatchException
 import com.digitalasset.canton.platform.store.backend.Conversions.{ledgerString, offset}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.{Conversions, ParameterStorageBackend}
+import com.digitalasset.canton.tracing.TraceContext
 import scalaz.syntax.tag.*
 
 import java.sql.Connection
 
 private[backend] object ParameterStorageBackendImpl extends ParameterStorageBackend {
-
-  private val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
 
   override def updateLedgerEnd(
       ledgerEnd: ParameterStorageBackend.LedgerEnd
@@ -94,8 +93,11 @@ private[backend] object ParameterStorageBackendImpl extends ParameterStorageBack
     }
 
   override def initializeParameters(
-      params: ParameterStorageBackend.IdentityParams
-  )(connection: Connection)(implicit loggingContext: LoggingContext): Unit = {
+      params: ParameterStorageBackend.IdentityParams,
+      loggerFactory: NamedLoggerFactory,
+  )(connection: Connection): Unit = {
+    val logger = loggerFactory.getTracedLogger(getClass)
+    implicit val traceContext: TraceContext = TraceContext.empty
     // Note: this method is the only one that inserts a row into the parameters table
     val previous = ledgerIdentity(connection)
     val ledgerId = params.ledgerId

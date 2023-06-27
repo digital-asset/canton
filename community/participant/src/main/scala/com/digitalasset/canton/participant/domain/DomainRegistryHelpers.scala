@@ -244,7 +244,8 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         sequencerAggregatedInfo.staticDomainParameters.protocolVersion,
       )
       _ <- downloadDomainTopologyStateForInitializationIfNeeded(
-        sequencerAggregatedInfo.sequencerConnections.default, // TODO(i12076): Support multiple sequencers
+        // TODO(i12076): Download topology state from one of the sequencers based on the health
+        sequencerAggregatedInfo.sequencerConnections.default,
         syncDomainPersistentStateManager,
         sequencerAggregatedInfo.domainId,
         topologyClient,

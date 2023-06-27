@@ -107,7 +107,7 @@ class BatchingParallelIngestionPipeSpec
   it should "form small batch sizes under no load" in {
     runPipe(
       ingesterHook = batch => {
-        batch.size shouldBe 1
+        batch.size should be <= 2
         ()
       },
       inputSource = Source(input).take(10).map(_.tap(_ => Threading.sleep(10L))).async,

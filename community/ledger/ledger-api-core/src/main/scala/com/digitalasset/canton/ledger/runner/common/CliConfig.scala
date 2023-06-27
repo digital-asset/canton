@@ -78,7 +78,6 @@ object CliConfig {
         allowedLanguageVersions = LanguageVersion.StableVersions,
         profileDir = None,
         stackTraceMode = false,
-        forbidV0ContractId = true,
       ),
       authService = AuthServiceConfig.Wildcard,
       acsContractFetchingParallelism = AcsStreamsConfig.DefaultAcsContractFetchingParallelism,

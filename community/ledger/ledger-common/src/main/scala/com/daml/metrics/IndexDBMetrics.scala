@@ -84,6 +84,29 @@ trait TransactionStreamsDbMetrics {
     val translationTimer: Timer = factory.timer(prefix :+ "translation")
   }
 
+  object reassignmentStream {
+    val prefix: MetricName = self.prefix :+ "reassignment_stream"
+
+    val fetchEventAssignIdsStakeholder: DatabaseMetrics = createDbMetrics(
+      "fetch_event_assign_ids_stakeholder"
+    )
+    val fetchEventUnassignIdsStakeholder: DatabaseMetrics = createDbMetrics(
+      "fetch_event_unassign_ids_stakeholder"
+    )
+    val fetchEventAssignPayloads: DatabaseMetrics = createDbMetrics("fetch_event_assign_payloads")
+    val fetchEventUnassignPayloads: DatabaseMetrics = createDbMetrics(
+      "fetch_event_unassign_payloads"
+    )
+    @MetricDoc.Tag(
+      summary = "The time needed to turn serialized Daml-LF values into in-memory objects.",
+      description = """Some index database queries that target contracts and transactions involve a
+          |Daml-LF translation step. For such queries this metric stands for the time it
+          |takes to turn the serialized Daml-LF values into in-memory representation.""",
+      qualification = Debug,
+    )
+    @nowarn("cat=deprecation")
+    val translationTimer: Timer = factory.timer(prefix :+ "translation")
+  }
 }
 
 class MainIndexDBMetrics(
@@ -162,8 +185,21 @@ class MainIndexDBMetrics(
   val getEventsByContractId: DatabaseMetrics = createDbMetrics("get_events_by_contract_id")
   val getEventsByContractKey: DatabaseMetrics = createDbMetrics("get_events_by_contract_key")
   val getActiveContracts: DatabaseMetrics = createDbMetrics("get_active_contracts")
-  val getActiveContractIds: DatabaseMetrics = createDbMetrics("get_active_contract_ids")
-  val getActiveContractBatch: DatabaseMetrics = createDbMetrics("get_active_contract_batch")
+  val getActiveContractIdsForCreated: DatabaseMetrics = createDbMetrics(
+    "get_active_contract_ids_for_created"
+  )
+  val getActiveContractIdsForAssigned: DatabaseMetrics = createDbMetrics(
+    "get_active_contract_ids_for_assigned"
+  )
+  val getActiveContractBatchForNotArchived: DatabaseMetrics = createDbMetrics(
+    "get_active_contract_batch_for_not_archived"
+  )
+  val getActiveContractBatchForCreated: DatabaseMetrics = createDbMetrics(
+    "get_active_contract_batch_for_created"
+  )
+  val getActiveContractBatchForAssigned: DatabaseMetrics = createDbMetrics(
+    "get_active_contract_batch_for_assigned"
+  )
   val getEventSeqIdRange: DatabaseMetrics = createDbMetrics("get_event_sequential_id_range")
   val getAcsEventSeqIdRange: DatabaseMetrics =
     createDbMetrics("get_acs_event_sequential_id_range")

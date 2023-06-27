@@ -22,6 +22,7 @@ final case class LedgerApiUser(
     primaryParty: Option[PartyId],
     isDeactivated: Boolean,
     metadata: LedgerApiObjectMeta,
+    identityProviderId: String,
 )
 
 object LedgerApiUser {
@@ -44,6 +45,7 @@ object LedgerApiUser {
             resourceVersion = metadataO.fold("")(_.resourceVersion),
             annotations = metadataO.fold(Map.empty[String, String])(_.annotations),
           ),
+          identityProviderId = identityProviderId,
         )
       }
   }
@@ -93,6 +95,7 @@ final case class User(
     primaryParty: Option[PartyId],
     isActive: Boolean,
     annotations: Map[String, String],
+    identityProviderId: String,
 )
 
 object User {
@@ -101,6 +104,7 @@ object User {
     primaryParty = u.primaryParty,
     isActive = !u.isDeactivated,
     annotations = u.metadata.annotations,
+    identityProviderId = u.identityProviderId,
   )
   def toLapiUser(u: User, resourceVersion: Option[String]): LedgerApiUser = LedgerApiUser(
     id = u.id,
@@ -110,6 +114,7 @@ object User {
       resourceVersion = resourceVersion.getOrElse(""),
       annotations = u.annotations,
     ),
+    identityProviderId = u.identityProviderId,
   )
 }
 

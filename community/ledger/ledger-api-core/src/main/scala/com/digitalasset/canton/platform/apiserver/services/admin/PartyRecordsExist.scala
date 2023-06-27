@@ -4,8 +4,8 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.PartyRecordStore
 
 import scala.concurrent.Future
@@ -13,12 +13,12 @@ import scala.concurrent.Future
 class PartyRecordsExist(partyRecordStore: PartyRecordStore) {
 
   def filterPartiesExistingInPartyRecordStore(id: IdentityProviderId, parties: Set[Ref.Party])(
-      implicit loggingContext: LoggingContext
+      implicit loggingContext: LoggingContextWithTrace
   ): Future[Set[Ref.Party]] =
     partyRecordStore.filterExistingParties(parties, id)
 
   def filterPartiesExistingInPartyRecordStore(parties: Set[Ref.Party])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Set[Ref.Party]] =
     partyRecordStore.filterExistingParties(parties)
 

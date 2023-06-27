@@ -68,6 +68,7 @@ object CommunityConfigValidations
       developmentProtocolSafetyCheckParticipants,
       warnIfUnsafeMinProtocolVersion,
       warnIfUnsafeProtocolVersionEmbeddedDomain,
+      adminTokenSafetyCheckParticipants,
     )
 
   /** Group node configs by db access to find matching db storage configs.
@@ -289,4 +290,32 @@ object CommunityConfigValidations
     }
 
   }
+
+  private def adminTokenSafetyCheckParticipants(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    def toNe(
+        name: String,
+        nonStandardConfig: Boolean,
+        adminToken: Option[String],
+    ): Validated[NonEmpty[Seq[String]], Unit] = {
+      Validated.cond(
+        nonStandardConfig || adminToken.isEmpty,
+        (),
+        NonEmpty(
+          Seq,
+          s"Setting ledger-api.admin-token for participant ${name} requires you to explicitly set canton.parameters.non-standard-config = yes",
+        ),
+      )
+    }
+
+    config.participants.toList.traverse_ { case (name, participantConfig) =>
+      toNe(
+        name.unwrap,
+        config.parameters.nonStandardConfig,
+        participantConfig.ledgerApi.adminToken,
+      )
+    }
+  }
+
 }

@@ -34,6 +34,7 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
 }
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{MultiDomainEventLog, SyncDomainEphemeralState}
+import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -61,6 +62,7 @@ import com.digitalasset.canton.{
   RequestCounter,
   SequencerCounter,
   TransferCounter,
+  TransferCounterO,
 }
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -103,6 +105,9 @@ final class TransferOutProcessingStepsTest
   )
 
   private val templateId = LfTemplateId.assertFromString("unknown:package:id")
+
+  private val initialTransferCounter: TransferCounterO =
+    TransferCounter.forCreatedContract(testedProtocolVersion)
 
   private def submitterMetadata(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
@@ -270,7 +275,7 @@ final class TransferOutProcessingStepsTest
           TargetProtocolVersion(testedProtocolVersion),
           sourceTopologySnapshot,
           targetTopologySnapshot,
-          TransferCounter.Genesis,
+          initialTransferCounter,
           logger,
         )
         .value
@@ -409,7 +414,7 @@ final class TransferOutProcessingStepsTest
             targetDomain = targetDomain,
             targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
             targetTimeProof = timeEvent,
-            transferCounter = TransferCounter.Genesis,
+            transferCounter = initialTransferCounter,
           ),
           Set(submittingParticipant, participant1, participant2),
         )
@@ -451,7 +456,7 @@ final class TransferOutProcessingStepsTest
             targetDomain = targetDomain,
             targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
             targetTimeProof = timeEvent,
-            transferCounter = TransferCounter.Genesis,
+            transferCounter = initialTransferCounter,
           ),
           Set(submittingParticipant, participant1, participant2, participant3, participant4),
         )
@@ -473,7 +478,7 @@ final class TransferOutProcessingStepsTest
             targetDomain = targetDomain,
             targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
             targetTimeProof = timeEvent,
-            transferCounter = TransferCounter.Genesis,
+            transferCounter = initialTransferCounter,
           ),
           Set(submittingParticipant, participant1),
         )
@@ -508,6 +513,12 @@ final class TransferOutProcessingStepsTest
           RequestCounter(1),
           Seq(WithTransactionId(contract, transactionId)),
         )
+        _ <- persistentState.activeContractStore
+          .createContracts(
+            Seq(contractId),
+            TimeOfChange(RequestCounter(1), timeEvent.timestamp),
+          )
+          .value
         _ <-
           outProcessingSteps
             .prepareSubmission(
@@ -568,9 +579,10 @@ final class TransferOutProcessingStepsTest
       targetDomain,
       TargetProtocolVersion(testedProtocolVersion),
       timeEvent,
-      transferCounter = TransferCounter.Genesis,
+      transferCounter = initialTransferCounter,
     )
     val outTree = makeFullTransferOutTree(outRequest)
+
     val encryptedOutRequestF = for {
       encrypted <- encryptTransferOutTree(outTree)
     } yield encrypted
@@ -644,9 +656,8 @@ final class TransferOutProcessingStepsTest
         targetDomain,
         TargetProtocolVersion(testedProtocolVersion),
         timeEvent,
-        transferCounter = TransferCounter.Genesis,
+        transferCounter = initialTransferCounter,
       )
-
       val fullTransferOutTree = makeFullTransferOutTree(outRequest)
       val dataAndResponseArgs = TransferOutProcessingSteps.PendingDataAndResponseArgs(
         fullTransferOutTree,
@@ -766,6 +777,7 @@ final class TransferOutProcessingStepsTest
           SequencerCounter(1),
           rootHash,
           WithContractHash(contractId, contractHash),
+          initialTransferCounter,
           templateId = templateId,
           transferringParticipant = false,
           submitterMetadata = submitterMetadata(submitter),
@@ -799,6 +811,7 @@ final class TransferOutProcessingStepsTest
     valueOrFail(request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid))(
       "Failed to create fullTransferOutTree"
     )
+    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid).value
   }
 
   def encryptTransferOutTree(

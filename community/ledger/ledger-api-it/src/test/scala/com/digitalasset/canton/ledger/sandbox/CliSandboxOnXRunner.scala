@@ -4,15 +4,19 @@
 package com.digitalasset.canton.ledger.sandbox
 
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
-import com.daml.logging.ContextualizedLogger
 import com.daml.resources.ProgramResource
 import com.digitalasset.canton.ledger.runner.common.*
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, StandardOpenOption}
 
 object CliSandboxOnXRunner {
-  private val logger = ContextualizedLogger.get(getClass)
+  private val loggerFactory: NamedLoggerFactory =
+    NamedLoggerFactory.root.appendUnnamedKey("sandbox", "SandboxOnX")
+  private val logger = loggerFactory.getTracedLogger(getClass)
+  private implicit val traceContext: TraceContext = TraceContext.empty
   val RunnerName = "sandbox-on-x"
 
   def program[T](owner: ResourceOwner[T]): Unit =
@@ -52,7 +56,7 @@ object CliSandboxOnXRunner {
             },
           )
       case Mode.DumpIndexMetadata(jdbcUrls) =>
-        program(DumpIndexMetadata(jdbcUrls))
+        program(DumpIndexMetadata(jdbcUrls, loggerFactory))
       case Mode.ConvertConfig =>
         Console.out.println(
           ConfigRenderer.render(SandboxOnXConfig.fromLegacy(new BridgeConfigAdaptor, cliConfig))
@@ -90,7 +94,7 @@ object CliSandboxOnXRunner {
       registerGlobalOpenTelemetry: Boolean,
   ): ResourceOwner[Unit] = {
     Banner.show(Console.out)
-    logger.withoutContext.info(
+    logger.info(
       "Sandbox-on-X server config: \n" + ConfigRenderer.render(sandboxOnXConfig)
     )
     SandboxOnXRunner
@@ -99,6 +103,7 @@ object CliSandboxOnXRunner {
         sandboxOnXConfig.ledger,
         sandboxOnXConfig.bridge,
         registerGlobalOpenTelemetry,
+        loggerFactory,
       )
       .map(_ => ())
   }

@@ -7,11 +7,17 @@ import com.daml.lf.data.Time.Timestamp
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.caching.SizedCache
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.NamedLoggerFactory
 
 import scala.concurrent.ExecutionContext
 
 object ContractsStateCache {
-  def apply(initialCacheIndex: Offset, cacheSize: Long, metrics: Metrics)(implicit
+  def apply(
+      initialCacheIndex: Offset,
+      cacheSize: Long,
+      metrics: Metrics,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext
   ): StateCache[ContractId, ContractStateValue] =
     StateCache(
@@ -21,6 +27,7 @@ object ContractsStateCache {
         metrics.daml.execution.cache.contractState.stateCache,
       ),
       registerUpdateTimer = metrics.daml.execution.cache.contractState.registerCacheUpdate,
+      loggerFactory = loggerFactory,
     )
 }
 

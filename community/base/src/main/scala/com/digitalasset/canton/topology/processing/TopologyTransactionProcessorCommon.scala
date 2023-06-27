@@ -181,8 +181,12 @@ abstract class TopologyTransactionProcessorCommonImpl[M](
       effective: EffectiveTime,
       approximate: ApproximateTime,
       potentialChanges: Boolean,
-  )(implicit traceContext: TraceContext): Unit =
+  )(implicit traceContext: TraceContext): Unit = {
+    logger.debug(
+      s"Updating listener heads to ${effective} and ${approximate}. Potential changes: ${potentialChanges}"
+    )
     listeners.toList.foreach(_.updateHead(effective, approximate, potentialChanges))
+  }
 
   /** Inform the topology manager where the subscription starts when using [[processEnvelopes]] rather than [[createHandler]] */
   override def subscriptionStartsAt(start: SubscriptionStart, domainTimeTracker: DomainTimeTracker)(

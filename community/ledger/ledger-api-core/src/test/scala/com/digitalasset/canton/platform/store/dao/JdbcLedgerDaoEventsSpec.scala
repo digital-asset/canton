@@ -43,7 +43,7 @@ private[dao] trait JdbcLedgerDaoEventsSpec extends LoneElement with Inside with 
       )
     } yield {
       val expected = flatTx.value.transaction.value.events.loneElement.event.created.value
-      val actual = result.createEvent.value
+      val actual = result.created.flatMap(_.createdEvent).value
       actual shouldBe expected
     }
   }
@@ -60,7 +60,7 @@ private[dao] trait JdbcLedgerDaoEventsSpec extends LoneElement with Inside with 
       expected = flatTx.value.transaction.value.events.loneElement.event.archived.value
       result <- eventsReader.getEventsByContractId(contractId, Set(alice))
     } yield {
-      val actual = result.archiveEvent.value
+      val actual = result.archived.flatMap(_.archivedEvent).value
       actual shouldBe expected
     }
   }
@@ -80,9 +80,9 @@ private[dao] trait JdbcLedgerDaoEventsSpec extends LoneElement with Inside with 
       charlieView <- eventsReader.getEventsByContractId(cId, Set(charlie))
       emmaView <- eventsReader.getEventsByContractId(cId, Set(emma))
     } yield {
-      aliceView.createEvent.isDefined shouldBe true
-      charlieView.createEvent.isDefined shouldBe true
-      emmaView.createEvent.isDefined shouldBe false
+      aliceView.created.flatMap(_.createdEvent).isDefined shouldBe true
+      charlieView.created.flatMap(_.createdEvent).isDefined shouldBe true
+      emmaView.created.flatMap(_.createdEvent).isDefined shouldBe false
     }
   }
 

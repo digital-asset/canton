@@ -16,9 +16,7 @@ import com.daml.lf.language.{LookupError, Reference}
 import com.daml.lf.transaction.*
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
-import com.daml.tracing.{NoOpTelemetryContext, TelemetryContext}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
@@ -69,8 +67,7 @@ class ApiSubmissionServiceSpec
   import TransactionBuilder.Implicits.*
 
   private implicit val loggingContextWithTrace: LoggingContextWithTrace =
-    LoggingContextWithTrace(TraceContext.empty)(LoggingContext.ForTesting)
-  private implicit val telemetryContext: TelemetryContext = NoOpTelemetryContext
+    LoggingContextWithTrace.ForTesting
 
   private val builder = TransactionBuilder()
   private val knownParties = (1 to 100).map(idx => s"party-$idx").toArray
@@ -100,8 +97,7 @@ class ApiSubmissionServiceSpec
   it should "finish successfully in the happy flow" in new TestContext {
     apiSubmissionService()
       .submit(SubmitRequest(commands))(
-        telemetryContext,
-        LoggingContextWithTrace(TraceContext.empty),
+        LoggingContextWithTrace(TraceContext.empty)
       )
       .futureValue
   }
@@ -297,11 +293,11 @@ class ApiSubmissionServiceSpec
         eqTo(estimatedInterpretationCost),
         eqTo(Map.empty),
         eqTo(processedDisclosedContracts),
-      )(any[LoggingContext], any[TelemetryContext])
+      )(any[TraceContext])
     ).thenReturn(CompletableFuture.completedFuture(SubmissionResult.Acknowledged))
 
     def apiSubmissionService(
-        checkOverloaded: TelemetryContext => Option[state.SubmissionResult] = _ => None
+        checkOverloaded: TraceContext => Option[state.SubmissionResult] = _ => None
     ) = new ApiSubmissionService(
       writeService = writeService,
       timeProviderType = timeProviderType,

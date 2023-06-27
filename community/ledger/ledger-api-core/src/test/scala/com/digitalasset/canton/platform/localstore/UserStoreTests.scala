@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{LedgerString, Party, UserId}
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{
   IdentityProviderConfig,
   IdentityProviderId,
@@ -14,13 +13,8 @@ import com.digitalasset.canton.ledger.api.domain.{
   User,
   UserRight,
 }
-import com.digitalasset.canton.platform.localstore.api.UserManagementStore.{
-  MaxAnnotationsSizeExceeded,
-  PermissionDenied,
-  UserExists,
-  UserNotFound,
-  UsersPage,
-}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.localstore.api.UserManagementStore.*
 import com.digitalasset.canton.platform.localstore.api.{
   ObjectMetaUpdate,
   UserManagementStore,
@@ -34,7 +28,8 @@ import scala.language.implicitConversions
   */
 trait UserStoreTests extends UserStoreSpecBase { self: AsyncFreeSpec =>
 
-  implicit val lc: LoggingContext = LoggingContext.ForTesting
+  implicit val lc: LoggingContextWithTrace =
+    LoggingContextWithTrace.ForTesting
 
   private implicit def toParty(s: String): Party =
     Party.assertFromString(s)

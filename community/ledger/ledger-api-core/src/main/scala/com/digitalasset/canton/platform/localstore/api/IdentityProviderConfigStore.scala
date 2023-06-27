@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.localstore.api
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.Result
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -12,37 +12,37 @@ import scala.concurrent.{ExecutionContext, Future}
 trait IdentityProviderConfigStore {
 
   def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]]
 
   def getIdentityProviderConfig(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]]
 
   def deleteIdentityProviderConfig(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Unit]]
 
   def listIdentityProviderConfigs()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Seq[IdentityProviderConfig]]]
 
   def updateIdentityProviderConfig(update: IdentityProviderConfigUpdate)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]]
 
   def getIdentityProviderConfig(issuer: String)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]]
 
   def identityProviderConfigExists(id: IdentityProviderId.Id)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Boolean]
 
   // TODO(#13019) Replace parasitic with DirectExecutionContext
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def getActiveIdentityProviderByIssuer(issuer: String)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[IdentityProviderConfig] =
     getIdentityProviderConfig(issuer)
       .flatMap {

@@ -24,6 +24,7 @@ object DbDto {
       create_argument: Option[Array[Byte]],
       create_argument_compression: Option[Int],
       event_sequential_id: Long,
+      domain_id: Option[String] = None,
   ) extends DbDto
 
   final case class EventCreate(
@@ -50,6 +51,7 @@ object DbDto {
       create_key_value_compression: Option[Int],
       event_sequential_id: Long,
       driver_metadata: Option[Array[Byte]],
+      domain_id: Option[String] = None,
   ) extends DbDto
 
   final case class EventExercise(
@@ -77,6 +79,50 @@ object DbDto {
       exercise_argument_compression: Option[Int],
       exercise_result_compression: Option[Int],
       event_sequential_id: Long,
+      domain_id: Option[String] = None,
+  ) extends DbDto
+
+  final case class EventAssign(
+      event_offset: String,
+      update_id: String,
+      command_id: Option[String],
+      workflow_id: Option[String],
+      submitter: String,
+      contract_id: String,
+      template_id: String,
+      flat_event_witnesses: Set[String],
+      create_argument: Array[Byte],
+      create_signatories: Set[String],
+      create_observers: Set[String],
+      create_agreement_text: Option[String],
+      create_key_value: Option[Array[Byte]],
+      create_key_hash: Option[String],
+      create_argument_compression: Option[Int],
+      create_key_value_compression: Option[Int],
+      event_sequential_id: Long,
+      ledger_effective_time: Long,
+      driver_metadata: Array[Byte],
+      source_domain_id: String,
+      target_domain_id: String,
+      unassign_id: String,
+      reassignment_counter: Long,
+  ) extends DbDto
+
+  final case class EventUnassign(
+      event_offset: String,
+      update_id: String,
+      command_id: Option[String],
+      workflow_id: Option[String],
+      submitter: String,
+      contract_id: String,
+      template_id: String,
+      flat_event_witnesses: Set[String],
+      event_sequential_id: Long,
+      source_domain_id: String,
+      target_domain_id: String,
+      unassign_id: String,
+      reassignment_counter: Long,
+      assignment_exclusivity: Option[Long],
   ) extends DbDto
 
   final case class ConfigurationEntry(
@@ -132,6 +178,7 @@ object DbDto {
       deduplication_duration_seconds: Option[Long],
       deduplication_duration_nanos: Option[Int],
       deduplication_start: Option[Long],
+      domain_id: Option[String] = None,
   ) extends DbDto
 
   final case class StringInterningDto(
@@ -168,6 +215,18 @@ object DbDto {
 
   final case class IdFilterNonConsumingInformee(
       event_sequential_id: Long,
+      party_id: String,
+  ) extends DbDto
+
+  final case class IdFilterUnassignStakeholder(
+      event_sequential_id: Long,
+      template_id: String,
+      party_id: String,
+  ) extends DbDto
+
+  final case class IdFilterAssignStakeholder(
+      event_sequential_id: Long,
+      template_id: String,
       party_id: String,
   ) extends DbDto
 

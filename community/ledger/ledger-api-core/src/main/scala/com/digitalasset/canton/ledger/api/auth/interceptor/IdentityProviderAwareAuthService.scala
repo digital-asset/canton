@@ -4,10 +4,13 @@
 package com.digitalasset.canton.ledger.api.auth.interceptor
 
 import com.digitalasset.canton.ledger.api.auth.ClaimSet
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import io.grpc.Metadata
 
 import scala.concurrent.Future
 
 trait IdentityProviderAwareAuthService {
-  def decodeMetadata(headers: Metadata): Future[ClaimSet]
+  def decodeMetadata(headers: Metadata)(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[ClaimSet]
 }

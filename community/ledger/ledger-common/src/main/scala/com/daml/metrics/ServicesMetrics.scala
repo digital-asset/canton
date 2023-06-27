@@ -236,6 +236,11 @@ class ServicesMetrics(
     @MetricDoc.FanInstanceTag
     val submitTransactionRunning: Counter = factory.counter(prefix :+ "submit_transaction_running")
     @MetricDoc.FanInstanceTag
+    val submitReassignment: Timer = factory.timer(prefix :+ "submit_reassignment")
+    @MetricDoc.FanInstanceTag
+    val submitReassignmentRunning: Counter =
+      factory.counter(prefix :+ "submit_reassignment_running")
+    @MetricDoc.FanInstanceTag
     val uploadPackages: Timer = factory.timer(prefix :+ "upload_packages")
     @MetricDoc.FanInstanceTag
     val allocateParty: Timer = factory.timer(prefix :+ "allocate_party")

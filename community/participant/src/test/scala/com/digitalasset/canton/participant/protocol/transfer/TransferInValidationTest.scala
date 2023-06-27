@@ -46,6 +46,10 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
   private val participant = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("bothdomains::participant")
   )
+
+  private val initialTransferCounter: TransferCounterO =
+    TransferCounter.forCreatedContract(testedProtocolVersion)
+
   private def submitterInfo(submitter: LfPartyId): TransferSubmitterMetadata = {
     TransferSubmitterMetadata(
       submitter,
@@ -130,26 +134,26 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
       targetDomain,
       TargetProtocolVersion(testedProtocolVersion),
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, targetDomain = targetDomain),
-      TransferCounter.Genesis,
+      initialTransferCounter,
     )
     val uuid = new UUID(3L, 4L)
     val seed = seedGenerator.generateSaltSeed()
-    val fullTransferOutTree =
-      transferOutRequest.toFullTransferOutTree(
+    val fullTransferOutTree = transferOutRequest
+      .toFullTransferOutTree(
         pureCrypto,
         pureCrypto,
         seed,
         uuid,
       )
+      .value
     val transferData =
       TransferData(
         SourceProtocolVersion(testedProtocolVersion),
         CantonTimestamp.Epoch,
         RequestCounter(1),
-        valueOrFail(fullTransferOutTree)("Failed to create fullTransferOutTree"),
+        fullTransferOutTree,
         CantonTimestamp.Epoch,
         contract,
-        TransferCounter.Genesis,
         transactionId1,
         Some(transferOutResult),
         None,
@@ -252,7 +256,7 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         submitterInfo(submitter),
         stakeholders,
         contract,
-        TransferCounter.Genesis,
+        initialTransferCounter,
         creatingTransactionId,
         targetDomain,
         MediatorRef(targetMediator),

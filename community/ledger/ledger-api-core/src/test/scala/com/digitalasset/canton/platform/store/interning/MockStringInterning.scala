@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.interning
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
+import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.blocking
 
@@ -66,6 +67,21 @@ class MockStringInterning extends StringInterning {
 
       override def tryExternalize(id: Int): Option[Party] =
         rawStringInterning.tryExternalize(id).map(Party.assertFromString)
+    }
+
+  override val domainId: StringInterningDomain[DomainId] =
+    new StringInterningDomain[DomainId] {
+      override val unsafe: StringInterningAccessor[String] = rawStringInterning
+
+      override def internalize(t: DomainId): Int = tryInternalize(t).get
+
+      override def tryInternalize(t: DomainId): Option[Int] =
+        rawStringInterning.tryInternalize(t.toProtoPrimitive)
+
+      override def externalize(id: Int): DomainId = tryExternalize(id).get
+
+      override def tryExternalize(id: Int): Option[DomainId] =
+        rawStringInterning.tryExternalize(id).map(DomainId.tryFromString)
     }
 
   private[store] def reset(): Unit = blocking(synchronized {

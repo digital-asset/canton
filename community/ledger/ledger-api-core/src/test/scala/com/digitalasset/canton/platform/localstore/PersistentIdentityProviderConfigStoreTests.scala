@@ -16,6 +16,7 @@ trait PersistentIdentityProviderConfigStoreTests
     dbSupport = dbSupport,
     metrics = Metrics.ForTesting,
     maxIdentityProviders = MaxIdentityProviderConfigs,
+    loggerFactory = loggerFactory,
   )
 
 }

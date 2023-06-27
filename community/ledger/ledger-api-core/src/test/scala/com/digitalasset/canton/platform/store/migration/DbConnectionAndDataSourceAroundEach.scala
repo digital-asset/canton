@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.migration
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.store.DbType
 import com.digitalasset.canton.platform.store.backend.{
@@ -26,19 +26,22 @@ trait DbConnectionAroundEachBase {
 
 trait DbConnectionAndDataSourceAroundEach
     extends BeforeAndAfterEach
-    with DbConnectionAroundEachBase {
+    with DbConnectionAroundEachBase
+    with BaseTest {
   self: Suite =>
 
   implicit var connection: Connection = _
 
-  private val dataSourceBackend = StorageBackendFactory.of(dbType).createDataSourceStorageBackend
+  private val dataSourceBackend =
+    StorageBackendFactory.of(dbType, loggerFactory).createDataSourceStorageBackend
   implicit var dataSource: DataSource = _
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()
     dataSource = dataSourceBackend.createDataSource(
-      dataSourceConfig = DataSourceStorageBackend.DataSourceConfig(jdbcUrl)
-    )(LoggingContext.ForTesting)
+      dataSourceConfig = DataSourceStorageBackend.DataSourceConfig(jdbcUrl),
+      loggerFactory = loggerFactory,
+    )
     connection = retry(20, 1000) {
       val c = dataSource.getConnection
       dataSourceBackend.checkDatabaseAvailable(c)

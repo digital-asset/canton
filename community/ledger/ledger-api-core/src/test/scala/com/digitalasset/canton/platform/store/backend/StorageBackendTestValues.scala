@@ -5,8 +5,8 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.crypto.Hash
-import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
+import com.daml.lf.data.{Bytes, Ref}
 import com.daml.lf.ledger.EventId
 import com.daml.lf.transaction.NodeId
 import com.daml.lf.value.Value.ContractId
@@ -46,12 +46,18 @@ private[backend] object StorageBackendTestValues {
     Ref.ParticipantId.assertFromString("participant")
   )
   val someTemplateId: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template")
+  val someTemplateId2: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template2")
+  val someTemplateId3: Ref.Identifier = Ref.Identifier.assertFromString("pkg:Mod:Template3")
   val someIdentityParams: ParameterStorageBackend.IdentityParams =
     ParameterStorageBackend.IdentityParams(someLedgerId, someParticipantId)
   val someParty: Ref.Party = Ref.Party.assertFromString("party")
+  val someParty2: Ref.Party = Ref.Party.assertFromString("party2")
+  val someParty3: Ref.Party = Ref.Party.assertFromString("party3")
   val someApplicationId: Ref.ApplicationId = Ref.ApplicationId.assertFromString("application_id")
   val someSubmissionId: Ref.SubmissionId = Ref.SubmissionId.assertFromString("submission_id")
   val someLedgerMeteringEnd: LedgerMeteringEnd = LedgerMeteringEnd(Offset.beforeBegin, someTime)
+  val someDriverMetadata = Bytes.assertFromString("00abcd")
+  val someDriverMetadataBytes = someDriverMetadata.toByteArray
 
   val someArchive: DamlLf.Archive = DamlLf.Archive.newBuilder
     .setHash("00001")
@@ -128,6 +134,7 @@ private[backend] object StorageBackendTestValues {
       ledgerEffectiveTime: Option[Timestamp] = Some(someTime),
       driverMetadata: Option[Array[Byte]] = None,
       keyHash: Option[String] = None,
+      domainId: Option[String] = None,
   ): DbDto.EventCreate = {
     val transactionId = transactionIdFromOffset(offset)
     val stakeholders = Set(signatory, observer)
@@ -156,6 +163,7 @@ private[backend] object StorageBackendTestValues {
       create_key_value_compression = None,
       event_sequential_id = eventSequentialId,
       driver_metadata = driverMetadata,
+      domain_id = domainId,
     )
   }
 
@@ -173,6 +181,7 @@ private[backend] object StorageBackendTestValues {
       signatory: String = "signatory",
       actor: String = "actor",
       commandId: String = UUID.randomUUID().toString,
+      domainId: Option[String] = None,
   ): DbDto.EventExercise = {
     val transactionId = transactionIdFromOffset(offset)
     DbDto.EventExercise(
@@ -200,6 +209,7 @@ private[backend] object StorageBackendTestValues {
       exercise_argument_compression = None,
       exercise_result_compression = None,
       event_sequential_id = eventSequentialId,
+      domain_id = domainId,
     )
   }
 
@@ -212,6 +222,7 @@ private[backend] object StorageBackendTestValues {
       submitter: String = "signatory",
       divulgee: String = "divulgee",
       commandId: String = UUID.randomUUID().toString,
+      domainId: Option[String] = None,
   ): DbDto.EventDivulgence = {
     DbDto.EventDivulgence(
       event_offset = offset.map(_.toHexString),
@@ -225,6 +236,75 @@ private[backend] object StorageBackendTestValues {
       create_argument = Some(someSerializedDamlLfValue),
       create_argument_compression = None,
       event_sequential_id = eventSequentialId,
+      domain_id = domainId,
+    )
+  }
+
+  def dtoAssign(
+      offset: Offset,
+      eventSequentialId: Long,
+      contractId: ContractId,
+      signatory: String = "signatory",
+      observer: String = "observer",
+      commandId: String = UUID.randomUUID().toString,
+      driverMetadata: Bytes = someDriverMetadata,
+      sourceDomainId: String = "x::sourcedomain",
+      targetDomainId: String = "x::targetdomain",
+  ): DbDto.EventAssign = {
+    val transactionId = transactionIdFromOffset(offset)
+    DbDto.EventAssign(
+      event_offset = offset.toHexString,
+      update_id = transactionId,
+      command_id = Some(commandId),
+      workflow_id = Some("workflow_id"),
+      submitter = someParty,
+      contract_id = contractId.coid,
+      template_id = someTemplateId.toString,
+      flat_event_witnesses = Set(signatory, observer),
+      create_argument = someSerializedDamlLfValue,
+      create_signatories = Set(signatory),
+      create_observers = Set(observer),
+      create_agreement_text = Some("agreement"),
+      create_key_value = None,
+      create_key_hash = None,
+      create_argument_compression = Some(123),
+      create_key_value_compression = Some(456),
+      event_sequential_id = eventSequentialId,
+      ledger_effective_time = someTime.micros,
+      driver_metadata = driverMetadata.toByteArray,
+      source_domain_id = sourceDomainId,
+      target_domain_id = targetDomainId,
+      unassign_id = "123456789",
+      reassignment_counter = 1000L,
+    )
+  }
+
+  def dtoUnassign(
+      offset: Offset,
+      eventSequentialId: Long,
+      contractId: ContractId,
+      signatory: String = "signatory",
+      observer: String = "observer",
+      commandId: String = UUID.randomUUID().toString,
+      sourceDomainId: String = "x::sourcedomain",
+      targetDomainId: String = "x::targetdomain",
+  ): DbDto.EventUnassign = {
+    val transactionId = transactionIdFromOffset(offset)
+    DbDto.EventUnassign(
+      event_offset = offset.toHexString,
+      update_id = transactionId,
+      command_id = Some(commandId),
+      workflow_id = Some("workflow_id"),
+      submitter = someParty,
+      contract_id = contractId.coid,
+      template_id = someTemplateId.toString,
+      flat_event_witnesses = Set(signatory, observer),
+      event_sequential_id = eventSequentialId,
+      source_domain_id = sourceDomainId,
+      target_domain_id = targetDomainId,
+      unassign_id = "123456789",
+      reassignment_counter = 1000L,
+      assignment_exclusivity = Some(11111),
     )
   }
 
@@ -238,6 +318,7 @@ private[backend] object StorageBackendTestValues {
       deduplicationDurationSeconds: Option[Long] = None,
       deduplicationDurationNanos: Option[Int] = None,
       deduplicationStart: Option[Timestamp] = None,
+      domainId: Option[String] = None,
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
       completion_offset = offset.toHexString,
@@ -254,6 +335,7 @@ private[backend] object StorageBackendTestValues {
       deduplication_duration_seconds = deduplicationDurationSeconds,
       deduplication_duration_nanos = deduplicationDurationNanos,
       deduplication_start = deduplicationStart.map(_.micros),
+      domain_id = domainId,
     )
 
   def dtoTransactionMeta(

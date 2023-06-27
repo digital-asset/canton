@@ -5,11 +5,12 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.api.PartyRecordStore.{
   MaxAnnotationsSizeExceeded,
   PartyRecordExistsFatal,
@@ -45,18 +46,21 @@ object InMemoryPartyRecordStore {
 
 }
 
-class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends PartyRecordStore {
+class InMemoryPartyRecordStore(
+    executionContext: ExecutionContext,
+    val loggerFactory: NamedLoggerFactory,
+) extends PartyRecordStore
+    with NamedLogging {
   import InMemoryPartyRecordStore.*
 
   implicit private val ec: ExecutionContext = executionContext
-  private val logger = ContextualizedLogger.get(getClass)
 
   private val state: mutable.TreeMap[Ref.Party, PartyRecordInfo] = mutable.TreeMap()
 
   override def getPartyRecordO(
       party: Party
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Option[PartyRecord]]] = {
     withState(
       state.get(party) match {
@@ -68,7 +72,7 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
 
   override def createPartyRecord(
       partyRecord: PartyRecord
-  )(implicit loggingContext: LoggingContext): Future[Result[PartyRecord]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[PartyRecord]] = {
     withState(withoutPartyRecord(partyRecord.party) {
       for {
         info <- doCreatePartyRecord(partyRecord)
@@ -79,7 +83,7 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
   override def updatePartyRecord(
       partyRecordUpdate: PartyRecordUpdate,
       ledgerPartyIsLocal: Boolean,
-  )(implicit loggingContext: LoggingContext): Future[Result[PartyRecord]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[PartyRecord]] = {
     val party = partyRecordUpdate.party
     for {
       updatedPartyRecord <- withState(
@@ -112,7 +116,7 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
             }
         }
       ).map(tapSuccess { updatePartyRecord =>
-        logger.info(s"Updated party record in a participant local store: ${updatePartyRecord}")
+        logger.info(s"Updated party record in a participant local store: $updatePartyRecord.")
       })
     } yield updatedPartyRecord
   }
@@ -122,7 +126,7 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
       ledgerPartyIsLocal: Boolean,
       sourceIdp: IdentityProviderId,
       targetIdp: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[PartyRecord]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[PartyRecord]] = {
     withState {
       state.get(party) match {
         case Some(info) =>
@@ -242,7 +246,7 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
   }
 
   override def filterExistingParties(parties: Set[Party], identityProviderId: IdentityProviderId)(
-      implicit loggingContext: LoggingContext
+      implicit loggingContext: LoggingContextWithTrace
   ): Future[Set[Party]] = {
     withState {
       parties.map(party => (party, state.get(party))).collect {
@@ -252,7 +256,7 @@ class InMemoryPartyRecordStore(executionContext: ExecutionContext) extends Party
   }
 
   override def filterExistingParties(parties: Set[Party])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Set[Party]] = {
     withState {
       parties.map(party => (party, state.get(party))).collect { case (party, Some(_)) =>

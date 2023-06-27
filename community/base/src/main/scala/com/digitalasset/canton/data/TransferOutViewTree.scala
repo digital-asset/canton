@@ -46,6 +46,7 @@ import com.digitalasset.canton.{
   LfWorkflowId,
   ProtoDeserializationError,
   TransferCounter,
+  TransferCounterO,
 }
 import com.google.protobuf.ByteString
 
@@ -143,7 +144,7 @@ object TransferOutViewTree
       )
     )(transferOutViewTreeP)
 }
-
+// TODO(#12373) replace "protocol version dev" in the documentation for transferCounter
 /** Aggregates the data of a transfer-out request that is sent to the mediator and the involved participants.
   *
   * @param salt Salt for blinding the Merkle hash
@@ -152,7 +153,9 @@ object TransferOutViewTree
   * @param stakeholders The stakeholders of the contract to be transferred
   * @param adminParties The admin parties of transferring transfer-out participants
   * @param uuid The request UUID of the transfer-out
-  * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract
+  * @param transferCounter The [[com.digitalasset.canton.TransferCounter]] of the contract.
+  *                        The value is defined iff the protocol versions is at least
+  *                        [[com.digitalasset.canton.version.ProtocolVersion.dev]].
   */
 final case class TransferOutCommonData private (
     override val salt: Salt,
@@ -161,7 +164,8 @@ final case class TransferOutCommonData private (
     stakeholders: Set[LfPartyId],
     adminParties: Set[LfPartyId],
     uuid: UUID,
-    transferCounter: TransferCounter,
+    // TODO(#9014) Remove the option
+    transferCounter: TransferCounterO,
 )(
     hashOps: HashOps,
     val protocolVersion: SourceProtocolVersion,
@@ -169,6 +173,12 @@ final case class TransferOutCommonData private (
 ) extends MerkleTreeLeaf[TransferOutCommonData](hashOps)
     with HasProtocolVersionedWrapper[TransferOutCommonData]
     with ProtocolVersionedMemoizedEvidence {
+
+  // TODO(#12373) Adapt when releasing BFT
+  require(
+    protocolVersion.v < ProtocolVersion.dev || transferCounter.isDefined,
+    s"Transfer counter must be defined in protocol version ${protocolVersion.v}",
+  )
 
   @transient override protected lazy val companionObj: TransferOutCommonData.type =
     TransferOutCommonData
@@ -207,7 +217,11 @@ final case class TransferOutCommonData private (
       adminParties = adminParties.toSeq,
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
       sourceProtocolVersion = protocolVersion.v.toProtoPrimitive,
-      transferCounter = transferCounter.toProtoPrimitive,
+      transferCounter = transferCounter
+        .map(_.toProtoPrimitive)
+        .getOrElse(
+          throw new RuntimeException(s"Transfer counter must be defined at $protocolVersion")
+        ),
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -259,23 +273,21 @@ object TransferOutCommonData
       stakeholders: Set[LfPartyId],
       adminParties: Set[LfPartyId],
       uuid: UUID,
-      transferCounter: TransferCounter,
+      transferCounter: TransferCounterO,
       protocolVersion: SourceProtocolVersion,
   ): Either[String, TransferOutCommonData] = {
-    // TODO(#12373) Adapt when releasing BFT
-    Either.cond(
-      sourceMediator.isSingle || protocolVersion.v >= ProtocolVersion.dev,
-      TransferOutCommonData(
-        salt,
-        sourceDomain,
-        sourceMediator,
-        stakeholders,
-        adminParties,
-        uuid,
-        transferCounter,
-      )(hashOps, protocolVersion, None),
-      s"Invariant violation: Mediator groups are not supported in protocol version $protocolVersion",
-    )
+    for {
+      _ <- TransferCommonData.checkMediatorGroup(sourceMediator, protocolVersion.v)
+      _ <- TransferCommonData.checkTransferCounter(transferCounter, protocolVersion.v)
+    } yield TransferOutCommonData(
+      salt,
+      sourceDomain,
+      sourceMediator,
+      stakeholders,
+      adminParties,
+      uuid,
+      transferCounter,
+    )(hashOps, protocolVersion, None)
   }
 
   private[this] def enforceInvariantFailForMediatorGroup(
@@ -319,7 +331,7 @@ object TransferOutCommonData
       commonData.stakeholders,
       commonData.adminParties,
       commonData.uuid,
-      TransferCounter.Genesis,
+      None,
     )(
       hashOps,
       SourceProtocolVersion(
@@ -359,7 +371,7 @@ object TransferOutCommonData
       commonData.stakeholders,
       commonData.adminParties,
       commonData.uuid,
-      TransferCounter.Genesis,
+      None,
     )(hashOps, SourceProtocolVersion(protocolVersion), Some(bytes))
   }
 
@@ -394,7 +406,7 @@ object TransferOutCommonData
       commonData.stakeholders,
       commonData.adminParties,
       commonData.uuid,
-      transferCounter,
+      Some(transferCounter),
     )(hashOps, SourceProtocolVersion(protocolVersion), Some(bytes))
   }
 
@@ -772,6 +784,7 @@ final case class FullTransferOutTree(tree: TransferOutViewTree)
   def contractId: LfContractId = view.contractId
 
   def templateId: LfTemplateId = view.templateId
+  def transferCounter: TransferCounterO = commonData.transferCounter
 
   def sourceDomain: SourceDomainId = commonData.sourceDomain
 

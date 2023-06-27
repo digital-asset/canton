@@ -6,9 +6,9 @@ package com.digitalasset.canton.integration
 import com.digitalasset.canton.CloseableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.environment.Environment
-import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.logging.{LogEntry, NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.metrics.{MetricsFactoryType, ScopedInMemoryMetricsFactory}
-import org.scalatest.{BeforeAndAfterAll, Suite}
+import org.scalatest.{Assertion, BeforeAndAfterAll, Suite}
 
 import scala.util.control.NonFatal
 
@@ -48,6 +48,10 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
     * This is required over a afterEach hook as we need the environment instance passed.
     */
   def testFinished(environment: TCE): Unit = {}
+
+  override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
+
+  def assertLogsDuringAutoStart: Option[Seq[LogEntry] => Assertion] = None
 
   /** Creates a new environment manually for a test without concurrent environment limitation and with optional config transformation.
     *
@@ -103,8 +107,17 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
         if (runPlugins(plugin)) plugin.afterEnvironmentCreated(finalConfig, testEnvironment)
       )
 
-      if (!finalConfig.parameters.manualStart)
-        testEnvironment.startAll()
+      if (!finalConfig.parameters.manualStart) {
+        assertLogsDuringAutoStart
+          .map { assertion =>
+            loggerFactory.assertLoggedWarningsAndErrorsSeq(
+              testEnvironment.startAll(),
+              assertion,
+            )
+          }
+          .getOrElse(testEnvironment.startAll())
+
+      }
 
       envDef.setups.foreach(setup => setup(testEnvironment))
 
@@ -166,12 +179,12 @@ trait SharedEnvironment[E <: Environment, TCE <: TestConsoleEnvironment[E]]
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var sharedEnvironment: Option[TCE] = None
 
-  override def beforeAll(): Unit = {
+  override protected def beforeAll(): Unit = {
     super.beforeAll()
     sharedEnvironment = Some(createEnvironment())
   }
 
-  override def afterAll(): Unit =
+  override protected def afterAll(): Unit =
     try {
       sharedEnvironment.foreach(destroyEnvironment)
     } finally super.afterAll()

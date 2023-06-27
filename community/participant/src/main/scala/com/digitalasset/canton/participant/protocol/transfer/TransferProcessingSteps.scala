@@ -350,12 +350,15 @@ object TransferProcessingSteps {
     def message: String
   }
 
-  final case class GenericError(override val message: String) extends TransferProcessorError
-
   final case class GenericStepsError(error: ProcessorError) extends TransferProcessorError {
     override def underlyingProcessorError(): Option[ProcessorError] = Some(error)
 
     override def message: String = error.toString
+  }
+
+  final case class InvalidTransferCommonData(reason: String) extends TransferProcessorError {
+
+    override def message: String = s"Invalid transfer common data: $reason"
   }
 
   final case class UnknownDomain(domainId: DomainId, context: String)

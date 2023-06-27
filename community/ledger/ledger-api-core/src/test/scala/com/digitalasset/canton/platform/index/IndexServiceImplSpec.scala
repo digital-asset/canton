@@ -35,7 +35,13 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
 
   it should "give an empty result if no packages" in new Scope {
     when(view.current()).thenReturn(PackageMetadata())
-    val memoFunc = memoizedTransactionFilterProjection(view, TransactionFilter(Map.empty), true)
+    val memoFunc =
+      memoizedTransactionFilterProjection(
+        packageMetadataView = view,
+        transactionFilter = TransactionFilter(Map.empty),
+        verbose = true,
+        alwaysPopulateArguments = false,
+      )
     memoFunc() shouldBe None
   }
 
@@ -43,11 +49,12 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
     when(view.current()).thenReturn(PackageMetadata())
     // subscribing to iface1
     val memoFunc = memoizedTransactionFilterProjection(
-      view,
-      TransactionFilter(
+      packageMetadataView = view,
+      transactionFilter = TransactionFilter(
         Map(party -> Filters(InclusiveFilters(Set(), Set(InterfaceFilter(iface1, true, true)))))
       ),
-      true,
+      verbose = true,
+      alwaysPopulateArguments = false,
     )
     memoFunc() shouldBe None // no template implementing iface1
     when(view.current())
@@ -92,6 +99,30 @@ class IndexServiceImplSpec extends AnyFlatSpec with Matchers with MockitoSugar {
         ),
       )
     ) // filter gets even more complicated, filters template1 and template2 for iface1, projects iface1 for both templates
+  }
+
+  it should "populate all contract arguments correctly" in new Scope {
+    when(view.current())
+      .thenReturn(PackageMetadata(interfacesImplementedBy = Map(iface1 -> Set(template1))))
+    // subscribing to iface1
+    val memoFunc = memoizedTransactionFilterProjection(
+      packageMetadataView = view,
+      transactionFilter = TransactionFilter(
+        Map(party -> Filters(InclusiveFilters(Set(), Set(InterfaceFilter(iface1, true, true)))))
+      ),
+      verbose = true,
+      alwaysPopulateArguments = true,
+    )
+    memoFunc() shouldBe Some(
+      (
+        TemplatePartiesFilter(Map(template1 -> Set(party)), Set()),
+        EventProjectionProperties(
+          true,
+          Map(party -> Set.empty),
+          Map(party.toString -> Map(template1 -> InterfaceViewFilter(Set(iface1), true))),
+        ),
+      )
+    )
   }
 
   behavior of "IndexServiceImpl.wildcardFilter"

@@ -3,18 +3,17 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.MemoryCheck.*
-import org.mockito.MockitoSugar
 import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
 
 import java.lang.management.{MemoryMXBean, MemoryPoolMXBean, MemoryType, MemoryUsage}
 import scala.concurrent.duration.DurationInt
 
 /** Note that most of the check functionality is tested via [[RateLimitingInterceptorSpec]] */
-class MemoryCheckSpec extends AnyFlatSpec with Matchers with MockitoSugar {
+class MemoryCheckSpec extends AnyFlatSpec with BaseTest {
 
   private val config = RateLimitingConfig(100, 10, 75, 100 * RateLimitingConfig.Megabyte, 100)
 
@@ -46,7 +45,7 @@ class MemoryCheckSpec extends AnyFlatSpec with Matchers with MockitoSugar {
   it should "use largest tenured pool as rate limiting pool" in {
     val expected = underLimitMemoryPoolMXBean()
     when(expected.getCollectionUsage).thenReturn(new MemoryUsage(0, 0, 0, 100))
-    findTenuredMemoryPool(config, Nil) shouldBe None
+    findTenuredMemoryPool(config, Nil, errorLoggingContext) shouldBe None
     findTenuredMemoryPool(
       config,
       List(
@@ -54,6 +53,7 @@ class MemoryCheckSpec extends AnyFlatSpec with Matchers with MockitoSugar {
         expected,
         underLimitMemoryPoolMXBean(),
       ),
+      errorLoggingContext,
     ) shouldBe Some(expected)
   }
 

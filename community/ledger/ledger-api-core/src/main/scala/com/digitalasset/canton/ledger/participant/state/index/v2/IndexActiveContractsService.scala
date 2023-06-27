@@ -5,10 +5,10 @@ package com.digitalasset.canton.ledger.participant.state.index.v2
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
-import com.daml.logging.LoggingContext
+import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.ledger.api.domain.TransactionFilter
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 /** Serves as a backend to implement
   * [[com.daml.ledger.api.v1.active_contracts_service.ActiveContractsServiceGrpc.ActiveContractsService]]
@@ -19,5 +19,6 @@ trait IndexActiveContractsService {
       filter: TransactionFilter,
       verbose: Boolean,
       activeAtO: Option[Offset],
-  )(implicit loggingContext: LoggingContext): Source[GetActiveContractsResponse, NotUsed]
+      multiDomainEnabled: Boolean,
+  )(implicit loggingContext: LoggingContextWithTrace): Source[GetActiveContractsResponse, NotUsed]
 }

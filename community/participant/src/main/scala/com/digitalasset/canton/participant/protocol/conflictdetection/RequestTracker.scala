@@ -143,7 +143,7 @@ import scala.util.Try
   * The [[ActivenessResult]] lists all contracts from the [[ActivenessSet]] of the request that are either locked or whose precondition fails.
   * The activeness check succeeds if the activeness result is empty.
   */
-trait RequestTracker extends AutoCloseable with NamedLogging {
+trait RequestTracker extends RequestTrackerLookup with AutoCloseable with NamedLogging {
   import RequestTracker.*
 
   private[protocol] val taskScheduler: TaskScheduler[TimedTask]
@@ -283,15 +283,18 @@ trait RequestTracker extends AutoCloseable with NamedLogging {
     RequestTrackerStoreError
   ], Unit]]
 
-  /** Returns a possibly outdated state of the contract. */
-  def getApproximateStates(coid: Seq[LfContractId])(implicit
-      traceContext: TraceContext
-  ): Future[Map[LfContractId, ContractState]]
-
   /** Returns a future that completes after the request has progressed to the given timestamp.
     * If the request tracker has already progressed to the timestamp, [[scala.None]] is returned.
     */
   def awaitTimestamp(timestamp: CantonTimestamp): Option[Future[Unit]]
+}
+
+trait RequestTrackerLookup extends AutoCloseable with NamedLogging {
+
+  /** Returns a possibly outdated state of the contracts. */
+  def getApproximateStates(coid: Seq[LfContractId])(implicit
+      traceContext: TraceContext
+  ): Future[Map[LfContractId, ContractState]]
 }
 
 object RequestTracker {

@@ -6,13 +6,13 @@ package com.digitalasset.canton.platform.index
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractState,
   ContractStore,
   MaximumLedgerTime,
   MaximumLedgerTimeService,
 }
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.scalaUtilChainingOps
@@ -22,7 +22,7 @@ class ContractStoreBasedMaximumLedgerTimeService(contractStore: ContractStore)
 
   override def lookupMaximumLedgerTimeAfterInterpretation(
       ids: Set[Value.ContractId]
-  )(implicit loggingContext: LoggingContext): Future[MaximumLedgerTime] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[MaximumLedgerTime] = {
     // TODO(#13019) Replace parasitic with DirectExecutionContext
     @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     def goAsync(

@@ -13,8 +13,7 @@ import com.daml.ledger.api.v1.admin.package_management_service.*
 import com.daml.lf.archive.{Dar, DarParser, Decode, GenDarReader}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
-import com.daml.logging.LoggingContext
-import com.daml.tracing.{Telemetry, TelemetryContext}
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.{LedgerOffset, PackageEntry}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
@@ -24,6 +23,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexTransactionsService,
 }
 import com.digitalasset.canton.ledger.participant.state.v2 as state
+import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{
@@ -59,10 +59,11 @@ private[apiserver] final class ApiPackageManagementService private (
 )(implicit
     materializer: Materializer,
     executionContext: ExecutionContext,
-    loggingContext: LoggingContext,
 ) extends PackageManagementService
     with GrpcApiService
     with NamedLogging {
+
+  private implicit val loggingContext = createLoggingContext(loggerFactory)(identity)
 
   private val synchronousResponse = new SynchronousResponse(
     new SynchronousResponseStrategy(
@@ -81,7 +82,8 @@ private[apiserver] final class ApiPackageManagementService private (
   override def listKnownPackages(
       request: ListKnownPackagesRequest
   ): Future[ListKnownPackagesResponse] = {
-    implicit val loggingContextWithTrace = LoggingContextWithTrace(telemetry)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory, telemetry)
 
     logger.info("Listing known packages.")
     packagesIndex
@@ -128,11 +130,8 @@ private[apiserver] final class ApiPackageManagementService private (
     ) { implicit loggingContext: LoggingContextWithTrace =>
       logger.info(s"Uploading DAR file, ${loggingContext.serializeFiltered("submissionId")}.")
 
-      implicit val telemetryContext: TelemetryContext =
-        telemetry.contextFromGrpcThreadLocalContext()
-
       // a new ErrorLoggingContext (that is overriding the default one derived from NamedLogging) is required to contain the loggingContext entries
-      implicit val errorLoggingContext =
+      implicit val errorLoggingContext: LedgerErrorLoggingContext =
         LedgerErrorLoggingContext(
           logger,
           loggerFactory.properties ++ loggingContext.toPropertiesMap,
@@ -182,8 +181,7 @@ private[apiserver] object ApiPackageManagementService {
   )(implicit
       materializer: Materializer,
       executionContext: ExecutionContext,
-      loggingContext: LoggingContext,
-  ): PackageManagementServiceGrpc.PackageManagementService with GrpcApiService =
+  ): PackageManagementServiceGrpc.PackageManagementService & GrpcApiService =
     new ApiPackageManagementService(
       readBackend,
       transactionsService,
@@ -200,8 +198,7 @@ private[apiserver] object ApiPackageManagementService {
       packagesIndex: IndexPackagesService,
       packagesWrite: state.WritePackagesService,
       val loggerFactory: NamedLoggerFactory,
-  )(implicit loggingContext: LoggingContext)
-      extends SynchronousResponse.Strategy[
+  ) extends SynchronousResponse.Strategy[
         Dar[Archive],
         PackageEntry,
         PackageEntry.PackageUploadAccepted,
@@ -209,12 +206,13 @@ private[apiserver] object ApiPackageManagementService {
       with NamedLogging {
 
     override def submit(submissionId: Ref.SubmissionId, dar: Dar[Archive])(implicit
-        telemetryContext: TelemetryContext,
-        loggingContext: LoggingContext,
+        loggingContext: LoggingContextWithTrace
     ): Future[state.SubmissionResult] =
       packagesWrite.uploadPackages(submissionId, dar.all, None).asScala
 
-    override def entries(offset: Option[LedgerOffset.Absolute]): Source[PackageEntry, _] =
+    override def entries(offset: Option[LedgerOffset.Absolute])(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Source[PackageEntry, ?] =
       packagesIndex.packageEntries(offset)
 
     override def accept(

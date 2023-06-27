@@ -7,6 +7,7 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.lf.data.Ref.PackageId
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Resources.{
   GetResourceLimits,
   SetResourceLimits,
@@ -104,17 +105,20 @@ private[console] object ParticipantCommands {
   object domains {
 
     def referenceToConfig(
-        domain: InstanceReferenceWithSequencerConnection,
+        domain: NonEmpty[Map[SequencerAlias, InstanceReferenceWithSequencerConnection]],
         manualConnect: Boolean = false,
         alias: Option[DomainAlias] = None,
         maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
         priority: Int = 0,
     ): DomainConnectionConfig = {
-      val domainAlias = alias.getOrElse(DomainAlias.tryCreate(domain.name))
-      val connection = domain.sequencerConnection
+      val domainAlias = alias.getOrElse(
+        DomainAlias.tryCreate(domain.head1._2.name)
+      ) // TODO(i11255): Come up with a good way of giving it a good alias
       DomainConnectionConfig(
         domainAlias,
-        SequencerConnections.single(connection),
+        SequencerConnections.many(domain.toSeq.map { case (alias, domain) =>
+          domain.sequencerConnection.withAlias(alias)
+        }),
         manualConnect = manualConnect,
         None,
         priority,
@@ -364,11 +368,17 @@ class LocalParticipantTestingGroup(
       filterId: String = "",
       filterPackage: String = "",
       filterTemplate: String = "",
+      filterStakeholder: Option[PartyId] = None,
       limit: PositiveInt = defaultLimit,
-  ): List[SerializableContract] = check(FeatureFlag.Testing) {
-    pcs_search(domainAlias, filterId, filterPackage, filterTemplate, activeSet = true, limit).map(
-      _._2
-    )
+  ): List[SerializableContract] = {
+    val predicate = (c: SerializableContract) =>
+      filterStakeholder.forall(s => c.metadata.stakeholders.contains(s.toLf))
+
+    check(FeatureFlag.Testing) {
+      pcs_search(domainAlias, filterId, filterPackage, filterTemplate, activeSet = true, limit)
+        .map(_._2)
+        .filter(predicate)
+    }
   }
 
   @Help.Summary("Lookup of events", FeatureFlag.Testing)
@@ -1133,6 +1143,26 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         """)
     def connect_local(
         domain: InstanceReferenceWithSequencerConnection,
+        manualConnect: Boolean = false,
+        alias: Option[DomainAlias] = None,
+        maxRetryDelayMillis: Option[Long] = None,
+        priority: Int = 0,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): Unit = {
+      val config = ParticipantCommands.domains.referenceToConfig(
+        NonEmpty.mk(Seq, SequencerAlias.Default -> domain).toMap,
+        manualConnect,
+        alias,
+        maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
+        priority,
+      )
+      connectFromConfig(config, synchronize)
+    }
+
+    def connect_local_bft(
+        domain: NonEmpty[Map[SequencerAlias, InstanceReferenceWithSequencerConnection]],
         manualConnect: Boolean = false,
         alias: Option[DomainAlias] = None,
         maxRetryDelayMillis: Option[Long] = None,

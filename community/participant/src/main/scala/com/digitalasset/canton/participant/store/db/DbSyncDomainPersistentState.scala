@@ -86,6 +86,7 @@ abstract class DbSyncDomainPersistentStateCommon(
       enableAdditionalConsistencyChecks,
       parameters.maxItemsInSqlClause,
       indexedStringStore,
+      protocolVersion,
       timeouts,
       loggerFactory,
     )

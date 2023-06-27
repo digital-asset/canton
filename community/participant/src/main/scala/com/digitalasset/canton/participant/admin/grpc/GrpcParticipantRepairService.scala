@@ -10,6 +10,7 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.admin.RepairServiceError
 import com.digitalasset.canton.participant.admin.grpc.util.AcsUtil
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.domain.{DomainAliasManager, DomainConnectionConfig}
@@ -58,21 +59,24 @@ class GrpcParticipantRepairService(
       lazy val acsFile = for {
         parties <- EitherT.fromEither[Future](
           request.parties
-            .map(x => UniqueIdentifier.fromProtoPrimitive_(x).map(PartyId.apply))
+            .map(x =>
+              UniqueIdentifier
+                .fromProtoPrimitive_(x)
+                .bimap(error => RepairServiceError.InvalidArgument.Error(error), PartyId.apply)
+            )
             .sequence
         )
         timestamp <- EitherT.fromEither[Future](
           request.timestamp
             .map(CantonTimestamp.fromProtoPrimitive)
             .sequence
-            .left
-            .map(x => x.message)
+            .leftMap(error => RepairServiceError.InvalidArgument.Error(error.message))
         )
         pv <- EitherT.fromEither[Future](
           OptionUtil
             .emptyStringAsNone(request.protocolVersion)
-            .map(ProtocolVersion.create)
-            .sequence
+            .traverse(ProtocolVersion.create)
+            .leftMap(error => RepairServiceError.InvalidArgument.Error(error))
         )
         acs <-
           sync.stateInspection
@@ -83,13 +87,10 @@ class GrpcParticipantRepairService(
               timestamp,
               pv,
             )
-
       } yield acs
 
       // Create a context that will be automatically cancelled after the processing timeout deadline
-      val context = io.grpc.Context
-        .current()
-        .withCancellation()
+      val context = io.grpc.Context.current().withCancellation()
 
       context.run { () =>
         val response = acsFile.map { file =>
@@ -115,7 +116,7 @@ class GrpcParticipantRepairService(
               ()
             }
           case Left(error) =>
-            responseObserver.onError(new Exception(s"error $error"))
+            responseObserver.onError(error.asGrpcError)
             context.cancel(new io.grpc.StatusRuntimeException(io.grpc.Status.CANCELLED))
             ()
         }

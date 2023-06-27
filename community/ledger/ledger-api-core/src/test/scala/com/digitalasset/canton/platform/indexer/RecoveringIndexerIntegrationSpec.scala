@@ -7,12 +7,9 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{BroadcastHub, Keep, Source}
 import akka.stream.{BoundedSourceQueue, Materializer, QueueCompletionResult, QueueOfferResult}
-import ch.qos.logback.classic.Level
 import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.lf.data.Ref.{Party, SubmissionId}
 import com.daml.lf.data.{Ref, Time}
-import com.daml.logging.LoggingContext
-import com.daml.logging.LoggingContext.newLoggingContext
 import com.daml.metrics.Metrics
 import com.daml.tracing.{NoOpTelemetryContext, TelemetryContext}
 import com.digitalasset.canton.ledger.api.health.HealthStatus
@@ -27,6 +24,12 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   SubmissionResult,
   Update,
   WritePartyService,
+}
+import com.digitalasset.canton.logging.{
+  LoggingContextWithTrace,
+  NamedLogging,
+  SuppressingLogger,
+  SuppressionRule,
 }
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.configuration.{
@@ -43,14 +46,15 @@ import com.digitalasset.canton.platform.store.DbSupport.{
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
-import com.digitalasset.canton.tracing.TraceContext.wrapWithNewTraceContext
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.TraceContext.{withNewTraceContext, wrapWithNewTraceContext}
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.mockito.Mockito.*
 import org.mockito.{ArgumentMatchers, MockitoSugar}
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
-import org.scalatest.{Assertion, BeforeAndAfterEach}
+import org.scalatest.{Assertion, BeforeAndAfterEach, Succeeded}
+import org.slf4j.event.Level
 
 import java.time.Instant
 import java.time.temporal.ChronoUnit.SECONDS
@@ -70,10 +74,15 @@ class RecoveringIndexerIntegrationSpec
     with Eventually
     with IntegrationPatience
     with BeforeAndAfterEach
-    with MockitoSugar {
-  private[this] var testId: UUID = _
+    with MockitoSugar
+    with NamedLogging {
 
+  private[this] var testId: UUID = _
   private implicit val telemetryContext: TelemetryContext = NoOpTelemetryContext
+  private implicit val loggingContext =
+    LoggingContextWithTrace.ForTesting
+
+  override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -81,44 +90,23 @@ class RecoveringIndexerIntegrationSpec
     TestingLogCollector.clear[this.type]
   }
 
-  private def assertLogsInOrder(expectedLogEntries: Seq[(Level, String)]): Assertion =
-    assertLogEntries[this.type, RecoveringIndexer](
-      _.map(entry =>
-        entry.level -> entry.msg
-      ) should contain theSameElementsInOrderAs expectedLogEntries
-    )
+  object RecoveringIndexerSuppressionRule extends SuppressionRule {
+    override def isSuppressed(loggerName: String, _eventLevel: Level): Boolean =
+      loggerName.contains(
+        s"${classOf[RecoveringIndexer].getSimpleName}:"
+      )
+  }
+
+  private def assertLogsInOrder(expected: Seq[(Level, String)]): Assertion = {
+    loggerFactory.fetchRecordedLogEntries
+      .map(entry => entry.level -> entry.message) should contain theSameElementsInOrderAs expected
+    Succeeded
+  }
 
   "indexer" should {
-    "index the participant state" in newLoggingContext { implicit loggingContext =>
-      participantServer(InMemoryPartyParticipantState)
-        .use { participantState =>
-          for {
-            _ <- participantState
-              .allocateParty(
-                hint = Some(Ref.Party.assertFromString("alice")),
-                displayName = Some("Alice"),
-                submissionId = randomSubmissionId(),
-              )
-              .asScala
-            _ <- eventuallyPartiesShouldBe("Alice")
-          } yield ()
-        }
-        .map { _ =>
-          assertLogsInOrder(
-            Seq(
-              Level.INFO -> "Starting Indexer Server",
-              Level.INFO -> "Started Indexer Server",
-              Level.INFO -> "Stopping Indexer Server",
-              Level.INFO -> "Successfully finished processing state updates",
-              Level.INFO -> "Stopped Indexer Server",
-            )
-          )
-        }
-    }
-
-    "index the participant state, even on spurious failures" in newLoggingContext {
-      implicit loggingContext =>
-        participantServer(ParticipantStateThatFailsOften)
+    "index the participant state" in withNewTraceContext { implicit traceContext =>
+      loggerFactory.suppress(RecoveringIndexerSuppressionRule) {
+        participantServer(InMemoryPartyParticipantState)
           .use { participantState =>
             for {
               _ <- participantState
@@ -128,21 +116,7 @@ class RecoveringIndexerIntegrationSpec
                   submissionId = randomSubmissionId(),
                 )
                 .asScala
-              _ <- participantState
-                .allocateParty(
-                  hint = Some(Ref.Party.assertFromString("bob")),
-                  displayName = Some("Bob"),
-                  submissionId = randomSubmissionId(),
-                )
-                .asScala
-              _ <- participantState
-                .allocateParty(
-                  hint = Some(Ref.Party.assertFromString("carol")),
-                  displayName = Some("Carol"),
-                  submissionId = randomSubmissionId(),
-                )
-                .asScala
-              _ <- eventuallyPartiesShouldBe("Alice", "Bob", "Carol")
+              _ <- eventuallyPartiesShouldBe("Alice")
             } yield ()
           }
           .map { _ =>
@@ -150,62 +124,110 @@ class RecoveringIndexerIntegrationSpec
               Seq(
                 Level.INFO -> "Starting Indexer Server",
                 Level.INFO -> "Started Indexer Server",
-                Level.ERROR -> "Error while running indexer, restart scheduled after 100 milliseconds",
-                Level.INFO -> "Restarting Indexer Server",
-                Level.INFO -> "Restarted Indexer Server",
-                Level.ERROR -> "Error while running indexer, restart scheduled after 100 milliseconds",
-                Level.INFO -> "Restarting Indexer Server",
-                Level.INFO -> "Restarted Indexer Server",
-                Level.ERROR -> "Error while running indexer, restart scheduled after 100 milliseconds",
-                Level.INFO -> "Restarting Indexer Server",
-                Level.INFO -> "Restarted Indexer Server",
                 Level.INFO -> "Stopping Indexer Server",
                 Level.INFO -> "Successfully finished processing state updates",
                 Level.INFO -> "Stopped Indexer Server",
               )
             )
           }
+      }
     }
 
-    "stop when the kill switch is hit after a failure" in newLoggingContext {
-      implicit loggingContext =>
-        participantServer(ParticipantStateThatFailsOften, restartDelay = 10.seconds)
-          .use { participantState =>
-            for {
-              _ <- participantState
-                .allocateParty(
-                  hint = Some(Ref.Party.assertFromString("alice")),
-                  displayName = Some("Alice"),
-                  submissionId = randomSubmissionId(),
+    "index the participant state, even on spurious failures" in withNewTraceContext {
+      implicit traceContext =>
+        loggerFactory.suppress(RecoveringIndexerSuppressionRule) {
+          participantServer(ParticipantStateThatFailsOften)
+            .use { participantState =>
+              for {
+                _ <- participantState
+                  .allocateParty(
+                    hint = Some(Ref.Party.assertFromString("alice")),
+                    displayName = Some("Alice"),
+                    submissionId = randomSubmissionId(),
+                  )
+                  .asScala
+                _ <- participantState
+                  .allocateParty(
+                    hint = Some(Ref.Party.assertFromString("bob")),
+                    displayName = Some("Bob"),
+                    submissionId = randomSubmissionId(),
+                  )
+                  .asScala
+                _ <- participantState
+                  .allocateParty(
+                    hint = Some(Ref.Party.assertFromString("carol")),
+                    displayName = Some("Carol"),
+                    submissionId = randomSubmissionId(),
+                  )
+                  .asScala
+                _ <- eventuallyPartiesShouldBe("Alice", "Bob", "Carol")
+              } yield ()
+            }
+            .map { _ =>
+              assertLogsInOrder(
+                Seq(
+                  Level.INFO -> "Starting Indexer Server",
+                  Level.INFO -> "Started Indexer Server",
+                  Level.ERROR -> "Error while running indexer, restart scheduled after 100 milliseconds",
+                  Level.INFO -> "Restarting Indexer Server",
+                  Level.INFO -> "Restarted Indexer Server",
+                  Level.ERROR -> "Error while running indexer, restart scheduled after 100 milliseconds",
+                  Level.INFO -> "Restarting Indexer Server",
+                  Level.INFO -> "Restarted Indexer Server",
+                  Level.ERROR -> "Error while running indexer, restart scheduled after 100 milliseconds",
+                  Level.INFO -> "Restarting Indexer Server",
+                  Level.INFO -> "Restarted Indexer Server",
+                  Level.INFO -> "Stopping Indexer Server",
+                  Level.INFO -> "Successfully finished processing state updates",
+                  Level.INFO -> "Stopped Indexer Server",
                 )
-                .asScala
-              _ <- Future {
-                assertLogEntries[this.type, RecoveringIndexer](
-                  _.map(entry => entry.level -> entry.msg)
+              )
+            }
+        }
+    }
+
+    "stop when the kill switch is hit after a failure" in withNewTraceContext {
+      implicit traceContext =>
+        loggerFactory.suppress(RecoveringIndexerSuppressionRule) {
+          participantServer(ParticipantStateThatFailsOften, restartDelay = 10.seconds)
+            .use { participantState =>
+              for {
+                _ <- participantState
+                  .allocateParty(
+                    hint = Some(Ref.Party.assertFromString("alice")),
+                    displayName = Some("Alice"),
+                    submissionId = randomSubmissionId(),
+                  )
+                  .asScala
+              } yield {
+                eventually(
+                  loggerFactory.fetchRecordedLogEntries
+                    .map(entry => entry.level -> entry.message)
                     .take(3) should contain theSameElementsInOrderAs Seq(
                     Level.INFO -> "Starting Indexer Server",
                     Level.INFO -> "Started Indexer Server",
                     Level.ERROR -> "Error while running indexer, restart scheduled after 10 seconds",
                   )
                 )
+                Instant.now()
               }
-            } yield Instant.now()
-          }
-          .map { timeBeforeStop =>
-            val timeAfterStop = Instant.now()
-            SECONDS.between(timeBeforeStop, timeAfterStop) should be <= 5L
-            // stopping the server and logging the error can happen in either order
-            assertLogsInOrder(
-              Seq(
-                Level.INFO -> "Starting Indexer Server",
-                Level.INFO -> "Started Indexer Server",
-                Level.ERROR -> "Error while running indexer, restart scheduled after 10 seconds",
-                Level.INFO -> "Stopping Indexer Server",
-                Level.INFO -> "Indexer Server was stopped; cancelling the restart",
-                Level.INFO -> "Stopped Indexer Server",
+            }
+            .map { timeBeforeStop =>
+              val timeAfterStop = Instant.now()
+              SECONDS.between(timeBeforeStop, timeAfterStop) should be <= 5L
+              // stopping the server and logging the error can happen in either order
+              assertLogsInOrder(
+                Seq(
+                  Level.INFO -> "Starting Indexer Server",
+                  Level.INFO -> "Started Indexer Server",
+                  Level.ERROR -> "Error while running indexer, restart scheduled after 10 seconds",
+                  Level.INFO -> "Stopping Indexer Server",
+                  Level.INFO -> "Indexer Server was stopped; cancelling the restart",
+                  Level.INFO -> "Stopped Indexer Server",
+                )
               )
-            )
-          }
+            }
+        }
     }
   }
 
@@ -214,7 +236,7 @@ class RecoveringIndexerIntegrationSpec
   private def participantServer(
       newParticipantState: ParticipantStateFactory,
       restartDelay: FiniteDuration = 100.millis,
-  )(implicit loggingContext: LoggingContext): ResourceOwner[WritePartyService] = {
+  )(implicit traceContext: TraceContext): ResourceOwner[WritePartyService] = {
     val ledgerId = Ref.LedgerString.assertFromString(s"ledger-$testId")
     val participantId = Ref.ParticipantId.assertFromString(s"participant-$testId")
     val jdbcUrl =
@@ -224,7 +246,7 @@ class RecoveringIndexerIntegrationSpec
     for {
       actorSystem <- ResourceOwner.forActorSystem(() => ActorSystem())
       materializer <- ResourceOwner.forMaterializer(() => Materializer(actorSystem))
-      participantState <- newParticipantState(ledgerId, participantId)(materializer, loggingContext)
+      participantState <- newParticipantState(ledgerId, participantId)(materializer, traceContext)
       servicesExecutionContext <- ResourceOwner
         .forExecutorService(() => Executors.newWorkStealingPool())
         .map(ExecutionContext.fromExecutorService)
@@ -235,6 +257,8 @@ class RecoveringIndexerIntegrationSpec
             CommandConfiguration.DefaultMaxCommandsInFlight,
             metrics,
             ExecutionContext.global,
+            loggerFactory,
+            multiDomainEnabled = false,
           )
       _ <- new IndexerServiceOwner(
         readService = participantState._1,
@@ -248,12 +272,14 @@ class RecoveringIndexerIntegrationSpec
         inMemoryState = inMemoryState,
         inMemoryStateUpdaterFlow = inMemoryStateUpdaterFlow,
         executionContext = servicesExecutionContext,
-      )(materializer, loggingContext)
+        loggerFactory = loggerFactory,
+        multiDomainEnabled = false,
+      )(materializer, traceContext)
     } yield participantState._2
   }
 
   private def eventuallyPartiesShouldBe(partyNames: String*)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Unit] = {
     val jdbcUrl =
       s"jdbc:h2:mem:${getClass.getSimpleName.toLowerCase}-$testId;db_close_delay=-1;db_close_on_exit=false"
@@ -269,6 +295,7 @@ class RecoveringIndexerIntegrationSpec
             connectionTimeout = 250.millis,
           ),
         ),
+        loggerFactory = loggerFactory,
       )
       .use { dbSupport =>
         val ledgerEndCache = MutableLedgerEndCache()
@@ -303,14 +330,14 @@ object RecoveringIndexerIntegrationSpec {
   private trait ParticipantStateFactory {
     def apply(ledgerId: LedgerId, participantId: Ref.ParticipantId)(implicit
         materializer: Materializer,
-        loggingContext: LoggingContext,
+        traceContext: TraceContext,
     ): ResourceOwner[ParticipantState]
   }
 
   private object InMemoryPartyParticipantState extends ParticipantStateFactory {
     override def apply(ledgerId: LedgerId, participantId: Ref.ParticipantId)(implicit
         materializer: Materializer,
-        loggingContext: LoggingContext,
+        traceContext: TraceContext,
     ): ResourceOwner[ParticipantState] = {
       ResourceOwner
         .forReleasable(() =>
@@ -339,7 +366,7 @@ object RecoveringIndexerIntegrationSpec {
   private object ParticipantStateThatFailsOften extends ParticipantStateFactory {
     override def apply(ledgerId: LedgerId, participantId: Ref.ParticipantId)(implicit
         materializer: Materializer,
-        loggingContext: LoggingContext,
+        traceContext: TraceContext,
     ): ResourceOwner[ParticipantState] =
       InMemoryPartyParticipantState(ledgerId, participantId)
         .map { case (readingDelegate, writeDelegate) =>
@@ -359,7 +386,7 @@ object RecoveringIndexerIntegrationSpec {
           }).when(failingParticipantState)
             .stateUpdates(
               ArgumentMatchers.any[Option[Offset]]()
-            )(ArgumentMatchers.any[LoggingContext])
+            )(ArgumentMatchers.any[TraceContext])
           failingParticipantState -> writeDelegate
         }
 
@@ -387,7 +414,7 @@ object RecoveringIndexerIntegrationSpec {
       )
 
     override def stateUpdates(beginAfter: Option[Offset])(implicit
-        loggingContext: LoggingContext
+        traceContext: TraceContext
     ): Source[(Offset, Traced[Update]), NotUsed] = {
       val updatesForStream = writtenUpdates.toSeq
       Source
@@ -403,8 +430,7 @@ object RecoveringIndexerIntegrationSpec {
         displayName: Option[String],
         submissionId: SubmissionId,
     )(implicit
-        loggingContext: LoggingContext,
-        telemetryContext: TelemetryContext,
+        traceContext: TraceContext
     ): CompletionStage[SubmissionResult] = {
       val updateOffset = Offset.fromByteArray(offset.incrementAndGet().toString.getBytes)
       val update = wrapWithNewTraceContext(

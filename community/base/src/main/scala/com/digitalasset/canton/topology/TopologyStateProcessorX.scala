@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology
 
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransactionX.GenericValidatedTopologyTransactionX
@@ -21,7 +22,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransactionX.TxHash
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -35,6 +36,7 @@ class TopologyStateProcessorX(
   private case class MaybePending(originalTx: GenericSignedTopologyTransactionX) {
     val adjusted = new AtomicReference[Option[GenericSignedTopologyTransactionX]](None)
     val rejection = new AtomicReference[Option[TopologyTransactionRejection]](None)
+    val expireImmediately = new AtomicBoolean(false)
 
     def currentTx: GenericSignedTopologyTransactionX = adjusted.get().getOrElse(originalTx)
 
@@ -92,6 +94,9 @@ class TopologyStateProcessorX(
         (removes, pendingWrites)
       }
       validatedTx = pendingWrites.map(_.validatedTx)
+      immediatleyExpiredValidatedTx = pendingWrites.collect {
+        case pw if pw.expireImmediately.get() => pw.validatedTx.transaction.transaction.hash
+      }.toSet
       _ <- EitherT.cond[Future](
         // TODO(#11255) differentiate error reason and only abort actual errors, not in-batch merges
         !abortOnError || validatedTx.forall(_.rejectionReason.isEmpty),
@@ -110,6 +115,7 @@ class TopologyStateProcessorX(
           mappingRemoves,
           txRemoves,
           validatedTx,
+          immediatleyExpiredValidatedTx,
         )
       )
     } yield validatedTx
@@ -184,12 +190,13 @@ class TopologyStateProcessorX(
   private def serialIsMonotonicallyIncreasing(
       previous: Option[GenericSignedTopologyTransactionX],
       current: GenericSignedTopologyTransactionX,
-  ): Either[String, Unit] = previous match {
+  ): Either[TopologyTransactionRejection, Unit] = previous match {
     case Some(value) =>
+      val expected = value.transaction.serial + PositiveInt.one
       Either.cond(
-        value.transaction.serial.value + 1 == current.transaction.serial.value,
+        expected == current.transaction.serial,
         (),
-        s"Serial mismatch: active=${value.transaction.serial}, update=${value.transaction.serial}",
+        TopologyTransactionRejection.SerialMismatch(expected, current.transaction.serial),
       )
     case None => Right(())
   }
@@ -261,7 +268,10 @@ class TopologyStateProcessorX(
       // we check if the transaction is properly authorized given the current topology state
       // if it is a proposal, then we demand that all signatures are appropriate (but
       // not necessarily sufficient)
-      txC <- transactionIsAuthorized(last, txB, expectFullAuthorization)
+      // TODO(#11255) emit appropriate log message
+      txC <- transactionIsAuthorized(last, txB, expectFullAuthorization).left.map(
+        TopologyTransactionRejection.Other(_)
+      )
       // we potentially merge the transaction with the currently active if this is just a signature update
       (isMerge, txD) = potentiallyMergeWithLast(last, txC)
       // now, check if the serial is monotonically increasing
@@ -272,9 +282,9 @@ class TopologyStateProcessorX(
     } yield txD
     ret match {
       case Right(value) => ValidatedTopologyTransactionX(value, None)
-      case Left(value) =>
-        // TODO(#11255) emit appropriate log message and use correct rejection reason
-        ValidatedTopologyTransactionX(txA, Some(TopologyTransactionRejection.Other(value)))
+      case Left(rejectionReason) =>
+        // TODO(#11255) emit appropriate log message
+        ValidatedTopologyTransactionX(txA, Some(rejectionReason))
     }
   }
 
@@ -293,8 +303,8 @@ class TopologyStateProcessorX(
       proposalsForTx.put(txHash, tx).foreach { previous =>
         // update currently pending (this is relevant in case if we have within a batch proposals for the
         // same txs)
-        val cur = previous.rejection
-          .getAndSet(Some(TopologyTransactionRejection.Other("Merged with other proposal")))
+        val cur = previous.rejection.get()
+        previous.expireImmediately.set(true)
         ErrorUtil.requireState(cur.isEmpty, s"Error state should be empty for ${previous}")
       }
       trackProposal(txHash, finalTx.transaction.mapping.uniqueKey)
@@ -307,8 +317,8 @@ class TopologyStateProcessorX(
       val mappingHash = finalTx.transaction.mapping.uniqueKey
       txForMapping.put(mappingHash, tx).foreach { previous =>
         // replace previous tx in case we have concurrent updates within the same timestamp
-        val cur = previous.rejection
-          .getAndSet(Some(TopologyTransactionRejection.Other("Subsumed within batch")))
+        val cur = previous.rejection.get()
+        previous.expireImmediately.set(true)
         ErrorUtil.requireState(cur.isEmpty, s"Error state should be empty for ${previous}")
       }
       // remove all pending proposals for this mapping

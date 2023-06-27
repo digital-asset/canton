@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.platform.apiserver.services.tracking
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
-import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
+import org.scalatest.concurrent.{Eventually, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -18,10 +18,9 @@ class CancellableTimeoutSupportSpec
     extends AnyFlatSpec
     with Matchers
     with Eventually
-    with IntegrationPatience
-    with ScalaFutures {
+    with ScalaFutures
+    with BaseTest {
 
-  private implicit val lc: LoggingContext = LoggingContext.ForTesting
   behavior of classOf[CancellableTimeoutSupport].getSimpleName
 
   it should "schedule a command entry task" in new TestFixture {
@@ -65,7 +64,7 @@ class CancellableTimeoutSupportSpec
     def run(): Unit
 
     private val timer = new Timer("test-timer")
-    val cancellableTimeoutSupport = new CancellableTimeoutSupportImpl(timer)
+    val cancellableTimeoutSupport = new CancellableTimeoutSupportImpl(timer, loggerFactory)
     run()
     timer.cancel()
   }

@@ -106,16 +106,13 @@ final case class SortedReconciliationIntervals private (
     * If an error occurs during tick computation, Left is returned.
     */
   def commitmentPeriodPreceding(
-      endOfPreviousPeriod: Option[CantonTimestampSecond]
-  )(ts: CantonTimestamp): Either[String, Option[CommitmentPeriod]] = {
-    tickBefore(ts)
-      .toRight(s"Unable to compute tick before $ts")
-      .map { periodEnd =>
-        val periodStart = endOfPreviousPeriod.getOrElse(CantonTimestampSecond.MinValue)
-        val periodLength = PositiveSeconds.between(periodStart, periodEnd)
+      periodEnd: CantonTimestampSecond,
+      endOfPreviousPeriod: Option[CantonTimestampSecond],
+  ): Option[CommitmentPeriod] = {
+    val periodStart = endOfPreviousPeriod.getOrElse(CantonTimestampSecond.MinValue)
+    val periodLength = PositiveSeconds.between(periodStart, periodEnd)
 
-        periodLength.toOption.map(CommitmentPeriod(periodStart, _))
-      }
+    periodLength.toOption.map(CommitmentPeriod(periodStart, _))
   }
 
   /** Check whether the given interval contains a tick */

@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.participant.state.index.v2
 
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -23,7 +23,7 @@ trait MaximumLedgerTimeService {
     *         Archived, if there was at least one contract specified which is archived (this list is not necessarily exhaustive)
     */
   def lookupMaximumLedgerTimeAfterInterpretation(ids: Set[ContractId])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[MaximumLedgerTime]
 }
 

@@ -24,6 +24,7 @@ import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
+import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.grpc.GrpcSequencerChannelBuilder
 import com.digitalasset.canton.sequencing.client.transports.*
 import com.digitalasset.canton.sequencing.client.transports.replay.{
@@ -113,11 +114,16 @@ object SequencerClientFactory {
         )
 
         for {
-          transport <- makeTransport(
-            sequencerConnections.default, // TODO(i12076): Support multiple sequencers
+          sequencerTransportsMap <- makeTransport(
+            sequencerConnections,
             member,
             requestSigner,
           )
+
+          sequencerTransports <- EitherT.fromEither[Future](
+            SequencerTransports.from(sequencerTransportsMap, expectedSequencers)
+          )
+
           // fetch the initial set of pending sends to initialize the client with.
           // as it owns the client that should be writing to this store it should not be racy.
           initialPendingSends <- EitherT.right(sendTrackerStore.fetchPendingSends)
@@ -152,7 +158,7 @@ object SequencerClientFactory {
         } yield new SequencerClientImpl(
           domainId,
           member,
-          transport,
+          sequencerTransports,
           config,
           testingConfig,
           domainParameters.protocolVersion,
@@ -169,7 +175,6 @@ object SequencerClientFactory {
           syncCryptoApi.pureCrypto,
           loggingConfig,
           loggerFactory,
-          expectedSequencers,
         )
       }
 

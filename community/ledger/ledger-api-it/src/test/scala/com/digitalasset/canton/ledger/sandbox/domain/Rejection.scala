@@ -23,6 +23,7 @@ private[sandbox] sealed trait Rejection extends Product with Serializable {
       recordTime = recordTime,
       completionInfo = completionInfo,
       reasonTemplate = FinalReason(toStatus),
+      None,
     )
 }
 

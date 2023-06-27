@@ -13,7 +13,8 @@ import com.digitalasset.canton.participant.protocol.validation.TimeValidator.Tim
 import com.digitalasset.canton.participant.store.ContractKeyJournal
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.{LfPartyId, WorkflowId}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LfPartyId, TransferCounter, WorkflowId}
 
 final case class TransactionValidationResult(
     transactionId: TransactionId,
@@ -36,13 +37,18 @@ final case class TransactionValidationResult(
     successfulActivenessCheck: Boolean,
     viewValidationResults: Map[ViewHash, ViewValidationResult],
     timeValidationResultE: Either[TimeCheckFailure, Unit],
-    hostedInformeeStakeholders: Set[LfPartyId],
+    hostedWitnesses: Set[LfPartyId],
 ) {
 
-  def commitSet(requestId: RequestId)(implicit loggingContext: ErrorLoggingContext): CommitSet = {
+  def commitSet(
+      requestId: RequestId
+  )(protocolVersion: ProtocolVersion)(implicit loggingContext: ErrorLoggingContext): CommitSet = {
     if (successfulActivenessCheck) {
       val archivals = consumedInputsOfHostedParties ++ transient
-      val creations = createdContracts.fmap(c => WithContractHash.fromContract(c, c.metadata))
+      val transferCounter = TransferCounter.forCreatedContract(protocolVersion)
+      val creations = createdContracts.fmap(c =>
+        WithContractHash.fromContract(c, CommitSet.CreationCommit(c.metadata, transferCounter))
+      )
       CommitSet(
         archivals = archivals,
         creations = creations,

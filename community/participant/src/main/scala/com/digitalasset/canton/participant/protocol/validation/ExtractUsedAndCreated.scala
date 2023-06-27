@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.implicits.toFunctorOps
 import cats.syntax.parallel.*
 import com.daml.lf.transaction.ContractStateMachine.{KeyInactive, KeyMapping}
 import com.daml.nonempty.NonEmpty
@@ -128,7 +127,6 @@ object ExtractUsedAndCreated {
   private[validation] final case class CreatedContractPrep(
       // The contract will be optional if it has been rolled back
       createdContractsOfHostedInformees: Map[LfContractId, Option[SerializableContract]],
-      hostedInformeeStakeholders: Set[LfPartyId],
       witnessed: Map[LfContractId, SerializableContract],
   )
 
@@ -136,7 +134,6 @@ object ExtractUsedAndCreated {
       used: Map[LfContractId, SerializableContract],
       divulged: Map[LfContractId, SerializableContract],
       consumedOfHostedStakeholders: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
-      hostedInformeeStakeholders: Set[LfPartyId],
       contractIdsOfHostedInformeeStakeholder: Set[LfContractId],
   )
 
@@ -167,8 +164,7 @@ private[validation] class ExtractUsedAndCreated(
       rootViewsWithSignatures = rootViewTreesWithSignatures,
       contracts = usedAndCreatedContracts(createdContracts, inputContracts, transientContracts),
       keys = inputAndUpdatedKeys(rootViewTrees),
-      hostedInformeeStakeholders =
-        inputContracts.hostedInformeeStakeholders ++ createdContracts.hostedInformeeStakeholders,
+      hostedWitnesses = hostedParties.filter(_._2).map(_._1).toSet,
     )
   }
 
@@ -186,7 +182,6 @@ private[validation] class ExtractUsedAndCreated(
     val usedB =
       Map.newBuilder[LfContractId, SerializableContract]
     val contractIdsOfHostedInformeeStakeholderB = Set.newBuilder[LfContractId]
-    val hostedInformeeStakeholdersB = Set.newBuilder[LfPartyId]
     val consumedOfHostedStakeholdersB =
       Map.newBuilder[LfContractId, WithContractHash[Set[LfPartyId]]]
     val divulgedB =
@@ -205,7 +200,6 @@ private[validation] class ExtractUsedAndCreated(
 
       if (hostsAny(informeeStakeholders)) {
         contractIdsOfHostedInformeeStakeholderB += contract.contractId
-        hostedInformeeStakeholdersB ++= informeeStakeholders.filter(hostsParty)
         // We do not need to include in consumedInputsOfHostedStakeholders the contracts created in the core
         // because they are not inputs even if they are consumed.
         if (inputContractWithMetadata.consumed) {
@@ -234,7 +228,6 @@ private[validation] class ExtractUsedAndCreated(
       used = usedB.result(),
       divulged = divulgedB.result(),
       consumedOfHostedStakeholders = consumedOfHostedStakeholdersB.result(),
-      hostedInformeeStakeholders = hostedInformeeStakeholdersB.result(),
       contractIdsOfHostedInformeeStakeholder = contractIdsOfHostedInformeeStakeholderB.result(),
     )
   }
@@ -243,8 +236,6 @@ private[validation] class ExtractUsedAndCreated(
 
     val createdContractsOfHostedInformeesB =
       Map.newBuilder[LfContractId, Option[SerializableContract]]
-
-    val hostedInformeeStakeholdersB = Set.newBuilder[LfPartyId]
 
     val witnessedB =
       Map.newBuilder[LfContractId, SerializableContract]
@@ -260,7 +251,6 @@ private[validation] class ExtractUsedAndCreated(
         createdContractsOfHostedInformeesB += contract.contractId -> Option.when(!rolledBack)(
           contract
         )
-        hostedInformeeStakeholdersB ++= contract.metadata.stakeholders.filter(hostsParty)
       } else if (!rolledBack) {
         witnessedB += (contract.contractId -> contract)
       }
@@ -268,7 +258,6 @@ private[validation] class ExtractUsedAndCreated(
 
     CreatedContractPrep(
       createdContractsOfHostedInformees = createdContractsOfHostedInformeesB.result(),
-      hostedInformeeStakeholders = hostedInformeeStakeholdersB.result(),
       witnessed = witnessedB.result(),
     )
   }
@@ -553,8 +542,6 @@ private[validation] class ExtractUsedAndCreated(
       uckUpdatedKeysOfHostedMaintainers = updatedKeys,
     )
   }
-
-  private def hostsParty(partyId: LfPartyId): Boolean = hostsAny(Iterable(partyId))
 
   private def hostsAny(
       parties: IterableOnce[LfPartyId]

@@ -4,9 +4,9 @@
 package com.digitalasset.canton.platform.localstore.api
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.Future
 
@@ -28,11 +28,11 @@ trait PartyRecordStore {
   import PartyRecordStore.*
 
   def createPartyRecord(partyRecord: PartyRecord)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[PartyRecord]]
 
   def updatePartyRecord(partyRecordUpdate: PartyRecordUpdate, ledgerPartyIsLocal: Boolean)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[PartyRecord]]
 
   def updatePartyRecordIdp(
@@ -40,18 +40,18 @@ trait PartyRecordStore {
       ledgerPartyIsLocal: Boolean,
       sourceIdp: IdentityProviderId,
       targetIdp: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[PartyRecord]]
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[PartyRecord]]
 
   def getPartyRecordO(party: Ref.Party)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[Option[PartyRecord]]]
 
   def filterExistingParties(parties: Set[Ref.Party], identityProviderId: IdentityProviderId)(
-      implicit loggingContext: LoggingContext
+      implicit loggingContext: LoggingContextWithTrace
   ): Future[Set[Ref.Party]]
 
   def filterExistingParties(parties: Set[Ref.Party])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Set[Ref.Party]]
 
 }

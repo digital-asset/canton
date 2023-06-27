@@ -447,7 +447,7 @@ class StoreBasedTopologySnapshot(
       ],
   ): Future[PartyInfo] =
     loadBatchActiveParticipantsOf(Seq(party), fetchParticipantStates).map(
-      _.getOrElse(party, PartyInfo(false, PositiveInt.one, Map.empty))
+      _.getOrElse(party, PartyInfo.EmptyPartyInfo)
     )
 
   override private[client] def loadBatchActiveParticipantsOf(
@@ -515,12 +515,11 @@ class StoreBasedTopologySnapshot(
           .filter(_._2.permission.isActive)
       }
       val partyToParticipantAttributes = allAggregated.fmap(v => capped(v))
-      // for each party we should return a result
+      // For each party we must return a result to satisfy the expectations of the
+      // calling CachingTopologySnapshot's caffeine partyCache per findings in #11598.
       parties.map { party =>
-        party -> PartyInfo(
-          groupAddressing = false,
-          threshold = PositiveInt.one,
-          partyToParticipantAttributes.getOrElse(party, Map.empty),
+        party -> PartyInfo.nonConsortiumPartyInfo(
+          partyToParticipantAttributes.getOrElse(party, Map.empty)
         )
       }.toMap
     }

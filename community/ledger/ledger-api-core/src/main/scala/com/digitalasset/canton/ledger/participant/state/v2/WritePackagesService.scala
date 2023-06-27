@@ -5,8 +5,7 @@ package com.digitalasset.canton.ledger.participant.state.v2
 
 import com.daml.daml_lf_dev.DamlLf.Archive
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
-import com.daml.tracing.TelemetryContext
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.CompletionStage
 
@@ -46,7 +45,6 @@ trait WritePackagesService {
       archives: List[Archive],
       sourceDescription: Option[String],
   )(implicit
-      loggingContext: LoggingContext,
-      telemetryContext: TelemetryContext,
+      traceContext: TraceContext
   ): CompletionStage[SubmissionResult]
 }

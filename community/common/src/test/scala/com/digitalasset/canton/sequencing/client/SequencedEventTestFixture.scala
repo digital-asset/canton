@@ -9,6 +9,7 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.ExampleTransactionFactory
@@ -43,15 +44,34 @@ class SequencedEventTestFixture(
     TestingIdentityFactory(loggerFactory).forOwnerAndDomain(sequencerId, defaultDomainId)
   lazy val updatedCounter: Long = 42L
   val SecondSequencerId = SequencerId(UniqueIdentifier(Identifier.tryCreate("da2"), namespace))
+  val ThirdSequencerId = SequencerId(UniqueIdentifier(Identifier.tryCreate("da3"), namespace))
+
+  val alice = ParticipantId(UniqueIdentifier.tryCreate("participant", "alice"))
+  val bob = ParticipantId(UniqueIdentifier.tryCreate("participant", "bob"))
+  val carlos = ParticipantId(UniqueIdentifier.tryCreate("participant", "carlos"))
+  val signatureAlice = SymbolicCrypto.signature(
+    ByteString.copyFromUtf8("signatureAlice1"),
+    alice.uid.namespace.fingerprint,
+  )
+  val signatureBob = SymbolicCrypto.signature(
+    ByteString.copyFromUtf8("signatureBob1"),
+    bob.uid.namespace.fingerprint,
+  )
+  val signatureCarlos = SymbolicCrypto.signature(
+    ByteString.copyFromUtf8("signatureCarlos1"),
+    carlos.uid.namespace.fingerprint,
+  )
 
   def mkAggregator(
-      expectedSequencers: NonEmpty[Set[SequencerId]] = NonEmpty.mk(Set, sequencerId)
+      expectedSequencers: NonEmpty[Set[SequencerId]] = NonEmpty.mk(Set, sequencerId),
+      expectedSequencersSize: Int = 1,
   ) =
     new SequencerAggregator(
       cryptoPureApi = subscriberCryptoApi.pureCrypto,
       eventInboxSize = PositiveInt.tryCreate(2),
       loggerFactory = loggerFactory,
       expectedSequencers = expectedSequencers,
+      expectedSequencersSize = PositiveInt.tryCreate(expectedSequencersSize),
     )
 
   def mkValidator(

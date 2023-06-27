@@ -471,6 +471,13 @@ abstract class TopologyManager[E <: CantonError](
               )
             ) =>
           Left(TopologyManagerError.InvalidSignatureError.Failure(err): TopologyManagerError)
+        case Some(
+              ValidatedTopologyTransaction(
+                `transaction`,
+                Some(TopologyTransactionRejection.SerialMismatch(expected, actual)),
+              )
+            ) =>
+          Left(TopologyManagerError.SerialMismatch.Failure(expected, actual): TopologyManagerError)
         case Some(tx: ValidatedTopologyTransaction) =>
           Left(TopologyManagerError.InternalError.ReplaceExistingFailed(tx))
         case None => Right(())

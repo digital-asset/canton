@@ -16,6 +16,7 @@ final case class PartyDetails(
     displayName: String,
     isLocal: Boolean,
     annotations: Map[String, String],
+    identityProviderId: String,
 )
 
 object PartyDetails {
@@ -24,6 +25,7 @@ object PartyDetails {
     displayName = details.displayName,
     isLocal = details.isLocal,
     annotations = details.localMetadata.fold(Map.empty[String, String])(_.annotations),
+    identityProviderId = details.identityProviderId,
   )
   def toProtoPartyDetails(
       details: PartyDetails,
@@ -38,6 +40,7 @@ object PartyDetails {
         annotations = details.annotations,
       )
     ),
+    identityProviderId = details.identityProviderId,
   )
 }
 

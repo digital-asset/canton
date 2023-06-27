@@ -1,0 +1,10 @@
+sdk-version: 2.7.0-snapshot.20230619.11890.0.vedd1a5f6
+build-options:
+- --target=1.14
+name: JsonEncodingTest
+source: JsonEncodingTest.daml
+version: 2.7.0
+dependencies:
+- daml-prim
+- daml-stdlib
+- daml-script

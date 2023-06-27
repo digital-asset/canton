@@ -9,7 +9,7 @@ import com.daml.ledger.api.v1.value.{Identifier, Record, RecordField, Value}
 import com.daml.lf.data.Ref
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
-import com.daml.tracing.{DefaultOpenTelemetry, SpanAttribute, TelemetryContext}
+import com.daml.tracing.{DefaultOpenTelemetry, SpanAttribute}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
@@ -50,10 +50,10 @@ class GrpcCommandSubmissionServiceSpec
     "propagate trace context" in {
       val span = testTelemetrySetup.anEmptySpan()
       val scope = span.makeCurrent()
-      val mockCommandSubmissionService = mock[CommandSubmissionService with AutoCloseable]
+      val mockCommandSubmissionService = mock[CommandSubmissionService & AutoCloseable]
       when(
         mockCommandSubmissionService
-          .submit(any[SubmitRequest])(any[TelemetryContext], any[LoggingContextWithTrace])
+          .submit(any[SubmitRequest])(any[LoggingContextWithTrace])
       )
         .thenReturn(Future.unit)
 
@@ -79,10 +79,10 @@ class GrpcCommandSubmissionServiceSpec
         aSubmitRequest.update(_.commands.submissionId := expectedSubmissionId)
       val requestCaptor =
         ArgCaptor[com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest]
-      val mockCommandSubmissionService = mock[CommandSubmissionService with AutoCloseable]
+      val mockCommandSubmissionService = mock[CommandSubmissionService & AutoCloseable]
       when(
         mockCommandSubmissionService
-          .submit(any[SubmitRequest])(any[TelemetryContext], any[LoggingContextWithTrace])
+          .submit(any[SubmitRequest])(any[LoggingContextWithTrace])
       )
         .thenReturn(Future.unit)
 
@@ -90,7 +90,7 @@ class GrpcCommandSubmissionServiceSpec
         .submit(requestWithSubmissionId)
         .map { _ =>
           verify(mockCommandSubmissionService)
-            .submit(requestCaptor.capture)(any[TelemetryContext], any[LoggingContextWithTrace])
+            .submit(requestCaptor.capture)(any[LoggingContextWithTrace])
           requestCaptor.value.commands.submissionId shouldBe Some(expectedSubmissionId)
         }
     }
@@ -99,10 +99,10 @@ class GrpcCommandSubmissionServiceSpec
       val requestCaptor =
         ArgCaptor[com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest]
 
-      val mockCommandSubmissionService = mock[CommandSubmissionService with AutoCloseable]
+      val mockCommandSubmissionService = mock[CommandSubmissionService & AutoCloseable]
       when(
         mockCommandSubmissionService
-          .submit(any[SubmitRequest])(any[TelemetryContext], any[LoggingContextWithTrace])
+          .submit(any[SubmitRequest])(any[LoggingContextWithTrace])
       )
         .thenReturn(Future.unit)
 
@@ -110,13 +110,13 @@ class GrpcCommandSubmissionServiceSpec
         .submit(aSubmitRequest)
         .map { _ =>
           verify(mockCommandSubmissionService)
-            .submit(requestCaptor.capture)(any[TelemetryContext], any[LoggingContextWithTrace])
+            .submit(requestCaptor.capture)(any[LoggingContextWithTrace])
           requestCaptor.value.commands.submissionId shouldBe Some(generatedSubmissionId)
         }
     }
 
     "reject submission on explicit disclosure disabled with provided disclosed contracts" in {
-      val mockCommandSubmissionService = mock[CommandSubmissionService with AutoCloseable]
+      val mockCommandSubmissionService = mock[CommandSubmissionService & AutoCloseable]
 
       val submissionWithDisclosedContracts =
         aSubmitRequest.update(_.commands.disclosedContracts.set(Seq(DisclosedContract())))
@@ -139,7 +139,7 @@ class GrpcCommandSubmissionServiceSpec
   }
 
   private def grpcCommandSubmissionService(
-      commandSubmissionService: CommandSubmissionService with AutoCloseable
+      commandSubmissionService: CommandSubmissionService & AutoCloseable
   ) =
     new GrpcCommandSubmissionService(
       commandSubmissionService,

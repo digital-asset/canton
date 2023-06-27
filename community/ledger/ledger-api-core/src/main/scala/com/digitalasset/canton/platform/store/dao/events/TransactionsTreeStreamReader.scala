@@ -7,14 +7,15 @@ import akka.NotUsed
 import akka.stream.Attributes
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v1.transaction.TreeEvent
-import com.daml.ledger.api.v1.transaction_service.GetTransactionTreesResponse
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.ledger.api.v2.update_service.GetUpdateTreesResponse
+import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.Spans
 import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.configuration.TransactionTreeStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
@@ -24,6 +25,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
 }
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPaginationState
 import com.digitalasset.canton.platform.store.dao.events.EventsTable.TransactionConversions
+import com.digitalasset.canton.platform.store.dao.events.ReassignmentStreamReader.ReassignmentStreamQueryParams
 import com.digitalasset.canton.platform.store.dao.{
   DbDispatcher,
   EventProjectionProperties,
@@ -34,7 +36,7 @@ import com.digitalasset.canton.platform.store.utils.{
   QueueBasedConcurrencyLimiter,
   Telemetry,
 }
-import com.digitalasset.canton.platform.{ApiOffset, Party}
+import com.digitalasset.canton.platform.{ApiOffset, Party, TemplatePartiesFilter}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.mutable.ArrayBuffer
@@ -51,6 +53,7 @@ class TransactionsTreeStreamReader(
     lfValueTranslation: LfValueTranslation,
     metrics: Metrics,
     tracer: Tracer,
+    reassignmentStreamReader: ReassignmentStreamReader,
 )(implicit executionContext: ExecutionContext) {
   import TransactionsReader.*
   import config.*
@@ -65,9 +68,10 @@ class TransactionsTreeStreamReader(
       queryRange: EventsRange,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
-      loggingContext: LoggingContext
-  ): Source[(Offset, GetTransactionTreesResponse), NotUsed] = {
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
     val span =
       Telemetry.Transactions.createSpan(
         tracer,
@@ -83,16 +87,24 @@ class TransactionsTreeStreamReader(
       queryRange,
       requestingParties,
       eventProjectionProperties,
+      multiDomainEnabled,
     )
     sourceOfTreeTransactions
       .wireTap(_ match {
         case (_, response) =>
-          response.transactions.foreach(txn =>
-            Spans.addEventToSpan(
-              tracing.Event("transaction", TraceIdentifiers.fromTransactionTree(txn)),
-              span,
-            )
-          )
+          response.update match {
+            case GetUpdateTreesResponse.Update.TransactionTree(txn) =>
+              Spans.addEventToSpan(
+                tracing.Event("transaction", TraceIdentifiers.fromTransactionTree(txn)),
+                span,
+              )
+            case GetUpdateTreesResponse.Update.Reassignment(reassignment) =>
+              Spans.addEventToSpan(
+                tracing.Event("transaction", TraceIdentifiers.fromReassignment(reassignment)),
+                span,
+              )
+            case _ => ()
+          }
       })
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -101,9 +113,10 @@ class TransactionsTreeStreamReader(
       queryRange: EventsRange,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
-      loggingContext: LoggingContext
-  ): Source[(Offset, GetTransactionTreesResponse), NotUsed] = {
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
     val createEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdCreateQueries, executionContext)
     val consumingEventIdQueriesLimiter =
@@ -112,12 +125,16 @@ class TransactionsTreeStreamReader(
       new QueueBasedConcurrencyLimiter(maxParallelIdNonConsumingQueries, executionContext)
     val payloadQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelPayloadQueries, executionContext)
+    val deserializationQueriesLimiter =
+      new QueueBasedConcurrencyLimiter(transactionsProcessingParallelism, executionContext)
     val filterParties = requestingParties.toVector
     val idPageSizing = IdPageSizing.calculateFrom(
       maxIdPageSize = maxIdsPerIdPage,
       // The ids for tree transactions are retrieved from five separate id tables.
       // To account for that we assign a fifth of the working memory to each table.
-      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / 5,
+      workingMemoryInBytesForIdPages = maxWorkingMemoryInBytesForIdPages / (
+        if (multiDomainEnabled) 7 else 5
+      ),
       numOfDecomposedFilters = filterParties.size,
       numOfPagesInIdPageBuffer = maxPagesPerIdPagesBuffer,
     )
@@ -264,14 +281,50 @@ class TransactionsTreeStreamReader(
       .mergeSorted(payloadsNonConsuming)(orderBySequentialEventId)
     val sourceOfTreeTransactions = TransactionsReader
       .groupContiguous(allSortedPayloads)(by = _.transactionId)
-      .mapAsync(transactionsProcessingParallelism)(
-        deserializeLfValues(_, eventProjectionProperties)
+      .mapAsync(transactionsProcessingParallelism)(rawEvents =>
+        deserializationQueriesLimiter.execute(
+          deserializeLfValues(rawEvents, eventProjectionProperties)
+        )
       )
       .mapConcat { events =>
         val responses = TransactionConversions.toGetTransactionTreesResponse(events)
         responses.map { case (offset, response) => ApiOffset.assertFromString(offset) -> response }
       }
-    sourceOfTreeTransactions
+
+    if (multiDomainEnabled) {
+      reassignmentStreamReader
+        .streamReassignments(
+          ReassignmentStreamQueryParams(
+            queryRange = queryRange,
+            filteringConstraints = TemplatePartiesFilter(
+              relation = Map.empty,
+              wildcardParties = requestingParties,
+            ),
+            eventProjectionProperties = eventProjectionProperties,
+            payloadQueriesLimiter = payloadQueriesLimiter,
+            deserializationQueriesLimiter = deserializationQueriesLimiter,
+            idPageSizing = idPageSizing,
+            decomposedFilters = requestingParties.map(DecomposedFilter(_, None)).toVector,
+            maxParallelIdAssignQueries = maxParallelIdAssignQueries,
+            maxParallelIdUnassignQueries = maxParallelIdUnassignQueries,
+            maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
+            maxPayloadsPerPayloadsPage = maxPayloadsPerPayloadsPage,
+            maxParallelPayloadAssignQueries = maxParallelPayloadAssignQueries,
+            maxParallelPayloadUnassignQueries = maxParallelPayloadUnassignQueries,
+            deserializationProcessingParallelism = transactionsProcessingParallelism,
+          )
+        )
+        .map { case (offset, reassignment) =>
+          offset -> GetUpdateTreesResponse(
+            GetUpdateTreesResponse.Update.Reassignment(reassignment)
+          )
+        }
+        .mergeSorted(sourceOfTreeTransactions)(
+          Ordering.by(_._1)
+        )
+    } else {
+      sourceOfTreeTransactions
+    }
   }
 
   private def mergeSortAndBatch(
@@ -291,7 +344,7 @@ class TransactionsTreeStreamReader(
   private def deserializeLfValues(
       rawEvents: Vector[EventStorageBackend.Entry[Raw.TreeEvent]],
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit lc: LoggingContext): Future[Vector[EventStorageBackend.Entry[TreeEvent]]] = {
+  )(implicit lc: LoggingContextWithTrace): Future[Vector[EventStorageBackend.Entry[TreeEvent]]] = {
     Timed.future(
       future =
         Future.traverse(rawEvents)(deserializeEntry(eventProjectionProperties, lfValueTranslation)),

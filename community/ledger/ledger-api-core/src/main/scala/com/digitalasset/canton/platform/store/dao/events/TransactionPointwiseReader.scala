@@ -5,13 +5,10 @@ package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.ledger.api.v1.event.Event
 import com.daml.ledger.api.v1.transaction.TreeEvent
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
-  GetTransactionResponse,
-}
+import com.daml.ledger.api.v2.update_service.{GetTransactionResponse, GetTransactionTreeResponse}
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Entry
@@ -51,7 +48,7 @@ sealed trait TransactionPointwiseReader {
       transactionId: Ref.TransactionId,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Future[Option[RespT]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[RespT]] = {
     val requestingPartiesStrings: Set[String] = requestingParties.toSet[String]
     for {
       // Fetching event sequential id range corresponding to the requested transaction id
@@ -103,7 +100,7 @@ final class TransactionTreePointwiseReader(
 
   override type EventT = TreeEvent
   override type RawEventT = Raw.TreeEvent
-  override type RespT = GetTransactionResponse
+  override type RespT = GetTransactionTreeResponse
 
   override val dbMetric: DatabaseMetrics = dbMetrics.lookupTransactionTreeById
 
@@ -135,7 +132,7 @@ final class TransactionFlatPointwiseReader(
 
   override type EventT = Event
   override type RawEventT = Raw.FlatEvent
-  override type RespT = GetFlatTransactionResponse
+  override type RespT = GetTransactionResponse
 
   override val dbMetric: DatabaseMetrics = dbMetrics.lookupFlatTransactionById
 

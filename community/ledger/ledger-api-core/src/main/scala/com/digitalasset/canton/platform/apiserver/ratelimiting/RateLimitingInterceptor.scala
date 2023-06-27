@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.ratelimiting.LimitResult.{
   LimitResultCheck,
@@ -76,11 +77,13 @@ final class RateLimitingInterceptor(
 object RateLimitingInterceptor {
 
   def apply(
+      loggerFactory: NamedLoggerFactory,
       metrics: Metrics,
       config: RateLimitingConfig,
       additionalChecks: List[LimitResultCheck] = List.empty,
   ): RateLimitingInterceptor = {
     apply(
+      loggerFactory = loggerFactory,
       metrics = metrics,
       config = config,
       tenuredMemoryPools = ManagementFactory.getMemoryPoolMXBeans.asScala.toList,
@@ -90,6 +93,7 @@ object RateLimitingInterceptor {
   }
 
   def apply(
+      loggerFactory: NamedLoggerFactory,
       metrics: Metrics,
       config: RateLimitingConfig,
       tenuredMemoryPools: List[MemoryPoolMXBean],
@@ -103,8 +107,8 @@ object RateLimitingInterceptor {
     new RateLimitingInterceptor(
       metrics = metrics,
       checks = List[LimitResultCheck](
-        MemoryCheck(tenuredMemoryPools, memoryMxBean, config),
-        StreamCheck(activeStreamsCounter, activeStreamsName, config.maxStreams),
+        MemoryCheck(tenuredMemoryPools, memoryMxBean, config, loggerFactory),
+        StreamCheck(activeStreamsCounter, activeStreamsName, config.maxStreams, loggerFactory),
       ) ::: additionalChecks,
     )
   }

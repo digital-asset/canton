@@ -20,7 +20,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.GrpcError
-import com.digitalasset.canton.participant.ParticipantNode
+import com.digitalasset.canton.participant.ParticipantNodeCommon
 import com.digitalasset.canton.participant.admin.v0.AcsSnapshotChunk
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContractWithWitnesses}
@@ -173,7 +173,8 @@ abstract class LocalParticipantRepairAdministration(
       loggerFactory = loggerFactory,
     ) {
 
-  protected def access[T](handler: ParticipantNode => T): T
+  protected def access[T](handler: ParticipantNodeCommon => T): T
+
   @Help.Summary("Add specified contracts to specific domain on local participant.")
   @Help.Description(
     """This is a last resort command to recover from data corruption, e.g. in scenarios in which participant

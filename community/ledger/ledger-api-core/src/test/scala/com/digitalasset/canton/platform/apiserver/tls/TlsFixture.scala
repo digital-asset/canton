@@ -5,13 +5,13 @@ package com.digitalasset.canton.platform.apiserver.tls
 
 import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplementation
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.ports.Port
 import com.digitalasset.canton.ledger.api.tls.TlsConfiguration
 import com.digitalasset.canton.ledger.client.GrpcChannel
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.apiserver.{ApiService, ApiServices, LedgerApiService}
 import io.grpc.{BindableService, ManagedChannel}
 import io.netty.handler.ssl.ClientAuth
@@ -22,6 +22,7 @@ import scala.collection.immutable
 import scala.concurrent.Future
 
 final case class TlsFixture(
+    loggerFactory: NamedLoggerFactory,
     tlsEnabled: Boolean,
     serverCrt: File,
     serverKey: File,
@@ -68,21 +69,20 @@ final case class TlsFixture(
     val apiServices = new EmptyApiServices
     val owner = new MockApiServices(apiServices)
 
-    LoggingContext.newLoggingContext { implicit loggingContext =>
-      ResourceOwner
-        .forExecutorService(() => Executors.newCachedThreadPool())
-        .flatMap(servicesExecutor =>
-          new LedgerApiService(
-            apiServicesOwner = owner,
-            desiredPort = Port.Dynamic,
-            maxInboundMessageSize = DefaultMaxInboundMessageSize,
-            address = None,
-            tlsConfiguration = Some(serverTlsConfiguration),
-            servicesExecutor = servicesExecutor,
-            metrics = Metrics.ForTesting,
-          )
+    ResourceOwner
+      .forExecutorService(() => Executors.newCachedThreadPool())
+      .flatMap(servicesExecutor =>
+        new LedgerApiService(
+          apiServicesOwner = owner,
+          desiredPort = Port.Dynamic,
+          maxInboundMessageSize = DefaultMaxInboundMessageSize,
+          address = None,
+          tlsConfiguration = Some(serverTlsConfiguration),
+          servicesExecutor = servicesExecutor,
+          metrics = Metrics.ForTesting,
+          loggerFactory = loggerFactory,
         )
-    }
+      )
   }
 
   private val clientTlsConfiguration =

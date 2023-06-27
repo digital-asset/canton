@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.platform.localstore
 
-import com.daml.logging.LoggingContext
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
 import com.digitalasset.canton.platform.store.backend.localstore.ResourceVersionOps
 import org.scalatest.freespec.AsyncFreeSpec
@@ -140,7 +140,7 @@ trait ConcurrentChangeControlTests extends PersistentStoreSpecBase with Matchers
   private def inTransaction[T](thunk: Connection => T): Future[T] = {
     dbSupport.dbDispatcher
       .executeSql(DatabaseMetrics.ForTesting("concurrent change control"))(thunk)(
-        LoggingContext.ForTesting
+        LoggingContextWithTrace.ForTesting
       )
   }
 

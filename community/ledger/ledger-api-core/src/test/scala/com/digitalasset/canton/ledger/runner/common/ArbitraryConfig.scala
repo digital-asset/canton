@@ -102,7 +102,6 @@ object ArbitraryConfig {
     stackTraceMode = stackTraceMode,
     profileDir = None,
     contractKeyUniqueness = contractKeyUniqueness,
-    forbidV0ContractId = forbidV0ContractId,
     requireSuffixedGlobalContractId = requireSuffixedGlobalContractId,
     limits = limits,
   )

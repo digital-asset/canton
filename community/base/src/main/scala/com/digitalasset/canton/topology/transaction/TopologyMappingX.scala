@@ -636,7 +636,7 @@ object DomainTrustCertificateX {
 
 /* Participant domain permission
  */
-sealed trait ParticipantPermissionX {
+sealed trait ParticipantPermissionX extends Product with Serializable {
   def toProtoV2: v2.ParticipantPermissionX
   def toNonX: ParticipantPermission
 }

@@ -5,24 +5,33 @@ package com.digitalasset.canton.platform.store.dao.events
 
 import akka.stream.scaladsl.Source
 import akka.{Done, NotUsed}
-import com.daml.ledger.api.v1.active_contracts_service.GetActiveContractsResponse
-import com.daml.ledger.api.v1.transaction_service.{
-  GetFlatTransactionResponse,
+import com.daml.api.util.TimestampConversion
+import com.daml.ledger.api.v1.contract_metadata.ContractMetadata
+import com.daml.ledger.api.v1.event.CreatedEvent
+import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
+import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
-  GetTransactionTreesResponse,
-  GetTransactionsResponse,
+  GetTransactionTreeResponse,
+  GetUpdateTreesResponse,
+  GetUpdatesResponse,
 }
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
+import com.daml.lf.ledger.EventId
+import com.daml.lf.transaction.NodeId
 import com.daml.metrics.*
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawCreatedEvent
 import com.digitalasset.canton.platform.store.dao.{
   DbDispatcher,
   EventProjectionProperties,
   LedgerDaoTransactionsReader,
 }
+import com.digitalasset.canton.platform.store.serialization.Compression
 import com.digitalasset.canton.platform.{Identifier, Party, TemplatePartiesFilter}
+import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Span
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -59,13 +68,17 @@ private[dao] final class TransactionsReader(
       endInclusive: Offset,
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, GetTransactionsResponse), NotUsed] = {
+      multiDomainEnabled: Boolean,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val futureSource = getEventSeqIdRange(startExclusive, endInclusive)
       .map(queryRange =>
         flatTransactionsStreamReader.streamFlatTransactions(
           queryRange,
           filter,
           eventProjectionProperties,
+          multiDomainEnabled,
         )
       )
     Source
@@ -76,7 +89,7 @@ private[dao] final class TransactionsReader(
   override def lookupFlatTransactionById(
       transactionId: Ref.TransactionId,
       requestingParties: Set[Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetFlatTransactionResponse]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetTransactionResponse]] = {
     flatTransactionPointwiseReader.lookupTransactionById(
       transactionId = transactionId,
       requestingParties = requestingParties,
@@ -90,7 +103,9 @@ private[dao] final class TransactionsReader(
   override def lookupTransactionTreeById(
       transactionId: Ref.TransactionId,
       requestingParties: Set[Party],
-  )(implicit loggingContext: LoggingContext): Future[Option[GetTransactionResponse]] = {
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[GetTransactionTreeResponse]] = {
     treeTransactionPointwiseReader.lookupTransactionById(
       transactionId = transactionId,
       requestingParties = requestingParties,
@@ -106,15 +121,17 @@ private[dao] final class TransactionsReader(
       endInclusive: Offset,
       requestingParties: Set[Party],
       eventProjectionProperties: EventProjectionProperties,
+      multiDomainEnabled: Boolean,
   )(implicit
-      loggingContext: LoggingContext
-  ): Source[(Offset, GetTransactionTreesResponse), NotUsed] = {
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
     val futureSource = getEventSeqIdRange(startExclusive, endInclusive)
       .map(queryRange =>
         treeTransactionsStreamReader.streamTreeTransaction(
           queryRange = queryRange,
           requestingParties = requestingParties,
           eventProjectionProperties = eventProjectionProperties,
+          multiDomainEnabled = multiDomainEnabled,
         )
       )
     Source
@@ -126,13 +143,17 @@ private[dao] final class TransactionsReader(
       activeAt: Offset,
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
-  )(implicit loggingContext: LoggingContext): Source[GetActiveContractsResponse, NotUsed] = {
+      multiDomainEnabled: Boolean,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[GetActiveContractsResponse, NotUsed] = {
     val futureSource = getMaxAcsEventSeqId(activeAt)
       .map(maxSeqId =>
         acsReader.streamActiveContracts(
           filter,
           activeAt -> maxSeqId,
           eventProjectionProperties,
+          multiDomainEnabled,
         )
       )
     Source
@@ -141,7 +162,7 @@ private[dao] final class TransactionsReader(
   }
 
   private def getMaxAcsEventSeqId(activeAt: Offset)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Long] =
     dispatcher
       .executeSql(dbMetrics.getAcsEventSeqIdRange)(implicit connection =>
@@ -159,7 +180,7 @@ private[dao] final class TransactionsReader(
   private def getEventSeqIdRange(
       startExclusive: Offset,
       endInclusive: Offset,
-  )(implicit loggingContext: LoggingContext): Future[EventsRange] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[EventsRange] =
     dispatcher
       .executeSql(dbMetrics.getEventSeqIdRange)(implicit connection =>
         queryNonPruned.executeSql(
@@ -201,7 +222,7 @@ private[dao] object TransactionsReader {
   )(
       entry: EventStorageBackend.Entry[Raw[E]]
   )(implicit
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
       ec: ExecutionContext,
   ): Future[EventStorageBackend.Entry[E]] =
     deserializeEvent(eventProjectionProperties, lfValueTranslation)(entry).map(event =>
@@ -212,7 +233,7 @@ private[dao] object TransactionsReader {
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
   )(entry: EventStorageBackend.Entry[Raw[E]])(implicit
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
       ec: ExecutionContext,
   ): Future[E] =
     entry.event.applyDeserialization(lfValueTranslation, eventProjectionProperties)
@@ -246,4 +267,53 @@ private[dao] object TransactionsReader {
       .map(_._1)
       .fold(Vector.empty[A])(_ :+ _)
       .concatSubstreams
+
+  def deserializeRawCreatedEvent(
+      lfValueTranslation: LfValueTranslation,
+      eventProjectionProperties: EventProjectionProperties,
+  )(rawCreatedEvent: RawCreatedEvent)(implicit
+      lc: LoggingContextWithTrace,
+      ec: ExecutionContext,
+  ): Future[CreatedEvent] =
+    lfValueTranslation
+      .deserializeRaw(
+        createArgument = rawCreatedEvent.createArgument,
+        createArgumentCompression = Compression.Algorithm
+          .assertLookup(rawCreatedEvent.createArgumentCompression),
+        createKeyValue = rawCreatedEvent.createKeyValue,
+        createKeyValueCompression = Compression.Algorithm
+          .assertLookup(rawCreatedEvent.createKeyValueCompression),
+        templateId = rawCreatedEvent.templateId,
+        witnesses = rawCreatedEvent.witnessParties,
+        eventProjectionProperties = eventProjectionProperties,
+      )
+      .map(apiContractData =>
+        CreatedEvent(
+          eventId = EventId(
+            Ref.LedgerString.assertFromString(rawCreatedEvent.updateId),
+            NodeId(0), // all create Node ID is set synthetically to 0
+          ).toLedgerString,
+          contractId = rawCreatedEvent.contractId,
+          templateId = Some(
+            LfEngineToApi.toApiIdentifier(rawCreatedEvent.templateId)
+          ),
+          contractKey = apiContractData.contractKey,
+          createArguments = apiContractData.createArguments,
+          createArgumentsBlob = apiContractData.createArgumentsBlob,
+          interfaceViews = apiContractData.interfaceViews,
+          witnessParties = rawCreatedEvent.witnessParties.toList,
+          signatories = rawCreatedEvent.signatories.toList,
+          observers = rawCreatedEvent.observers.toList,
+          agreementText = rawCreatedEvent.agreementText,
+          metadata = Some(
+            ContractMetadata(
+              createdAt = Some(TimestampConversion.fromLf(rawCreatedEvent.ledgerEffectiveTime)),
+              contractKeyHash =
+                rawCreatedEvent.createKeyHash.fold(ByteString.EMPTY)(_.bytes.toByteString),
+              driverMetadata = ByteString.copyFrom(rawCreatedEvent.driverMetadata),
+            )
+          ),
+        )
+      )
+
 }

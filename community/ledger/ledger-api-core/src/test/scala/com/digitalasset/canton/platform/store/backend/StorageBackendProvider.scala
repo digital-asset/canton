@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
@@ -59,10 +60,15 @@ trait StorageBackendProvider {
   }
 }
 
-trait StorageBackendProviderPostgres extends StorageBackendProvider with PostgresAroundAll {
+trait StorageBackendProviderPostgres
+    extends StorageBackendProvider
+    with PostgresAroundAll
+    with BaseTest {
   this: Suite =>
   override protected def jdbcUrl: String = postgresDatabase.url
-  override protected val backend: TestBackend = TestBackend(PostgresStorageBackendFactory)
+  override protected val backend: TestBackend = TestBackend(
+    PostgresStorageBackendFactory(loggerFactory)
+  )
 }
 
 trait StorageBackendProviderH2 extends StorageBackendProvider { this: Suite =>

@@ -4,10 +4,11 @@
 package com.digitalasset.canton.platform.indexer.ha
 
 import akka.stream.KillSwitch
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend.{Lock, LockId, LockMode}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
 import java.util.Timer
@@ -65,8 +66,6 @@ final case class HaConfig(
 
 object HaCoordinator {
 
-  private val logger = ContextualizedLogger.get(this.getClass)
-
   /** This implementation of the HaCoordinator
     * - provides a database lock based isolation of the protected executions
     * - will run the execution at-most once during the entire lifecycle
@@ -84,12 +83,14 @@ object HaCoordinator {
       executionContext: ExecutionContext,
       timer: Timer,
       haConfig: HaConfig,
-  )(implicit loggingContext: LoggingContext): HaCoordinator = {
+      loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext): HaCoordinator = {
     implicit val ec: ExecutionContext = executionContext
 
+    val logger = TracedLogger(loggerFactory.getLogger(getClass))
     val indexerLockId = storageBackend.lock(haConfig.indexerLockId)
     val indexerWorkerLockId = storageBackend.lock(haConfig.indexerWorkerLockId)
-    val preemptableSequence = PreemptableSequence(timer)
+    val preemptableSequence = PreemptableSequence(timer, loggerFactory)
 
     new HaCoordinator {
       override def protectedExecution(
@@ -150,6 +151,7 @@ object HaCoordinator {
                 checkBody = acquireMainLock(mainConnection),
                 killSwitch =
                   handle.killSwitch, // meaning: this PollingChecker will shut down the main preemptableSequence
+                loggerFactory = loggerFactory,
               )
             )
             _ = logger.debug(

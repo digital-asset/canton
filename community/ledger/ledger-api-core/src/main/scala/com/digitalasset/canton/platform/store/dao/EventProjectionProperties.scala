@@ -78,33 +78,44 @@ object EventProjectionProperties {
     * @param interfaceImplementedBy The relation between an interface id and template id.
     *                               If template has no relation to the interface,
     *                               an empty Set must be returned.
+    * @param alwaysPopulateArguments If this flag is set, the witnessTemplate filter will
+    *                                be populated with all the parties, so that rendering of
+    *                                contract arguments and contract keys is always true.
     */
   def apply(
       transactionFilter: domain.TransactionFilter,
       verbose: Boolean,
       interfaceImplementedBy: Identifier => Set[Identifier],
+      alwaysPopulateArguments: Boolean,
   ): EventProjectionProperties =
     EventProjectionProperties(
       verbose = verbose,
-      witnessTemplateIdFilter = witnessTemplateIdFilter(transactionFilter),
+      witnessTemplateIdFilter = witnessTemplateIdFilter(transactionFilter, alwaysPopulateArguments),
       witnessInterfaceViewFilter =
         witnessInterfaceViewFilter(transactionFilter, interfaceImplementedBy),
     )
 
   private def witnessTemplateIdFilter(
-      domainTransactionFilter: domain.TransactionFilter
-  ): Map[String, Set[Identifier]] =
-    domainTransactionFilter.filtersByParty.iterator
-      .map { case (party, filters) => (party.toString, filters) }
-      .collect {
-        case (party, Filters(None)) => party -> Set.empty[Identifier]
-        case (party, Filters(Some(empty)))
-            if empty.templateIds.isEmpty && empty.interfaceFilters.isEmpty =>
-          party -> Set.empty[Identifier]
-        case (party, Filters(Some(nonEmptyFilter))) if nonEmptyFilter.templateIds.nonEmpty =>
-          party -> nonEmptyFilter.templateIds
-      }
-      .toMap
+      domainTransactionFilter: domain.TransactionFilter,
+      alwaysPopulateArguments: Boolean,
+  ): Map[String, Set[Identifier]] = {
+    if (alwaysPopulateArguments)
+      domainTransactionFilter.filtersByParty.keysIterator
+        .map(_.toString -> Set.empty[Identifier])
+        .toMap
+    else
+      domainTransactionFilter.filtersByParty.iterator
+        .map { case (party, filters) => (party.toString, filters) }
+        .collect {
+          case (party, Filters(None)) => party -> Set.empty[Identifier]
+          case (party, Filters(Some(empty)))
+              if empty.templateIds.isEmpty && empty.interfaceFilters.isEmpty =>
+            party -> Set.empty[Identifier]
+          case (party, Filters(Some(nonEmptyFilter))) if nonEmptyFilter.templateIds.nonEmpty =>
+            party -> nonEmptyFilter.templateIds
+        }
+        .toMap
+  }
 
   private def witnessInterfaceViewFilter(
       domainTransactionFilter: domain.TransactionFilter,

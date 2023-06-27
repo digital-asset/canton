@@ -11,8 +11,8 @@ import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.Transaction as LfTransaction
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.ContextualizedLogger
+import com.daml.logging.entries.LoggingEntry
 import com.daml.metrics.Timed
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.offset.Offset
@@ -27,6 +27,7 @@ import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckingLe
 import com.digitalasset.canton.ledger.sandbox.domain.Rejection
 import com.digitalasset.canton.ledger.sandbox.domain.Rejection.*
 import com.digitalasset.canton.ledger.sandbox.domain.Submission.Transaction
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -41,6 +42,9 @@ private[validate] class ConflictCheckWithCommittedImpl(
     extends ConflictCheckWithCommitted {
   private[this] implicit val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
 
+  private def toSubmissionId(id: Ref.SubmissionId): LoggingEntry =
+    "submissionId" -> id
+
   override def apply(
       in: Validation[(Offset, PreparedSubmission)]
   ): AsyncValidation[(Offset, PreparedSubmission)] = in match {
@@ -48,14 +52,15 @@ private[validate] class ConflictCheckWithCommittedImpl(
     case Right(input @ (_, transactionSubmission: PreparedTransactionSubmission)) =>
       val submissionId = transactionSubmission.submission.submissionId
 
-      withEnrichedLoggingContext("submissionId" -> submissionId) { implicit loggingContext =>
-        withErrorLogger(Some(submissionId)) { implicit errorLogger =>
-          Timed
-            .future(
-              bridgeMetrics.Stages.ConflictCheckWithCommitted.timer,
-              validate(transactionSubmission).map(_.map(_ => input)),
-            )
-        }
+      LoggingContextWithTrace.withEnrichedLoggingContext(toSubmissionId(submissionId)) {
+        implicit loggingContext: LoggingContextWithTrace =>
+          withErrorLogger(Some(submissionId)) { implicit errorLogger =>
+            Timed
+              .future(
+                bridgeMetrics.Stages.ConflictCheckWithCommitted.timer,
+                validate(transactionSubmission).map(_.map(_ => input)),
+              )
+          }
       }(transactionSubmission.submission.loggingContext)
 
     case Right(validated) => Future.successful(Right(validated))
@@ -65,7 +70,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
       inputSubmission: PreparedTransactionSubmission
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): Future[Either[Rejection, Unit]] = {
     import inputSubmission.*
 
@@ -135,7 +140,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
   private def validateKeyUsages(
       transactionInformees: Set[Ref.Party],
       keyInputs: KeyInputs,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
       completionInfo: CompletionInfo,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -162,7 +167,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
       completionInfo: CompletionInfo,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): EitherT[Future, Rejection, Unit] =
     // Validation fails fast on the first unknown/invalid contract.
     processedDisclosedContracts.toList.collectFirstSomeM { processedDisclosedContract =>
@@ -179,7 +184,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
       completionInfo: CompletionInfo,
   )(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger,
-      loggingContext: LoggingContext,
+      loggingContext: LoggingContextWithTrace,
   ): EitherT[Future, Rejection, Unit] =
     EitherT(
       indexService

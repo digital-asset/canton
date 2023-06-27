@@ -10,7 +10,6 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParametersWithValidity
@@ -220,7 +219,7 @@ class StoreBasedTopologySnapshotX(
       participantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
   ): Future[PartyInfo] =
     loadBatchActiveParticipantsOf(Seq(party), participantStates).map(
-      _.getOrElse(party, PartyInfo(false, PositiveInt.one, Map.empty))
+      _.getOrElse(party, PartyInfo.EmptyPartyInfo)
     )
 
   override private[client] def loadBatchActiveParticipantsOf(
@@ -298,12 +297,9 @@ class StoreBasedTopologySnapshotX(
           participantToAttributesMap
             .get(participantId)
             .map(attrs =>
-              participantId.adminParty -> PartyInfo(
-                // participant admin parties are never consortium parties
-                groupAddressing = false,
-                threshold = PositiveInt.one,
-                Map(participantId -> attrs),
-              )
+              // participant admin parties are never consortium parties
+              participantId.adminParty -> PartyInfo
+                .nonConsortiumPartyInfo(Map(participantId -> attrs))
             )
         )
         .toMap
@@ -312,7 +308,7 @@ class StoreBasedTopologySnapshotX(
       // by loadParticipantStates, filter out participants with "empty" permissions and transitively
       // parties whose participants have all been filtered out this way.
       // this can only affect participants that have left the domain
-      result = {
+      partiesToPartyInfos = {
         val p2pMappings = partyToParticipantMap.toSeq.mapFilter {
           case (partyId, (groupAddressing, threshold, participantToPermissionsMap)) =>
             val participantIdToAttribs = participantToPermissionsMap.toSeq.mapFilter {
@@ -343,7 +339,14 @@ class StoreBasedTopologySnapshotX(
             case x @ (adminPartyId, _) if !p2pMappings.contains(adminPartyId) => x
           }
       }
-    } yield result
+      // For each party we must return a result to satisfy the expectations of the
+      // calling CachingTopologySnapshot's caffeine partyCache per findings in #11598.
+      // This includes parties not found in the topology store or parties filtered out
+      // above, e.g. parties whose participants have left the domain.
+      fullySpecifiedPartyMap = parties.map { party =>
+        party -> partiesToPartyInfos.getOrElse(party, PartyInfo.EmptyPartyInfo)
+      }.toMap
+    } yield fullySpecifiedPartyMap
   }
 
   /** returns the list of currently known mediator groups */

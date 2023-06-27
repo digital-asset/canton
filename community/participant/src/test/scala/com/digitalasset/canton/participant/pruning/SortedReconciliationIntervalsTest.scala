@@ -499,7 +499,9 @@ private[pruning] object SortedReconciliationIntervalsTestHelpers extends EitherV
 
     times.foldLeft((None: Option[CantonTimestampSecond], Seq.empty[CommitmentPeriod])) {
       case ((lastTick, periods), ts) =>
-        reconciliationIntervals.commitmentPeriodPreceding(lastTick)(ts).value match {
+        reconciliationIntervals.tickBefore(ts).flatMap { periodEnd =>
+          reconciliationIntervals.commitmentPeriodPreceding(periodEnd, lastTick)
+        } match {
           case Some(period) => (Some(period.toInclusive), periods :+ period)
           case None => (lastTick, periods)
         }

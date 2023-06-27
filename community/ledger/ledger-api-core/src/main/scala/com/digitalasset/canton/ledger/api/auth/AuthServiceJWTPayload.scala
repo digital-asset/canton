@@ -7,6 +7,7 @@ import org.slf4j.{Logger, LoggerFactory}
 import spray.json.*
 
 import java.time.Instant
+import scala.util.Try
 
 /** All the JWT payloads that can be used with the JWT auth service. */
 sealed abstract class AuthServiceJWTPayload extends Product with Serializable
@@ -208,6 +209,12 @@ object AuthServiceJWTCodec {
         s"Could not read ${value.prettyPrint} as AuthServiceJWTPayload: value is not an object"
       )
   }
+
+  def readFromString(value: String): Try[AuthServiceJWTPayload] =
+    for {
+      json <- Try(value.parseJson)
+      parsed <- Try(readPayload(json))
+    } yield parsed
 
   def readPayload(value: JsValue): AuthServiceJWTPayload = value match {
     case JsObject(fields) =>

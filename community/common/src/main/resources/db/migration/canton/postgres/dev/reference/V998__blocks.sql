@@ -3,7 +3,7 @@
 -- Proprietary code. All rights reserved.
 
 create table blocks (
-    id bigserial primary key,
+    id bigint primary key,
     event bytea not null,
     uuid varchar(36) collate "C" unique not null
 );

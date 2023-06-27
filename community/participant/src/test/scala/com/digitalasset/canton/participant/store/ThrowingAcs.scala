@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
@@ -19,6 +18,7 @@ import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDom
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
+import com.digitalasset.canton.{RequestCounter, TransferCounterO}
 
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -38,7 +38,7 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
     CheckedT(Future.failed[M](mk(s"archiveContracts for $contractIds at $toc")))
 
   override def transferInContracts(
-      transferIns: Seq[(LfContractId, SourceDomainId)],
+      transferIns: Seq[(LfContractId, SourceDomainId, TransferCounterO)],
       toc: TimeOfChange,
   )(implicit
       traceContext: TraceContext
@@ -46,7 +46,7 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
     CheckedT(Future.failed[M](mk(s"transferInContracts for $transferIns at $toc")))
 
   override def transferOutContracts(
-      transferOuts: Seq[(LfContractId, TargetDomainId)],
+      transferOuts: Seq[(LfContractId, TargetDomainId, TransferCounterO)],
       toc: TimeOfChange,
   )(implicit
       traceContext: TraceContext

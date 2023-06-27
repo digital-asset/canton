@@ -4,11 +4,12 @@
 package com.digitalasset.canton.platform.store.cache
 
 import com.daml.lf.transaction.GlobalKey
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2
 import com.digitalasset.canton.ledger.participant.state.index.v2.ContractStore
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.*
 import com.digitalasset.canton.platform.store.cache.ContractStateValue.*
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.*
@@ -27,21 +28,21 @@ import scala.util.{Failure, Success}
 private[platform] class MutableCacheBackedContractStore(
     metrics: Metrics,
     contractsReader: LedgerDaoContractsReader,
+    val loggerFactory: NamedLoggerFactory,
     private[cache] val contractStateCaches: ContractStateCaches,
 )(implicit executionContext: ExecutionContext)
-    extends ContractStore {
-
-  private val logger = ContextualizedLogger.get(getClass)
+    extends ContractStore
+    with NamedLogging {
 
   override def lookupActiveContract(readers: Set[Party], contractId: ContractId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[Contract]] =
     lookupContractStateValue(contractId)
       .flatMap(contractStateToResponse(readers, contractId))
 
   override def lookupContractStateWithoutDivulgence(
       contractId: ContractId
-  )(implicit loggingContext: LoggingContext): Future[v2.ContractState] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[v2.ContractState] =
     lookupContractStateValue(contractId)
       .map {
         case active: Active =>
@@ -52,14 +53,14 @@ private[platform] class MutableCacheBackedContractStore(
 
   private def lookupContractStateValue(
       contractId: ContractId
-  )(implicit loggingContext: LoggingContext): Future[ContractStateValue] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractStateValue] =
     contractStateCaches.contractState
       .get(contractId)
       .map(Future.successful)
       .getOrElse(readThroughContractsCache(contractId))
 
   override def lookupContractKey(readers: Set[Party], key: GlobalKey)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractId]] =
     contractStateCaches.keyState
       .get(key)
@@ -68,7 +69,7 @@ private[platform] class MutableCacheBackedContractStore(
       .map(keyStateToResponse(_, readers))
 
   private def readThroughContractsCache(contractId: ContractId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[ContractStateValue] = {
     val readThroughRequest =
       (validAt: Offset) =>
@@ -105,7 +106,7 @@ private[platform] class MutableCacheBackedContractStore(
   private def contractStateToResponse(readers: Set[Party], contractId: ContractId)(
       value: ContractStateValue
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[Contract]] =
     value match {
       case Active(contract, stakeholders, _) if nonEmptyIntersection(stakeholders, readers) =>
@@ -126,7 +127,7 @@ private[platform] class MutableCacheBackedContractStore(
       contractId: ContractId,
       forParties: Set[Party],
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[Contract]] =
     contractStateValue match {
       case Active(contract, _, _) =>
@@ -163,7 +164,7 @@ private[platform] class MutableCacheBackedContractStore(
 
   private def readThroughKeyCache(
       key: GlobalKey
-  )(implicit loggingContext: LoggingContext): Future[ContractKeyStateValue] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyStateValue] = {
     val readThroughRequest = (validAt: Offset) =>
       contractsReader.lookupKeyState(key, validAt).map(toKeyCacheValue)
     contractStateCaches.keyState.putAsync(key, readThroughRequest)

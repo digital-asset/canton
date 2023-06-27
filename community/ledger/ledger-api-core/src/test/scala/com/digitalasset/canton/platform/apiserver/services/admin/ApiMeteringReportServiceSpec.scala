@@ -8,8 +8,10 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.daml.logging.LoggingContext
 import com.daml.tracing.NoOpTelemetry
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.meteringreport.HmacSha256.{Bytes, Key}
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportGenerator
 import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportKey.{
@@ -18,7 +20,6 @@ import com.digitalasset.canton.platform.apiserver.meteringreport.MeteringReportK
 }
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiMeteringReportService.toProtoTimestamp
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.temporal.ChronoUnit
@@ -27,9 +28,9 @@ import scala.concurrent.Future
 
 class ApiMeteringReportServiceSpec
     extends AsyncWordSpec
-    with Matchers
     with MockitoSugar
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
 
   private val someParticipantId = Ref.ParticipantId.assertFromString("test-participant")
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
@@ -58,6 +59,7 @@ class ApiMeteringReportServiceSpec
           store,
           CommunityKey,
           NoOpTelemetry,
+          loggerFactory,
           () => expectedGenTime,
         )
 
@@ -73,7 +75,11 @@ class ApiMeteringReportServiceSpec
           expectedGenTime,
         )
 
-      when(store.getMeteringReportData(eqTo(from), eqTo(None), eqTo(None))(any[LoggingContext]))
+      when(
+        store.getMeteringReportData(eqTo(from), eqTo(None), eqTo(None))(
+          any[LoggingContextWithTrace]
+        )
+      )
         .thenReturn(Future.successful(reportData))
 
       underTest.getMeteringReport(request).map { actual =>
@@ -94,6 +100,7 @@ class ApiMeteringReportServiceSpec
           store,
           CommunityKey,
           NoOpTelemetry,
+          loggerFactory,
           () => expectedGenTime,
         )
 
@@ -116,7 +123,7 @@ class ApiMeteringReportServiceSpec
 
       when(
         store.getMeteringReportData(eqTo(from), eqTo(Some(to)), eqTo(Some(appId)))(
-          any[LoggingContext]
+          any[LoggingContextWithTrace]
         )
       )
         .thenReturn(Future.successful(reportData))
@@ -133,6 +140,7 @@ class ApiMeteringReportServiceSpec
           mock[MeteringStore],
           CommunityKey,
           NoOpTelemetry,
+          loggerFactory,
         )
       val request = GetMeteringReportRequest.defaultInstance
       underTest.getMeteringReport(request).failed.map { _ => succeed }
@@ -145,6 +153,7 @@ class ApiMeteringReportServiceSpec
           mock[MeteringStore],
           CommunityKey,
           NoOpTelemetry,
+          loggerFactory,
         )
 
       val nonBoundaryFrom = Timestamp.assertFromInstant(fromUtc.plusSeconds(1).toInstant)
@@ -162,6 +171,7 @@ class ApiMeteringReportServiceSpec
           mock[MeteringStore],
           EnterpriseKey(Key("bad", Bytes(Array.empty[Byte]), "bad")),
           NoOpTelemetry,
+          loggerFactory,
         )
       val request = GetMeteringReportRequest.defaultInstance
       underTest.getMeteringReport(request).failed.map { _ => succeed }

@@ -11,7 +11,6 @@ import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
@@ -23,7 +22,6 @@ import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, Trans
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.LedgerTime
-import com.digitalasset.canton.tracing.TraceContext
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -39,7 +37,7 @@ class LedgerTimeAwareCommandExecutorSpec
     with ArgumentMatchersSugar {
 
   private val loggingContext =
-    LoggingContextWithTrace(TraceContext.empty)(LoggingContext.ForTesting)
+    LoggingContextWithTrace.ForTesting
 
   private val submissionSeed = Hash.hashPrivateKey("a key")
   private val configuration = Configuration(
@@ -124,7 +122,7 @@ class LedgerTimeAwareCommandExecutorSpec
           eqTo(processedDisclosedContracts),
           any[Set[ContractId]],
         )(
-          any[LoggingContext]
+          any[LoggingContextWithTrace]
         )
       )
         .thenReturn(Future.successful(resolveMaximumLedgerTimeResults.head))

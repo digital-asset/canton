@@ -13,7 +13,6 @@ import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.transaction.{CommittedTransaction, TransactionNodeStatistics}
 import com.daml.lf.value.Value
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.configuration.{
   Configuration,
@@ -27,8 +26,9 @@ import com.digitalasset.canton.ledger.participant.state.v2.{
   TransactionMeta,
   Update,
 }
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext.wrapWithNewTraceContext
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import java.time.Instant
 import scala.concurrent.blocking
@@ -42,12 +42,12 @@ import scala.concurrent.blocking
 final case class EndlessReadService(
     updatesPerSecond: Int,
     name: String,
-)(implicit loggingContext: LoggingContext)
+    loggerFactory: NamedLoggerFactory,
+)(implicit traceContext: TraceContext)
     extends ReadService
+    with NamedLogging
     with AutoCloseable {
   import EndlessReadService.*
-
-  private val logger = ContextualizedLogger.get(this.getClass)
 
   override def currentHealth(): HealthStatus = blocking(
     synchronized(
@@ -76,7 +76,7 @@ final case class EndlessReadService(
     */
   override def stateUpdates(
       beginAfter: Option[Offset]
-  )(implicit loggingContext: LoggingContext): Source[(Offset, Traced[Update]), NotUsed] =
+  )(implicit traceContext: TraceContext): Source[(Offset, Traced[Update]), NotUsed] =
     blocking(synchronized {
       logger.info(s"EndlessReadService.stateUpdates($beginAfter) called")
       stateUpdatesCalls += 1
@@ -115,6 +115,7 @@ final case class EndlessReadService(
               recordTime = recordTime(i),
               divulgedContracts = List.empty,
               blindingInfo = None,
+              hostedWitnesses = Nil,
               contractMetadata = Map.empty,
             )
           case i =>
@@ -126,6 +127,7 @@ final case class EndlessReadService(
               recordTime = recordTime(i),
               divulgedContracts = List.empty,
               blindingInfo = None,
+              hostedWitnesses = Nil,
               contractMetadata = Map.empty,
             )
         }

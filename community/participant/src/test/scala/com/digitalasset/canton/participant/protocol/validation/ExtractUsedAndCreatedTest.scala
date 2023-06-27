@@ -62,7 +62,7 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
         Map(singleCreate.contractId -> singleCreate.created.headOption)
       ),
       keys = emptyInputAndUpdateKeys,
-      hostedInformeeStakeholders = informeeParties,
+      hostedWitnesses = informeeParties,
     )
 
     "match" in {
@@ -91,7 +91,6 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
             serializedContract.rawContractInstance.contractHash,
           )
         ),
-        hostedInformeeStakeholders = informeeParties,
         contractIdsOfHostedInformeeStakeholder = Set(singleExercise.contractId),
       )
 
@@ -117,7 +116,6 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
         used = Map(singleExercise.contractId -> serializedContract),
         divulged = Map(singleExercise.contractId -> serializedContract),
         consumedOfHostedStakeholders = Map.empty,
-        hostedInformeeStakeholders = Set.empty,
         contractIdsOfHostedInformeeStakeholder = Set.empty,
       )
 
@@ -139,7 +137,6 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
       val expected = CreatedContractPrep(
         createdContractsOfHostedInformees =
           Map(singleCreate.contractId -> singleCreate.created.headOption),
-        hostedInformeeStakeholders = informeeParties,
         witnessed = Map.empty,
       )
 
@@ -161,7 +158,6 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
 
       val expected = CreatedContractPrep(
         createdContractsOfHostedInformees = Map.empty,
-        Set.empty,
         witnessed = Map(singleCreate.contractId -> singleCreate.created.head),
       )
 

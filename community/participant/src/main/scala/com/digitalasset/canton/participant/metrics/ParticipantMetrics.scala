@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
+import com.daml.http.metrics.HttpApiMetrics
 import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Meter}
@@ -43,6 +44,10 @@ class ParticipantMetrics(
   @nowarn("cat=deprecation")
   val ledgerApiServer: LedgerApiServerMetrics =
     new LedgerApiServerMetrics(metricsFactory, labeledMetricsFactory, registry)
+
+  @nowarn("cat=deprecation")
+  val httpApiServer: HttpApiMetrics =
+    new HttpApiMetrics(metricsFactory, labeledMetricsFactory)
 
   private val clients = TrieMap[DomainAlias, SyncDomainMetrics]()
 

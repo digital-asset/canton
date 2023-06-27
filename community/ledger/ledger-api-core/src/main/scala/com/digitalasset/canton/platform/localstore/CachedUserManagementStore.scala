@@ -5,12 +5,12 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.UserId
-import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User}
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.localstore.CachedUserManagementStore.CacheKey
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.{Result, UserInfo}
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}
@@ -25,7 +25,7 @@ class CachedUserManagementStore(
     expiryAfterWriteInSeconds: Int,
     maximumCacheSize: Int,
     metrics: Metrics,
-)(implicit val executionContext: ExecutionContext, loggingContext: LoggingContext)
+)(implicit val executionContext: ExecutionContext, loggingContext: LoggingContextWithTrace)
     extends UserManagementStore {
 
   private val cache: CaffeineCache.AsyncLoadingCaffeineCache[CacheKey, Result[UserInfo]] =
@@ -43,13 +43,13 @@ class CachedUserManagementStore(
     )
 
   override def getUserInfo(id: UserId, identityProviderId: IdentityProviderId)(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[UserManagementStore.UserInfo]] = {
     cache.get(CacheKey(id, identityProviderId))
   }
 
   override def createUser(user: User, rights: Set[domain.UserRight])(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[User]] =
     delegate
       .createUser(user, rights)
@@ -57,7 +57,7 @@ class CachedUserManagementStore(
 
   override def updateUser(
       userUpdate: UserUpdate
-  )(implicit loggingContext: LoggingContext): Future[Result[User]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] = {
     delegate
       .updateUser(userUpdate)
       .andThen(invalidateOnSuccess(CacheKey(userUpdate.id, userUpdate.identityProviderId)))
@@ -66,7 +66,7 @@ class CachedUserManagementStore(
   override def deleteUser(
       id: UserId,
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[Unit]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Unit]] = {
     delegate
       .deleteUser(id, identityProviderId)
       .andThen(invalidateOnSuccess(CacheKey(id, identityProviderId)))
@@ -76,7 +76,7 @@ class CachedUserManagementStore(
       id: UserId,
       rights: Set[domain.UserRight],
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[Set[domain.UserRight]]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[domain.UserRight]]] = {
     delegate
       .grantRights(id, rights, identityProviderId)
       .andThen(invalidateOnSuccess(CacheKey(id, identityProviderId)))
@@ -86,7 +86,7 @@ class CachedUserManagementStore(
       id: UserId,
       rights: Set[domain.UserRight],
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[Set[domain.UserRight]]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[domain.UserRight]]] = {
     delegate
       .revokeRights(id, rights, identityProviderId)
       .andThen(invalidateOnSuccess(CacheKey(id, identityProviderId)))
@@ -97,7 +97,7 @@ class CachedUserManagementStore(
       maxResults: Int,
       identityProviderId: IdentityProviderId,
   )(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Result[UserManagementStore.UsersPage]] =
     delegate.listUsers(fromExcl, maxResults, identityProviderId)
 
@@ -105,7 +105,7 @@ class CachedUserManagementStore(
       id: UserId,
       sourceIdp: IdentityProviderId,
       targetIdp: IdentityProviderId,
-  )(implicit loggingContext: LoggingContext): Future[Result[User]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] = {
     val keyToInvalidate = CacheKey(id, sourceIdp)
     delegate
       .updateUserIdp(id, sourceIdp = sourceIdp, targetIdp = targetIdp)

@@ -29,7 +29,7 @@ private[backend] trait StorageBackendTestsContracts
       dtoCompletion(offset(1)),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(1), 1L)
@@ -62,7 +62,7 @@ private[backend] trait StorageBackendTestsContracts
       dtoCompletion(offset(2)),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(2), 2L)
@@ -89,7 +89,7 @@ private[backend] trait StorageBackendTestsContracts
       dtoCompletion(offset(1)),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(1), 1L)
@@ -125,7 +125,7 @@ private[backend] trait StorageBackendTestsContracts
       dtoCompletion(offset(2)),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(2), 2L)
@@ -163,7 +163,7 @@ private[backend] trait StorageBackendTestsContracts
       dtoCompletion(offset(3)),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(3), 3L)

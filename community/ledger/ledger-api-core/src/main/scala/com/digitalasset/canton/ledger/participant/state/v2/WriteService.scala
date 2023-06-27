@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.ledger.participant.state.v2
 
-import com.daml.lf.data.ImmArray
+import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
-import com.daml.logging.LoggingContext
-import com.daml.tracing.TelemetryContext
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.health.ReportsHealth
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.CompletionStage
 
@@ -111,7 +110,37 @@ trait WriteService
       globalKeyMapping: Map[GlobalKey, Option[Value.ContractId]],
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
   )(implicit
-      loggingContext: LoggingContext,
-      telemetryContext: TelemetryContext,
+      traceContext: TraceContext
+  ): CompletionStage[SubmissionResult]
+
+  /** Submit a reassignment command for acceptance to the ledger.
+    *
+    * To complete a reassignment, first a submission of an unassign command followed by an assign
+    * command is required. The [[com.digitalasset.canton.ledger.participant.state.v2.ReassignmentCommand.Assign]] command must include the unassign ID which can be
+    * observed in the accepted event marking the corresponding successful unassign command.
+    *
+    * @param submitter           The submitter of the reassignment.
+    * @param applicationId       An identifier for the Daml application that
+    *                            submitted the command. This is used for monitoring, command
+    *                            deduplication, and to allow Daml applications subscribe to their own
+    *                            submissions only.
+    * @param commandId           A submitter-provided identifier to identify an intended ledger change
+    *                            within all the submissions by the same parties and application.
+    * @param submissionId        An identifier for the submission that allows an application to
+    *                            correlate completions to its submissions.
+    * @param workflowId          A submitter-provided identifier used for monitoring
+    *                            and to traffic-shape the work handled by Daml applications
+    *                            communicating over the ledger.
+    * @param reassignmentCommand The command specifying this reassignment further.
+    */
+  def submitReassignment(
+      submitter: Ref.Party,
+      applicationId: Ref.ApplicationId,
+      commandId: Ref.CommandId,
+      submissionId: Option[Ref.SubmissionId],
+      workflowId: Option[Ref.WorkflowId],
+      reassignmentCommand: ReassignmentCommand,
+  )(implicit
+      traceContext: TraceContext
   ): CompletionStage[SubmissionResult]
 }

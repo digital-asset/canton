@@ -94,6 +94,7 @@ message TransactionAccepted {
   repeated DivulgedContract divulged_contracts = 6;
   BlindingInfo blinding_info = 7; // optional
   map<string, bytes> contract_metadata = 8; //optional
+  repeated string hosted_witnesses = 9; // not empty in case multi-domain deployment, empty otherwise
 }
 
 message CompletionInfo {
@@ -170,6 +171,7 @@ message TransferredOut {
   string template_id = 11; // optional
   bool is_transferring_participant = 12;
   repeated string hosted_stakeholders = 13;
+  int64 transfer_counter = 14;
 }
 
 message TransferredIn {
@@ -187,4 +189,5 @@ message TransferredIn {
   string workflow_id = 12; // optional
   bool is_transferring_participant = 13;
   repeated string hosted_stakeholders = 14;
+  int64 transfer_counter = 15;
 }

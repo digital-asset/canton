@@ -332,10 +332,10 @@ class AcsCommitmentProcessor(
 
     def processCompletedPeriod(
         snapshot: RunningCommitments
-    )(completedPeriod: CommitmentPeriod): Future[Unit] = {
+    )(completedPeriod: CommitmentPeriod, cryptoSnapshot: SyncCryptoApi): Future[Unit] = {
       val snapshotRes = snapshot.snapshot()
       for {
-        msgs <- commitmentMessages(completedPeriod, snapshotRes.active)
+        msgs <- commitmentMessages(completedPeriod, snapshotRes.active, cryptoSnapshot)
         _ <- storeAndSendCommitmentMessages(completedPeriod, msgs)
         _ <- store.markOutstanding(completedPeriod, msgs.keySet)
         _ <- persistRunningCommitments(snapshotRes)
@@ -358,18 +358,20 @@ class AcsCommitmentProcessor(
     }
 
     def performPublish(
-        snapshot: RunningCommitments,
+        acsSnapshot: RunningCommitments,
         reconciliationIntervals: SortedReconciliationIntervals,
+        cryptoSnapshotO: Option[SyncCryptoApi],
+        periodEndO: Option[CantonTimestampSecond],
     ): FutureUnlessShutdown[Unit] = {
       // Check whether this change pushes us to a new commitment period; if so, the previous one is completed
-      val optCompletedPeriod = reconciliationIntervals
-        .commitmentPeriodPreceding(endOfLastProcessedPeriod)(toc.timestamp)
-        .tapLeft { err =>
-          logger.info(
-            s"Unable to compute commitment period preceding ${toc.timestamp}: $err. Keeping the current period"
-          )
-        }
-        .getOrElse(None)
+      val completedPeriodAndCryptoO = for {
+        periodEnd <- periodEndO
+        completedPeriod <- reconciliationIntervals
+          .commitmentPeriodPreceding(periodEnd, endOfLastProcessedPeriod)
+        cryptoSnapshot <- cryptoSnapshotO
+      } yield {
+        (completedPeriod, cryptoSnapshot)
+      }
 
       for {
         // Important invariant:
@@ -380,37 +382,42 @@ class AcsCommitmentProcessor(
         //   otherwise, we lose the ability to compute the commitments at t'
         // Hence, the order here is critical for correctness; if the change moves us beyond t', first compute
         // the commitments at t', and only then update the snapshot
-        _ <- optCompletedPeriod.traverse_(commitmentPeriod =>
+        _ <- completedPeriodAndCryptoO.traverse_ { case (commitmentPeriod, cryptoSnapshot) =>
           performUnlessClosingF(functionFullName)(
-            processCompletedPeriod(snapshot)(commitmentPeriod)
+            processCompletedPeriod(acsSnapshot)(commitmentPeriod, cryptoSnapshot)
           )
-        )
+        }
 
         _ <- FutureUnlessShutdown.outcomeF(updateSnapshot(toc, acsChange))
       } yield ()
     }
 
-    // On the `publishQueue`, obtain the running commitment and the reconciliation parameters on the `publishQueue`
+    // On the `publishQueue`, obtain the running commitment, the reconciliation parameters, and topology snapshot,
     // and check whether this is a replay of something we've already seen. If not, then do publish the change,
     // which runs on the `dbQueue`.
     val fut = publishQueue
       .executeUS(
         for {
-          snapshot <- performUnlessClosingF(functionFullName)(runningCommitments)
+          acsSnapshot <- performUnlessClosingF(functionFullName)(runningCommitments)
           reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
+          periodEndO = reconciliationIntervals
+            .tickBefore(toc.timestamp)
+          cryptoSnapshotO <- periodEndO.traverse(periodEnd =>
+            domainCrypto.awaitSnapshotUS(periodEnd.forgetRefinement)
+          )
         } yield {
-          if (snapshot.watermark >= toc) {
+          if (acsSnapshot.watermark >= toc) {
             logger.debug(s"ACS change at $toc is a replay, treating it as a no-op")
             // This is a replay of an already processed ACS change, ignore
             FutureUnlessShutdown.unit
           } else {
-            // Serialize the access to the DB only after having obtained the reconciliation interval.
-            // During crash recovery, the topology client may only be able to serve the intervals
+            // Serialize the access to the DB only after having obtained the reconciliation intervals and topology snapshot.
+            // During crash recovery, the topology client may only be able to serve the intervals and snapshots
             // for re-published ACS changes after some messages have been processed,
             // which may include ACS commitments that go through the same queue.
             dbQueue.executeUS(
               Policy.noisyInfiniteRetryUS(
-                performPublish(snapshot, reconciliationIntervals),
+                performPublish(acsSnapshot, reconciliationIntervals, cryptoSnapshotO, periodEndO),
                 this,
                 timeouts.storageMaxRetryInterval.asFiniteApproximation,
                 s"publish ACS change at $toc",
@@ -720,6 +727,7 @@ class AcsCommitmentProcessor(
   private def commitmentMessages(
       period: CommitmentPeriod,
       commitmentSnapshot: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
+      cryptoSnapshot: SyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): Future[Map[ParticipantId, SignedProtocolMessage[AcsCommitment]]] = {
@@ -727,7 +735,6 @@ class AcsCommitmentProcessor(
       s"Computing commitments for $period, number of stakeholder sets: ${commitmentSnapshot.keySet.size}"
     )
     for {
-      crypto <- domainCrypto.awaitSnapshot(period.toInclusive.forgetRefinement)
       cmts <- commitments(
         participantId,
         commitmentSnapshot,
@@ -739,7 +746,7 @@ class AcsCommitmentProcessor(
       msgs <- cmts
         .collect {
           case (counterParticipant, cmt) if LtHash16.isNonEmptyCommitment(cmt) =>
-            signCommitment(crypto, counterParticipant, cmt, period).map(msg =>
+            signCommitment(cryptoSnapshot, counterParticipant, cmt, period).map(msg =>
               (counterParticipant, msg)
             )
         }

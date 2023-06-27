@@ -4,7 +4,9 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.ledger.resources.ResourceContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.FlywayMigrations
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, TestSuite}
 
@@ -17,12 +19,13 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Try, Using}
 
 trait StorageBackendSpec
-    extends StorageBackendProvider
+    extends BaseTest
+    with StorageBackendProvider
     with BeforeAndAfterEach
     with BeforeAndAfterAll {
   this: TestSuite =>
 
-  protected val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
+  override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
   implicit protected val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   // Data source (initialized once)
@@ -77,11 +80,10 @@ trait StorageBackendSpec
     // Note: reusing the connection pool EC for initialization
     implicit val ec: ExecutionContext = connectionPoolExecutionContext
     implicit val resourceContext: ResourceContext = ResourceContext(ec)
-    implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
     val dataSourceFuture = for {
-      _ <- new FlywayMigrations(jdbcUrl).migrate()
-      dataSource <- VerifiedDataSource(jdbcUrl)
+      _ <- new FlywayMigrations(jdbcUrl, loggerFactory = loggerFactory).migrate()
+      dataSource <- VerifiedDataSource(jdbcUrl, loggerFactory = loggerFactory)
     } yield dataSource
 
     dataSource = Await.result(dataSourceFuture, 60.seconds)

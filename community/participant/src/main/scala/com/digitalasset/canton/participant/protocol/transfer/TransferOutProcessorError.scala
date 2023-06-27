@@ -7,6 +7,7 @@ import cats.data.NonEmptyChain
 import cats.implicits.catsSyntaxFoldableOps0
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
+import com.digitalasset.canton.participant.store.ActiveContractStore.Status
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.sequencing.protocol.Recipients
@@ -50,6 +51,15 @@ object TransferOutProcessorError {
       s"Cannot transfer-out contract `$contractId`: unknown contract"
   }
 
+  final case class DeactivatedContract(contractId: LfContractId, status: Status)
+      extends TransferOutProcessorError {
+    override def message: String =
+      s"Cannot transfer-out contract `$contractId` because it's not active. Current status $status"
+  }
+
+  final case object TransferCounterOverflow extends TransferProcessorError {
+    override def message: String = "Transfer counter overflow"
+  }
   final case class InvalidResult(
       transferId: TransferId,
       result: DeliveredTransferOutResult.InvalidTransferOutResult,

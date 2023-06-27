@@ -19,8 +19,8 @@ import com.daml.ledger.api.v1.experimental_features.*
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.data.Ref
 import com.daml.lf.engine.Engine
+import com.daml.logging.LoggingContext
 import com.daml.logging.LoggingContext.newLoggingContext
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricHandle.MetricsFactory
 import com.daml.ports.Port
@@ -32,6 +32,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.ledger.participant.state.v2.{Update, WriteService}
 import com.digitalasset.canton.ledger.runner.common.*
 import com.digitalasset.canton.ledger.sandbox.bridge.{BridgeMetrics, LedgerBridge}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
@@ -43,7 +44,7 @@ import com.digitalasset.canton.platform.apiserver.{LedgerFeatures, TimeServiceBa
 import com.digitalasset.canton.platform.config.ParticipantConfig
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.platform.store.DbType
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContextExecutorService
@@ -51,18 +52,18 @@ import scala.util.Try
 
 object SandboxOnXRunner {
   val RunnerName = "sandbox-on-x"
-  private val logger = ContextualizedLogger.get(getClass)
 
   def owner(
       configAdaptor: BridgeConfigAdaptor,
       config: Config,
       bridgeConfig: BridgeConfig,
       registerGlobalOpenTelemetry: Boolean,
+      loggerFactory: NamedLoggerFactory,
   ): ResourceOwner[Port] =
     new ResourceOwner[Port] {
       override def acquire()(implicit context: ResourceContext): Resource[Port] =
         SandboxOnXRunner
-          .run(bridgeConfig, config, configAdaptor, registerGlobalOpenTelemetry)
+          .run(bridgeConfig, config, configAdaptor, registerGlobalOpenTelemetry, loggerFactory)
           .acquire()
     }
 
@@ -71,9 +72,12 @@ object SandboxOnXRunner {
       config: Config,
       configAdaptor: BridgeConfigAdaptor,
       registerGlobalOpenTelemetry: Boolean,
+      loggerFactory: NamedLoggerFactory,
   ): ResourceOwner[Port] = newLoggingContext { implicit loggingContext =>
     implicit val actorSystem: ActorSystem = ActorSystem(RunnerName)
     implicit val materializer: Materializer = Materializer(actorSystem)
+    implicit val traceContext: TraceContext = TraceContext.empty
+    implicit val logger: TracedLogger = loggerFactory.getTracedLogger(getClass)
 
     for {
       // Take ownership of the actor system and materializer so they're cleaned up properly.
@@ -147,10 +151,17 @@ object SandboxOnXRunner {
         explicitDisclosureUnsafeEnabled = true,
         rateLimitingInterceptor = participantConfig.apiServer.rateLimit.map(config =>
           dbExecutor =>
-            buildRateLimitingInterceptor(metrics, dbExecutor, servicesExecutionContext)(config)
+            buildRateLimitingInterceptor(
+              loggerFactory,
+              metrics,
+              dbExecutor,
+              servicesExecutionContext,
+            )(config)
         ),
         telemetry = new DefaultOpenTelemetry(openTelemetry),
         tracer = openTelemetry.getTracer(DamlTracerName),
+        loggerFactory = loggerFactory,
+        multiDomainEnabled = false,
       )(actorSystem, materializer).owner
     } yield {
       logInitializationHeader(
@@ -166,6 +177,9 @@ object SandboxOnXRunner {
 
   def assertSingleParticipant(
       config: Config
+  )(implicit
+      logger: TracedLogger,
+      traceContext: TraceContext,
   ): ResourceOwner[(Ref.ParticipantId, ParticipantDataSourceConfig, ParticipantConfig)] = for {
     (participantId, participantConfig) <- validateSingleParticipantConfigured(config)
     dataSource <- validateDataSource(config, participantId)
@@ -188,6 +202,9 @@ object SandboxOnXRunner {
 
   private def validateSingleParticipantConfigured(
       config: Config
+  )(implicit
+      logger: TracedLogger,
+      traceContext: TraceContext,
   ): ResourceOwner[(Ref.ParticipantId, ParticipantConfig)] =
     config.participants.toList match {
 
@@ -198,7 +215,7 @@ object SandboxOnXRunner {
       case _ =>
         ResourceOwner.failed {
           val loggingMessage = "Sandbox-on-X can only be run with a single participant."
-          newLoggingContext(logger.info(loggingMessage)(_))
+          logger.info(loggingMessage)
           new IllegalArgumentException(loggingMessage)
         }
     }
@@ -257,7 +274,7 @@ object SandboxOnXRunner {
       participantConfig: ParticipantConfig,
       participantDataSourceConfig: ParticipantDataSourceConfig,
       extra: BridgeConfig,
-  ): Unit = {
+  )(implicit logger: TracedLogger, traceContext: TraceContext): Unit = {
     val apiServerConfig = participantConfig.apiServer
     val authentication =
       participantConfig.authentication.create(participantConfig.jwtTimestampLeeway) match {
@@ -282,7 +299,7 @@ object SandboxOnXRunner {
         s"$key = $value"
       }.mkString(", ")
 
-    logger.withoutContext.info(
+    logger.info(
       s"Initialized {} with {}, version {}, {}",
       RunnerName,
       if (extra.conflictCheckingEnabled) "conflict checking ledger bridge"
@@ -293,24 +310,27 @@ object SandboxOnXRunner {
   }
 
   def buildRateLimitingInterceptor(
+      loggerFactory: NamedLoggerFactory,
       metrics: Metrics,
-      indexDbExecutor: QueueAwareExecutor with NamedExecutor,
-      apiServicesExecutor: QueueAwareExecutor with NamedExecutor,
+      indexDbExecutor: QueueAwareExecutor & NamedExecutor,
+      apiServicesExecutor: QueueAwareExecutor & NamedExecutor,
   )(config: RateLimitingConfig): RateLimitingInterceptor = {
 
     val indexDbCheck = ThreadpoolCheck(
       "Index DB Threadpool",
       indexDbExecutor,
       config.maxApiServicesIndexDbQueueSize,
+      loggerFactory,
     )
 
     val apiServicesCheck = ThreadpoolCheck(
       "Api Services Threadpool",
       apiServicesExecutor,
       config.maxApiServicesQueueSize,
+      loggerFactory,
     )
 
-    RateLimitingInterceptor(metrics, config, List(indexDbCheck, apiServicesCheck))
+    RateLimitingInterceptor(loggerFactory, metrics, config, List(indexDbCheck, apiServicesCheck))
 
   }
 

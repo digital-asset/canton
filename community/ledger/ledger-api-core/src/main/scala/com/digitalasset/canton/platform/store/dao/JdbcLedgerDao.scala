@@ -11,14 +11,12 @@ import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.{BlindingInfo, CommittedTransaction}
-import com.daml.logging.LoggingContext.withEnrichedLoggingContext
 import com.daml.logging.entries.LoggingEntry
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.configuration.Configuration
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.ReportData
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
@@ -27,7 +25,16 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
 }
 import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.participant.state.v2 as state
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.LoggingContextWithTrace.{
+  implicitExtractTraceContext,
+  withEnrichedLoggingContext,
+}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.configuration.{
   AcsStreamsConfig,
   TransactionFlatStreamsConfig,
@@ -53,7 +60,7 @@ import com.digitalasset.canton.platform.{
   TransactionId,
   WorkflowId,
 }
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.Traced
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -76,22 +83,24 @@ private class JdbcLedgerDao(
     globalMaxEventIdQueries: Int,
     globalMaxEventPayloadQueries: Int,
     tracer: Tracer,
-) extends LedgerDao {
+    val loggerFactory: NamedLoggerFactory,
+) extends LedgerDao
+    with NamedLogging {
 
   import JdbcLedgerDao.*
 
-  private val logger = ContextualizedLogger.get(this.getClass)
-
   override def currentHealth(): HealthStatus = dbDispatcher.currentHealth()
 
-  override def lookupLedgerId()(implicit loggingContext: LoggingContext): Future[Option[LedgerId]] =
+  override def lookupLedgerId()(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[LedgerId]] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.getLedgerId)(
         parameterStorageBackend.ledgerIdentity(_).map(_.ledgerId)
       )
 
   override def lookupParticipantId()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[ParticipantId]] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.getParticipantId)(
@@ -100,7 +109,9 @@ private class JdbcLedgerDao(
 
   /** Defaults to Offset.begin if ledger_end is unset
     */
-  override def lookupLedgerEnd()(implicit loggingContext: LoggingContext): Future[LedgerEnd] =
+  override def lookupLedgerEnd()(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[LedgerEnd] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.getLedgerEnd)(
         parameterStorageBackend.ledgerEnd
@@ -109,19 +120,20 @@ private class JdbcLedgerDao(
   override def initialize(
       ledgerId: LedgerId,
       participantId: ParticipantId,
-  )(implicit loggingContext: LoggingContext): Future[Unit] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.initializeLedgerParameters)(
         parameterStorageBackend.initializeParameters(
           ParameterStorageBackend.IdentityParams(
             ledgerId = ledgerId,
             participantId = participantId,
-          )
+          ),
+          loggerFactory,
         )
       )
 
   override def lookupLedgerConfiguration()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[Option[(Offset, Configuration)]] =
     dbDispatcher.executeSql(metrics.daml.index.db.lookupConfiguration)(
       readStorageBackend.configurationStorageBackend.ledgerConfiguration
@@ -130,17 +142,20 @@ private class JdbcLedgerDao(
   override def getConfigurationEntries(
       startExclusive: Offset,
       endInclusive: Offset,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, ConfigurationEntry), NotUsed] =
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, ConfigurationEntry), NotUsed] =
     PaginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
-      withEnrichedLoggingContext("queryOffset" -> queryOffset) { implicit loggingContext =>
-        dbDispatcher.executeSql(metrics.daml.index.db.loadConfigurationEntries) {
-          readStorageBackend.configurationStorageBackend.configurationEntries(
-            startExclusive = startExclusive,
-            endInclusive = endInclusive,
-            pageSize = PageSize,
-            queryOffset = queryOffset,
-          )
-        }
+      withEnrichedLoggingContext(("queryOffset" -> queryOffset): LoggingEntry) {
+        implicit loggingContext =>
+          dbDispatcher.executeSql(metrics.daml.index.db.loadConfigurationEntries) {
+            readStorageBackend.configurationStorageBackend.configurationEntries(
+              startExclusive = startExclusive,
+              endInclusive = endInclusive,
+              pageSize = PageSize,
+              queryOffset = queryOffset,
+            )
+          }
       }
     }
 
@@ -151,8 +166,7 @@ private class JdbcLedgerDao(
       configuration: Configuration,
       rejectionReason: Option[String],
   )(implicit
-      loggingContext: LoggingContext,
-      traceContext: TraceContext,
+      loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] =
     withEnrichedLoggingContext(Logging.submissionId(submissionId)) { implicit loggingContext =>
       logger.info("Storing configuration entry")
@@ -182,8 +196,7 @@ private class JdbcLedgerDao(
       offset: Offset,
       partyEntry: PartyLedgerEntry,
   )(implicit
-      loggingContext: LoggingContext,
-      traceContext: TraceContext,
+      loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] = {
     logger.info("Storing party entry")
     dbDispatcher.executeSql(metrics.daml.index.db.storePartyEntryDbMetrics) { implicit conn =>
@@ -235,17 +248,20 @@ private class JdbcLedgerDao(
   override def getPartyEntries(
       startExclusive: Offset,
       endInclusive: Offset,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, PartyLedgerEntry), NotUsed] = {
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, PartyLedgerEntry), NotUsed] = {
     PaginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
-      withEnrichedLoggingContext("queryOffset" -> queryOffset) { implicit loggingContext =>
-        dbDispatcher.executeSql(metrics.daml.index.db.loadPartyEntries)(
-          readStorageBackend.partyStorageBackend.partyEntries(
-            startExclusive = startExclusive,
-            endInclusive = endInclusive,
-            pageSize = PageSize,
-            queryOffset = queryOffset,
+      withEnrichedLoggingContext(("queryOffset" -> queryOffset): LoggingEntry) {
+        implicit loggingContext =>
+          dbDispatcher.executeSql(metrics.daml.index.db.loadPartyEntries)(
+            readStorageBackend.partyStorageBackend.partyEntries(
+              startExclusive = startExclusive,
+              endInclusive = endInclusive,
+              pageSize = PageSize,
+              queryOffset = queryOffset,
+            )
           )
-        )
       }
     }
   }
@@ -256,8 +272,7 @@ private class JdbcLedgerDao(
       offset: Offset,
       reason: state.Update.CommandRejected.RejectionReasonTemplate,
   )(implicit
-      loggingContext: LoggingContext,
-      traceContext: TraceContext,
+      loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.storeRejectionDbMetrics) { implicit conn =>
@@ -270,6 +285,7 @@ private class JdbcLedgerDao(
                 recordTime = recordTime,
                 completionInfo = info,
                 reasonTemplate = reason,
+                domainId = None,
               )
             )
           ),
@@ -281,7 +297,7 @@ private class JdbcLedgerDao(
 
   override def getParties(
       parties: Seq[Party]
-  )(implicit loggingContext: LoggingContext): Future[List[IndexerPartyDetails]] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[List[IndexerPartyDetails]] =
     if (parties.isEmpty)
       Future.successful(List.empty)
     else
@@ -291,7 +307,7 @@ private class JdbcLedgerDao(
         )
 
   override def listKnownParties()(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[List[IndexerPartyDetails]] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.loadAllParties)(
@@ -308,7 +324,7 @@ private class JdbcLedgerDao(
 
   override def getLfArchive(
       packageId: PackageId
-  )(implicit loggingContext: LoggingContext): Future[Option[Archive]] =
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Archive]] =
     dbDispatcher
       .executeSql(metrics.daml.index.db.loadArchive)(
         readStorageBackend.packageStorageBackend.lfArchive(packageId)
@@ -322,8 +338,7 @@ private class JdbcLedgerDao(
       packages: List[(Archive, PackageDetails)],
       optEntry: Option[PackageLedgerEntry],
   )(implicit
-      loggingContext: LoggingContext,
-      traceContext: TraceContext,
+      loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] = {
     logger.info("Storing package entry")
     dbDispatcher.executeSql(metrics.daml.index.db.storePackageEntryDbMetrics) {
@@ -382,17 +397,20 @@ private class JdbcLedgerDao(
   override def getPackageEntries(
       startExclusive: Offset,
       endInclusive: Offset,
-  )(implicit loggingContext: LoggingContext): Source[(Offset, PackageLedgerEntry), NotUsed] =
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[(Offset, PackageLedgerEntry), NotUsed] =
     PaginatingAsyncStream.streamFromLimitOffsetPagination(PageSize) { queryOffset =>
-      withEnrichedLoggingContext("queryOffset" -> queryOffset) { implicit loggingContext =>
-        dbDispatcher.executeSql(metrics.daml.index.db.loadPackageEntries)(
-          readStorageBackend.packageStorageBackend.packageEntries(
-            startExclusive = startExclusive,
-            endInclusive = endInclusive,
-            pageSize = PageSize,
-            queryOffset = queryOffset,
+      withEnrichedLoggingContext(("queryOffset" -> queryOffset): LoggingEntry) {
+        implicit loggingContext =>
+          dbDispatcher.executeSql(metrics.daml.index.db.loadPackageEntries)(
+            readStorageBackend.packageStorageBackend.packageEntries(
+              startExclusive = startExclusive,
+              endInclusive = endInclusive,
+              pageSize = PageSize,
+              queryOffset = queryOffset,
+            )
           )
-        )
       }
     }
 
@@ -436,7 +454,7 @@ private class JdbcLedgerDao(
   override def prune(
       pruneUpToInclusive: Offset,
       pruneAllDivulgedContracts: Boolean,
-  )(implicit loggingContext: LoggingContext): Future[Unit] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Unit] = {
     val allDivulgencePruningParticle =
       if (pruneAllDivulgedContracts) " (including all divulged contracts)" else ""
     logger.info(
@@ -455,7 +473,7 @@ private class JdbcLedgerDao(
           throw LedgerApiErrors.RequestValidation.OffsetOutOfRange
             .Reject(
               "Pruning offset for all divulged contracts needs to be after the migration offset"
-            )(new DamlContextualizedErrorLogger(logger, loggingContext, None))
+            )(ErrorLoggingContext(logger, loggingContext))
             .asGrpcError
         }
 
@@ -490,7 +508,7 @@ private class JdbcLedgerDao(
   }
 
   override def pruningOffsets(implicit
-      loggingContext: LoggingContext
+      loggingContext: LoggingContextWithTrace
   ): Future[(Option[Offset], Option[Offset])] =
     dbDispatcher.executeSql(metrics.daml.index.db.fetchPruningOffsetsMetrics) { conn =>
       parameterStorageBackend.prunedUpToInclusive(conn) -> parameterStorageBackend
@@ -504,7 +522,7 @@ private class JdbcLedgerDao(
       loadPackage = (packageId, loggingContext) => this.getLfArchive(packageId)(loggingContext),
     )
 
-  private val queryNonPruned = QueryNonPrunedImpl(parameterStorageBackend)
+  private val queryNonPruned = QueryNonPrunedImpl(parameterStorageBackend, loggerFactory)
 
   private val globalIdQueriesLimiter = new QueueBasedConcurrencyLimiter(
     parallelism = globalMaxEventIdQueries,
@@ -526,6 +544,19 @@ private class JdbcLedgerDao(
     lfValueTranslation = translation,
     metrics = metrics,
     tracer = tracer,
+    loggerFactory = loggerFactory,
+  )(servicesExecutionContext)
+
+  private val reassignmentStreamReader = new ReassignmentStreamReader(
+    globalIdQueriesLimiter = globalIdQueriesLimiter,
+    globalPayloadQueriesLimiter = globalPayloadQueriesLimiter,
+    dbDispatcher = dbDispatcher,
+    queryNonPruned = queryNonPruned,
+    eventStorageBackend = readStorageBackend.eventStorageBackend,
+    lfValueTranslation = translation,
+    metrics = metrics,
+    tracer = tracer,
+    loggerFactory = loggerFactory,
   )(servicesExecutionContext)
 
   private val flatTransactionsStreamReader = new TransactionsFlatStreamReader(
@@ -538,6 +569,8 @@ private class JdbcLedgerDao(
     lfValueTranslation = translation,
     metrics = metrics,
     tracer = tracer,
+    reassignmentStreamReader = reassignmentStreamReader,
+    loggerFactory = loggerFactory,
   )(servicesExecutionContext)
 
   private val treeTransactionsStreamReader = new TransactionsTreeStreamReader(
@@ -550,6 +583,7 @@ private class JdbcLedgerDao(
     lfValueTranslation = translation,
     metrics = metrics,
     tracer = tracer,
+    reassignmentStreamReader = reassignmentStreamReader,
   )(servicesExecutionContext)
 
   private val flatTransactionPointwiseReader = new TransactionFlatPointwiseReader(
@@ -582,7 +616,12 @@ private class JdbcLedgerDao(
     )
 
   override val contractsReader: ContractsReader =
-    ContractsReader(dbDispatcher, metrics, readStorageBackend.contractStorageBackend)(
+    ContractsReader(
+      dbDispatcher,
+      metrics,
+      readStorageBackend.contractStorageBackend,
+      loggerFactory,
+    )(
       servicesExecutionContext
     )
 
@@ -620,10 +659,10 @@ private class JdbcLedgerDao(
       transaction: CommittedTransaction,
       divulgedContracts: Iterable[state.DivulgedContract],
       blindingInfo: Option[BlindingInfo],
+      hostedWitnesses: List[Party],
       recordTime: Timestamp,
   )(implicit
-      loggingContext: LoggingContext,
-      traceContext: TraceContext,
+      loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] = {
     logger.info("Storing transaction")
     dbDispatcher
@@ -649,6 +688,7 @@ private class JdbcLedgerDao(
                 recordTime = recordTime,
                 divulgedContracts = divulgedContracts.toList,
                 blindingInfo = blindingInfo,
+                hostedWitnesses = hostedWitnesses,
                 contractMetadata = Map.empty,
               )
             )
@@ -663,7 +703,7 @@ private class JdbcLedgerDao(
       from: Timestamp,
       to: Option[Timestamp],
       applicationId: Option[ApplicationId],
-  )(implicit loggingContext: LoggingContext): Future[ReportData] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ReportData] = {
     dbDispatcher.executeSql(metrics.daml.index.db.lookupConfiguration)(
       readStorageBackend.meteringStorageBackend.reportData(from, to, applicationId)
     )
@@ -695,6 +735,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventIdQueries: Int,
       globalMaxEventPayloadQueries: Int,
       tracer: Tracer,
+      loggerFactory: NamedLoggerFactory,
   ): LedgerReadDao =
     new JdbcLedgerDao(
       dbDispatcher = dbSupport.dbDispatcher,
@@ -714,6 +755,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventIdQueries = globalMaxEventIdQueries,
       globalMaxEventPayloadQueries = globalMaxEventPayloadQueries,
       tracer = tracer,
+      loggerFactory = loggerFactory,
     )
 
   def write(
@@ -732,6 +774,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventIdQueries: Int,
       globalMaxEventPayloadQueries: Int,
       tracer: Tracer,
+      loggerFactory: NamedLoggerFactory,
   ): LedgerDao =
     new JdbcLedgerDao(
       dbDispatcher = dbSupport.dbDispatcher,
@@ -751,6 +794,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventIdQueries = globalMaxEventIdQueries,
       globalMaxEventPayloadQueries = globalMaxEventPayloadQueries,
       tracer = tracer,
+      loggerFactory = loggerFactory,
     )
 
   val acceptType = "accept"

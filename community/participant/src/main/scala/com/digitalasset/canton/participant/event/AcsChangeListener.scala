@@ -44,8 +44,11 @@ object AcsChange {
   //    3. if we have a double archive as in "create -> archive -> archive",
   //  We should define a sensible semantics for non-repudation in all such cases.
   def fromCommitSet(commitSet: CommitSet): AcsChange = {
-    val activations = commitSet.creations ++ commitSet.transferIns.fmap(_.map(_.metadata))
-    val deactivations = commitSet.archivals ++ commitSet.transferOuts.fmap(_.map(_._2))
+    val activations =
+      commitSet.creations.fmap(_.map(_.contractMetadata)) ++ commitSet.transferIns.fmap(
+        _.map(_.contractMetadata)
+      )
+    val deactivations = commitSet.archivals ++ commitSet.transferOuts.fmap(_.map(_.stakeholders))
     val transient = activations.keySet.intersect(deactivations.keySet)
     AcsChange(
       activations = activations -- transient,

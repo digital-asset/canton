@@ -6,9 +6,9 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
@@ -23,6 +23,7 @@ import com.digitalasset.canton.platform.store.interning.{
   StringInterning,
   StringInterningDomain,
 }
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.mockito.MockitoSugar.mock
 import org.scalatest.flatspec.AnyFlatSpec
@@ -156,9 +157,12 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
         initialLedgerEnd
       })
 
-    override def initializeParameters(params: ParameterStorageBackend.IdentityParams)(
+    override def initializeParameters(
+        params: ParameterStorageBackend.IdentityParams,
+        loggerFactory: NamedLoggerFactory,
+    )(
         connection: Connection
-    )(implicit loggingContext: LoggingContext): Unit =
+    ): Unit =
       throw new UnsupportedOperationException
 
     override def ledgerIdentity(
@@ -305,8 +309,8 @@ object SequentialWriteDaoSpec {
 
   private val dbDtoToStringsForInterningFixture: Iterable[DbDto] => DomainStringIterators = {
     case iterable if iterable.size == 5 =>
-      new DomainStringIterators(Iterator.empty, List("1").iterator)
-    case _ => new DomainStringIterators(Iterator.empty, Iterator.empty)
+      new DomainStringIterators(Iterator.empty, List("1").iterator, Iterator.empty)
+    case _ => new DomainStringIterators(Iterator.empty, Iterator.empty, Iterator.empty)
   }
 
   private val stringInterningViewFixture: StringInterning with InternizingStringInterningView = {
@@ -315,6 +319,8 @@ object SequentialWriteDaoSpec {
         throw new NotImplementedException
 
       override def party: StringInterningDomain[Party] = throw new NotImplementedException
+
+      override def domainId: StringInterningDomain[DomainId] = throw new NotImplementedException
 
       override def internize(
           domainStringIterators: DomainStringIterators
