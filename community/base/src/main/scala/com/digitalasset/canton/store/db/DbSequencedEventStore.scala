@@ -10,12 +10,15 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
-import com.digitalasset.canton.sequencing.protocol.{SequencedEvent, SignedContent, TrafficState}
+import com.digitalasset.canton.sequencing.protocol.{
+  SequencedEvent,
+  SequencedEventTrafficState,
+  SignedContent,
+}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.*
@@ -37,11 +40,12 @@ class DbSequencedEventStore(
 )(implicit val ec: ExecutionContext)
     extends SequencedEventStore
     with DbStore
-    with DbPrunableByTime[SequencerClientDiscriminator, Nothing] {
+    with DbPrunableByTime[SequencerClientDiscriminator] {
 
   override protected[this] val partitionKey: SequencerClientDiscriminator = client
 
   override protected[this] def partitionColumn: String = "client"
+
   override protected[this] def pruning_status_table: String = "sequenced_event_store_pruning"
 
   /** Semaphore to prevent concurrent writes to the db.
@@ -84,26 +88,15 @@ class DbSequencedEventStore(
       val traceContext: TraceContext = r.<<[SerializableTraceContext].unwrap
       val ignore = r.<<[Boolean]
 
-      def getTrafficState(eventTimestamp: CantonTimestamp) = {
+      val getTrafficState = {
         if (protocolVersion >= ProtocolVersion.dev) {
-          val trafficData = r.<<[Option[Long]]
-          trafficData
-            .map(
-              NonNegativeLong
-                .create(_)
-                .valueOr(err =>
-                  throw new DbDeserializationException(
-                    s"Failed to deserialize extra traffic remainder: $err"
-                  )
-                )
-            )
-            .map(TrafficState(_, eventTimestamp))
+          SequencedEventTrafficState.sequencedEventTrafficStateGetResult(r)
         } else None
       }
 
       typ match {
         case SequencedEventDbType.IgnoredEvent =>
-          IgnoredSequencedEvent(timestamp, sequencerCounter, None, getTrafficState(timestamp))(
+          IgnoredSequencedEvent(timestamp, sequencerCounter, None, getTrafficState)(
             traceContext
           )
         case _ =>
@@ -120,12 +113,12 @@ class DbSequencedEventStore(
               timestamp,
               sequencerCounter,
               Some(signedEvent),
-              getTrafficState(signedEvent.content.timestamp),
+              getTrafficState,
             )(
               traceContext
             )
           } else {
-            OrdinarySequencedEvent(signedEvent, getTrafficState(signedEvent.content.timestamp))(
+            OrdinarySequencedEvent(signedEvent, getTrafficState)(
               traceContext
             )
           }
@@ -160,12 +153,12 @@ class DbSequencedEventStore(
             |using (select ? client, ? ts from dual) input
             |on (sequenced_events.ts = input.ts and sequenced_events.client = input.client)
             |when not matched then
-            |  insert (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore, extra_traffic_remainder)
-            |  values (input.client, input.ts, ?, ?, ?, ?, ?, ?)""".stripMargin
+            |  insert (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed)
+            |  values (input.client, input.ts, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
 
         case _ =>
-          "insert into sequenced_events (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore, extra_traffic_remainder) " +
-            "values (?, ?, ?, ?, ?, ?, ?, ?) " +
+          "insert into sequenced_events (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed) " +
+            "values (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
             "on conflict do nothing"
       }
       DbStorage.bulkOperation_(insertSql, events, storage.profile) { pp => event =>
@@ -176,7 +169,8 @@ class DbSequencedEventStore(
         pp >> event.counter
         pp >> SerializableTraceContext(event.traceContext)
         pp >> event.isIgnored
-        pp >> event.trafficStatus.map(_.extraTrafficRemainder)
+        pp >> event.trafficState.map(_.extraTrafficRemainder)
+        pp >> event.trafficState.map(_.extraTrafficConsumed)
       }
     } else {
       val insertSql = storage.profile match {
@@ -216,10 +210,10 @@ class DbSequencedEventStore(
           case ByTimestamp(timestamp) =>
             // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
             // It therefore is fine to take the first event that we find.
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder from sequenced_events
+            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
                 where client = $partitionKey and ts = $timestamp"""
           case LatestUpto(inclusive) =>
-            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder from sequenced_events
+            sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
                 where client = $partitionKey and ts <= $inclusive
                 order by ts desc #${storage.limit(1)}"""
         }
@@ -252,7 +246,7 @@ class DbSequencedEventStore(
               // TODO(i13104): Move traffic control to stable release
               if (protocolVersion >= ProtocolVersion.dev) {
                 storage.query(
-                  sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder from sequenced_events
+                  sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
                     where client = $partitionKey and $lowerInclusive <= ts  and ts <= $upperInclusive
                     order by ts #${limit.fold("")(storage.limit(_))}"""
                     .as[PossiblyIgnoredSerializedEvent],
@@ -269,7 +263,7 @@ class DbSequencedEventStore(
               }
             // check for pruning after we've read the events so that we certainly catch the case
             // if pruning is started while we're reading (as we're not using snapshot isolation here)
-            pruningO <- pruningStatus.merge
+            pruningO <- pruningStatus
           } yield pruningO match {
             case Some(pruningStatus) if pruningStatus.timestamp >= lowerInclusive =>
               Left(SequencedEventRangeOverlapsWithPruning(criterion, pruningStatus, events))
@@ -286,7 +280,7 @@ class DbSequencedEventStore(
     if (protocolVersion >= ProtocolVersion.dev) {
       processingTime.event {
         storage.query(
-          sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder from sequenced_events
+          sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore, extra_traffic_remainder, extra_traffic_consumed from sequenced_events
               where client = $partitionKey
               order by ts #${limit.fold("")(storage.limit(_))}"""
             .as[PossiblyIgnoredSerializedEvent],
@@ -308,20 +302,17 @@ class DbSequencedEventStore(
 
   override protected[canton] def doPrune(
       beforeAndIncluding: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, Nothing, Unit] =
-    processingTime.eitherTEvent[Nothing, Unit] {
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    processingTime.event {
       val query =
         sqlu"delete from sequenced_events where client = $partitionKey and ts <= $beforeAndIncluding"
-
-      EitherT.right[Nothing](
-        storage
-          .update(query, functionFullName)
-          .map { nrPruned =>
-            logger.info(
-              s"Pruned at least $nrPruned entries from the sequenced event store of client $partitionKey older or equal to $beforeAndIncluding"
-            )
-          }
-      )
+      storage
+        .update(query, functionFullName)
+        .map { nrPruned =>
+          logger.info(
+            s"Pruned at least $nrPruned entries from the sequenced event store of client $partitionKey older or equal to $beforeAndIncluding"
+          )
+        }
     }
 
   override def ignoreEvents(from: SequencerCounter, to: SequencerCounter)(implicit

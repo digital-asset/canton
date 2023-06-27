@@ -54,25 +54,25 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
   private lazy val submissionId1 = DefaultDamlValues.submissionId().some
   private lazy val event1 = TransactionAccepted(
-    optCompletionInfo = DefaultParticipantStateValues.completionInfo(List.empty).some,
+    completionInfoO = DefaultParticipantStateValues.completionInfo(List.empty).some,
     transactionMeta = DefaultParticipantStateValues.transactionMeta(),
     transaction = DefaultDamlValues.emptyCommittedTransaction,
     transactionId = DefaultDamlValues.lfTransactionId(1),
     recordTime = CantonTimestamp.Epoch.toLf,
     divulgedContracts = List.empty,
-    blindingInfo = None,
+    blindingInfoO = None,
     hostedWitnesses = Nil,
     contractMetadata = Map(),
   )
-  private lazy val changeId1 = event1.optCompletionInfo.value.changeId
+  private lazy val changeId1 = event1.completionInfoO.value.changeId
   private lazy val changeId1Hash = ChangeIdHash(changeId1)
 
   private lazy val event2 =
-    event1.copy(optCompletionInfo = None, transactionId = DefaultDamlValues.lfTransactionId(2))
+    event1.copy(completionInfoO = None, transactionId = DefaultDamlValues.lfTransactionId(2))
 
   private lazy val event1reject = CommandRejected(
     CantonTimestamp.Epoch.toLf,
-    event1.optCompletionInfo.value,
+    event1.completionInfoO.value,
     new FinalReason(RpcStatus(code = Code.ABORTED_VALUE, message = "event1 rejection")),
     ProcessingSteps.RequestType.Transaction,
     Some(domainId),

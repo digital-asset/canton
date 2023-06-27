@@ -15,6 +15,10 @@ object HasTestCloseContext {
   })
 }
 
+trait HasNonImplicitTestCloseContext { self: NamedLogging =>
+  protected val testCloseContext: CloseContext = makeTestCloseContext(self.logger)
+}
+
 trait HasTestCloseContext { self: NamedLogging =>
   implicit protected val testCloseContext: CloseContext = makeTestCloseContext(self.logger)
 }

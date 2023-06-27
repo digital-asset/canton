@@ -3,9 +3,13 @@
 
 package com.digitalasset.canton.platform.localstore.api
 
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.Ref
+import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User, UserRight}
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -30,6 +34,7 @@ object ObjectMetaUpdate {
 }
 
 trait UserManagementStore {
+  self: NamedLogging =>
 
   import UserManagementStore.*
 
@@ -95,6 +100,30 @@ trait UserManagementStore {
     getUserInfo(id, identityProviderId).map(_.map(_.rights))(ExecutionContext.parasitic)
   }
 
+  def createExtraAdminUser(rawUserId: String)(implicit
+      loggingContext: LoggingContextWithTrace,
+      ec: ExecutionContext,
+  ): Future[Unit] = {
+    val userId = Ref.UserId.assertFromString(rawUserId)
+    createUser(
+      user = domain.User(
+        id = userId,
+        primaryParty = None,
+        identityProviderId = IdentityProviderId.Default,
+      ),
+      rights = Set(UserRight.ParticipantAdmin),
+    )
+      .flatMap {
+        case Left(UserManagementStore.UserExists(_)) =>
+          logger.info(
+            s"Creating admin user with id $userId failed. User with this id already exists"
+          )
+          Future.successful(())
+        case other =>
+          handleResult("creating extra admin user")(other).map(_ => ())
+      }
+  }
+
 }
 
 object UserManagementStore {
@@ -116,4 +145,53 @@ object UserManagementStore {
   final case class ConcurrentUserUpdate(userId: Ref.UserId) extends Error
   final case class MaxAnnotationsSizeExceeded(userId: Ref.UserId) extends Error
   final case class PermissionDenied(userId: Ref.UserId) extends Error
+
+  def handleResult[T](operation: String)(
+      result: UserManagementStore.Result[T]
+  )(implicit errorLogger: ContextualizedErrorLogger): Future[T] =
+    result match {
+      case Left(UserManagementStore.PermissionDenied(id)) =>
+        Future.failed(
+          LedgerApiErrors.AuthorizationChecks.PermissionDenied
+            .Reject(s"User $id belongs to another Identity Provider")
+            .asGrpcError
+        )
+      case Left(UserManagementStore.UserNotFound(id)) =>
+        Future.failed(
+          LedgerApiErrors.Admin.UserManagement.UserNotFound
+            .Reject(operation, id.toString)
+            .asGrpcError
+        )
+
+      case Left(UserManagementStore.UserExists(id)) =>
+        Future.failed(
+          LedgerApiErrors.Admin.UserManagement.UserAlreadyExists
+            .Reject(operation, id.toString)
+            .asGrpcError
+        )
+
+      case Left(UserManagementStore.TooManyUserRights(id)) =>
+        Future.failed(
+          LedgerApiErrors.Admin.UserManagement.TooManyUserRights
+            .Reject(operation, id: String)
+            .asGrpcError
+        )
+      case Left(e: UserManagementStore.ConcurrentUserUpdate) =>
+        Future.failed(
+          LedgerApiErrors.Admin.UserManagement.ConcurrentUserUpdateDetected
+            .Reject(userId = e.userId)
+            .asGrpcError
+        )
+
+      case Left(e: UserManagementStore.MaxAnnotationsSizeExceeded) =>
+        Future.failed(
+          LedgerApiErrors.Admin.UserManagement.MaxUserAnnotationsSizeExceeded
+            .Reject(userId = e.userId)
+            .asGrpcError
+        )
+
+      case scala.util.Right(t) =>
+        Future.successful(t)
+    }
+
 }

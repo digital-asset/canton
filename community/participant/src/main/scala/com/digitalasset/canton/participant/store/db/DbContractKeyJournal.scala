@@ -38,7 +38,7 @@ class DbContractKeyJournal(
 )(override protected[this] implicit val ec: ExecutionContext)
     extends ContractKeyJournal
     with DbStore
-    with DbPrunableByTimeDomain[ContractKeyJournalError] {
+    with DbPrunableByTimeDomain {
 
   import ContractKeyJournal.*
   import DbStorage.Implicits.*
@@ -218,8 +218,8 @@ class DbContractKeyJournal(
 
   override def doPrune(
       beforeAndIncluding: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, ContractKeyJournalError, Unit] =
-    processingTime.eitherTEvent {
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    processingTime.event {
       val query = storage.profile match {
         case _: DbStorage.Profile.H2 =>
           sqlu"""
@@ -283,7 +283,7 @@ class DbContractKeyJournal(
             )
           """
       }
-      EitherT.right(storage.update_(query, functionFullName))
+      storage.update_(query, functionFullName)
     }
 
   override def deleteSince(

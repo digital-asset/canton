@@ -22,7 +22,7 @@ import scala.concurrent.{ExecutionContext, Future}
 trait PrunableByTimeTest {
   this: AsyncWordSpecLike & BaseTest & TestMetrics =>
 
-  def prunableByTime[E](mkPrunable: ExecutionContext => PrunableByTime[E]): Unit = {
+  def prunableByTime(mkPrunable: ExecutionContext => PrunableByTime): Unit = {
 
     val ts = CantonTimestamp.assertFromInstant(Instant.parse("2019-04-04T10:00:00.00Z"))
     val ts2 = ts.addMicros(1)
@@ -63,23 +63,22 @@ trait PrunableByTimeTest {
 
       def timestampForIter(iter: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(iter.toLong)
       def prune(iter: Int): Future[Unit] =
-        valueOrFail(prunable.prune(timestampForIter(iter)))(s"pruning iteration $iter")
+        prunable.prune(timestampForIter(iter))
 
       val lastRead = new AtomicReference[Option[PruningStatus]](None)
 
       def read(): Future[Int] =
-        valueOrFail(prunable.pruningStatus)("Failed to get the pruning status")
-          .map { statusO =>
-            val previousO = lastRead.getAndAccumulate(
-              statusO,
-              OptionUtil.mergeWith(_, _)(Ordering[PruningStatus].max),
-            )
-            assert(
-              previousO.forall(previous => statusO.exists(previous <= _)),
-              s"PrunableByTime pruning status decreased from $previousO to $statusO",
-            )
-            if (statusO.exists(_.phase == PruningPhase.Started)) 1 else 0
-          }(parallelEc)
+        prunable.pruningStatus.map { statusO =>
+          val previousO = lastRead.getAndAccumulate(
+            statusO,
+            OptionUtil.mergeWith(_, _)(Ordering[PruningStatus].max),
+          )
+          assert(
+            previousO.forall(previous => statusO.exists(previous <= _)),
+            s"PrunableByTime pruning status decreased from $previousO to $statusO",
+          )
+          if (statusO.exists(_.phase == PruningPhase.Started)) 1 else 0
+        }(parallelEc)
 
       val pruningsF = Future.traverse((1 to iterations).toList)(prune)(List, parallelEc)
       val readingsF = MonadUtil.sequentialTraverse(1 to iterations)(_ => read())(
@@ -89,7 +88,7 @@ trait PrunableByTimeTest {
       val testF = for {
         _ <- pruningsF
         readings <- readingsF
-        statusEnd <- valueOrFail(prunable.pruningStatus)("Failed to get pruning status")
+        statusEnd <- prunable.pruningStatus
       } yield {
         logger.info(s"concurrent pruning test had ${readings.sum} intermediate readings")
         assert(

@@ -358,11 +358,11 @@ class DomainNodeBootstrap(
     * every change to the topology manager. If after one of these changes we find that the domain manager has the keys it
     * requires to be initialized we will then start the domain.
     * TODO(i12893): if we defer startup of the domain the initialization check and eventual domain startup will
-    *                       occur within the topology manager transaction observer. currently exceptions will bubble
-    *                       up into the topology transaction processor however if a error is encountered it is just
-    *                       logged here leaving the domain in a dangling state. Ideally this would trigger a managed
-    *                       shutdown of some form allow allowing another startup attempt to be run if appropriate, however
-    *                       I don't believe we currently have a means of doing this.
+    * occur within the topology manager transaction observer. currently exceptions will bubble
+    * up into the topology transaction processor however if a error is encountered it is just
+    * logged here leaving the domain in a dangling state. Ideally this would trigger a managed
+    * shutdown of some form allow allowing another startup attempt to be run if appropriate, however
+    * I don't believe we currently have a means of doing this.
     */
   private def startIfDomainManagerReadyOrDefer(
       manager: DomainTopologyManager,
@@ -372,6 +372,7 @@ class DomainNodeBootstrap(
       logger.info("Deferring domain startup until domain manager has been fully initialized")
       manager.addObserver(new DomainIdentityStateObserver {
         val attemptedStart = new AtomicBoolean(false)
+
         override def addedSignedTopologyTransaction(
             timestamp: CantonTimestamp,
             transaction: Seq[SignedTopologyTransaction[TopologyChangeOp]],
@@ -404,6 +405,7 @@ class DomainNodeBootstrap(
       })
       EitherT.pure[FutureUnlessShutdown, String](())
     }
+
     for {
       // if the domain is starting up after previously running its identity will have been stored and will be immediately available
       alreadyInitialized <- EitherT
@@ -833,6 +835,7 @@ object Domain extends DomainErrorGroup {
     final case class Failure(override val cause: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause)
+
     final case class Shutdown()(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = "Node is being shutdown")

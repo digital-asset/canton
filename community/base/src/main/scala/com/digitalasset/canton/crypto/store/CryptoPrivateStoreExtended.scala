@@ -94,12 +94,13 @@ trait CryptoPrivateStoreExtended extends CryptoPrivateStore { this: NamedLogging
   }
 
   def existsPrivateKey(
-      keyId: Fingerprint
+      keyId: Fingerprint,
+      keyPurpose: KeyPurpose,
   )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Boolean] =
-    for {
-      existsSigKey <- existsSigningKey(keyId)
-      existsDecryptKey <- existsDecryptionKey(keyId)
-    } yield existsSigKey || existsDecryptKey
+    keyPurpose match {
+      case KeyPurpose.Signing => existsSigningKey(keyId)
+      case KeyPurpose.Encryption => existsDecryptionKey(keyId)
+    }
 
   def removePrivateKey(
       keyId: Fingerprint

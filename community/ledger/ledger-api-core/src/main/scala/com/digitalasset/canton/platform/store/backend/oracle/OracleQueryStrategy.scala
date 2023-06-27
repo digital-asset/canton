@@ -33,10 +33,17 @@ object OracleQueryStrategy extends QueryStrategy {
 
   override def constBooleanWhere(value: Boolean): String = if (value) "1=1" else "0=1"
 
-  // WARNING! this construction will lead to "= ANY(?, ?, ?, ..... ?)" SQLs, for which oracle has an upper limit of 1000
+  // TODO(i13593): WARNING! this construction will lead to "= ANY(?, ?, ?, ..... ?)" SQLs, for which oracle has an upper limit of 1000
   override def anyOf(longs: Iterable[Long]): CompositeSql = {
-    val longArray: Vector[java.lang.Long] =
+    val longVector: Vector[java.lang.Long] =
       longs.view.map(Long.box).toVector
-    cSQL"= ANY($longArray)"
+    cSQL"= ANY($longVector)"
+  }
+
+  // TODO(i13593): WARNING! this construction will lead to "= ANY(?, ?, ?, ..... ?)" SQLs, for which oracle has an upper limit of 1000
+  override def anyOfStrings(strings: Iterable[String]): CompositeSql = {
+    val stringVector: Vector[String] =
+      strings.toVector
+    cSQL"= ANY($stringVector)"
   }
 }

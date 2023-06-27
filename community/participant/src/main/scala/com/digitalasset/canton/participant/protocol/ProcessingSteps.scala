@@ -151,6 +151,11 @@ trait ProcessingSteps[
       requestTs: CantonTimestamp,
   ): Either[RequestError with ResultError, CantonTimestamp]
 
+  /** Return the submission data needed by the SubmissionTracker to decide on transaction validity */
+  def getSubmissionDataForTracker(
+      views: Seq[DecryptedView]
+  ): Option[SubmissionTracker.SubmissionData]
+
   def participantResponseDeadlineFor(
       parameters: DynamicDomainParametersWithValidity,
       requestTs: CantonTimestamp,
@@ -231,7 +236,8 @@ trait ProcessingSteps[
       * @param actualDeduplicationOffset The deduplication offset chosen by command deduplication
       */
     def prepareBatch(
-        actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset
+        actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset,
+        maxSequencingTime: CantonTimestamp,
     ): EitherT[Future, UnsequencedSubmission, PreparedBatch]
 
     /** Produce a `SubmissionError` to be returned by the [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.submit]] method
@@ -373,7 +379,10 @@ trait ProcessingSteps[
       rc: RequestCounter,
       sc: SequencerCounter,
       decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
-  )(implicit traceContext: TraceContext): (Option[TimestampedEvent], Option[PendingSubmissionId])
+      freshOwnTimelyTx: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): (Option[TimestampedEvent], Option[PendingSubmissionId])
 
   /** Phase 3, step 2 (submission where the chosen mediator is inactive)
     *
@@ -433,6 +442,7 @@ trait ProcessingSteps[
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediator: MediatorRef,
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RequestError, StorePendingDataAndSendResponseAndCreateTimeout]

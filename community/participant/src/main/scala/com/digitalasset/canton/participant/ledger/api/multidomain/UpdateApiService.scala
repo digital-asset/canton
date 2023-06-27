@@ -49,7 +49,7 @@ private[participant] object UpdateApiService {
   object Update {
     final case class TransactionAccepted(event: LedgerSyncEvent.TransactionAccepted)
         extends Update {
-      override def optCompletionInfo: Option[CompletionInfo] = event.optCompletionInfo
+      override def optCompletionInfo: Option[CompletionInfo] = event.completionInfoO
       override def updateId: LedgerTransactionId = event.transactionId
     }
 
@@ -151,7 +151,7 @@ final class UpdateApiServiceImpl(
         case (globalOffset, Traced(txAccepted: LedgerSyncEvent.TransactionAccepted)) =>
           globalOffset -> (Right(
             Update.TransactionAccepted(txAccepted)
-          ), txAccepted.optCompletionInfo)
+          ), txAccepted.completionInfoO)
 
         case (globalOffset, Traced(out: LedgerSyncEvent.TransferredOut)) =>
           globalOffset -> (Right(Update.TransferredOut(out)), out.optCompletionInfo)

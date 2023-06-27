@@ -159,7 +159,7 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
   override def keys: LocalKeyAdministrationGroup = _keys
 
   private val _keys =
-    new LocalKeyAdministrationGroup(this, this, consoleEnvironment, crypto)
+    new LocalKeyAdministrationGroup(this, this, consoleEnvironment, crypto, loggerFactory)
 
   private[console] def migrateDbCommand(): ConsoleCommandResult[Unit] =
     migrateInstanceDb().toResult(_.message, _ => ())
@@ -219,7 +219,7 @@ trait RemoteInstanceReference extends InstanceReferenceCommon {
   @Help.Summary("Manage public and secret keys")
   @Help.Group("Keys")
   override val keys: KeyAdministrationGroup =
-    new KeyAdministrationGroup(this, this, consoleEnvironment)
+    new KeyAdministrationGroup(this, this, consoleEnvironment, loggerFactory)
 }
 
 trait GrpcRemoteInstanceReference extends RemoteInstanceReference {
@@ -370,6 +370,9 @@ trait LocalDomainReference
 
   override protected[console] def runningNode: Option[DomainNodeBootstrap] =
     consoleEnvironment.environment.domains.getRunning(name)
+
+  override protected[console] def startingNode: Option[DomainNodeBootstrap] =
+    consoleEnvironment.environment.domains.getStarting(name)
 }
 
 class CommunityLocalDomainReference(
@@ -671,6 +674,9 @@ class LocalParticipantReference(
   override def runningNode: Option[CantonNodeBootstrap[ParticipantNode]] =
     consoleEnvironment.environment.participants.getRunning(name)
 
+  override def startingNode: Option[CantonNodeBootstrap[ParticipantNode]] =
+    consoleEnvironment.environment.participants.getStarting(name)
+
 }
 
 abstract class ParticipantReferenceX(
@@ -759,6 +765,9 @@ class LocalParticipantReferenceX(
 
   override def runningNode: Option[ParticipantNodeBootstrapX] =
     consoleEnvironment.environment.participantsX.getRunning(name)
+
+  override def startingNode: Option[ParticipantNodeBootstrapX] =
+    consoleEnvironment.environment.participantsX.getStarting(name)
 
   /** secret, not publicly documented way to get the admin token */
   def adminToken: Option[String] = underlying.map(_.adminToken.secret)

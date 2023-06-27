@@ -47,6 +47,7 @@ trait TransactionTreeFactory {
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,
       keyResolver: LfKeyResolver,
+      maxSequencingTime: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree]
@@ -88,7 +89,7 @@ object TransactionTreeFactory {
     LfContractId => EitherT[
       Future,
       ContractLookupError,
-      (SerializableRawContractInstance, CantonTimestamp, Option[Salt]),
+      SerializableContract,
     ]
 
   def contractInstanceLookup(contractStore: ContractLookup)(implicit
@@ -99,7 +100,7 @@ object TransactionTreeFactory {
       contract <- contractStore
         .lookupContract(id)
         .toRight(ContractLookupError(id, "Unknown contract"))
-    } yield (contract.rawContractInstance, contract.ledgerCreateTime, contract.contractSalt)
+    } yield contract
 
   /** Supertype for all errors than may arise during the conversion. */
   sealed trait TransactionTreeConversionError extends Product with Serializable with PrettyPrinting

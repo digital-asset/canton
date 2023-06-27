@@ -134,6 +134,7 @@ class TransactionsFlatStreamReader(
       ),
       numOfDecomposedFilters = decomposedFilters.size,
       numOfPagesInIdPageBuffer = maxPagesPerIdPagesBuffer,
+      loggerFactory = loggerFactory,
     )
 
     def fetchIds(

@@ -48,6 +48,7 @@ trait SyncDomainPersistentState extends NamedLogging with AutoCloseable {
   def acsCommitmentStore: AcsCommitmentStore
   def parameterStore: DomainParameterStore
   def topologyStore: DomainStoreCommon
+  def submissionTrackerStore: SubmissionTrackerStore
   def isMemory(): Boolean
 
 }

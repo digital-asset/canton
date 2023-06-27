@@ -4,19 +4,21 @@
 package com.daml.fetchcontracts
 
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
+import com.daml.ledger.api.v1.transaction.Transaction
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.logging.TracedLogger
 import org.scalatest.wordspec.AsyncWordSpec
-import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
-class AcsTxStreamsTest extends AsyncWordSpec with Matchers with AkkaBeforeAndAfterAll {
-  import AcsTxStreamsTest._
+class AcsTxStreamsTest extends AsyncWordSpec with BaseTest with AkkaBeforeAndAfterAll {
+  import AcsTxStreamsTest.*
 
   "acsFollowingAndBoundary" when {
     "ACS is active" should {
       "cancel the ACS on output cancel" in {
-        val (acs, futx, out, _) = probeAcsFollowingAndBoundary()
+        val (acs, futx, out, _) = probeAcsFollowingAndBoundary(logger)
         out.cancel()
         acs.expectCancellation()
         futx.isCompleted should ===(false)
@@ -25,14 +27,14 @@ class AcsTxStreamsTest extends AsyncWordSpec with Matchers with AkkaBeforeAndAft
 
     "ACS is past liveBegin" should {
       "not start tx until ACS is complete" in {
-        val (acs, futx, _, _) = probeAcsFollowingAndBoundary()
+        val (acs, futx, _, _) = probeAcsFollowingAndBoundary(logger)
         acs.sendNext(liveBegin)
         futx.isCompleted should ===(false)
       }
 
       "propagate cancellation of tx stream" in {
         val (_, _) = (liveBegin, txEnd)
-        val (acs, futx, out, off) = probeAcsFollowingAndBoundary()
+        val (acs, futx, out, off) = probeAcsFollowingAndBoundary(logger)
         acs.sendNext(liveBegin).sendComplete()
         off.expectSubscription()
         out.cancel()
@@ -46,16 +48,15 @@ class AcsTxStreamsTest extends AsyncWordSpec with Matchers with AkkaBeforeAndAft
 }
 
 object AcsTxStreamsTest {
-  import akka.NotUsed
   import akka.actor.ActorSystem
-  import akka.{stream => aks}
+  import akka.{NotUsed, stream as aks}
   import aks.scaladsl.{GraphDSL, RunnableGraph, Source}
-  import aks.{testkit => tk}
-  import tk.TestPublisher.{Probe => InProbe}
-  import tk.TestSubscriber.{Probe => OutProbe}
-  import tk.scaladsl.{TestSource, TestSink}
-  import com.daml.ledger.api.{v1 => lav1}
+  import aks.testkit as tk
+  import com.daml.ledger.api.v1 as lav1
   import com.daml.logging.LoggingContextOf
+  import tk.TestPublisher.Probe as InProbe
+  import tk.TestSubscriber.Probe as OutProbe
+  import tk.scaladsl.{TestSink, TestSource}
 
   private val liveBegin = lav1.active_contracts_service.GetActiveContractsResponse(offset = "42")
   private val txEnd = lav1.transaction.Transaction(offset = "84")
@@ -63,11 +64,16 @@ object AcsTxStreamsTest {
   private implicit val `log ctx`: LoggingContextOf[Any] =
     LoggingContextOf.newLoggingContext(LoggingContextOf.label[Any])(identity)
 
-  private def probeAcsFollowingAndBoundary()(implicit
+  private def probeAcsFollowingAndBoundary(logger: TracedLogger)(implicit
       ec: concurrent.ExecutionContext,
       as: ActorSystem,
   ) =
-    probeFOS2PlusContinuation(AcsTxStreams.acsFollowingAndBoundary).run()
+    probeFOS2PlusContinuation(
+      AcsTxStreams.acsFollowingAndBoundary(
+        _: lav1.ledger_offset.LedgerOffset => Source[Transaction, NotUsed],
+        logger,
+      )
+    ).run()
 
   @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
   private def probeFOS2PlusContinuation[K, I0, I1, O0, O1](
@@ -96,7 +102,7 @@ object AcsTxStreamsTest {
       TestSink.probe[O0],
       TestSink.probe[O1],
     )((_, _, _)) { implicit b => (i, o0, o1) =>
-      import GraphDSL.Implicits._
+      import GraphDSL.Implicits.*
       val here = b add part
       // format: off
       i  ~> here.in

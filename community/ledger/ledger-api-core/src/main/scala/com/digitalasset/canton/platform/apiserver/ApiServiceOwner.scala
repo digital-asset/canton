@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.configuration.LedgerId
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
+import com.digitalasset.canton.ledger.participant.state.v2.ReadService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
@@ -53,6 +54,7 @@ object ApiServiceOwner {
       participantId: Ref.ParticipantId,
       config: ApiServerConfig,
       optWriteService: Option[state.WriteService],
+      readService: ReadService,
       healthChecks: HealthChecks,
       metrics: Metrics,
       timeServiceBackend: Option[TimeServiceBackend] = None,
@@ -117,6 +119,7 @@ object ApiServiceOwner {
       apiServicesOwner = new ApiServices.Owner(
         participantId = participantId,
         optWriteService = optWriteService,
+        readService = readService,
         indexService = indexService,
         authorizer = authorizer,
         engine = engine,

@@ -26,6 +26,7 @@ import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -67,8 +68,11 @@ import com.digitalasset.canton.participant.protocol.submission.{
   CommandDeduplicatorImpl,
   InFlightSubmissionTracker,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferCoordination
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
+import com.digitalasset.canton.participant.protocol.transfer.{
+  IncompleteTransferData,
+  TransferCoordination,
+}
 import com.digitalasset.canton.participant.pruning.{NoOpPruningProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.MissingConfigForAlias
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
@@ -81,6 +85,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
+import com.digitalasset.canton.participant.traffic.TrafficStateController
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.AuthorityResolver
 import com.digitalasset.canton.protocol.*
@@ -94,6 +99,7 @@ import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFinite
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
@@ -109,6 +115,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.FutureConverters.*
+import scala.util.chaining.scalaUtilChainingOps
 import scala.util.{Failure, Right, Success}
 
 /** The Canton-based synchronization service.
@@ -246,6 +253,7 @@ class CantonSyncService(
 
   // Track domains we would like to "keep on reconnecting until available"
   private val attemptReconnect: TrieMap[DomainAlias, AttemptReconnect] = TrieMap.empty
+
   private def resolveReconnectAttempts(alias: DomainAlias): Unit =
     attemptReconnect.remove(alias).discard
 
@@ -559,6 +567,7 @@ class CantonSyncService(
   }
 
   /** Build source for subscription (for ledger api server indexer).
+    *
     * @param beginAfterOffset offset after which to emit events
     */
   override def stateUpdates(
@@ -606,7 +615,7 @@ class CantonSyncService(
             _hostedWitnesses,
             _contractMetadata,
           ) =>
-        ta.copy(optCompletionInfo =
+        ta.copy(completionInfoO =
           Some(
             completionInfo.copy(statistics =
               Some(LedgerTransactionNodeStatistics(transaction, excludedPackageIds))
@@ -763,7 +772,7 @@ class CantonSyncService(
     *
     * NOTE: Does not automatically connect the sync service to the new domain.
     *
-    * @param config   The domain configuration.
+    * @param config The domain configuration.
     * @return Error or unit.
     */
   def addDomain(
@@ -796,6 +805,7 @@ class CantonSyncService(
       (),
       SyncServiceError.SyncServiceDomainMustBeOffline.Error(alias): SyncServiceError,
     )
+
     for {
       targetDomainInfo <- performUnlessClosingEitherU(functionFullName)(
         sequencerInfoLoader
@@ -912,6 +922,7 @@ class CantonSyncService(
             res <- go(if (succeeded) connected :+ con else connected, rest)
           } yield res
       }
+
     def startDomains(domains: Seq[DomainAlias]): EitherT[Future, SyncServiceError, Unit] = {
       // we need to start all domains concurrently in order to avoid the transfer processing
       // to hang
@@ -934,13 +945,16 @@ class CantonSyncService(
         }
       })
     }
+
     val connectedDomains =
       connectedDomainsMap.keys.to(LazyList).mapFilter(aliasManager.aliasForDomainId).toSet
+
     def shouldConnectTo(config: StoredDomainConnectionConfig): Boolean = {
       config.status.isActive && !config.config.manualConnect && !connectedDomains.contains(
         config.config.domain
       )
     }
+
     for {
       configs <- EitherT.pure[FutureUnlessShutdown, SyncServiceError](
         domainConnectionConfigStore
@@ -1056,6 +1070,7 @@ class CantonSyncService(
         case None => Some(ts)
         case Some(old) => Some(ts.max(old))
       }
+
     val _ = clock.scheduleAt(
       ts => {
         val (reconnect, nextO) = {
@@ -1183,6 +1198,8 @@ class CantonSyncService(
           loggerFactory,
         )
 
+        trafficStateController = new TrafficStateController(participantId, loggerFactory)
+
         syncDomain = syncDomainFactory.create(
           domainId,
           domainHandle,
@@ -1201,6 +1218,7 @@ class CantonSyncService(
               partyNotifier,
               missingKeysAlerter,
               domainHandle.topologyClient,
+              trafficStateController,
             ),
           missingKeysAlerter,
           transferCoordination,
@@ -1208,6 +1226,7 @@ class CantonSyncService(
           clock,
           metrics.pruning,
           domainMetrics,
+          trafficStateController,
           futureSupervisor,
           domainLoggerFactory,
           skipRecipientsCheck = skipRecipientsCheck,
@@ -1589,6 +1608,37 @@ class CantonSyncService(
 
     Future.sequence(result).map(_.flatten).map(ConnectedDomainResponse.apply)
   }
+
+  def incompleteTransferData(
+      validAt: GlobalOffset,
+      stakeholders: Set[LfPartyId],
+  )(implicit traceContext: TraceContext): Future[List[IncompleteTransferData]] =
+    syncDomainPersistentStateManager.getAll.values.toList
+      .parTraverse {
+        _.transferStore.findIncomplete(
+          sourceDomain = None,
+          validAt = validAt,
+          stakeholders = NonEmpty.from(stakeholders),
+          limit = NonNegativeInt.maxValue,
+        )
+      }
+      .map(_.flatten)
+
+  override def incompleteReassignmentOffsets(
+      validAt: LedgerSyncOffset,
+      stakeholders: Set[LfPartyId],
+  )(implicit traceContext: TraceContext): Future[Vector[LedgerSyncOffset]] =
+    UpstreamOffsetConvert
+      .toGlobalOffset(validAt)
+      .fold(
+        error => Future.failed(new IllegalArgumentException(error)),
+        incompleteTransferData(_, stakeholders).map(
+          _.map(
+            _.transferEventGlobalOffset.globalOffset
+              .pipe(UpstreamOffsetConvert.fromGlobalOffset)
+          ).toVector
+        ),
+      )
 }
 
 object CantonSyncService {
@@ -1787,6 +1837,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
       with ParentCantonError[DomainRegistryError] {
 
     override def logOnCreation: Boolean = false
+
     override def mixinContext: Map[String, String] = Map("domain" -> domain.unwrap)
 
   }
@@ -1801,6 +1852,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
       with ParentCantonError[SyncDomainMigrationError] {
 
     override def logOnCreation: Boolean = false
+
     override def mixinContext: Map[String, String] = Map("from" -> from.unwrap, "to" -> to.unwrap)
 
   }
@@ -1829,7 +1881,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
   )
   @Resolution(
     """If you attempt to connect to a domain that has either been migrated off or has a pending migration,
-       |this error will be emitted. Please complete the migration before attempting to connect to it."""
+      |this error will be emitted. Please complete the migration before attempting to connect to it."""
   )
   object SyncServiceDomainIsNotActive
       extends ErrorCode(
@@ -1894,6 +1946,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
     final case class UnrecoverableError(domain: DomainAlias, _reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = show"$domain fatally disconnected because of ${_reason}")
+
     final case class UnrecoverableException(domain: DomainAlias, throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(

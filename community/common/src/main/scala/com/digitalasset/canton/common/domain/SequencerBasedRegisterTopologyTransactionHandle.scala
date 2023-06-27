@@ -7,10 +7,9 @@ import cats.data.EitherT
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{ProcessingTimeout, TopologyXConfig}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.mapErr
@@ -18,6 +17,7 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{MediatorsOfDomain, OpenEnvelope, Recipients}
 import com.digitalasset.canton.sequencing.{EnvelopeHandler, HandlerResult}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member, ParticipantId}
@@ -25,6 +25,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{DiscardOps, config}
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -101,6 +102,8 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     domainId: DomainId,
     requestedFor: Member,
     requestedBy: Member,
+    maybeClockForRetries: Option[Clock],
+    topologyXConfig: TopologyXConfig,
     protocolVersion: ProtocolVersion,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -114,6 +117,8 @@ class SequencerBasedRegisterTopologyTransactionHandleX(
     new DomainTopologyServiceX(
       domainId,
       send,
+      maybeClockForRetries,
+      topologyXConfig,
       protocolVersion,
       timeouts,
       loggerFactory,
@@ -152,6 +157,7 @@ abstract class DomainTopologyServiceCommon[
         OpenEnvelope[ProtocolMessage],
     ) => EitherT[Future, SendAsyncClientError, Unit],
     recipients: Recipients,
+    maybeTriggerRetries: Option[(Clock, config.NonNegativeDuration)],
     protocolVersion: ProtocolVersion,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -176,8 +182,34 @@ abstract class DomainTopologyServiceCommon[
       _ <- performUnlessClosingF(functionFullName)(
         EitherTUtil.toFuture(mapErr(sendRequest(request)))
       )
+      _ = scheduleTimeoutRequest(request)
       response <- responseF
     } yield response
+  }
+
+  /* If configured with a finite timeout and a "timeout" clock, schedule a timeout.
+   */
+  private def scheduleTimeoutRequest(
+      request: Request
+  )(implicit traceContext: TraceContext): Unit = maybeTriggerRetries.foreach {
+    case (clock, timeout) =>
+      if (timeout.duration.isFinite) {
+        logger.debug(s"Scheduling timeout of ${request} in ${timeout}")
+        clock.scheduleAfter(
+          _ => {
+            responsePromiseMap
+              .remove(requestToIndex(request))
+              .foreach { promise =>
+                // Failing the promise generates a failed future on the promise,
+                // and the failed future is picked up by DomainOutboxDispatch.dispatch
+                // to issue a retry unless shutting down.
+                logger.info(s"Timing out request ${request}")
+                promise.tryFailure(new RuntimeException(s"Request ${request} timed out"))
+              }
+          },
+          timeout.toInternal.duration,
+        )
+      }
   }
 
   private def sendRequest(
@@ -224,7 +256,7 @@ abstract class DomainTopologyServiceCommon[
           envs.mapFilter(env => protocolMessageToResponse(env.protocolMessage)).foreach {
             response =>
               responsePromiseMap
-                .get(responseToIndex(response))
+                .remove(responseToIndex(response))
                 .foreach(_.trySuccess(UnlessShutdown.Outcome(responseToResult(response))))
           }
         }
@@ -256,6 +288,7 @@ class DomainTopologyService(
     ](
       send,
       Recipients.cc(DomainTopologyManagerId(domainId)),
+      maybeTriggerRetries = None,
       protocolVersion,
       timeouts,
       loggerFactory,
@@ -286,6 +319,8 @@ class DomainTopologyServiceX(
         TraceContext,
         OpenEnvelope[ProtocolMessage],
     ) => EitherT[Future, SendAsyncClientError, Unit],
+    maybeClockForRetries: Option[Clock],
+    topologyXConfig: TopologyXConfig,
     protocolVersion: ProtocolVersion,
     timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
@@ -298,6 +333,7 @@ class DomainTopologyServiceX(
     ](
       send,
       Recipients.cc(MediatorsOfDomain.TopologyTransactionMediatorGroup),
+      maybeClockForRetries.map((_, topologyXConfig.topologyTransactionRegistrationTimeout)),
       protocolVersion,
       timeouts,
       loggerFactory,

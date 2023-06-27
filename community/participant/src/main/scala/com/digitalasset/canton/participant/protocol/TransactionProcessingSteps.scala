@@ -194,6 +194,13 @@ class TransactionProcessingSteps(
   ): Either[TransactionProcessorError, CantonTimestamp] =
     parameters.decisionTimeFor(requestTs).leftMap(DomainParametersError(parameters.domainId, _))
 
+  override def getSubmissionDataForTracker(
+      views: Seq[DecryptedView]
+  ): Option[SubmissionTracker.SubmissionData] =
+    views.map(_.tree.submitterMetadata.unwrap).collectFirst { case Right(meta) =>
+      SubmissionTracker.SubmissionData(meta.submitterParticipant, meta.maxSequencingTimeO)
+    }
+
   override def participantResponseDeadlineFor(
       parameters: DynamicDomainParametersWithValidity,
       requestTs: CantonTimestamp,
@@ -285,7 +292,8 @@ class TransactionProcessingSteps(
     )
 
     override def prepareBatch(
-        actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset
+        actualDeduplicationOffset: DeduplicationPeriod.DeduplicationOffset,
+        maxSequencingTime: CantonTimestamp,
     ): EitherT[Future, UnsequencedSubmission, PreparedBatch] = {
       logger.debug("Preparing batch for transaction submission")
       val submitterInfoWithDedupPeriod =
@@ -347,9 +355,7 @@ class TransactionProcessingSteps(
             disclosedContracts
               .get(contractId)
               .map(contract =>
-                EitherT.rightT[Future, TransactionTreeFactory.ContractLookupError](
-                  (contract.rawContractInstance, contract.ledgerCreateTime, contract.contractSalt)
-                )
+                EitherT.rightT[Future, TransactionTreeFactory.ContractLookupError](contract)
               )
               .getOrElse(
                 TransactionTreeFactory
@@ -372,6 +378,7 @@ class TransactionProcessingSteps(
               recentSnapshot,
               lookupContractsWithDisclosed,
               None,
+              maxSequencingTime,
               protocolVersion,
             )
             .leftMap[TransactionSubmissionTrackingData.RejectionCause] {
@@ -792,6 +799,7 @@ class TransactionProcessingSteps(
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediator: MediatorRef,
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -812,6 +820,9 @@ class TransactionProcessingSteps(
 
     val ipsSnapshot = snapshot.ipsSnapshot
     val requestId = RequestId(requestTimestamp)
+
+    def checkReplayedTransaction: Option[String] =
+      Option.when(!freshOwnTimelyTx)("View %s belongs to a replayed transaction")
 
     def doParallelChecks(enrichedTransaction: EnrichedTransaction): Future[ParallelChecksResult] = {
       val ledgerTime = enrichedTransaction.ledgerTime
@@ -852,6 +863,8 @@ class TransactionProcessingSteps(
           logger,
         )
 
+        replayCheckResult = if (amSubmitter) checkReplayedTransaction else None
+
         authorizationResult <- authorizationValidator.checkAuthorization(
           requestId,
           rootViews,
@@ -886,6 +899,7 @@ class TransactionProcessingSteps(
         conformanceResultE,
         internalConsistencyResultE,
         timeValidationE,
+        replayCheckResult,
       )
     }
 
@@ -1002,6 +1016,7 @@ class TransactionProcessingSteps(
         viewValidationResults = viewResults.result(),
         timeValidationResultE = parallelChecksResult.timeValidationResultE,
         hostedWitnesses = enrichedTransaction.rootViewsWithUsedAndCreated.hostedWitnesses,
+        replayCheckResult = parallelChecksResult.replayCheckResult,
       )
     }
 
@@ -1028,7 +1043,14 @@ class TransactionProcessingSteps(
       } yield {
 
         val pendingTransaction =
-          createPendingTransaction(requestId, transactionValidationResult, rc, sc, mediator)
+          createPendingTransaction(
+            requestId,
+            transactionValidationResult,
+            rc,
+            sc,
+            mediator,
+            freshOwnTimelyTx,
+          )
         StorePendingDataAndSendResponseAndCreateTimeout(
           pendingTransaction,
           responses.map(_ -> mediatorRecipients),
@@ -1078,30 +1100,32 @@ class TransactionProcessingSteps(
       rc: RequestCounter,
       sc: SequencerCounter,
       decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId]) = {
     val someView = decryptedViews.head1
     val mediator = someView.unwrap.mediator
     val submitterMetadataO = someView.unwrap.tree.submitterMetadata.unwrap.toOption
-    submitterMetadataO.flatMap(completionInfoFromSubmitterMetadataO).map { completionInfo =>
-      val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
-        TransactionProcessor.SubmissionErrors.InactiveMediatorError
-          .Error(mediator, ts)
-          .rpcStatus()
-      )
+    submitterMetadataO.flatMap(completionInfoFromSubmitterMetadataO(_, freshOwnTimelyTx)).map {
+      completionInfo =>
+        val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
+          TransactionProcessor.SubmissionErrors.InactiveMediatorError
+            .Error(mediator, ts)
+            .rpcStatus()
+        )
 
-      TimestampedEvent(
-        LedgerSyncEvent.CommandRejected(
-          ts.toLf,
-          completionInfo,
-          rejection,
-          requestType,
-          Some(domainId),
-        ),
-        rc.asLocalOffset,
-        Some(sc),
-      )
+        TimestampedEvent(
+          LedgerSyncEvent.CommandRejected(
+            ts.toLf,
+            completionInfo,
+            rejection,
+            requestType,
+            Some(domainId),
+          ),
+          rc.asLocalOffset,
+          Some(sc),
+        )
     } -> None // Transaction processing doesn't use pending submissions
   }
 
@@ -1120,6 +1144,7 @@ class TransactionProcessingSteps(
     val RejectionArgs(pendingTransaction, rejectionReason) = rejectionArgs
     val PendingTransaction(
       _,
+      freshOwnTimelyTx,
       _,
       _,
       _,
@@ -1131,8 +1156,8 @@ class TransactionProcessingSteps(
     ) =
       pendingTransaction
     val submitterMetaO = transactionValidationResult.submitterMetadataO
-    val submitterParticipantSubmitterInfoO =
-      submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO)
+    val completionInfoO =
+      submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO(_, freshOwnTimelyTx))
 
     rejectionReason.logWithContext(Map("requestId" -> pendingTransaction.requestId.toString))
     val rejection =
@@ -1154,7 +1179,7 @@ class TransactionProcessingSteps(
         case reason => LedgerSyncEvent.CommandRejected.FinalReason(reason.rpcStatus())
       }
 
-    val tseO = submitterParticipantSubmitterInfoO.map(info =>
+    val tseO = completionInfoO.map(info =>
       TimestampedEvent(
         LedgerSyncEvent
           .CommandRejected(requestTime.toLf, info, rejection, requestType, Some(domainId)),
@@ -1162,6 +1187,7 @@ class TransactionProcessingSteps(
         Some(requestSequencerCounter),
       )
     )
+
     Right(tseO)
   }
 
@@ -1186,20 +1212,20 @@ class TransactionProcessingSteps(
       )
 
   private def completionInfoFromSubmitterMetadataO(
-      meta: SubmitterMetadata
-  ): Option[CompletionInfo] =
-    if (meta.submitterParticipant == participantId) {
-      Some(
-        CompletionInfo(
-          meta.actAs.toList,
-          meta.applicationId.unwrap,
-          meta.commandId.unwrap,
-          Some(meta.dedupPeriod),
-          meta.submissionId,
-          statistics = None, // Statistics filled by ReadService, so we don't persist them
-        )
-      )
-    } else None
+      meta: SubmitterMetadata,
+      freshOwnTimelyTx: Boolean,
+  ): Option[CompletionInfo] = {
+    lazy val completionInfo = CompletionInfo(
+      meta.actAs.toList,
+      meta.applicationId.unwrap,
+      meta.commandId.unwrap,
+      Some(meta.dedupPeriod),
+      meta.submissionId,
+      statistics = None, // Statistics filled by ReadService, so we don't persist them
+    )
+
+    Option.when(freshOwnTimelyTx)(completionInfo)
+  }
 
   private[this] def createPendingTransaction(
       id: RequestId,
@@ -1207,6 +1233,7 @@ class TransactionProcessingSteps(
       rc: RequestCounter,
       sc: SequencerCounter,
       mediator: MediatorRef,
+      freshOwnTimelyTx: Boolean,
   )(implicit traceContext: TraceContext): PendingTransaction = {
     val TransactionValidationResult(
       transactionId,
@@ -1227,6 +1254,7 @@ class TransactionProcessingSteps(
       viewValidationResults,
       timeValidationE,
       hostedInformeeStakeholders,
+      replayCheckResult,
     ) = transactionValidationResult
 
     ErrorUtil.requireArgument(
@@ -1236,6 +1264,7 @@ class TransactionProcessingSteps(
 
     validation.PendingTransaction(
       transactionId,
+      freshOwnTimelyTx,
       modelConformanceResultE,
       internalConsistencyResultE,
       workflowIdO,
@@ -1249,7 +1278,7 @@ class TransactionProcessingSteps(
 
   private def getCommitSetAndContractsToBeStoredAndEventApproveConform(
       pendingRequestData: RequestType#PendingRequestData,
-      completionInfo: Option[CompletionInfo],
+      completionInfoO: Option[CompletionInfo],
       modelConformance: ModelConformanceChecker.Result,
   )(implicit
       traceContext: TraceContext
@@ -1288,7 +1317,7 @@ class TransactionProcessingSteps(
         }.toMap
 
       acceptedEvent = LedgerSyncEvent.TransactionAccepted(
-        optCompletionInfo = completionInfo,
+        completionInfoO = completionInfoO,
         transactionMeta = TransactionMeta(
           ledgerEffectiveTime = lfTx.metadata.ledgerTime.toLf,
           workflowId = pendingRequestData.workflowIdO.map(_.unwrap),
@@ -1309,7 +1338,7 @@ class TransactionProcessingSteps(
             case (divulgedCid, divulgedContract) =>
               DivulgedContract(divulgedCid, divulgedContract.contractInstance)
           }.toList,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = pendingRequestData.transactionValidationResult.hostedWitnesses.toList,
         contractMetadata = contractMetadata,
       )
@@ -1341,7 +1370,9 @@ class TransactionProcessingSteps(
     val content = eventE.fold(_.content, _.content)
     val Deliver(_, ts, _, _, _) = content
     val submitterMetaO = pendingRequestData.transactionValidationResult.submitterMetadataO
-    val completionInfoO = submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO)
+    val completionInfoO = submitterMetaO.flatMap(
+      completionInfoFromSubmitterMetadataO(_, pendingRequestData.freshOwnTimelyTx)
+    )
 
     def rejected(error: TransactionError) = {
       for {
@@ -1448,7 +1479,7 @@ object TransactionProcessingSteps {
     }
   }
 
-  final case class ParallelChecksResult(
+  private final case class ParallelChecksResult(
       authenticationResult: Map[ViewHash, String],
       consistencyResultE: Either[List[ReferenceToFutureContractError], Unit],
       authorizationResult: Map[ViewHash, String],
@@ -1458,6 +1489,7 @@ object TransactionProcessingSteps {
       ],
       internalConsistencyResultE: Either[ErrorWithInternalConsistencyCheck, Unit],
       timeValidationResultE: Either[TimeCheckFailure, Unit],
+      replayCheckResult: Option[String],
   )
 
   final case class PendingDataAndResponseArgs(

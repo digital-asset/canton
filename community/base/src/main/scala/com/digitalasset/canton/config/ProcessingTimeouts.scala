@@ -22,6 +22,7 @@ import scala.concurrent.duration.*
   * @param storageMaxRetryInterval max retry interval for storage
   * @param activeInit how long a passive replica should wait for the initialization by the active replica
   * @param slowFutureWarn when using future supervision, when should we start to warn about a slow future
+  * @param activeInitRetryDelay delay between attempts while waiting for initialization of the active replica
   */
 final case class ProcessingTimeout(
     unbounded: NonNegativeDuration = DefaultProcessingTimeouts.unbounded,
@@ -34,9 +35,11 @@ final case class ProcessingTimeout(
     closing: NonNegativeDuration = DefaultProcessingTimeouts.closing,
     inspection: NonNegativeDuration = DefaultProcessingTimeouts.inspection,
     storageMaxRetryInterval: NonNegativeDuration = DefaultProcessingTimeouts.maxRetryInterval,
+    kmsRetryInterval: NonNegativeDuration = DefaultProcessingTimeouts.maxRetryInterval,
     verifyActive: NonNegativeDuration = DefaultProcessingTimeouts.verifyActive,
     activeInit: NonNegativeDuration = DefaultProcessingTimeouts.activeInit,
     slowFutureWarn: NonNegativeDuration = DefaultProcessingTimeouts.slowFutureWarn,
+    activeInitRetryDelay: NonNegativeDuration = DefaultProcessingTimeouts.activeInitRetryDelay,
 )
 
 /** Reasonable default timeouts */
@@ -66,6 +69,8 @@ object DefaultProcessingTimeouts {
   val verifyActive: NonNegativeDuration = NonNegativeDuration.tryFromDuration(10.seconds)
 
   val activeInit: NonNegativeDuration = NonNegativeDuration.tryFromDuration(1.minute)
+
+  val activeInitRetryDelay: NonNegativeDuration = NonNegativeDuration.tryFromDuration(50.millis)
 
   val warnUnbounded: NonNegativeDuration = NonNegativeDuration.tryFromDuration(30.seconds)
 

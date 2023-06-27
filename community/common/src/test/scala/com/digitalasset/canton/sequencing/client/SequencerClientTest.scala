@@ -95,7 +95,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
       DefaultTestIdentities.domainId,
     )
   private lazy val signedDeliver: OrdinarySerializedEvent = {
-    OrdinarySequencedEvent(SequencerTestUtils.sign(deliver))(traceContext)
+    OrdinarySequencedEvent(SequencerTestUtils.sign(deliver), None)(traceContext)
   }
 
   private lazy val nextDeliver: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
@@ -113,6 +113,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
     CantonTimestamp.ofEpochSecond(3),
     DefaultTestIdentities.domainId,
   )
+
   def deliver(i: Long): Deliver[Nothing] = SequencerTestUtils.mockDeliver(
     i,
     CantonTimestamp.Epoch.plusSeconds(i),
@@ -805,15 +806,16 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
       subscription: MockSubscription[E],
   ) {
     def sendToHandler(event: SequencedEvent[ClosedEnvelope]): Future[Unit] = {
-      handler(OrdinarySequencedEvent(SequencerTestUtils.sign(event))(traceContext)).transform {
-        case Success(Right(_)) => Success(())
-        case Success(Left(err)) =>
-          subscription.closeSubscription(err)
-          Success(())
-        case Failure(ex) =>
-          subscription.closeSubscription(ex)
-          Success(())
-      }
+      handler(OrdinarySequencedEvent(SequencerTestUtils.sign(event), None)(traceContext))
+        .transform {
+          case Success(Right(_)) => Success(())
+          case Success(Left(err)) =>
+            subscription.closeSubscription(err)
+            Success(())
+          case Failure(ex) =>
+            subscription.closeSubscription(ex)
+            Success(())
+        }
     }
   }
 
@@ -856,14 +858,18 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
   private class MockSubscription[E] extends SequencerSubscription[E] {
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
+
     override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
+
     override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
         traceContext: TraceContext
     ): Unit = {
       closeReasonPromise.success(reason)
       close()
     }
+
     def closeSubscription(reason: E): Unit = this.closeReasonPromise.success(HandlerError(reason))
+
     def closeSubscription(error: Throwable): Unit =
       this.closeReasonPromise.success(HandlerException(error))
   }
@@ -888,6 +894,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
             subscriber(retry - 1)
           case None => None
         }
+
       subscriber(retry = 10)
     }
 
@@ -940,9 +947,11 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
 
     override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
       SubscriptionErrorRetryPolicy.never
+
     override def handshake(request: HandshakeRequest)(implicit
         traceContext: TraceContext
     ): EitherT[Future, HandshakeRequestError, HandshakeResponse] = ???
+
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
 
@@ -974,10 +983,10 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
     )
 
     /** @param useParallelExecutionContext Set to true to use a parallel execution context which is handy for
-      *                                    verifying close behavior that can involve an Await that would deadlock
-      *                                    on ScalaTest's default serial execution context. However by enabling this
-      *                                    it means the order of asynchronous operations within the SequencerClient
-      *                                    will no longer be deterministic.
+      *                                     verifying close behavior that can involve an Await that would deadlock
+      *                                     on ScalaTest's default serial execution context. However by enabling this
+      *                                     it means the order of asynchronous operations within the SequencerClient
+      *                                     will no longer be deterministic.
       */
     def create(
         storedEvents: Seq[SequencedEvent[ClosedEnvelope]] = Seq.empty,
@@ -1078,7 +1087,7 @@ class SequencerClientTest extends AnyWordSpec with BaseTest with HasExecutorServ
 
       for {
         _ <- sequencedEventStore.store(
-          signedEvents.map(OrdinarySequencedEvent(_)(TraceContext.empty))
+          signedEvents.map(OrdinarySequencedEvent(_, None)(TraceContext.empty))
         )
         _ <- cleanPrehead.traverse_(prehead =>
           sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(prehead)

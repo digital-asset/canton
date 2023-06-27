@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
+import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v1.event.{CreatedEvent, ExercisedEvent, InterfaceView}
 import com.daml.ledger.api.v1.value.{
   Identifier as ApiIdentifier,
@@ -16,10 +17,13 @@ import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.VersionedValue
 import com.daml.lf.engine as LfEngine
-import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.{Metrics, Timed}
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.platform.apiserver.services.{ErrorCause, RejectionGenerators}
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
@@ -94,9 +98,9 @@ final class LfValueTranslation(
         LfPackageId,
         LoggingContextWithTrace,
     ) => Future[Option[com.daml.daml_lf_dev.DamlLf.Archive]],
-) extends LfValueSerialization {
-
-  private val logger = ContextualizedLogger.get(this.getClass)
+    val loggerFactory: NamedLoggerFactory,
+) extends LfValueSerialization
+    with NamedLogging {
 
   private val enricherO = engineO.map(new ValueEnricher(_))
 
@@ -463,8 +467,8 @@ final class LfValueTranslation(
       executionContext: ExecutionContext,
   ): Future[Either[Status, Versioned[Value]]] = Timed.future(
     metrics.daml.index.lfValue.computeInterfaceView, {
-      implicit val contextualizedErrorLogger: DamlContextualizedErrorLogger =
-        new DamlContextualizedErrorLogger(logger, loggingContext, None)
+      implicit val errorLogger: ContextualizedErrorLogger =
+        ErrorLoggingContext(logger, loggingContext)
 
       def goAsync(
           res: LfEngine.Result[Versioned[Value]]

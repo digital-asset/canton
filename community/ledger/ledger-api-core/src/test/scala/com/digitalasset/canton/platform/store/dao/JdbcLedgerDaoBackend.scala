@@ -109,6 +109,7 @@ private[dao] trait JdbcLedgerDaoBackend extends AkkaBeforeAndAfterAll {
             stringInterningView = stringInterningView,
             ingestionStorageBackend = storageBackendFactory.createIngestionStorageBackend,
             parameterStorageBackend = storageBackendFactory.createParameterStorageBackend,
+            loggerFactory = loggerFactory,
           ),
           servicesExecutionContext = executionContext,
           metrics = metrics,

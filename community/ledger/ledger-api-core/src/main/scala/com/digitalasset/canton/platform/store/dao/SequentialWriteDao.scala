@@ -8,6 +8,7 @@ import com.daml.metrics.Metrics
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   DbDtoToStringsForInterning,
@@ -41,6 +42,7 @@ object SequentialWriteDao {
       stringInterningView: StringInterning with InternizingStringInterningView,
       ingestionStorageBackend: IngestionStorageBackend[_],
       parameterStorageBackend: ParameterStorageBackend,
+      loggerFactory: NamedLoggerFactory,
   ): SequentialWriteDao = {
     MetricsContext.withMetricLabels("participant_id" -> participantId) { implicit mc =>
       SequentialWriteDaoImpl(
@@ -52,6 +54,7 @@ object SequentialWriteDao {
             metrics = metrics,
             engineO = None,
             loadPackage = (_, _) => Future.successful(None),
+            loggerFactory = loggerFactory,
           ),
           compressionStrategy = compressionStrategy,
           metrics,

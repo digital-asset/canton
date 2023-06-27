@@ -30,7 +30,7 @@ class InMemoryContractKeyJournal(override protected val loggerFactory: NamedLogg
     override implicit val ec: ExecutionContext
 ) extends ContractKeyJournal
     with NamedLogging
-    with InMemoryPrunableByTime[ContractKeyJournalError] {
+    with InMemoryPrunableByTime {
 
   import InMemoryContractKeyJournal.*
 
@@ -71,8 +71,8 @@ class InMemoryContractKeyJournal(override protected val loggerFactory: NamedLogg
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ContractKeyJournalError, Unit] =
-    EitherT.pure[Future, ContractKeyJournalError](mapWithCleanup(_.prune(beforeAndIncluding)))
+  ): Future[Unit] =
+    Future.successful(mapWithCleanup(_.prune(beforeAndIncluding)))
 
   override def deleteSince(inclusive: TimeOfChange)(implicit
       traceContext: TraceContext

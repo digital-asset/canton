@@ -253,6 +253,7 @@ trait ParticipantNodeBootstrapCommon {
       topologyManager: ParticipantTopologyManagerOps,
       componentFactory: ParticipantComponentBootstrapFactory,
       skipRecipientsCheck: Boolean,
+      overrideKeyUniqueness: Option[Boolean] = None, // TODO(i13235) remove when UCK is gone
   )(implicit executionSequencerFactory: ExecutionSequencerFactory): EitherT[
     FutureUnlessShutdown,
     String,
@@ -278,7 +279,7 @@ trait ParticipantNodeBootstrapCommon {
     // closed in DomainAliasManager
     val registeredDomainsStore = RegisteredDomainsStore(storage, timeouts, loggerFactory)
 
-    // closed in grpc domain registriy
+    // closed in grpc domain registry
     val agreementService = {
       // store is cleaned up as part of the agreement service
       val acceptedAgreements = ServiceAgreementStore(storage, timeouts, loggerFactory)
@@ -315,7 +316,7 @@ trait ParticipantNodeBootstrapCommon {
           storage,
           clock,
           config.init.ledgerApi.maxDeduplicationDuration.toInternal.some,
-          config.init.parameters.uniqueContractKeys.some,
+          overrideKeyUniqueness.orElse(config.init.parameters.uniqueContractKeys.some),
           parameterConfig.stores,
           ReleaseProtocolVersion.latest,
           arguments.metrics,

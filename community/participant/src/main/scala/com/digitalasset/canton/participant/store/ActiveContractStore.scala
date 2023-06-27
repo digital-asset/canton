@@ -3,14 +3,12 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.data.EitherT
 import cats.kernel.Order
 import cats.syntax.foldable.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
-import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.{
   LfContractId,
@@ -37,7 +35,7 @@ import scala.concurrent.Future
   * Updates must be idempotent.</p>
   *
   * <p>Creations, transfers, and archivals can be mixed arbitrarily.
-  * A contract may be transferred in and out several times during its lifetime.
+  * A contract may be transferred-in and -out several times during its lifetime.
   * It becomes active with every transfer-in and transferred away with every transfer-out.
   * If the ACS detects irregularities, the change method reports them.</p>
   *
@@ -60,7 +58,7 @@ import scala.concurrent.Future
   */
 trait ActiveContractStore
     extends ActiveContractSnapshot
-    with ConflictDetectionStore[LfContractId, ActiveContractStore.Status, AcsError] {
+    with ConflictDetectionStore[LfContractId, ActiveContractStore.Status] {
   import ActiveContractStore.*
 
   /** Marks the given contracts as active from `timestamp` (inclusive) onwards.
@@ -214,7 +212,7 @@ trait ActiveContractStore
     */
   override protected[canton] def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Unit]
+  ): Future[Unit]
 
   /** Deletes all activeness changes from requests whose request counter is at least the given one.
     * This method must not be called concurrently with creating, archiving, or transferring contracts.
@@ -510,7 +508,7 @@ trait ActiveContractSnapshot {
     */
   def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, CantonTimestamp]]
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]]
 
   /** Returns all contracts that were active right after the given request counter,
     * and when the contract became active for the last time before or at the given request counter.
@@ -530,10 +528,9 @@ trait ActiveContractSnapshot {
     *         it does not show up in any snapshot.
     *         The map is sorted by [[cats.kernel.Order]]`[`[[com.digitalasset.canton.protocol.LfContractId]]`]`.
     */
-  // TODO(#12754) Expose the transfer counters
   def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, RequestCounter]]
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]]
 
   /** Returns Some(contractId) if an active contract belonging to package `pkg` exists, otherwise returns None.
     * The returned contractId may be any active contract from package `pkg`.

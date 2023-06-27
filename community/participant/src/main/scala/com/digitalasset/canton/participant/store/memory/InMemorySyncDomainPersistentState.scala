@@ -47,6 +47,7 @@ abstract class InMemorySyncDomainPersistentStateCommon(
   val sequencerCounterTrackerStore =
     new InMemorySequencerCounterTrackerStore(loggerFactory, timeouts)
   val sendTrackerStore = new InMemorySendTrackerStore()
+  val submissionTrackerStore = new InMemorySubmissionTrackerStore(loggerFactory)
 
   override def isMemory(): Boolean = true
 

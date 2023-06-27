@@ -16,6 +16,7 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
@@ -34,22 +35,15 @@ import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckingLe
 import com.digitalasset.canton.ledger.sandbox.domain.{Rejection, Submission}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.google.rpc.status.Status.toJavaProto
-import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.{Assertion, FixtureContext, OptionValues}
+import org.scalatest.{Assertion, FixtureContext}
 
 import java.time.Duration
 import scala.annotation.nowarn
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 
 @nowarn("msg=match may not be exhaustive")
-class SequenceSpec
-    extends AnyFlatSpec
-    with MockitoSugar
-    with Matchers
-    with ArgumentMatchersSugar
-    with OptionValues {
+class SequenceSpec extends AnyFlatSpec with BaseTest {
   private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   behavior of classOf[SequenceImpl].getSimpleName
@@ -496,6 +490,7 @@ class SequenceSpec
       initialAllocatedParties = allocatedInformees,
       initialLedgerConfiguration = initialLedgerConfiguration,
       maxDeduplicationDuration = maxDeduplicationDuration,
+      loggerFactory = loggerFactory,
     )
 
     def exerciseNonConsuming(
@@ -530,13 +525,13 @@ class SequenceSpec
         tx: SubmittedTransaction = txMock,
     ): Update.TransactionAccepted =
       Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo.copy(commandId = cmdId)),
+        completionInfoO = Some(completionInfo.copy(commandId = cmdId)),
         transactionMeta = transactionMeta,
         transaction = CommittedTransaction(tx),
         transactionId = Ref.TransactionId.assertFromString(txId.toString),
         recordTime = recordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = contractMetadata,
       )

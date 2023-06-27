@@ -3,7 +3,7 @@
 
 package com.daml.http
 
-import com.daml.lf.data.ImmArray.ImmArraySeq
+import com.daml.http.LedgerClientJwt.Grpc
 import com.daml.http.domain.{
   ActiveContract,
   Choice,
@@ -16,23 +16,25 @@ import com.daml.http.domain.{
   JwtWritePayload,
 }
 import com.daml.http.util.ClientUtil.uniqueCommandId
-import com.daml.http.util.FutureUtil._
+import com.daml.http.util.FutureUtil.*
 import com.daml.http.util.IdentifierConverters.refApiIdentifier
 import com.daml.http.util.Logging.{InstanceUUID, RequestID}
 import com.daml.http.util.{Commands, Transactions}
-import LedgerClientJwt.Grpc
 import com.daml.jwt.domain.Jwt
-import com.daml.ledger.api.refinements.{ApiTypes => lar}
+import com.daml.ledger.api.refinements.ApiTypes as lar
+import com.daml.ledger.api.v1 as lav1
 import com.daml.ledger.api.v1.commands.Commands.DeduplicationPeriod
-import com.daml.ledger.api.{v1 => lav1}
 import com.daml.ledger.service.Grpc.StatusEnvelope
+import com.daml.lf.data.ImmArray.ImmArraySeq
+import com.daml.logging.LoggingContextOf
 import com.daml.logging.LoggingContextOf.{label, withEnrichedLoggingContext}
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
-import scalaz.std.option._
-import scalaz.std.scalaFuture._
-import scalaz.syntax.show._
-import scalaz.syntax.std.option._
-import scalaz.syntax.traverse._
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
+import scalaz.std.option.*
+import scalaz.std.scalaFuture.*
+import scalaz.syntax.show.*
+import scalaz.syntax.std.option.*
+import scalaz.syntax.traverse.*
 import scalaz.{-\/, EitherT, \/, \/-}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -41,9 +43,12 @@ import scala.util.{Failure, Success}
 class CommandService(
     submitAndWaitForTransaction: LedgerClientJwt.SubmitAndWaitForTransaction,
     submitAndWaitForTransactionTree: LedgerClientJwt.SubmitAndWaitForTransactionTree,
-)(implicit ec: ExecutionContext) {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends NamedLogging
+    with NoTracing {
 
-  import CommandService._
+  import CommandService.*
 
   private def withTemplateLoggingContext[CtId <: ContractTypeId.RequiredPkg, T](
       templateId: CtId
@@ -72,7 +77,7 @@ class CommandService(
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): Future[Error \/ domain.CreateCommandResponse[lav1.value.Value]] =
     withTemplateLoggingContext(input.templateId).run { implicit lc =>
-      logger.trace(s"sending create command to ledger")
+      logger.trace(s"sending create command to ledger, ${lc.makeString}")
       val command = createCommand(input)
       val request = submitAndWaitRequest(jwtPayload, input.meta, command, "create")
       val et: ET[domain.CreateCommandResponse[lav1.value.Value]] = for {
@@ -104,7 +109,7 @@ class CommandService(
     ).run(implicit lc =>
       withTemplateChoiceLoggingContext(input.reference.fold(_._1, _._1), input.choice)
         .run { implicit lc =>
-          logger.trace("sending exercise command to ledger")
+          logger.trace(s"sending exercise command to ledger, ${lc.makeString}")
           val command = exerciseCommand(input)
 
           val et: ET[ExerciseResponse[lav1.value.Value]] =
@@ -135,7 +140,7 @@ class CommandService(
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): Future[Error \/ ExerciseResponse[lav1.value.Value]] =
     withTemplateChoiceLoggingContext(input.templateId, input.choice).run { implicit lc =>
-      logger.trace("sending create and exercise command to ledger")
+      logger.trace(s"sending create and exercise command to ledger, ${lc.makeString}")
       val command = createAndExerciseCommand(input)
       val request = submitAndWaitRequest(jwtPayload, input.meta, command, "createAndExercise")
       val et: ET[ExerciseResponse[lav1.value.Value]] = for {
@@ -168,14 +173,14 @@ class CommandService(
             case _ => InternalError(Some(op), e)
           }))
         case Success(-\/(e)) =>
-          import Grpc.Category._
+          import Grpc.Category.*
           val tagged = e.e match {
             case PermissionDenied => -\/(PermissionDenied)
             case InvalidArgument => \/-(InvalidArgument)
           }
           Future.successful(-\/(ClientError(tagged, e.message)))
         case Success(\/-(a)) =>
-          logger.debug(s"$opName success: $a")
+          logger.debug(s"$opName success: $a, ${lc.makeString}")
           Future.successful(\/-(a))
       }
     }
@@ -240,7 +245,7 @@ class CommandService(
     )
       .run { implicit lc =>
         logger.info(
-          s"Submitting $commandKind command"
+          s"Submitting $commandKind command, ${lc.makeString}"
         )
         Commands.submitAndWaitRequest(
           jwtPayload.ledgerId,
@@ -358,6 +363,4 @@ object CommandService {
   private type ET[A] = EitherT[Future, Error, A]
 
   type ExerciseCommandRef = domain.ResolvedContractRef[lav1.value.Value]
-
-  private val logger = ContextualizedLogger.get(classOf[CommandService])
 }

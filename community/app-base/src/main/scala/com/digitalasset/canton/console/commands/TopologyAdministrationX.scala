@@ -37,6 +37,26 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
+trait InitNodeIdX extends ConsoleCommandGroup {
+
+  @Help.Summary("Initialize the node with a unique identifier")
+  @Help.Description("""Every node in Canton is identified using a unique identifier, which is composed
+                      |of a user-chosen string and the fingerprint of a signing key. The signing key is the root key
+                      |defining a so-called namespace, where the signing key has the ultimate control over
+                      |issuing new identifiers.
+                      |During initialisation, we have to pick such a unique identifier.
+                      |By default, initialisation happens automatically, but it can be turned off by setting the auto-init
+                      |option to false.
+                      |Automatic node initialisation is usually turned off to preserve the identity of a participant or domain
+                      |node (during major version upgrades) or if the topology transactions are managed through
+                      |a different topology manager than the one integrated into this node.""")
+  def init_id(identifier: UniqueIdentifier): Unit =
+    consoleEnvironment.run {
+      runner.adminCommand(TopologyAdminCommandsX.Init.InitId(identifier.toProtoPrimitive))
+    }
+
+}
+
 class TopologyAdministrationGroupX(
     instance: InstanceReferenceX,
     topologyQueueStatus: => Option[TopologyQueueStatus],
@@ -48,6 +68,7 @@ class TopologyAdministrationGroupX(
       consoleEnvironment,
       loggerFactory,
     )
+    with InitNodeIdX
     with Helpful
     with FeatureFlagFilter {
 

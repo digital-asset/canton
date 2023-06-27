@@ -156,6 +156,7 @@ class DefaultMessageDispatcher(
         signedEventE.fold(_.content, _.content) match {
           case deliver @ Deliver(sc, ts, _, _, _) if TimeProof.isTimeProofDeliver(deliver) =>
             tickTrackers(sc, ts, triggerAcsChangePublication = true)
+
           case Deliver(sc, ts, _, _, _) =>
             val deliverE = signedEventE.fold(
               err => Left(err.asInstanceOf[EventWithErrors[Deliver[DefaultOpenEnvelope]]]),
@@ -170,6 +171,7 @@ class DefaultMessageDispatcher(
                 case Failure(ex) =>
                   logger.error("event processing failed.", ex)
               }
+
           case error @ DeliverError(sc, ts, _, _, _) =>
             logger.debug(s"Received a deliver error at ${sc} / ${ts}")
             for {

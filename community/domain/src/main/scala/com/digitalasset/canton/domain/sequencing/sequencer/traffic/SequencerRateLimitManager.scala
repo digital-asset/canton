@@ -4,11 +4,12 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.traffic
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
+import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, TrafficState}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.traffic.{MemberTrafficStatus, TopUpEvent}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -16,62 +17,74 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 trait SequencerRateLimitManager {
 
-  /** Return the rate limit status for all members known to the manager
+  /** Compute the traffic status (including effective traffic limit) for members based on their traffic state
     */
-  def rateLimitsStatus: Seq[MemberTrafficStatus]
+  def getTrafficStatusFor(members: Map[Member, TrafficState])(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Seq[MemberTrafficStatus]]
 
-  /** Return the traffic status for a single member
+  /** Create a traffic state for a new member at the given timestamp.
+    * Its base traffic remainder will be equal to the max burst window configured at that point in time.
     */
-  def trafficStateForMember(member: Member): Option[MemberTrafficStatus]
-
-  /** Load the traffic control state of the member at the given timestamp.
-    * @param member member to load
-    * @param at timestamp to load data from
-    */
-  def loadMember(member: Member, at: CantonTimestamp)(implicit
-      ec: ExecutionContext
-  ): EitherT[Future, SequencerRateLimitError, Unit]
-
-  /** Register a new member with its initial traffic status
-    */
-  def register(member: Member, initialStatus: MemberTrafficStatus)(implicit
-      ec: ExecutionContext
-  ): Future[Unit]
+  def createNewTrafficStateAt(member: Member, timestamp: CantonTimestamp)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[TrafficState]
 
   /** Top up a member with its new extra traffic limit. Must be strictly increasing between subsequent calls.
-    * @param member member to top up
+    *
+    * @param member               member to top up
     * @param newExtraTrafficTotal new limit
-    * @param timestamp timestamp at which the top up will be effective
+    * @param timestamp            timestamp at which the top up will be effective
     */
   def topUp(
       member: Member,
-      newExtraTrafficTotal: PositiveLong,
-      timestamp: CantonTimestamp,
-  ): Either[SequencerRateLimitError.UnknownMember, Unit]
+      limit: TopUpEvent,
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Unit]
 
   /** Consume the traffic costs of the submission request from the sender's traffic state.
     *
     * NOTE: This method must be called in order of the sequencing timestamps.
     */
   def consume(
-      submissionRequest: SubmissionRequest,
+      sender: Member,
+      batch: Batch[ClosedEnvelope],
       sequencingTimestamp: CantonTimestamp,
+      trafficState: TrafficState,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[
     Future,
     SequencerRateLimitError,
-    Unit,
+    TrafficState,
   ]
+
+  /** Takes a partial map of traffic states and update them to be up to date with the given timestamp.
+    * In particular recompute relevant state fields for the effective extra traffic limit at that timestamp.
+    * The return state map will be merged back into the complete state.
+    */
+  def updateTrafficStates(
+      partialTrafficStates: Map[Member, TrafficState],
+      timestamp: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Map[Member, TrafficState]]
 }
 
-sealed trait SequencerRateLimitError
+sealed trait SequencerRateLimitError {
+  def trafficState: Option[TrafficState]
+}
+
 object SequencerRateLimitError {
-  final case class UnknownMember(member: Member) extends SequencerRateLimitError
   final case class AboveTrafficLimit(
+      member: Member,
       trafficCost: NonNegativeLong,
-      extraTrafficRemainder: NonNegativeLong,
-      remainingBaseTraffic: NonNegativeLong,
+      override val trafficState: Option[TrafficState],
   ) extends SequencerRateLimitError
 }

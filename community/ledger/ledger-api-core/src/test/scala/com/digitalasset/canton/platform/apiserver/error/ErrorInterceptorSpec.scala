@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.error
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Flow, Source}
-import ch.qos.logback.classic.Level
 import com.daml.error.*
 import com.daml.error.utils.ErrorDetails
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -15,31 +14,31 @@ import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.platform.hello.HelloServiceGrpc.HelloService
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.platform.testing.StreamConsumer
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
-import com.digitalasset.canton.ledger.error.{CommonErrors, DamlContextualizedErrorLogger}
-import com.digitalasset.canton.testing.TestingLogCollector.ThrowableEntry
-import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
+import com.digitalasset.canton.ledger.error.CommonErrors
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.testing.TestingLogCollector
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.*
 import io.grpc.stub.StreamObserver
 import org.scalatest.*
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.freespec.AsyncFreeSpec
-import org.scalatest.matchers.should.Matchers
 
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+import scala.concurrent.Future
 
 final class ErrorInterceptorSpec
     extends AsyncFreeSpec
     with BeforeAndAfter
     with AkkaBeforeAndAfterAll
-    with Matchers
     with OptionValues
     with Eventually
     with IntegrationPatience
     with TestResourceContext
     with Checkpoints
-    with LoggingAssertions
-    with ErrorsAssertions {
+    with ErrorsAssertions
+    with BaseTest {
 
   import ErrorInterceptorSpec.*
 
@@ -58,7 +57,11 @@ final class ErrorInterceptorSpec
       "when signalling with a non-self-service error should SANITIZE the server response when arising " - {
         "inside a Future" in {
           exerciseUnaryFutureEndpoint(
-            new HelloServiceFailing(useSelfService = false, errorInsideFutureOrStream = true)
+            new HelloServiceFailing(
+              useSelfService = false,
+              errorInsideFutureOrStream = true,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertSecuritySanitizedError(t)
@@ -67,7 +70,11 @@ final class ErrorInterceptorSpec
 
         s"outside a Future $bypassMsg" in {
           exerciseUnaryFutureEndpoint(
-            new HelloServiceFailing(useSelfService = false, errorInsideFutureOrStream = false)
+            new HelloServiceFailing(
+              useSelfService = false,
+              errorInsideFutureOrStream = false,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertSecuritySanitizedError(t)
@@ -78,7 +85,11 @@ final class ErrorInterceptorSpec
       "when signalling with a self-service error should NOT SANITIZE the server response when arising" - {
         "inside a Future" in {
           exerciseUnaryFutureEndpoint(
-            new HelloServiceFailing(useSelfService = true, errorInsideFutureOrStream = true)
+            new HelloServiceFailing(
+              useSelfService = true,
+              errorInsideFutureOrStream = true,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertFooMissingError(
@@ -90,7 +101,11 @@ final class ErrorInterceptorSpec
 
         s"outside a Future $bypassMsg" in {
           exerciseUnaryFutureEndpoint(
-            new HelloServiceFailing(useSelfService = true, errorInsideFutureOrStream = false)
+            new HelloServiceFailing(
+              useSelfService = true,
+              errorInsideFutureOrStream = false,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertFooMissingError(
@@ -106,7 +121,11 @@ final class ErrorInterceptorSpec
 
       "signal server shutting down" in {
         val service =
-          new HelloServiceFailing(useSelfService = false, errorInsideFutureOrStream = true)
+          new HelloServiceFailing(
+            useSelfService = false,
+            errorInsideFutureOrStream = true,
+            loggerFactory = loggerFactory,
+          )
         service.close()
         exerciseStreamingAkkaEndpoint(service)
           .map { t: StatusRuntimeException =>
@@ -117,7 +136,11 @@ final class ErrorInterceptorSpec
       "when signalling with a non-self-service error should SANITIZE the server response when arising" - {
         "inside a Stream" in {
           exerciseStreamingAkkaEndpoint(
-            new HelloServiceFailing(useSelfService = false, errorInsideFutureOrStream = true)
+            new HelloServiceFailing(
+              useSelfService = false,
+              errorInsideFutureOrStream = true,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertSecuritySanitizedError(t)
@@ -126,7 +149,11 @@ final class ErrorInterceptorSpec
 
         s"outside a Stream $bypassMsg" in {
           exerciseStreamingAkkaEndpoint(
-            new HelloServiceFailing(useSelfService = false, errorInsideFutureOrStream = false)
+            new HelloServiceFailing(
+              useSelfService = false,
+              errorInsideFutureOrStream = false,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertSecuritySanitizedError(t)
@@ -134,22 +161,26 @@ final class ErrorInterceptorSpec
         }
 
         "outside a Stream by directly calling stream-observer.onError" in {
-          exerciseStreamingAkkaEndpoint(
-            new HelloServiceFailingDirectlyObserverOnError
-          ).map { t: StatusRuntimeException =>
-            assertSecuritySanitizedError(t)
-            assertLogEntries[this.type, ErrorInterceptor] { loggedEntries =>
-              // not logging the transformed error
-              loggedEntries should have size 0
+          loggerFactory.assertLogs(
+            exerciseStreamingAkkaEndpoint(
+              new HelloServiceFailingDirectlyObserverOnError
+            ).map { t: StatusRuntimeException =>
+              assertSecuritySanitizedError(t)
             }
-          }
+            // the transformed error is expected to not be logged
+            // so it is required that no entries will be found
+          )
         }
       }
 
       "when signalling with a self-service error should NOT SANITIZE the server response when arising" - {
         "inside a Stream" in {
           exerciseStreamingAkkaEndpoint(
-            new HelloServiceFailing(useSelfService = true, errorInsideFutureOrStream = true)
+            new HelloServiceFailing(
+              useSelfService = true,
+              errorInsideFutureOrStream = true,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertFooMissingError(
@@ -161,7 +192,11 @@ final class ErrorInterceptorSpec
 
         s"outside a Stream $bypassMsg" in {
           exerciseStreamingAkkaEndpoint(
-            new HelloServiceFailing(useSelfService = true, errorInsideFutureOrStream = false)
+            new HelloServiceFailing(
+              useSelfService = true,
+              errorInsideFutureOrStream = false,
+              loggerFactory = loggerFactory,
+            )
           )
             .map { t: StatusRuntimeException =>
               assertFooMissingError(
@@ -181,36 +216,25 @@ final class ErrorInterceptorSpec
         idx += 1
         idx
       }
-      assert(LogOnUnhandledFailureInClose(call()) === 1)
-      assert(LogOnUnhandledFailureInClose(call()) === 2)
+      assert(LogOnUnhandledFailureInClose(logger, call()) === 1)
+      assert(LogOnUnhandledFailureInClose(logger, call()) === 2)
     }
 
-    "logs and re-throws the exception of a " in {
+    "logs and re-throws an exception" in {
       val failure = new RuntimeException("some failure")
       val failingCall = () => throw failure
 
-      // TODO(#13019) Avoid the global execution context
-      @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-      implicit val ec: ExecutionContextExecutor = ExecutionContext.global
-
-      Future(LogOnUnhandledFailureInClose(failingCall())).failed.map {
-        case `failure` =>
-          assertSingleLogEntry[this.type, LogOnUnhandledFailureInClose.type](
-            expectedLogLevel = Level.ERROR,
-            expectedMsg =
-              "LEDGER_API_INTERNAL_ERROR(4,0): Unhandled error in ServerCall.close(). The gRPC client might have not been notified about the call/stream termination. Either notify clients to retry pending unary/streaming calls or restart the participant server.",
-            expectedMarkerAsString =
-              """{err-context: "{location=ErrorInterceptor.scala:<line-number>, throwableO=Some(java.lang.RuntimeException: some failure)}"}""",
-            expectedThrowableEntry = Some(
-              ThrowableEntry(
-                className = "java.lang.RuntimeException",
-                message = "some failure",
-              )
-            ),
-          )
-          succeed
-        case other => fail("Unexpected failure", other)
-      }
+      loggerFactory
+        .assertThrowsAndLogs[RuntimeException](
+          within = LogOnUnhandledFailureInClose(logger, failingCall()),
+          assertions = logEntry => {
+            logEntry.errorMessage shouldBe "LEDGER_API_INTERNAL_ERROR(4,0): Unhandled error in ServerCall.close(). The gRPC client might have not been notified about the call/stream termination. Either notify clients to retry pending unary/streaming calls or restart the participant server."
+            logEntry.mdc.keys should contain("err-context")
+            logEntry.mdc
+              .get("err-context")
+              .value should fullyMatch regex """\{location=ErrorInterceptor.scala:\d+, throwableO=Some\(java.lang.RuntimeException: some failure\)\}"""
+          },
+        )
     }
   }
 
@@ -218,7 +242,7 @@ final class ErrorInterceptorSpec
       helloService: BindableService
   ): Future[StatusRuntimeException] = {
     val response: Future[HelloResponse] = server(
-      tested = new ErrorInterceptor(),
+      tested = new ErrorInterceptor(loggerFactory),
       service = helloService,
     ).use { channel =>
       HelloServiceGrpc.stub(channel).single(HelloRequest(1))
@@ -232,7 +256,7 @@ final class ErrorInterceptorSpec
       helloService: BindableService
   ): Future[StatusRuntimeException] = {
     val response: Future[Vector[HelloResponse]] = server(
-      tested = new ErrorInterceptor(),
+      tested = new ErrorInterceptor(loggerFactory),
       service = helloService,
     ).use { channel =>
       val streamConsumer = new StreamConsumer[HelloResponse](observer =>
@@ -264,8 +288,12 @@ final class ErrorInterceptorSpec
       actual,
       expectedStatusCode = FooMissingErrorCode.category.grpcCode.value,
       expectedMessage = s"FOO_MISSING_ERROR_CODE(11,0): Foo is missing: $expectedMsg",
-      expectedDetails =
-        Seq(ErrorDetails.ErrorInfoDetail("FOO_MISSING_ERROR_CODE", Map("category" -> "11"))),
+      expectedDetails = Seq(
+        ErrorDetails.ErrorInfoDetail(
+          "FOO_MISSING_ERROR_CODE",
+          Map("category" -> "11", "test" -> getClass.getSimpleName),
+        )
+      ),
       verifyEmptyStackTrace = false,
     )
     Assertions.succeed
@@ -296,9 +324,6 @@ object ErrorInterceptorSpec {
   trait HelloServiceBase extends BindableService {
     self: HelloService =>
 
-    implicit protected val damlLogger: DamlContextualizedErrorLogger =
-      DamlContextualizedErrorLogger.forTesting(getClass)
-
     // TODO(#13019) Avoid the global execution context
     @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     override def bindService(): ServerServiceDefinition =
@@ -310,21 +335,29 @@ object ErrorInterceptorSpec {
   /** @param useSelfService - whether to use self service error codes or "rogue" exceptions
     * @param errorInsideFutureOrStream - whether to signal the exception inside a Future or a Stream, or outside to them
     */
-  class HelloServiceFailing(useSelfService: Boolean, errorInsideFutureOrStream: Boolean)(implicit
+  class HelloServiceFailing(
+      useSelfService: Boolean,
+      errorInsideFutureOrStream: Boolean,
+      val loggerFactory: NamedLoggerFactory,
+  )(implicit
       esf: ExecutionSequencerFactory,
       mat: Materializer,
   ) extends HelloService
       with StreamingServiceLifecycleManagement
       with HelloServiceResponding
-      with HelloServiceBase {
+      with HelloServiceBase
+      with NamedLogging {
 
     override protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-      DamlContextualizedErrorLogger.forTesting(getClass)
+      errorLoggingContext(
+        TraceContext.empty
+      )
 
     override def serverStreaming(
         request: HelloRequest,
         responseObserver: StreamObserver[HelloResponse],
     ): Unit = registerStream(responseObserver) {
+      implicit val traceContext = TraceContext.empty
       val where = if (errorInsideFutureOrStream) "inside" else "outside"
       val t: Throwable = if (useSelfService) {
         FooMissingErrorCode
@@ -343,6 +376,7 @@ object ErrorInterceptorSpec {
     }
 
     override def single(request: HelloRequest): Future[HelloResponse] = {
+      implicit val traceContext = TraceContext.empty
       val where = if (errorInsideFutureOrStream) "inside" else "outside"
       val t: Throwable = if (useSelfService) {
         FooMissingErrorCode

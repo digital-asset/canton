@@ -400,8 +400,8 @@ object WellFormedTransaction {
       _ <- tx.nodes.to(LazyList).traverse_ {
         case (nodeId, an: LfActionNode) =>
           // Since we check for the fetch actors before, informees does not throw.
-          val missingInformees = LfTransactionUtil.signatoriesOrMaintainers(an) -- LfTransactionUtil
-            .informees(an)
+          val missingInformees =
+            LfTransactionUtil.signatoriesOrMaintainers(an) -- an.informeesOfNode
           if (missingInformees.isEmpty) Checked.unit
           else
             Checked.continue(s"signatory or maintainer not declared as informee: ${missingInformees
@@ -437,7 +437,7 @@ object WellFormedTransaction {
   private def checkPartyNames(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] = {
     val lfPartyIds =
       tx.nodes.values
-        .collect { case node: LfActionNode => LfTransactionUtil.informees(node) }
+        .collect { case node: LfActionNode => node.informeesOfNode }
         .toSet
         .flatten
     lfPartyIds.to(LazyList).traverse_ { lfPartyId =>

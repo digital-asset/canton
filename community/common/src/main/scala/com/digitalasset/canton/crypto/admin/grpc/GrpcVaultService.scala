@@ -9,7 +9,9 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.config.CantonRequireTypes.String300
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.admin.v0
+import com.digitalasset.canton.crypto.store.CryptoPublicStoreError
 import com.digitalasset.canton.crypto.{v0 as cryptoproto, *}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
@@ -20,6 +22,8 @@ import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import org.bouncycastle.asn1.x500.X500Name
 
@@ -28,6 +32,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class GrpcVaultService(
     crypto: Crypto,
     certificateGenerator: X509CertificateGenerator,
+    enablePreviewFeatures: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends v0.VaultServiceGrpc.VaultService
@@ -60,7 +65,7 @@ class GrpcVaultService(
         mapErr(
           keys.toList.parFilterA(pk =>
             crypto.cryptoPrivateStore
-              .existsPrivateKey(pk.publicKey.id)
+              .existsPrivateKey(pk.publicKey.id, pk.publicKey.purpose)
               .leftMap[String](err => s"Failed to check key ${pk.publicKey.id}'s existence: $err")
           )
         )
@@ -156,6 +161,20 @@ class GrpcVaultService(
     EitherTUtil.toFuture(res)
   }
 
+  override def registerKmsSigningKey(
+      request: v0.RegisterKmsSigningKeyRequest
+  ): Future[v0.RegisterKmsSigningKeyResponse] =
+    Future.failed[v0.RegisterKmsSigningKeyResponse](
+      StaticGrpcServices.notSupportedByCommunityStatus.asRuntimeException()
+    )
+
+  override def registerKmsEncryptionKey(
+      request: v0.RegisterKmsEncryptionKeyRequest
+  ): Future[v0.RegisterKmsEncryptionKeyResponse] =
+    Future.failed[v0.RegisterKmsEncryptionKeyResponse](
+      StaticGrpcServices.notSupportedByCommunityStatus.asRuntimeException()
+    )
+
   override def importCertificate(
       request: v0.ImportCertificateRequest
   ): Future[v0.ImportCertificateResponse] = {
@@ -214,9 +233,8 @@ class GrpcVaultService(
 
   override def rotateWrapperKey(
       request: v0.RotateWrapperKeyRequest
-  ): Future[Empty] = {
+  ): Future[Empty] =
     Future.failed[Empty](StaticGrpcServices.notSupportedByCommunityStatus.asRuntimeException())
-  }
 
   override def getWrapperKeyId(
       request: v0.GetWrapperKeyIdRequest
@@ -225,6 +243,128 @@ class GrpcVaultService(
       StaticGrpcServices.notSupportedByCommunityStatus.asRuntimeException()
     )
 
+  override def exportKeyPair(request: v0.ExportKeyPairRequest): Future[v0.ExportKeyPairResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      // TODO(i13613): Remove feature flag check in favor of exportable keys check
+      _ <- EitherTUtil.condUnitET[Future](
+        enablePreviewFeatures,
+        "Remote export of private keys only allowed when preview is enabled",
+      )
+      cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
+        .toRight(
+          "The selected crypto provider does not support exporting of private keys."
+        )
+        .toEitherT[Future]
+      fingerprint <- Fingerprint
+        .fromProtoPrimitive(request.fingerprint)
+        .leftMap(err => s"Failed to deserialize fingerprint: $err")
+        .toEitherT[Future]
+      protocolVersion = ProtocolVersion.fromProtoPrimitive(request.protocolVersion)
+      _ <- EitherTUtil.condUnitET[Future](
+        ProtocolVersion.supported.contains(protocolVersion),
+        s"Requested protocol version $protocolVersion is not supported",
+      )
+      privateKey <- cryptoPrivateStore
+        .exportPrivateKey(fingerprint)
+        .leftMap(_.toString)
+        .subflatMap(_.toRight(s"no private key found for [$fingerprint]"))
+        .leftMap(err => s"Error retrieving private key [$fingerprint] $err")
+      publicKey <- crypto.cryptoPublicStore
+        .publicKey(fingerprint)
+        .leftMap(_.toString)
+        .subflatMap(_.toRight(s"no public key found for [$fingerprint]"))
+        .leftMap(err => s"Error retrieving public key [$fingerprint] $err")
+      keyPair <- (publicKey, privateKey) match {
+        case (pub: SigningPublicKey, pkey: SigningPrivateKey) =>
+          EitherT.rightT[Future, String](new SigningKeyPair(pub, pkey))
+        case (pub: EncryptionPublicKey, pkey: EncryptionPrivateKey) =>
+          EitherT.rightT[Future, String](new EncryptionKeyPair(pub, pkey))
+        case _ =>
+          EitherT.leftT[Future, CryptoKeyPair[PublicKey, PrivateKey]](
+            "public and private keys must have same purpose"
+          )
+      }
+    } yield v0.ExportKeyPairResponse(keyPair = keyPair.toByteString(protocolVersion))
+
+    EitherTUtil.toFuture(mapErr(res))
+  }
+
+  override def importKeyPair(request: v0.ImportKeyPairRequest): Future[v0.ImportKeyPairResponse] = {
+    def parseKeyPair(
+        keyPairBytes: ByteString
+    ): Either[String, CryptoKeyPair[PublicKey, PrivateKey]] = {
+      CryptoKeyPair
+        .fromByteString(keyPairBytes)
+        .leftFlatMap { firstErr =>
+          // Fallback to parse the old protobuf message format
+          ProtoConverter
+            .parse(
+              cryptoproto.CryptoKeyPair.parseFrom,
+              CryptoKeyPair.fromProtoCryptoKeyPairV0,
+              keyPairBytes,
+            )
+            .leftMap(secondErr => s"Failed to parse crypto key pair: $firstErr, $secondErr")
+        }
+    }
+
+    def loadKeyPair(
+        validatedName: Option[KeyName],
+        keyPair: CryptoKeyPair[PublicKey, PrivateKey],
+    )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+      for {
+        cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
+          .toRight(
+            "The selected crypto provider does not support importing of private keys."
+          )
+          .toEitherT[Future]
+        _ <- crypto.cryptoPublicStore
+          .storePublicKey(keyPair.publicKey, validatedName)
+          .recoverWith {
+            // if the existing key is the same, then ignore error
+            case error: CryptoPublicStoreError.KeyAlreadyExists =>
+              for {
+                existing <- crypto.cryptoPublicStore.publicKey(keyPair.publicKey.fingerprint)
+                _ <-
+                  if (existing.contains(keyPair.publicKey))
+                    EitherT.rightT[Future, CryptoPublicStoreError](())
+                  else EitherT.leftT[Future, Unit](error: CryptoPublicStoreError)
+              } yield ()
+          }
+          .leftMap(_.toString)
+        _ <- cryptoPrivateStore
+          .storePrivateKey(keyPair.privateKey, validatedName)
+          .leftMap(_.toString)
+      } yield ()
+
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val res = for {
+      validatedName <- OptionUtil
+        .emptyStringAsNone(request.name)
+        .traverse(KeyName.create)
+        .toEitherT[Future]
+      keyPair <- parseKeyPair(request.keyPair).toEitherT[Future]
+      _ <- loadKeyPair(validatedName, keyPair)
+    } yield v0.ImportKeyPairResponse()
+
+    EitherTUtil.toFuture(mapErr(res))
+  }
+
+  override def deleteKeyPair(request: v0.DeleteKeyPairRequest): Future[v0.DeleteKeyPairResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      fingerprint <- Fingerprint
+        .fromProtoPrimitive(request.fingerprint)
+        .leftMap(err => s"Failed to parse key fingerprint: $err")
+        .toEitherT[Future]
+      _ <- crypto.cryptoPrivateStore
+        .removePrivateKey(fingerprint)
+        .leftMap(err => s"Failed to remove private key: $err")
+    } yield v0.DeleteKeyPairResponse()
+
+    EitherTUtil.toFuture(mapErr(res))
+  }
 }
 
 object GrpcVaultService {
@@ -232,6 +372,8 @@ object GrpcVaultService {
     def create(
         crypto: Crypto,
         certificateGenerator: X509CertificateGenerator,
+        enablePreviewFeatures: Boolean,
+        timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
     )(implicit ec: ExecutionContext): GrpcVaultService
   }
@@ -240,9 +382,11 @@ object GrpcVaultService {
     override def create(
         crypto: Crypto,
         certificateGenerator: X509CertificateGenerator,
+        enablePreviewFeatures: Boolean,
+        timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
     )(implicit ec: ExecutionContext): GrpcVaultService =
-      new GrpcVaultService(crypto, certificateGenerator, loggerFactory)
+      new GrpcVaultService(crypto, certificateGenerator, enablePreviewFeatures, loggerFactory)
   }
 }
 

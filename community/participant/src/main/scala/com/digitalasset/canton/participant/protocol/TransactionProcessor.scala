@@ -88,6 +88,7 @@ class TransactionProcessor(
         ModelConformanceChecker(
           damle,
           confirmationRequestFactory.transactionTreeFactory,
+          staticDomainParameters.protocolVersion,
           loggerFactory,
         ),
         staticDomainParameters,

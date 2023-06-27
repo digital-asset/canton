@@ -338,6 +338,7 @@ private[transfer] class TransferInProcessingSteps(
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediator: MediatorRef,
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[

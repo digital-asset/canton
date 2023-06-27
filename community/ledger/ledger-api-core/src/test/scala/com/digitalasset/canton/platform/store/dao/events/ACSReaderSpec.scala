@@ -6,24 +6,22 @@ package com.digitalasset.canton.platform.store.dao.events
 import akka.actor.ActorSystem
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdPaginationState,
   streamIdsFromSeekPagination,
 }
 import com.digitalasset.canton.platform.store.dao.events.EventIdsUtils.*
 import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, BeforeAndAfterAll}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-class ACSReaderSpec extends AsyncFlatSpec with Matchers with BeforeAndAfterAll {
+class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
   private val actorSystem = ActorSystem()
   private implicit val materializer: Materializer = Materializer(actorSystem)
   private implicit val ec: ExecutionContext = actorSystem.dispatcher
-  private implicit val lc: LoggingContext = LoggingContext.empty
 
   override def afterAll(): Unit = {
     Await.result(actorSystem.terminate(), Duration(10, "seconds"))
@@ -38,6 +36,7 @@ class ACSReaderSpec extends AsyncFlatSpec with Matchers with BeforeAndAfterAll {
       workingMemoryInBytesForIdPages = 100 * 1024 * 1024,
       numOfDecomposedFilters = filterSize,
       numOfPagesInIdPageBuffer = 1,
+      loggerFactory = loggerFactory,
     )
     // progression: 200 800 3200 10000 10000...
     realisticConfigForFilterSize(1) shouldBe IdPageSizing(200, 10000)
@@ -58,6 +57,7 @@ class ACSReaderSpec extends AsyncFlatSpec with Matchers with BeforeAndAfterAll {
       workingMemoryInBytesForIdPages = 100 * 1024 * 1024,
       numOfDecomposedFilters = filterSize,
       numOfPagesInIdPageBuffer = 1,
+      loggerFactory = loggerFactory,
     )
     configWith(1) shouldBe IdPageSizing(150, 150)
     configWith(10) shouldBe IdPageSizing(150, 150)
@@ -75,6 +75,7 @@ class ACSReaderSpec extends AsyncFlatSpec with Matchers with BeforeAndAfterAll {
       workingMemoryInBytesForIdPages = 100 * 1024 * 1024,
       numOfDecomposedFilters = filterSize,
       numOfPagesInIdPageBuffer = 1,
+      loggerFactory = loggerFactory,
     )
     configWith(1) shouldBe IdPageSizing(4, 4)
     configWith(10) shouldBe IdPageSizing(4, 4)

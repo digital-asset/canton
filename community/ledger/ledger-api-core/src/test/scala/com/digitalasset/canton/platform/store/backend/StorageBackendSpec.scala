@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.ledger.resources.ResourceContext
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.FlywayMigrations
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, TestSuite}
 
@@ -25,7 +24,6 @@ trait StorageBackendSpec
     with BeforeAndAfterAll {
   this: TestSuite =>
 
-  override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
   implicit protected val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   // Data source (initialized once)

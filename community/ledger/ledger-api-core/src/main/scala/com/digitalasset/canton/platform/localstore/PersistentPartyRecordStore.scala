@@ -6,13 +6,13 @@ package com.digitalasset.canton.platform.localstore
 import com.daml.api.util.TimeProvider
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
-import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.PersistentPartyRecordStore.{
   ConcurrentPartyRecordUpdateDetectedRuntimeException,
   MaxAnnotationsSizeExceededException,
@@ -48,14 +48,14 @@ class PersistentPartyRecordStore(
     metrics: Metrics,
     timeProvider: TimeProvider,
     executionContext: ExecutionContext,
-) extends PartyRecordStore {
+    val loggerFactory: NamedLoggerFactory,
+) extends PartyRecordStore
+    with NamedLogging {
 
   private implicit val ec: ExecutionContext = executionContext
 
   private val backend = dbSupport.storageBackendFactory.createPartyRecordStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher
-
-  private val logger = ContextualizedLogger.get(getClass)
 
   // TODO(#13019) Replace parasitic with DirectExecutionContext
   @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.h2
 
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.common.{
   CommonStorageBackendFactory,
   CompletionStorageBackendTemplate,
@@ -51,9 +52,10 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
     PartyRecordStorageBackendImpl
 
   override def createCompletionStorageBackend(
-      stringInterning: StringInterning
+      stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): CompletionStorageBackend =
-    new CompletionStorageBackendTemplate(H2QueryStrategy, stringInterning)
+    new CompletionStorageBackendTemplate(H2QueryStrategy, stringInterning, loggerFactory)
 
   override def createContractStorageBackend(
       ledgerEndCache: LedgerEndCache,
@@ -64,10 +66,12 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
   override def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): EventStorageBackend =
     new H2EventStorageBackend(
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
+      loggerFactory = loggerFactory,
     )
 
   override val createDataSourceStorageBackend: DataSourceStorageBackend =

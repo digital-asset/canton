@@ -24,7 +24,10 @@ trait StorageBackendFactory {
   def createPartyStorageBackend(ledgerEndCache: LedgerEndCache): PartyStorageBackend
   def createPartyRecordStorageBackend: PartyRecordStorageBackend
   def createPackageStorageBackend(ledgerEndCache: LedgerEndCache): PackageStorageBackend
-  def createCompletionStorageBackend(stringInterning: StringInterning): CompletionStorageBackend
+  def createCompletionStorageBackend(
+      stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
+  ): CompletionStorageBackend
   def createContractStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
@@ -32,6 +35,7 @@ trait StorageBackendFactory {
   def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): EventStorageBackend
   def createDataSourceStorageBackend: DataSourceStorageBackend
   def createDBLockStorageBackend: DBLockStorageBackend
@@ -46,14 +50,16 @@ trait StorageBackendFactory {
   final def readStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): ReadStorageBackend =
     ReadStorageBackend(
       configurationStorageBackend = createConfigurationStorageBackend(ledgerEndCache),
       partyStorageBackend = createPartyStorageBackend(ledgerEndCache),
       packageStorageBackend = createPackageStorageBackend(ledgerEndCache),
-      completionStorageBackend = createCompletionStorageBackend(stringInterning),
+      completionStorageBackend = createCompletionStorageBackend(stringInterning, loggerFactory),
       contractStorageBackend = createContractStorageBackend(ledgerEndCache, stringInterning),
-      eventStorageBackend = createEventStorageBackend(ledgerEndCache, stringInterning),
+      eventStorageBackend =
+        createEventStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
       meteringStorageBackend = createMeteringStorageReadBackend(ledgerEndCache),
     )
 }

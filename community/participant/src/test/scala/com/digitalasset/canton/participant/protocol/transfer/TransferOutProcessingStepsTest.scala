@@ -138,6 +138,7 @@ final class TransferOutProcessingStepsTest
 
   private def mkState: SyncDomainEphemeralState =
     new SyncDomainEphemeralState(
+      submittingParticipant,
       persistentState,
       Eval.now(multiDomainEventLog),
       mock[InFlightSubmissionTracker],
@@ -684,6 +685,7 @@ final class TransferOutProcessingStepsTest
           FutureUnlessShutdown.pure(ActivenessResult.success),
           Future.unit,
           sourceMediator,
+          freshOwnTimelyTx = true,
         )
         .value
         .onShutdown(fail("unexpected shutdown during a test"))

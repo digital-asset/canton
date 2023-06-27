@@ -11,6 +11,7 @@ import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
 import "com/digitalasset/canton/protocol/v0/topology.proto";
 import "com/digitalasset/canton/protocol/v1/common.proto";
 import "com/digitalasset/canton/protocol/v1/merkle.proto";
+import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
 // Messages sent by a participant as part of the transaction protocol
@@ -139,4 +140,18 @@ message CommonMetadata {
   string domain_id = 3;
   string uuid = 4;
   string mediator = 5;
+}
+
+// Compared to v0: added max_sequencing_time
+message SubmitterMetadata {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.UnstableProtoVersion";
+
+  com.digitalasset.canton.crypto.v0.Salt salt = 1;
+  repeated string act_as = 2;
+  string application_id = 3;
+  string command_id = 4;
+  string submitter_participant = 5;
+  string submission_id = 6; // optional; absent if not specified by submitter
+  v0.DeduplicationPeriod dedup_period = 7;
+  google.protobuf.Timestamp max_sequencing_time = 8;
 }

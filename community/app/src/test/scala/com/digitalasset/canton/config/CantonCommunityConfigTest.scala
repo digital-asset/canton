@@ -47,7 +47,11 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
         (
           _.message should (include("Config field") and include("is deprecated")),
           "deprecated field not logged",
-        )
+        ),
+        (
+          _.message should (include("Config path") and include("is deprecated")),
+          "deprecated path not logged",
+        ),
       ),
       Seq.empty,
     ) _

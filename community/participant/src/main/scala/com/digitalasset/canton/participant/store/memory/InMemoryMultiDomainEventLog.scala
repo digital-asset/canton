@@ -170,7 +170,7 @@ class InMemoryMultiDomainEventLog(
 
       val notifyTransferF: Future[Unit] = event.event match {
         case transfer: LedgerSyncEvent.TransferEvent if transfer.isTransferringParticipant =>
-          notifyOnPublishTransfer(transfer, nextOffset)
+          notifyOnPublishTransfer(Seq((transfer, nextOffset)))
 
         case _ => Future.unit
       }

@@ -250,20 +250,20 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       builder.add(createNode)
 
       lazy val event = TransactionAccepted(
-        optCompletionInfo = DefaultParticipantStateValues.completionInfo(List.empty).some,
+        completionInfoO = DefaultParticipantStateValues.completionInfo(List.empty).some,
         transactionMeta = DefaultParticipantStateValues.transactionMeta(),
         transaction = CommittedTransaction.subst[Id](builder.build()),
         transactionId = DefaultDamlValues.lfTransactionId(1),
         recordTime = CantonTimestamp.Epoch.toLf,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map(),
       )
 
       Option(sync.augmentTransactionStatistics(event))
         .collect({ case ta: TransactionAccepted => ta })
-        .flatMap(_.optCompletionInfo)
+        .flatMap(_.completionInfoO)
         .flatMap(_.statistics)
         .map(_.committed.actions)
 

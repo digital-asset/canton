@@ -395,6 +395,8 @@ class DatabaseSequencer(
     // see [[isLedgerIdentityRegistered]]
     EitherT.leftT("authorizeLedgerIdentity is not implemented for database sequencers")
 
-  override def trafficStatus(implicit traceContext: TraceContext): Future[SequencerTrafficStatus] =
+  override def trafficStatus(members: Seq[Member])(implicit
+      traceContext: TraceContext
+  ): Future[SequencerTrafficStatus] =
     Future.successful(SequencerTrafficStatus(Seq.empty))
 }

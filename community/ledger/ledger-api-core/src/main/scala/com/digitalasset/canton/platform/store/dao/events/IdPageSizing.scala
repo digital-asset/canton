@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.tracing.TraceContext
 
 /** The size of a page is the number of ids in the page.
   */
@@ -16,7 +17,6 @@ final case class IdPageSizing(
 }
 
 object IdPageSizing {
-  private val logger = ContextualizedLogger.get(getClass)
 
   // Approximation of how many index entries is present in a leaf page of a btree index.
   // Fetching fewer ids than this only adds round-trip overhead, without decreasing the number of disk page reads per round-trip.
@@ -34,7 +34,9 @@ object IdPageSizing {
       workingMemoryInBytesForIdPages: Int,
       numOfDecomposedFilters: Int,
       numOfPagesInIdPageBuffer: Int,
-  )(implicit loggingContext: LoggingContext): IdPageSizing = {
+      loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext): IdPageSizing = {
+    val logger = loggerFactory.getTracedLogger(getClass)
     val calculated = calculateMaxNumOfIdsPerPage(
       workingMemoryInBytesForIdPages = workingMemoryInBytesForIdPages,
       numOfDecomposedFilters = numOfDecomposedFilters,

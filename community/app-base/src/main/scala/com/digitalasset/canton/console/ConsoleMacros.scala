@@ -11,6 +11,7 @@ import ch.qos.logback.core.spi.AppenderAttachable
 import ch.qos.logback.core.{Appender, FileAppender}
 import com.daml.ledger.api.v1.commands.{Command, CreateCommand, ExerciseCommand}
 import com.daml.ledger.api.v1.event.CreatedEvent
+import com.daml.ledger.api.v1.value.Value.Sum
 import com.daml.ledger.api.v1.value.{
   Identifier as IdentifierV1,
   List as ListV1,
@@ -382,6 +383,15 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         entityName = template,
       )
 
+    private def productToLedgerApiRecord(product: Product): Sum.Record = Value.Sum.Record(
+      Record(fields =
+        product.productIterator
+          .map(mapToLedgerApiValue)
+          .map(v => RecordField(value = Some(v)))
+          .toSeq
+      )
+    )
+
     private def mapToLedgerApiValue(value: Any): Value = {
 
       // assuming that String.toString = id, we'll just map any Map to a string map without casting
@@ -403,6 +413,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         case x: Option[Any] => Value.Sum.Optional(Optional(value = x.map(mapToLedgerApiValue)))
         case x: Value.Sum => x
         case x: Map[_, _] => Value.Sum.Record(buildArguments(safeMapCast(x)))
+        case x: (Any, Any) => productToLedgerApiRecord(x)
+        case x: (Any, Any, Any) => productToLedgerApiRecord(x)
         case _ =>
           throw new UnsupportedOperationException(
             s"value type not yet implemented: ${value.getClass}"

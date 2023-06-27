@@ -222,13 +222,13 @@ object LedgerSyncEvent {
   }
 
   final case class TransactionAccepted(
-      optCompletionInfo: Option[CompletionInfo],
+      completionInfoO: Option[CompletionInfo],
       transactionMeta: TransactionMeta,
       transaction: CommittedTransaction,
       transactionId: LedgerTransactionId,
       recordTime: LfTimestamp,
       divulgedContracts: List[DivulgedContract],
-      blindingInfo: Option[BlindingInfo],
+      blindingInfoO: Option[BlindingInfo],
       hostedWitnesses: List[LfPartyId],
       contractMetadata: Map[LfContractId, Bytes],
   ) extends LedgerSyncEvent.WithDomainId {
@@ -238,7 +238,7 @@ object LedgerSyncEvent {
       prettyOfClass(
         param("recordTime", _.recordTime),
         param("transactionId", _.transactionId),
-        paramIfDefined("completion info", _.optCompletionInfo),
+        paramIfDefined("completion info", _.completionInfoO),
         param("transactionMeta", _.transactionMeta),
         paramWithoutValue("transaction"),
         paramWithoutValue("divulgedContracts"),
@@ -379,7 +379,7 @@ object LedgerSyncEvent {
             sourceDomain = transferId.sourceDomain,
             targetDomain = targetDomain,
             submitter = submitter,
-            reassignmentCounter = 0L, // TODO(i12286): this needs to be populated properly
+            reassignmentCounter = transferCounter.v,
             hostedStakeholders = hostedStakeholders,
             unassignId = transferId.transferOutTimestamp,
           ),
@@ -484,7 +484,7 @@ object LedgerSyncEvent {
               sourceDomain = transferId.sourceDomain,
               targetDomain = targetDomain,
               submitter = submitter,
-              reassignmentCounter = 0L, // TODO(i12286): this needs to be populated properly
+              reassignmentCounter = transferCounter.v,
               hostedStakeholders = hostedStakeholders,
               unassignId = transferId.transferOutTimestamp,
             ),
@@ -507,13 +507,13 @@ object LedgerSyncEvent {
             )
 
             Update.TransactionAccepted(
-              optCompletionInfo = optCompletionInfo,
+              completionInfoO = optCompletionInfo,
               transactionMeta = transactionMeta,
               transaction = committedTransaction,
               transactionId = updateId,
               recordTime = recordTime,
               divulgedContracts = Nil,
-              blindingInfo = None,
+              blindingInfoO = None,
               hostedWitnesses = hostedStakeholders,
               contractMetadata = Map(createNode.coid -> contractMetadata),
             )

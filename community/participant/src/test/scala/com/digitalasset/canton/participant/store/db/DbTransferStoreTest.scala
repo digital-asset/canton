@@ -28,6 +28,7 @@ trait DbTransferStoreTest extends AsyncWordSpec with BaseTest with TransferStore
         domainId,
         testedProtocolVersion,
         TestingIdentityFactory.pureCrypto(),
+        futureSupervisor,
         timeouts,
         loggerFactory,
       )

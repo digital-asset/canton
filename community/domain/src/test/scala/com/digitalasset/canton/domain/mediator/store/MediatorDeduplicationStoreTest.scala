@@ -8,6 +8,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore.DeduplicationData
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.DefaultTestIdentities
@@ -16,7 +17,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 import java.util.UUID
 import scala.concurrent.Future
 
-trait MediatorDeduplicationStoreTest extends AsyncWordSpec with BaseTest {
+trait MediatorDeduplicationStoreTest extends AsyncWordSpec with BaseTest { this: HasCloseContext =>
 
   def mkStore(
       firstEventTs: CantonTimestamp = CantonTimestamp.MaxValue
@@ -184,22 +185,25 @@ trait MediatorDeduplicationStoreTest extends AsyncWordSpec with BaseTest {
         _ <- store.store(data2)
         _ <- store.store(data3)
 
-        _ <- store.prune(CantonTimestamp.ofEpochSecond(10))
+        _ <- store.prune(CantonTimestamp.ofEpochSecond(10), closeContext)
         _ = store.allData() shouldBe Set(data2, data3)
 
-        _ <- store.prune(CantonTimestamp.MinValue)
+        _ <- store.prune(CantonTimestamp.MinValue, closeContext)
         _ = store.allData() shouldBe Set(data2, data3)
 
-        _ <- store.prune(CantonTimestamp.ofEpochSecond(11))
+        _ <- store.prune(CantonTimestamp.ofEpochSecond(11), closeContext)
         _ = store.allData() shouldBe Set(data3)
 
-        _ <- store.prune(CantonTimestamp.MaxValue)
+        _ <- store.prune(CantonTimestamp.MaxValue, closeContext)
       } yield store.allData() shouldBe empty
     }
   }
 }
 
-class MediatorDeduplicationStoreTestInMemory extends MediatorDeduplicationStoreTest {
+class MediatorDeduplicationStoreTestInMemory
+    extends MediatorDeduplicationStoreTest
+    with FlagCloseable
+    with HasCloseContext {
   override def mkStore(firstEventTs: CantonTimestamp): MediatorDeduplicationStore = {
     val store = new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts)
     store.initialize(firstEventTs).futureValue

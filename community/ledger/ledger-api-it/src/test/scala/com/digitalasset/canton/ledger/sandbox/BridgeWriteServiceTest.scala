@@ -75,7 +75,7 @@ class BridgeWriteServiceTest extends AnyFlatSpec with MockitoSugar with Matchers
         index = 0,
         currentTimestamp = Time.Timestamp.now(),
       )
-    update.optCompletionInfo.flatMap(_.statistics) shouldBe Some(expected)
+    update.completionInfoO.flatMap(_.statistics) shouldBe Some(expected)
   }
 
   "toTransactionAccepted" should "forward populate contract metadata" in {

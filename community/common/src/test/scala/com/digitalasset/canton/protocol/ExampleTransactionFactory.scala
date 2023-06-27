@@ -42,6 +42,11 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.LfTransactionUtil.{
+  metadataFromCreate,
+  metadataFromExercise,
+  metadataFromFetch,
+}
 import com.digitalasset.canton.util.{LfTransactionBuilder, LfTransactionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.EitherValues
@@ -262,19 +267,6 @@ object ExampleTransactionFactory {
   def rootViewPosition(index: Int, total: Int): ViewPosition =
     ViewPosition(List(MerkleSeq.indicesFromSeq(total)(index)))
 
-  def metadataFromExercise(
-      node: LfNodeExercises,
-      contractInstance: LfContractInst,
-  ): WithContractMetadata[LfContractInst] =
-    WithContractMetadata(
-      contractInstance,
-      ContractMetadata.tryCreate(
-        node.signatories,
-        node.stakeholders,
-        node.versionedKey,
-      ),
-    )
-
   def asSerializableRaw(
       contractInstance: LfContractInst,
       agreementText: String,
@@ -299,20 +291,16 @@ object ExampleTransactionFactory {
       salt,
     )
 
-  def serializableFromCreate(
+  private def serializableFromCreate(
       node: LfNodeCreate,
       salt: Option[Salt],
   ): SerializableContract = {
-    val metadata = LfTransactionUtil
-      .createdContractIdWithMetadata(node)
-      .getOrElse(throw new RuntimeException("Shouldn't happen"))
-      .metadata
-    SerializableContract(
+    asSerializable(
       node.coid,
-      asSerializableRaw(node.versionedCoinst, node.agreementText),
-      metadata,
-      CantonTimestamp.Epoch,
-      salt,
+      node.versionedCoinst,
+      metadataFromCreate(node),
+      salt = salt,
+      agreementText = node.agreementText,
     )
   }
 
@@ -361,6 +349,7 @@ object ExampleTransactionFactory {
 
   // Merkle trees
   def blinded[A](tree: MerkleTree[A]): MerkleTree[A] = BlindedNode(tree.rootHash)
+
 }
 
 /** Factory for [[ExampleTransaction]].
@@ -584,7 +573,7 @@ class ExampleTransactionFactory(
       CreatedContract.tryCreate(contract, consumed.contains(coid), rolledBack = false)
     }
 
-    val coreInputsWithMetadata = coreInputs.map { contract =>
+    val coreInputContracts = coreInputs.map { contract =>
       val coid = contract.contractId
       coid -> InputContract(contract, consumed.contains(coid))
     }.toMap
@@ -605,7 +594,7 @@ class ExampleTransactionFactory(
       )
 
     val viewParticipantData = ViewParticipantData(cryptoOps)(
-      coreInputsWithMetadata,
+      coreInputContracts,
       createWithSerialization,
       createdInSubviewArchivedInCore,
       Map.empty,
@@ -645,6 +634,7 @@ class ExampleTransactionFactory(
       Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
       DefaultDamlValues.submissionId().some,
       DeduplicationDuration(JDuration.ofSeconds(100)),
+      ledgerTime.plusSeconds(100),
       cryptoOps,
       protocolVersion,
     )
@@ -808,45 +798,51 @@ class ExampleTransactionFactory(
 
     def consuming: Boolean
 
-    def created: Seq[SerializableContract] =
-      LfTransactionUtil
-        .createdContractIdWithMetadata(node)
-        .map { wMeta =>
+    def created: Seq[SerializableContract] = node match {
+      case n: LfNodeCreate =>
+        Seq(
           asSerializable(
-            wMeta.unwrap,
+            n.coid,
             contractInstance,
-            wMeta.metadata,
+            metadataFromCreate(n),
             salt = saltO,
             agreementText = agreementText,
           )
-        }
-        .toList
+        )
+      case _ => Seq.empty
+    }
 
-    def used: Seq[SerializableContract] =
-      LfTransactionUtil
-        .usedContractIdWithMetadata(node)
-        .map { wMeta =>
+    def used: Seq[SerializableContract] = node match {
+      case n: LfNodeExercises =>
+        Seq(
           asSerializable(
-            wMeta.unwrap,
+            n.targetCoid,
             contractInstance,
-            wMeta.metadata,
+            metadataFromExercise(n),
             salt = saltO,
             agreementText = agreementText,
           )
-        }
-        .toList
+        )
+      case n: LfNodeFetch =>
+        Seq(
+          asSerializable(
+            n.coid,
+            contractInstance,
+            metadataFromFetch(n),
+            salt = saltO,
+            agreementText = agreementText,
+          )
+        )
+      case _ => Seq.empty
+    }
 
     def consumed: Set[LfContractId] = if (consuming) used.map(_.contractId).toSet else Set.empty
 
     def metadata: TransactionMetadata =
       mkMetadata(nodeSeed.fold(Map.empty[LfNodeId, LfHash])(seed => Map(nodeId -> seed)))
 
-    override def keyResolver: LfKeyResolver = node.gkeyOpt match {
-      case None => Map.empty
-      case Some(gkey) =>
-        val resolution = LfTransactionUtil.usedContractIdWithMetadata(node).map(_.unwrap)
-        Map(gkey -> resolution)
-    }
+    override def keyResolver: LfKeyResolver =
+      node.gkeyOpt.fold(Map.empty: LfKeyResolver)(k => Map(k -> LfTransactionUtil.contractId(node)))
 
     override lazy val versionedUnsuffixedTransaction: LfVersionedTransaction =
       transaction(Seq(0), lfNode)
@@ -927,10 +923,11 @@ class ExampleTransactionFactory(
       ExampleTransactionFactory.contractInstance(capturedContractIds)
     override val agreementText: String = ""
 
-    val serializableContractInstance: SerializableRawContractInstance = asSerializableRaw(
-      contractInstance,
-      agreementText,
-    )
+    val serializableContractInstance: SerializableRawContractInstance =
+      asSerializableRaw(
+        contractInstance,
+        agreementText,
+      )
 
     val lfContractId: LfContractId = LfContractId.V1(discriminator, Bytes.Empty)
 
@@ -1423,8 +1420,7 @@ class ExampleTransactionFactory(
     val exercise1Agreement = "exercise1"
     val exercise1Id: LfContractId = suffixedId(-1, 0)
     val exercise1: LfNodeExercises = genExercise1(exercise1Id)
-    val exercise1UsedInstance: WithContractMetadata[LfContractInst] =
-      metadataFromExercise(exercise1, contractInstance())
+    val exercise1Instance: LfContractInst = contractInstance()
 
     val create10SerInst: SerializableRawContractInstance =
       asSerializableRaw(create10Inst, create10Agreement)
@@ -1456,8 +1452,7 @@ class ExampleTransactionFactory(
     val exercise131Id: LfContractId = suffixedId(-1, 1)
     val exercise131: LfNodeExercises = genExercise131(exercise131Id)
     val exercise131Agreement = "exercise131"
-    val exercise131UsedInstance: WithContractMetadata[LfContractInst] =
-      metadataFromExercise(exercise131, contractInstance())
+    val exercise131Instance: LfContractInst = contractInstance()
 
     val create1310SerInst: SerializableRawContractInstance =
       asSerializableRaw(create1310Inst, create1310Agreement)
@@ -1512,8 +1507,8 @@ class ExampleTransactionFactory(
         Seq(
           asSerializable(
             contractId = exercise131Id,
-            contractInstance = exercise131UsedInstance.unwrap,
-            metadata = exercise131UsedInstance.metadata,
+            contractInstance = exercise131Instance,
+            metadata = metadataFromExercise(exercise131),
             ledgerTime = ledgerTime,
             agreementText = exercise131Agreement,
           )
@@ -1532,8 +1527,8 @@ class ExampleTransactionFactory(
         Seq(
           asSerializable(
             exercise1Id,
-            exercise1UsedInstance.unwrap,
-            exercise1UsedInstance.metadata,
+            exercise1Instance,
+            metadataFromExercise(exercise1),
             ledgerTime,
             agreementText = exercise1Agreement,
           )
@@ -1961,14 +1956,12 @@ class ExampleTransactionFactory(
     val exercise1Agreement = "exercise1"
     val exercise1Id: LfContractId = suffixedId(-1, 1)
     val exercise1: LfNodeExercises = genExercise1(exercise1Id)
-    val exercise1UsedInstance: WithContractMetadata[LfContractInst] =
-      metadataFromExercise(exercise1, contractInstance())
+    val exercise1Instance: LfContractInst = contractInstance()
 
     val exercise10Agreement = "exercise10"
     val exercise10Id: LfContractId = suffixedId(-1, 10)
     val exercise10: LfNodeExercises = genExercise1X(exercise10Id, 3)
-    val exercise10UsedInstance: WithContractMetadata[LfContractInst] =
-      metadataFromExercise(exercise10, contractInstance())
+    val exercise10Instance: LfContractInst = contractInstance()
 
     val create100SerInst: SerializableRawContractInstance =
       asSerializableRaw(create100Inst, create100Agreement)
@@ -1993,8 +1986,7 @@ class ExampleTransactionFactory(
     val exercise12Agreement = "exercise12"
     val exercise12Id: LfContractId = suffixedId(-1, 12)
     val exercise12: LfNodeExercises = genExercise1X(exercise12Id, 6)
-    val exercise12UsedInstance: WithContractMetadata[LfContractInst] =
-      metadataFromExercise(exercise12, contractInstance())
+    val exercise12Instance: LfContractInst = contractInstance()
 
     val create120Inst: LfContractInst = genCreate120Inst(create100Id)
     val create120SerInst: SerializableRawContractInstance =
@@ -2052,8 +2044,8 @@ class ExampleTransactionFactory(
       Seq(
         asSerializable(
           exercise10Id,
-          exercise10UsedInstance.unwrap,
-          exercise10UsedInstance.metadata,
+          exercise10Instance,
+          metadataFromExercise(exercise10),
           ledgerTime,
           agreementText = exercise10Agreement,
         )
@@ -2083,8 +2075,8 @@ class ExampleTransactionFactory(
         Seq(
           asSerializable(
             exercise12Id,
-            exercise12UsedInstance.unwrap,
-            exercise12UsedInstance.metadata,
+            exercise12Instance,
+            metadataFromExercise(exercise12),
             ledgerTime,
             agreementText = exercise12Agreement,
           )
@@ -2103,8 +2095,8 @@ class ExampleTransactionFactory(
         Seq(
           asSerializable(
             exercise1Id,
-            exercise1UsedInstance.unwrap,
-            exercise1UsedInstance.metadata,
+            exercise1Instance,
+            metadataFromExercise(exercise1),
             ledgerTime,
             None,
             agreementText = exercise1Agreement,

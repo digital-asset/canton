@@ -7,7 +7,7 @@ package endpoints
 import akka.NotUsed
 import akka.http.scaladsl.model.*
 import akka.stream.scaladsl.{Flow, Source}
-import com.daml.lf.value.{Value as LfValue}
+import com.daml.lf.value.Value as LfValue
 import ContractsService.SearchResult
 import EndpointsCompanion.*
 import Endpoints.{ET, IntoEndpointsError}
@@ -27,13 +27,18 @@ import spray.json.*
 
 import scala.concurrent.{ExecutionContext, Future}
 import com.daml.http.metrics.HttpApiMetrics
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
+import com.daml.logging.LoggingContextOf
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
 
 private[http] final class ContractList(
     routeSetup: RouteSetup,
     decoder: DomainJsonDecoder,
     contractsService: ContractsService,
-)(implicit ec: ExecutionContext) {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends NamedLogging
+    with NoTracing {
   import ContractList.*
   import routeSetup.*, RouteSetup.*
   import json.JsonProtocol.*
@@ -43,7 +48,7 @@ private[http] final class ContractList(
       lc: LoggingContextOf[InstanceUUID with RequestID],
       ec: ExecutionContext,
       metrics: HttpApiMetrics,
-  ): ET[domain.SyncResponse[JsValue]] =
+  ): ET[domain.SyncResponse[JsValue]] = {
     for {
       parseAndDecodeTimer <- getParseAndDecodeTimerCtx()
       input <- inputJsValAndJwtPayload(req): ET[(Jwt, JwtPayload, JsValue)]
@@ -51,7 +56,7 @@ private[http] final class ContractList(
       (jwt, jwtPayload, reqBody) = input
 
       jsVal <- withJwtPayloadLoggingContext(jwtPayload) { implicit lc =>
-        logger.debug(s"/v1/fetch reqBody: $reqBody")
+        logger.debug(s"/v1/fetch reqBody: $reqBody, ${lc.makeString}")
         for {
           fr <-
             either(
@@ -67,7 +72,7 @@ private[http] final class ContractList(
                 )
               ): ET[domain.FetchRequest[LfValue]]
           _ <- EitherT.pure(parseAndDecodeTimer.stop())
-          _ = logger.debug(s"/v1/fetch fr: $fr")
+          _ = logger.debug(s"/v1/fetch fr: $fr, ${lc.makeString}")
 
           _ <- either(ensureReadAsAllowedByJwt(fr.readAs, jwtPayload))
           ac <- eitherT(
@@ -81,7 +86,7 @@ private[http] final class ContractList(
       }
 
     } yield domain.OkResponse(jsVal)
-
+  }
   def retrieveAll(req: HttpRequest)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID],
       metrics: HttpApiMetrics,
@@ -125,7 +130,7 @@ private[http] final class ContractList(
           LoggingContextOf.label[domain.GetActiveContractsRequest],
           "cmd" -> cmd.toString,
         ).run { implicit lc =>
-          logger.debug("Processing a query request")
+          logger.debug(s"Processing a query request, ${lc.makeString}")
           contractsService
             .search(jwt, jwtPayload, cmd)
             .map(
@@ -152,8 +157,6 @@ private[http] final class ContractList(
 private[endpoints] object ContractList {
   import json.JsonProtocol.*
   import util.ErrorOps.*
-
-  private val logger = ContextualizedLogger.get(getClass)
 
   private def lfValueToJsValue(a: LfValue): Error \/ JsValue =
     \/.attempt(LfValueCodec.apiValueToJsValue(a))(identity).liftErr(ServerError.fromMsg)

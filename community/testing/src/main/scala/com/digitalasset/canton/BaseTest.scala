@@ -126,6 +126,12 @@ trait BaseTest
 
   import scala.language.implicitConversions
 
+  // TODO(#12373) Adapt when releasing BFT
+  protected val testTrafficState = testedProtocolVersion >= ProtocolVersion.dev
+
+  protected def whenTestTrafficState[K, V](m: Map[K, V]): Map[K, V] =
+    if (testTrafficState) m else Map.empty
+
   /** Allows for invoking `myEitherT.futureValue` when `myEitherT: EitherT[Future, _, _]`.
     */
   implicit def futureConceptOfEitherTFuture[A, B](eitherTFuture: EitherT[Future, A, B])(implicit

@@ -50,7 +50,8 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         SymbolicCrypto.emptySignature,
         None,
         testedProtocolVersion,
-      )
+      ),
+      None,
     )(TraceContext.empty)
 
   def mockMultiDomainEventLog(): MultiDomainEventLog =
@@ -338,7 +339,9 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
           _ <- Future {
             ()
           } // this is needed to make AsyncWordSpec's serial execution context actually
-          _ <- Future { () } // do the publication before computing the starting points.
+          _ <- Future {
+            ()
+          } // do the publication before computing the starting points.
           noCleanReq <- SyncDomainEphemeralStateFactory.startingPoints(
             domainId,
             rjs,

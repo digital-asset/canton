@@ -4,11 +4,10 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.scalautil.Statement
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.platform.store.backend.PruningDto
 import com.digitalasset.canton.platform.store.backend.PruningDto.*
+import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, Checkpoints, OptionValues}
@@ -32,10 +31,10 @@ private[backend] trait StorageBackendTestsPruning
   private val actorParty = Ref.Party.assertFromString("actor")
 
   def pruneEventsSql(pruneUpToInclusive: Offset, pruneAllDivulgedContracts: Boolean)(implicit
-      loggingContext: LoggingContext
+      traceContext: TraceContext
   ): Unit =
     executeSql(
-      backend.event.pruneEvents(pruneUpToInclusive, pruneAllDivulgedContracts)(_, loggingContext)
+      backend.event.pruneEvents(pruneUpToInclusive, pruneAllDivulgedContracts)(_, traceContext)
     )
 
   it should "correctly update the pruning offset" in {
@@ -444,7 +443,7 @@ private[backend] trait StorageBackendTestsPruning
     executeSql(updateLedgerEnd(offset(1), 1L))
     assertIndexDbDataSql(completion = Seq(PruningDto.Completion("00000001")))
     // Prune
-    executeSql(backend.completion.pruneCompletions(offset(1))(_, loggingContext))
+    executeSql(backend.completion.pruneCompletions(offset(1))(_, TraceContext.empty))
     assertIndexDbDataSql(completion = Seq.empty)
   }
 

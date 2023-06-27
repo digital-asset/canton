@@ -3,14 +3,14 @@
 
 package com.daml.http
 
-import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.*
 import akka.http.scaladsl.server.RouteResult.Complete
 import akka.http.scaladsl.server.{RequestContext, Route}
 import akka.util.ByteString
 import com.daml.http.domain.{JwtPayload, JwtPayloadLedgerIdOnly, JwtWritePayload, LedgerApiError}
 import com.daml.http.json.SprayJson
 import com.daml.http.util.Logging.{InstanceUUID, RequestID, extendWithRequestIdLogCtx}
-import util.GrpcHttpErrorCodes._
+import util.GrpcHttpErrorCodes.*
 import com.daml.jwt.domain.{DecodedJwt, Jwt}
 import com.digitalasset.canton.ledger.api.auth.{
   AuthServiceJWTCodec,
@@ -22,22 +22,25 @@ import com.digitalasset.canton.ledger.api.domain.UserRight
 import UserRight.{CanActAs, CanReadAs}
 import com.daml.error.utils.ErrorDetails
 import com.daml.error.utils.ErrorDetails.ErrorDetail
-import com.daml.ledger.api.refinements.{ApiTypes => lar}
+import com.daml.ledger.api.refinements.ApiTypes as lar
 import com.digitalasset.canton.ledger.client.services.admin.UserManagementClient
 import com.digitalasset.canton.ledger.client.services.identity.LedgerIdentityClient
 import com.daml.ledger.service.Grpc.StatusEnvelope
 import com.daml.lf.data.Ref.UserId
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
-import com.google.rpc.{Code => GrpcCode}
+import com.daml.logging.LoggingContextOf
+import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.tracing.NoTracing
+import com.google.rpc.Code as GrpcCode
 import com.google.rpc.Status
-import scalaz.syntax.std.option._
+import scalaz.syntax.std.option.*
 import scalaz.{-\/, EitherT, Monad, NonEmptyList, Show, \/, \/-}
 import spray.json.JsValue
-import scalaz.syntax.std.either._
+import scalaz.syntax.std.either.*
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
-object EndpointsCompanion {
+object EndpointsCompanion extends NoTracing {
 
   type ValidateJwt = Jwt => Unauthorized \/ DecodedJwt[String]
 
@@ -109,7 +112,7 @@ object EndpointsCompanion {
       def apply(userId: String, actAs: List[String], readAs: List[String], ledgerId: String): A \/ B
     }
 
-     def userIdFromToken(
+    def userIdFromToken(
         jwt: StandardJWTPayload
     ): Unauthorized \/ UserId =
       UserId
@@ -140,7 +143,7 @@ object EndpointsCompanion {
         res <- either(fromUser(userId, actAs.toList, readAs.toList, ledgerId))
       } yield res
 
-     implicit def jwtWritePayloadFromUserToken(implicit
+    implicit def jwtWritePayloadFromUserToken(implicit
         mf: Monad[Future]
     ): CreateFromUserToken[JwtWritePayload] =
       (
@@ -164,7 +167,7 @@ object EndpointsCompanion {
           )
         )
 
-     implicit def jwtPayloadLedgerIdOnlyFromUserToken(implicit
+    implicit def jwtPayloadLedgerIdOnlyFromUserToken(implicit
         mf: Monad[Future]
     ): CreateFromUserToken[JwtPayloadLedgerIdOnly] =
       (_, _, getLedgerId: () => Future[String]) =>
@@ -172,7 +175,7 @@ object EndpointsCompanion {
           .rightT(getLedgerId())
           .map(ledgerId => JwtPayloadLedgerIdOnly(lar.LedgerId(ledgerId)))
 
-     implicit def jwtPayloadFromUserToken(implicit
+    implicit def jwtPayloadFromUserToken(implicit
         mf: Monad[Future]
     ): CreateFromUserToken[JwtPayload] =
       (
@@ -193,8 +196,7 @@ object EndpointsCompanion {
 
   object CreateFromCustomToken {
 
-     implicit val jwtWritePayloadFromCustomToken
-        : CreateFromCustomToken[JwtWritePayload] =
+    implicit val jwtWritePayloadFromCustomToken: CreateFromCustomToken[JwtWritePayload] =
       (
         jwt: CustomDamlJWTPayload,
       ) =>
@@ -215,14 +217,14 @@ object EndpointsCompanion {
           lar.Party.subst(jwt.readAs),
         )
 
-     implicit val jwtPayloadLedgerIdOnlyFromCustomToken
+    implicit val jwtPayloadLedgerIdOnlyFromCustomToken
         : CreateFromCustomToken[JwtPayloadLedgerIdOnly] =
       (jwt: CustomDamlJWTPayload) =>
         jwt.ledgerId
           .toRightDisjunction(Unauthorized("ledgerId missing in access token"))
           .map(ledgerId => JwtPayloadLedgerIdOnly(lar.LedgerId(ledgerId)))
 
-     implicit val jwtPayloadFromCustomToken: CreateFromCustomToken[JwtPayload] =
+    implicit val jwtPayloadFromCustomToken: CreateFromCustomToken[JwtPayload] =
       (jwt: CustomDamlJWTPayload) =>
         for {
           ledgerId <- jwt.ledgerId
@@ -238,27 +240,32 @@ object EndpointsCompanion {
         } yield payload
   }
 
-  def notFound(implicit lc: LoggingContextOf[InstanceUUID]): Route = (ctx: RequestContext) =>
+  def notFound(
+      logger: TracedLogger
+  )(implicit lc: LoggingContextOf[InstanceUUID]): Route = (ctx: RequestContext) =>
     ctx.request match {
       case HttpRequest(method, uri, _, _, _) =>
         extendWithRequestIdLogCtx(implicit lc =>
           Future.successful(
-            Complete(httpResponseError(NotFound(s"${method: HttpMethod}, uri: ${uri: Uri}")))
+            Complete(
+              httpResponseError(NotFound(s"${method: HttpMethod}, uri: ${uri: Uri}"), logger)
+            )
           )
         )
     }
 
-   def httpResponseError(
-      error: Error
+  def httpResponseError(
+      error: Error,
+      logger: TracedLogger,
   )(implicit lc: LoggingContextOf[InstanceUUID with RequestID]): HttpResponse = {
-    import com.daml.http.json.JsonProtocol._
-    val resp = errorResponse(error)
+    import com.daml.http.json.JsonProtocol.*
+    val resp = errorResponse(error, logger)
     httpResponse(resp.status, SprayJson.encodeUnsafe(resp))
   }
-  private[this] val logger = ContextualizedLogger.get(getClass)
 
-   def errorResponse(
-      error: Error
+  def errorResponse(
+      error: Error,
+      logger: TracedLogger,
   )(implicit lc: LoggingContextOf[InstanceUUID with RequestID]): domain.ErrorResponse = {
     def mkErrorResponse(
         status: StatusCode,
@@ -286,23 +293,23 @@ object EndpointsCompanion {
           Some(ledgerApiError),
         )
       case ServerError(reason) =>
-        logger.error(s"Internal server error occured", reason)
+        logger.error(s"Internal server error occured, ${lc.makeString}", reason)
         mkErrorResponse(StatusCodes.InternalServerError, "HTTP JSON API Server Error")
       case Unauthorized(e) => mkErrorResponse(StatusCodes.Unauthorized, e)
       case NotFound(e) => mkErrorResponse(StatusCodes.NotFound, e)
     }
   }
 
-   def httpResponse(status: StatusCode, data: JsValue): HttpResponse = {
+  def httpResponse(status: StatusCode, data: JsValue): HttpResponse = {
     HttpResponse(
       status = status,
       entity = HttpEntity.Strict(ContentTypes.`application/json`, format(data)),
     )
   }
 
-   def format(a: JsValue): ByteString = ByteString(a.compactPrint)
+  def format(a: JsValue): ByteString = ByteString(a.compactPrint)
 
-   def decodeAndParseJwt(
+  def decodeAndParseJwt(
       jwt: Jwt,
       decodeJwt: ValidateJwt,
   ): Error \/ AuthServiceJWTPayload =
@@ -315,7 +322,7 @@ object EndpointsCompanion {
           .leftMap(Error.fromThrowable)
       )
 
-   def decodeAndParsePayload[A](
+  def decodeAndParsePayload[A](
       jwt: Jwt,
       decodeJwt: ValidateJwt,
       userManagementClient: UserManagementClient,

@@ -125,6 +125,10 @@ class TestProcessingSteps(
     .decisionTimeFor(requestTs)
     .leftMap(err => TestProcessorError(DomainParametersError(parameters.domainId, err)))
 
+  override def getSubmissionDataForTracker(
+      views: Seq[DecryptedView]
+  ): Option[SubmissionTracker.SubmissionData] = None
+
   override def participantResponseDeadlineFor(
       parameters: DynamicDomainParametersWithValidity,
       requestTs: CantonTimestamp,
@@ -226,6 +230,7 @@ class TestProcessingSteps(
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediator: MediatorRef,
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -257,6 +262,7 @@ class TestProcessingSteps(
       rc: RequestCounter,
       sc: SequencerCounter,
       decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      freshOwnTimelyTx: Boolean,
   )(implicit traceContext: TraceContext): (Option[TimestampedEvent], Option[PendingSubmissionId]) =
     (None, None)
 

@@ -187,7 +187,7 @@ object UpdateToDbDto {
 
         case u: TransactionAccepted =>
           withOptionalMetricLabels(
-            IndexedUpdatesMetrics.Labels.applicationId -> u.optCompletionInfo.map(_.applicationId)
+            IndexedUpdatesMetrics.Labels.applicationId -> u.completionInfoO.map(_.applicationId)
           ) { implicit mc: MetricsContext =>
             incrementCounterForEvent(
               metrics.daml.indexerEvents,
@@ -195,7 +195,7 @@ object UpdateToDbDto {
               IndexedUpdatesMetrics.Labels.status.accepted,
             )
           }
-          val blinding = u.blindingInfo.getOrElse(Blinding.blind(u.transaction))
+          val blinding = u.blindingInfoO.getOrElse(Blinding.blind(u.transaction))
           // TODO(i12283) LLP: Extract in common functionality together with duplicated code in [[InMemoryStateUpdater]]
           val preorderTraversal = u.transaction
             .foldInExecutionOrder(List.empty[(NodeId, Node)])(
@@ -231,10 +231,10 @@ object UpdateToDbDto {
                     event_offset = Some(offset.toHexString),
                     transaction_id = Some(u.transactionId),
                     ledger_effective_time = Some(u.transactionMeta.ledgerEffectiveTime.micros),
-                    command_id = u.optCompletionInfo.map(_.commandId),
+                    command_id = u.completionInfoO.map(_.commandId),
                     workflow_id = u.transactionMeta.workflowId,
-                    application_id = u.optCompletionInfo.map(_.applicationId),
-                    submitters = u.optCompletionInfo.map(_.actAs.toSet),
+                    application_id = u.completionInfoO.map(_.applicationId),
+                    submitters = u.completionInfoO.map(_.actAs.toSet),
                     node_index = Some(nodeId.index),
                     event_id = Some(eventId.toLedgerString),
                     contract_id = create.coid.coid,
@@ -290,10 +290,10 @@ object UpdateToDbDto {
                     event_offset = Some(offset.toHexString),
                     transaction_id = Some(u.transactionId),
                     ledger_effective_time = Some(u.transactionMeta.ledgerEffectiveTime.micros),
-                    command_id = u.optCompletionInfo.map(_.commandId),
+                    command_id = u.completionInfoO.map(_.commandId),
                     workflow_id = u.transactionMeta.workflowId,
-                    application_id = u.optCompletionInfo.map(_.applicationId),
-                    submitters = u.optCompletionInfo.map(_.actAs.toSet),
+                    application_id = u.completionInfoO.map(_.applicationId),
+                    submitters = u.completionInfoO.map(_.actAs.toSet),
                     node_index = Some(nodeId.index),
                     event_id = Some(EventId(u.transactionId, nodeId).toLedgerString),
                     contract_id = exercise.targetCoid.coid,
@@ -356,10 +356,10 @@ object UpdateToDbDto {
               val contractInst = divulgedContractIndex.get(contractId).map(_.contractInst)
               DbDto.EventDivulgence(
                 event_offset = Some(offset.toHexString),
-                command_id = u.optCompletionInfo.map(_.commandId),
+                command_id = u.completionInfoO.map(_.commandId),
                 workflow_id = u.transactionMeta.workflowId,
-                application_id = u.optCompletionInfo.map(_.applicationId),
-                submitters = u.optCompletionInfo.map(_.actAs.toSet),
+                application_id = u.completionInfoO.map(_.applicationId),
+                submitters = u.completionInfoO.map(_.actAs.toSet),
                 contract_id = contractId.coid,
                 template_id = contractInst.map(_.unversioned.template.toString),
                 tree_event_witnesses = visibleToParties.map(_.toString),
@@ -374,7 +374,7 @@ object UpdateToDbDto {
           }
 
           val completions =
-            u.optCompletionInfo.iterator.map(
+            u.completionInfoO.iterator.map(
               commandCompletion(
                 offset,
                 u.recordTime,

@@ -36,6 +36,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def clientAdminApi = adminApi.clientConfig
     override def withDefaults(ports: DefaultPorts): TestNodeConfig = this
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig()
+    override val topologyX: TopologyXConfig = TopologyXConfig.NotUsed
   }
 
   class TestNodeBootstrap extends CantonNodeBootstrap[TestNode] {
@@ -49,6 +50,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def onClosed(): Unit = ()
     override protected def loggerFactory: NamedLoggerFactory = ???
     override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
+    override def isActive: Boolean = true
   }
 
   class TestNodeFactory {

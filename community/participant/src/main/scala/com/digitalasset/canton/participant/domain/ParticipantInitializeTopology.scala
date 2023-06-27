@@ -11,7 +11,7 @@ import com.digitalasset.canton.common.domain.{
   SequencerBasedRegisterTopologyTransactionHandle,
   SequencerBasedRegisterTopologyTransactionHandleX,
 }
-import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout, TopologyXConfig}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -286,6 +286,7 @@ class ParticipantInitializeTopologyX(
     sequencerClientFactory: SequencerClientFactory,
     connections: SequencerConnections,
     crypto: Crypto,
+    config: TopologyXConfig,
     protocolVersion: ProtocolVersion,
     expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
 ) extends ParticipantInitializeTopologyCommon[GenericSignedTopologyTransactionX](
@@ -316,6 +317,8 @@ class ParticipantInitializeTopologyX(
       domainId,
       participantId,
       member,
+      maybeClockForRetries = None,
+      config,
       protocolVersion,
       processingTimeout,
       loggerFactory,

@@ -32,7 +32,7 @@ final case class SerializableRawContractInstance private (
     contractInstance: LfContractInst,
     // Keeping this in the serializable instance for historical reasons
     // The agreement text may come from an untrusted node.
-    val unvalidatedAgreementText: AgreementText,
+    unvalidatedAgreementText: AgreementText,
 )(
     override val deserializedFrom: Option[ByteString]
 ) extends MemoizedEvidenceWithFailure[ValueCoder.EncodeError] {

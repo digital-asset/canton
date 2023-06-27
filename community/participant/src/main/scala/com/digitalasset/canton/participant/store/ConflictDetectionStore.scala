@@ -11,7 +11,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.concurrent.Future
 
 /** Common interface for stores used by conflict detection */
-trait ConflictDetectionStore[K, A <: PrettyPrinting, E] extends PrunableByTime[E] {
+trait ConflictDetectionStore[K, A <: PrettyPrinting] extends PrunableByTime {
 
   /** Short-hand for [[fetchStates]] for a single identifier */
   def fetchState(id: K)(implicit traceContext: TraceContext): Future[Option[StateChange[A]]] =

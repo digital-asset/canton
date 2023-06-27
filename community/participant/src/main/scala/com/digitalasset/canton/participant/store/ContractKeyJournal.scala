@@ -32,12 +32,7 @@ import scala.concurrent.Future
   * this correspondence no longer needs to hold.
   * Then, the contract key journal has the authority over the allocation status of the key.
   */
-trait ContractKeyJournal
-    extends ConflictDetectionStore[
-      LfGlobalKey,
-      ContractKeyJournal.Status,
-      ContractKeyJournalError,
-    ] {
+trait ContractKeyJournal extends ConflictDetectionStore[LfGlobalKey, ContractKeyJournal.Status] {
 
   /** Returns the latest state for the given keys.
     * The map contains only keys that are found in the store.
@@ -62,7 +57,7 @@ trait ContractKeyJournal
     */
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ContractKeyJournalError, Unit]
+  ): Future[Unit]
 
   /** Deletes all journal entries whose time of change is at least `inclusive`.
     * This operation need not execute atomically.

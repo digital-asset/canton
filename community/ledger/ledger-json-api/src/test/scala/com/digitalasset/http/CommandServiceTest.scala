@@ -15,6 +15,7 @@ import com.daml.logging.LoggingContextOf
 import LoggingContextOf.{label, newLoggingContext}
 import com.daml.jwt.JwtSigner
 import com.daml.jwt.domain.{DecodedJwt, Jwt}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.AuthServiceJWTCodec
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
@@ -76,7 +77,7 @@ class CommandServiceTest extends AsyncWordSpec with Matchers with Inside {
   }
 }
 
-object CommandServiceTest {
+object CommandServiceTest extends BaseTest {
   private val multiPartyJwp = domain.JwtWritePayload(
     domain.LedgerId("what"),
     domain.ApplicationId("myapp"),
@@ -168,6 +169,7 @@ object CommandServiceTest {
               trees.add(req)
               \/-(SubmitAndWaitForTransactionTreeResponse(Some(TransactionTree())))
             },
+        loggerFactory = loggerFactory,
       ),
       txns.asScala,
       trees.asScala,

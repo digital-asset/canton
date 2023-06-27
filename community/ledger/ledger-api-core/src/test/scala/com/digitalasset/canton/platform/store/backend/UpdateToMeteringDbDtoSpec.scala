@@ -64,7 +64,7 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
     )
 
     val someTransactionAccepted = state.Update.TransactionAccepted(
-      optCompletionInfo = Some(someCompletionInfo),
+      completionInfoO = Some(someCompletionInfo),
       transactionMeta = someTransactionMeta,
       transaction = CommittedTransaction(
         VersionedTransaction(TransactionVersion.VDev, Map.empty, ImmArray.empty)
@@ -72,7 +72,7 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
       transactionId = Ref.TransactionId.assertFromString("TransactionId"),
       recordTime = someRecordTime,
       divulgedContracts = List.empty,
-      blindingInfo = None,
+      blindingInfoO = None,
       hostedWitnesses = Nil,
       Map.empty,
     )
@@ -137,7 +137,7 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
     // This is so infrastructure transactions, with a zero action count, are not included
     "filter zero action counts" in {
 
-      val txWithNoActionCount = someTransactionAccepted.copy(optCompletionInfo =
+      val txWithNoActionCount = someTransactionAccepted.copy(completionInfoO =
         Some(someCompletionInfo.copy(statistics = Some(TransactionNodeStatistics.Empty)))
       )
 

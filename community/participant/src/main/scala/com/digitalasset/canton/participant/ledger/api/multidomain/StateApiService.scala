@@ -7,11 +7,8 @@ import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
-import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.error.TransactionErrorImpl
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.v2.ReadService.{
@@ -38,7 +35,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfWorkflowId, RequestCounter}
+import com.digitalasset.canton.{LfWorkflowId, RequestCounter, TransferCounter}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -90,16 +87,11 @@ object StateApiService {
     }
 
     final case class ActiveContracts(
-        contracts: Seq[SerializableContract],
+        contracts: Seq[(SerializableContract, TransferCounter)],
         domain: DomainId,
         protocolVersion: ProtocolVersion,
     )
   }
-
-  final case class TransferWithStoredContract(
-      transfer: LedgerSyncEvent.TransferredOut,
-      serializableContract: SerializableContract,
-  )
 
   object Error extends LedgerApiErrors.RequestValidation {
     @Explanation("This error results if a state request failed validation.")
@@ -141,25 +133,16 @@ class StateApiServiceImpl(
       syncDomainPersistentStates =
         cantonSyncService.syncDomainPersistentStateManager.getAll.values.toList
 
-      incompleteTransferData <-
-        syncDomainPersistentStates
-          .parTraverse { syncDomainPersistentState =>
-            syncDomainPersistentState.transferStore.findIncomplete(
-              sourceDomain = None,
-              validAt = validAt,
-              stakeholders = NonEmpty.from(request.filters.parties),
-              limit = NonNegativeInt.maxValue,
-            )
-          }
-          .map(_.flatten)
-          .map(
-            _.filter(incomplete =>
-              request.filters.satisfyFilter(
-                incomplete.contract.metadata.stakeholders,
-                incomplete.contract.contractInstance.unversioned.template,
-              )
+      incompleteTransferData <- cantonSyncService
+        .incompleteTransferData(validAt, request.filters.parties)
+        .map(
+          _.filter(incomplete =>
+            request.filters.satisfyFilter(
+              incomplete.contract.metadata.stakeholders,
+              incomplete.contract.contractInstance.unversioned.template,
             )
           )
+        )
 
       incompleteTransfers <- enrichWithEventData(incompleteTransferData)
 
@@ -197,7 +180,9 @@ class StateApiServiceImpl(
       contracts <- localOffset
         .traverse(getActiveContractsForLocalOffset(syncDomainPersistentState, filters, _))
         .map(_.getOrElse(Nil))
-        .map(_.map(_.contract))
+        .map(_.map { case (storedContract, transferCounter) =>
+          (storedContract.contract, transferCounter)
+        })
 
     } yield ActiveContractsResponse.ActiveContracts(contracts, domainId, protocolVersion)
   }
@@ -295,7 +280,7 @@ class StateApiServiceImpl(
       localOffset: LocalOffset,
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[StoredContract]] = {
+  ): Future[Seq[(StoredContract, TransferCounter)]] = {
 
     def contractPredicate(contract: StoredContract): Boolean =
       filters.satisfyFilter(
@@ -303,32 +288,36 @@ class StateApiServiceImpl(
         contract.contract.contractInstance.unversioned.template,
       )
 
-    def fetchContracts(cids: Seq[LfContractId]): Future[Seq[StoredContract]] = {
+    def fetchContracts(
+        contracts: Seq[(LfContractId, TransferCounter)]
+    ): Future[Seq[(StoredContract, TransferCounter)]] = {
+      val cids = contracts.map { case (cid, _) => cid }
+
       syncDomainPersistentState.contractStore.lookupManyUncached(cids).map { foundContracts =>
-        cids.zip(foundContracts).mapFilter {
-          case (cid, None) =>
+        contracts.zip(foundContracts).mapFilter {
+          case ((cid, _), None) =>
             logger.warn(s"Unable to find contract $cid in ACS snapshot")
             None
 
-          case (_, Some(contract)) =>
-            Option.when(contractPredicate(contract))(contract)
+          case ((_, transferCounter), Some(contract)) =>
+            Option.when(contractPredicate(contract))((contract, transferCounter))
         }
       }
     }
 
     for {
-      snapshot <- syncDomainPersistentState.activeContractStore.snapshot(
-        RequestCounter(localOffset)
-      )
-
-      cids = snapshot.keys.toSeq
+      snapshot <- syncDomainPersistentState.activeContractStore
+        .snapshot(
+          RequestCounter(localOffset)
+        )
+        .map(_.toSeq.map { case (cid, (_, transferCounter)) => (cid, transferCounter) })
 
       contracts <- MonadUtil.batchedSequentialTraverse(
         parallelism = StateApiServiceImpl.dbBatchParallelism,
         chunkSize = StateApiServiceImpl.dbBatchChunkSize,
-      )(cids)(fetchContracts)
+      )(snapshot)(fetchContracts)
 
-    } yield contracts.sortBy(_.requestCounter)
+    } yield contracts
   }
 
   override protected def loggerFactory: NamedLoggerFactory = namedLoggerFactory

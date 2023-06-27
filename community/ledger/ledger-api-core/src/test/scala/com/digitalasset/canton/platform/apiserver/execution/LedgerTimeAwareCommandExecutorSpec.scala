@@ -12,6 +12,7 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod.DeduplicationDuration
@@ -24,7 +25,6 @@ import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.LedgerTime
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.Assertion
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
@@ -32,9 +32,9 @@ import scala.concurrent.Future
 
 class LedgerTimeAwareCommandExecutorSpec
     extends AsyncWordSpec
-    with Matchers
     with MockitoSugar
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
 
   private val loggingContext =
     LoggingContextWithTrace.ForTesting
@@ -153,6 +153,7 @@ class LedgerTimeAwareCommandExecutorSpec
       mockResolveMaximumLedgerTime,
       3,
       Metrics.ForTesting,
+      loggerFactory,
     )
 
     instance.execute(commands, submissionSeed, configuration)(loggingContext).map { actual =>

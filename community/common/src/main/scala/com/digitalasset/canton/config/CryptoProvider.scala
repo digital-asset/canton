@@ -85,8 +85,7 @@ object CryptoProvider {
         NonEmpty.mk(
           Set,
           EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
-          // TODO(#13339): Re-enable after fixing Security.addProvider flake
-          // EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc,
+          EncryptionKeyScheme.EciesP256HmacSha256Aes128Cbc,
           EncryptionKeyScheme.Rsa2048OaepSha256,
         ),
       )

@@ -223,7 +223,7 @@ object Update {
 
   /** Signal the acceptance of a transaction.
     *
-    * @param optCompletionInfo The information provided by the submitter of the command that
+    * @param completionInfoO The information provided by the submitter of the command that
     *                          created this transaction. It must be provided if this participant
     *                          hosts one of the [[SubmitterInfo.actAs]] parties and shall output a
     *                          completion event for this transaction. This in particular applies if
@@ -255,13 +255,13 @@ object Update {
     *                          its metadata is equal to the empty byte array.
     */
   final case class TransactionAccepted(
-      optCompletionInfo: Option[CompletionInfo],
+      completionInfoO: Option[CompletionInfo],
       transactionMeta: TransactionMeta,
       transaction: CommittedTransaction,
       transactionId: Ref.TransactionId,
       recordTime: Timestamp,
       divulgedContracts: List[DivulgedContract],
-      blindingInfo: Option[BlindingInfo],
+      blindingInfoO: Option[BlindingInfo],
       hostedWitnesses: List[Ref.Party],
       contractMetadata: Map[Value.ContractId, Bytes],
   ) extends Update {
@@ -271,7 +271,7 @@ object Update {
   object TransactionAccepted {
     implicit val `TransactionAccepted to LoggingValue`: ToLoggingValue[TransactionAccepted] = {
       case TransactionAccepted(
-            optCompletionInfo,
+            completionInfoO,
             transactionMeta,
             _,
             transactionId,
@@ -283,7 +283,7 @@ object Update {
           ) =>
         LoggingValue.Nested.fromEntries(
           Logging.recordTime(recordTime),
-          Logging.completionInfo(optCompletionInfo),
+          Logging.completionInfo(completionInfoO),
           Logging.transactionId(transactionId),
           Logging.ledgerTime(transactionMeta.ledgerEffectiveTime),
           Logging.workflowIdOpt(transactionMeta.workflowId),

@@ -212,6 +212,19 @@ class MainIndexDBMetrics(
     "initialize_metering_aggregator"
   )
 
+  val getAssingIdsForOffsets: DatabaseMetrics = createDbMetrics(
+    "get_assign_ids_for_offsets"
+  )
+  val getUnassingIdsForOffsets: DatabaseMetrics = createDbMetrics(
+    "get_unassign_ids_for_offsets"
+  )
+  val getCreateIdsForContractIds: DatabaseMetrics = createDbMetrics(
+    "get_create_ids_for_contract_ids"
+  )
+  val getAssignIdsForContractIds: DatabaseMetrics = createDbMetrics(
+    "get_assign_ids_for_contract_ids"
+  )
+
   object translation {
     private val prefix: MetricName = MainIndexDBMetrics.this.prefix :+ "translation"
 

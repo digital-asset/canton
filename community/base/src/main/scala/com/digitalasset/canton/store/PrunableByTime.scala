@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.store
 
-import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
@@ -12,7 +11,7 @@ import com.google.common.annotations.VisibleForTesting
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Interface for a store that allows pruning and keeps track of when pruning has started and finished. */
-trait PrunableByTime[E] {
+trait PrunableByTime {
 
   protected implicit val ec: ExecutionContext
 
@@ -23,7 +22,7 @@ trait PrunableByTime[E] {
     */
   final def prune(
       limit: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, E, Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] =
     for {
       _ <- advancePruningTimestamp(PruningPhase.Started, limit)
       _ <- doPrune(limit)
@@ -38,16 +37,16 @@ trait PrunableByTime[E] {
     * That is, another pruning with the returned timestamp (or earlier) has no effect on the store.
     * Returns [[scala.None$]] if no pruning has ever been started on the store.
     */
-  def pruningStatus(implicit traceContext: TraceContext): EitherT[Future, E, Option[PruningStatus]]
+  def pruningStatus(implicit traceContext: TraceContext): Future[Option[PruningStatus]]
 
   @VisibleForTesting
   protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
       implicit traceContext: TraceContext
-  ): EitherT[Future, E, Unit]
+  ): Future[Unit]
 
   @VisibleForTesting
   protected[canton] def doPrune(limit: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, E, Unit]
+  ): Future[Unit]
 
 }

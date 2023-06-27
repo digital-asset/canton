@@ -5,9 +5,11 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
 import cats.implicits.catsSyntaxPartialOrder
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
 import com.digitalasset.canton.participant.store.TransferStore
@@ -16,18 +18,20 @@ import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil, MapsUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
 
 import java.util.ConcurrentModificationException
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 class InMemoryTransferStore(
     domain: TargetDomainId,
     override protected val loggerFactory: NamedLoggerFactory,
-) extends TransferStore
+)(implicit executionContext: ExecutionContext)
+    extends TransferStore
     with NamedLogging {
 
   import TransferStore.*
@@ -84,15 +88,13 @@ class InMemoryTransferStore(
     editTransferEntry(transferId, _.addTransferOutResult(transferOutResult))
   }
 
-  override def addTransferOutGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransferStoreError, Unit] =
-    editTransferEntry(transferId, _.addTransferOutGlobalOffset(offset))
-
-  override def addTransferInGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransferStoreError, Unit] =
-    editTransferEntry(transferId, _.addTransferInGlobalOffset(offset))
+  override def addTransfersOffsets(offsets: Map[TransferId, TransferData.TransferGlobalOffset])(
+      implicit traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransferStoreError, Unit] = offsets.toList
+    .parTraverse_ { case (transferId, newGlobalOffset) =>
+      editTransferEntry(transferId, _.addTransferOutGlobalOffset(newGlobalOffset))
+    }
+    .mapK(FutureUnlessShutdown.outcomeK)
 
   override def completeTransfer(transferId: TransferId, timeOfCompletion: TimeOfChange)(implicit
       traceContext: TraceContext

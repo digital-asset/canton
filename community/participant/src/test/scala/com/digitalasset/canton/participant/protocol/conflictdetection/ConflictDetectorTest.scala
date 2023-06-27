@@ -1952,7 +1952,7 @@ class ConflictDetectorTest
         fin1 <- cd.finalizeRequest(commitSet1, toc1).flatten.failOnShutdown
         _ = assert(fin1 == Right(()))
 
-        _ <- valueOrFail(acs.prune(toc1.timestamp))(s"Prune the acs")
+        _ <- acs.prune(toc1.timestamp)
 
         _ <- checkContractState(acs, coid00, None)(s"$coid00 has been pruned")
         _ <- checkContractState(acs, coid01, None)(s"$coid01 has been pruned")
@@ -1961,7 +1961,7 @@ class ConflictDetectorTest
         fin2 <- cd.finalizeRequest(CommitSet.empty, toc2).flatten.failOnShutdown
 
         // Now prune the contract key journal (pruning does not run atomically on all stores)
-        _ <- valueOrFail(ckj.prune(toc1.timestamp))(s"Prune the contract key journal")
+        _ <- ckj.prune(toc1.timestamp)
 
         _ <- checkKeyState(ckj, key1, None)(show"$key1 has been pruned")
         _ <- checkKeyState(ckj, key2, Assigned -> toc1)(show"$key2 has not been pruned")

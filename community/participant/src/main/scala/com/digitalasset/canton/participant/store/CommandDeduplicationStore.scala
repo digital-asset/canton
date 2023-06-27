@@ -188,18 +188,18 @@ object CommandDeduplicationData {
 final case class DefiniteAnswerEvent(
     offset: GlobalOffset,
     publicationTime: CantonTimestamp,
-    submissionId: Option[LedgerSubmissionId],
+    submissionIdO: Option[LedgerSubmissionId],
     traceContext: TraceContext,
     // TODO(#7348) add submission rank
 ) extends PrettyPrinting {
 
   def serializableSubmissionId: Option[SerializableSubmissionId] =
-    submissionId.map(SerializableSubmissionId(_))
+    submissionIdO.map(SerializableSubmissionId(_))
 
   override def pretty: Pretty[DefiniteAnswerEvent] = prettyOfClass(
     param("offset", _.offset),
     param("publication time", _.publicationTime),
-    paramIfNonEmpty("submission id", _.submissionId),
+    paramIfNonEmpty("submission id", _.submissionIdO),
     param("trace context", _.traceContext),
   )
 }

@@ -31,7 +31,7 @@ object UpdateToMeteringDbDto {
 
       (for {
         optCompletionInfo <- input.collect { case (_, Traced(ta: TransactionAccepted)) =>
-          ta.optCompletionInfo
+          ta.completionInfoO
         }
         ci <- optCompletionInfo.iterator
         statistics <- ci.statistics

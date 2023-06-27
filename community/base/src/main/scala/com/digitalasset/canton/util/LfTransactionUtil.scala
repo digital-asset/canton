@@ -47,89 +47,19 @@ object LfTransactionUtil {
     case _: LfNodeLookupByKey => None
   }
 
-  /** Get the IDs and metadata of contracts used within a single
-    * [[com.digitalasset.canton.protocol.package.LfActionNode]]
-    */
-  def usedContractIdWithMetadata(
-      node: LfActionNode
-  ): Option[WithContractMetadata[LfContractId]] = {
-    node match {
-      case _: LfNodeCreate => None
-      case nf: LfNodeFetch =>
-        Some(
-          WithContractMetadata(
-            nf.coid,
-            ContractMetadata.tryCreate(
-              nf.signatories,
-              nf.stakeholders,
-              nf.versionedKeyOpt,
-            ),
-          )
-        )
-      case nx: LfNodeExercises =>
-        Some(
-          WithContractMetadata(
-            nx.targetCoid,
-            ContractMetadata.tryCreate(
-              nx.signatories,
-              nx.stakeholders,
-              nx.versionedKeyOpt,
-            ),
-          )
-        )
-      // TODO(#3013): Use stakeholders instead of maintainers of the node
-      case nl: LfNodeLookupByKey =>
-        nl.result.map(cid =>
-          WithContractMetadata(
-            cid,
-            ContractMetadata.tryCreate(
-              nl.keyMaintainers,
-              nl.keyMaintainers,
-              nl.versionedKeyOpt,
-            ),
-          )
-        )
-    }
+  def contractId(node: LfActionNode): Option[LfContractId] = node match {
+    case n: LfNodeCreate => Some(n.coid)
+    case n: LfNodeFetch => Some(n.coid)
+    case n: LfNodeExercises => Some(n.targetCoid)
+    case n: LfNodeLookupByKey => n.result
   }
 
-  /** Get the IDs and metadata of all the used contracts of a [[com.digitalasset.canton.protocol.package.LfVersionedTransaction]] */
-  private def usedContractIdsWithMetadata(
-      tx: LfVersionedTransaction
-  ): Set[WithContractMetadata[LfContractId]] = {
-    val nodes = tx.nodes.values.collect { case an: LfActionNode => an }.toSet
-    nodes.flatMap(n => usedContractIdWithMetadata(n).toList)
+  def usedContractId(node: LfActionNode): Option[LfContractId] = node match {
+    case n: LfNodeCreate => None
+    case n: LfNodeFetch => Some(n.coid)
+    case n: LfNodeExercises => Some(n.targetCoid)
+    case n: LfNodeLookupByKey => n.result
   }
-
-  /** Get the IDs and metadata of all input contracts of a [[com.digitalasset.canton.protocol.package.LfVersionedTransaction]].
-    * Input contracts are those that are used, but are not transient.
-    */
-  def inputContractIdsWithMetadata(
-      tx: LfVersionedTransaction
-  ): Set[WithContractMetadata[LfContractId]] = {
-    val createdContracts = tx.localContracts
-    // Input contracts are used contracts, but not transient contracts (transient contracts are created and then
-    // archived by the transaction)
-    usedContractIdsWithMetadata(tx).filterNot(x => createdContracts.contains(x.unwrap))
-  }
-
-  /** Get the IDs and metadata of all the created contracts of a single [[com.digitalasset.canton.protocol.package.LfNode]]. */
-  def createdContractIdWithMetadata(
-      node: LfNode
-  ): Option[WithContractMetadata[LfContractId]] =
-    node match {
-      case nc: LfNodeCreate =>
-        Some(
-          WithContractMetadata(
-            nc.coid,
-            ContractMetadata.tryCreate(
-              nc.signatories,
-              nc.stakeholders,
-              nc.versionedKeyOpt,
-            ),
-          )
-        )
-      case _ => None
-    }
 
   /** All contract IDs referenced with a Daml `com.daml.lf.value.Value` */
   def referencedContractIds(value: Value): Set[LfContractId] = value.cids
@@ -208,13 +138,6 @@ object LfTransactionUtil {
     }
   }
 
-  /** Check that the `com.daml.lf.value.Value` key does not contain a contract ID.
-    * If the key does contain a contract ID then it will be returned in a Left.
-    * Valid contract keys cannot contain contract IDs.
-    */
-  def checkNoContractIdInKey(key: Value): Either[LfContractId, Value] =
-    key.cids.headOption.toLeft(key)
-
   /** Given internally consistent transactions, compute their consumed contract ids. */
   def consumedContractIds(
       transactions: Iterable[LfVersionedTransaction]
@@ -260,14 +183,6 @@ object LfTransactionUtil {
     case nl: LfNodeLookupByKey => nl.keyMaintainers
   }
 
-  /** Compute the informees of a node based on the ledger model definition.
-    *
-    * Refer to https://docs.daml.com/concepts/ledger-model/ledger-privacy.html#projections
-    *
-    * @throws java.lang.IllegalStateException if a Fetch node does not contain the acting parties.
-    */
-  def informees(node: LfActionNode): Set[LfPartyId] = node.informeesOfNode
-
   /** Compute the informees of a transaction based on the ledger model definition.
     *
     * Refer to https://docs.daml.com/concepts/ledger-model/ledger-privacy.html#projections
@@ -276,7 +191,7 @@ object LfTransactionUtil {
     val nodes: Set[LfActionNode] = transaction.nodes.values.collect { case an: LfActionNode =>
       an
     }.toSet
-    nodes.flatMap(informees(_))
+    nodes.flatMap(_.informeesOfNode)
   }
 
   val children: LfNode => Seq[LfNodeId] = {
@@ -296,4 +211,14 @@ object LfTransactionUtil {
       case n: LfNodeLookupByKey => n
     }
   }
+
+  def metadataFromExercise(node: LfNodeExercises): ContractMetadata =
+    ContractMetadata.tryCreate(node.signatories, node.stakeholders, node.versionedKeyOpt)
+
+  def metadataFromCreate(node: LfNodeCreate): ContractMetadata =
+    ContractMetadata.tryCreate(node.signatories, node.stakeholders, node.versionedKeyOpt)
+
+  def metadataFromFetch(node: LfNodeFetch): ContractMetadata =
+    ContractMetadata.tryCreate(node.signatories, node.stakeholders, node.versionedKeyOpt)
+
 }

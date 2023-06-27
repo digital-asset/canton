@@ -70,6 +70,7 @@ trait BaseInspection[I <: CantonNode] {
   }
 
   protected[console] def runningNode: Option[CantonNodeBootstrap[I]]
+  protected[console] def startingNode: Option[CantonNodeBootstrap[I]]
   protected[console] def name: String
 
   protected[console] def access[T](ops: I => T): T = {

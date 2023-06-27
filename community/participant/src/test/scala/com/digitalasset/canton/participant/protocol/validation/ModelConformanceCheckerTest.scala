@@ -33,6 +33,11 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
   val ledgerTimeRecordTimeTolerance: Duration = Duration.ofSeconds(10)
 
+  def validateContractOk(
+      contract: SerializableContract,
+      context: TraceContext,
+  ): EitherT[Future, ContractValidationFailure, Unit] = EitherT.pure(())
+
   def reinterpret(example: ExampleTransaction)(
       contracts: ContractLookup,
       submitters: Set[LfPartyId],
@@ -98,7 +103,12 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       s"checking $example" must {
 
         val sut =
-          new ModelConformanceChecker(reinterpret(example), transactionTreeFactory, loggerFactory)
+          new ModelConformanceChecker(
+            reinterpret(example),
+            validateContractOk,
+            transactionTreeFactory,
+            loggerFactory,
+          )
 
         "yield the correct result" in {
           for {
@@ -142,6 +152,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     "transaction id is inconsistent" must {
       val sut = new ModelConformanceChecker(
         (_, _, _, _, _, _, _, _, _) => throw new UnsupportedOperationException(),
+        validateContractOk,
         transactionTreeFactory,
         loggerFactory,
       )
@@ -166,6 +177,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
           EitherT.leftT[Future, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)](
             error
           ),
+        validateContractOk,
         transactionTreeFactory,
         loggerFactory,
       )
@@ -201,6 +213,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
             EitherT.pure[Future, DAMLeError](
               (reinterpreted, subviewMissing.metadata, subviewMissing.keyResolver)
             ),
+          validateContractOk,
           transactionTreeFactory,
           loggerFactory,
         )

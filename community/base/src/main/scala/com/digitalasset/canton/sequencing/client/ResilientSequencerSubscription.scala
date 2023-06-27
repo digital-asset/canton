@@ -117,6 +117,10 @@ class ResilientSequencerSubscription[HandlerError](
             // Create a new subscription and reset the retry delay
             // It is the responsibility of the subscription factory to use the changed transport
             setupNewSubscription(retryDelayRule.initialDelay)
+
+          case Success(_: SubscriptionCloseReason.SubscriptionError) if isClosing =>
+            giveUp(Success(SubscriptionCloseReason.Shutdown))
+
           case error @ Success(subscriptionError: SubscriptionCloseReason.SubscriptionError) =>
             val canRetry =
               retryPolicy.retryOnError(subscriptionError, hasReceivedEvent.hasReceivedEvent)

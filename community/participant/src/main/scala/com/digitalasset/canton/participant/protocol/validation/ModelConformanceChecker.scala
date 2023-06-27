@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
+import com.daml.lf.data.Ref.Identifier
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -39,7 +40,15 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorRef, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, RequestCounter, checked}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{
+  LfCommand,
+  LfCreateCommand,
+  LfKeyResolver,
+  LfPartyId,
+  RequestCounter,
+  checked,
+}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
@@ -68,6 +77,10 @@ class ModelConformanceChecker(
       DAMLeError,
       (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
     ],
+    val validateContract: (
+        SerializableContract,
+        TraceContext,
+    ) => EitherT[Future, ContractValidationFailure, Unit],
     val transactionTreeFactory: TransactionTreeFactory,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -102,7 +115,7 @@ class ModelConformanceChecker(
           ledgerTime,
           submissionTime,
           confirmationPolicy,
-          viewTree.submitterMetadata.map(_.submitterParticipant),
+          viewTree.submitterMetadataO.map(_.submitterParticipant),
           topologySnapshot,
         )
       }
@@ -144,6 +157,27 @@ class ModelConformanceChecker(
     }
   }
 
+  private def validateInputContracts(
+      view: TransactionView,
+      requestCounter: RequestCounter,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, Error, Map[LfContractId, StoredContract]] = {
+    view.tryFlattenToParticipantViews
+      .flatMap(_.viewParticipantData.coreInputs)
+      .parTraverse { case (cid, inputContract @ InputContract(contract, _)) =>
+        validateContract(contract, traceContext)
+          .leftMap {
+            case DAMLeFailure(error) =>
+              DAMLeError(error, view.viewHash): Error
+            case ContractMismatch(actual, _) =>
+              InvalidInputContract(cid, actual.templateId, view.viewHash): Error
+          }
+          .map(_ => cid -> StoredContract(contract, requestCounter, None))
+      }
+      .map(_.toMap)
+  }
+
   private def checkView(
       view: TransactionView,
       viewPosition: ViewPosition,
@@ -163,20 +197,14 @@ class ModelConformanceChecker(
     val RootAction(cmd, authorizers, failed) = viewParticipantData.rootAction
     val rbContext = viewParticipantData.rollbackContext
     val seed = viewParticipantData.actionDescription.seedOption
-    val viewInputContracts = view.tryFlattenToParticipantViews
-      .flatMap(_.viewParticipantData.coreInputs.map {
-        case (cid, InputContract(contract, _consumed)) =>
-          (cid, StoredContract(contract, requestCounter, None))
-      })
-      .toMap
-    val lookupWithKeys =
-      new ExtendedContractLookup(
-        ContractLookup.noContracts(logger), // all contracts and keys specified explicitly
-        viewInputContracts,
-        resolverFromView,
-      )
-
     for {
+      viewInputContracts <- validateInputContracts(view, requestCounter)
+      lookupWithKeys =
+        new ExtendedContractLookup(
+          ContractLookup.noContracts(logger), // all contracts and keys specified explicitly
+          viewInputContracts,
+          resolverFromView,
+        )
       lfTxAndMetadata <- reinterpret(
         lookupWithKeys,
         authorizers,
@@ -218,7 +246,6 @@ class ModelConformanceChecker(
         )
       ).leftMap(err => TransactionTreeError(err, view.viewHash))
       (reconstructedView, suffixedTx) = reconstructedViewAndTx
-
       _ <- EitherT.cond[Future](
         view == reconstructedView,
         (),
@@ -265,6 +292,7 @@ object ModelConformanceChecker {
   def apply(
       damle: DAMLe,
       transactionTreeFactory: TransactionTreeFactory,
+      protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ModelConformanceChecker = {
     def reinterpret(
@@ -290,7 +318,66 @@ object ModelConformanceChecker {
         )(traceContext)
         .leftMap(DAMLeError(_, viewHash))
 
-    new ModelConformanceChecker(reinterpret, transactionTreeFactory, loggerFactory)
+    new ModelConformanceChecker(
+      reinterpret,
+      if (protocolVersion >= ProtocolVersion.v5) validateSerializedContract(damle)
+      else noSerializedContractValidation,
+      transactionTreeFactory,
+      loggerFactory,
+    )
+  }
+
+  private[validation] sealed trait ContractValidationFailure
+  private[validation] final case class DAMLeFailure(error: engine.Error)
+      extends ContractValidationFailure
+  private[validation] final case class ContractMismatch(
+      actual: LfNodeCreate,
+      expected: LfNodeCreate,
+  ) extends ContractValidationFailure
+
+  private def noSerializedContractValidation(
+      contract: SerializableContract,
+      traceContext: TraceContext,
+  )(implicit ec: ExecutionContext): EitherT[Future, ContractValidationFailure, Unit] = {
+    EitherT.pure[Future, ContractValidationFailure](())
+  }
+
+  private def validateSerializedContract(damle: DAMLe)(
+      contract: SerializableContract,
+      traceContext: TraceContext,
+  )(implicit ec: ExecutionContext): EitherT[Future, ContractValidationFailure, Unit] = {
+
+    val instance = contract.rawContractInstance
+    val unversioned = instance.contractInstance.unversioned
+    val metadata = contract.metadata
+
+    for {
+      actual <- damle
+        .replayCreate(
+          metadata.signatories,
+          LfCreateCommand(unversioned.template, unversioned.arg),
+          contract.ledgerCreateTime,
+        )(
+          traceContext
+        )
+        .leftMap(DAMLeFailure.apply)
+      expected: LfNodeCreate = LfNodeCreate(
+        coid = actual.coid,
+        templateId = unversioned.template,
+        arg = unversioned.arg,
+        agreementText = instance.unvalidatedAgreementText.v,
+        signatories = metadata.signatories,
+        stakeholders = metadata.stakeholders,
+        keyOpt = metadata.maybeKeyWithMaintainers,
+        version = instance.contractInstance.version,
+      )
+      _ <- EitherT.cond[Future](
+        actual == expected,
+        (),
+        ContractMismatch(actual, expected): ContractValidationFailure,
+      )
+    } yield ()
+
   }
 
   sealed trait Error extends PrettyPrinting
@@ -364,6 +451,23 @@ object ModelConformanceChecker {
   ) extends Error {
     override def pretty: Pretty[JoinedTransactionNotWellFormed] = prettyOfClass(
       param("cause", _.cause.unquoted)
+    )
+  }
+
+  final case class InvalidInputContract(
+      contractId: LfContractId,
+      templateId: Identifier,
+      viewHash: ViewHash,
+  ) extends Error {
+
+    def cause =
+      "Details of supplied contract to not match those that result from command reinterpretation"
+
+    override def pretty: Pretty[InvalidInputContract] = prettyOfClass(
+      param("cause", _.cause.unquoted),
+      param("contractId", _.contractId),
+      param("templateId", _.templateId),
+      unnamedParam(_.viewHash),
     )
   }
 

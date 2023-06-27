@@ -8,6 +8,7 @@ import com.daml.metrics.Metrics
 import com.daml.metrics.grpc.GrpcMetricsServerInterceptor
 import com.daml.ports.Port
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.apiserver.error.ErrorInterceptor
 import com.google.protobuf.Message
 import io.grpc.*
@@ -41,6 +42,7 @@ private[apiserver] object GrpcServer {
       metrics: Metrics,
       servicesExecutor: Executor,
       services: Iterable[BindableService],
+      loggerFactory: NamedLoggerFactory,
   ): ResourceOwner[Server] = {
     val host = address.map(InetAddress.getByName).getOrElse(InetAddress.getLoopbackAddress)
     val builder = NettyServerBuilder.forAddress(new InetSocketAddress(host, desiredPort.value))
@@ -53,7 +55,7 @@ private[apiserver] object GrpcServer {
     interceptors.foreach(interceptor => builder.intercept(interceptor).discard)
     builder.intercept(new GrpcMetricsServerInterceptor(metrics.daml.grpc))
     builder.intercept(new TruncatedStatusInterceptor(MaximumStatusDescriptionLength))
-    builder.intercept(new ErrorInterceptor)
+    builder.intercept(new ErrorInterceptor(loggerFactory))
     services.foreach { service =>
       builder.addService(service)
       toLegacyService(service).foreach(builder.addService)

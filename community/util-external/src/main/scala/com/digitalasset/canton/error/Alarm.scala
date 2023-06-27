@@ -25,6 +25,9 @@ abstract class AlarmErrorCode(id: String)(implicit parent: ErrorClass)
 trait BaseAlarm extends BaseError {
   override def code: AlarmErrorCode
 
+  override def context: Map[String, String] =
+    super.context ++ BaseError.extractContext(this)
+
   /** Report the alarm to the logger. */
   def report()(implicit logger: ContextualizedErrorLogger): Unit = logWithContext()
 

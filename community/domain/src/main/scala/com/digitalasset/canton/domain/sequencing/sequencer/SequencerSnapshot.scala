@@ -9,17 +9,12 @@ import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.{v0, v1}
 import com.digitalasset.canton.domain.sequencing.sequencer.InFlightAggregation.AggregationBySender
+import com.digitalasset.canton.domain.sequencing.sequencer.traffic.MemberTrafficSnapshot
 import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRule}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, Member}
-import com.digitalasset.canton.version.{
-  HasProtocolVersionedCompanion,
-  HasProtocolVersionedWrapper,
-  ProtoVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import com.google.protobuf.ByteString
 
@@ -29,6 +24,7 @@ final case class SequencerSnapshot(
     status: SequencerPruningStatus,
     inFlightAggregations: InFlightAggregations,
     additional: Option[SequencerSnapshot.ImplementationSpecificInfo],
+    trafficSnapshots: Map[Member, MemberTrafficSnapshot],
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot.type])
     extends HasProtocolVersionedWrapper[SequencerSnapshot] {
 
@@ -76,9 +72,13 @@ final case class SequencerSnapshot(
       status = Some(status.toProtoV0),
       inFlightAggregations = inFlightAggregations.toSeq.map(serializeInFlightAggregation),
       additional = additional.map(a => v0.ImplementationSpecificInfo(a.implementationName, a.info)),
+      trafficSnapshots = trafficSnapshots.toList.map { case (member, snapshot) =>
+        snapshot.toProtoV1
+      },
     )
   }
 }
+
 object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot] {
   val supportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.v3)(v0.SequencerSnapshot)(
@@ -100,9 +100,11 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
       inFlightAggregations: InFlightAggregations,
       additional: Option[SequencerSnapshot.ImplementationSpecificInfo],
       protocolVersion: ProtocolVersion,
-  ): SequencerSnapshot = SequencerSnapshot(lastTs, heads, status, inFlightAggregations, additional)(
-    protocolVersionRepresentativeFor(protocolVersion)
-  )
+      trafficState: Map[Member, MemberTrafficSnapshot],
+  ): SequencerSnapshot =
+    SequencerSnapshot(lastTs, heads, status, inFlightAggregations, additional, trafficState)(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
 
   def unimplemented(protocolVersion: ProtocolVersion) = SequencerSnapshot(
     CantonTimestamp.MinValue,
@@ -110,6 +112,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
     SequencerPruningStatus.Unimplemented,
     Map.empty,
     None,
+    Map.empty,
   )(protocolVersionRepresentativeFor(protocolVersion))
 
   final case class ImplementationSpecificInfo(implementationName: String, info: ByteString)
@@ -141,6 +144,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
       status,
       Map.empty,
       request.additional.map(a => ImplementationSpecificInfo(a.implementationName, a.info)),
+      Map.empty,
     )(protocolVersionRepresentativeFor(ProtoVersion(0)))
 
   def fromProtoV1(
@@ -222,12 +226,14 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
       inFlightAggregations <- request.inFlightAggregations
         .traverse(parseInFlightAggregationWithId)
         .map(_.toMap)
+      trafficSnapshots <- request.trafficSnapshots.traverse(MemberTrafficSnapshot.fromProtoV1)
     } yield SequencerSnapshot(
       lastTs,
       heads,
       status,
       inFlightAggregations,
       request.additional.map(a => ImplementationSpecificInfo(a.implementationName, a.info)),
+      trafficSnapshots = trafficSnapshots.map(s => s.member -> s).toMap,
     )(protocolVersionRepresentativeFor(ProtoVersion(1)))
   }
 }

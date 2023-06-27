@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.Eval
-import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
@@ -15,7 +14,6 @@ import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherTUtil
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -29,6 +27,7 @@ private[participant] class PruneObserver(
     acsCommitmentStore: AcsCommitmentStore,
     acs: ActiveContractStore,
     keyJournal: ContractKeyJournal,
+    submissionTrackerStore: SubmissionTrackerStore,
     inFlightSubmissionStore: Eval[InFlightSubmissionStore],
     domainId: DomainId,
     acsPruningInterval: NonNegativeFiniteDuration,
@@ -100,23 +99,20 @@ private[participant] class PruneObserver(
     }
 
     if (oldTs < localTs) {
+      logger.debug(s"Starting periodic background pruning at ${pruneTs}")
       // Clean unused entries from the ACS
-      val acsF = EitherTUtil
-        .logOnError(acs.prune(pruneTs.forgetRefinement), s"Periodic ACS prune at $pruneTs:")
-        .value
-        // Discard the result of this prune, as it's not needed
-        .void
+      val acsF = acs.prune(pruneTs.forgetRefinement)
       // clean unused contract key journal entries
-      val journalF =
-        EitherTUtil
-          .logOnError(
-            keyJournal.prune(pruneTs.forgetRefinement),
-            s"Periodic contract key journal prune at $pruneTs: ",
-          )
-          .value
-          // discard the result of this prune
-          .void
-      val pruneF = acsF.flatMap(_ => journalF)
+      val journalF = keyJournal.prune(pruneTs.forgetRefinement)
+      // Clean unused entries from the submission tracker store
+      val submissionTrackerStoreF = submissionTrackerStore.prune(pruneTs.forgetRefinement)
+
+      val pruneF = for {
+        _ <- acsF
+        _ <- journalF
+        _ <- submissionTrackerStoreF
+      } yield ()
+
       promise.completeWith(pruneF)
       pruneF
     } else {

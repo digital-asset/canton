@@ -108,25 +108,25 @@ final case class EndlessReadService(
             )
           case i if i % 2 == 0 =>
             offset(i) -> Update.TransactionAccepted(
-              optCompletionInfo = Some(completionInfo(i)),
+              completionInfoO = Some(completionInfo(i)),
               transactionMeta = transactionMeta(i),
               transaction = createTransaction(i),
               transactionId = transactionId(i),
               recordTime = recordTime(i),
               divulgedContracts = List.empty,
-              blindingInfo = None,
+              blindingInfoO = None,
               hostedWitnesses = Nil,
               contractMetadata = Map.empty,
             )
           case i =>
             offset(i) -> Update.TransactionAccepted(
-              optCompletionInfo = Some(completionInfo(i)),
+              completionInfoO = Some(completionInfo(i)),
               transactionMeta = transactionMeta(i),
               transaction = exerciseTransaction(i),
               transactionId = transactionId(i),
               recordTime = recordTime(i),
               divulgedContracts = List.empty,
-              blindingInfo = None,
+              blindingInfoO = None,
               hostedWitnesses = Nil,
               contractMetadata = Map.empty,
             )

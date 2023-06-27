@@ -53,6 +53,7 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
         targetDomainId,
         testedProtocolVersion,
         TestingIdentityFactory.pureCrypto(),
+        futureSupervisor,
         timeouts,
         loggerFactory,
       )

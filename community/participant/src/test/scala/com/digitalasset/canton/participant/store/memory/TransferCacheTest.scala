@@ -8,6 +8,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
 import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.store.memory.TransferCacheTest.HookTransferStore
@@ -268,15 +269,10 @@ object TransferCacheTest {
     ): EitherT[Future, TransferStoreError, Unit] =
       baseStore.addTransferOutResult(transferOutResult)
 
-    override def addTransferOutGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, TransferStoreError, Unit] =
-      baseStore.addTransferOutGlobalOffset(transferId, offset)
-
-    override def addTransferInGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
-        traceContext: TraceContext
-    ): EitherT[Future, TransferStoreError, Unit] =
-      baseStore.addTransferInGlobalOffset(transferId, offset)
+    override def addTransfersOffsets(offsets: Map[TransferId, TransferData.TransferGlobalOffset])(
+        implicit traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, TransferStoreError, Unit] =
+      baseStore.addTransfersOffsets(offsets)
 
     override def completeTransfer(transferId: TransferId, timeOfCompletion: TimeOfChange)(implicit
         traceContext: TraceContext

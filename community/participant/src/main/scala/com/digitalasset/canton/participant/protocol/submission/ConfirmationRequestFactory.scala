@@ -69,6 +69,7 @@ class ConfirmationRequestFactory(
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
       contractInstanceOfId: SerializableContractOfId,
       optKeySeed: Option[SecureRandomness],
+      maxSequencingTime: CantonTimestamp,
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
@@ -97,6 +98,7 @@ class ConfirmationRequestFactory(
           cryptoSnapshot.ipsSnapshot,
           contractInstanceOfId,
           keyResolver,
+          maxSequencingTime,
         )
         .leftMap(TransactionTreeFactoryError)
 

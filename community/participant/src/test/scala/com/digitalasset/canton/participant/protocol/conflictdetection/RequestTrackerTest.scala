@@ -42,7 +42,7 @@ private[conflictdetection] trait RequestTrackerTest {
 
   private val active = Active(initialTransferCounter)
 
-  def requestTracker(
+  protected def requestTracker(
       genMk: (
           RequestCounter,
           SequencerCounter,
@@ -303,8 +303,22 @@ private[conflictdetection] trait RequestTrackerTest {
         _ = enterTick(rt, SequencerCounter(7), tsCommit1.plusMillis(5))
         _ <- checkFinalize(rc1, finalize1)
 
-        _ <- checkSnapshot(acs, tsCR0.addMicros(1), Map(coid00 -> tsCR0, coid01 -> tsCR0))
-        _ <- checkSnapshot(acs, tsCR1.addMicros(1), Map(coid01 -> tsCR0, coid10 -> tsCR1))
+        _ <- checkSnapshot(
+          acs,
+          tsCR0.addMicros(1),
+          Map(
+            coid00 -> (tsCR0, TransferCounter.Genesis),
+            coid01 -> (tsCR0, TransferCounter.Genesis),
+          ),
+        )
+        _ <- checkSnapshot(
+          acs,
+          tsCR1.addMicros(1),
+          Map(
+            coid01 -> (tsCR0, TransferCounter.Genesis),
+            coid10 -> (tsCR1, TransferCounter.Genesis),
+          ),
+        )
       } yield succeed
     }
 
@@ -1099,11 +1113,11 @@ private[conflictdetection] trait RequestTrackerTest {
     }
   }
 
-  def enterTick(rt: RequestTracker, sc: SequencerCounter, ts: CantonTimestamp): Unit = {
+  protected def enterTick(rt: RequestTracker, sc: SequencerCounter, ts: CantonTimestamp): Unit = {
     rt.tick(sc, ts)
   }
 
-  def enterCR(
+  protected def enterCR(
       rt: RequestTracker,
       rc: RequestCounter,
       sc: SequencerCounter,
@@ -1121,7 +1135,7 @@ private[conflictdetection] trait RequestTrackerTest {
       activenessSet,
     )
 
-  def enterCR(
+  protected def enterCR(
       rt: RequestTracker,
       rc: RequestCounter,
       sc: SequencerCounter,
@@ -1143,7 +1157,7 @@ private[conflictdetection] trait RequestTrackerTest {
     }
   }
 
-  def enterCR_US(
+  protected def enterCR_US(
       rt: RequestTracker,
       rc: RequestCounter,
       sc: SequencerCounter,
@@ -1161,7 +1175,7 @@ private[conflictdetection] trait RequestTrackerTest {
       activenessSet,
     )
 
-  def enterCR_US(
+  protected def enterCR_US(
       rt: RequestTracker,
       rc: RequestCounter,
       sc: SequencerCounter,
@@ -1186,7 +1200,7 @@ private[conflictdetection] trait RequestTrackerTest {
       .failOnShutdown("add request")
   }
 
-  def checkConflictResult(
+  protected def checkConflictResult(
       rc: RequestCounter,
       conflictResultFuture: Future[ActivenessResult],
       activenessResult: ActivenessResult,
@@ -1199,7 +1213,7 @@ private[conflictdetection] trait RequestTrackerTest {
       )
     )
 
-  def enterTR(
+  protected def enterTR(
       rt: RequestTracker,
       rc: RequestCounter,
       sc: SequencerCounter,
@@ -1220,36 +1234,36 @@ private[conflictdetection] trait RequestTrackerTest {
     } yield resCS.value.value.failOnShutdown("add commit set")
   }
 
-  def checkFinalize(
+  protected def checkFinalize(
       rc: RequestCounter,
       finalizeFuture: Future[Either[NonEmptyChain[RequestTrackerStoreError], Unit]],
   ): Future[Assertion] =
     finalizeFuture.map(result => assert(result == Right(()), s"request $rc finalized"))
 
-  def checkContractState(
+  protected def checkContractState(
       acs: ActiveContractStore,
       coid: LfContractId,
       cs: (Status, RequestCounter, CantonTimestamp),
   )(clue: String): Future[Assertion] =
     checkContractState(acs, coid, Some(ContractState(cs._1, cs._2, cs._3)))(clue)
 
-  def checkContractState(
+  protected def checkContractState(
       acs: ActiveContractStore,
       coid: LfContractId,
       state: Option[ContractState],
   )(clue: String): Future[Assertion] =
     acs.fetchState(coid).map(result => assert(result == state, clue))
 
-  def checkSnapshot(
+  protected def checkSnapshot(
       acs: ActiveContractStore,
       ts: CantonTimestamp,
-      expected: Map[LfContractId, CantonTimestamp],
+      expected: Map[LfContractId, (CantonTimestamp, TransferCounter)],
   ): Future[Assertion] =
     acs
       .snapshot(ts)
       .map(snapshot => assert(snapshot == expected, s"ACS snapshot at time $ts correct"))
 
-  def singleCRwithTR(
+  protected def singleCRwithTR(
       rt: RequestTracker,
       rc: RequestCounter,
       sc: SequencerCounter,
@@ -1271,7 +1285,7 @@ private[conflictdetection] trait RequestTrackerTest {
       commitDelay,
     )
 
-  def singleCRwithTR(
+  protected def singleCRwithTR(
       rt: RequestTracker,
       rc: RequestCounter,
       sc: SequencerCounter,

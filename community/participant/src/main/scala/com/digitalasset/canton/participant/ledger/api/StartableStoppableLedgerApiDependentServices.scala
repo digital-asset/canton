@@ -80,8 +80,8 @@ class StartableStoppableLedgerApiDependentServices(
       synchronized {
         servicesRef match {
           case Some(_servicesStarted) =>
-            ErrorUtil.invalidState(
-              "Attempt to start Ledger API-dependent Canton services, but they are already started"
+            logger.info(
+              "Attempt to start Ledger API-dependent Canton services, but they are already started. Ignoring."
             )
           case None =>
             logger.debug("Starting Ledger API-dependent canton services")

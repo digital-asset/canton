@@ -33,9 +33,6 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
     EitherT.fromEither(
       example.inputContracts
         .get(id)
-        .map(contract =>
-          (contract.rawContractInstance, contract.ledgerCreateTime, contract.contractSalt)
-        )
         .toRight(ContractLookupError(id, "Unable to lookup input contract from test data"))
     )
   }
@@ -75,6 +72,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       snapshot,
       contractInstanceOfId,
       keyResolver,
+      factory.ledgerTime.plusSeconds(100),
     )
   }
 

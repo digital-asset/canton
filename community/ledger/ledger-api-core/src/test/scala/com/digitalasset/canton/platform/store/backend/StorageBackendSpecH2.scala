@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import org.scalatest.flatspec.AnyFlatSpec
 
-final class StorageBackendH2Spec
+final class StorageBackendSpecH2
     extends AnyFlatSpec
     with StorageBackendProviderH2
     with StorageBackendSuite

@@ -43,7 +43,8 @@ import scala.concurrent.{ExecutionContext, Future}
   * The store may assume that sequencer counters strictly increase with timestamps
   * without checking this precondition.
   */
-trait SequencedEventStore extends PrunableByTime[Nothing] with NamedLogging with AutoCloseable {
+trait SequencedEventStore extends PrunableByTime with NamedLogging with AutoCloseable {
+
   import SequencedEventStore.SearchCriterion
 
   implicit val ec: ExecutionContext
@@ -77,6 +78,7 @@ trait SequencedEventStore extends PrunableByTime[Nothing] with NamedLogging with
 
   /** Marks events between `from` and `to` as ignored.
     * Fills any gap between `from` and `to` by empty ignored events, i.e. ignored events without any underlying real event.
+    *
     * @return [[ChangeWouldResultInGap]] if there would be a gap between the highest sequencer counter in the store and `from`.
     */
   def ignoreEvents(from: SequencerCounter, to: SequencerCounter)(implicit
@@ -84,6 +86,7 @@ trait SequencedEventStore extends PrunableByTime[Nothing] with NamedLogging with
   ): EitherT[Future, ChangeWouldResultInGap, Unit]
 
   /** Removes the ignored status from all events between `from` and `to`.
+    *
     * @return [[ChangeWouldResultInGap]] if deleting empty ignored events between `from` and `to` would result in a gap in sequencer counters.
     */
   def unignoreEvents(from: SequencerCounter, to: SequencerCounter)(implicit
@@ -154,7 +157,7 @@ object SequencedEventStore {
       with Serializable {
     def timestamp: CantonTimestamp
 
-    def trafficStatus: Option[TrafficState]
+    def trafficState: Option[SequencedEventTrafficState]
 
     def counter: SequencerCounter
 
@@ -191,7 +194,7 @@ object SequencedEventStore {
       override val timestamp: CantonTimestamp,
       override val counter: SequencerCounter,
       override val underlying: Option[SignedContent[SequencedEvent[Env]]],
-      override val trafficStatus: Option[TrafficState] = None,
+      override val trafficState: Option[SequencedEventTrafficState] = None,
   )(override val traceContext: TraceContext)
       extends PossiblyIgnoredSequencedEvent[Env] {
 
@@ -207,7 +210,7 @@ object SequencedEventStore {
     override def asIgnoredEvent: IgnoredSequencedEvent[Env] = this
 
     override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env] = underlying match {
-      case Some(event) => OrdinarySequencedEvent(event)(traceContext)
+      case Some(event) => OrdinarySequencedEvent(event, trafficState)(traceContext)
       case None => this
     }
 
@@ -248,7 +251,7 @@ object SequencedEventStore {
     */
   final case class OrdinarySequencedEvent[+Env <: Envelope[_]](
       signedEvent: SignedContent[SequencedEvent[Env]],
-      trafficStatus: Option[TrafficState] = None,
+      trafficState: Option[SequencedEventTrafficState],
   )(
       override val traceContext: TraceContext
   ) extends PossiblyIgnoredSequencedEvent[Env] {
@@ -266,7 +269,7 @@ object SequencedEventStore {
     override def underlying: Some[SignedContent[SequencedEvent[Env]]] = Some(signedEvent)
 
     override def asIgnoredEvent: IgnoredSequencedEvent[Env] =
-      IgnoredSequencedEvent(timestamp, counter, Some(signedEvent), trafficStatus)(traceContext)
+      IgnoredSequencedEvent(timestamp, counter, Some(signedEvent), trafficState)(traceContext)
 
     override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env] = this
 
@@ -339,7 +342,12 @@ object SequencedEventStore {
           } else
             ProtoConverter
               .required("underlying", underlyingO)
-              .map(OrdinarySequencedEvent(_)(traceContext.unwrap))
+              // TODO(i13596): This only seems to be used to deserialize time proof events. Revisit whether or not we do need the traffic state for that
+              .map(
+                OrdinarySequencedEvent(_, Option.empty[SequencedEventTrafficState])(
+                  traceContext.unwrap
+                )
+              )
       } yield possiblyIgnoredSequencedEvent
     }
 

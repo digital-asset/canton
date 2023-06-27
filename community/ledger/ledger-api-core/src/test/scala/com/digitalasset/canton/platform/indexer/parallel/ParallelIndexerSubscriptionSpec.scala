@@ -255,7 +255,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
     )
 
     val someTransactionAccepted = state.Update.TransactionAccepted(
-      optCompletionInfo = Some(someCompletionInfo),
+      completionInfoO = Some(someCompletionInfo),
       transactionMeta = someTransactionMeta,
       transaction = CommittedTransaction(
         VersionedTransaction(TransactionVersion.VDev, Map.empty, ImmArray.empty)
@@ -263,7 +263,7 @@ class ParallelIndexerSubscriptionSpec extends AnyFlatSpec with Matchers with Nam
       transactionId = Ref.TransactionId.assertFromString("TransactionId"),
       recordTime = someRecordTime,
       divulgedContracts = List.empty,
-      blindingInfo = None,
+      blindingInfoO = None,
       hostedWitnesses = Nil,
       contractMetadata = Map.empty,
     )

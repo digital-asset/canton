@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.util
 
 import cats.data.EitherT
 import com.daml.lf.VersionRange
-import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.PackageId
+import com.daml.lf.data.{ImmArray, Time}
 import com.daml.lf.engine.*
 import com.daml.lf.interpretation.Error as LfInterpretationError
 import com.daml.lf.language.Ast.Package
@@ -181,6 +181,34 @@ class DAMLe(
       TransactionMetadata.fromLf(ledgerTime, metadata),
       metadata.globalKeyMapping,
     )
+  }
+
+  def replayCreate(
+      submitters: Set[LfPartyId],
+      command: LfCreateCommand,
+      ledgerEffectiveTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): EitherT[Future, Error, LfNodeCreate] = {
+    LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
+      val result = engine.reinterpret(
+        submitters = submitters,
+        command = command,
+        nodeSeed = Some(DAMLe.zeroSeed),
+        submissionTime = Time.Timestamp.Epoch, // Only used to compute contract ids
+        ledgerEffectiveTime = ledgerEffectiveTime.underlying,
+      )
+      for {
+        txWithMetadata <- EitherT(handleResult(ContractAndKeyLookup.noContracts(logger), result))
+        (tx, _) = txWithMetadata
+        singleCreate = tx.nodes.values.toList match {
+          case (create: LfNodeCreate) :: Nil => create
+          case _ =>
+            throw new RuntimeException(
+              s"DAMLe failed to replay a create $command submitted by $submitters"
+            )
+        }
+        create <- EitherT.pure[Future, Error](singleCreate)
+      } yield create
+    }
   }
 
   def contractWithMetadata(contractInstance: LfContractInst, supersetOfSignatories: Set[LfPartyId])(

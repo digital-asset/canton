@@ -1148,7 +1148,6 @@ class SequencerClientImpl(
       SyncCloseable("sequencer-client-subscription", closeAllSubscriptions()),
       SyncCloseable("sequencer-client-recorder", recorderO.foreach(_.close())),
       SyncCloseable("sequenced-event-store", sequencedEventStore.close()),
-      // TODO(i12076): What do we do on close? should we close all the delegates as well?
       SyncCloseable("deferred-subscription-health", deferredSubscriptionHealth.close()),
     )
   }

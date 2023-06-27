@@ -137,6 +137,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       _ <- persistentState.parameterStore.setParameters(defaultStaticDomainParameters)
     } yield {
       val state = new SyncDomainEphemeralState(
+        participant,
         persistentState,
         Eval.now(multiDomainEventLog),
         mock[InFlightSubmissionTracker],
@@ -238,7 +239,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           CantonTimestamp.ofEpochSecond(10),
           contract,
           transactionId1,
-          None,
           None,
           None,
         )
@@ -554,6 +554,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
               FutureUnlessShutdown.pure(ActivenessResult.success),
               Future.unit,
               targetMediator,
+              freshOwnTimelyTx = true,
             )
         )("construction of pending data and response did not return a left").failOnShutdown
       } yield {
@@ -599,6 +600,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
               FutureUnlessShutdown.pure(ActivenessResult.success),
               Future.unit,
               targetMediator,
+              freshOwnTimelyTx = true,
             )
         )("construction of pending data and response failed").failOnShutdown
       } yield {

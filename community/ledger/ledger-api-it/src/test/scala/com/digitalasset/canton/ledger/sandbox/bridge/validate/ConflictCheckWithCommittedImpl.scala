@@ -11,7 +11,6 @@ import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.transaction.Transaction as LfTransaction
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.ContextualizedLogger
 import com.daml.logging.entries.LoggingEntry
 import com.daml.metrics.Timed
 import com.digitalasset.canton.data.ProcessedDisclosedContract
@@ -27,7 +26,8 @@ import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckingLe
 import com.digitalasset.canton.ledger.sandbox.domain.Rejection
 import com.digitalasset.canton.ledger.sandbox.domain.Rejection.*
 import com.digitalasset.canton.ledger.sandbox.domain.Submission.Transaction
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -38,9 +38,10 @@ import scala.util.{Failure, Success}
 private[validate] class ConflictCheckWithCommittedImpl(
     indexService: IndexService,
     bridgeMetrics: BridgeMetrics,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends ConflictCheckWithCommitted {
-  private[this] implicit val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
+    extends ConflictCheckWithCommitted
+    with NamedLogging {
 
   private def toSubmissionId(id: Ref.SubmissionId): LoggingEntry =
     "submissionId" -> id
@@ -54,13 +55,13 @@ private[validate] class ConflictCheckWithCommittedImpl(
 
       LoggingContextWithTrace.withEnrichedLoggingContext(toSubmissionId(submissionId)) {
         implicit loggingContext: LoggingContextWithTrace =>
-          withErrorLogger(Some(submissionId)) { implicit errorLogger =>
+          withErrorLogger(Some(submissionId)) { implicit errorLoggingContext =>
             Timed
               .future(
                 bridgeMetrics.Stages.ConflictCheckWithCommitted.timer,
                 validate(transactionSubmission).map(_.map(_ => input)),
               )
-          }
+          }(loggingContext, logger)
       }(transactionSubmission.submission.loggingContext)
 
     case Right(validated) => Future.successful(Right(validated))
@@ -69,7 +70,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
   private def validate(
       inputSubmission: PreparedTransactionSubmission
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger,
+      errorLoggingContext: ContextualizedErrorLogger,
       loggingContext: LoggingContextWithTrace,
   ): Future[Either[Rejection, Unit]] = {
     import inputSubmission.*
@@ -166,7 +167,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
       processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
       completionInfo: CompletionInfo,
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger,
+      errorLoggingContext: ContextualizedErrorLogger,
       loggingContext: LoggingContextWithTrace,
   ): EitherT[Future, Rejection, Unit] =
     // Validation fails fast on the first unknown/invalid contract.
@@ -183,7 +184,7 @@ private[validate] class ConflictCheckWithCommittedImpl(
       provided: ProcessedDisclosedContract,
       completionInfo: CompletionInfo,
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger,
+      errorLoggingContext: ContextualizedErrorLogger,
       loggingContext: LoggingContextWithTrace,
   ): EitherT[Future, Rejection, Unit] =
     EitherT(

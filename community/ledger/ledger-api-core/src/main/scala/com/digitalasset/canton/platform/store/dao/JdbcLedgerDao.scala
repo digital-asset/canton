@@ -60,7 +60,7 @@ import com.digitalasset.canton.platform.{
   TransactionId,
   WorkflowId,
 }
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -84,6 +84,7 @@ private class JdbcLedgerDao(
     globalMaxEventPayloadQueries: Int,
     tracer: Tracer,
     val loggerFactory: NamedLoggerFactory,
+    incompleteOffsets: (Offset, Set[Ref.Party], TraceContext) => Future[Vector[Offset]],
 ) extends LedgerDao
     with NamedLogging {
 
@@ -482,12 +483,12 @@ private class JdbcLedgerDao(
           pruneAllDivulgedContracts,
         )(
           conn,
-          loggingContext,
+          loggingContext.traceContext,
         )
 
         readStorageBackend.completionStorageBackend.pruneCompletions(pruneUpToInclusive)(
           conn,
-          loggingContext,
+          loggingContext.traceContext,
         )
         parameterStorageBackend.updatePrunedUptoInclusive(pruneUpToInclusive)(conn)
 
@@ -520,6 +521,7 @@ private class JdbcLedgerDao(
       metrics = metrics,
       engineO = engine,
       loadPackage = (packageId, loggingContext) => this.getLfArchive(packageId)(loggingContext),
+      loggerFactory = loggerFactory,
     )
 
   private val queryNonPruned = QueryNonPrunedImpl(parameterStorageBackend, loggerFactory)
@@ -542,6 +544,7 @@ private class JdbcLedgerDao(
     queryNonPruned = queryNonPruned,
     eventStorageBackend = readStorageBackend.eventStorageBackend,
     lfValueTranslation = translation,
+    incompleteOffsets = incompleteOffsets,
     metrics = metrics,
     tracer = tracer,
     loggerFactory = loggerFactory,
@@ -584,6 +587,7 @@ private class JdbcLedgerDao(
     metrics = metrics,
     tracer = tracer,
     reassignmentStreamReader = reassignmentStreamReader,
+    loggerFactory = loggerFactory,
   )(servicesExecutionContext)
 
   private val flatTransactionPointwiseReader = new TransactionFlatPointwiseReader(
@@ -658,7 +662,7 @@ private class JdbcLedgerDao(
       offset: Offset,
       transaction: CommittedTransaction,
       divulgedContracts: Iterable[state.DivulgedContract],
-      blindingInfo: Option[BlindingInfo],
+      blindingInfoO: Option[BlindingInfo],
       hostedWitnesses: List[Party],
       recordTime: Timestamp,
   )(implicit
@@ -673,7 +677,7 @@ private class JdbcLedgerDao(
           Some(
             Traced[Update](
               state.Update.TransactionAccepted(
-                optCompletionInfo = completionInfo,
+                completionInfoO = completionInfo,
                 transactionMeta = state.TransactionMeta(
                   ledgerEffectiveTime = ledgerEffectiveTime,
                   workflowId = workflowId,
@@ -687,7 +691,7 @@ private class JdbcLedgerDao(
                 transactionId = transactionId,
                 recordTime = recordTime,
                 divulgedContracts = divulgedContracts.toList,
-                blindingInfo = blindingInfo,
+                blindingInfoO = blindingInfoO,
                 hostedWitnesses = hostedWitnesses,
                 contractMetadata = Map.empty,
               )
@@ -736,6 +740,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventPayloadQueries: Int,
       tracer: Tracer,
       loggerFactory: NamedLoggerFactory,
+      incompleteOffsets: (Offset, Set[Ref.Party], TraceContext) => Future[Vector[Offset]],
   ): LedgerReadDao =
     new JdbcLedgerDao(
       dbDispatcher = dbSupport.dbDispatcher,
@@ -744,8 +749,8 @@ private[platform] object JdbcLedgerDao {
       engine = engine,
       sequentialIndexer = SequentialWriteDao.noop,
       participantId = participantId,
-      readStorageBackend =
-        dbSupport.storageBackendFactory.readStorageBackend(ledgerEndCache, stringInterning),
+      readStorageBackend = dbSupport.storageBackendFactory
+        .readStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
       parameterStorageBackend = dbSupport.storageBackendFactory.createParameterStorageBackend,
       ledgerEndCache = ledgerEndCache,
       completionsPageSize = completionsPageSize,
@@ -756,6 +761,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventPayloadQueries = globalMaxEventPayloadQueries,
       tracer = tracer,
       loggerFactory = loggerFactory,
+      incompleteOffsets = incompleteOffsets,
     )
 
   def write(
@@ -783,8 +789,8 @@ private[platform] object JdbcLedgerDao {
       engine = engine,
       sequentialIndexer = sequentialWriteDao,
       participantId = participantId,
-      readStorageBackend =
-        dbSupport.storageBackendFactory.readStorageBackend(ledgerEndCache, stringInterning),
+      readStorageBackend = dbSupport.storageBackendFactory
+        .readStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
       parameterStorageBackend = dbSupport.storageBackendFactory.createParameterStorageBackend,
       ledgerEndCache = ledgerEndCache,
       completionsPageSize = completionsPageSize,
@@ -795,6 +801,7 @@ private[platform] object JdbcLedgerDao {
       globalMaxEventPayloadQueries = globalMaxEventPayloadQueries,
       tracer = tracer,
       loggerFactory = loggerFactory,
+      incompleteOffsets = (_, _, _) => Future.successful(Vector.empty),
     )
 
   val acceptType = "accept"

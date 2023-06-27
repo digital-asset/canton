@@ -102,6 +102,7 @@ object IndexMetadata {
           globalMaxEventPayloadQueries = 10,
           tracer = GlobalOpenTelemetry.getTracer(DamlTracerName),
           loggerFactory = loggerFactory,
+          incompleteOffsets = (_, _, _) => Future.successful(Vector.empty),
         )
       )
   }

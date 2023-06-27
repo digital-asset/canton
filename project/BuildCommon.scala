@@ -334,7 +334,7 @@ object BuildCommon {
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
-        releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ additionalBundleSources.value ++ protoFiles
+        releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ protoFiles
       val args = bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
       val assembleJar = assembly.value
@@ -1193,6 +1193,7 @@ object BuildCommon {
           `ledger-api-core`,
           DamlProjects.`daml-copy-testing-0` % Test,
           `ledger-common` % "test->test",
+          `community-testing` % Test,
         )
         .disablePlugins(
           ScalafixPlugin,

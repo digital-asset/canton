@@ -8,14 +8,14 @@ import akka.stream.Attributes
 import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v1.transaction.TreeEvent
 import com.daml.ledger.api.v2.update_service.GetUpdateTreesResponse
-import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.Spans
 import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.configuration.TransactionTreeStreamsConfig
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
@@ -54,11 +54,12 @@ class TransactionsTreeStreamReader(
     metrics: Metrics,
     tracer: Tracer,
     reassignmentStreamReader: ReassignmentStreamReader,
-)(implicit executionContext: ExecutionContext) {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends NamedLogging {
   import TransactionsReader.*
   import config.*
 
-  private val logger = ContextualizedLogger.get(getClass)
   private val dbMetrics = metrics.daml.index.db
 
   private val orderBySequentialEventId =
@@ -137,6 +138,7 @@ class TransactionsTreeStreamReader(
       ),
       numOfDecomposedFilters = filterParties.size,
       numOfPagesInIdPageBuffer = maxPagesPerIdPagesBuffer,
+      loggerFactory = loggerFactory,
     )
 
     def fetchIds(

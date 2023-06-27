@@ -8,6 +8,7 @@ import akka.{Done, NotUsed}
 import com.daml.api.util.TimestampConversion
 import com.daml.ledger.api.v1.contract_metadata.ContractMetadata
 import com.daml.ledger.api.v1.event.CreatedEvent
+import com.daml.ledger.api.v2.reassignment.{AssignedEvent, UnassignedEvent}
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.{
   GetTransactionResponse,
@@ -23,7 +24,11 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawCreatedEvent
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
+  RawAssignEvent,
+  RawCreatedEvent,
+  RawUnassignEvent,
+}
 import com.digitalasset.canton.platform.store.dao.{
   DbDispatcher,
   EventProjectionProperties,
@@ -304,7 +309,7 @@ private[dao] object TransactionsReader {
           witnessParties = rawCreatedEvent.witnessParties.toList,
           signatories = rawCreatedEvent.signatories.toList,
           observers = rawCreatedEvent.observers.toList,
-          agreementText = rawCreatedEvent.agreementText,
+          agreementText = rawCreatedEvent.agreementText.orElse(Some("")),
           metadata = Some(
             ContractMetadata(
               createdAt = Some(TimestampConversion.fromLf(rawCreatedEvent.ledgerEffectiveTime)),
@@ -316,4 +321,30 @@ private[dao] object TransactionsReader {
         )
       )
 
+  def toUnassignedEvent(rawUnassignEvent: RawUnassignEvent): UnassignedEvent =
+    UnassignedEvent(
+      unassignId = rawUnassignEvent.unassignId,
+      contractId = rawUnassignEvent.contractId,
+      templateId = Some(LfEngineToApi.toApiIdentifier(rawUnassignEvent.templateId)),
+      source = rawUnassignEvent.sourceDomainId,
+      target = rawUnassignEvent.targetDomainId,
+      submitter = rawUnassignEvent.submitter,
+      reassignmentCounter = rawUnassignEvent.reassignmentCounter,
+      assignmentExclusivity =
+        rawUnassignEvent.assignmentExclusivity.map(TimestampConversion.fromLf),
+      witnessParties = rawUnassignEvent.witnessParties.toSeq,
+    )
+
+  def toAssignedEvent(
+      rawAssignEvent: RawAssignEvent,
+      createdEvent: CreatedEvent,
+  ): AssignedEvent =
+    AssignedEvent(
+      source = rawAssignEvent.sourceDomainId,
+      target = rawAssignEvent.targetDomainId,
+      unassignId = rawAssignEvent.unassignId,
+      submitter = rawAssignEvent.submitter,
+      reassignmentCounter = rawAssignEvent.reassignmentCounter,
+      createdEvent = Some(createdEvent),
+    )
 }

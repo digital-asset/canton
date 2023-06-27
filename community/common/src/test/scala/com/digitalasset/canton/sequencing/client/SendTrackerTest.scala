@@ -43,7 +43,8 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           timestamp = timestamp,
           domainId = DefaultTestIdentities.domainId,
         )
-      )
+      ),
+      None,
     )(
       traceContext
     )
@@ -59,7 +60,8 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           Batch.empty(testedProtocolVersion),
           testedProtocolVersion,
         )
-      )
+      ),
+      None,
     )(traceContext)
 
   def deliverError(msgId: MessageId, timestamp: CantonTimestamp): OrdinaryProtocolEvent = {
@@ -73,7 +75,8 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           DeliverErrorReason.BatchRefused("test"),
           testedProtocolVersion,
         )
-      )
+      ),
+      None,
     )(traceContext)
   }
 
@@ -90,6 +93,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
     private val calls = new AtomicInteger()
 
     def callCount = calls.get()
+
     def assertNotCalled = callCount shouldBe 0
 
     val handler: SendTimeoutHandler = _ => {

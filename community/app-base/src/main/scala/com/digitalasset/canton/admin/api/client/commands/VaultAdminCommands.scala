@@ -15,6 +15,8 @@ import com.digitalasset.canton.crypto.admin.v0
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc.VaultServiceStub
 import com.digitalasset.canton.crypto.{PublicKeyWithName, v0 as cryptoproto, *}
 import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.util.{EitherUtil, OptionUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
@@ -189,6 +191,68 @@ object VaultAdminCommands {
 
   }
 
+  final case class RegisterKmsSigningKey(kmsKeyId: String, name: String)
+      extends BaseVaultAdminCommand[
+        v0.RegisterKmsSigningKeyRequest,
+        v0.RegisterKmsSigningKeyResponse,
+        SigningPublicKey,
+      ] {
+
+    override def createRequest(): Either[String, v0.RegisterKmsSigningKeyRequest] =
+      Right(
+        v0.RegisterKmsSigningKeyRequest(
+          kmsKeyId = kmsKeyId,
+          name = name,
+        )
+      )
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.RegisterKmsSigningKeyRequest,
+    ): Future[v0.RegisterKmsSigningKeyResponse] = {
+      service.registerKmsSigningKey(request)
+    }
+
+    override def handleResponse(
+        response: v0.RegisterKmsSigningKeyResponse
+    ): Either[String, SigningPublicKey] =
+      response.publicKey
+        .toRight("No public key returned")
+        .flatMap(k => SigningPublicKey.fromProtoV0(k).leftMap(_.toString))
+
+  }
+
+  final case class RegisterKmsEncryptionKey(kmsKeyId: String, name: String)
+      extends BaseVaultAdminCommand[
+        v0.RegisterKmsEncryptionKeyRequest,
+        v0.RegisterKmsEncryptionKeyResponse,
+        EncryptionPublicKey,
+      ] {
+
+    override def createRequest(): Either[String, v0.RegisterKmsEncryptionKeyRequest] =
+      Right(
+        v0.RegisterKmsEncryptionKeyRequest(
+          kmsKeyId = kmsKeyId,
+          name = name,
+        )
+      )
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.RegisterKmsEncryptionKeyRequest,
+    ): Future[v0.RegisterKmsEncryptionKeyResponse] = {
+      service.registerKmsEncryptionKey(request)
+    }
+
+    override def handleResponse(
+        response: v0.RegisterKmsEncryptionKeyResponse
+    ): Either[String, EncryptionPublicKey] =
+      response.publicKey
+        .toRight("No public key returned")
+        .flatMap(k => EncryptionPublicKey.fromProtoV0(k).leftMap(_.toString))
+
+  }
+
   final case class RotateWrapperKey(newWrapperKeyId: String)
       extends BaseVaultAdminCommand[
         v0.RotateWrapperKeyRequest,
@@ -315,4 +379,70 @@ object VaultAdminCommands {
       )
   }
 
+  final case class ImportKeyPair(keyPair: ByteString, name: Option[String])
+      extends BaseVaultAdminCommand[
+        v0.ImportKeyPairRequest,
+        v0.ImportKeyPairResponse,
+        Unit,
+      ] {
+
+    override def createRequest(): Either[String, v0.ImportKeyPairRequest] =
+      Right(v0.ImportKeyPairRequest(keyPair = keyPair, name = OptionUtil.noneAsEmptyString(name)))
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.ImportKeyPairRequest,
+    ): Future[v0.ImportKeyPairResponse] =
+      service.importKeyPair(request)
+
+    override def handleResponse(response: v0.ImportKeyPairResponse): Either[String, Unit] =
+      EitherUtil.unit
+  }
+
+  final case class ExportKeyPair(fingerprint: Fingerprint, protocolVersion: ProtocolVersion)
+      extends BaseVaultAdminCommand[
+        v0.ExportKeyPairRequest,
+        v0.ExportKeyPairResponse,
+        ByteString,
+      ] {
+
+    override def createRequest(): Either[String, v0.ExportKeyPairRequest] = {
+      Right(
+        v0.ExportKeyPairRequest(
+          fingerprint = fingerprint.toProtoPrimitive,
+          protocolVersion = protocolVersion.toProtoPrimitive,
+        )
+      )
+    }
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.ExportKeyPairRequest,
+    ): Future[v0.ExportKeyPairResponse] =
+      service.exportKeyPair(request)
+
+    override def handleResponse(response: v0.ExportKeyPairResponse): Either[String, ByteString] =
+      Right(response.keyPair)
+  }
+
+  final case class DeleteKeyPair(fingerprint: Fingerprint)
+      extends BaseVaultAdminCommand[
+        v0.DeleteKeyPairRequest,
+        v0.DeleteKeyPairResponse,
+        Unit,
+      ] {
+
+    override def createRequest(): Either[String, v0.DeleteKeyPairRequest] = {
+      Right(v0.DeleteKeyPairRequest(fingerprint = fingerprint.toProtoPrimitive))
+    }
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.DeleteKeyPairRequest,
+    ): Future[v0.DeleteKeyPairResponse] =
+      service.deleteKeyPair(request)
+
+    override def handleResponse(response: v0.DeleteKeyPairResponse): Either[String, Unit] =
+      EitherUtil.unit
+  }
 }

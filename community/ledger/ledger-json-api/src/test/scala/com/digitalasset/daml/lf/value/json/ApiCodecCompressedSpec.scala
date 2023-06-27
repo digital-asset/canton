@@ -313,6 +313,8 @@ class ApiCodecCompressedSpec
         "\"1990-11-09T04:30:23.1234569Z\"",
       ),
       c("\"1970-01-01T00:00:00Z\"", VA.timestamp)(Time.Timestamp assertFromLong 0),
+      // TODO(i12203) enable the following line once we move away from Java 11 -- see https://bugs.openjdk.org/browse/JDK-8166138
+      //c("\"1970-01-01T00:00:00+01:00\"", VA.timestamp)(Time.Timestamp assertFromLong 3600),
       cn("\"42\"", "42", VA.int64)(42, "\"+42\""),
       cn("\"0\"", "0", VA.int64)(0, "-0", "\"+0\"", "\"-0\""),
       c("\"Alice\"", VA.party)(Ref.Party assertFromString "Alice"),
@@ -352,7 +354,6 @@ class ApiCodecCompressedSpec
       ("\"garbage\"", VA.int64, ""),
       ("\"   42 \"", VA.int64, ""),
       ("\"1970-01-01T00:00:00\"", VA.timestamp, ""),
-      ("\"1970-01-01T00:00:00+01:00\"", VA.timestamp, ""),
       ("\"1970-01-01T00:00:00+01:00[Europe/Paris]\"", VA.timestamp, ""),
       ("\"0000-01-01\"", VA.date, "Invalid date: 0000-01-01"),
       ("\"9999-99-99\"", VA.date, "Invalid date: 9999-99-99"),

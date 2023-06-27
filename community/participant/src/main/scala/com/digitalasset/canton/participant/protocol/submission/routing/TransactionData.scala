@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.daml.lf.data.Ref.Party
 import com.daml.lf.engine.Blinding
 import com.digitalasset.canton.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
@@ -14,7 +15,7 @@ import com.digitalasset.canton.participant.sync.TransactionRoutingError.Malforme
   InvalidDomainAlias,
   InvalidDomainId,
 }
-import com.digitalasset.canton.protocol.{LfContractId, LfVersionedTransaction, WithContractMetadata}
+import com.digitalasset.canton.protocol.{LfContractId, LfVersionedTransaction}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.{DomainAlias, LfPackageId, LfPartyId, LfWorkflowId}
 
@@ -46,7 +47,7 @@ private[routing] object TransactionData {
       workflowIdO: Option[LfWorkflowId],
       domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
       domainIdResolver: DomainAlias => Option[DomainId],
-      inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
+      contractRoutingParties: Map[LfContractId, Set[Party]],
       submitterDomainId: Option[DomainId],
   )(implicit
       ec: ExecutionContext
@@ -58,7 +59,7 @@ private[routing] object TransactionData {
           .getOrElse(toDomainId(workflowIdO, domainIdResolver))
       )
       contractsDomainData <- EitherT.liftF(
-        ContractsDomainData.create(domainOfContracts, inputContractsMetadata)
+        ContractsDomainData.create(domainOfContracts, contractRoutingParties)
       )
     } yield TransactionData(
       transaction = transaction,
@@ -75,7 +76,7 @@ private[routing] object TransactionData {
       workflowIdO: Option[LfWorkflowId],
       domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
       domainIdResolver: DomainAlias => Option[DomainId],
-      inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
+      contractRoutingParties: Map[LfContractId, Set[Party]],
       submitterDomainId: Option[DomainId],
   )(implicit
       ec: ExecutionContext
@@ -97,7 +98,7 @@ private[routing] object TransactionData {
         workflowIdO,
         domainOfContracts,
         domainIdResolver,
-        inputContractsMetadata,
+        contractRoutingParties,
         submitterDomainId,
       )
     } yield transactionData

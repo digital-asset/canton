@@ -600,6 +600,107 @@ private[backend] trait StorageBackendTestsReassignmentEvents
     ).map(_.rawCreatedEvent.updateId) shouldBe Nil
   }
 
+  behavior of "incomplete lookup related event_sequential_id lookup queries"
+
+  it should "return the correct sequence of event sequential IDs" in {
+    val dbDtos = Vector(
+      dtoCreate(
+        offset = offset(1),
+        eventSequentialId = 1L,
+        contractId = hashCid("#1"),
+        commandId = "command id 1",
+        domainId = Some("x::domain1"),
+        driverMetadata = Some(someDriverMetadataBytes),
+      ),
+      dtoCreate(
+        offset = offset(2),
+        eventSequentialId = 2L,
+        contractId = hashCid("#2"),
+        commandId = "command id 2",
+        domainId = Some("x::domain1"),
+        driverMetadata = Some(someDriverMetadataBytes),
+      ),
+      dtoExercise(
+        offset = offset(3),
+        eventSequentialId = 3L,
+        consuming = true,
+        contractId = hashCid("#2"),
+        domainId = Some("x::domain2"),
+      ),
+      dtoUnassign(
+        offset = offset(4),
+        eventSequentialId = 4L,
+        contractId = hashCid("#2"),
+        sourceDomainId = "x::domain2",
+      ),
+      dtoAssign(
+        offset = offset(5),
+        eventSequentialId = 5L,
+        contractId = hashCid("#2"),
+        sourceDomainId = "x::domain2",
+      ),
+      dtoAssign(
+        offset = offset(6),
+        eventSequentialId = 6L,
+        contractId = hashCid("#2"),
+        sourceDomainId = "x::domain3",
+      ),
+      dtoExercise(
+        offset = offset(10),
+        eventSequentialId = 10L,
+        consuming = true,
+        contractId = hashCid("#2"),
+        domainId = Some("x::domain1"),
+      ),
+      dtoUnassign(
+        offset = offset(11),
+        eventSequentialId = 11L,
+        contractId = hashCid("#1"),
+        sourceDomainId = "x::domain1",
+      ),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dbDtos, _))
+    executeSql(updateLedgerEnd(offset(11), 11L))
+
+    executeSql(
+      backend.event.lookupAssignSequentialIdByOffset(
+        List(
+          1L,
+          5L,
+          6L,
+          7L,
+        ).map(offset).map(_.toHexString)
+      )
+    ) shouldBe Vector(5L, 6L)
+    executeSql(
+      backend.event.lookupUnassignSequentialIdByOffset(
+        List(
+          1L, 4L, 6L, 7L, 11L,
+        ).map(offset).map(_.toHexString)
+      )
+    ) shouldBe Vector(4L, 11L)
+    executeSql(
+      backend.event.lookupAssignSequentialIdByContractId(
+        List(
+          1,
+          2,
+          3,
+        ).map(i => hashCid(s"#$i").coid)
+      )
+    ) shouldBe Vector(5L)
+    executeSql(
+      backend.event.lookupCreateSequentialIdByContractId(
+        List(
+          1,
+          2,
+          3,
+        ).map(i => hashCid(s"#$i").coid)
+      )
+    ) shouldBe Vector(1L, 2L)
+  }
+
   def rawCreatedEventHasExpectedCreateAgumentAndDriverMetadata(
       rawCreatedEvent: RawCreatedEvent,
       createArgument: Array[Byte],

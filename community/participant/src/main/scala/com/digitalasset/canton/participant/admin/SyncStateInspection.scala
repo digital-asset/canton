@@ -234,7 +234,20 @@ class SyncStateInspection(
                 )
               )
               snapshot <- EitherT.right[RepairServiceError](
-                state.activeContractStore.snapshot(requestedTimestamp)
+                state.activeContractStore
+                  .snapshot(requestedTimestamp)
+                  .map(_.unsorted.map { case (cid, (ts, _transferCounter)) => cid -> ts })
+              )
+              pruningStatus <- EitherT.right[RepairServiceError](
+                state.activeContractStore.pruningStatus
+              )
+              _ <- pruningStatus.traverse_(status =>
+                EitherT.cond[Future](
+                  status.timestamp < requestedTimestamp,
+                  (),
+                  RepairServiceError.UnavailableAcsSnapshot
+                    .Error(requestedTimestamp, status.timestamp, domainId): RepairServiceError,
+                )
               )
             } yield snapshot
           case None => EitherT.right[RepairServiceError](currentAcsSnapshot(state))
@@ -324,7 +337,11 @@ class SyncStateInspection(
       cursorHeadO <- persistentState.requestJournalStore.preheadClean
       snapshot <- cursorHeadO.fold(
         Future.successful(Map.empty[LfContractId, CantonTimestamp])
-      )(cursorHead => persistentState.activeContractStore.snapshot(cursorHead.timestamp))
+      )(cursorHead =>
+        persistentState.activeContractStore
+          .snapshot(cursorHead.timestamp)
+          .map(_.unsorted.map { case (cid, (ts, _transferCounter)) => cid -> ts })
+      )
     } yield snapshot
 
   def findAcceptedTransactions(

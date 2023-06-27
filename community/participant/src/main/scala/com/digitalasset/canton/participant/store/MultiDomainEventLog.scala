@@ -14,12 +14,16 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.v2.ChangeId
-import com.digitalasset.canton.lifecycle.CloseContext
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingSteps
+import com.digitalasset.canton.participant.protocol.transfer.TransferData.{
+  TransferInGlobalOffset,
+  TransferOutGlobalOffset,
+}
 import com.digitalasset.canton.participant.store.EventLogId.{
   DomainEventLogId,
   ParticipantEventLogId,
@@ -286,30 +290,42 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
   protected def transferStoreFor: TargetDomainId => Either[String, TransferStore]
 
   def notifyOnPublishTransfer(
-      event: LedgerSyncEvent.TransferEvent,
-      globalOffset: GlobalOffset,
+      events: Seq[(LedgerSyncEvent.TransferEvent, GlobalOffset)]
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
-    val res: EitherT[Future, String, Unit] = for {
-      transferStore <- EitherT.fromEither[Future](
-        transferStoreFor(event.targetDomain)
-      )
-      _ <- transferStore
-        .addTransferEventGlobalOffset(event, globalOffset)
-        .leftMap(_.message)
-    } yield {
-      logger.debug(
-        s"Updated global offset for transfer-${event.kind} `${event.transferId}` to $globalOffset"
-      )
-    }
+    events.groupBy { case (event, _) => event.targetDomain }.toList.parTraverse_ {
+      case (targetDomain, eventsForDomain) =>
+        lazy val updates = eventsForDomain
+          .map { case (event, offset) => s"${event.transferId} (${event.kind}): $offset" }
+          .mkString(", ")
 
-    EitherTUtil.toFuture(
-      res.leftMap(err =>
-        new RuntimeException(
-          s"Unable to update global offset for transfer-${event.kind} `${event.transferId}` to $globalOffset: $err"
-        )
-      )
-    )
+        val res: EitherT[FutureUnlessShutdown, String, Unit] = for {
+          transferStore <- EitherT
+            .fromEither[FutureUnlessShutdown](transferStoreFor(targetDomain))
+          offsets = eventsForDomain.map {
+            case (out: LedgerSyncEvent.TransferredOut, offset) =>
+              (out.transferId, TransferOutGlobalOffset(offset))
+            case (in: LedgerSyncEvent.TransferredIn, offset) =>
+              (in.transferId, TransferInGlobalOffset(offset))
+          }
+          _ = logger.debug(s"Updated global offsets for transfers: $updates")
+          _ <- transferStore.addTransfersOffsets(offsets).leftMap(_.message)
+        } yield ()
+
+        EitherTUtil
+          .toFutureUnlessShutdown(
+            res.leftMap(err =>
+              new RuntimeException(
+                s"Unable to update global offsets for transfers ($updates): $err"
+              )
+            )
+          )
+          .onShutdown(
+            throw new RuntimeException(
+              "Notification upon published transfer aborted due to shutdown"
+            )
+          )
+    }
   }
 
   /** Returns a lower bound on the latest publication time of a published event.
@@ -458,7 +474,7 @@ object MultiDomainEventLog {
       event match {
         case accepted: LedgerSyncEvent.TransactionAccepted =>
           // The indexer outputs a completion event iff the completion info is set.
-          accepted.optCompletionInfo.map { completionInfo =>
+          accepted.completionInfoO.map { completionInfo =>
             val changeId = completionInfo.changeId
             DeduplicationInfo(
               changeId,

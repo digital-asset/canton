@@ -5,22 +5,21 @@ package com.digitalasset.canton.console.commands
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.commands.{TopologyAdminCommands, VaultAdminCommands}
 import com.digitalasset.canton.admin.api.client.data.ListKeyOwnersResult
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleEnvironment,
+  FeatureFlag,
+  FeatureFlagFilter,
   Help,
   Helpful,
   InstanceReferenceCommon,
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
-import com.digitalasset.canton.crypto.store.CryptoPublicStoreError
-import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.{KeyOwner, KeyOwnerCode}
 import com.digitalasset.canton.tracing.TraceContext
@@ -39,8 +38,10 @@ import scala.jdk.CollectionConverters.*
 class SecretKeyAdministration(
     instance: InstanceReferenceCommon,
     runner: AdminCommandRunner,
-    consoleEnvironment: ConsoleEnvironment,
-) extends Helpful {
+    override protected val consoleEnvironment: ConsoleEnvironment,
+    override protected val loggerFactory: NamedLoggerFactory,
+) extends Helpful
+    with FeatureFlagFilter {
 
   import runner.*
 
@@ -93,6 +94,40 @@ class SecretKeyAdministration(
   ): EncryptionPublicKey = {
     consoleEnvironment.run {
       adminCommand(VaultAdminCommands.GenerateEncryptionKey(name, scheme))
+    }
+  }
+
+  @Help.Summary(
+    "Register the specified KMS signing key in canton storing its public information in the vault"
+  )
+  @Help.Description(
+    """
+      |The id for the KMS signing key.
+      |The optional name argument allows you to store an associated string for your convenience."""
+  )
+  def register_kms_signing_key(
+      kmsKeyId: String,
+      name: String = "",
+  ): SigningPublicKey = {
+    consoleEnvironment.run {
+      adminCommand(VaultAdminCommands.RegisterKmsSigningKey(kmsKeyId, name))
+    }
+  }
+
+  @Help.Summary(
+    "Register the specified KMS encryption key in canton storing its public information in the vault"
+  )
+  @Help.Description(
+    """
+      |The id for the KMS encryption key.
+      |The optional name argument allows you to store an associated string for your convenience."""
+  )
+  def register_kms_encryption_key(
+      kmsKeyId: String,
+      name: String = "",
+  ): EncryptionPublicKey = {
+    consoleEnvironment.run {
+      adminCommand(VaultAdminCommands.RegisterKmsEncryptionKey(kmsKeyId, name))
     }
   }
 
@@ -165,58 +200,10 @@ class SecretKeyAdministration(
     }
   }
 
-}
-
-// TODO(#13019) Avoid the global execution context
-@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
-class LocalSecretKeyAdministration(
-    instance: InstanceReferenceCommon,
-    runner: AdminCommandRunner,
-    consoleEnvironment: ConsoleEnvironment,
-    crypto: => Crypto,
-) extends SecretKeyAdministration(instance, runner, consoleEnvironment) {
-
-  private def run[V](eitherT: EitherT[Future, String, V], action: String): V = {
-    import TraceContext.Implicits.Empty.*
-    implicit val loggingContext: ErrorLoggingContext =
-      ErrorLoggingContext.fromTracedLogger(runner.tracedLogger)
-    consoleEnvironment.environment.config.parameters.timeouts.processing.default
-      .await(action)(eitherT.value) match {
-      case Left(error) =>
-        throw new IllegalArgumentException(s"Problem while $action. Error: $error")
-      case Right(value) => value
-    }
-  }
-
-  private def parseKeyPair(
-      keyPairBytes: ByteString
-  ): Either[String, CryptoKeyPair[_ <: PublicKey, _ <: PrivateKey]] = {
-    CryptoKeyPair
-      .fromByteString(keyPairBytes)
-      .leftFlatMap { firstErr =>
-        // Fallback to parse the old protobuf message format
-        ProtoConverter
-          .parse(
-            v0.CryptoKeyPair.parseFrom,
-            CryptoKeyPair.fromProtoCryptoKeyPairV0,
-            keyPairBytes,
-          )
-          .leftMap(secondErr => s"Failed to parse crypto key pair: $firstErr, $secondErr")
-      }
-  }
-
   @Help.Summary("Upload (load and import) a key pair from file")
-  def upload(filename: String, name: Option[String]): Unit = TraceContext.withNewTraceContext {
-    implicit traceContext =>
-      val cmd = for {
-        keyPairContent <- EitherT.fromEither[Future](
-          BinaryFileUtil.readByteStringFromFile(filename)
-        )
-        validatedName <- name.traverse(KeyName.create).toEitherT[Future]
-        keyPair <- parseKeyPair(keyPairContent).toEitherT[Future]
-        _ <- loadKeyPair(validatedName, keyPair)
-      } yield ()
-      run(cmd, "importing key pair")
+  def upload(filename: String, name: Option[String]): Unit = {
+    val keyPair = BinaryFileUtil.tryReadByteStringFromFile(filename)
+    upload(keyPair, name)
   }
 
   @Help.Summary("Upload a key pair")
@@ -224,122 +211,75 @@ class LocalSecretKeyAdministration(
       pairBytes: ByteString,
       name: Option[String],
   ): Unit =
-    TraceContext.withNewTraceContext { implicit traceContext =>
-      val cmd = for {
-        validatedName <- name.traverse(KeyName.create).toEitherT[Future]
-        keyPair <- parseKeyPair(pairBytes).toEitherT[Future]
-        _ <- loadKeyPair(validatedName, keyPair)
-      } yield ()
-      run(cmd, "importing key pair")
+    consoleEnvironment.run {
+      adminCommand(
+        VaultAdminCommands.ImportKeyPair(pairBytes, name)
+      )
     }
 
-  private def loadKeyPair(
-      validatedName: Option[KeyName],
-      keyPair: CryptoKeyPair[_ <: PublicKey, _ <: PrivateKey],
-  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
-    for {
-      cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
-        .toRight(
-          "The selected crypto provider does not support importing of private keys."
-        )
-        .toEitherT[Future]
-      _ <- crypto.cryptoPublicStore
-        .storePublicKey(keyPair.publicKey, validatedName)
-        .recoverWith {
-          // if the existing key is the same, then ignore error
-          case error: CryptoPublicStoreError.KeyAlreadyExists =>
-            for {
-              existing <- crypto.cryptoPublicStore.publicKey(keyPair.publicKey.fingerprint)
-              _ <-
-                if (existing.contains(keyPair.publicKey))
-                  EitherT.rightT[Future, CryptoPublicStoreError](())
-                else EitherT.leftT[Future, Unit](error: CryptoPublicStoreError)
-            } yield ()
-        }
-        .leftMap(_.toString)
-      _ <- cryptoPrivateStore.storePrivateKey(keyPair.privateKey, validatedName).leftMap(_.toString)
-    } yield ()
-
-  @Help.Summary("Download key pair")
+  // TODO(i13613): Remove feature flag
+  @Help.Summary("Download key pair", FeatureFlag.Preview)
+  @Help.Description(
+    """Download the key pair with the private and public key in its binary representation.
+      |fingerprint: The identifier of the key pair to download
+      |protocolVersion: The (optional) protocol version that defines the serialization of the key pair"""
+  )
   def download(
       fingerprint: Fingerprint,
       protocolVersion: ProtocolVersion = ProtocolVersion.latest,
-  ): ByteString =
-    TraceContext.withNewTraceContext { implicit traceContext =>
-      val cmd = for {
-        cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
-          .toRight(
-            "The selected crypto provider does not support exporting of private keys."
-          )
-          .toEitherT[Future]
-        privateKey <- cryptoPrivateStore
-          .exportPrivateKey(fingerprint)
-          .leftMap(_.toString)
-          .subflatMap(_.toRight(s"no private key found for [$fingerprint]"))
-          .leftMap(err => s"Error retrieving private key [$fingerprint] $err")
-        publicKey <- crypto.cryptoPublicStore
-          .publicKey(fingerprint)
-          .leftMap(_.toString)
-          .subflatMap(_.toRight(s"no public key found for [$fingerprint]"))
-          .leftMap(err => s"Error retrieving public key [$fingerprint] $err")
-        keyPair: CryptoKeyPair[PublicKey, PrivateKey] = (publicKey, privateKey) match {
-          case (pub: SigningPublicKey, pkey: SigningPrivateKey) =>
-            new SigningKeyPair(pub, pkey)
-          case (pub: EncryptionPublicKey, pkey: EncryptionPrivateKey) =>
-            new EncryptionKeyPair(pub, pkey)
-          case _ => sys.error("public and private keys must have same purpose")
-        }
-        keyPairBytes = keyPair.toByteString(protocolVersion)
-      } yield keyPairBytes
-      run(cmd, "exporting key pair")
+  ): ByteString = {
+    check(FeatureFlag.Preview) {
+      consoleEnvironment.run {
+        adminCommand(
+          VaultAdminCommands.ExportKeyPair(fingerprint, protocolVersion)
+        )
+      }
     }
+  }
+
+  protected def writeToFile(outputFile: String, bytes: ByteString): Unit = {
+    val file = new File(outputFile)
+    file.createNewFile()
+    // only current user has permissions with the file
+    try {
+      Files.setPosixFilePermissions(file.toPath, Set(OWNER_READ, OWNER_WRITE).asJava)
+    } catch {
+      // the above will throw on non-posix systems such as windows
+      case _: UnsupportedOperationException =>
+    }
+    BinaryFileUtil.writeByteStringToFile(outputFile, bytes)
+  }
 
   @Help.Summary("Download key pair and save it to a file")
   def download_to(
       fingerprint: Fingerprint,
       outputFile: String,
       protocolVersion: ProtocolVersion = ProtocolVersion.latest,
-  ): Unit =
-    run(
-      EitherT.rightT(writeToFile(Some(outputFile), download(fingerprint, protocolVersion))),
-      "saving key pair to file",
-    )
-
-  private def writeToFile(outputFile: Option[String], bytes: ByteString): Unit =
-    outputFile.foreach { filename =>
-      val file = new File(filename)
-      file.createNewFile()
-      // only current user has permissions with the file
-      try {
-        Files.setPosixFilePermissions(file.toPath, Set(OWNER_READ, OWNER_WRITE).asJava)
-      } catch {
-        // the above will throw on non-posix systems such as windows
-        case _: UnsupportedOperationException =>
-      }
-      BinaryFileUtil.writeByteStringToFile(filename, bytes)
-    }
+  ): Unit = {
+    writeToFile(outputFile, download(fingerprint, protocolVersion))
+  }
 
   @Help.Summary("Delete private key")
-  def delete(fingerprint: Fingerprint, force: Boolean = false): Unit =
-    TraceContext.withNewTraceContext { implicit traceContext =>
-      def deleteKey(): Unit =
-        run(
-          crypto.cryptoPrivateStore.removePrivateKey(fingerprint).leftMap(_.toString),
-          "deleting private key",
+  def delete(fingerprint: Fingerprint, force: Boolean = false): Unit = {
+    def deleteKey(): Unit =
+      consoleEnvironment.run {
+        adminCommand(
+          VaultAdminCommands.DeleteKeyPair(fingerprint)
         )
-
-      if (force)
-        deleteKey()
-      else {
-        println(
-          s"Are you sure you want to delete the private key with fingerprint $fingerprint? yes/no"
-        )
-        println(s"This action is irreversible and can have undesired effects if done carelessly.")
-        print("> ")
-        val answer = Option(scala.io.StdIn.readLine())
-        if (answer.exists(_.toLowerCase == "yes")) deleteKey()
       }
+
+    if (force)
+      deleteKey()
+    else {
+      println(
+        s"Are you sure you want to delete the private key with fingerprint $fingerprint? yes/no"
+      )
+      println(s"This action is irreversible and can have undesired effects if done carelessly.")
+      print("> ")
+      val answer = Option(scala.io.StdIn.readLine())
+      if (answer.exists(_.toLowerCase == "yes")) deleteKey()
     }
+  }
 
 }
 
@@ -457,11 +397,13 @@ class KeyAdministrationGroup(
     instance: InstanceReferenceCommon,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
+    loggerFactory: NamedLoggerFactory,
 ) extends Helpful {
 
   private lazy val publicAdmin =
     new PublicKeyAdministration(runner, consoleEnvironment)
-  private lazy val secretAdmin = new SecretKeyAdministration(instance, runner, consoleEnvironment)
+  private lazy val secretAdmin =
+    new SecretKeyAdministration(instance, runner, consoleEnvironment, loggerFactory)
 
   @Help.Summary("Manage public keys")
   @Help.Group("Public keys")
@@ -473,15 +415,83 @@ class KeyAdministrationGroup(
 
 }
 
+// TODO(#13019) Avoid the global execution context
+@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
+class LocalSecretKeyAdministration(
+    instance: InstanceReferenceCommon,
+    runner: AdminCommandRunner,
+    consoleEnvironment: ConsoleEnvironment,
+    crypto: => Crypto,
+    loggerFactory: NamedLoggerFactory,
+) extends SecretKeyAdministration(instance, runner, consoleEnvironment, loggerFactory) {
+
+  private def run[V](eitherT: EitherT[Future, String, V], action: String): V = {
+    import TraceContext.Implicits.Empty.*
+    consoleEnvironment.environment.config.parameters.timeouts.processing.default
+      .await(action)(eitherT.value) match {
+      case Left(error) =>
+        throw new IllegalArgumentException(s"Problem while $action. Error: $error")
+      case Right(value) => value
+    }
+  }
+
+  @Help.Summary("Download key pair")
+  override def download(
+      fingerprint: Fingerprint,
+      protocolVersion: ProtocolVersion = ProtocolVersion.latest,
+  ): ByteString =
+    TraceContext.withNewTraceContext { implicit traceContext =>
+      val cmd = for {
+        cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
+          .toRight(
+            "The selected crypto provider does not support exporting of private keys."
+          )
+          .toEitherT[Future]
+        privateKey <- cryptoPrivateStore
+          .exportPrivateKey(fingerprint)
+          .leftMap(_.toString)
+          .subflatMap(_.toRight(s"no private key found for [$fingerprint]"))
+          .leftMap(err => s"Error retrieving private key [$fingerprint] $err")
+        publicKey <- crypto.cryptoPublicStore
+          .publicKey(fingerprint)
+          .leftMap(_.toString)
+          .subflatMap(_.toRight(s"no public key found for [$fingerprint]"))
+          .leftMap(err => s"Error retrieving public key [$fingerprint] $err")
+        keyPair: CryptoKeyPair[PublicKey, PrivateKey] = (publicKey, privateKey) match {
+          case (pub: SigningPublicKey, pkey: SigningPrivateKey) =>
+            new SigningKeyPair(pub, pkey)
+          case (pub: EncryptionPublicKey, pkey: EncryptionPrivateKey) =>
+            new EncryptionKeyPair(pub, pkey)
+          case _ => sys.error("public and private keys must have same purpose")
+        }
+        keyPairBytes = keyPair.toByteString(protocolVersion)
+      } yield keyPairBytes
+      run(cmd, "exporting key pair")
+    }
+
+  @Help.Summary("Download key pair and save it to a file")
+  override def download_to(
+      fingerprint: Fingerprint,
+      outputFile: String,
+      protocolVersion: ProtocolVersion = ProtocolVersion.latest,
+  ): Unit =
+    run(
+      EitherT.rightT(writeToFile(outputFile, download(fingerprint, protocolVersion))),
+      "saving key pair to file",
+    )
+
+}
+
 class LocalKeyAdministrationGroup(
     instance: InstanceReferenceCommon,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     crypto: => Crypto,
-) extends KeyAdministrationGroup(instance, runner, consoleEnvironment) {
+    loggerFactory: NamedLoggerFactory,
+) extends KeyAdministrationGroup(instance, runner, consoleEnvironment, loggerFactory) {
 
   private lazy val localSecretAdmin: LocalSecretKeyAdministration =
-    new LocalSecretKeyAdministration(instance, runner, consoleEnvironment, crypto)
+    new LocalSecretKeyAdministration(instance, runner, consoleEnvironment, crypto, loggerFactory)
 
   @Help.Summary("Manage secret keys")
   @Help.Group("Secret keys")

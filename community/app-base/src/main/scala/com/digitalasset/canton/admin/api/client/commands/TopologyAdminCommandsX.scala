@@ -654,6 +654,22 @@ object TopologyAdminCommandsX {
         v1.IdentityInitializationServiceXGrpc.stub(channel)
     }
 
+    final case class InitId(identifier: String)
+        extends BaseInitializationService[v1.InitIdRequest, v1.InitIdResponse, Unit] {
+
+      override def createRequest(): Either[String, v1.InitIdRequest] =
+        Right(v1.InitIdRequest(identifier))
+
+      override def submitRequest(
+          service: IdentityInitializationServiceXStub,
+          request: v1.InitIdRequest,
+      ): Future[v1.InitIdResponse] =
+        service.initId(request)
+
+      override def handleResponse(response: v1.InitIdResponse): Either[String, Unit] =
+        Right(())
+    }
+
     final case class GetId()
         extends BaseInitializationService[Empty, v1.GetIdResponse, UniqueIdentifier] {
       override def createRequest(): Either[String, Empty] =

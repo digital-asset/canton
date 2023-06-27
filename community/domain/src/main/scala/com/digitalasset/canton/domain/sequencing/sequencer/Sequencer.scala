@@ -35,6 +35,7 @@ import scala.concurrent.{ExecutionContext, Future}
 sealed trait PruningError {
   def message: String
 }
+
 sealed trait PruningSupportError extends PruningError
 
 object PruningError {
@@ -71,12 +72,13 @@ trait Sequencer
   override val closingState: SequencerHealthStatus = SequencerHealthStatus.shutdownStatus
 
   def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
+
   def registerMember(member: Member)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencerWriteError[RegisterMemberError], Unit]
 
   /** Always returns false for Sequencer drivers that don't support ledger identity authorization. Otherwise returns
-    *  whether the given ledger identity is registered on the underlying ledger (and configured smart contract).
+    * whether the given ledger identity is registered on the underlying ledger (and configured smart contract).
     */
   def isLedgerIdentityRegistered(identity: LedgerIdentity)(implicit
       traceContext: TraceContext
@@ -106,6 +108,7 @@ trait Sequencer
   def sendAsync(submission: SubmissionRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncError, Unit]
+
   def read(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource]
@@ -148,7 +151,9 @@ trait Sequencer
     */
   private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter
 
-  def trafficStatus(implicit traceContext: TraceContext): Future[SequencerTrafficStatus]
+  def trafficStatus(members: Seq[Member])(implicit
+      traceContext: TraceContext
+  ): Future[SequencerTrafficStatus]
 }
 
 /** Sequencer pruning interface.
@@ -158,6 +163,7 @@ trait SequencerPruning {
   /** Builds a pruning scheduler once storage is available
     */
   def pruningSchedulerBuilder: Option[Storage => PruningScheduler] = None
+
   def pruningScheduler: Option[PruningScheduler] = None
 
   /** Prune as much sequencer data as safely possible without breaking operation (except for members
@@ -176,7 +182,7 @@ trait SequencerPruning {
     *
     * When index == 1, indicates the progress of pruning as the timestamp of the oldest unpruned response
     * When index > 1, returns the timestamp of the index'th oldest response which is useful for pruning in batches
-    *                  when index == batchSize.
+    * when index == batchSize.
     */
   def locatePruningTimestamp(index: PositiveInt)(implicit
       traceContext: TraceContext

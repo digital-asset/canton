@@ -31,7 +31,7 @@ class AuthorizationValidator(participantId: ParticipantId)(implicit
         def err(details: String): String =
           show"Received a request with id $requestId with a view that is not correctly authorized. Rejecting request...\n$details"
 
-        val errOF = rootView.submitterMetadata match {
+        val errOF = rootView.submitterMetadataO match {
           case Some(submitterMetadata) =>
             // The submitter metadata is unblinded -> rootView is a top-level view
 

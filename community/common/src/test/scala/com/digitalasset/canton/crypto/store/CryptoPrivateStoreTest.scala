@@ -69,7 +69,7 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
       for {
         _ <- storePrivateKey(store, sigKey1, sigKey1.id, sigKey1WithName.name)
         _ <- store.removePrivateKey(sigKey1.id)
-        res <- store.existsPrivateKey(sigKey1.id)
+        res <- store.existsSigningKey(sigKey1.id)
       } yield res shouldBe false
     }
 

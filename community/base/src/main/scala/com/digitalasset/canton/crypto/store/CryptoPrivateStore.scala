@@ -48,7 +48,8 @@ trait CryptoPrivateStore extends AutoCloseable {
   )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Unit]
 
   def existsPrivateKey(
-      keyId: Fingerprint
+      keyId: Fingerprint,
+      purpose: KeyPurpose,
   )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Boolean]
 
   def existsSigningKey(signingKeyId: Fingerprint)(implicit
@@ -68,23 +69,27 @@ trait CryptoPrivateStore extends AutoCloseable {
 object CryptoPrivateStore {
   trait CryptoPrivateStoreFactory {
     def create(
+        cryptoPublicStore: CryptoPublicStore,
         storage: Storage,
         releaseProtocolVersion: ReleaseProtocolVersion,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
     )(implicit
-        ec: ExecutionContext
+        ec: ExecutionContext,
+        traceContext: TraceContext,
     ): EitherT[Future, CryptoPrivateStoreError, CryptoPrivateStore]
   }
 
   class CommunityCryptoPrivateStoreFactory extends CryptoPrivateStoreFactory {
     override def create(
+        cryptoPublicStore: CryptoPublicStore,
         storage: Storage,
         releaseProtocolVersion: ReleaseProtocolVersion,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
     )(implicit
-        ec: ExecutionContext
+        ec: ExecutionContext,
+        traceContext: TraceContext,
     ): EitherT[Future, CryptoPrivateStoreError, CryptoPrivateStore] =
       storage match {
         case _: MemoryStorage =>

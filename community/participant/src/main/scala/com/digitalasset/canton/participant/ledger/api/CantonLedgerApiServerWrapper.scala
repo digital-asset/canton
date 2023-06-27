@@ -20,12 +20,7 @@ import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, StorageConfi
 import com.digitalasset.canton.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{
-  LoggingContextUtil,
-  NamedLoggerFactory,
-  NamedLogging,
-  TracedLogger,
-}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.config.{IndexerConfig, LedgerApiServerConfig}
 import com.digitalasset.canton.participant.sync.CantonSyncService
@@ -141,20 +136,16 @@ object CantonLedgerApiServerWrapper extends NoTracing {
         val participantDataSourceConfig =
           DbSupport.ParticipantDataSourceConfig(ledgerApiStorage.jdbcUrl)
 
-        val startableStoppableLedgerApiServer = {
-          // Propagate NamedLoggerFactory's properties as map to upstream LoggingContext.
-          LoggingContextUtil.createLoggingContext(config.loggerFactory) { implicit loggingContext =>
-            new StartableStoppableLedgerApiServer(
-              config = config,
-              participantDataSourceConfig = participantDataSourceConfig,
-              dbConfig = dbConfig,
-              createExternalServices = createExternalServices,
-              telemetry = new DefaultOpenTelemetry(config.tracerProvider.openTelemetry),
-              futureSupervisor = futureSupervisor,
-              multiDomainEnabled = multiDomainEnabled,
-            )
-          }
-        }
+        val startableStoppableLedgerApiServer =
+          new StartableStoppableLedgerApiServer(
+            config = config,
+            participantDataSourceConfig = participantDataSourceConfig,
+            dbConfig = dbConfig,
+            createExternalServices = createExternalServices,
+            telemetry = new DefaultOpenTelemetry(config.tracerProvider.openTelemetry),
+            futureSupervisor = futureSupervisor,
+            multiDomainEnabled = multiDomainEnabled,
+          )
         val startupMode: IndexerStartupMode =
           if (config.cantonParameterConfig.dbMigrateAndStart)
             IndexerStartupMode.MigrateAndStart

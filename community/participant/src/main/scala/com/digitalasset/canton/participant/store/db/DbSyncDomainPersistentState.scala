@@ -76,6 +76,7 @@ abstract class DbSyncDomainPersistentStateCommon(
     TargetDomainId(domainId.item),
     protocolVersion,
     pureCryptoApi,
+    futureSupervisor,
     timeouts,
     loggerFactory,
   )
@@ -131,6 +132,9 @@ abstract class DbSyncDomainPersistentStateCommon(
     new DbSequencerCounterTrackerStore(client, storage, timeouts, loggerFactory)
   // TODO(i5660): Use the db-based send tracker store
   val sendTrackerStore = new InMemorySendTrackerStore()
+
+  val submissionTrackerStore =
+    new DbSubmissionTrackerStore(storage, domainId, timeouts, loggerFactory)
 
   override def isMemory(): Boolean = false
 

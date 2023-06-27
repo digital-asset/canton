@@ -665,6 +665,7 @@ class GenTransactionTreeTest
         mkTestSalt(0),
         DefaultDamlValues.submissionId().some,
         DeduplicationDuration(Duration.ofSeconds(100)),
+        factory.ledgerTime.plusSeconds(100),
         factory.cryptoOps,
         protocolVersion,
       )

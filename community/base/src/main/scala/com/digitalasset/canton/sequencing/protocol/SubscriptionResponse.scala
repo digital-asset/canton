@@ -10,7 +10,7 @@ import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, 
 
 final case class SubscriptionResponse(
     signedSequencedEvent: Traced[SignedContent[SequencedEvent[ClosedEnvelope]]],
-    trafficState: Option[TrafficState],
+    trafficState: Option[SequencedEventTrafficState],
 ) {
 
   // We don't introduce a `VersionedSubscriptionResponse` because we assume that the subscription endpoint will also be
@@ -43,7 +43,7 @@ object SubscriptionResponse {
       )
       signedContent <- SignedContent.fromProtoV0(signedSequencedEventP)
       signedSequencedEvent <- signedContent.deserializeContent(SequencedEvent.fromByteString)
-      extraTrafficRemainder <- trafficStateP.traverse(TrafficState.fromProtoV0)
-    } yield SubscriptionResponse(Traced(signedSequencedEvent)(traceContext), extraTrafficRemainder)
+      trafficState <- trafficStateP.traverse(SequencedEventTrafficState.fromProtoV0)
+    } yield SubscriptionResponse(Traced(signedSequencedEvent)(traceContext), trafficState)
   }
 }

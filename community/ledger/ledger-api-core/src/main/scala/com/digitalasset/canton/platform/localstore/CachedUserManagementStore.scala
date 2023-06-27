@@ -10,7 +10,7 @@ import com.digitalasset.canton.caching.CaffeineCache
 import com.digitalasset.canton.caching.CaffeineCache.FutureAsyncCacheLoader
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User}
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.CachedUserManagementStore.CacheKey
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.{Result, UserInfo}
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}
@@ -25,8 +25,10 @@ class CachedUserManagementStore(
     expiryAfterWriteInSeconds: Int,
     maximumCacheSize: Int,
     metrics: Metrics,
+    val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext, loggingContext: LoggingContextWithTrace)
-    extends UserManagementStore {
+    extends UserManagementStore
+    with NamedLogging {
 
   private val cache: CaffeineCache.AsyncLoadingCaffeineCache[CacheKey, Result[UserInfo]] =
     new CaffeineCache.AsyncLoadingCaffeineCache(

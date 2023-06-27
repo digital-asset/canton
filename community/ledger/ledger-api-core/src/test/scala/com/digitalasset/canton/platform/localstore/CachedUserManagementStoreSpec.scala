@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.localstore
 
 import com.daml.lf.data.Ref
 import com.daml.metrics.Metrics
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.ledger.api.domain.{
   IdentityProviderConfig,
@@ -33,10 +34,11 @@ class CachedUserManagementStoreSpec
     extends AsyncFreeSpec
     with UserStoreTests
     with MockitoSugar
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with BaseTest {
 
   override def newStore(): UserManagementStore =
-    createTested(new InMemoryUserManagementStore(createAdmin = false))
+    createTested(new InMemoryUserManagementStore(createAdmin = false, loggerFactory))
 
   def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig): Future[Unit] =
     Future.unit
@@ -67,7 +69,7 @@ class CachedUserManagementStoreSpec
   private val idpId = IdentityProviderId.Default
 
   "test user-not-found cache result gets invalidated after user creation" in {
-    val delegate = spy(new InMemoryUserManagementStore())
+    val delegate = spy(new InMemoryUserManagementStore(loggerFactory = loggerFactory))
     val tested = createTested(delegate)
     for {
       getYetNonExistent <- tested.getUserInfo(userInfo.user.id, idpId)
@@ -80,7 +82,7 @@ class CachedUserManagementStoreSpec
   }
 
   "test cache population" in {
-    val delegate = spy(new InMemoryUserManagementStore())
+    val delegate = spy(new InMemoryUserManagementStore(loggerFactory = loggerFactory))
     val tested = createTested(delegate)
 
     for {
@@ -101,7 +103,7 @@ class CachedUserManagementStoreSpec
   }
 
   "test cache invalidation after every write method" in {
-    val delegate = spy(new InMemoryUserManagementStore())
+    val delegate = spy(new InMemoryUserManagementStore(loggerFactory = loggerFactory))
     val tested = createTested(delegate)
 
     val userInfo = UserInfo(user, rights)
@@ -151,7 +153,12 @@ class CachedUserManagementStoreSpec
   }
 
   "listing all users should not be cached" in {
-    val delegate = spy(new InMemoryUserManagementStore(createAdmin = false))
+    val delegate = spy(
+      new InMemoryUserManagementStore(
+        createAdmin = false,
+        loggerFactory = loggerFactory,
+      )
+    )
     val tested = createTested(delegate)
 
     for {
@@ -180,7 +187,7 @@ class CachedUserManagementStoreSpec
   }
 
   "cache entries expire after a set time" in {
-    val delegate = spy(new InMemoryUserManagementStore())
+    val delegate = spy(new InMemoryUserManagementStore(loggerFactory = loggerFactory))
     val tested = createTested(delegate)
 
     for {
@@ -212,6 +219,7 @@ class CachedUserManagementStoreSpec
       expiryAfterWriteInSeconds = 1,
       maximumCacheSize = 10,
       Metrics.ForTesting,
+      loggerFactory,
     )
   }
 }

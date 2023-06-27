@@ -3,35 +3,31 @@
 
 package com.daml.ledger.service
 
-import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.daml.ledger.api.v1.package_service.GetPackageResponse
 import com.daml.lf.archive
+import com.daml.lf.data.ImmArray.ImmArraySeq
 import com.daml.lf.data.Ref.{Identifier, PackageId}
 import com.daml.lf.typesig.reader.SignatureReader
 import com.daml.lf.typesig.{DefDataType, PackageSignature}
-import com.daml.ledger.api.v1.package_service.GetPackageResponse
-import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
-import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.{PackageClient => LoosePackageClient}
-import com.daml.lf.data.ImmArray.ImmArraySeq
 import com.daml.logging.LoggingContextOf
-import com.daml.scalautil.TraverseFMSyntax._
+import com.daml.scalautil.TraverseFMSyntax.*
 import com.daml.timer.RetryStrategy
-import scalaz.Scalaz._
-import scalaz._
+import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
+import com.digitalasset.canton.ledger.client.services.pkg.withoutledgerid.PackageClient as LoosePackageClient
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
+import scalaz.*
+import scalaz.Scalaz.*
 
-import scala.collection.immutable.Map
 import scala.concurrent.{ExecutionContext, Future}
 
-object LedgerReader {
+final case class LedgerReader(loggerFactory: NamedLoggerFactory)
+    extends NamedLogging
+    with NoTracing {
+  import com.daml.ledger.service.LedgerReader.*
 
-  type Error = String
-
-  // PackageId -> PackageSignature
-  type PackageStore = Map[String, PackageSignature]
-
-  val UpToDate: Future[Error \/ Option[PackageStore]] =
-    Future.successful(\/-(None))
-
-  /** @return [[UpToDate]] if packages did not change
+  /** @return [[LedgerReader.UpToDate]] if packages did not change
     */
   def loadPackageStoreUpdates(
       client: LoosePackageClient,
@@ -52,7 +48,7 @@ object LedgerReader {
         else load[Option[PackageStore]](client, loadCache, diffIds, ledgerId, token)
     } yield result
 
-  /** @return [[UpToDate]] if packages did not change
+  /** @return [[LedgerReader.UpToDate]] if packages did not change
     */
   @deprecated("unused overload, see #15922", since = "2.5.2")
   def loadPackageStoreUpdates(client: PackageClient, loadCache: LoadCache, token: Option[String])(
@@ -62,37 +58,6 @@ object LedgerReader {
       lc: LoggingContextOf[Any],
   ): Future[Error \/ Option[PackageStore]] =
     loadPackageStoreUpdates(client.it, loadCache, token, client.ledgerId)(loadedPackageIds)
-
-  final class LoadCache private () {
-    import com.digitalasset.canton.caching.CaffeineCache, com.github.benmanes.caffeine.cache.Caffeine
-
-    // This cache serves *concurrent* load requests, not *subsequent* requests;
-    // once a request is complete, its records shouldn't be touched at all for
-    // any requests that follow for the rest of the server lifetime, hence the
-    // short timeout.  The timeout is chosen to allow concurrent contention to
-    // resolve even in unideal execution situations with large package sets, but
-    // short enough not to pointlessly cache for pkg reqs that do not overlap at
-    // all.
-    //
-    // A hit indicates concurrent contention, so we actually want to *maximize
-    // misses, not hits*, but the hitrate is really determined by the client's
-    // request pattern, so there isn't anything you can really do about it on
-    // the server configuration.  100% miss rate means no redundant work is
-    // happening; it does not mean the server is being slower.
-    private[LedgerReader] val cache = CaffeineCache[(LedgerId, String), Error \/ PackageSignature](
-      Caffeine
-        .newBuilder()
-        .softValues()
-        .expireAfterWrite(60, java.util.concurrent.TimeUnit.SECONDS),
-      None,
-    )
-
-    private[LedgerReader] val ParallelLoadFactor = 8
-  }
-
-  object LoadCache {
-    def freshCache(): LoadCache = new LoadCache()
-  }
 
   private def load[PS >: Some[PackageStore]](
       client: LoosePackageClient,
@@ -124,7 +89,8 @@ object LedgerReader {
         .getIfPresent(ck)
         .cata(
           { v =>
-            logger.trace(s"detected redundant package load before starting: $pkid")
+            logger
+              .trace(s"detected redundant package load before starting: $pkid, ${lc.makeString}")
             Future successful v
           },
           client.getPackage(pkid, ledgerId, token).map { pkresp =>
@@ -132,12 +98,15 @@ object LedgerReader {
               .getIfPresent(ck)
               .cata(
                 { decoded =>
-                  logger.trace(s"detected redundant package load after gRPC: $pkid")
+                  logger
+                    .trace(s"detected redundant package load after gRPC: $pkid, ${lc.makeString}")
                   decoded
                 }, {
                   val decoded = decodeInterfaceFromPackageResponse(pkresp)
-                  if (logger.trace.isEnabled && cache.getIfPresent(ck).isDefined)
-                    logger.trace(s"detected redundant package load after decoding: $pkid")
+                  if (logger.underlying.isTraceEnabled && cache.getIfPresent(ck).isDefined)
+                    logger.trace(
+                      s"detected redundant package load after decoding: $pkid, ${lc.makeString}"
+                    )
                   cache.put(ck, decoded)
                   decoded
                 },
@@ -145,6 +114,70 @@ object LedgerReader {
           },
         )
     }
+  }
+
+  private def retryLoop[A](
+      fa: => Future[A]
+  )(implicit ec: ExecutionContext, lc: LoggingContextOf[Any]): Future[A] =
+    packageRetry.apply { (_, _) => fa }
+
+  private def packageRetry(implicit lc: LoggingContextOf[Any]): RetryStrategy = {
+    import com.google.rpc.Code
+
+    import scala.concurrent.duration.*
+    RetryStrategy.constant(
+      Some(20),
+      250.millis,
+    ) { case Grpc.StatusEnvelope(status) =>
+      val retry = Code.ABORTED == (Code forNumber status.getCode) &&
+        (status.getMessage startsWith "THREADPOOL_OVERLOADED")
+      if (retry)
+        logger.trace(s"package load failed with THREADPOOL_OVERLOADED; retrying, ${lc.makeString}")
+      retry
+    }
+  }
+
+}
+
+object LedgerReader {
+
+  type Error = String
+
+  // PackageId -> PackageSignature
+  type PackageStore = Map[String, PackageSignature]
+
+  val UpToDate: Future[Error \/ Option[PackageStore]] =
+    Future.successful(\/-(None))
+  final class LoadCache private () {
+    import com.digitalasset.canton.caching.CaffeineCache
+    import com.github.benmanes.caffeine.cache.Caffeine
+
+    // This cache serves *concurrent* load requests, not *subsequent* requests;
+    // once a request is complete, its records shouldn't be touched at all for
+    // any requests that follow for the rest of the server lifetime, hence the
+    // short timeout.  The timeout is chosen to allow concurrent contention to
+    // resolve even in unideal execution situations with large package sets, but
+    // short enough not to pointlessly cache for pkg reqs that do not overlap at
+    // all.
+    //
+    // A hit indicates concurrent contention, so we actually want to *maximize
+    // misses, not hits*, but the hitrate is really determined by the client's
+    // request pattern, so there isn't anything you can really do about it on
+    // the server configuration.  100% miss rate means no redundant work is
+    // happening; it does not mean the server is being slower.
+    private[LedgerReader] val cache = CaffeineCache[(LedgerId, String), Error \/ PackageSignature](
+      Caffeine
+        .newBuilder()
+        .softValues()
+        .expireAfterWrite(60, java.util.concurrent.TimeUnit.SECONDS),
+      None,
+    )
+
+    private[LedgerReader] val ParallelLoadFactor = 8
+  }
+
+  object LoadCache {
+    def freshCache(): LoadCache = new LoadCache()
   }
 
   private def createPackageStoreFromArchives(
@@ -157,7 +190,7 @@ object LedgerReader {
   private def decodeInterfaceFromPackageResponse(
       packageResponse: GetPackageResponse
   ): Error \/ PackageSignature = {
-    import packageResponse._
+    import packageResponse.*
     \/.attempt {
       val payload = archive.ArchivePayloadParser.assertFromByteString(archivePayload)
       val (errors, out) =
@@ -165,24 +198,6 @@ object LedgerReader {
       (if (!errors.empty) -\/("Errors reading LF archive:\n" + errors.toString)
        else \/-(out)): Error \/ PackageSignature
     }(_.getLocalizedMessage).join
-  }
-
-  private def retryLoop[A](
-      fa: => Future[A]
-  )(implicit ec: ExecutionContext, lc: LoggingContextOf[Any]): Future[A] =
-    packageRetry.apply { (_, _) => fa }
-
-  private def packageRetry(implicit lc: LoggingContextOf[Any]): RetryStrategy = {
-    import scala.concurrent.duration._, com.google.rpc.Code
-    RetryStrategy.constant(
-      Some(20),
-      250.millis,
-    ) { case Grpc.StatusEnvelope(status) =>
-      val retry = Code.ABORTED == (Code forNumber status.getCode) &&
-        (status.getMessage startsWith "THREADPOOL_OVERLOADED")
-      if (retry) logger.trace("package load failed with THREADPOOL_OVERLOADED; retrying")
-      retry
-    }
   }
 
   def damlLfTypeLookup(
@@ -201,5 +216,4 @@ object LedgerReader {
     }
   }
 
-  private val logger = com.daml.logging.ContextualizedLogger get getClass
 }

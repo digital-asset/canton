@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.platform.store.backend.common
 
-import anorm.SqlParser.{array, bool, byteArray, get, int, long, str}
+import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   hashFromHexString,
   offset,
@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.Raw
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{Identifier, Party}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
 import scala.collection.immutable.ArraySeq
@@ -693,10 +694,10 @@ abstract class EventStorageBackendTemplate(
     stringInterning: StringInterning,
     // This method is needed in pruneEvents, but belongs to [[ParameterStorageBackend]].
     participantAllDivulgedContractsPrunedUpToInclusive: Connection => Option[Offset],
-) extends EventStorageBackend {
+    val loggerFactory: NamedLoggerFactory,
+) extends EventStorageBackend
+    with NamedLogging {
   import EventStorageBackendTemplate.*
-
-  private val logger: ContextualizedLogger = ContextualizedLogger.get(this.getClass)
 
   override def transactionPointwiseQueries: TransactionPointwiseQueries =
     new TransactionPointwiseQueries(
@@ -766,7 +767,7 @@ abstract class EventStorageBackendTemplate(
   override def pruneEvents(
       pruneUpToInclusive: Offset,
       pruneAllDivulgedContracts: Boolean,
-  )(connection: Connection, loggingContext: LoggingContext): Unit = {
+  )(implicit connection: Connection, traceContext: TraceContext): Unit = {
     import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
 
     if (pruneAllDivulgedContracts) {
@@ -778,7 +779,7 @@ abstract class EventStorageBackendTemplate(
           where delete_events.event_offset <= $pruneUpToInclusive
             or delete_events.event_offset is null
           """
-      }(connection, loggingContext)
+      }
     } else {
       pruneWithLogging(queryDescription = "Archived retroactive divulgence events pruning") {
         // Note: do not use `QueryStrategy.offsetIsSmallerOrEqual` because divulgence events have a nullable offset
@@ -793,10 +794,10 @@ abstract class EventStorageBackendTemplate(
                 archive_events.event_offset <= $pruneUpToInclusive and
                 archive_events.contract_id = delete_events.contract_id
             )"""
-      }(connection, loggingContext)
+      }
     }
 
-    pruneIdFilterTables(pruneUpToInclusive)(connection, loggingContext)
+    pruneIdFilterTables(pruneUpToInclusive)
 
     pruneWithLogging(queryDescription = "Create events pruning") {
       SQL"""
@@ -810,7 +811,7 @@ abstract class EventStorageBackendTemplate(
                 archive_events.event_offset <= $pruneUpToInclusive AND
                 archive_events.contract_id = delete_events.contract_id
             )"""
-    }(connection, loggingContext)
+    }
 
     if (pruneAllDivulgedContracts) {
       val pruneAfterClause = {
@@ -838,7 +839,7 @@ abstract class EventStorageBackendTemplate(
             )
             $pruneAfterClause
          """
-      }(connection, loggingContext)
+      }
     }
 
     pruneWithLogging(queryDescription = "Exercise (consuming) events pruning") {
@@ -847,7 +848,7 @@ abstract class EventStorageBackendTemplate(
           delete from participant_events_consuming_exercise delete_events
           where
             delete_events.event_offset <= $pruneUpToInclusive"""
-    }(connection, loggingContext)
+    }
 
     pruneWithLogging(queryDescription = "Exercise (non-consuming) events pruning") {
       SQL"""
@@ -855,40 +856,40 @@ abstract class EventStorageBackendTemplate(
           delete from participant_events_non_consuming_exercise delete_events
           where
             delete_events.event_offset <= $pruneUpToInclusive"""
-    }(connection, loggingContext)
+    }
 
     pruneWithLogging(queryDescription = "transaction meta pruning") {
       pruneTransactionMeta(pruneUpToInclusive = pruneUpToInclusive)
-    }(connection, loggingContext)
+    }
   }
 
-  private def pruneIdFilterTables(pruneUpToInclusive: Offset)(
+  private def pruneIdFilterTables(pruneUpToInclusive: Offset)(implicit
       connection: Connection,
-      loggingContext: LoggingContext,
+      traceContext: TraceContext,
   ): Unit = {
     pruneWithLogging("Pruning id filter create stakeholder table") {
       pruneIdFilterCreateStakeholder(pruneUpToInclusive)
-    }(connection, loggingContext)
+    }
     pruneWithLogging("Pruning id filter create non-stakeholder informee table") {
       pruneIdFilterCreateNonStakeholderInformee(pruneUpToInclusive)
-    }(connection, loggingContext)
+    }
     pruneWithLogging("Pruning id filter consuming stakeholder table") {
       pruneIdFilterConsumingStakeholder(pruneUpToInclusive)
-    }(connection, loggingContext)
+    }
     pruneWithLogging("Pruning id filter consuming non-stakeholders informee table") {
       pruneIdFilterConsumingNonStakeholderInformee(pruneUpToInclusive)
-    }(connection, loggingContext)
+    }
     pruneWithLogging("Pruning id filter non-consuming informee table") {
       pruneIdFilterNonConsumingInformee(pruneUpToInclusive)
-    }(connection, loggingContext)
+    }
   }
 
-  private def pruneWithLogging(queryDescription: String)(query: SimpleSql[Row])(
+  private def pruneWithLogging(queryDescription: String)(query: SimpleSql[Row])(implicit
       connection: Connection,
-      loggingContext: LoggingContext,
+      traceContext: TraceContext,
   ): Unit = {
     val deletedRows = query.executeUpdate()(connection)
-    logger.info(s"$queryDescription finished: deleted $deletedRows rows.")(loggingContext)
+    logger.info(s"$queryDescription finished: deleted $deletedRows rows.")
   }
 
   override def maxEventSequentialId(
@@ -1160,5 +1161,53 @@ abstract class EventStorageBackendTemplate(
       limit = limit,
       stringInterning = stringInterning,
     )(connection)
+
+  override def lookupAssignSequentialIdByOffset(
+      offsets: Iterable[String]
+  )(connection: Connection): Vector[Long] =
+    SQL"""
+        SELECT event_sequential_id
+        FROM participant_events_assign
+        WHERE
+          event_offset ${queryStrategy.anyOfStrings(offsets)}
+        ORDER BY event_sequential_id -- deliver in index order
+        """
+      .asVectorOf(long("event_sequential_id"))(connection)
+
+  override def lookupUnassignSequentialIdByOffset(
+      offsets: Iterable[String]
+  )(connection: Connection): Vector[Long] =
+    SQL"""
+        SELECT event_sequential_id
+        FROM participant_events_unassign
+        WHERE
+          event_offset ${queryStrategy.anyOfStrings(offsets)}
+        ORDER BY event_sequential_id -- deliver in index order
+        """
+      .asVectorOf(long("event_sequential_id"))(connection)
+
+  override def lookupAssignSequentialIdByContractId(
+      contractIds: Iterable[String]
+  )(connection: Connection): Vector[Long] =
+    SQL"""
+        SELECT MIN(assign_evs.event_sequential_id) as event_sequential_id
+        FROM participant_events_assign assign_evs
+        WHERE contract_id ${queryStrategy.anyOfStrings(contractIds)}
+        GROUP BY contract_id
+        ORDER BY event_sequential_id
+        """
+      .asVectorOf(long("event_sequential_id"))(connection)
+
+  override def lookupCreateSequentialIdByContractId(
+      contractIds: Iterable[String]
+  )(connection: Connection): Vector[Long] =
+    SQL"""
+        SELECT event_sequential_id
+        FROM participant_events_create
+        WHERE
+          contract_id ${queryStrategy.anyOfStrings(contractIds)}
+        ORDER BY event_sequential_id -- deliver in index order
+        """
+      .asVectorOf(long("event_sequential_id"))(connection)
 
 }

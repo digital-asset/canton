@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.EitherT
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.LfPartyId
@@ -20,7 +19,6 @@ import com.digitalasset.canton.participant.pruning.{
   SortedReconciliationIntervals,
   SortedReconciliationIntervalsProvider,
 }
-import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentStore,
   CommitmentQueue,
@@ -58,7 +56,7 @@ class DbAcsCommitmentStore(
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends AcsCommitmentStore
-    with DbPrunableByTimeDomain[AcsCommitmentStoreError]
+    with DbPrunableByTimeDomain
     with DbStore {
   import DbStorage.Implicits.*
   import storage.api.*
@@ -406,18 +404,15 @@ class DbAcsCommitmentStore(
 
   override def doPrune(
       before: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, AcsCommitmentStoreError, Unit] =
-    processingTime.eitherTEvent {
-      EitherT.right(
-        storage.update_(
-          for {
-            _ <-
-              sqlu"delete from received_acs_commitments where domain_id=$domainId and to_inclusive < $before"
-            _ <-
-              sqlu"delete from computed_acs_commitments where domain_id=$domainId and to_inclusive < $before"
-          } yield (),
-          operationName = "commitments: prune",
-        )
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    processingTime.event {
+      val query1 =
+        sqlu"delete from received_acs_commitments where domain_id=$domainId and to_inclusive < $before"
+      val query2 =
+        sqlu"delete from computed_acs_commitments where domain_id=$domainId and to_inclusive < $before"
+      storage.update_(
+        query1.zip(query2),
+        operationName = "commitments: prune",
       )
     }
 

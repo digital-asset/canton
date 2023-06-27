@@ -3,9 +3,6 @@
 
 package com.digitalasset.canton.participant
 
-import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
-import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
-import com.digitalasset.canton.participant.store.ContractKeyJournal.ContractKeyJournalError
 import com.digitalasset.canton.participant.store.EventLogId
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.topology.DomainId
@@ -42,19 +39,6 @@ object Pruning {
   }
 
   final case class LedgerPruningOffsetNonCantonFormat(message: String) extends LedgerPruningError
-
-  final case class LedgerPruningAcsError(err: AcsError) extends LedgerPruningError {
-    override def message = err.toString
-  }
-  final case class LedgerPruningContractKeyJournalError(err: ContractKeyJournalError)
-      extends LedgerPruningError {
-    override def message = err.toString
-  }
-
-  final case class LedgerPruningAcsCommitmentStoreError[M](err: AcsCommitmentStoreError)
-      extends LedgerPruningError {
-    override def message = err.toString
-  }
 
   final case class LedgerPruningUnknownMaxDeduplicationDuration(override val message: String)
       extends LedgerPruningError

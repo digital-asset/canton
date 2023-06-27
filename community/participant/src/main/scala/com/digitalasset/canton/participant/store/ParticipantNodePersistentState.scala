@@ -48,10 +48,11 @@ class ParticipantNodePersistentState private (
     val inFlightSubmissionStore: InFlightSubmissionStore,
     val commandDeduplicationStore: CommandDeduplicationStore,
     val pruningStore: ParticipantPruningStore,
+    override val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
-) extends AutoCloseable
+) extends FlagCloseable
     with NamedLogging {
-  override def close(): Unit =
+  override def onClosed(): Unit =
     Lifecycle.close(
       settingsStore,
       participantEventLog,
@@ -307,6 +308,7 @@ object ParticipantNodePersistentState extends HasLoggerName {
         inFlightSubmissionStore,
         commandDeduplicationStore,
         pruningStore,
+        timeouts,
         loggerFactory,
       )
     }

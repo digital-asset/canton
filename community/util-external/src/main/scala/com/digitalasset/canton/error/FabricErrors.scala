@@ -125,9 +125,9 @@ object FabricErrors extends FabricErrorGroup {
                   |""")
     object InvalidTransaction extends AlarmErrorCode("FABRIC_TRANSACTION_INVALID") {
 
-      final case class Warn(fcn: String, msg: String, blockHeight: Long)
+      final case class Warn(fcn: String, _msg: String, blockHeight: Long)
           extends Alarm(
-            s"At block $blockHeight found invalid $fcn transaction. That indicates malicious or faulty behavior, so skipping it. Error: $msg"
+            s"At block $blockHeight found invalid $fcn transaction. That indicates malicious or faulty behavior, so skipping it. Error: ${_msg}"
           )
     }
   }

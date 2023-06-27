@@ -80,10 +80,10 @@
     </logger>
 
     <appender name="ErrorFactoriesLogCollector" class="com.digitalasset.canton.testing.TestingLogCollector">
-        <test>com.digitalasset.canton.platform.server.api.validation.ErrorFactoriesSpec</test>
+        <test>com.digitalasset.canton.platform.apiserver.validation.ErrorFactoriesSpec</test>
     </appender>
 
-    <logger name="com.digitalasset.canton.platform.server.api.validation.ErrorFactoriesSpec" level="DEBUG">
+    <logger name="com.digitalasset.canton.platform.apiserver.validation.ErrorFactoriesSpec" level="DEBUG">
         <appender-ref ref="ErrorFactoriesLogCollector"/>
     </logger>
 

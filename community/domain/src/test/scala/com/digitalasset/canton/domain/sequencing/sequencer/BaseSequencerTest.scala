@@ -161,7 +161,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
       ???
 
-    override def trafficStatus(implicit
+    override def trafficStatus(members: Seq[Member])(implicit
         traceContext: TraceContext
     ): Future[SequencerTrafficStatus] = ???
   }

@@ -11,6 +11,10 @@ import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
+import com.digitalasset.canton.participant.traffic.{
+  TrafficStateController,
+  TrafficStateTopUpSubscription,
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.{
@@ -71,6 +75,7 @@ trait TopologyComponentFactory {
       partyNotifier: LedgerServerPartyNotifier,
       missingKeysAlerter: MissingKeysAlerter,
       topologyClient: DomainTopologyClientWithInit,
+      trafficStateController: TrafficStateController,
   ): TopologyTransactionProcessorCommon.Factory
 
 }
@@ -147,6 +152,7 @@ class TopologyComponentFactoryOld(
       partyNotifier: LedgerServerPartyNotifier,
       missingKeysAlerter: MissingKeysAlerter,
       topologyClient: DomainTopologyClientWithInit,
+      trafficStateController: TrafficStateController,
   ): TopologyTransactionProcessorCommon.Factory =
     new TopologyTransactionProcessorCommon.Factory {
       override def create(
@@ -193,6 +199,7 @@ class TopologyComponentFactoryX(
       partyNotifier: LedgerServerPartyNotifier,
       missingKeysAlerter: MissingKeysAlerter,
       topologyClient: DomainTopologyClientWithInit,
+      trafficStateController: TrafficStateController,
   ): TopologyTransactionProcessorCommon.Factory = new TopologyTransactionProcessorCommon.Factory {
     override def create(
         acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit
@@ -217,6 +224,7 @@ class TopologyComponentFactoryX(
         case _ =>
           throw new IllegalStateException("passed wrong type. coding bug")
       }
+      processor.subscribe(new TrafficStateTopUpSubscription(trafficStateController, loggerFactory))
       processor
     }
   }

@@ -157,7 +157,6 @@ class TransferInValidationTest extends AsyncWordSpec with BaseTest {
         transactionId1,
         Some(transferOutResult),
         None,
-        None,
       )
 
     "succeed without errors when transfer data is valid" in {
