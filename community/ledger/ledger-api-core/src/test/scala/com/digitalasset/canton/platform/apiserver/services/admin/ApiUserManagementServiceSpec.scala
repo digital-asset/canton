@@ -6,34 +6,28 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import com.daml.error.ErrorsAssertions
 import com.daml.lf.data.Ref
 import com.daml.platform.apiserver.page_tokens.ListUsersPageTokenPayload
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
-import com.digitalasset.canton.testing.ErrorAssertionsWithLogCollectorAssertions
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
 class ApiUserManagementServiceSpec
     extends AnyFlatSpec
-    with Matchers
+    with BaseTest
     with Eventually
     with IntegrationPatience
     with EitherValues
-    with ErrorsAssertions
-    with ErrorAssertionsWithLogCollectorAssertions {
-
-  private val errorLogger = DamlContextualizedErrorLogger.forTesting(getClass)
+    with ErrorsAssertions {
 
   it should "test users page token encoding and decoding" in {
     val id2 = Ref.UserId.assertFromString("user2")
     val actualNextPageToken = ApiUserManagementService.encodeNextPageToken(Some(id2))
     actualNextPageToken shouldBe "CgV1c2VyMg=="
-    ApiUserManagementService.decodeUserIdFromPageToken(actualNextPageToken)(
-      errorLogger
-    ) shouldBe Right(
+    ApiUserManagementService.decodeUserIdFromPageToken(actualNextPageToken) shouldBe Right(
       Some(id2)
     )
   }
@@ -41,19 +35,17 @@ class ApiUserManagementServiceSpec
   it should "test users empty page token encoding and decoding" in {
     val actualNextPageToken = ApiUserManagementService.encodeNextPageToken(None)
     actualNextPageToken shouldBe ("")
-    ApiUserManagementService.decodeUserIdFromPageToken(actualNextPageToken)(
-      errorLogger
-    ) shouldBe Right(None)
+    ApiUserManagementService.decodeUserIdFromPageToken(actualNextPageToken) shouldBe Right(None)
   }
 
   it should "return invalid argument error when token is not a base64" in {
     val actualNextPageToken =
-      ApiUserManagementService.decodeUserIdFromPageToken("not-a-base64-string!!")(errorLogger)
+      ApiUserManagementService.decodeUserIdFromPageToken("not-a-base64-string!!")
     val error = actualNextPageToken.left.value
     assertError(
       actual = error,
-      expectedF = LedgerApiErrors.RequestValidation.InvalidArgument
-        .Reject("Invalid page token")(_)
+      expected = LedgerApiErrors.RequestValidation.InvalidArgument
+        .Reject("Invalid page token")
         .asGrpcError,
     )
   }
@@ -66,12 +58,12 @@ class ApiUserManagementServiceSpec
     )
 
     val actualNextPageToken =
-      ApiUserManagementService.decodeUserIdFromPageToken(badPageToken)(errorLogger)
+      ApiUserManagementService.decodeUserIdFromPageToken(badPageToken)
     val error = actualNextPageToken.left.value
     assertError(
       actual = error,
-      expectedF = LedgerApiErrors.RequestValidation.InvalidArgument
-        .Reject("Invalid page token")(_)
+      expected = LedgerApiErrors.RequestValidation.InvalidArgument
+        .Reject("Invalid page token")
         .asGrpcError,
     )
   }
@@ -88,12 +80,12 @@ class ApiUserManagementServiceSpec
     )
 
     val actualNextPageToken =
-      ApiUserManagementService.decodeUserIdFromPageToken(badPageToken)(errorLogger)
+      ApiUserManagementService.decodeUserIdFromPageToken(badPageToken)
     val error = actualNextPageToken.left.value
     assertError(
       actual = error,
-      expectedF = LedgerApiErrors.RequestValidation.InvalidArgument
-        .Reject("Invalid page token")(_)
+      expected = LedgerApiErrors.RequestValidation.InvalidArgument
+        .Reject("Invalid page token")
         .asGrpcError,
     )
   }

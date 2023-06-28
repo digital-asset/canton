@@ -15,7 +15,7 @@ import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
+import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandServiceSpec.*
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
 import com.digitalasset.canton.platform.apiserver.services.tracking.{
@@ -141,7 +141,10 @@ class ApiCommandServiceSpec
       ).thenReturn(
         Future.fromTry(
           CompletionResponse.timeout("some-cmd-id", "some-submission-id")(
-            DamlContextualizedErrorLogger.forTesting(getClass)
+            ErrorLoggingContext(
+              loggerFactory.getTracedLogger(getClass),
+              LoggingContextWithTrace.ForTesting,
+            )
           )
         )
       )

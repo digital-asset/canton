@@ -102,7 +102,7 @@ object ConfirmationPolicy {
         }
         .map(_.toSet)
       confirmingPartiesF.map { confirmingParties =>
-        val plainInformees = LfTransactionUtil.informees(node) -- confirmingParties
+        val plainInformees = node.informeesOfNode -- confirmingParties
         val informees =
           confirmingParties.map(ConfirmingParty(_, 1, TrustLevel.Vip)) ++
             plainInformees.map(PlainInformee)
@@ -130,7 +130,7 @@ object ConfirmationPolicy {
           .map(_.toSet)
       } yield {
         val plainInformees =
-          (LfTransactionUtil.informees(node) -- vipParties -- submittingAdminPartyO)
+          (node.informeesOfNode -- vipParties -- submittingAdminPartyO)
             .map(PlainInformee)
 
         val vipConfirmingParties =
@@ -186,7 +186,7 @@ object ConfirmationPolicy {
         confirmingParties.nonEmpty,
         "There must be at least one confirming party, as every node must have at least one signatory.",
       )
-      val plainInformees = LfTransactionUtil.informees(node) -- confirmingParties
+      val plainInformees = node.informeesOfNode -- confirmingParties
       Future.successful(
         toInformeesAndThreshold(confirmingParties, plainInformees, TrustLevel.Ordinary)
       )
@@ -206,7 +206,7 @@ object ConfirmationPolicy {
         confirmingParties.nonEmpty,
         "There must be at least one confirming party, as every node must have at least one signatory.",
       )
-      val plainInformees = LfTransactionUtil.informees(node) -- confirmingParties
+      val plainInformees = node.informeesOfNode -- confirmingParties
       Future.successful(
         toInformeesAndThreshold(confirmingParties, plainInformees, TrustLevel.Ordinary)
       )
@@ -221,7 +221,7 @@ object ConfirmationPolicy {
     override def informeesAndThresholdV0(node: LfActionNode, topologySnapshot: TopologySnapshot)(
         implicit ec: ExecutionContext
     ): Future[(Set[Informee], NonNegativeInt)] = {
-      val informees = LfTransactionUtil.informees(node)
+      val informees = node.informeesOfNode
       require(
         informees.nonEmpty,
         "There must be at least one informee as every node must have at least one signatory.",
@@ -236,7 +236,7 @@ object ConfirmationPolicy {
     )(implicit
         ec: ExecutionContext
     ): Future[(Set[Informee], NonNegativeInt)] = {
-      val informees = LfTransactionUtil.informees(node) ++ submittingAdminPartyO
+      val informees = node.informeesOfNode ++ submittingAdminPartyO
       require(
         informees.nonEmpty,
         "There must be at least one informee as every node must have at least one signatory.",
@@ -269,7 +269,7 @@ object ConfirmationPolicy {
     val actionNodes = transaction.nodes.values.collect { case an: LfActionNode => an }
 
     val vipCheckPartiesPerNode = actionNodes.map { node =>
-      LfTransactionUtil.informees(node) & LfTransactionUtil.stateKnownTo(node)
+      node.informeesOfNode & LfTransactionUtil.stateKnownTo(node)
     }
     val signatoriesCheckPartiesPerNode = actionNodes.map { node =>
       LfTransactionUtil.signatoriesOrMaintainers(node) | LfTransactionUtil.actingParties(node)

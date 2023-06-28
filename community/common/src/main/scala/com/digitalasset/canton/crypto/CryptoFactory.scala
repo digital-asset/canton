@@ -35,6 +35,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStor
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 
@@ -51,7 +52,8 @@ trait CryptoFactory {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      ec: ExecutionContext
+      ec: ExecutionContext,
+      traceContext: TraceContext,
   ): EitherT[Future, String, Crypto]
 
   def createPureCrypto(
@@ -84,14 +86,15 @@ trait CryptoFactory {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      ec: ExecutionContext
+      ec: ExecutionContext,
+      traceContext: TraceContext,
   ): EitherT[Future, String, CryptoStoresAndSchemes] =
     for {
       cryptoPublicStore <- EitherT.rightT[Future, String](
         CryptoPublicStore.create(storage, releaseProtocolVersion, timeouts, loggerFactory)
       )
       cryptoPrivateStore <- cryptoPrivateStoreFactory
-        .create(storage, releaseProtocolVersion, timeouts, loggerFactory)
+        .create(cryptoPublicStore, storage, releaseProtocolVersion, timeouts, loggerFactory)
         .leftMap(err => show"Failed to create crypto private store: $err")
       symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
         .map(_.default)
@@ -180,7 +183,8 @@ class CommunityCryptoFactory extends CryptoFactory {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      ec: ExecutionContext
+      ec: ExecutionContext,
+      traceContext: TraceContext,
   ): EitherT[Future, String, Crypto] =
     for {
       storesAndSchemes <- initStoresAndSelectSchemes(

@@ -12,7 +12,6 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.grpc.{
   GrpcParticipantRepairService,
@@ -31,12 +30,11 @@ import com.digitalasset.canton.participant.admin.v0.TransferServiceGrpc.Transfer
 import com.digitalasset.canton.participant.admin.v0.{ResourceLimits as _, *}
 import com.digitalasset.canton.participant.admin.{ResourceLimits, v0}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig as CDomainConnectionConfig
-import com.digitalasset.canton.participant.traffic.TrafficStateController.ParticipantTrafficState
 import com.digitalasset.canton.protocol.{LfContractId, TransferId, v0 as v0proto}
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.traffic.MemberTrafficStatus
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LedgerApplicationId, LedgerTransactionId}
@@ -62,6 +60,7 @@ object ParticipantAdminCommands {
 
     sealed trait PackageCommand[Req, Res, Result] extends GrpcAdminCommand[Req, Res, Result] {
       override type Svc = PackageServiceStub
+
       override def createService(channel: ManagedChannel): PackageServiceStub =
         PackageServiceGrpc.stub(channel)
     }
@@ -390,6 +389,7 @@ object ParticipantAdminCommands {
     final case class SetPartyDisplayName(partyId: PartyId, displayName: String)
         extends GrpcAdminCommand[SetPartyDisplayNameRequest, SetPartyDisplayNameResponse, Unit] {
       override type Svc = PartyNameManagementServiceStub
+
       override def createService(channel: ManagedChannel): PartyNameManagementServiceStub =
         PartyNameManagementServiceGrpc.stub(channel)
 
@@ -431,8 +431,10 @@ object ParticipantAdminCommands {
         ] {
 
       override type Svc = ParticipantRepairServiceStub
+
       override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
         ParticipantRepairServiceGrpc.stub(channel)
+
       override def createRequest(): Either[String, DownloadRequest] = {
         Right(
           DownloadRequest(
@@ -445,6 +447,7 @@ object ParticipantAdminCommands {
           )
         )
       }
+
       override def submitRequest(
           service: ParticipantRepairServiceStub,
           request: DownloadRequest,
@@ -453,6 +456,7 @@ object ParticipantAdminCommands {
         context.run(() => service.download(request, observer))
         Future.successful(context)
       }
+
       override def handleResponse(
           response: CancellableContext
       ): Either[String, CancellableContext] = Right(response)
@@ -463,11 +467,14 @@ object ParticipantAdminCommands {
         extends GrpcAdminCommand[UploadRequest, UploadResponse, Unit] {
 
       override type Svc = ParticipantRepairServiceStub
+
       override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
         ParticipantRepairServiceGrpc.stub(channel)
+
       override def createRequest(): Either[String, UploadRequest] = {
         Right(UploadRequest(acsChunk))
       }
+
       override def submitRequest(
           service: ParticipantRepairServiceStub,
           request: UploadRequest,
@@ -507,6 +514,7 @@ object ParticipantAdminCommands {
         requestObserver.onCompleted()
         requestComplete.future
       }
+
       override def handleResponse(response: UploadResponse): Either[String, Unit] = {
         Right(())
       }
@@ -517,6 +525,7 @@ object ParticipantAdminCommands {
         targetDomainConfig: CDomainConnectionConfig,
     ) extends GrpcAdminCommand[MigrateDomainRequest, MigrateDomainResponse, Unit] {
       override type Svc = ParticipantRepairServiceStub
+
       override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
         ParticipantRepairServiceGrpc.stub(channel)
 
@@ -589,6 +598,7 @@ object ParticipantAdminCommands {
 
     abstract class Base[Req, Res, Ret] extends GrpcAdminCommand[Req, Res, Ret] {
       override type Svc = DomainConnectivityServiceStub
+
       override def createService(channel: ManagedChannel): DomainConnectivityServiceStub =
         DomainConnectivityServiceGrpc.stub(channel)
     }
@@ -801,6 +811,7 @@ object ParticipantAdminCommands {
 
     abstract class Base[Req, Res, Ret] extends GrpcAdminCommand[Req, Res, Ret] {
       override type Svc = TransferServiceStub
+
       override def createService(channel: ManagedChannel): TransferServiceStub =
         TransferServiceGrpc.stub(channel)
     }
@@ -924,6 +935,7 @@ object ParticipantAdminCommands {
   object Resources {
     abstract class Base[Req, Res, Ret] extends GrpcAdminCommand[Req, Res, Ret] {
       override type Svc = ResourceManagementServiceStub
+
       override def createService(channel: ManagedChannel): ResourceManagementServiceStub =
         ResourceManagementServiceGrpc.stub(channel)
     }
@@ -960,6 +972,7 @@ object ParticipantAdminCommands {
 
     abstract class Base[Req, Res, Ret] extends GrpcAdminCommand[Req, Res, Ret] {
       override type Svc = InspectionServiceStub
+
       override def createService(channel: ManagedChannel): InspectionServiceStub =
         InspectionServiceGrpc.stub(channel)
     }
@@ -1052,6 +1065,7 @@ object ParticipantAdminCommands {
   object Pruning {
     abstract class Base[Req, Res, Ret] extends GrpcAdminCommand[Req, Res, Ret] {
       override type Svc = PruningServiceStub
+
       override def createService(channel: ManagedChannel): PruningServiceStub =
         PruningServiceGrpc.stub(channel)
     }
@@ -1105,7 +1119,7 @@ object ParticipantAdminCommands {
         extends GrpcAdminCommand[
           TrafficControlStateRequest,
           TrafficControlStateResponse,
-          ParticipantTrafficState,
+          MemberTrafficStatus,
         ] {
       override type Svc = TrafficControlServiceGrpc.TrafficControlServiceStub
 
@@ -1126,27 +1140,12 @@ object ParticipantAdminCommands {
 
       override def handleResponse(
           response: TrafficControlStateResponse
-      ): Either[String, ParticipantTrafficState] = {
+      ): Either[String, MemberTrafficStatus] = {
         response.trafficState
-          .map { trafficState =>
-            val result = for {
-              timestamp <- ProtoConverter.parseRequired(
-                CantonTimestamp.fromProtoPrimitive,
-                "timestamp",
-                trafficState.timestamp,
-              )
-              totalExtraTraffic <- trafficState.totalExtraTrafficLimit.traverse(
-                ProtoConverter.parsePositiveLong
-              )
-              remainderExtraTraffic <- ProtoConverter.parseNonNegativeLong(
-                trafficState.extraTrafficRemainder
-              )
-            } yield ParticipantTrafficState(
-              timestamp,
-              totalExtraTraffic,
-              remainderExtraTraffic,
-            )
-            result.leftMap(_.message)
+          .map { trafficStatus =>
+            MemberTrafficStatus
+              .fromProtoV0(trafficStatus)
+              .leftMap(_.message)
           }
           .getOrElse(Left("No traffic state available"))
       }

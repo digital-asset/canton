@@ -48,7 +48,7 @@ abstract class TransactionTreeFactoryImpl(
     protocolVersion: ProtocolVersion,
     contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
     packageInfoService: PackageInfoService,
-    cryptoOps: HashOps with HmacOps,
+    cryptoOps: HashOps & HmacOps,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TransactionTreeFactory
@@ -59,6 +59,8 @@ abstract class TransactionTreeFactoryImpl(
   private val transactionViewDecompositionFactory = TransactionViewDecompositionFactory(
     protocolVersion
   )
+  private val contractEnrichmentFactory = ContractEnrichmentFactory(protocolVersion)
+
   protected type State <: TransactionTreeFactoryImpl.State
 
   protected def stateForSubmission(
@@ -66,8 +68,8 @@ abstract class TransactionTreeFactoryImpl(
       mediator: MediatorRef,
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
-      nextSaltIndex: Int,
       keyResolver: LfKeyResolver,
+      nextSaltIndex: Int,
   ): State
 
   protected def stateForValidation(
@@ -89,6 +91,7 @@ abstract class TransactionTreeFactoryImpl(
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,
       keyResolver: LfKeyResolver,
+      maxSequencingTime: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -98,8 +101,8 @@ abstract class TransactionTreeFactoryImpl(
       mediator,
       transactionUuid,
       metadata.ledgerTime,
-      0,
       keyResolver,
+      nextSaltIndex = 0,
     )
 
     // Create salts
@@ -145,6 +148,7 @@ abstract class TransactionTreeFactoryImpl(
             submitterDeduplicationPeriod = submitterInfo.deduplicationPeriod,
             submitterParticipant = participantId,
             salt = submitterMetadataSalt,
+            maxSequencingTime,
             protocolVersion = protocolVersion,
           )
           .leftMap(SubmitterMetadataError)
@@ -242,7 +246,7 @@ abstract class TransactionTreeFactoryImpl(
       }
 
       // keep around the rollback nodes (not suffixed as they don't have a contract id), so that we don't orphan suffixed nodes.
-      val rollbackNodes = subaction.unwrap.nodes.collect { case tuple @ (_, _rn: LfNodeRollback) =>
+      val rollbackNodes = subaction.unwrap.nodes.collect { case tuple @ (_, _: LfNodeRollback) =>
         tuple
       }
 
@@ -271,7 +275,7 @@ abstract class TransactionTreeFactoryImpl(
       case subview +: toVisit =>
         addSaltsFrom(subview)
         subview.subviews.assertAllUnblinded(hash =>
-          s"View ${subview.viewHash} contains an unexpected blinded subview ${hash}"
+          s"View ${subview.viewHash} contains an unexpected blinded subview $hash"
         )
         go(subview.subviews.unblindedElements ++ toVisit)
     }
@@ -386,14 +390,10 @@ abstract class TransactionTreeFactoryImpl(
 
     state.setUnicumFor(discriminator, unicum)
 
-    val createdMetadata = LfTransactionUtil
-      .createdContractIdWithMetadata(createNode)
-      .getOrElse(throw new RuntimeException("Created metadata be defined for create node"))
-      .metadata
     val createdInfo = SerializableContract(
       contractId = contractId,
       rawContractInstance = serializedCantonContractInst,
-      metadata = createdMetadata,
+      metadata = LfTransactionUtil.metadataFromCreate(createNode),
       ledgerCreateTime = state.ledgerTime,
       contractSalt = Option.when(protocolVersion >= ProtocolVersion.v4)(contractSalt.unwrap),
     )
@@ -476,15 +476,13 @@ abstract class TransactionTreeFactoryImpl(
     val createdInSubviews = createdInSubviewsSeq.toSet
     val createdInSameViewOrSubviews = createdInSubviewsSeq ++ created.map(_.contract.contractId)
 
-    val usedCoreWithMetadata = coreOtherNodes
-      .mapFilter { case (node, _) =>
-        LfTransactionUtil.usedContractIdWithMetadata(node)
-      }
-      .map(idWithMetadata => idWithMetadata.unwrap -> idWithMetadata.metadata)
-      .toMap
-    val usedCore = SortedSet(usedCoreWithMetadata.keys.toSeq *)
+    val usedCore = SortedSet.from(coreOtherNodes.flatMap({ case (node, _) =>
+      LfTransactionUtil.usedContractId(node)
+    }))
     val coreInputs = usedCore -- createdInSameViewOrSubviews
     val createdInSubviewArchivedInCore = consumedInCore intersect createdInSubviews
+
+    val contractEnricher = contractEnrichmentFactory(coreOtherNodes)
 
     def withInstance(
         contractId: LfContractId
@@ -494,17 +492,7 @@ abstract class TransactionTreeFactoryImpl(
         case Some(info) =>
           EitherT.pure(InputContract(info, cons))
         case None =>
-          val metadata = usedCoreWithMetadata(contractId)
-          contractOfId(contractId).map { case (contractInstance, ledgerTime, contractSalt) =>
-            val serializableContract = SerializableContract(
-              contractId,
-              contractInstance,
-              metadata,
-              ledgerTime,
-              contractSalt,
-            )
-            InputContract(serializableContract, cons)
-          }
+          contractOfId(contractId).map { c => InputContract(contractEnricher(c), cons) }
       }
     }
 
@@ -538,7 +526,7 @@ object TransactionTreeFactoryImpl {
       submitterParticipant: ParticipantId,
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
-      cryptoOps: HashOps with HmacOps,
+      cryptoOps: HashOps & HmacOps,
       packageService: PackageInfoService,
       uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,

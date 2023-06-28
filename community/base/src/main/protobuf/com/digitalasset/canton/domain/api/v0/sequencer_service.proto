@@ -187,7 +187,7 @@ message SubscriptionResponse {
 
   // Traffic state for the subscribed member
   // Optional value which is set if the sequencer enforces traffic limits
-  TrafficState traffic_state = 3;
+  SequencedEventTrafficState traffic_state = 3;
 }
 
 message AcknowledgeRequest {
@@ -210,10 +210,10 @@ message TopologyStateForInitResponse {
   com.digitalasset.canton.protocol.v0.TopologyTransactions topology_transactions = 1;
 }
 
-message TrafficState {
-  // Remaining extra traffic
-  uint64 extra_traffic_remainder = 1;
+message SequencedEventTrafficState {
+  // Remaining extra traffic at the time of this event
+  uint64 extra_traffic_remainder = 2;
 
-  // Timestamp at which the traffic state was computed
-  google.protobuf.Timestamp timestamp = 2;
+  // Total extra traffic consumed at the time of this event
+  uint64 extra_traffic_consumed = 3;
 }

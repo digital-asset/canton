@@ -109,4 +109,23 @@ object BaseError {
     msg.startsWith(SecuritySensitiveMessageOnApiPrefix)
   }
 
+  private val ignoreFields =
+    Set(
+      "cause",
+      "throwable",
+      "loggingContext",
+      "definiteAnswer",
+      "representativeProtocolVersion",
+      "companionObj",
+    )
+
+  def extractContext[D](obj: D): Map[String, String] = {
+    obj.getClass.getDeclaredFields
+      .filterNot(x => ignoreFields.contains(x.getName) || x.getName.startsWith("_"))
+      .map { field =>
+        field.setAccessible(true)
+        (field.getName, field.get(obj).toString)
+      }
+      .toMap
+  }
 }

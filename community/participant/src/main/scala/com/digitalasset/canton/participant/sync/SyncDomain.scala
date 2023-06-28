@@ -79,6 +79,7 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.traffic.MemberTrafficStatus
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
@@ -89,14 +90,14 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** A connected domain from the synchronization service.
   *
-  * @param domainId                  The identifier of the connected domain.
-  * @param domainHandle              A domain handle providing sequencer clients.
-  * @param participantId             The participant node id hosting this sync service.
-  * @param persistent                The persistent state of the sync domain.
-  * @param ephemeral                 The ephemeral state of the sync domain.
-  * @param packageService            Underlying package management service.
-  * @param domainCrypto              Synchronisation crypto utility combining IPS and Crypto operations for a single domain.
-  * @param topologyProcessor         Processor of topology messages from the sequencer.
+  * @param domainId          The identifier of the connected domain.
+  * @param domainHandle      A domain handle providing sequencer clients.
+  * @param participantId     The participant node id hosting this sync service.
+  * @param persistent        The persistent state of the sync domain.
+  * @param ephemeral         The ephemeral state of the sync domain.
+  * @param packageService    Underlying package management service.
+  * @param domainCrypto      Synchronisation crypto utility combining IPS and Crypto operations for a single domain.
+  * @param topologyProcessor Processor of topology messages from the sequencer.
   */
 class SyncDomain(
     val domainId: DomainId,
@@ -119,6 +120,7 @@ class SyncDomain(
     clock: Clock,
     pruningMetrics: PruningMetrics,
     metrics: SyncDomainMetrics,
+    trafficStateController: TrafficStateController,
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
     skipRecipientsCheck: Boolean,
@@ -129,7 +131,9 @@ class SyncDomain(
     with HealthComponent {
 
   val topologyClient: DomainTopologyClientWithInit = domainHandle.topologyClient
+
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
+
   override val name = SyncDomain.healthName
   override val initialHealthState: ComponentHealthState = ComponentHealthState.NotInitializedState
   override val closingState: ComponentHealthState =
@@ -226,6 +230,7 @@ class SyncDomain(
     persistent.acsCommitmentStore,
     persistent.activeContractStore,
     persistent.contractKeyJournal,
+    persistent.submissionTrackerStore,
     participantNodePersistentState.map(_.inFlightSubmissionStore),
     domainId,
     parameters.stores.acsPruningInterval.toInternal,
@@ -302,13 +307,8 @@ class SyncDomain(
       loggerFactory,
     )
 
-  private val trafficStateController =
-    new TrafficStateController(topologyClient, participantId, loggerFactory)
-
-  def getTrafficControlState()(implicit
-      tc: TraceContext
-  ): Future[Option[TrafficStateController.ParticipantTrafficState]] =
-    trafficStateController.getState()
+  def getTrafficControlState: Future[Option[MemberTrafficStatus]] =
+    trafficStateController.getState
 
   def authorityOfInSnapshotApproximation(requestingAuthority: Set[LfPartyId])(implicit
       traceContext: TraceContext
@@ -581,7 +581,7 @@ class SyncDomain(
           ): HandlerResult = {
             tracedEvents.withTraceContext { traceContext => closedEvents =>
               val openEvents = closedEvents.map { event =>
-                event.trafficStatus.foreach(trafficStateController.updateState)
+                event.trafficState.foreach(trafficStateController.updateState(_, event.timestamp))
 
                 val openedEvent = PossiblyIgnoredSequencedEvent.openEnvelopes(event)(
                   staticDomainParameters.protocolVersion,
@@ -738,7 +738,7 @@ class SyncDomain(
     ready && !isFailed && !sequencerClient.healthComponent.isFailed
 
   /** @return The outer future completes after the submission has been registered as in-flight.
-    *         The inner future completes after the submission has been sequenced or if it will never be sequenced.
+    *          The inner future completes after the submission has been sequenced or if it will never be sequenced.
     */
   def submitTransaction(
       submitterInfo: SubmitterInfo,
@@ -947,6 +947,7 @@ object SyncDomain {
         clock: Clock,
         pruningMetrics: PruningMetrics,
         syncDomainMetrics: SyncDomainMetrics,
+        trafficStateController: TrafficStateController,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         skipRecipientsCheck: Boolean,
@@ -974,6 +975,7 @@ object SyncDomain {
         clock: Clock,
         pruningMetrics: PruningMetrics,
         syncDomainMetrics: SyncDomainMetrics,
+        trafficStateController: TrafficStateController,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         skipRecipientsCheck: Boolean,
@@ -999,6 +1001,7 @@ object SyncDomain {
         clock,
         pruningMetrics,
         syncDomainMetrics,
+        trafficStateController,
         futureSupervisor,
         loggerFactory,
         skipRecipientsCheck = skipRecipientsCheck,
@@ -1007,8 +1010,11 @@ object SyncDomain {
 }
 
 sealed trait SyncDomainInitializationError
+
 final case class SequencedEventStoreError(err: store.SequencedEventStoreError)
     extends SyncDomainInitializationError
+
 final case class ParticipantTopologyHandshakeError(err: DomainRegistryError)
     extends SyncDomainInitializationError
+
 final case class ParticipantDidNotBecomeActive(msg: String) extends SyncDomainInitializationError

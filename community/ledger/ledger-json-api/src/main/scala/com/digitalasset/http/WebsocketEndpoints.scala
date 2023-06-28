@@ -3,34 +3,34 @@
 
 package com.daml.http
 
-import akka.http.scaladsl.model.HttpMethods._
-import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.*
+import akka.http.scaladsl.model.HttpMethods.*
 import akka.http.scaladsl.model.ws.{Message, WebSocketUpgrade}
-import akka.stream.scaladsl.Flow
-import com.daml.jwt.domain.Jwt
-import scalaz.syntax.std.boolean._
-import scalaz.syntax.std.option._
-import scalaz.{EitherT, \/}
-
-import scala.concurrent.{ExecutionContext, Future}
-import EndpointsCompanion._
-import akka.http.scaladsl.server.{Rejection, RequestContext, Route, RouteResult}
 import akka.http.scaladsl.server.RouteResult.{Complete, Rejected}
+import akka.http.scaladsl.server.{Rejection, RequestContext, Route, RouteResult}
+import akka.stream.scaladsl.Flow
+import com.daml.http.EndpointsCompanion.*
 import com.daml.http.domain.JwtPayload
 import com.daml.http.metrics.HttpApiMetrics
 import com.daml.http.util.Logging.{InstanceUUID, RequestID, extendWithRequestIdLogCtx}
+import com.daml.jwt.domain.Jwt
+import com.daml.logging.LoggingContextOf
+import com.daml.metrics.akkahttp.{MetricLabelsExtractor, WebSocketMetricsInterceptor}
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ledger.client.services.admin.UserManagementClient
 import com.digitalasset.canton.ledger.client.services.identity.LedgerIdentityClient
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
-import com.daml.metrics.api.MetricsContext
-import com.daml.metrics.akkahttp.{MetricLabelsExtractor, WebSocketMetricsInterceptor}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
+import scalaz.std.scalaFuture.*
+import scalaz.syntax.std.boolean.*
+import scalaz.syntax.std.option.*
+import scalaz.{EitherT, \/}
 
-import scala.collection.immutable.Seq
-import scalaz.std.scalaFuture._
+import scala.concurrent.{ExecutionContext, Future}
 
 object WebsocketEndpoints {
-   val tokenPrefix: String = "jwt.token."
-   val wsProtocol: String = "daml.ws.auth"
+  val tokenPrefix: String = "jwt.token."
+  val wsProtocol: String = "daml.ws.auth"
 
   private def findJwtFromSubProtocol[Err >: Unauthorized](
       upgradeToWebSocket: WebSocketUpgrade
@@ -69,15 +69,16 @@ class WebsocketEndpoints(
     webSocketService: WebSocketService,
     userManagementClient: UserManagementClient,
     ledgerIdentityClient: LedgerIdentityClient,
-)(implicit ec: ExecutionContext) {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends NamedLogging
+    with NoTracing {
 
-  import WebsocketEndpoints._
-
-  private[this] val logger = ContextualizedLogger.get(getClass)
+  import WebsocketEndpoints.*
 
   def transactionWebSocket(implicit
-                           lc: LoggingContextOf[InstanceUUID],
-                           metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID],
+      metrics: HttpApiMetrics,
   ): Route = { (ctx: RequestContext) =>
     val dispatch: PartialFunction[HttpRequest, LoggingContextOf[
       InstanceUUID with RequestID
@@ -91,7 +92,7 @@ class WebsocketEndpoints(
                     "Cannot upgrade client's connection to websocket"
                   ): Error)
                 )
-                _ = logger.info(s"GOT $wsProtocol")
+                _ = logger.info(s"GOT $wsProtocol ${lc.makeString}")
 
                 payload <- preconnect(
                   decodeJwt,
@@ -112,7 +113,7 @@ class WebsocketEndpoints(
                     )
                 }
               })
-                .valueOr(httpResponseError)
+                .valueOr(httpResponseError(_, logger))
         )
 
       case req @ HttpRequest(GET, Uri.Path("/v1/stream/fetch"), _, _, _) =>
@@ -143,15 +144,16 @@ class WebsocketEndpoints(
                     )
                 }
               })
-                .valueOr(httpResponseError)
+                .valueOr(httpResponseError(_, logger))
         )
     }
-    import scalaz.std.partialFunction._, scalaz.syntax.arrow._
+    import scalaz.std.partialFunction.*
+    import scalaz.syntax.arrow.*
     dispatch
       .&&& { case r => r }
       .andThen { case (lcFhr, req) =>
         extendWithRequestIdLogCtx(implicit lc => {
-          logger.trace(s"Incoming request on ${req.uri}")
+          logger.trace(s"Incoming request on ${req.uri}, ${lc.makeString}")
           lcFhr(lc) map Complete
         })
       }
@@ -167,9 +169,9 @@ class WebsocketEndpoints(
       req: WebSocketUpgrade,
       protocol: String,
   )(implicit
-    lc: LoggingContextOf[InstanceUUID with RequestID],
-    metrics: HttpApiMetrics,
-    mc: MetricsContext,
+      lc: LoggingContextOf[InstanceUUID with RequestID],
+      metrics: HttpApiMetrics,
+      mc: MetricsContext,
   ): HttpResponse = {
     val handler: Flow[Message, Message, _] =
       WebSocketMetricsInterceptor.withRateSizeMetrics(

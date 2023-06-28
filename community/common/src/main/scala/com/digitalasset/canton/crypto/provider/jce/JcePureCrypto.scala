@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.crypto.HkdfError.HkdfInternalError
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.deterministic.encryption.DeterministicRandom
+import com.digitalasset.canton.crypto.provider.jce.JceSecurityProvider.bouncyCastleProvider
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
@@ -98,7 +99,7 @@ class JcePureCrypto(
     // the IV for AES-128-CBC is 16 bytes
     val ivSizeForAesCbcInBytes: Int = 16
     // the parameter specification for this scheme.
-    def parameterSpec(iv: Array[Byte]) = new IESParameterSpec(
+    def parameterSpec(iv: Array[Byte]): IESParameterSpec = new IESParameterSpec(
       // we do no use any encoding or derivation vector for the KDF.
       Array[Byte](),
       Array[Byte](),
@@ -474,7 +475,7 @@ class JcePureCrypto(
       encrypter <- Either
         .catchOnly[GeneralSecurityException] {
           val cipher = Cipher
-            .getInstance(EciesP256HmacSha256Aes128CbcParams.jceInternalName, "BC")
+            .getInstance(EciesP256HmacSha256Aes128CbcParams.jceInternalName, bouncyCastleProvider)
           cipher.init(
             Cipher.ENCRYPT_MODE,
             ecPublicKey,
@@ -705,7 +706,7 @@ class JcePureCrypto(
               val cipher = Cipher
                 .getInstance(
                   EciesP256HmacSha256Aes128CbcParams.jceInternalName,
-                  "BC",
+                  bouncyCastleProvider,
                 )
               cipher.init(
                 Cipher.DECRYPT_MODE,

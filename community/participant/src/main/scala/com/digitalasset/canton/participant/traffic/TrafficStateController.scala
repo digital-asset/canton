@@ -3,82 +3,61 @@
 
 package com.digitalasset.canton.participant.traffic
 
-import cats.instances.option.*
-import cats.syntax.parallel.*
 import com.daml.error.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.v0.TrafficControlStateResponse
 import com.digitalasset.canton.participant.sync.SyncServiceError.TrafficControlErrorGroup
-import com.digitalasset.canton.participant.traffic.TrafficStateController.ParticipantTrafficState
-import com.digitalasset.canton.sequencing.protocol.TrafficState
-import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.sequencing.protocol.SequencedEventTrafficState
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.traffic.{MemberTrafficStatus, TopUpEvent, TopUpQueue}
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 /** Maintains the current traffic state up to date for a given domain.
   */
 class TrafficStateController(
-    topologyClient: DomainTopologyClientWithInit,
-    participant: ParticipantId,
+    val participant: ParticipantId,
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
-  private val currentTrafficState = new AtomicReference[Option[TrafficState]](None)
+  private val currentTrafficState =
+    new AtomicReference[Option[(SequencedEventTrafficState, CantonTimestamp)]](None)
+  private val topUpQueue = new TopUpQueue(List.empty)
 
-  def updateState(newState: TrafficState)(implicit tc: TraceContext): Unit = {
+  def addTopUp(topUp: TopUpEvent): Unit = topUpQueue.addOne(topUp)
+
+  def updateState(newState: SequencedEventTrafficState, timestamp: CantonTimestamp)(implicit
+      tc: TraceContext
+  ): Unit = {
     logger.trace(s"Updating traffic control state with $newState")
-    currentTrafficState.get().foreach { state =>
-      require(
-        newState.timestamp > state.timestamp,
-        s"Expected new traffic state to have a strictly more recent timestamp than the old state. Old state at ${state.timestamp}. New state at ${newState.timestamp}",
-      )
+    currentTrafficState.get() match {
+      // if the new state is older or equal to the new one, don't update, but log it instead
+      case Some(state) if timestamp <= state._2 =>
+        logger.debug(
+          s"Received a traffic state update with a timestamp ($timestamp) <= to the existing state ($state). It will be ignored."
+        )
+      case _ =>
+        currentTrafficState.set(Some(newState -> timestamp))
     }
-    currentTrafficState.set(Some(newState))
   }
 
-  def getState()(implicit
-      tc: TraceContext,
-      ec: ExecutionContext,
-  ): Future[Option[ParticipantTrafficState]] = {
+  def getState: Future[Option[MemberTrafficStatus]] = Future.successful {
     currentTrafficState
       .get()
-      .parTraverse { trafficState =>
-        for {
-          snapshot <- topologyClient.awaitSnapshot(trafficState.timestamp)
-          trafficTopology <- snapshot.trafficControlStatus(Seq(participant))
-        } yield {
-          ParticipantTrafficState(
-            trafficState.timestamp,
-            trafficTopology
-              .get(participant)
-              .flatMap(_.map(_.totalExtraTrafficLimit)),
-            trafficState.extraTrafficRemainder,
-          )
-        }
+      .map { case (trafficState, ts) =>
+        MemberTrafficStatus(
+          participant,
+          ts,
+          trafficState,
+          topUpQueue.pruneUntilAndGetAllTopUpsFor(ts),
+        )
       }
   }
 }
 
 object TrafficStateController {
-  final case class ParticipantTrafficState(
-      timestamp: CantonTimestamp,
-      totalExtraTrafficLimit: Option[PositiveLong],
-      extraTrafficRemainder: NonNegativeLong,
-  ) {
-    def toProto: TrafficControlStateResponse.TrafficControlState = {
-      TrafficControlStateResponse.TrafficControlState(
-        Some(timestamp.toProtoPrimitive),
-        totalExtraTrafficLimit = totalExtraTrafficLimit.map(_.value),
-        extraTrafficRemainder = extraTrafficRemainder.value,
-      )
-    }
-  }
 
   object TrafficControlError extends TrafficControlErrorGroup {
     sealed trait TrafficControlError extends Product with Serializable with CantonError

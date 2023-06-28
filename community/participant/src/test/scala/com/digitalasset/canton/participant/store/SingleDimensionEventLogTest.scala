@@ -62,13 +62,13 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
     )
 
     val transactionAccepted = LedgerSyncEvent.TransactionAccepted(
-      optCompletionInfo = None,
+      completionInfoO = None,
       transactionMeta = transactionMeta,
       transaction = committedTransaction,
       transactionId = transactionId,
       recordTime = LfTimestamp.Epoch,
       divulgedContracts = List.empty,
-      blindingInfo = None,
+      blindingInfoO = None,
       hostedWitnesses = Nil,
       contractMetadata = Map(), // TODO(#9795) wire proper value
     )

@@ -4,20 +4,24 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.participant.protocol.transfer.TransferData.*
 import com.digitalasset.canton.participant.protocol.transfer.{IncompleteTransferData, TransferData}
-import com.digitalasset.canton.participant.sync.{LedgerSyncEvent, SyncDomainPersistentStateLookup}
+import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.participant.{GlobalOffset, LocalOffset}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SourceDomainId, TargetDomainId, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{Checked, CheckedT, EitherUtil, OptionUtil}
+import com.digitalasset.canton.util.{Checked, CheckedT, MonadUtil, OptionUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
+import monocle.macros.syntax.lens.*
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 trait TransferStore extends TransferLookup {
   import TransferStore.*
@@ -51,46 +55,29 @@ trait TransferStore extends TransferLookup {
       traceContext: TraceContext
   ): EitherT[Future, TransferStoreError, Unit]
 
-  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the transfer-out to the transfer data in
-    * the store, provided that the transfer data has previously been stored.
+  /** Adds the given offsets to the transfer data in the store, provided that the transfer data has previously been stored.
     *
-    * The same [[com.digitalasset.canton.participant.GlobalOffset]] can be added any number of times.
-    *
-    * @param transferId The id of the transfer
-    * @param offset The global offset of the transfer-out result to add
-    * @return [[TransferStore$.UnknownTransferId]] if the transfer has not previously been added with [[addTransfer]].
-    *         [[TransferStore$.TransferOutGlobalOffsetAlreadyExists]] if a different transfer-out global offset for the same
-    *         transfer request has been added before.
+    * The same offset can be added any number of times.
     */
-  def addTransferOutGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
+  def addTransfersOffsets(offsets: Map[TransferId, TransferGlobalOffset])(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferStoreError, Unit]
+  ): EitherT[FutureUnlessShutdown, TransferStoreError, Unit]
 
-  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the transfer-in to the transfer data in
-    * the store, provided that the transfer data has previously been stored.
-    *
-    * The same [[com.digitalasset.canton.participant.GlobalOffset]] can be added any number of times.
-    *
-    * @param transferId The id of the transfer
-    * @param offset     The global offset of the transfer-in result to add
-    * @return [[TransferStore$.UnknownTransferId]] if the transfer has not previously been added with [[addTransfer]].
-    *         [[TransferStore$.TransferInGlobalOffsetAlreadyExists]] if a different transfer-in global offset for the same
-    *         transfer request has been added before.
-    */
-  def addTransferInGlobalOffset(transferId: TransferId, offset: GlobalOffset)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransferStoreError, Unit]
-
-  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the transfer event to the transfer data in
+  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the transfer events to the transfer data in
     * the store, provided that the transfer data has previously been stored.
     *
     * The same [[com.digitalasset.canton.participant.GlobalOffset]] can be added any number of times.
     */
-  def addTransferEventGlobalOffset(event: LedgerSyncEvent.TransferEvent, offset: GlobalOffset)(
-      implicit traceContext: TraceContext
-  ): EitherT[Future, TransferStoreError, Unit] = event match {
-    case _: LedgerSyncEvent.TransferredOut => addTransferOutGlobalOffset(event.transferId, offset)
-    case _: LedgerSyncEvent.TransferredIn => addTransferInGlobalOffset(event.transferId, offset)
+  def addTransfersOffsets(
+      events: Seq[(TransferId, TransferGlobalOffset)]
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, TransferStoreError, Unit] = {
+    for {
+      preparedOffsets <- EitherT.fromEither[FutureUnlessShutdown](mergeTransferOffsets(events))
+      _ <- addTransfersOffsets(preparedOffsets)
+    } yield ()
   }
 
   /** Marks the transfer as completed, i.e., a transfer-in request was committed.
@@ -130,6 +117,32 @@ object TransferStore {
       .toRight(s"Unknown domain `${domainId.unwrap}`")
       .map(_.transferStore)
 
+  /** Merge the offsets corresponding to the same transfer id.
+    * Returns an error in case of inconsistent offsets.
+    */
+  def mergeTransferOffsets(
+      events: Seq[(TransferId, TransferGlobalOffset)]
+  ): Either[ConflictingGlobalOffsets, Map[TransferId, TransferGlobalOffset]] = {
+    type Acc = Map[TransferId, TransferGlobalOffset]
+    val zero: Acc = Map.empty[TransferId, TransferGlobalOffset]
+
+    MonadUtil.foldLeftM[Either[
+      ConflictingGlobalOffsets,
+      *,
+    ], Acc, (TransferId, TransferGlobalOffset)](
+      zero,
+      events,
+    ) { case (acc, (transferId, offset)) =>
+      val newOffsetE = acc.get(transferId) match {
+        case Some(value) =>
+          value.merge(offset).leftMap(ConflictingGlobalOffsets(transferId, _))
+        case None => Right(offset)
+      }
+
+      newOffsetE.map(newOffset => acc + (transferId -> newOffset))
+    }
+  }
+
   sealed trait TransferStoreError extends Product with Serializable {
     def message: String
   }
@@ -165,28 +178,17 @@ object TransferStore {
       s"Transfer-out result for transfer `$transferId` already exists and differs from the new one"
   }
 
-  final case class TransferOutGlobalOffsetAlreadyExists(
+  final case class TransferGlobalOffsetsMerge(
       transferId: TransferId,
-      old: GlobalOffset,
-      `new`: GlobalOffset,
+      error: String,
   ) extends TransferStoreError {
     override def message: String =
-      s"Transfer-out offset for transfer `$transferId` already exists and differs from the new one"
+      s"Unable to merge global offsets for transfer `$transferId`: $error"
   }
 
-  final case class TransferInGlobalOffsetAlreadyExists(
-      transferId: TransferId,
-      old: GlobalOffset,
-      `new`: GlobalOffset,
-  ) extends TransferStoreError {
-    override def message: String =
-      s"Transfer-in offset for transfer `$transferId` already exists and differs from the new one"
-  }
-
-  final case class TransferOutInSameGlobalOffset(transferId: TransferId, offset: GlobalOffset)
+  final case class ConflictingGlobalOffsets(transferId: TransferId, error: String)
       extends TransferStoreError {
-    override def message: String =
-      s"Cannot have identical transfer-out and transfer-in global offsets ($offset) for transfer `$transferId`"
+    override def message: String = s"Conflicting global offsets for $transferId: $error"
   }
 
   final case class TransferAlreadyCompleted(transferId: TransferId, newCompletion: TimeOfChange)
@@ -248,40 +250,18 @@ object TransferStore {
         .map(TransferEntry(_, timeOfCompletion))
 
     private[store] def addTransferOutGlobalOffset(
-        offset: GlobalOffset
-    ): Either[TransferStoreError, TransferEntry] =
-      for {
-        _ <- EitherUtil.condUnitE(
-          !transferData.transferInGlobalOffset.contains(offset),
-          TransferOutInSameGlobalOffset(transferData.transferId, offset),
-        )
-        newTransferData <- transferData
-          .addTransferOutGlobalOffset(offset)
-          .toRight {
-            val old = transferData.transferOutGlobalOffset.getOrElse(
-              throw new IllegalStateException("Transfer-out global offset should not be empty")
-            )
-            TransferOutGlobalOffsetAlreadyExists(transferData.transferId, old, offset)
-          }
-      } yield TransferEntry(newTransferData, timeOfCompletion)
+        offset: TransferGlobalOffset
+    ): Either[TransferGlobalOffsetsMerge, TransferEntry] = {
 
-    private[store] def addTransferInGlobalOffset(
-        offset: GlobalOffset
-    ): Either[TransferStoreError, TransferEntry] =
-      for {
-        _ <- EitherUtil.condUnitE(
-          !transferData.transferOutGlobalOffset.contains(offset),
-          TransferOutInSameGlobalOffset(transferData.transferId, offset),
+      val newGlobalOffsetE = transferData.transferGlobalOffset
+        .fold[Either[TransferGlobalOffsetsMerge, TransferGlobalOffset]](Right(offset))(
+          _.merge(offset).leftMap(TransferGlobalOffsetsMerge(transferData.transferId, _))
         )
-        newTransferData <- transferData
-          .addTransferInGlobalOffset(offset)
-          .toRight {
-            val old = transferData.transferInGlobalOffset.getOrElse(
-              throw new IllegalStateException("Transfer-in global offset should not be empty")
-            )
-            TransferInGlobalOffsetAlreadyExists(transferData.transferId, old, offset)
-          }
-      } yield TransferEntry(newTransferData, timeOfCompletion)
+
+      newGlobalOffsetE.map(newGlobalOffset =>
+        this.focus(_.transferData.transferGlobalOffset).replace(Some(newGlobalOffset))
+      )
+    }
 
     def complete(
         timeOfChange: TimeOfChange

@@ -3,40 +3,66 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import cats.syntax.apply.*
+import com.digitalasset.canton.config.RequireTypes
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.store.db.RequiredTypesCodec.nonNegativeLongOptionGetResult
+import slick.jdbc.{GetResult, SetParameter}
 
-/** The traffic state communicated to members on the sequencer API */
+/** Traffic state stored in the sequencer per event needed for enforcing traffic control */
 final case class TrafficState(
     extraTrafficRemainder: NonNegativeLong,
+    extraTrafficConsumed: NonNegativeLong,
+    baseTrafficRemainder: NonNegativeLong,
     timestamp: CantonTimestamp,
 ) {
-  def toProtoV0: v0.TrafficState = v0.TrafficState(
-    extraTrafficRemainder = extraTrafficRemainder.value,
-    timestamp = Some(timestamp.toProtoPrimitive),
+  lazy val extraTrafficLimit: Option[PositiveLong] =
+    PositiveLong.create((extraTrafficRemainder + extraTrafficConsumed).value).toOption
+
+  def update(
+      newExtraTrafficLimit: NonNegativeLong,
+      timestamp: CantonTimestamp,
+  ): Either[RequireTypes.InvariantViolation, TrafficState] = {
+    NonNegativeLong.create(newExtraTrafficLimit.value - extraTrafficConsumed.value).map {
+      newRemainder =>
+        this.copy(
+          timestamp = timestamp,
+          extraTrafficRemainder = newRemainder,
+        )
+    }
+  }
+
+  def toSequencedEventTrafficState: SequencedEventTrafficState = SequencedEventTrafficState(
+    extraTrafficRemainder = extraTrafficRemainder,
+    extraTrafficConsumed = extraTrafficConsumed,
   )
 }
 
 object TrafficState {
 
-  def fromProtoV0(
-      trafficStateP: v0.TrafficState
-  ): ParsingResult[TrafficState] = {
-    for {
-      timestamp <- ProtoConverter.parseRequired(
-        CantonTimestamp.fromProtoPrimitive,
-        "timestamp",
-        trafficStateP.timestamp,
-      )
-      value <- ProtoConverter
-        .parseNonNegativeLong(trafficStateP.extraTrafficRemainder)
-    } yield TrafficState(
-      extraTrafficRemainder = value,
-      timestamp = timestamp,
-    )
+  implicit val setResultParameter: SetParameter[TrafficState] = { (v: TrafficState, pp) =>
+    pp >> Some(v.extraTrafficRemainder.value)
+    pp >> Some(v.extraTrafficConsumed.value)
+    pp >> Some(v.baseTrafficRemainder.value)
+    pp >> v.timestamp
   }
 
+  implicit val getResultTrafficState: GetResult[Option[TrafficState]] = {
+    GetResult
+      .createGetTuple4(
+        nonNegativeLongOptionGetResult,
+        nonNegativeLongOptionGetResult,
+        nonNegativeLongOptionGetResult,
+        CantonTimestamp.getResultOptionTimestamp,
+      )
+      .andThen(_.mapN(TrafficState.apply))
+  }
+
+  def empty(timestamp: CantonTimestamp): TrafficState = TrafficState(
+    NonNegativeLong.zero,
+    NonNegativeLong.zero,
+    NonNegativeLong.zero,
+    timestamp,
+  )
 }

@@ -25,8 +25,8 @@ import json.*
 import util.FutureUtil.{either, eitherT}
 import util.Logging.{InstanceUUID, RequestID}
 import com.daml.jwt.domain.Jwt
-import com.daml.ledger.api.{v1 as lav1}
-import lav1.value.{Value as ApiValue}
+import com.daml.ledger.api.v1 as lav1
+import lav1.value.Value as ApiValue
 import scalaz.std.scalaFuture.*
 import scalaz.syntax.std.option.*
 import scalaz.{-\/, EitherT, Traverse, \/, \/-}
@@ -37,8 +37,10 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 import com.digitalasset.canton.ledger.client.services.admin.UserManagementClient
 import com.digitalasset.canton.ledger.client.services.identity.LedgerIdentityClient
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
+import com.daml.logging.LoggingContextOf
 import com.daml.metrics.api.MetricHandle.Timer.TimerHandle
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
 
 private[http] final class RouteSetup(
     allowNonHttps: Boolean,
@@ -47,7 +49,10 @@ private[http] final class RouteSetup(
     userManagementClient: UserManagementClient,
     ledgerIdentityClient: LedgerIdentityClient,
     maxTimeToCollectRequest: FiniteDuration,
-)(implicit ec: ExecutionContext, mat: Materializer) {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext, mat: Materializer)
+    extends NamedLogging
+    with NoTracing {
   import RouteSetup.*
   import encoder.implicits.*
   import util.ErrorOps.*
@@ -106,7 +111,7 @@ private[http] final class RouteSetup(
   ): ET[TimerHandle] =
     EitherT.pure(metrics.incomingJsonParsingAndValidationTimer.startAsync())
 
-    def input(req: HttpRequest)(implicit
+  def input(req: HttpRequest)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): Future[Error \/ (Jwt, String)] = {
     findJwt(req) match {
@@ -118,7 +123,7 @@ private[http] final class RouteSetup(
     }
   }
 
-    def inputSource(req: HttpRequest)(implicit
+  def inputSource(req: HttpRequest)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): Future[Error \/ (Jwt, JwtPayloadLedgerIdOnly, Source[ByteString, Any])] =
     findJwt(req) match {
@@ -134,7 +139,7 @@ private[http] final class RouteSetup(
   private[this] def data(entity: RequestEntity): Future[String] =
     entity.toStrict(maxTimeToCollectRequest).map(_.data.utf8String)
 
-    def inputJsVal(req: HttpRequest)(implicit
+  def inputJsVal(req: HttpRequest)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): ET[(Jwt, JsValue)] =
     for {
@@ -160,15 +165,13 @@ private[http] final class RouteSetup(
   ): Unauthorized \/ Unit =
     if (allowNonHttps || isForwardedForHttps(req.headers)) \/-(())
     else {
-      logger.warn(nonHttpsErrorMessage)
+      logger.warn(s"$nonHttpsErrorMessage, ${lc.makeString}")
       \/-(())
     }
 }
 
 object RouteSetup {
   import Endpoints.IntoEndpointsError
-
-  private val logger = ContextualizedLogger.get(getClass)
 
   private val nonHttpsErrorMessage =
     "missing HTTPS reverse-proxy request headers; for development launch with --allow-insecure-tokens"
@@ -184,12 +187,12 @@ object RouteSetup {
       "read_as" -> jwtPayload.readAs.toString,
     ).run(fn)
 
-    def handleFutureFailure[A](fa: Future[A])(implicit
+  def handleFutureFailure[A](fa: Future[A])(implicit
       ec: ExecutionContext
   ): Future[Error \/ A] =
     fa.map(a => \/-(a)).recover(Error.fromThrowable andThen (-\/(_)))
 
-    def handleFutureEitherFailure[A, B](fa: Future[A \/ B])(implicit
+  def handleFutureEitherFailure[A, B](fa: Future[A \/ B])(implicit
       ec: ExecutionContext,
       A: IntoEndpointsError[A],
   ): Future[Error \/ B] =

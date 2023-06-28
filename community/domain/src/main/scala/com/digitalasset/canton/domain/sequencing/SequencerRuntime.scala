@@ -69,7 +69,8 @@ object SequencerAuthenticationConfig {
 }
 
 /** Run a sequencer and its supporting services.
-  * @param authenticationConfig Authentication setup if supported, otherwise none.
+  *
+  * @param authenticationConfig   Authentication setup if supported, otherwise none.
   * @param staticDomainParameters The set of members to register on startup statically.
   */
 class SequencerRuntime(
@@ -144,6 +145,7 @@ class SequencerRuntime(
             Either.cond(keyO.nonEmpty, (), s"Missing sequencer keys at ${snapshot.referenceTime}.")
           }
       }
+
     def registerInitialMembers = {
       logger.debug("Registering initial sequencer members")
       // only register the sequencer itself if we have remote sequencers that will necessitate topology transactions
@@ -161,6 +163,7 @@ class SequencerRuntime(
             }
         )
     }
+
     for {
       _ <- keyCheckET
       _ <- registerInitialMembers.leftMap(_.toString)
@@ -211,7 +214,8 @@ class SequencerRuntime(
     }
   }
 
-  private val sequencerAdministrationService = new GrpcSequencerAdministrationService(sequencer)
+  private val sequencerAdministrationService =
+    new GrpcSequencerAdministrationService(sequencer, loggerFactory)
 
   private case class AuthenticationServices(
       memberAuthenticationService: MemberAuthenticationService,

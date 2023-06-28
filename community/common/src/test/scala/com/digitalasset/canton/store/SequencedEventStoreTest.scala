@@ -184,7 +184,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
       event: SignedContent[SequencedEvent[ClosedEnvelope]],
       traceContext: TraceContext = TraceContext.empty,
   ): OrdinarySerializedEvent =
-    OrdinarySequencedEvent(event)(traceContext)
+    OrdinarySequencedEvent(event, None)(traceContext)
 
   def mkEmptyIgnoredEvent(
       counter: Long,
@@ -469,7 +469,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
       val criterionBelow = ByTimestampRange(CantonTimestamp.MinValue, CantonTimestamp.Epoch)
       for {
         _ <- store.store(events)
-        _ <- store.prune(tsPrune).merge
+        _ <- store.prune(tsPrune)
         succeed <- store
           .findRange(ByTimestampRange(tsPrune.immediateSuccessor, ts4), None)
           .valueOrFail("successful range query")
@@ -608,7 +608,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
 
       for {
         _ <- store.store(Seq(firstDeliver, secondDeliver, deliver1, thirdDeliver, deliver2))
-        _ <- store.prune(ts2).merge
+        _ <- store.prune(ts2)
         eventsAfterPruning <- store.sequencedEvents()
       } yield {
         assert(

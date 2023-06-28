@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import cats.data.{Chain, EitherT}
+import cats.data.Chain
 import cats.kernel.Order
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
@@ -12,7 +12,6 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
-import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
@@ -41,7 +40,7 @@ class InMemoryActiveContractStore(
     val ec: ExecutionContext
 ) extends ActiveContractStore
     with NamedLogging
-    with InMemoryPrunableByTime[AcsError] {
+    with InMemoryPrunableByTime {
 
   import ActiveContractStore.*
   import InMemoryActiveContractStore.*
@@ -84,24 +83,25 @@ class InMemoryActiveContractStore(
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
-    Future.successful {
-      val snapshot = SortedMap.newBuilder[LfContractId, CantonTimestamp]
-      table.foreach { case (contractId, contractStatus) =>
-        contractStatus.activeBy(timestamp).foreach { activationTimestamp =>
-          snapshot += (contractId -> activationTimestamp)
-        }
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] = Future.successful {
+    val snapshot = SortedMap.newBuilder[LfContractId, (CantonTimestamp, TransferCounter)]
+    table.foreach { case (contractId, contractStatus) =>
+      contractStatus.activeBy(timestamp).foreach { case (activationTimestamp, transferCounterO) =>
+        snapshot += (contractId -> (activationTimestamp, transferCounterO
+          .getOrElse(TransferCounter.Genesis)))
       }
-      snapshot.result()
     }
+    snapshot.result()
+  }
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, RequestCounter]] = Future.successful {
-    val snapshot = SortedMap.newBuilder[LfContractId, RequestCounter]
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] = Future.successful {
+    val snapshot = SortedMap.newBuilder[LfContractId, (RequestCounter, TransferCounter)]
     table.foreach { case (contractId, contractStatus) =>
-      contractStatus.activeBy(rc).foreach { activationRc =>
-        snapshot += (contractId -> activationRc)
+      contractStatus.activeBy(rc).foreach { case (activationRc, transferCounterO) =>
+        snapshot += (contractId -> (activationRc, transferCounterO
+          .getOrElse(TransferCounter.Genesis)))
       }
     }
     snapshot.result()
@@ -114,7 +114,9 @@ class InMemoryActiveContractStore(
       contractIds
         .to(LazyList)
         .mapFilter(contractId =>
-          table.get(contractId).flatMap(_.activeBy(timestamp)).map(contractId -> _)
+          table.get(contractId).flatMap(_.activeBy(timestamp)).map { case (ts, _) =>
+            contractId -> ts
+          }
         )
         .toMap
     }
@@ -147,7 +149,7 @@ class InMemoryActiveContractStore(
 
   override def doPrune(
       beforeAndIncluding: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, AcsError, Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] = {
     table.foreach { case (coid, status) =>
       status.prune(beforeAndIncluding) match {
         case None => val _ = table.remove(coid)
@@ -161,7 +163,7 @@ class InMemoryActiveContractStore(
       }
     }
 
-    EitherT.rightT[Future, AcsError](())
+    Future.successful(())
   }
 
   override def deleteSince(
@@ -552,26 +554,30 @@ object InMemoryActiveContractStore {
     /** If the contract is active right after the given `timestamp`,
       * returns the [[com.digitalasset.canton.data.CantonTimestamp]] of the latest creation or latest transfer-in.
       */
-    def activeBy(timestamp: CantonTimestamp): Option[CantonTimestamp] = {
+    def activeBy(timestamp: CantonTimestamp): Option[(CantonTimestamp, TransferCounterO)] = {
       val iter = changes.iteratorFrom(ContractStatus.searchByTimestamp(timestamp))
       if (!iter.hasNext) { None }
       else {
-        val (change, _) = iter.next()
-        if (change.isActivation) Some(change.toc.timestamp) else None
+        val (change, detail) = iter.next()
+        if (change.isActivation) Some((change.toc.timestamp, detail.transferCounter)) else None
       }
     }
 
     /** If the contract is active right after the given `rc`,
       * returns the [[com.digitalasset.canton.RequestCounter]] of the latest creation or latest transfer-in.
       */
-    def activeBy(rc: RequestCounter): Option[RequestCounter] =
+    def activeBy(rc: RequestCounter): Option[(RequestCounter, TransferCounterO)] =
       changes
-        .collect {
-          case (activenessChange, _) if activenessChange.toc.rc <= rc => activenessChange
+        .filter { case (activenessChange, _) =>
+          activenessChange.toc.rc <= rc
         }
         .toSeq
-        .maxByOption(activenessChange => (activenessChange.toc, !activenessChange.isActivation))
-        .flatMap(change => Option.when(change.isActivation)(change.toc.rc))
+        .maxByOption { case (activenessChange, _) =>
+          (activenessChange.toc, !activenessChange.isActivation)
+        }
+        .flatMap { case (change, detail) =>
+          Option.when(change.isActivation)((change.toc.rc, detail.transferCounter))
+        }
 
     /** Returns the latest [[ActiveContractStore.ContractState]] if any */
     def latestState: Option[ContractState] = {
@@ -609,7 +615,7 @@ object InMemoryActiveContractStore {
 
     /** Returns a contract status that has all changes removed whose request counter is at least `criterion`. */
     def deleteSince(criterion: RequestCounter): ContractStatus = {
-      val affected = changes.headOption.exists { case (change, details) =>
+      val affected = changes.headOption.exists { case (change, _detail) =>
         change.toc.rc >= criterion
       }
       if (!affected) this

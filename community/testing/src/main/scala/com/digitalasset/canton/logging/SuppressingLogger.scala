@@ -198,7 +198,25 @@ class SuppressingLogger private[logging] (
   def assertLogs[A](within: => A, assertions: (LogEntry => Assertion)*)(implicit
       pos: source.Position
   ): A =
-    suppress(SuppressionRule.LevelAndAbove(WARN)) {
+    assertLogs(rule = SuppressionRule.LevelAndAbove(WARN))(within, assertions: _*)
+
+  /** Asserts that the sequence of logs captured by the suppression rule meets a given sequence of assertions.
+    * Use this if the expected sequence of logs is deterministic.
+    *
+    * This method will automatically use asynchronous suppression if `A` is `Future[_]`.
+    *
+    * The method will delete logged messages up to and including the first message on which an assertion fails.
+    *
+    * @throws java.lang.IllegalArgumentException if `T` is `EitherT` or `OptionT`, because the method cannot detect
+    *                                            whether asynchronous suppression is needed in this case.
+    *                                            Use `EitherT.value` or `OptionT`.value to work around this.
+    */
+  def assertLogs[A](
+      rule: SuppressionRule
+  )(within: => A, assertions: (LogEntry => Assertion)*)(implicit
+      pos: source.Position
+  ): A =
+    suppress(rule) {
       runWithCleanup(
         {
           within

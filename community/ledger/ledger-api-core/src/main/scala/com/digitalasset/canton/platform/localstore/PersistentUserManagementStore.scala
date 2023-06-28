@@ -85,6 +85,7 @@ object PersistentUserManagementStore {
       expiryAfterWriteInSeconds = cacheExpiryAfterWriteInSeconds,
       maximumCacheSize = maxCacheSize,
       metrics = metrics,
+      loggerFactory = loggerFactory,
     )(executionContext, LoggingContextWithTrace(loggerFactory))
   }
 }

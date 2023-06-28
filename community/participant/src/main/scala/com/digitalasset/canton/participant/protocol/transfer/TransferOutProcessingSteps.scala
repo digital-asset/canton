@@ -394,6 +394,7 @@ class TransferOutProcessingSteps(
       activenessF: FutureUnlessShutdown[ActivenessResult],
       pendingCursor: Future[Unit],
       mediator: MediatorRef,
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -486,8 +487,7 @@ class TransferOutProcessingSteps(
         contract = storedContract.contract,
         creatingTransactionId = creatingTransactionId,
         transferOutResult = None,
-        transferOutGlobalOffset = None,
-        transferInGlobalOffset = None,
+        transferGlobalOffset = None,
       )
       _ <- ifThenET(transferringParticipant) {
         transferCoordination.addTransferOutRequest(transferData).mapK(FutureUnlessShutdown.outcomeK)

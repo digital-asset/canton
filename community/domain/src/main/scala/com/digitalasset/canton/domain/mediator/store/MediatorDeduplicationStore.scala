@@ -9,7 +9,7 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore.DeduplicationData
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -42,8 +42,8 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
   /** Clients must call this method before any other method.
     *
     * @param firstEventTs the timestamp used to subscribe to the sequencer, i.e.,
-    *   all data with a requestTime greater than or equal to `firstEventTs` will be deleted so that
-    *   sequencer events can be replayed
+    *                     all data with a requestTime greater than or equal to `firstEventTs` will be deleted so that
+    *                     sequencer events can be replayed
     */
   def initialize(firstEventTs: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -128,7 +128,9 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
     * If some data is concurrently stored and pruned, some data may remain in the in-memory caches and / or in the database.
     * Such data will be deleted by a subsequent call to `prune`.
     */
-  def prune(upToInclusive: CantonTimestamp)(implicit traceContext: TraceContext): Future[Unit] = {
+  def prune(upToInclusive: CantonTimestamp, callerCloseContext: CloseContext)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
     requireInitialized()
 
     // Take a defensive copy so that we can safely iterate over it.
@@ -150,12 +152,15 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging with Fla
       }
     }
 
-    prunePersistentData(upToInclusive)
+    prunePersistentData(upToInclusive, callerCloseContext)
   }
 
   /** Delete all persistent data with `expireAt` before than or equal to `upToInclusive`.
     */
-  protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
+  protected def prunePersistentData(
+      upToInclusive: CantonTimestamp,
+      callerCloseContext: CloseContext,
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit]
 }
@@ -224,7 +229,10 @@ private[mediator] class InMemoryMediatorDeduplicationStore(
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
 
-  override protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
+  override protected def prunePersistentData(
+      upToInclusive: CantonTimestamp,
+      callerCloseContext: CloseContext,
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
 }
@@ -275,6 +283,7 @@ private[mediator] class DbMediatorDeduplicationStore(
     val processor: BatchAggregator.Processor[DeduplicationData, Unit] =
       new BatchAggregator.Processor[DeduplicationData, Unit] {
         override val kind: String = "deduplication data"
+
         override def logger: TracedLogger = DbMediatorDeduplicationStore.this.logger
 
         override def executeBatch(items: NonEmpty[Seq[Traced[DeduplicationData]]])(implicit
@@ -307,13 +316,23 @@ private[mediator] class DbMediatorDeduplicationStore(
     )
   }
 
-  override protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
+  override protected def prunePersistentData(
+      upToInclusive: CantonTimestamp,
+      callerCloseContext: CloseContext,
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] = processingTime.event {
-    storage.update_(
-      sqlu"""delete from mediator_deduplication_store
+    CloseContext.withCombinedContextF(
+      implicitly[CloseContext],
+      callerCloseContext,
+      timeouts,
+      logger,
+    ) { implicit closeContext =>
+      storage.update_(
+        sqlu"""delete from mediator_deduplication_store
           where mediator_id = $mediatorId and expire_after <= $upToInclusive""",
-      functionFullName,
-    )
+        functionFullName,
+      )
+    }
   }
 }

@@ -38,6 +38,7 @@ final case class TransactionValidationResult(
     viewValidationResults: Map[ViewHash, ViewValidationResult],
     timeValidationResultE: Either[TimeCheckFailure, Unit],
     hostedWitnesses: Set[LfPartyId],
+    replayCheckResult: Option[String],
 ) {
 
   def commitSet(

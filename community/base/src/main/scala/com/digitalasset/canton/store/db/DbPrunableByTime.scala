@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.store.db
 
-import cats.data.EitherT
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -21,7 +20,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * The pruning method of the store must use [[advancePruningTimestamp]] to signal the start end completion
   * of each pruning.
   */
-trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
+trait DbPrunableByTime[PartitionKey] extends PrunableByTime {
   this: DbStore =>
 
   protected[this] implicit def setParameterDiscriminator: SetParameter[PartitionKey]
@@ -48,18 +47,18 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
 
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): EitherT[Future, E, Option[PruningStatus]] =
-    EitherT.right[E](processingTime.event {
+  ): Future[Option[PruningStatus]] =
+    processingTime.event {
       val query = sql"""
         select phase, ts from #$pruning_status_table
         where #$partitionColumn = $partitionKey
         """.as[PruningStatus].headOption
       storage.query(query, functionFullName)
-    })
+    }
 
   protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
       implicit traceContext: TraceContext
-  ): EitherT[Future, E, Unit] = processingTime.eitherTEvent {
+  ): Future[Unit] = processingTime.event {
     val query = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         sqlu"""
@@ -103,7 +102,7 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
     )
 
     for {
-      rowCount <- EitherT.right(storage.update(query, "pruning status upsert"))
+      rowCount <- storage.update(query, "pruning status upsert")
       _ <-
         if (logger.underlying.isDebugEnabled && rowCount != 1 && phase == PruningPhase.Started) {
           pruningStatus.map {
@@ -113,7 +112,7 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
               )
             case _ =>
           }
-        } else EitherT.pure[Future, E](())
+        } else Future.successful(())
     } yield {
       logger.debug(
         s"Finished setting phase of $pruning_status_table to \"${phase.kind}\" and timestamp to $timestamp"
@@ -123,7 +122,7 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
 }
 
 /** Specialized [[DbPrunableByTime]] that uses the [[com.digitalasset.canton.topology.DomainId]] as discriminator */
-trait DbPrunableByTimeDomain[E] extends DbPrunableByTime[IndexedDomain, E] {
+trait DbPrunableByTimeDomain extends DbPrunableByTime[IndexedDomain] {
   this: DbStore =>
 
   protected[this] def domainId: IndexedDomain

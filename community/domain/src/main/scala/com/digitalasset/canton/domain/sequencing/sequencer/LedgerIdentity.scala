@@ -31,7 +31,6 @@ object LedgerIdentity {
   }
 }
 
-// TODO(i11028): use length-limited strings here
 /** The address of an Ethereum account is derived by taking the last 20 bytes
   * of the Keccak-256 hash of the public key and adding 0x to the beginning. See, e.g.,
   * [here](https://ethereum.org/en/developers/docs/accounts/#account-creation) as a reference.
@@ -47,7 +46,6 @@ final case class EthereumAccount(address: String) extends LedgerIdentity {
 
 object EthereumAccount {
   def create(address: String): Either[String, EthereumAccount] = {
-    // TODO(i11028): add more validation here (e.g. like org.web3j.crypto.WalletUtils.isValidAddress(publicAddress))
     Right(new EthereumAccount(address))
   }
 

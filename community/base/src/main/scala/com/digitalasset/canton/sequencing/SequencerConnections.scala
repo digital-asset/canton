@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.domain.api.{v0, v1}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequiredNonEmpty}
@@ -125,6 +125,14 @@ object SequencerConnections
       new SequencerConnections(connections.map(conn => (conn.sequencerAlias, conn)).toMap)(
         protocolVersionRepresentativeFor(ProtocolVersion.dev)
       )
+  }
+
+  def tryMany(connections: Seq[SequencerConnection]): SequencerConnections = {
+    require(
+      connections.map(_.sequencerAlias).toSet.size == connections.size,
+      "Non-unique sequencer aliases detected",
+    )
+    many(NonEmptyUtil.fromUnsafe(connections))
   }
 
   private def fromProtoV0V1(

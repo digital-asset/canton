@@ -13,8 +13,8 @@ import com.daml.fetchcontracts.util.{
   ContractStreamStep,
   InsertDeleteStep,
 }
-import com.daml.fetchcontracts.util.GraphExtensions._
-import com.daml.http.EndpointsCompanion._
+import com.daml.fetchcontracts.util.GraphExtensions.*
+import com.daml.http.EndpointsCompanion.*
 import com.daml.http.domain.{
   ContractKeyStreamRequest,
   JwtPayload,
@@ -26,19 +26,19 @@ import com.daml.http.LedgerClientJwt.Terminates
 import util.ApiValueToLfValueConverter.apiValueToLfValue
 import util.toLedgerId
 import ContractStreamStep.{Acs, LiveBegin, Txn}
-import json.JsonProtocol.LfValueCodec.{apiValueToJsValue => lfValueToJsValue}
+import json.JsonProtocol.LfValueCodec.apiValueToJsValue as lfValueToJsValue
 import query.ValuePredicate.{LfV, TypeLookup}
 import com.daml.jwt.domain.Jwt
 import com.daml.http.query.ValuePredicate
-import scalaz.syntax.bifunctor._
-import scalaz.syntax.std.boolean._
-import scalaz.syntax.std.option._
-import scalaz.std.scalaFuture._
-import scalaz.std.map._
-import scalaz.std.option._
-import scalaz.std.tuple._
-import scalaz.syntax.traverse._
-import scalaz.std.list._
+import scalaz.syntax.bifunctor.*
+import scalaz.syntax.std.boolean.*
+import scalaz.syntax.std.option.*
+import scalaz.std.scalaFuture.*
+import scalaz.std.map.*
+import scalaz.std.option.*
+import scalaz.std.tuple.*
+import scalaz.syntax.traverse.*
+import scalaz.std.list.*
 import scalaz.{-\/, Foldable, Liskov, NonEmptyList, Tag, \/, \/-}
 import Liskov.<~<
 import com.daml.fetchcontracts.domain.ResolvedQuery
@@ -47,18 +47,18 @@ import com.daml.fetchcontracts.domain.ContractTypeId.OptionalPkg
 import com.daml.http.metrics.HttpApiMetrics
 import com.daml.http.util.FlowUtil.allowOnlyFirstInput
 import com.daml.http.util.Logging.{InstanceUUID, RequestID, extendWithRequestIdLogCtx}
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
-import spray.json.{JsArray, JsObject, JsValue, JsonReader, JsonWriter, enrichAny => `sj enrichAny`}
+import com.daml.logging.LoggingContextOf
+import spray.json.{JsArray, JsObject, JsValue, JsonReader, JsonWriter, enrichAny as `sj enrichAny`}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scalaz.EitherT.{either, eitherT, rightT}
-import com.digitalasset.canton.ledger.api.{domain => LedgerApiDomain}
+import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
 
-object WebSocketService {
-  import util.ErrorOps._
-
-  private val logger = ContextualizedLogger.get(getClass)
+object WebSocketService extends NoTracing {
+  import util.ErrorOps.*
 
   private type CompiledQueries =
     NonEmpty[Map[domain.ContractTypeId.Resolved, (ValuePredicate, LfV => Boolean)]]
@@ -96,12 +96,13 @@ object WebSocketService {
         domain.ArchivedContract,
         (domain.ActiveContract.ResolvedCtTyId[LfVT], Pos),
       ],
-  ) {
-    import JsonProtocol._
+      loggerFactory: NamedLoggerFactory,
+  ) extends NamedLogging {
+    import JsonProtocol.*
 
     def logHiddenErrors()(implicit lc: LoggingContextOf[InstanceUUID]): Unit =
       errors foreach { case ServerError(reason) =>
-        logger.error(s"while rendering contract", reason)
+        logger.error(s"while rendering contract, ${lc.makeString}", reason)
       }
 
     def render(implicit lfv: LfVT <~< JsValue, pos: Pos <~< Map[String, JsValue]): JsObject = {
@@ -128,7 +129,7 @@ object WebSocketService {
     }
 
     def append[P >: Pos, A >: LfVT](o: StepAndErrors[P, A]): StepAndErrors[P, A] =
-      StepAndErrors(errors ++ o.errors, step append o.step)
+      StepAndErrors(errors ++ o.errors, step append o.step, loggerFactory)
 
     def mapLfv[A](f: LfVT => A): StepAndErrors[Pos, A] =
       copy(step = step mapPreservingIds (_ leftMap (_ map f)))
@@ -146,7 +147,7 @@ object WebSocketService {
     jv match {
       case JsObject(fields) =>
         fields get "offset" map { offJv =>
-          import JsonProtocol._
+          import JsonProtocol.*
           if (fields.sizeIs > 1)
             -\/(InvalidUserInput("offset must be specified as a leading, separate object message"))
           else
@@ -164,9 +165,9 @@ object WebSocketService {
       .batchWeighted(
         max = maxCost,
         costFn = {
-          case StepAndErrors(errors, ContractStreamStep.LiveBegin(_)) =>
+          case StepAndErrors(errors, ContractStreamStep.LiveBegin(_), _) =>
             1L + errors.length
-          case StepAndErrors(errors, step) =>
+          case StepAndErrors(errors, step, _) =>
             val InsertDeleteStep(inserts, deletes) = step.toInsertDelete
             errors.length.toLong + (inserts.length * 2) + deletes.size
         },
@@ -268,7 +269,7 @@ object WebSocketService {
       )(implicit
           lc: LoggingContextOf[InstanceUUID]
       ) = {
-        import JsonProtocol._
+        import JsonProtocol.*
         Future.successful(
           SprayJson
             .decode[SearchForeverRequest](jv)
@@ -285,7 +286,7 @@ object WebSocketService {
       )(implicit
           lc: LoggingContextOf[InstanceUUID]
       ): Future[Error \/ ResolvedQueryRequest[_]] = {
-        import scalaz.syntax.foldable._
+        import scalaz.syntax.foldable.*
 
         def resolveIds(
             sfq: domain.SearchForeverQuery
@@ -383,15 +384,15 @@ object WebSocketService {
           lc: LoggingContextOf[InstanceUUID]
       ): Future[StreamPredicate[Positive]] = {
 
-        import scalaz.syntax.foldable._
-        import util.Collections._
+        import scalaz.syntax.foldable.*
+        import util.Collections.*
 
         val indexedOffsets: Vector[Option[domain.Offset]] =
           request.queriesWithPos.map { case (q, _) => q.offset }.toVector
 
         def matchesOffset(queryIndex: Int, maybeEventOffset: Option[domain.Offset]): Boolean = {
           import domain.Offset.`Offset ordering`
-          import scalaz.syntax.order._
+          import scalaz.syntax.order.*
           val matches =
             for {
               queryOffset <- indexedOffsets(queryIndex)
@@ -428,7 +429,7 @@ object WebSocketService {
         }
 
         val q = {
-          import scalaz.syntax.foldable1._
+          import scalaz.syntax.foldable1.*
           request.queriesWithPos.zipWithIndex // index is used to ensure matchesOffset works properly
             .map { case ((q, pos), ix) => (q, pos, ix) }
             .toNEF
@@ -456,7 +457,7 @@ object WebSocketService {
 
       override def renderCreatedMetadata(p: Positive) =
         Map {
-          import JsonProtocol._
+          import JsonProtocol.*
           "matchedQueries" -> p.toJson
         }
 
@@ -484,7 +485,7 @@ object WebSocketService {
           )
         )
 
-      import scalaz.syntax.foldable1._
+      import scalaz.syntax.foldable1.*
       import domain.Offset.`Offset ordering`
       import scalaz.std.option.optionOrder
 
@@ -512,7 +513,7 @@ object WebSocketService {
       ec: ExecutionContext
   ): StreamRequestParser[domain.ContractKeyStreamRequest[_, _]] =
     new StreamRequestParser[domain.ContractKeyStreamRequest[_, _]] {
-      import JsonProtocol._
+      import JsonProtocol.*
 
       override def parse(
           resumingAtOffset: Boolean,
@@ -685,23 +686,26 @@ class WebSocketService(
     decoder: DomainJsonDecoder,
     lookupType: ValuePredicate.TypeLookup,
     wsConfig: Option[WebsocketConfig],
-)(implicit mat: Materializer, ec: ExecutionContext) {
+    val loggerFactory: NamedLoggerFactory,
+)(implicit mat: Materializer, ec: ExecutionContext)
+    extends NamedLogging
+    with NoTracing {
 
-  import WebSocketService._
+  import WebSocketService.*
   import com.daml.scalautil.Statement.discard
-  import util.ErrorOps._
-  import com.daml.http.json.JsonProtocol._
+  import util.ErrorOps.*
+  import com.daml.http.json.JsonProtocol.*
 
   private val config = wsConfig.getOrElse(WebsocketConfig())
 
   private val numConns = new java.util.concurrent.atomic.AtomicInteger(0)
 
-   def transactionMessageHandler[A: StreamRequestParser](
+  def transactionMessageHandler[A: StreamRequestParser](
       jwt: Jwt,
       jwtPayload: JwtPayload,
   )(implicit
-    lc: LoggingContextOf[InstanceUUID],
-    metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID],
+      metrics: HttpApiMetrics,
   ): Flow[Message, Message, _] =
     wsMessageHandler[A](jwt, jwtPayload)
       .via(applyConfig)
@@ -713,15 +717,15 @@ class WebSocketService(
       .throttle(config.throttleElem, config.throttlePer, config.maxBurst, config.mode)
 
   private def connCounter[A](implicit
-                             lc: LoggingContextOf[InstanceUUID],
-                             metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID],
+      metrics: HttpApiMetrics,
   ): Flow[A, A, NotUsed] =
     Flow[A]
       .watchTermination() { (_, future) =>
         val afterInc = numConns.incrementAndGet()
         metrics.websocketRequestCounter.inc()
         logger.info(
-          s"New websocket client has connected, current number of clients:$afterInc"
+          s"New websocket client has connected, current number of clients:$afterInc, ${lc.makeString}"
         )
         future onComplete { td =>
           def msg = td.fold(
@@ -730,7 +734,7 @@ class WebSocketService(
           )
           val afterDec = numConns.decrementAndGet()
           metrics.websocketRequestCounter.dec()
-          logger.info(s"Websocket client $msg number of clients: $afterDec")
+          logger.info(s"Websocket client $msg number of clients: $afterDec, ${lc.makeString}")
         }
         NotUsed
       }
@@ -791,7 +795,7 @@ class WebSocketService(
             jwtPayload.parties,
             offPrefix,
             rq.q: q,
-          ) via logTermination("getTransactionSourceForParty")
+          ) via logTermination(logger, "getTransactionSourceForParty")
         }.valueOr(e => Source.single(-\/(e))): Source[Error \/ Message, NotUsed],
       )
       .takeWhile(_.isRight, inclusive = true) // stop after emitting 1st error
@@ -842,7 +846,7 @@ class WebSocketService(
   private[this] def liveBegin(
       bookmark: BeginBookmark[domain.Offset]
   ): Source[StepAndErrors[Nothing, Nothing], NotUsed] =
-    Source.single(StepAndErrors(Seq.empty, ContractStreamStep.LiveBegin(bookmark)))
+    Source.single(StepAndErrors(Seq.empty, ContractStreamStep.LiveBegin(bookmark), loggerFactory))
 
   // simple alias to avoid passing in the class parameters
   private[this] def queryPredicate[A](
@@ -896,7 +900,7 @@ class WebSocketService(
             liveStartingOffset,
             Terminates.Never,
           )
-          .via(logTermination("insertDeleteStepSource with ACS"))
+          .via(logTermination(logger, "insertDeleteStepSource with ACS"))
           .via(
             convertFilterContracts(
               resolvedQuery,
@@ -920,14 +924,14 @@ class WebSocketService(
             _.map { acsAndLiveMarker =>
               acsAndLiveMarker
                 .mapAsync(1) {
-                  case acs @ StepAndErrors(_, Acs(_)) if acs.nonEmpty =>
+                  case acs @ StepAndErrors(_, Acs(_), _) if acs.nonEmpty =>
                     Future.successful(Source.single(acs))
-                  case StepAndErrors(_, Acs(_)) =>
+                  case StepAndErrors(_, Acs(_), _) =>
                     Future.successful(Source.empty)
-                  case liveBegin @ StepAndErrors(_, LiveBegin(offset)) =>
+                  case liveBegin @ StepAndErrors(_, LiveBegin(offset), _) =>
                     val acsEnd = offset.toOption.map(domain.StartingOffset(_))
                     liveFrom(resolvedQuery)(acsEnd).map(it => Source.single(liveBegin) ++ it)
-                  case txn @ StepAndErrors(_, Txn(_, offset)) =>
+                  case txn @ StepAndErrors(_, Txn(_, offset), _) =>
                     val acsEnd = Some(domain.StartingOffset(offset))
                     liveFrom(resolvedQuery)(acsEnd).map(it => Source.single(txn) ++ it)
                 }
@@ -946,7 +950,7 @@ class WebSocketService(
                     liveStartingOffset,
                     Terminates.Never,
                   )
-                  .via(logTermination("insertDeleteStepSource without ACS"))
+                  .via(logTermination(logger, "insertDeleteStepSource without ACS"))
                   .via(
                     convertFilterContracts(
                       resolvedQuery,
@@ -1007,7 +1011,7 @@ class WebSocketService(
   }
 
   private def offsetTick[Pos](offset: BeginBookmark[domain.Offset]) =
-    StepAndErrors[Pos, JsValue](Seq.empty, LiveBegin(offset))
+    StepAndErrors[Pos, JsValue](Seq.empty, LiveBegin(offset), loggerFactory)
 
   private def removePhantomArchives[A, B](remove: Option[Set[domain.ContractId]]) =
     remove.cata(removePhantomArchives_[A, B], Flow[StepAndErrors[A, B]])
@@ -1018,7 +1022,7 @@ class WebSocketService(
     import ContractStreamStep.{LiveBegin, Txn, Acs}
     Flow[StepAndErrors[A, B]]
       .scan((Tag unsubst initialState, Option.empty[StepAndErrors[A, B]])) {
-        case ((s0, _), a0 @ StepAndErrors(_, Txn(idstep, _))) =>
+        case ((s0, _), a0 @ StepAndErrors(_, Txn(idstep, _), _)) =>
           val newInserts: Vector[String] =
             domain.ContractId.unsubst(idstep.inserts.map(_._1.contractId))
           val (deletesToEmit, deletesToHold) = s0 partition idstep.deletes.keySet
@@ -1027,23 +1031,23 @@ class WebSocketService(
 
           (s1, if (a1.nonEmpty) Some(a1) else None)
 
-        case ((deletesToHold, _), a0 @ StepAndErrors(_, Acs(inserts))) =>
+        case ((deletesToHold, _), a0 @ StepAndErrors(_, Acs(inserts), _)) =>
           val newInserts: Vector[String] = domain.ContractId.unsubst(inserts.map(_._1.contractId))
           val s1: Set[String] = deletesToHold ++ newInserts
           (s1, Some(a0))
 
-        case ((s0, _), a0 @ StepAndErrors(_, LiveBegin(_))) =>
+        case ((s0, _), a0 @ StepAndErrors(_, LiveBegin(_), loggerFactory)) =>
           (s0, Some(a0))
       }
       .collect { case (_, Some(x)) => x }
   }
 
-   def wsErrorMessage(error: Error)(implicit
+  def wsErrorMessage(error: Error)(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): TextMessage.Strict =
-    wsMessage(SprayJson.encodeUnsafe(errorResponse(error)))
+    wsMessage(SprayJson.encodeUnsafe(errorResponse(error, logger)))
 
-   def wsMessage(jsVal: JsValue): TextMessage.Strict =
+  def wsMessage(jsVal: JsValue): TextMessage.Strict =
     TextMessage(jsVal.compactPrint)
 
   private def convertFilterContracts[Pos](
@@ -1070,6 +1074,7 @@ class WebSocketService(
               fn(ac, dstep.bookmark.flatMap(_.toOption)).map((ac, _)).toList
             }
           },
+          loggerFactory,
         )
       }
       .via(conflation)

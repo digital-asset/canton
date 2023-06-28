@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.data.EitherT
-import cats.syntax.either.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
@@ -18,7 +16,7 @@ import com.digitalasset.canton.protocol.{LfContractId, SourceDomainId, TargetDom
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{RequestCounter, TransferCounterO}
+import com.digitalasset.canton.{RequestCounter, TransferCounter, TransferCounterO}
 
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -66,12 +64,12 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] =
     Future.failed(mk(s"snapshot at $timestamp"))
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, RequestCounter]] =
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] =
     Future.failed(mk(s"snapshot at $rc"))
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
@@ -83,21 +81,20 @@ class ThrowingAcs[T <: Throwable](mk: String => T)(override implicit val ec: Exe
 
   override protected[canton] def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Unit] =
-    EitherT(Future.failed[Either[AcsError, Unit]](mk(s"doPrune at $beforeAndIncluding")))
+  ): Future[Unit] =
+    Future.failed(mk(s"doPrune at $beforeAndIncluding"))
 
   override protected[canton] def advancePruningTimestamp(
       phase: PruningPhase,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): EitherT[Future, AcsError, Unit] = {
-    EitherT(Future.failed[Either[AcsError, Unit]](mk(s"advancePruningTimestamp")))
-  }
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    Future.failed(mk(s"advancePruningTimestamp"))
 
   /** Always returns [[scala.None$]] so that the failure does not happen while checking the invariant. */
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Option[PruningStatus]] =
-    EitherT(Future.successful(Either.right[AcsError, Option[PruningStatus]](None)))
+  ): Future[Option[PruningStatus]] =
+    Future.successful(None)
 
   override def deleteSince(criterion: RequestCounter)(implicit
       traceContext: TraceContext

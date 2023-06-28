@@ -38,6 +38,7 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 
 trait SequencerParameters {
   def maxBurstFactor: PositiveDouble
+
   def processingTimeouts: ProcessingTimeout
 }
 
@@ -146,7 +147,7 @@ object SequencerRuntimeFactory {
         agreementManager,
         memberAuthenticationServiceFactory,
         topologyStateForInitializationService,
-        Option.empty[SequencerRateLimitManager],
+        rateLimitManager,
         loggerFactory,
       )
       ret.initialize().map(_ => ret)

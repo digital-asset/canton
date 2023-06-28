@@ -81,7 +81,8 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
             SymbolicCrypto.emptySignature,
             None,
             testedProtocolVersion,
-          )
+          ),
+          None,
         )(traceContext)
       TimeProof.fromEventO(event).value
     }

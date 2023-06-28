@@ -28,9 +28,10 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
     new PartyStorageBackendTemplate(PostgresQueryStrategy, ledgerEndCache)
 
   override def createCompletionStorageBackend(
-      stringInterning: StringInterning
+      stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): CompletionStorageBackend =
-    new CompletionStorageBackendTemplate(PostgresQueryStrategy, stringInterning)
+    new CompletionStorageBackendTemplate(PostgresQueryStrategy, stringInterning, loggerFactory)
 
   override def createContractStorageBackend(
       ledgerEndCache: LedgerEndCache,
@@ -41,10 +42,12 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
   override def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): EventStorageBackend =
     new PostgresEventStorageBackend(
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
+      loggerFactory = loggerFactory,
     )
 
   override val createDataSourceStorageBackend: DataSourceStorageBackend =

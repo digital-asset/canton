@@ -317,13 +317,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map(contractId -> someContractDriverMetadata),
       )
@@ -401,13 +401,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         contractMetadata = Map(contractId -> someContractDriverMetadata),
         hostedWitnesses = Nil,
       )
@@ -496,13 +496,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map.empty,
       )
@@ -597,13 +597,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         contractMetadata = Map.empty,
         hostedWitnesses = Nil,
       )
@@ -700,13 +700,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map.empty,
       )
@@ -795,13 +795,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         contractMetadata = Map.empty,
         hostedWitnesses = Nil,
       )
@@ -918,13 +918,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeCId = builder.add(exerciseNodeC, exerciseNodeAId)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map.empty,
       )
@@ -1104,13 +1104,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeCId = builder.add(exerciseNodeC, exerciseNodeAId)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         contractMetadata = Map.empty,
         hostedWitnesses = Nil,
       )
@@ -1276,13 +1276,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       builder.add(lookupByKeyNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map.empty,
       )
@@ -1344,13 +1344,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map.empty,
       )
@@ -1467,14 +1467,14 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
         hostedWitnesses = Nil,
-        blindingInfo = None,
+        blindingInfoO = None,
         contractMetadata = Map(contractId -> someContractDriverMetadata),
       )
       val dtos = updateToDtos(update)
@@ -1613,14 +1613,14 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val exerciseNodeId = builder.add(exerciseNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts =
           List(state.DivulgedContract(createNode.coid, createNode.versionedCoinst)),
-        blindingInfo = Some(
+        blindingInfoO = Some(
           BlindingInfo(
             disclosure = Map(exerciseNodeId -> Set(Ref.Party.assertFromString("disclosee"))),
             divulgence = Map(createNode.coid -> Set(Ref.Party.assertFromString("divulgee"))),
@@ -1743,13 +1743,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       builder.add(exerciseNode, rollbackNodeId)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = Some(completionInfo),
+        completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map.empty,
       )
@@ -1814,13 +1814,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = None,
+        completionInfoO = None,
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = Ref.TransactionId.assertFromString("TransactionId"),
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map(contractId -> someContractDriverMetadata),
       )
@@ -1876,13 +1876,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
       val update = state.Update.TransactionAccepted(
-        optCompletionInfo = None,
+        completionInfoO = None,
         transactionMeta = transactionMeta,
         transaction = transaction,
         transactionId = transactionId,
         recordTime = someRecordTime,
         divulgedContracts = List.empty,
-        blindingInfo = None,
+        blindingInfoO = None,
         hostedWitnesses = Nil,
         contractMetadata = Map.empty,
       )
@@ -2011,13 +2011,13 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             ) =>
           val completionInfo = someCompletionInfo.copy(optDeduplicationPeriod = deduplicationPeriod)
           val update = state.Update.TransactionAccepted(
-            optCompletionInfo = Some(completionInfo),
+            completionInfoO = Some(completionInfo),
             transactionMeta = transactionMeta,
             transaction = transaction,
             transactionId = transactionId,
             recordTime = someRecordTime,
             divulgedContracts = List.empty,
-            blindingInfo = None,
+            blindingInfoO = None,
             hostedWitnesses = Nil,
             contractMetadata = Map(contractId -> someContractDriverMetadata),
           )

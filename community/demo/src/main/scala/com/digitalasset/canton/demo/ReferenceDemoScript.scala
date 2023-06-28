@@ -149,7 +149,7 @@ class ReferenceDemoScript(
     participant.domains.register(
       DomainConnectionConfig(
         name,
-        SequencerConnections.single(connection), // TODO(i12076): Support multiple sequencers
+        SequencerConnections.single(connection),
         manualConnect = autoApprove,
       )
     )

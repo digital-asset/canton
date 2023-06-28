@@ -39,6 +39,11 @@ object ParticipantInitConfig {
             "identity.generate-legal-identity-certificate",
           )
         )
+
+        override def deprecatePath: List[DeprecatedConfigUtils.DeprecatedConfigPath[_]] = List(
+          DeprecatedConfigUtils
+            .DeprecatedConfigPath[Boolean]("parameters.unique-contract-keys", "2.7.0")
+        )
       }
   }
 
@@ -52,6 +57,7 @@ object ParticipantInitConfig {
 
   /** Init configuration of the ledger API for participant nodes
     * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
+    *                           This parameter is now deprecated and ignored for service versions targeting the next major version
     */
   final case class ParticipantParametersInitConfig(
       uniqueContractKeys: Boolean = true

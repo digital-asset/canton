@@ -63,7 +63,7 @@ private[backend] trait StorageBackendTestsMigrationPruning
     executeSql(
       backend.event.pruneEvents(offset(2), pruneAllDivulgedContracts = true)(
         _,
-        loggingContext,
+        traceContext,
       )
     )
 

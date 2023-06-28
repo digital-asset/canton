@@ -18,7 +18,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.Update
 import com.digitalasset.canton.ledger.sandbox.BridgeConfig
 import com.digitalasset.canton.ledger.sandbox.bridge.validate.ConflictCheckingLedgerBridge
 import com.digitalasset.canton.ledger.sandbox.domain.Submission
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.primitives.Longs
 
@@ -38,6 +38,7 @@ object LedgerBridge {
       servicesThreadPoolSize: Int,
       timeProvider: TimeProvider,
       stageBufferSize: Int,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       loggingContext: LoggingContext,
       servicesExecutionContext: ExecutionContext,
@@ -50,6 +51,7 @@ object LedgerBridge {
         servicesThreadPoolSize,
         timeProvider,
         stageBufferSize,
+        loggerFactory,
       )
     else
       ResourceOwner.forValue(() => new PassThroughLedgerBridge(participantId, timeProvider))
@@ -61,6 +63,7 @@ object LedgerBridge {
       servicesThreadPoolSize: Int,
       timeProvider: TimeProvider,
       stageBufferSize: Int,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       loggingContext: LoggingContext,
       servicesExecutionContext: ExecutionContext,
@@ -89,6 +92,7 @@ object LedgerBridge {
         .map(_.maxDeduplicationDuration)
         .getOrElse(BridgeConfig.DefaultMaximumDeduplicationDuration),
       stageBufferSize = stageBufferSize,
+      loggerFactory = loggerFactory,
     )
   }
   private[bridge] def packageUploadSuccess(
@@ -151,13 +155,13 @@ object LedgerBridge {
         }
         .toMap
     Update.TransactionAccepted(
-      optCompletionInfo = completionInfo,
+      completionInfoO = completionInfo,
       transactionMeta = transactionSubmission.transactionMeta,
       transaction = CommittedTransaction(submittedTransaction),
       transactionId = Ref.TransactionId.assertFromString(index.toString),
       recordTime = currentTimestamp,
       divulgedContracts = Nil,
-      blindingInfo = None,
+      blindingInfoO = None,
       hostedWitnesses = Nil,
       contractMetadata = contractMetadata,
     )

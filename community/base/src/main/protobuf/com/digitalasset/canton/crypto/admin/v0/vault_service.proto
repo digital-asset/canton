@@ -51,6 +51,20 @@ service VaultService {
   rpc GenerateEncryptionKey(GenerateEncryptionKeyRequest) returns (GenerateEncryptionKeyResponse);
 
   /**
+   * Registers a KMS key for asymmetric/hybrid encryption.
+   *
+   * Stores the corresponding public key in the vault, and returns it
+   */
+  rpc RegisterKmsEncryptionKey(RegisterKmsEncryptionKeyRequest) returns (RegisterKmsEncryptionKeyResponse);
+
+  /**
+   * Registers a KMS key for signing.
+   *
+   * Stores the corresponding public key in the vault, and returns it
+   */
+  rpc RegisterKmsSigningKey(RegisterKmsSigningKeyRequest) returns (RegisterKmsSigningKeyResponse);
+
+  /**
    * Import a public key into the registry in order to provide that Fingerprint -> PublicKey lookups
    *
    * @param: ImportPublicKeyRequest serialized public key to be imported
@@ -87,6 +101,12 @@ service VaultService {
   rpc RotateWrapperKey(RotateWrapperKeyRequest) returns (google.protobuf.Empty);
 
   rpc GetWrapperKeyId(GetWrapperKeyIdRequest) returns (GetWrapperKeyIdResponse);
+
+  rpc ExportKeyPair(ExportKeyPairRequest) returns (ExportKeyPairResponse);
+
+  rpc ImportKeyPair(ImportKeyPairRequest) returns (ImportKeyPairResponse);
+
+  rpc DeleteKeyPair(DeleteKeyPairRequest) returns (DeleteKeyPairResponse);
 }
 
 message GenerateCertificateRequest {
@@ -183,6 +203,28 @@ message GenerateEncryptionKeyResponse {
   com.digitalasset.canton.crypto.v0.EncryptionPublicKey public_key = 1;
 }
 
+message RegisterKmsSigningKeyRequest {
+  string kms_key_id = 1;
+
+  // optional descriptive name for the key
+  string name = 2;
+}
+
+message RegisterKmsSigningKeyResponse {
+  com.digitalasset.canton.crypto.v0.SigningPublicKey public_key = 1;
+}
+
+message RegisterKmsEncryptionKeyRequest {
+  string kms_key_id = 1;
+
+  // optional descriptive name for the key
+  string name = 2;
+}
+
+message RegisterKmsEncryptionKeyResponse {
+  com.digitalasset.canton.crypto.v0.EncryptionPublicKey public_key = 1;
+}
+
 message RotateWrapperKeyRequest {
   string new_wrapper_key_id = 1;
 }
@@ -192,3 +234,28 @@ message GetWrapperKeyIdRequest {}
 message GetWrapperKeyIdResponse {
   string wrapper_key_id = 1;
 }
+
+message ExportKeyPairRequest {
+  // The id of the keypair to export
+  string fingerprint = 1;
+
+  // The protocol version that defines the serialization of the keypair
+  int32 protocol_version = 2;
+}
+
+message ExportKeyPairResponse {
+  bytes key_pair = 1;
+}
+
+message ImportKeyPairRequest {
+  bytes key_pair = 1;
+  string name = 2;
+}
+
+message ImportKeyPairResponse {}
+
+message DeleteKeyPairRequest {
+  string fingerprint = 1;
+}
+
+message DeleteKeyPairResponse {}

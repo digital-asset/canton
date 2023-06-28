@@ -104,7 +104,7 @@ object TimeProof {
         "Time Proof event should have no envelopes",
       )
       _ <- Either.cond(
-        deliver.messageId.exists(isTimeEventMessageId),
+        deliver.messageIdO.exists(isTimeEventMessageId),
         (),
         "Time Proof event should have an expected message id",
       )

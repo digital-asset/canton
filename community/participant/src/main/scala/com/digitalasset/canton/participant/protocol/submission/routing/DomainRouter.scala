@@ -8,7 +8,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
-import com.daml.lf.data.ImmArray
+import com.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.ProcessedDisclosedContract
@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
   TransactionSubmitted,
 }
+import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter.inputContractRoutingParties
 import com.digitalasset.canton.participant.protocol.{
   SerializableContractAuthenticator,
   SerializableContractAuthenticatorImpl,
@@ -51,8 +52,8 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{EitherTUtil, LfTransactionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId}
 
@@ -138,8 +139,7 @@ class DomainRouter(
           .leftMap(RoutingInternalError.IllformedTransaction)
       )
 
-      inputContractsMetadata: Set[WithContractMetadata[LfContractId]] = LfTransactionUtil
-        .inputContractIdsWithMetadata(wfTransaction.unwrap)
+      contractRoutingParties = inputContractRoutingParties(wfTransaction.unwrap)
 
       transactionData <- TransactionData.create(
         submitterInfo,
@@ -147,7 +147,7 @@ class DomainRouter(
         transactionMeta.workflowId,
         domainOfContracts,
         domainIdResolver,
-        inputContractsMetadata,
+        contractRoutingParties,
         transactionMeta.optDomainId,
       )
 
@@ -443,4 +443,22 @@ object DomainRouter {
       eitherT: EitherT[Future, TransactionSubmissionError, T]
   )(implicit ec: ExecutionContext): EitherT[Future, TransactionRoutingError, T] =
     eitherT.leftMap(subm => TransactionRoutingError.SubmissionError(domainId, subm))
+
+  private[routing] def inputContractRoutingParties(
+      tx: LfVersionedTransaction
+  ): Map[LfContractId, Set[Ref.Party]] = {
+
+    val keyLookupMap = tx.nodes.values.collect { case LfNodeLookupByKey(_, key, Some(cid), _) =>
+      cid -> key.maintainers
+    }.toMap
+
+    val mainMap = tx.nodes.values.collect {
+      case n: LfNodeFetch => n.coid -> n.stakeholders
+      case n: LfNodeExercises => n.targetCoid -> n.stakeholders
+    }.toMap
+
+    (keyLookupMap ++ mainMap) -- tx.localContracts.keySet
+
+  }
+
 }

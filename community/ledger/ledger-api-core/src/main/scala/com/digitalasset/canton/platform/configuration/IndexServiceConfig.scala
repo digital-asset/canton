@@ -48,6 +48,8 @@ final case class AcsStreamsConfig(
     // Must be a power of 2
     maxParallelPayloadCreateQueries: Int = AcsStreamsConfig.DefaultAcsContractFetchingParallelism,
     contractProcessingParallelism: Int = AcsStreamsConfig.DefaultContractProcessingParallelism,
+    // Temporary incomplete population parameters
+    maxIncompletePageSize: Int = 20,
 )
 
 object AcsStreamsConfig {

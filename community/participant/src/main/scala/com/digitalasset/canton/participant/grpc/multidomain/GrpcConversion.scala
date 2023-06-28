@@ -137,10 +137,11 @@ private[grpc] object GrpcConversion {
 
     val apiContracts = activeContractsResponse.activeContracts.flatMap {
       case ActiveContractsResponse.ActiveContracts(contracts, domainId, protocolVersion) =>
-        contracts.map { contract =>
+        contracts.map { case (contract, transferCounter) =>
           val apiActiveContract = mdProto.state_service.ActiveContract(
             createdEvent = Some(toApiCreatedEvent(contract, protocolVersion)(requestingParties)),
             domainId = domainId.toProtoPrimitive,
+            reassignmentCounter = transferCounter.v,
           )
 
           val contractEntry =
@@ -234,6 +235,7 @@ private[grpc] object GrpcConversion {
             source = out.sourceDomain.toProtoPrimitive,
             target = out.targetDomain.toProtoPrimitive,
             submitter = out.submitter,
+            reassignmentCounter = out.transferCounter.v,
             assignmentExclusivity = out.transferInExclusivity.map(toProtoInstant),
             templateId = Some(LfEngineToApi.toApiIdentifier(templateId)),
             witnessParties = requestingParties.intersect(out.contractStakeholders).toSeq,
@@ -274,6 +276,7 @@ private[grpc] object GrpcConversion {
       target = in.targetDomain.toProtoPrimitive,
       unassignId = toApiTransferId(in.transferId.transferOutTimestamp.toLf),
       submitter = in.submitter,
+      reassignmentCounter = in.transferCounter.v,
       createdEvent = Some(
         toApiCreatedEvent(
           creatingTransactionId = in.creatingTransactionId,
@@ -305,6 +308,7 @@ private[grpc] object GrpcConversion {
       target = in.targetDomain.toProtoPrimitive,
       unassignId = toApiTransferId(in.transferId.transferOutTimestamp.toLf),
       submitter = in.submitter,
+      reassignmentCounter = in.transferCounter.v,
       createdEvent = Some(
         toApiCreatedEvent(
           creatingTransactionId = in.creatingTransactionId,
@@ -331,7 +335,7 @@ private[grpc] object GrpcConversion {
       txAccepted: TransactionAccepted,
       domainId: DomainId,
   )(requestingParties: Set[LfPartyId]): mdProto.transaction.TransactionTree = {
-    val blinding = txAccepted.blindingInfo.getOrElse(Blinding.blind(txAccepted.transaction))
+    val blinding = txAccepted.blindingInfoO.getOrElse(Blinding.blind(txAccepted.transaction))
     val events = txAccepted.transaction
       .foldInExecutionOrder(List.empty[(NodeId, Node)])(
         exerciseBegin = (acc, nid, node) => ((nid -> node) :: acc, ChildrenRecursion.DoRecurse),
@@ -385,7 +389,7 @@ private[grpc] object GrpcConversion {
 
     mdProto.transaction.TransactionTree(
       updateId = txAccepted.transactionId,
-      commandId = txAccepted.optCompletionInfo
+      commandId = txAccepted.completionInfoO
         .flatMap(completionInfo =>
           if (completionInfo.actAs.intersect(requestingParties.toSeq).nonEmpty)
             Some(completionInfo.commandId)

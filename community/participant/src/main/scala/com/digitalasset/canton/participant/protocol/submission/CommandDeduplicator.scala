@@ -198,7 +198,7 @@ class CommandDeduplicatorImpl(
                   AlreadyExists(
                     acceptance.offset,
                     accepted = true,
-                    acceptance.submissionId,
+                    acceptance.submissionIdO,
                   ): DeduplicationFailed,
                 )
             }
@@ -243,7 +243,7 @@ class CommandDeduplicatorImpl(
                   AlreadyExists(
                     acceptance.offset,
                     accepted = true,
-                    acceptance.submissionId,
+                    acceptance.submissionIdO,
                   ): DeduplicationFailed,
                 )
             }

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.data.EitherT
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProvider
@@ -56,32 +55,20 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
   )(implicit traceContext: TraceContext): Future[Unit] =
     incrementCounterAndErrF()
 
-  private val err: AcsCommitmentStore.AcsCommitmentStoreError =
-    AcsCommitmentStore.AcsCommitmentDbError("bla")
-
-  def incrementCounterAndErrE[A]()
-      : EitherT[Future, AcsCommitmentStore.AcsCommitmentStoreError, A] = {
-    writeCounter.incrementAndGet().discard
-    EitherT.leftT[Future, A](err)
-  }
-
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsCommitmentStore.AcsCommitmentStoreError, Option[PruningStatus]] =
-    EitherT.rightT[Future, AcsCommitmentStore.AcsCommitmentStoreError](None)
+  ): Future[Option[PruningStatus]] = Future.successful(None)
 
   override protected[canton] def advancePruningTimestamp(
       phase: PruningPhase,
       timestamp: CantonTimestamp,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, AcsCommitmentStore.AcsCommitmentStoreError, Unit] =
-    incrementCounterAndErrE()
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    incrementCounterAndErrF()
 
   override protected[canton] def doPrune(limit: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsCommitmentStore.AcsCommitmentStoreError, Unit] =
-    incrementCounterAndErrE()
+  ): Future[Unit] =
+    incrementCounterAndErrF()
 
   override def getComputed(period: CommitmentPeriod, counterParticipant: ParticipantId)(implicit
       traceContext: TraceContext

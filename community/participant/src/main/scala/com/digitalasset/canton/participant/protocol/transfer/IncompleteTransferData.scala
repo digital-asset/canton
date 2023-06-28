@@ -48,7 +48,18 @@ final case class IncompleteTransferData private (
     s"Supplied contract with ID ${contract.contractId} differs from the ID ${transferOutRequest.contractId} of the transfer-out request.",
   )
 
-  def toTransferData: TransferData = this.into[TransferData].enableMethodAccessors.transform
+  def toTransferData: TransferData = this
+    .into[TransferData]
+    .withFieldComputed(
+      _.transferGlobalOffset,
+      _.transferEventGlobalOffset match {
+        case IncompleteTransferData.TransferInEventGlobalOffset(globalOffset) =>
+          Some(TransferData.TransferInGlobalOffset(globalOffset))
+        case IncompleteTransferData.TransferOutEventGlobalOffset(globalOffset) =>
+          Some(TransferData.TransferOutGlobalOffset(globalOffset))
+      },
+    )
+    .transform
 }
 
 object IncompleteTransferData {

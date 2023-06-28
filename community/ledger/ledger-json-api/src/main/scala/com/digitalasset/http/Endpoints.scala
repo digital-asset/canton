@@ -4,39 +4,41 @@
 package com.daml.http
 
 import akka.NotUsed
-import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.*
 import headers.`Content-Type`
 import akka.http.scaladsl.server
 import akka.http.scaladsl.server.Directives.extractClientIP
 import akka.http.scaladsl.server.{Directive, Directive0, PathMatcher, Route}
-import akka.http.scaladsl.server.RouteResult._
+import akka.http.scaladsl.server.RouteResult.*
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Flow, Source}
 import akka.util.ByteString
 import ContractsService.SearchResult
-import EndpointsCompanion._
-import json._
+import EndpointsCompanion.*
+import json.*
 import util.toLedgerId
 import util.FutureUtil.{either, rightT}
 import util.Logging.{InstanceUUID, RequestID, extendWithRequestIdLogCtx}
 import com.daml.logging.LoggingContextOf.withEnrichedLoggingContext
-import scalaz.std.scalaFuture._
-import scalaz.syntax.std.option._
-import scalaz.syntax.traverse._
+import scalaz.std.scalaFuture.*
+import scalaz.syntax.std.option.*
+import scalaz.syntax.traverse.*
 import scalaz.{-\/, EitherT, \/, \/-}
-import spray.json._
+import spray.json.*
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import com.daml.http.metrics.HttpApiMetrics
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
+import com.daml.logging.LoggingContextOf
 import com.daml.metrics.Timed
-import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.server.Directives.*
 import com.daml.http.endpoints.{MeteringReportEndpoint, RouteSetup}
 import com.daml.jwt.domain.Jwt
-import com.digitalasset.canton.ledger.api.{domain => LedgerApiDomain}
+import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
 import com.digitalasset.canton.ledger.client.services.admin.UserManagementClient
 import com.digitalasset.canton.ledger.client.services.identity.LedgerIdentityClient
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
 import scalaz.EitherT.eitherT
 
 import scala.util.control.NonFatal
@@ -55,8 +57,11 @@ class Endpoints(
     shouldLogHttpBodies: Boolean,
     userManagementClient: UserManagementClient,
     ledgerIdentityClient: LedgerIdentityClient,
+    val loggerFactory: NamedLoggerFactory,
     maxTimeToCollectRequest: FiniteDuration = FiniteDuration(5, "seconds"),
-)(implicit ec: ExecutionContext, mat: Materializer) {
+)(implicit ec: ExecutionContext, mat: Materializer)
+    extends NamedLogging
+    with NoTracing {
 
   private[this] val routeSetup: endpoints.RouteSetup = new endpoints.RouteSetup(
     allowNonHttps = allowNonHttps,
@@ -65,33 +70,32 @@ class Endpoints(
     userManagementClient,
     ledgerIdentityClient,
     maxTimeToCollectRequest = maxTimeToCollectRequest,
+    loggerFactory = loggerFactory,
   )
 
   private[this] val commandsHelper: endpoints.CreateAndExercise =
     new endpoints.CreateAndExercise(routeSetup, decoder, commandService, contractsService)
-  import commandsHelper._
+  import commandsHelper.*
 
   private[this] val userManagement: endpoints.UserManagement = new endpoints.UserManagement(
     decodeJwt = decodeJwt,
     userManagementClient,
   )
-  import userManagement._
+  import userManagement.*
 
   private[this] val packagesDars: endpoints.PackagesAndDars =
     new endpoints.PackagesAndDars(routeSetup, packageManagementService)
-  import packagesDars._
+  import packagesDars.*
 
   private[this] val meteringReportEndpoint =
     new MeteringReportEndpoint(meteringReportService)
 
   private[this] val contractList: endpoints.ContractList =
-    new endpoints.ContractList(routeSetup, decoder, contractsService)
-  import contractList._
+    new endpoints.ContractList(routeSetup, decoder, contractsService, loggerFactory)
+  import contractList.*
 
   private[this] val partiesEP: endpoints.Parties = new endpoints.Parties(partiesService)
-  import partiesEP._
-
-  private[this] val logger = ContextualizedLogger.get(getClass)
+  import partiesEP.*
 
   // Limit logging of bodies to content with size of less than 10 KiB.
   // Reason is that a char of an UTF-8 string consumes 1 up to 4 bytes such that the string length
@@ -99,9 +103,9 @@ class Endpoints(
   // of import statements in this file, which I would consider already as very big string to log.
   private final val maxBodySizeForLogging = Math.pow(2, 10) * 10
 
-  import Endpoints._
-  import json.JsonProtocol._
-  import util.ErrorOps._
+  import Endpoints.*
+  import json.JsonProtocol.*
+  import util.ErrorOps.*
 
   private def responseToRoute(res: Future[HttpResponse]): Route = _ => res map Complete
   private def toRoute[T: MkHttpResponse](res: => T)(implicit
@@ -113,8 +117,8 @@ class Endpoints(
       httpRequest: HttpRequest,
       fn: (Jwt, Req) => ET[domain.SyncResponse[Res]],
   )(implicit
-    lc: LoggingContextOf[InstanceUUID with RequestID],
-    metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID with RequestID],
+      metrics: HttpApiMetrics,
   ): Route = {
     val res = for {
       t <- routeSetup.inputJsVal(httpRequest): ET[(Jwt, JsValue)]
@@ -229,7 +233,7 @@ class Endpoints(
         httpMessage: HttpMessage,
         msg: String,
         kind: String,
-    ): httpMessage.Self =
+    ): httpMessage.Self = {
       if (
         httpMessage
           .header[`Content-Type`]
@@ -241,17 +245,17 @@ class Endpoints(
             LoggingContextOf.label[RequestEntity],
             s"${kind}_body" -> body,
           )
-            .run { implicit lc => logger.info(msg) }
+            .run { implicit lc => logger.info(s"$msg, ${lc.makeString}") }
         httpMessage.entity.contentLengthOption match {
           case Some(length) if length < maxBodySizeForLogging =>
-            import akka.stream.scaladsl._
+            import akka.stream.scaladsl.*
             httpMessage
               .transformEntityDataBytes(
                 Flow.fromFunction { it =>
                   try logWithBodyInCtx(it.utf8String.parseJson)
                   catch {
                     case NonFatal(ex) =>
-                      logger.error("Failed to log message body: ", ex)
+                      logger.error(s"Failed to log message body, ${lc.makeString}: ", ex)
                   }
                   it
                 }
@@ -269,10 +273,10 @@ class Endpoints(
             httpMessage.self
         }
       } else {
-        logger.info(msg)
+        logger.info(s"$msg, ${lc.makeString}")
         httpMessage.self
       }
-
+    }
     logRequestResponseHelper(
       (request, remoteAddress) =>
         logWithHttpMessageBodyIfAvailable(
@@ -291,18 +295,18 @@ class Endpoints(
 
   def logRequestAndResultSimple(implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]
-  ): Directive0 =
+  ): Directive0 = {
     logRequestResponseHelper(
       (request, remoteAddress) => {
-        logger.info(mkRequestLogMsg(request, remoteAddress))
+        logger.info(s"${mkRequestLogMsg(request, remoteAddress)}, ${lc.makeString}")
         request
       },
       httpResponse => {
-        logger.info(mkResponseLogMsg(httpResponse.status))
+        logger.info(s"${mkResponseLogMsg(httpResponse.status)}, ${lc.makeString}")
         httpResponse
       },
     )
-
+  }
   val logRequestAndResultFn: LoggingContextOf[InstanceUUID with RequestID] => Directive0 =
     if (shouldLogHttpBodies) lc => logJsonRequestAndResult(lc)
     else lc => logRequestAndResultSimple(lc)
@@ -311,15 +315,17 @@ class Endpoints(
     logRequestAndResultFn(lc)
 
   def all(implicit
-          lc0: LoggingContextOf[InstanceUUID],
-          metrics: HttpApiMetrics,
+      lc0: LoggingContextOf[InstanceUUID],
+      metrics: HttpApiMetrics,
   ): Route = extractRequest apply { req =>
     implicit val lc: LoggingContextOf[InstanceUUID with RequestID] =
       extendWithRequestIdLogCtx(identity)(lc0)
     val markThroughputAndLogProcessingTime: Directive0 = Directive { (fn: Unit => Route) =>
       val t0 = System.nanoTime
       fn(()).andThen { res =>
-        res.onComplete(_ => logger.trace(s"Processed request after ${System.nanoTime() - t0}ns"))
+        res.onComplete(_ =>
+          logger.trace(s"Processed request after ${System.nanoTime() - t0}ns, ${lc.makeString}")
+        )
         res
       }
     }
@@ -371,7 +377,7 @@ class Endpoints(
       lc: LoggingContextOf[InstanceUUID with RequestID],
   ): Future[HttpResponse] =
     T.run(output)
-      .recover(Error.fromThrowable andThen (httpResponseError(_)))
+      .recover(Error.fromThrowable andThen (httpResponseError(_, logger)))
 
   private implicit def sourceStreamSearchResults[A: JsonWriter](implicit
       lc: LoggingContextOf[InstanceUUID with RequestID]
@@ -385,7 +391,7 @@ class Endpoints(
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): MkHttpResponse[Future[Error \/ SearchResult[Error \/ JsValue]]] =
     MkHttpResponse { output =>
-      output.map(_.fold(httpResponseError, searchHttpResponse))
+      output.map(_.fold(httpResponseError(_, logger), searchHttpResponse))
     }
 
   private implicit def mkHttpResponseEitherT(implicit
@@ -399,13 +405,13 @@ class Endpoints(
       lc: LoggingContextOf[InstanceUUID with RequestID]
   ): MkHttpResponse[Future[Error \/ HttpResponse]] =
     MkHttpResponse { output =>
-      output.map(_.fold(httpResponseError, identity))
+      output.map(_.fold(httpResponseError(_, logger), identity))
     }
 
   private def searchHttpResponse(
       searchResult: SearchResult[Error \/ JsValue]
   )(implicit lc: LoggingContextOf[RequestID]): HttpResponse = {
-    import json.JsonProtocol._
+    import json.JsonProtocol.*
 
     val response: Source[ByteString, NotUsed] = searchResult match {
       case domain.OkResponse(result, warnings, _) =>
@@ -430,7 +436,7 @@ class Endpoints(
       case -\/(ServerError(t)) =>
         val hideMsg = "internal server error"
         logger.error(
-          s"hiding internal error details from response, responding '$hideMsg' instead",
+          s"hiding internal error details from response, responding '$hideMsg' instead, ${lc.makeString}",
           t,
         )
         -\/(ServerError.fromMsg(hideMsg))
@@ -438,8 +444,8 @@ class Endpoints(
     }
 
   private implicit def fullySync[A: JsonWriter](implicit
-                                                metrics: HttpApiMetrics,
-                                                lc: LoggingContextOf[InstanceUUID with RequestID],
+      metrics: HttpApiMetrics,
+      lc: LoggingContextOf[InstanceUUID with RequestID],
   ): MkHttpResponse[ET[domain.SyncResponse[A]]] = MkHttpResponse { result =>
     Timed.future(
       metrics.responseCreationTimer,
@@ -450,7 +456,7 @@ class Endpoints(
         .run
         .map {
           case -\/(e) =>
-            httpResponseError(e)
+            httpResponseError(e, logger)
           case \/-((jsVal, status)) =>
             HttpResponse(
               entity = HttpEntity.Strict(ContentTypes.`application/json`, format(jsVal)),
@@ -463,10 +469,10 @@ class Endpoints(
 }
 
 object Endpoints {
-   type ET[A] = EitherT[Future, Error, A]
+  type ET[A] = EitherT[Future, Error, A]
 
-   final class IntoEndpointsError[-A](val run: A => Error) extends AnyVal
-   object IntoEndpointsError {
+  final class IntoEndpointsError[-A](val run: A => Error) extends AnyVal
+  object IntoEndpointsError {
     import LedgerClientJwt.Grpc.Category
 
     implicit val id: IntoEndpointsError[Error] = new IntoEndpointsError(identity)

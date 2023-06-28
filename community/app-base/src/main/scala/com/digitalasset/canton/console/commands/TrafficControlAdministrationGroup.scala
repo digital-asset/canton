@@ -15,13 +15,13 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.traffic.TrafficStateController
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransactionX,
   TopologyChangeOpX,
   TrafficControlStateX,
 }
+import com.digitalasset.canton.traffic.MemberTrafficStatus
 
 class TrafficControlAdministrationGroup(
     instance: InstanceReferenceX,
@@ -38,7 +38,7 @@ class TrafficControlAdministrationGroup(
   )
   def traffic_state(
       domainId: DomainId
-  ): TrafficStateController.ParticipantTrafficState = {
+  ): MemberTrafficStatus = {
     consoleEnvironment.run(
       runner.adminCommand(
         ParticipantAdminCommands.TrafficControl

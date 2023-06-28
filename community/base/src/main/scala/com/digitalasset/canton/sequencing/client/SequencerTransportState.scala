@@ -279,8 +279,8 @@ object SequencerTransportState {
       eventValidator: SequencedEventValidator,
   ) {
     def close(): Unit = {
-      resilientSequencerSubscription.close()
       eventValidator.close()
+      resilientSequencerSubscription.close()
     }
   }
 }

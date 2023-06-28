@@ -155,7 +155,7 @@ private[mediator] class Mediator(
       newTracedPrehead: Traced[SequencerCounterCursorPrehead]
   ): Future[Unit] = newTracedPrehead.withTraceContext { implicit traceContext => newPrehead =>
     performUnlessClosingF("prune mediator deduplication store")(
-      state.deduplicationStore.prune(newPrehead.timestamp)
+      state.deduplicationStore.prune(newPrehead.timestamp, this.closeContext)
     ).onShutdown(logger.info("Not pruning the mediator deduplication store due to shutdown"))
   }
 
@@ -226,7 +226,7 @@ private[mediator] class Mediator(
       _ = logger.debug(show"Pruning finalized responses up to [$pruneAt]")
       _ <- EitherT.right(state.prune(pruneAt))
       _ = logger.debug(show"Pruning sequenced event up to [$pruneAt]")
-      _ <- EitherT.right(sequencedEventStore.prune(pruneAt).merge)
+      _ <- EitherT.right(sequencedEventStore.prune(pruneAt))
 
       // After pruning successfully, update the "max-event-age" metric
       // looking up the oldest event (in case prunedAt precedes any events and nothing was pruned).

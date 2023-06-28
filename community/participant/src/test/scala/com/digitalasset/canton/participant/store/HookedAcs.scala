@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
@@ -23,7 +22,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.CheckedT
-import com.digitalasset.canton.{RequestCounter, TransferCounterO}
+import com.digitalasset.canton.{RequestCounter, TransferCounter, TransferCounterO}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.SortedMap
@@ -125,12 +124,12 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] =
     acs.snapshot(timestamp)
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, RequestCounter]] =
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] =
     acs.snapshot(rc)
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
@@ -140,19 +139,18 @@ private[participant] class HookedAcs(private val acs: ActiveContractStore)(impli
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Unit] =
+  ): Future[Unit] =
     acs.doPrune(beforeAndIncluding)
 
   override protected[canton] def advancePruningTimestamp(
       phase: PruningPhase,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): EitherT[Future, AcsError, Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] =
     acs.advancePruningTimestamp(phase, timestamp)
-  }
 
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Option[PruningStatus]] =
+  ): Future[Option[PruningStatus]] =
     acs.pruningStatus
 
   override def deleteSince(criterion: RequestCounter)(implicit

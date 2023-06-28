@@ -60,6 +60,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
   )
   val ledgerConfiguration: LedgerConfiguration = DefaultDamlValues.ledgerConfiguration
   val submitterInfo: SubmitterInfo = DefaultParticipantStateValues.submitterInfo(submitters)
+  val maxSequencingTime: CantonTimestamp = ledgerTime.plusSeconds(10)
 
   // Crypto snapshots
   def createCryptoSnapshot(
@@ -122,6 +123,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           _topologySnapshot: TopologySnapshot,
           _contractOfId: SerializableContractOfId,
           _keyResolver: LfKeyResolver,
+          _maxSequencingTime: CantonTimestamp,
       )(implicit
           traceContext: TraceContext
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -330,6 +332,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
               newCryptoSnapshot,
               contractInstanceOfId,
               Some(testKeySeed),
+              maxSequencingTime,
               testedProtocolVersion,
             )
             .value
@@ -361,6 +364,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             emptyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            maxSequencingTime,
             testedProtocolVersion,
           )
           .value
@@ -395,6 +399,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             confirmationOnlyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            maxSequencingTime,
             testedProtocolVersion,
           )
           .value
@@ -426,6 +431,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             newCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            maxSequencingTime,
             testedProtocolVersion,
           )
           .value
@@ -454,6 +460,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             submitterOnlyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            maxSequencingTime,
             testedProtocolVersion,
           )
           .value
@@ -487,6 +494,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             noKeyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            maxSequencingTime,
             testedProtocolVersion,
           )
           .value

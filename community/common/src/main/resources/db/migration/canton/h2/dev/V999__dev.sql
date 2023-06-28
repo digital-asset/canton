@@ -81,11 +81,56 @@ CREATE INDEX topology_transactions_x_idx ON topology_transactions_x (store_id, t
 -- TODO(#12373) Move this to stable when releasing BFT: END
 
 -- TODO(#13104) Move traffic control to stable release: BEGIN
--- adds extra traffic remainder per event
+-- update the sequencer_state_manager_events to store traffic information per event
+-- this will be needed to re-hydrate the sequencer from a specific point in time deterministically
+-- adds extra traffic remainder at the time of the event
 alter table sequencer_state_manager_events
     add column extra_traffic_remainder bigint;
+-- adds total extra traffic consumed at the time of the event
+alter table sequencer_state_manager_events
+    add column extra_traffic_consumed bigint;
+-- adds base traffic remainder at the time of the event
+alter table sequencer_state_manager_events
+    add column base_traffic_remainder bigint;
 
 -- adds extra traffic remainder per event in sequenced event store
+-- this way the participant can replay event and reconstruct the correct traffic state
+-- adds extra traffic remainder at the time of the event
 alter table sequenced_events
     add column extra_traffic_remainder bigint;
+-- adds total extra traffic consumed at the time of the event
+alter table sequenced_events
+    add column extra_traffic_consumed bigint;
+
+-- adds initial traffic info per member for when a sequencer gets onboarded
+-- initial extra traffic remainder
+alter table sequencer_initial_state
+    add column extra_traffic_remainder bigint;
+-- initial total extra traffic consumed
+alter table sequencer_initial_state
+    add column extra_traffic_consumed bigint;
+-- initial base traffic remainder
+alter table sequencer_initial_state
+    add column base_traffic_remainder bigint;
+-- timestamp of the initial traffic state
+alter table sequencer_initial_state
+    add column sequenced_timestamp bigint;
+
+-- Store the top up events per member as they get sequenced in the topology state
+-- Allows to efficiently query top ups without replaying the topology state
+create table top_up_events (
+    -- member the traffic limit belongs to
+    member varchar(300) not null,
+    -- timestamp at which the limit is effective
+    effective_timestamp bigint not null,
+    -- the total traffic limit at that time
+    extra_traffic_limit bigint not null,
+    -- serial number of the topology transaction effecting the top up
+    -- used to disambiguate between top ups with the same effective timestamp
+    serial bigint not null,
+    -- top ups should have unique serial per member
+    primary key (member, serial)
+);
+
+create index top_up_events_idx ON top_up_events (member);
 -- TODO(#13104) Move traffic control to stable release: END

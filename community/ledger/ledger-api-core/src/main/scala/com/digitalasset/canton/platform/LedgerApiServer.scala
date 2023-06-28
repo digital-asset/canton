@@ -124,6 +124,7 @@ class LedgerApiServer(
         inMemoryState = inMemoryState,
         tracer = tracer,
         loggerFactory = loggerFactory,
+        incompleteOffsets = readService.incompleteReassignmentOffsets(_, _)(_),
       )
 
       writeService <- buildWriteService(indexService)
@@ -194,6 +195,7 @@ class LedgerApiServer(
       ledgerId = ledgerId,
       config = apiServerConfig,
       optWriteService = Some(writeService),
+      readService = readService,
       healthChecks = healthChecks,
       metrics = metrics,
       timeServiceBackend = timeServiceBackend,
@@ -218,6 +220,7 @@ class LedgerApiServer(
         metrics = metrics,
         timeProvider = TimeProvider.UTC,
         executionContext = servicesExecutionContext,
+        loggerFactory = loggerFactory,
       ),
       ledgerFeatures = ledgerFeatures,
       participantId = participantId,

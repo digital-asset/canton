@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.sandbox.bridge.validate
 
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.{ImmArray, Ref, Time}
 import com.daml.lf.transaction.test.TransactionBuilder
@@ -11,9 +10,9 @@ import com.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractId, ValueNil}
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.ledger.sandbox.bridge.BridgeMetrics
 import com.digitalasset.canton.ledger.sandbox.bridge.validate.PrepareSubmissionSpec.*
@@ -23,19 +22,16 @@ import com.digitalasset.canton.ledger.sandbox.domain.Rejection.{
 }
 import com.digitalasset.canton.ledger.sandbox.domain.Submission
 import com.digitalasset.canton.logging.LoggingContextWithTrace
-import org.mockito.MockitoSugar.mock
 import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 
 import java.time.Duration
 
-class PrepareSubmissionSpec extends AsyncFlatSpec with Matchers {
+class PrepareSubmissionSpec extends AsyncFlatSpec with BaseTest {
   private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
-  private implicit val errorLogger: ContextualizedErrorLogger =
-    DamlContextualizedErrorLogger.forTesting(getClass)
 
   private val prepareSubmission = new PrepareSubmissionImpl(
-    new BridgeMetrics(NoOpMetricsFactory)
+    new BridgeMetrics(NoOpMetricsFactory),
+    loggerFactory,
   )
 
   private def cid(key: String): ContractId = ContractId.V1(Hash.hashPrivateKey(key))

@@ -29,7 +29,7 @@ object TimeProofTestUtil {
     )
     val signedContent =
       SignedContent(deliver, SymbolicCrypto.emptySignature, None, BaseTest.testedProtocolVersion)
-    val event = OrdinarySequencedEvent(signedContent)(TraceContext.empty)
+    val event = OrdinarySequencedEvent(signedContent, None)(TraceContext.empty)
     TimeProof
       .fromEvent(event)
       .fold(err => sys.error(s"Failed to create time proof: $err"), identity)

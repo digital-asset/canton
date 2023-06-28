@@ -102,6 +102,7 @@ class ParticipantNodeBootstrapX(
         case s: TopologyStoreX[TopologyStoreId] => s
       }
     )
+
   override protected def customNodeStages(
       storage: Storage,
       crypto: Crypto,
@@ -111,6 +112,7 @@ class ParticipantNodeBootstrapX(
       healthService: HealthReporting.HealthService,
   ): BootstrapStageOrLeaf[ParticipantNodeX] =
     new StartupNode(storage, crypto, nodeId, manager, healthReporter, healthService)
+
   private class StartupNode(
       storage: Storage,
       crypto: Crypto,
@@ -149,6 +151,7 @@ class ParticipantNodeBootstrapX(
             manager,
             crypto,
             clock,
+            config,
             parameterConfig.processingTimeouts,
             loggerFactory,
           )
@@ -165,16 +168,20 @@ class ParticipantNodeBootstrapX(
         override def packageVetted(packageId: PackageId)(implicit
             tc: TraceContext
         ): EitherT[Future, PackageRemovalErrorCode.PackageVetted, Unit] = ???
+
         override def packageUnused(packageId: PackageId)(implicit
             tc: TraceContext
         ): EitherT[Future, PackageRemovalErrorCode.PackageInUse, Unit] = ???
+
         override def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
             tc: TraceContext
         ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] = ???
+
         override def genRevokePackagesTx(packages: List[LfPackageId])(implicit
             tc: TraceContext
         ): EitherT[Future, ParticipantTopologyManagerError, TopologyTransaction[TopologyChangeOp]] =
           ???
+
         override protected def loggerFactory: NamedLoggerFactory = ???
       }
     }
@@ -318,6 +325,7 @@ class ParticipantNodeBootstrapX(
         participantOps,
         componentFactory,
         skipRecipientsCheck,
+        overrideKeyUniqueness = Some(false),
       ).map {
         case (
               partyNotifier,
@@ -363,6 +371,7 @@ class ParticipantNodeBootstrapX(
   }
 
   override protected def member(uid: UniqueIdentifier): Member = ParticipantId(uid)
+
   override protected def mkNodeHealthService(storage: Storage): HealthReporting.HealthService =
     HealthReporting.HealthService(
       "participant",
@@ -385,6 +394,10 @@ object ParticipantNodeBootstrapX {
 
   object CommunityParticipantFactory
       extends CommunityParticipantFactoryCommon[ParticipantNodeBootstrapX] {
+
+    override protected def createEngine(arguments: Arguments): Engine = super.createEngine(
+      arguments.copy(parameterConfig = arguments.parameterConfig.copy(uniqueContractKeys = false))
+    )
 
     override protected def createNode(
         arguments: Arguments,

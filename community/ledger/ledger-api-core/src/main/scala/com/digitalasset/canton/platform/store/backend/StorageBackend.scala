@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, ParticipantId}
 import com.digitalasset.canton.ledger.configuration.Configuration
 import com.digitalasset.canton.ledger.offset.Offset
@@ -19,6 +18,7 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   PackageDetails,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.EventSequentialId
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawActiveContract,
@@ -40,14 +40,6 @@ import com.digitalasset.canton.platform.store.entries.{
 }
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.KeyState
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.platform.{
-  ApplicationId,
-  ContractId,
-  Identifier,
-  Key,
-  PackageId,
-  Party,
-}
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
@@ -231,7 +223,7 @@ trait CompletionStorageBackend {
     */
   def pruneCompletions(
       pruneUpToInclusive: Offset
-  )(connection: Connection, loggingContext: LoggingContext): Unit
+  )(connection: Connection, traceContext: TraceContext): Unit
 }
 
 trait ContractStorageBackend {
@@ -289,9 +281,9 @@ trait EventStorageBackend {
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
-  def pruneEvents(pruneUpToInclusive: Offset, pruneAllDivulgedContracts: Boolean)(
+  def pruneEvents(pruneUpToInclusive: Offset, pruneAllDivulgedContracts: Boolean)(implicit
       connection: Connection,
-      loggingContext: LoggingContext,
+      traceContext: TraceContext,
   ): Unit
   def isPruningOffsetValidAgainstMigration(
       pruneUpToInclusive: Offset,
@@ -342,6 +334,22 @@ trait EventStorageBackend {
       eventSequentialIds: Iterable[Long],
       allFilterParties: Set[Party],
   )(connection: Connection): Vector[RawUnassignEvent]
+
+  def lookupAssignSequentialIdByOffset(
+      offsets: Iterable[String]
+  )(connection: Connection): Vector[Long]
+
+  def lookupUnassignSequentialIdByOffset(
+      offsets: Iterable[String]
+  )(connection: Connection): Vector[Long]
+
+  def lookupAssignSequentialIdByContractId(
+      contractIds: Iterable[String]
+  )(connection: Connection): Vector[Long]
+
+  def lookupCreateSequentialIdByContractId(
+      contractIds: Iterable[String]
+  )(connection: Connection): Vector[Long]
 
   def maxEventSequentialId(untilInclusiveOffset: Offset)(
       connection: Connection

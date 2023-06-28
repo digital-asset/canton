@@ -35,7 +35,7 @@ import io.grpc.stub.StreamObserver
 
 import scala.concurrent.{ExecutionContext, Future}
 
-final class ApiStateService private (
+final class ApiStateService(
     acsService: ACSBackend,
     readService: ReadService,
     txService: IndexTransactionsService,

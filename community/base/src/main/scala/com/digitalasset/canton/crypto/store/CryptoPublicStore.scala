@@ -36,6 +36,14 @@ trait CryptoPublicStore extends AutoCloseable {
       traceContext: TraceContext
   ): EitherT[Future, CryptoPublicStoreError, Unit]
 
+  protected[crypto] def listAllKeyFingerprints(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPublicStoreError, Set[Fingerprint]] =
+    for {
+      signingKeys <- listSigningKeys
+      encryptionKeys <- listEncryptionKeys
+    } yield signingKeys.map(_.publicKey.id) ++ encryptionKeys.map(_.publicKey.id)
+
   @VisibleForTesting
   private[store] def listSigningKeys(implicit
       traceContext: TraceContext

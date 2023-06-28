@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.oracle
 
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.common.{
   CommonStorageBackendFactory,
   CompletionStorageBackendTemplate,
@@ -45,9 +46,10 @@ object OracleStorageBackendFactory extends StorageBackendFactory with CommonStor
     new PartyStorageBackendTemplate(OracleQueryStrategy, ledgerEndCache)
 
   override def createCompletionStorageBackend(
-      stringInterning: StringInterning
+      stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): CompletionStorageBackend =
-    new CompletionStorageBackendTemplate(OracleQueryStrategy, stringInterning)
+    new CompletionStorageBackendTemplate(OracleQueryStrategy, stringInterning, loggerFactory)
 
   override def createContractStorageBackend(
       ledgerEndCache: LedgerEndCache,
@@ -58,10 +60,12 @@ object OracleStorageBackendFactory extends StorageBackendFactory with CommonStor
   override def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
+      loggerFactory: NamedLoggerFactory,
   ): EventStorageBackend =
     new OracleEventStorageBackend(
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
+      loggerFactory = loggerFactory,
     )
 
   override val createDataSourceStorageBackend: DataSourceStorageBackend =

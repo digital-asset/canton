@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.topology
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.syntax.functor.*
+import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
@@ -15,7 +16,7 @@ import com.digitalasset.canton.common.domain.{
   SequencerBasedRegisterTopologyTransactionHandle,
   SequencerBasedRegisterTopologyTransactionHandleX,
 }
-import com.digitalasset.canton.config.{DomainTimeTrackerConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{DomainTimeTrackerConfig, LocalNodeConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
@@ -315,6 +316,7 @@ class ParticipantTopologyDispatcherX(
     state: SyncDomainPersistentStateManagerImpl[SyncDomainPersistentStateX],
     crypto: Crypto,
     clock: Clock,
+    config: LocalNodeConfig,
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -423,6 +425,7 @@ class ParticipantTopologyDispatcherX(
         sequencerClientFactory,
         sequencerConnections,
         crypto,
+        config.topologyX,
         protocolVersion,
         expectedSequencers,
       )).run()
@@ -445,6 +448,8 @@ class ParticipantTopologyDispatcherX(
         domainId,
         participantId,
         participantId,
+        clock.some,
+        config.topologyX,
         protocolVersion,
         timeouts,
         loggerFactory,

@@ -5,26 +5,25 @@ package com.daml.http
 
 import akka.actor.ActorSystem
 import akka.stream.Materializer
-import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
+import com.daml.grpc.adapter.AkkaExecutionSequencerPool
 import com.daml.http.metrics.HttpApiMetrics
 import com.daml.http.util.Logging.instanceUUIDLogCtx
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.tracing.NoTracing
 import io.grpc.Channel
 import scalaz.std.anyVal.*
 import scalaz.std.option.*
 import scalaz.syntax.show.*
 
 import java.nio.file.Path
-import scala.util.Success
 
-object HttpApiServer {
-  private[this] val logger = ContextualizedLogger.get(getClass)
+object HttpApiServer extends NoTracing {
 
-  def apply(config: JsonApiConfig, channel: Channel)(implicit
-      jsonApiMetrics: HttpApiMetrics,
-      loggingContext: LoggingContext,
-  ): ResourceOwner[Unit] =
+  def apply(config: JsonApiConfig, channel: Channel, loggerFactory: NamedLoggerFactory)(implicit
+      jsonApiMetrics: HttpApiMetrics
+  ): ResourceOwner[Unit] = {
+    val logger = loggerFactory.getTracedLogger(getClass)
     for {
       actorSystem <- ResourceOwner.forActorSystem(() => ActorSystem("http-json-ledger-api"))
       materializer <- ResourceOwner.forMaterializer(() => Materializer(actorSystem))
@@ -32,7 +31,7 @@ object HttpApiServer {
         new AkkaExecutionSequencerPool("httpPool")(actorSystem)
       )
       serverBinding <- instanceUUIDLogCtx(implicit loggingContextOf =>
-        new HttpService(config, channel)(
+        new HttpService(config, channel, loggerFactory)(
           actorSystem,
           materializer,
           executionSequencerFactory,
@@ -52,4 +51,5 @@ object HttpApiServer {
           ")"
       )
     }
+  }
 }

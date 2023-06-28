@@ -7,22 +7,21 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.{BroadcastHub, Keep, MergeHub, Sink, Source}
 import com.daml.ledger.resources.ResourceOwner
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.v2.Update
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.util.chaining.*
 
 object AkkaSubmissionsBridge {
-  private val logger = ContextualizedLogger.get(getClass)
-  def apply()(implicit
-      loggingContext: LoggingContext,
-      materializer: Materializer,
+  def apply(loggerFactory: NamedLoggerFactory)(implicit
+      materializer: Materializer
   ): ResourceOwner[
     (Sink[(Offset, Traced[Update]), NotUsed], Source[(Offset, Traced[Update]), NotUsed])
   ] =
     ResourceOwner.forValue(() => {
+      val logger = loggerFactory.getTracedLogger(getClass)
       MergeHub
         // We can't instrument these buffers, therefore keep these to minimal sizes and
         // use a configurable instrumented buffer in the producer.
@@ -30,7 +29,7 @@ object AkkaSubmissionsBridge {
         .toMat(BroadcastHub.sink(bufferSize = 1))(Keep.both)
         .run()
         .tap { _ =>
-          logger.info("Instantiated Akka submissions bridge.")
+          logger.info("Instantiated Akka submissions bridge.")(TraceContext.empty)
         }
     })
 }

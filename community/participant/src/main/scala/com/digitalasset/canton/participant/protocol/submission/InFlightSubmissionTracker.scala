@@ -415,14 +415,17 @@ class InFlightSubmissionTracker(
       localOffsets <- localOffsetsFor(sequencedInFlight)
       sequencingInfoAndPublications <- publicationsFor(localOffsets)
       (toDelete, publications) = sequencingInfoAndPublications.unzip
-      _ <- publications.parTraverse_ { publication =>
+
+      transferEvents = publications.mapFilter { publication =>
         publication.event match {
           case transfer: LedgerSyncEvent.TransferEvent if transfer.isTransferringParticipant =>
-            multiDomainEventLog.value.notifyOnPublishTransfer(transfer, publication.globalOffset)
-
-          case _ => Future.unit
+            Some((transfer, publication.globalOffset))
+          case _ => None
         }
       }
+
+      _ <- multiDomainEventLog.value.notifyOnPublishTransfer(transferEvents)
+
       _ <- deduplicator.processPublications(publications)
       _ = logger.debug("Removing in-flight submissions from in-flight submission store")
       _ <- store.value.delete(toDelete)

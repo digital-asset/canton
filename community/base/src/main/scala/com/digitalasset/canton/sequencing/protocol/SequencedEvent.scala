@@ -299,7 +299,7 @@ object DeliverError {
   *
   * @param counter   a monotonically increasing counter for each recipient.
   * @param timestamp a timestamp defining the order.
-  * @param messageId   populated with the message id used on the originating send operation only for the sender
+  * @param messageIdO  populated with the message id used on the originating send operation only for the sender
   * @param batch     a batch of envelopes.
   */
 @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
@@ -307,7 +307,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     override val counter: SequencerCounter,
     override val timestamp: CantonTimestamp,
     override val domainId: DomainId,
-    messageId: Option[MessageId],
+    messageIdO: Option[MessageId],
     batch: Batch[Env],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type],
@@ -317,14 +317,14 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
   /** Is this deliver event a receipt for a message that the receiver previously sent?
     * (messageId is only populated for the sender)
     */
-  lazy val isReceipt: Boolean = messageId.isDefined
+  lazy val isReceipt: Boolean = messageIdO.isDefined
 
   @VisibleForTesting
   protected[sequencing] def toProtoV0: v0.SequencedEvent = v0.SequencedEvent(
     counter = counter.toProtoPrimitive,
     timestamp = Some(timestamp.toProtoPrimitive),
     domainId = domainId.toProtoPrimitive,
-    messageId = messageId.map(_.toProtoPrimitive),
+    messageId = messageIdO.map(_.toProtoPrimitive),
     batch = Some(batch.toProtoV0),
     deliverErrorReason = None,
   )
@@ -333,7 +333,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     counter = counter.toProtoPrimitive,
     timestamp = Some(timestamp.toProtoPrimitive),
     domainId = domainId.toProtoPrimitive,
-    messageId = messageId.map(_.toProtoPrimitive),
+    messageId = messageIdO.map(_.toProtoPrimitive),
     batch = Some(batch.toProtoV1),
     deliverErrorReason = None,
   )
@@ -342,7 +342,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       f: Env => F[Env2]
   )(implicit F: Applicative[F]) =
     F.map(batch.traverse(f))(
-      Deliver(counter, timestamp, domainId, messageId, _)(
+      Deliver(counter, timestamp, domainId, messageIdO, _)(
         representativeProtocolVersion,
         deserializedFrom,
       )
@@ -353,20 +353,20 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       counter: SequencerCounter = this.counter,
       timestamp: CantonTimestamp = this.timestamp,
       domainId: DomainId = this.domainId,
-      messageId: Option[MessageId] = this.messageId,
+      messageIdO: Option[MessageId] = this.messageIdO,
       batch: Batch[Env2] = this.batch,
-      deserializedFrom: Option[ByteString] = None,
+      deserializedFromO: Option[ByteString] = None,
   ): Deliver[Env2] =
-    Deliver[Env2](counter, timestamp, domainId, messageId, batch)(
+    Deliver[Env2](counter, timestamp, domainId, messageIdO, batch)(
       representativeProtocolVersion,
-      deserializedFrom,
+      deserializedFromO,
     )
 
   override def pretty: Pretty[this.type] =
     prettyOfClass(
       param("counter", _.counter),
       param("timestamp", _.timestamp),
-      paramIfNonEmpty("message id", _.messageId),
+      paramIfNonEmpty("message id", _.messageIdO),
       param("domain id", _.domainId),
       unnamedParam(_.batch),
     )
@@ -379,11 +379,11 @@ object Deliver {
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
       domainId: DomainId,
-      messageId: Option[MessageId],
+      messageIdO: Option[MessageId],
       batch: Batch[Env],
       protocolVersion: ProtocolVersion,
   ): Deliver[Env] =
-    Deliver[Env](counter, timestamp, domainId, messageId, batch)(
+    Deliver[Env](counter, timestamp, domainId, messageIdO, batch)(
       SequencedEvent.protocolVersionRepresentativeFor(protocolVersion),
       None,
     )
@@ -407,7 +407,7 @@ object Deliver {
     val openDeliver = deliver.copy(
       batch = openBatch,
       // Keep the serialized representation only if there were no errors
-      deserializedFrom = if (openingErrors.isEmpty) deliver.deserializedFrom else None,
+      deserializedFromO = if (openingErrors.isEmpty) deliver.deserializedFrom else None,
     )
 
     (openDeliver, openingErrors)

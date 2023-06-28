@@ -11,12 +11,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.sync.{CantonSyncService, SyncDomain}
-import com.digitalasset.canton.participant.traffic.TrafficStateController.{
-  ParticipantTrafficState,
-  TrafficControlError,
-}
+import com.digitalasset.canton.participant.traffic.TrafficStateController.TrafficControlError
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.traffic.MemberTrafficStatus
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -46,11 +44,11 @@ class GrpcTrafficControlService(
             .readySyncDomainById(domainId)
             .toRight(TrafficControlError.DomainIdNotFound.Error(domainId))
         )
-      trafficState <- EitherT.liftF[Future, CantonError, Option[ParticipantTrafficState]](
-        syncDomain.getTrafficControlState()
+      trafficState <- EitherT.liftF[Future, CantonError, Option[MemberTrafficStatus]](
+        syncDomain.getTrafficControlState
       )
     } yield {
-      TrafficControlStateResponse(trafficState.map(_.toProto))
+      TrafficControlStateResponse(trafficState.map(_.toProtoV0))
     }
 
     CantonGrpcUtil.mapErrNew(result)

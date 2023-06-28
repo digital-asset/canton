@@ -224,6 +224,19 @@ class ConfirmationResponseFactory(
                   )
                 )
 
+            // Rejections due to a transaction detected as a replay
+            val replayRejections =
+              transactionValidationResult.replayCheckResult
+                .map(err =>
+                  logged(
+                    requestId,
+                    // TODO(i13513): Check whether a `Malformed` code is appropriate
+                    LocalReject.MalformedRejects.MalformedRequest.Reject(err.format(viewHash))(
+                      verdictProtocolVersion
+                    ),
+                  )
+                )
+
             // Rejections due to a failed authorization check
             val authorizationRejections =
               transactionValidationResult.authorizationResult
@@ -264,7 +277,8 @@ class ConfirmationResponseFactory(
             val localVerdicts: Seq[LocalVerdict] =
               consistencyVerdicts.toList ++ timeValidationRejections ++
                 authenticationRejections ++ authorizationRejections ++
-                modelConformanceRejections ++ internalConsistencyRejections
+                modelConformanceRejections ++ internalConsistencyRejections ++
+                replayRejections
 
             val localVerdictAndPartiesO = localVerdicts
               .collectFirst[(LocalVerdict, Set[LfPartyId])] {

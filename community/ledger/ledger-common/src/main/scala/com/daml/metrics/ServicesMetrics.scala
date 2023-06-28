@@ -204,6 +204,11 @@ class ServicesMetrics(
     val getLedgerInitialConditions: Timer = factory.timer(prefix :+ "get_ledger_initial_conditions")
     @MetricDoc.FanInstanceTag
     val stateUpdates: Timer = factory.timer(prefix :+ "state_updates")
+    @MetricDoc.FanInstanceTag
+    val getConnectedDomains: Timer = factory.timer(prefix :+ "get_connected_domains")
+    @MetricDoc.FanInstanceTag
+    val incompleteReassignmentOffsets: Timer =
+      factory.timer(prefix :+ "incomplete_reassignment_offsets")
   }
 
   @MetricDoc.FanTag(

@@ -13,29 +13,31 @@ import com.daml.http.util.Logging.InstanceUUID
 import com.daml.jwt.domain.Jwt
 import com.daml.ledger.service.LedgerReader.PackageStore
 import com.daml.ledger.service.{LedgerReader, TemplateIds}
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
+import com.daml.logging.LoggingContextOf
 import com.daml.nonempty.{NonEmpty, Singleton}
-import scalaz.{\/, \/-, EitherT, Show}
+import scalaz.{EitherT, Show, \/, \/-}
 import scalaz.std.option.none
-import scalaz.std.scalaFuture._
-import scalaz.syntax.apply._
-import scalaz.syntax.std.option._
+import scalaz.std.scalaFuture.*
+import scalaz.syntax.apply.*
+import scalaz.syntax.std.option.*
 
 import scala.concurrent.{ExecutionContext, Future}
-import java.time._
-import com.digitalasset.canton.ledger.api.{domain => LedgerApiDomain}
+import java.time.*
+import com.digitalasset.canton.ledger.api.domain as LedgerApiDomain
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
 
 class PackageService(
     reloadPackageStoreIfChanged: (
         Jwt,
         LedgerApiDomain.LedgerId,
     ) => PackageService.ReloadPackageStore,
+    val loggerFactory: NamedLoggerFactory,
     timeoutInSeconds: Long = 60L,
-) {
+) extends NamedLogging
+    with NoTracing {
 
-  private[this] val logger = ContextualizedLogger.get(getClass)
-
-  import PackageService._
+  import PackageService.*
   private type ET[A] = EitherT[Future, Error, A]
 
   private case class State(
@@ -111,11 +113,11 @@ class PackageService(
     def reload(jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(implicit
         ec: ExecutionContext,
         lc: LoggingContextOf[InstanceUUID],
-    ): Future[Error \/ Unit] =
+    ): Future[Error \/ Unit] = {
       EitherT
         .eitherT(
           Future(
-            logger.debug("Trying to execute a package update")
+            logger.debug(s"Trying to execute a package update, ${lc.makeString}")
           ) *> reloadPackageStoreIfChanged(jwt, ledgerId)(_state.packageIds)
         )
         .map {
@@ -131,22 +133,25 @@ class PackageService(
             val loadsSinceReloading = diff -- _state.packageIds
             if (diff.sizeIs > loadsSinceReloading.size)
               logger.debug(
-                s"discarding ${diff.size - loadsSinceReloading.size} redundant loaded packages"
+                s"discarding ${diff.size - loadsSinceReloading.size} redundant loaded packages, ${lc.makeString}"
               )
             if (loadsSinceReloading.isEmpty)
-              logger.debug("new package IDs not found")
+              logger.debug(s"new package IDs not found, ${lc.makeString}")
             else {
               updateState(loadsSinceReloading)
-              logger.info(s"new package IDs loaded: ${loadsSinceReloading.keySet.mkString(", ")}")
-              logger.debug(s"loaded diff: $loadsSinceReloading")
+              logger.info(
+                s"new package IDs loaded: ${loadsSinceReloading.keySet.mkString(", ")}, ${lc.makeString}"
+              )
+              logger.debug(s"loaded diff: $loadsSinceReloading, ${lc.makeString}")
             }
-          case None => logger.debug("new package IDs not found")
+          case None => logger.debug(s"new package IDs not found, ${lc.makeString}")
         }
         .map { res =>
           updateInstant(Instant.now())
           res
         }
         .run
+    }
   }
 
   private object StateCache {
@@ -173,7 +178,7 @@ class PackageService(
   private[this] def resolveContractTypeIdFromState(
       latestMaps: () => (TemplateIdMap, InterfaceIdMap)
   )(implicit ec: ExecutionContext): ResolveContractTypeId = new ResolveContractTypeId {
-    import ResolveContractTypeId.{Overload => O}, domain.{ContractTypeId => C}
+    import ResolveContractTypeId.{Overload as O}, domain.{ContractTypeId as C}
     override def apply[U, R](jwt: Jwt, ledgerId: LedgerApiDomain.LedgerId)(
         x: U with ContractTypeId.OptionalPkg
     )(implicit
@@ -208,44 +213,44 @@ class PackageService(
       def keep(it: ResultType) = EitherT.pure(it): ET[ResultType]
       for {
         result <- EitherT.pure(doSearch()): ET[ResultType]
-        _ = logger.trace(s"Result: $result")
+        _ = logger.trace(s"Result: $result, ${lc.makeString}")
         finalResult <- (x: C.OptionalPkg).packageId.fold {
           if (result.isDefined)
             // no package id and we do have the package, refresh if timeout
             if (cache.packagesShouldBeFetchedAgain) {
               logger.trace(
-                "no package id and we do have the package, refresh because of timeout"
+                s"no package id and we do have the package, refresh because of timeout, ${lc.makeString}"
               )
               doReloadAndSearchAgain()
             } else {
               logger.trace(
-                "no package id and we do have the package, -no timeout- no refresh"
+                s"no package id and we do have the package, -no timeout- no refresh, ${lc.makeString}"
               )
               keep(result)
             }
           // no package id and we don’t have the package, always refresh
           else {
-            logger.trace("no package id and we don’t have the package, always refresh")
+            logger.trace(s"no package id and we don’t have the package, always refresh, ${lc.makeString}")
             doReloadAndSearchAgain()
           }
         } { packageId =>
           if (result.isDefined) {
-            logger.trace("package id defined & template id found, no refresh necessary")
+            logger.trace(s"package id defined & template id found, no refresh necessary, ${lc.makeString}")
             keep(result)
           } else {
             // package id and we have the package, never refresh
             if (state.packageIds.contains(packageId)) {
-              logger.trace("package id and we have the package, never refresh")
+              logger.trace(s"package id and we have the package, never refresh, ${lc.makeString}")
               keep(result)
             }
             // package id and we don’t have the package, always refresh
             else {
-              logger.trace("package id and we don’t have the package, always refresh")
+              logger.trace(s"package id and we don’t have the package, always refresh, ${lc.makeString}")
               doReloadAndSearchAgain()
             }
           }
         }: ET[ResultType]
-        _ = logger.trace(s"Final result: $finalResult")
+        _ = logger.trace(s"Final result: $finalResult, ${lc.makeString}")
       } yield finalResult
     }.run
   }
@@ -265,7 +270,7 @@ class PackageService(
       val f =
         if (cache.packagesShouldBeFetchedAgain) {
           logger.trace(
-            "no package id and we do have the package, refresh because of timeout"
+            s"no package id and we do have the package, refresh because of timeout, ${lc.makeString}"
           )
           reload(jwt, ledgerId)
         } else Future.successful(())
@@ -308,7 +313,7 @@ object PackageService {
   object ResolveContractTypeId {
     sealed abstract class Overload[-Unresolved, +Resolved]
 
-    import domain.{ContractTypeId => C}
+    import domain.{ContractTypeId as C}
 
     object Overload extends LowPriority {
       /* TODO #15293 see below note about Top
@@ -348,7 +353,7 @@ object PackageService {
       all: Map[RequiredPkg[CtId], ResolvedOf[CtId]],
       unique: Map[NoPkg[CtId], ResolvedOf[CtId]],
   ) {
-     def resolve(
+    def resolve(
         a: ContractTypeId[Option[String]]
     )(implicit makeKey: ContractTypeId.Like[CtId]): Option[ResolvedOf[CtId]] =
       a.packageId match {
@@ -393,7 +398,7 @@ object PackageService {
   private type RequiredPkg[CtId[_]] = CtId[String]
   private type NoPkg[CtId[_]] = CtId[Unit]
 
-   def key2[CtId[T] <: ContractTypeId.Ops[CtId, T]](
+  def key2[CtId[T] <: ContractTypeId.Ops[CtId, T]](
       k: RequiredPkg[CtId]
   ): NoPkg[CtId] =
     k.copy(packageId = ())
@@ -476,7 +481,7 @@ object PackageService {
         Map[Option[Ref.TypeConName], typesig.TemplateChoice[Ty]]
       ]]
   ): ChoicesByInterface[Ty] = {
-    import typesig._
+    import typesig.*
     choices.map { case (name, resolvedChoices) =>
       (
         Choice(name: String),

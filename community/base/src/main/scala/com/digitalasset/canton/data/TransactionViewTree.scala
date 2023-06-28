@@ -75,7 +75,7 @@ final case class TransactionViewTree(tree: GenTransactionTree)
   /** Determines whether `view` is top-level. */
   val isTopLevel: Boolean = viewPosition.position.sizeCompare(1) == 0
 
-  val submitterMetadata: Option[SubmitterMetadata] = {
+  val submitterMetadataO: Option[SubmitterMetadata] = {
     val result = tree.submitterMetadata.unwrap.toOption
 
     if (result.isEmpty == isTopLevel) {

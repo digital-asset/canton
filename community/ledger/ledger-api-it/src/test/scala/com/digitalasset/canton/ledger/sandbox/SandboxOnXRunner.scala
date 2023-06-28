@@ -93,7 +93,7 @@ object SandboxOnXRunner {
       (participantId, dataSource, participantConfig) <- assertSingleParticipant(config)
       metrics <- MetricsOwner(openTelemetry.getMeter("daml"), config.metrics, participantId)
       timeServiceBackendO = configAdaptor.timeServiceBackend(participantConfig.apiServer)
-      (stateUpdatesFeedSink, stateUpdatesSource) <- AkkaSubmissionsBridge()
+      (stateUpdatesFeedSink, stateUpdatesSource) <- AkkaSubmissionsBridge(loggerFactory)
 
       servicesThreadPoolSize = participantConfig.servicesThreadPoolSize
       servicesExecutionContext <- buildServicesExecutionContext(metrics, servicesThreadPoolSize)
@@ -111,6 +111,7 @@ object SandboxOnXRunner {
         servicesExecutionContext = servicesExecutionContext,
         timeServiceBackendO = timeServiceBackendO,
         stageBufferSize = bridgeConfig.stageBufferSize,
+        loggerFactory = loggerFactory,
       )
       apiServer <- new LedgerApiServer(
         ledgerFeatures = LedgerFeatures(
@@ -144,6 +145,7 @@ object SandboxOnXRunner {
           ledgerId = config.ledgerId,
           maximumDeduplicationDuration = bridgeConfig.maxDeduplicationDuration,
           stateUpdatesSource,
+          loggerFactory,
         ),
         timeServiceBackendO = timeServiceBackendO,
         servicesExecutionContext = servicesExecutionContext,
@@ -232,6 +234,7 @@ object SandboxOnXRunner {
       servicesExecutionContext: ExecutionContextExecutorService,
       timeServiceBackendO: Option[TimeServiceBackend],
       stageBufferSize: Int,
+      loggerFactory: NamedLoggerFactory,
   ): IndexService => ResourceOwner[WriteService] = { indexService =>
     val bridgeMetrics = new BridgeMetrics(factory = metricsFactory)
     for {
@@ -243,6 +246,7 @@ object SandboxOnXRunner {
         servicesThreadPoolSize,
         timeServiceBackendO.getOrElse(TimeProvider.UTC),
         stageBufferSize,
+        loggerFactory,
       )(loggingContext, servicesExecutionContext)
       writeService <- ResourceOwner.forCloseable(() =>
         new BridgeWriteService(
@@ -250,7 +254,8 @@ object SandboxOnXRunner {
           submissionBufferSize = bridgeConfig.submissionBufferSize,
           ledgerBridge = ledgerBridge,
           bridgeMetrics = bridgeMetrics,
-        )(materializer, loggingContext)
+          loggerFactory = loggerFactory,
+        )(materializer)
       )
     } yield writeService
   }

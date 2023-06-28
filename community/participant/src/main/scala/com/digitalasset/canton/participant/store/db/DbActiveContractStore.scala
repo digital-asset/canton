@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.{Chain, EitherT}
+import cats.data.Chain
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
@@ -16,7 +16,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
-import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.db.DbActiveContractStore.*
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
@@ -67,7 +66,7 @@ class DbActiveContractStore(
 )(implicit val ec: ExecutionContext)
     extends ActiveContractStore
     with DbStore
-    with DbPrunableByTimeDomain[AcsError] {
+    with DbPrunableByTimeDomain {
 
   import ActiveContractStore.*
   import DbStorage.Implicits.*
@@ -379,7 +378,7 @@ class DbActiveContractStore(
 
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, CantonTimestamp]] =
+  ): Future[SortedMap[LfContractId, (CantonTimestamp, TransferCounter)]] =
     processingTime.event {
       logger.debug(s"Obtaining ACS snapshot at $timestamp")
       storage
@@ -387,19 +386,27 @@ class DbActiveContractStore(
           snapshotQuery(SnapshotQueryParameter.Ts(timestamp), None),
           functionFullName,
         )
-        .map(snapshot => SortedMap(snapshot *))
+        .map { snapshot =>
+          SortedMap.from(snapshot.map { case (cid, ts, transferCounter) =>
+            cid -> (ts, transferCounter)
+          })
+        }
     }
 
   override def snapshot(rc: RequestCounter)(implicit
       traceContext: TraceContext
-  ): Future[SortedMap[LfContractId, RequestCounter]] = processingTime.event {
+  ): Future[SortedMap[LfContractId, (RequestCounter, TransferCounter)]] = processingTime.event {
     logger.debug(s"Obtaining ACS snapshot at $rc")
     storage
       .query(
         snapshotQuery(SnapshotQueryParameter.Rc(rc), None),
         functionFullName,
       )
-      .map(snapshot => SortedMap(snapshot *))
+      .map { snapshot =>
+        SortedMap.from(snapshot.map { case (cid, rc, transferCounter) =>
+          cid -> (rc, transferCounter)
+        })
+      }
   }
 
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
@@ -413,14 +420,14 @@ class DbActiveContractStore(
             snapshotQuery(SnapshotQueryParameter.Ts(timestamp), Some(contractIds)),
             functionFullName,
           )
-          .map(_.toMap)
+          .map(_.view.map { case (cid, ts, _) => cid -> ts }.toMap)
     }
   }
 
   private[this] def snapshotQuery[T](
       p: SnapshotQueryParameter[T],
       contractIds: Option[Set[LfContractId]],
-  ): DbAction.ReadOnly[Seq[(LfContractId, T)]] = {
+  ): DbAction.ReadOnly[Seq[(LfContractId, T, TransferCounter)]] = {
     import DbStorage.Implicits.BuilderChain.*
 
     val idsO = contractIds.map { ids =>
@@ -437,7 +444,7 @@ class DbActiveContractStore(
     storage.profile match {
       case _: DbStorage.Profile.H2 =>
         (sql"""
-          select distinct(contract_id), #${p.attribute}
+          select distinct(contract_id), #${p.attribute}, transfer_counter
           from active_contracts AC
           where not exists(select * from active_contracts AC2 where domain_id = $domainId and AC.contract_id = AC2.contract_id
             and AC2.#${p.attribute} <= ${p.bound}
@@ -445,32 +452,32 @@ class DbActiveContractStore(
               or (AC.ts = AC2.ts and AC.request_counter = AC2.request_counter and AC2.change = ${ChangeType.Deactivation})))
            and AC.#${p.attribute} <= ${p.bound} and domain_id = $domainId""" ++
           idsO.fold(sql"")(ids => sql" and AC.contract_id in " ++ ids) ++ ordering)
-          .as[(LfContractId, T)]
+          .as[(LfContractId, T, TransferCounter)]
       case _: DbStorage.Profile.Postgres =>
         (sql"""
-          select distinct(contract_id), AC3.#${p.attribute} from active_contracts AC1
+          select distinct(contract_id), AC3.#${p.attribute}, AC3.transfer_counter from active_contracts AC1
           join lateral
-            (select #${p.attribute}, change from active_contracts AC2 where domain_id = $domainId
+            (select #${p.attribute}, change, transfer_counter from active_contracts AC2 where domain_id = $domainId
              and AC2.contract_id = AC1.contract_id and #${p.attribute} <= ${p.bound} order by ts desc, request_counter desc, change asc #${storage
             .limit(1)}) as AC3 on true
           where AC1.domain_id = $domainId and AC3.change = CAST(${ChangeType.Activation} as change_type)""" ++
           idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids) ++ ordering)
-          .as[(LfContractId, T)]
+          .as[(LfContractId, T, TransferCounter)]
       case _: DbStorage.Profile.Oracle =>
-        (sql"""select distinct(contract_id), AC3.#${p.attribute} from active_contracts AC1, lateral
-          (select #${p.attribute}, change from active_contracts AC2 where domain_id = $domainId
+        (sql"""select distinct(contract_id), AC3.#${p.attribute}, AC3.transfer_counter from active_contracts AC1, lateral
+          (select #${p.attribute}, change, transfer_counter from active_contracts AC2 where domain_id = $domainId
              and AC2.contract_id = AC1.contract_id and #${p.attribute} <= ${p.bound}
              order by ts desc, request_counter desc, change desc
              fetch first 1 row only) AC3
           where AC1.domain_id = $domainId and AC3.change = 'activation'""" ++
           idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids) ++ ordering)
-          .as[(LfContractId, T)]
+          .as[(LfContractId, T, TransferCounter)]
     }
   }
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Unit] = processingTime.eitherTEvent {
+  ): Future[Unit] = processingTime.event {
 
     // For each contract select the last deactivation before or at the timestamp.
     // If such a deactivation exists then delete all acs records up to and including the deactivation
@@ -528,15 +535,13 @@ class DbActiveContractStore(
             where ac.request_counter <= dc.request_counter
         )"""
     }
-    EitherT.right(
-      for {
-        nrPruned <- storage.queryAndUpdate(query, functionFullName)
-      } yield {
-        logger.info(
-          s"Pruned at least $nrPruned entries from the ACS of domain $domainId older or equal to $beforeAndIncluding"
-        )
-      }
-    )
+    for {
+      nrPruned <- storage.queryAndUpdate(query, functionFullName)
+    } yield {
+      logger.info(
+        s"Pruned at least $nrPruned entries from the ACS of domain $domainId older or equal to $beforeAndIncluding"
+      )
+    }
   }
 
   def deleteSince(criterion: RequestCounter)(implicit traceContext: TraceContext): Future[Unit] =

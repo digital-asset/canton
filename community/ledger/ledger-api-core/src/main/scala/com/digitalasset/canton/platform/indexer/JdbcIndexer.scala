@@ -93,6 +93,7 @@ object JdbcIndexer {
             metrics = metrics,
             engineO = None,
             loadPackage = (_, _) => Future.successful(None),
+            loggerFactory = loggerFactory,
           ),
           compressionStrategy =
             if (config.enableCompression) CompressionStrategy.allGZIP(metrics)

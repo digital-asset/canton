@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.backend.localstore.{
@@ -67,20 +68,25 @@ trait StorageBackendProviderPostgres
   this: Suite =>
   override protected def jdbcUrl: String = postgresDatabase.url
   override protected val backend: TestBackend = TestBackend(
-    PostgresStorageBackendFactory(loggerFactory)
+    PostgresStorageBackendFactory(loggerFactory),
+    loggerFactory,
   )
 }
 
-trait StorageBackendProviderH2 extends StorageBackendProvider { this: Suite =>
+trait StorageBackendProviderH2 extends StorageBackendProvider with BaseTest { this: Suite =>
   override protected def jdbcUrl: String = "jdbc:h2:mem:storage_backend_provider;db_close_delay=-1"
   override protected def lockIdSeed: Int =
     throw new UnsupportedOperationException //  DB Locking is not supported for H2
-  override protected val backend: TestBackend = TestBackend(H2StorageBackendFactory)
+  override protected val backend: TestBackend = TestBackend(H2StorageBackendFactory, loggerFactory)
 }
 
-trait StorageBackendProviderOracle extends StorageBackendProvider with OracleAroundAll {
+trait StorageBackendProviderOracle
+    extends StorageBackendProvider
+    with OracleAroundAll
+    with BaseTest {
   this: Suite =>
-  override protected val backend: TestBackend = TestBackend(OracleStorageBackendFactory)
+  override protected val backend: TestBackend =
+    TestBackend(OracleStorageBackendFactory, loggerFactory)
 }
 
 final case class TestBackend(
@@ -113,7 +119,10 @@ final case class TestMeteringBackend(
 )
 
 object TestBackend {
-  def apply(storageBackendFactory: StorageBackendFactory): TestBackend = {
+  def apply(
+      storageBackendFactory: StorageBackendFactory,
+      loggerFactory: NamedLoggerFactory,
+  ): TestBackend = {
     val ledgerEndCache = MutableLedgerEndCache()
     val stringInterning = new MockStringInterning
 
@@ -131,10 +140,12 @@ object TestBackend {
       configuration = storageBackendFactory.createConfigurationStorageBackend(ledgerEndCache),
       party = storageBackendFactory.createPartyStorageBackend(ledgerEndCache),
       packageBackend = storageBackendFactory.createPackageStorageBackend(ledgerEndCache),
-      completion = storageBackendFactory.createCompletionStorageBackend(stringInterning),
+      completion =
+        storageBackendFactory.createCompletionStorageBackend(stringInterning, loggerFactory),
       contract =
         storageBackendFactory.createContractStorageBackend(ledgerEndCache, stringInterning),
-      event = storageBackendFactory.createEventStorageBackend(ledgerEndCache, stringInterning),
+      event = storageBackendFactory
+        .createEventStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
       dataSource = storageBackendFactory.createDataSourceStorageBackend,
       dbLock = storageBackendFactory.createDBLockStorageBackend,
       integrity = storageBackendFactory.createIntegrityStorageBackend,

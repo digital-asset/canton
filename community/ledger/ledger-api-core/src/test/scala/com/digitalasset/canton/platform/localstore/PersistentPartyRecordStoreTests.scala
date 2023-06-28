@@ -30,6 +30,7 @@ trait PersistentPartyRecordStoreTests
       metrics = Metrics.ForTesting,
       timeProvider = TimeProvider.UTC,
       executionContext = executionContext,
+      loggerFactory = loggerFactory,
     )
 
   def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig): Future[Unit] =

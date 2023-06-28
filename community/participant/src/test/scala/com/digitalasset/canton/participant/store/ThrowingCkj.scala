@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
   ContractKeyJournalError,
@@ -40,8 +39,8 @@ class ThrowingCkj[T <: Throwable](mk: String => T)(override implicit val ec: Exe
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ContractKeyJournalError, Unit] =
-    EitherT(Future.failed[M](mk(show"doPrune($beforeAndIncluding)")))
+  ): Future[Unit] =
+    Future.failed(mk(show"doPrune($beforeAndIncluding)"))
 
   override def deleteSince(inclusive: TimeOfChange)(implicit
       traceContext: TraceContext
@@ -54,12 +53,12 @@ class ThrowingCkj[T <: Throwable](mk: String => T)(override implicit val ec: Exe
   /** Always returns [[scala.None$]] so that the failure does not happen while checking the invariant. */
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ContractKeyJournalError, Option[PruningStatus]] =
-    EitherT(Future.successful(Either.right[ContractKeyJournalError, Option[PruningStatus]](None)))
+  ): Future[Option[PruningStatus]] =
+    Future.successful(None)
 
   override protected[canton] def advancePruningTimestamp(
       phase: PruningPhase,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): EitherT[Future, ContractKeyJournalError, Unit] =
-    EitherT(Future.failed[M](mk(show"advancePruningTimestamp($phase, $timestamp)")))
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    Future.failed(mk(show"advancePruningTimestamp($phase, $timestamp)"))
 }

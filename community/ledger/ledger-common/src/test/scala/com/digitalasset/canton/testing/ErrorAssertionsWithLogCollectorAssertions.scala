@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.testing
 
+import com.daml.error.ErrorsAssertions
 import com.daml.error.utils.ErrorDetails
-import com.daml.error.{ContextualizedErrorLogger, ErrorsAssertions}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.testing.TestingLogCollector.ExpectedLogEntry
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
@@ -18,20 +16,6 @@ import scala.reflect.ClassTag
 // TODO(#12133): remove this file
 trait ErrorAssertionsWithLogCollectorAssertions extends ErrorsAssertions with LoggingAssertions {
   self: Matchers with Eventually with IntegrationPatience =>
-
-  private val logger = ContextualizedLogger.get(getClass)
-  private val loggingContext = LoggingContext.ForTesting
-  private val errorLogger = new DamlContextualizedErrorLogger(logger, loggingContext, None)
-
-  def assertError(
-      actual: StatusRuntimeException,
-      expectedF: ContextualizedErrorLogger => StatusRuntimeException,
-  ): Unit = {
-    assertError(
-      actual = actual,
-      expected = expectedF(errorLogger),
-    )
-  }
 
   def assertError[Test: ClassTag, Logger: ClassTag](
       actual: StatusRuntimeException,

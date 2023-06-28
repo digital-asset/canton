@@ -361,7 +361,9 @@ abstract class ProtocolProcessor[
         }
 
         unlessError(
-          tracked.prepareBatch(actualDeduplicationOffset).mapK(FutureUnlessShutdown.outcomeK)
+          tracked
+            .prepareBatch(actualDeduplicationOffset, maxSequencingTime)
+            .mapK(FutureUnlessShutdown.outcomeK)
         )(sendBatch)
     }
 
@@ -555,6 +557,10 @@ abstract class ProtocolProcessor[
       )
     } else {
       logger.info(show"Processing ${steps.requestKind.unquoted} request at $requestId.")
+
+      val rootHash = batch.rootHashMessage.rootHash
+      val freshOwnTimelyTxF = ephemeral.submissionTracker.register(rootHash, requestId)
+
       val processedET = performUnlessClosingEitherU(
         s"ProtocolProcess.processRequest(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
       ) {
@@ -565,7 +571,7 @@ abstract class ProtocolProcessor[
               .registerRequest(steps.requestType)(RequestId(ts))
           )
           .map { handleRequestData =>
-            performRequestProcessing(ts, rc, sc, handleRequestData, batch)
+            performRequestProcessing(ts, rc, sc, handleRequestData, batch, freshOwnTimelyTxF)
           }
       }
       toHandlerRequest(ts, processedET)
@@ -582,11 +588,13 @@ abstract class ProtocolProcessor[
         steps.requestType.PendingRequestData
       ],
       batch: steps.RequestBatch,
+      freshOwnTimelyTxF: FutureUnlessShutdown[Boolean],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
     val RequestAndRootHashMessage(viewMessages, rootHashMessage, mediator) = batch
     val requestId = RequestId(ts)
+    val rootHash = rootHashMessage.rootHash
 
     def checkRootHash(
         decryptedViews: steps.DecryptedViews
@@ -607,7 +615,7 @@ abstract class ProtocolProcessor[
     performUnlessClosingEitherUSF(
       s"$functionFullName(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
     ) {
-      for {
+      val preliminaryChecksET = for {
         snapshot <- EitherT.right(
           crypto.awaitSnapshotUSSupervised(s"await crypto snapshot $ts")(ts)
         )
@@ -633,6 +641,14 @@ abstract class ProtocolProcessor[
         decryptedViews <- steps
           .decryptViews(viewMessages, snapshot)
           .mapK(FutureUnlessShutdown.outcomeK)
+      } yield (snapshot, decisionTime, decryptedViews)
+
+      for {
+        preliminaryChecks <- preliminaryChecksET.leftMap { err =>
+          ephemeral.submissionTracker.cancelRegistration(rootHash, requestId)
+          err
+        }
+        (snapshot, decisionTime, decryptedViews) = preliminaryChecks
 
         (malformedPayloads, viewsWithCorrectRootHash) = checkRootHash(decryptedViews)
         _ = malformedPayloads.foreach { mp =>
@@ -650,6 +666,7 @@ abstract class ProtocolProcessor[
 
         _ <- NonEmpty.from(viewsWithCorrectRootHash) match {
           case None =>
+            ephemeral.submissionTracker.cancelRegistration(rootHash, requestId)
             trackAndSendResponsesMalformed(
               rc,
               sc,
@@ -664,6 +681,24 @@ abstract class ProtocolProcessor[
           case Some(goodViewsWithSignatures) =>
             // All views with the same correct root hash declare the same mediator, so it's enough to look at the head
             val (firstView, _) = goodViewsWithSignatures.head1
+
+            val views = goodViewsWithSignatures.forgetNE.map { case (v, _) => v.unwrap }
+
+            steps.getSubmissionDataForTracker(views) match {
+              case Some(submissionData) =>
+                ephemeral.submissionTracker.provideSubmissionData(
+                  rootHash,
+                  requestId,
+                  submissionData,
+                )
+              case None =>
+                // There are no root views
+                ephemeral.submissionTracker.cancelRegistration(
+                  rootHash,
+                  requestId,
+                )
+            }
+
             val declaredMediator = firstView.unwrap.mediator
             if (declaredMediator == mediator) {
               processRequestWithGoodViews(
@@ -676,6 +711,7 @@ abstract class ProtocolProcessor[
                 mediator,
                 goodViewsWithSignatures,
                 malformedPayloads,
+                freshOwnTimelyTxF,
               )
             } else {
               // When the mediator `mediatorId` receives the root hash message,
@@ -708,78 +744,90 @@ abstract class ProtocolProcessor[
         Seq[(WithRecipients[ProtocolProcessor.this.steps.DecryptedView], Option[Signature])]
       ],
       malformedPayloads: Seq[MalformedPayload],
+      freshOwnTimelyTxF: FutureUnlessShutdown[Boolean],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ProtocolProcessor.this.steps.RequestError, Unit] = {
     val views = viewsWithSignatures.map { case (view, _) => view }
 
-    // Check whether the declared mediator is still an active mediator.
-    EitherT
-      .right(snapshot.ipsSnapshot.isMediatorActive(mediator))
-      .mapK(FutureUnlessShutdown.outcomeK)
-      .flatMap {
-        case true =>
-          steps
-            .computeActivenessSetAndPendingContracts(
-              ts,
-              rc,
-              sc,
-              viewsWithSignatures,
-              malformedPayloads,
-              snapshot,
-              mediator,
-            )
-            .mapK(FutureUnlessShutdown.outcomeK)
-            .flatMap(
-              trackAndSendResponses(
-                rc,
-                sc,
-                ts,
-                handleRequestData,
-                mediator,
-                snapshot,
-                decisionTime,
-                _,
-              )
-            )
-        case false =>
-          SyncServiceAlarm
-            .Warn(
-              s"Request $rc: Chosen mediator $mediator is inactive at $ts. Skipping this request."
-            )
-            .report()
+    def continueProcessing(freshOwnTimelyTx: Boolean) =
+      for {
+        activenessAndPending <- steps
+          .computeActivenessSetAndPendingContracts(
+            ts,
+            rc,
+            sc,
+            viewsWithSignatures,
+            malformedPayloads,
+            snapshot,
+            mediator,
+          )
+          .mapK(FutureUnlessShutdown.outcomeK)
+        _ <- trackAndSendResponses(
+          rc,
+          sc,
+          ts,
+          handleRequestData,
+          mediator,
+          snapshot,
+          decisionTime,
+          activenessAndPending,
+          freshOwnTimelyTx,
+        )
+      } yield ()
 
-          // The chosen mediator may have become inactive between submission and sequencing.
-          // All honest participants and the mediator will ignore the request,
-          // but the submitting participant still must produce a completion event.
-          val (eventO, submissionIdO) =
-            steps.eventAndSubmissionIdForInactiveMediator(ts, rc, sc, views)
-          for {
-            _ <- EitherT.right(
-              FutureUnlessShutdown.outcomeF(
-                unlessCleanReplay(rc)(
-                  ephemeral.recordOrderPublisher.schedulePublication(sc, rc, ts, eventO)
-                )
-              )
+    def stopProcessing(freshOwnTimelyTx: Boolean) = {
+      SyncServiceAlarm
+        .Warn(
+          s"Request $rc: Chosen mediator $mediator is inactive at $ts. Skipping this request."
+        )
+        .report()
+
+      // The chosen mediator may have become inactive between submission and sequencing.
+      // All honest participants and the mediator will ignore the request,
+      // but the submitting participant still must produce a completion event.
+      val (eventO, submissionIdO) =
+        steps.eventAndSubmissionIdForInactiveMediator(ts, rc, sc, views, freshOwnTimelyTx)
+
+      for {
+        _ <- EitherT.right(
+          FutureUnlessShutdown.outcomeF(
+            unlessCleanReplay(rc)(
+              ephemeral.recordOrderPublisher.schedulePublication(sc, rc, ts, eventO)
             )
-            submissionDataO = submissionIdO.flatMap(submissionId =>
-              // This removal does not interleave with `schedulePendingSubmissionRemoval`
-              // as the sequencer respects the max sequencing time of the request.
-              // TODO(M99) Gracefully handle the case that the sequencer does not respect the max sequencing time.
-              steps.removePendingSubmission(
-                steps.pendingSubmissions(ephemeral),
-                submissionId,
-              )
-            )
-            _ = submissionDataO.foreach(
-              steps.postProcessSubmissionForInactiveMediator(mediator, ts, _)
-            )
-            _ <- EitherT.right[steps.RequestError] {
-              handleRequestData.complete(None)
-              invalidRequest(rc, sc, ts)
-            }
-          } yield ()
-      }
+          )
+        )
+        submissionDataO = submissionIdO.flatMap(submissionId =>
+          // This removal does not interleave with `schedulePendingSubmissionRemoval`
+          // as the sequencer respects the max sequencing time of the request.
+          // TODO(M99) Gracefully handle the case that the sequencer does not respect the max sequencing time.
+          steps.removePendingSubmission(
+            steps.pendingSubmissions(ephemeral),
+            submissionId,
+          )
+        )
+        _ = submissionDataO.foreach(
+          steps.postProcessSubmissionForInactiveMediator(mediator, ts, _)
+        )
+        _ <- EitherT.right[steps.RequestError] {
+          handleRequestData.complete(None)
+          invalidRequest(rc, sc, ts)
+        }
+      } yield ()
+    }
+
+    // Check whether the declared mediator is still an active mediator.
+    for {
+      mediatorIsActive <- EitherT
+        .right(snapshot.ipsSnapshot.isMediatorActive(mediator))
+        .mapK(FutureUnlessShutdown.outcomeK)
+      freshOwnTimelyTx <- EitherT.right(freshOwnTimelyTxF)
+      _ <-
+        if (mediatorIsActive)
+          continueProcessing(freshOwnTimelyTx)
+        else
+          stopProcessing(freshOwnTimelyTx)
+    } yield ()
   }
 
   private def trackAndSendResponses(
@@ -793,6 +841,7 @@ abstract class ProtocolProcessor[
       snapshot: DomainSnapshotSyncCryptoApi,
       decisionTime: CantonTimestamp,
       contractsAndContinue: steps.CheckActivenessAndWritePendingContracts,
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
@@ -851,6 +900,7 @@ abstract class ProtocolProcessor[
               requestFuturesF.flatMap(_.activenessResult),
               pendingCursor,
               mediator,
+              freshOwnTimelyTx,
             )
 
             steps.StorePendingDataAndSendResponseAndCreateTimeout(
@@ -1344,7 +1394,9 @@ abstract class ProtocolProcessor[
           _,
         ) <- unsignedResultE.toOption
         case WrappedPendingRequestData(pendingRequestData) <- Some(pendingRequestDataOrReplayData)
-        case PendingTransaction(txId, _, _, _, requestTime, _, _, _, _) <- Some(pendingRequestData)
+        case PendingTransaction(txId, _, _, _, _, requestTime, _, _, _, _) <- Some(
+          pendingRequestData
+        )
 
         txRootHash = txId.toRootHash
         if resultRootHash != txRootHash

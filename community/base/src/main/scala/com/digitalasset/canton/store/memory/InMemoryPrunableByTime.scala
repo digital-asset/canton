@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.store.memory
 
-import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
@@ -20,21 +19,21 @@ import scala.concurrent.Future
   * The pruning method of the store must use [[advancePruningTimestamp]] to signal the start end completion
   * of each pruning.
   */
-trait InMemoryPrunableByTime[E] extends PrunableByTime[E] { this: NamedLogging =>
+trait InMemoryPrunableByTime extends PrunableByTime { this: NamedLogging =>
 
   protected[this] val pruningStatusF: AtomicReference[Option[PruningStatus]] =
     new AtomicReference[Option[PruningStatus]](None)
 
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): EitherT[Future, E, Option[PruningStatus]] =
-    EitherT.pure[Future, E] {
+  ): Future[Option[PruningStatus]] =
+    Future.successful {
       pruningStatusF.get
     }
 
   protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
       implicit traceContext: TraceContext
-  ): EitherT[Future, E, Unit] = EitherT.pure[Future, E] {
+  ): Future[Unit] = Future.successful {
     val previousO =
       pruningStatusF.getAndAccumulate(
         Some(PruningStatus(phase, timestamp)),

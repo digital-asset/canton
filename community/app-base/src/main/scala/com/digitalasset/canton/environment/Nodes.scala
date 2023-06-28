@@ -50,6 +50,11 @@ trait Nodes[+Node <: CantonNode, +NodeBootstrap <: CantonNodeBootstrap[Node]]
   /** Get the single running node */
   def getRunning(name: String): Option[NodeBootstrap]
 
+  /** Get the node while it is still being started. This is mostly useful during testing to access the node in earlier
+    * stages of its initialization phase.
+    */
+  def getStarting(name: String): Option[NodeBootstrap]
+
   /** Stop the named node */
   def stop(name: String): Either[ShutdownError, Unit]
 
@@ -83,6 +88,9 @@ class ManagedNodes[
   // this is a mutable collections so modifications must be synchronized
   // (this may not be necessary if all calls are happening from the same startup thread or console)
   private val nodes = TrieMap[String, NodeBootstrap]()
+  // Mutable collection of node bootstraps while they are being started. They are removed from here as soon as the start
+  // function has completed
+  private val startingNodes = TrieMap[String, NodeBootstrap]()
 
   override def running: Seq[NodeBootstrap] = nodes.values.toSeq
 
@@ -121,6 +129,7 @@ class ManagedNodes[
             _ <- checkMigration(name, config.storage, params)
             instance = create(name, config)
             // we call start which will perform the asynchronous startup
+            _ = startingNodes.put(name, instance)
             _ <- Try(
               params.processingTimeouts.unbounded.await(s"Starting node $name")(
                 instance.start().value
@@ -130,11 +139,13 @@ class ManagedNodes[
               .fold(
                 ex => throw ex,
                 _.leftMap { error =>
+                  startingNodes.remove(name).discard
                   instance
                     .close() // clean up resources allocated during instance creation (e.g., db)
                   StartFailed(name, error)
                 },
               )
+            _ = startingNodes.remove(name).discard
             // register the running instance
             _ = nodes.put(name, instance)
           } yield instance
@@ -173,6 +184,7 @@ class ManagedNodes[
   override def isRunning(name: String): Boolean = nodes.contains(name)
 
   override def getRunning(name: String): Option[NodeBootstrap] = nodes.get(name)
+  override def getStarting(name: String): Option[NodeBootstrap] = startingNodes.get(name)
 
   override def stop(name: String): Either[ShutdownError, Unit] =
     for {

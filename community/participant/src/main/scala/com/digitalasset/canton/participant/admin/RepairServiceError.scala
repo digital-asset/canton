@@ -60,6 +60,30 @@ object RepairServiceError extends RepairServiceErrorGroup {
         with RepairServiceError
   }
 
+  @Explanation(
+    "The participant does not support serving an ACS snapshot at the requested timestamp because its database has already been pruned, e.g., by the continuous background pruning process."
+  )
+  @Resolution(
+    "The snapshot at the requested timestamp is no longer available. Pick a more recent timestamp if possible."
+  )
+  object UnavailableAcsSnapshot
+      extends ErrorCode(
+        id = "UNAVAILABLE_ACS_SNAPSHOT",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(
+        requestedTimestamp: CantonTimestamp,
+        prunedTimestamp: CantonTimestamp,
+        domainId: DomainId,
+    )(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"The participant does not support serving an ACS snapshot at the requested timestamp $requestedTimestamp on domain $domainId"
+        )
+        with RepairServiceError
+  }
+
   object InvalidArgument
       extends ErrorCode(
         id = "INVALID_ARGUMENT_REPAIR",

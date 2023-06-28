@@ -6,15 +6,17 @@ package com.daml.fetchcontracts
 import akka.NotUsed
 import akka.stream.scaladsl.{Broadcast, Concat, Flow, GraphDSL, Source}
 import akka.stream.{FanOutShape2, Graph}
-import com.daml.scalautil.Statement.discard
-import domain.ContractTypeId
-import util.{AbsoluteBookmark, BeginBookmark, ContractStreamStep, InsertDeleteStep, LedgerBegin}
-import util.GraphExtensions._
-import util.IdentifierConverters.apiIdentifier
+import com.daml.fetchcontracts.domain.ContractTypeId
+import com.daml.fetchcontracts.util.*
+import com.daml.fetchcontracts.util.GraphExtensions.*
+import com.daml.fetchcontracts.util.IdentifierConverters.apiIdentifier
+import com.daml.ledger.api.v1 as lav1
 import com.daml.ledger.api.v1.transaction.Transaction
-import com.daml.ledger.api.{v1 => lav1}
+import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.tracing.NoTracing
 
- object AcsTxStreams {
+object AcsTxStreams extends NoTracing {
   import util.AkkaStreamsUtils.{last, max, project2}
 
   /** Plan inserts, deletes from an in-order batch of create/archive events. */
@@ -24,7 +26,7 @@ import com.daml.ledger.api.{v1 => lav1}
     val csb = Vector.newBuilder[lav1.event.CreatedEvent]
     val asb = Map.newBuilder[String, lav1.event.ArchivedEvent]
     import lav1.event.Event
-    import Event.Event._
+    import Event.Event.*
     txes foreach {
       case Event(Created(c)) => discard { csb += c }
       case Event(Archived(a)) => discard { asb += ((a.contractId, a)) }
@@ -38,8 +40,9 @@ import com.daml.ledger.api.{v1 => lav1}
     * after the ACS's last offset, terminating with the last offset of the last transaction,
     * or the ACS's last offset if there were no transactions.
     */
-   def acsFollowingAndBoundary(
-      transactionsSince: lav1.ledger_offset.LedgerOffset => Source[Transaction, NotUsed]
+  def acsFollowingAndBoundary(
+      transactionsSince: lav1.ledger_offset.LedgerOffset => Source[Transaction, NotUsed],
+      logger: TracedLogger,
   )(implicit
       ec: concurrent.ExecutionContext,
       lc: com.daml.logging.LoggingContextOf[Any],
@@ -49,15 +52,15 @@ import com.daml.ledger.api.{v1 => lav1}
     BeginBookmark[domain.Offset],
   ], NotUsed] =
     GraphDSL.create() { implicit b =>
-      import GraphDSL.Implicits._
-      import ContractStreamStep.{LiveBegin, Acs}
+      import ContractStreamStep.{Acs, LiveBegin}
+      import GraphDSL.Implicits.*
       type Off = BeginBookmark[domain.Offset]
       val acs = b add acsAndBoundary
       val dupOff = b add Broadcast[Off](2, eagerCancel = false)
       val liveStart = Flow fromFunction { off: Off =>
         LiveBegin(off)
       }
-      val txns = b add transactionsFollowingBoundary(transactionsSince)
+      val txns = b add transactionsFollowingBoundary(transactionsSince, logger)
       val allSteps = b add Concat[ContractStreamStep.LAV1](3)
       // format: off
       discard { dupOff <~ acs.out1 }
@@ -77,8 +80,8 @@ import com.daml.ledger.api.{v1 => lav1}
         lav1.event.CreatedEvent,
       ], BeginBookmark[domain.Offset]], NotUsed] =
     GraphDSL.create() { implicit b =>
-      import GraphDSL.Implicits._
-      import lav1.active_contracts_service.{GetActiveContractsResponse => GACR}
+      import GraphDSL.Implicits.*
+      import lav1.active_contracts_service.GetActiveContractsResponse as GACR
       val dup = b add Broadcast[GACR](2, eagerCancel = true)
       val acs = b add (Flow fromFunction ((_: GACR).activeContracts))
       val off = b add Flow[GACR]
@@ -95,8 +98,9 @@ import com.daml.ledger.api.{v1 => lav1}
     * the ACS graph, if desired.  Deliberately matching output shape
     * to `acsFollowingAndBoundary`.
     */
-   def transactionsFollowingBoundary(
-      transactionsSince: lav1.ledger_offset.LedgerOffset => Source[Transaction, NotUsed]
+  def transactionsFollowingBoundary(
+      transactionsSince: lav1.ledger_offset.LedgerOffset => Source[Transaction, NotUsed],
+      logger: TracedLogger,
   )(implicit
       ec: concurrent.ExecutionContext,
       lc: com.daml.logging.LoggingContextOf[Any],
@@ -106,7 +110,7 @@ import com.daml.ledger.api.{v1 => lav1}
     BeginBookmark[domain.Offset],
   ], NotUsed] =
     GraphDSL.create() { implicit b =>
-      import GraphDSL.Implicits._
+      import GraphDSL.Implicits.*
       type Off = BeginBookmark[domain.Offset]
       val dupOff = b add Broadcast[Off](2)
       val mergeOff = b add Concat[Off](2)
@@ -118,7 +122,7 @@ import com.daml.ledger.api.{v1 => lav1}
       val lastTxOff = b add last(LedgerBegin: Off)
       val maxOff = b add max(LedgerBegin: Off)
       val logTxnOut =
-        b add logTermination[ContractStreamStep.Txn.LAV1]("first branch of tx stream split")
+        b add logTermination[ContractStreamStep.Txn.LAV1](logger, "first branch of tx stream split")
       // format: off
       discard { txnSplit.in <~ txns <~ dupOff }
       discard {                        dupOff                                ~> mergeOff ~> maxOff }
@@ -135,11 +139,11 @@ import com.daml.ledger.api.{v1 => lav1}
     (ContractStreamStep.Txn(partitionInsertsDeletes(tx.events), offset), offset)
   }
 
-   def transactionFilter(
+  def transactionFilter(
       parties: domain.PartySet,
       contractTypeIds: List[ContractTypeId.Resolved],
   ): lav1.transaction_filter.TransactionFilter = {
-    import lav1.transaction_filter._
+    import lav1.transaction_filter.*
 
     val (templateIds, interfaceIds) = domain.ResolvedQuery.partition(contractTypeIds)
     val filters = Filters(

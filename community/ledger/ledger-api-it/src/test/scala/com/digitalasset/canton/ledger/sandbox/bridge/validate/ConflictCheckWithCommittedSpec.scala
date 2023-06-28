@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.sandbox.bridge.validate
 
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Bytes, ImmArray, Ref, Time}
@@ -12,9 +11,9 @@ import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{ContractId, ValueTrue, VersionedContractInstance}
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.{Configuration, LedgerTimeModel}
-import com.digitalasset.canton.ledger.error.DamlContextualizedErrorLogger
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.{
   ContractState,
@@ -257,11 +256,9 @@ class ConflictCheckWithCommittedSpec
     }
   }
 
-  private class TestContext extends FixtureContext {
+  private class TestContext extends FixtureContext with BaseTest {
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace.ForTesting
-    implicit val contextualizedErrorLogger: ContextualizedErrorLogger =
-      DamlContextualizedErrorLogger.forTesting(getClass)
 
     val indexServiceMock: IndexService = mock[IndexService]
 
@@ -271,6 +268,7 @@ class ConflictCheckWithCommittedSpec
       new ConflictCheckWithCommittedImpl(
         indexService = indexServiceMock,
         bridgeMetrics = new BridgeMetrics(NoOpMetricsFactory),
+        loggerFactory = loggerFactory,
       )(scala.concurrent.ExecutionContext.global)
 
     val inputContract: ContractId = cid(1)

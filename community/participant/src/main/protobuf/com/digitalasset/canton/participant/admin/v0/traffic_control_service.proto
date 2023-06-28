@@ -5,8 +5,7 @@ syntax = "proto3";
 
 package com.digitalasset.canton.participant.admin.v0;
 
-import "google/protobuf/timestamp.proto";
-import "google/protobuf/wrappers.proto";
+import "com/digitalasset/canton/traffic/v0/member_traffic_status.proto";
 
 /*
  * Service to retrieve information about the traffic state of the participant.
@@ -20,10 +19,5 @@ message TrafficControlStateRequest {
 }
 
 message TrafficControlStateResponse {
-  message TrafficControlState {
-    google.protobuf.Timestamp timestamp = 1; // timestamp at which the state is valid
-    google.protobuf.UInt64Value total_extra_traffic_limit = 2; // total extra traffic at that timestamp
-    uint64 extra_traffic_remainder = 3; // remaining extra traffic at that timestamp
-  }
-  TrafficControlState traffic_state = 1;
+  com.digitalasset.canton.traffic.v0.MemberTrafficStatus traffic_state = 1;
 }

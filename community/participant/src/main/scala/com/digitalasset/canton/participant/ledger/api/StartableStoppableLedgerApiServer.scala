@@ -14,7 +14,6 @@ import com.daml.ledger.api.v1.experimental_features.{
   ExperimentalExplicitDisclosure,
 }
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
-import com.daml.logging.LoggingContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.ports.Port
 import com.daml.tracing.Telemetry
@@ -32,7 +31,7 @@ import com.digitalasset.canton.ledger.participant.state.v2.metrics.{
   TimedWriteService,
 }
 import com.digitalasset.canton.lifecycle.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{ApiRequestLogger, ClientChannelBuilder}
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.platform.LedgerApiServer
@@ -60,7 +59,7 @@ import com.digitalasset.canton.platform.services.time.TimeProviderType
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import io.grpc.{BindableService, ServerInterceptor}
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 import io.scalaland.chimney.dsl.*
@@ -91,7 +90,6 @@ class StartableStoppableLedgerApiServer(
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
-    loggingContext: LoggingContext,
 ) extends FlagCloseableAsync
     with NamedLogging {
 
@@ -127,9 +125,10 @@ class StartableStoppableLedgerApiServer(
       performUnlessClosingF(functionFullName) {
         ledgerApiResource.get match {
           case Some(_ledgerApiAlreadyStarted) =>
-            ErrorUtil.invalidStateAsync(
-              "Attempt to start ledger API server, but ledger API server already started"
+            logger.info(
+              "Attempt to start ledger API server, but ledger API server already started. Ignoring."
             )
+            Future.unit
           case None =>
             val ledgerApiServerResource =
               buildLedgerApiServerOwner(overrideIndexerStartupMode).acquire()(
@@ -180,6 +179,7 @@ class StartableStoppableLedgerApiServer(
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
+    implicit val loggingContextWithTrace = LoggingContextWithTrace(loggerFactory, telemetry)
     val acsStreamsConfig =
       config.serverConfig.activeContractsService.transformInto[LedgerAcsStreamsConfig]
     val txFlatStreamsConfig =
@@ -273,6 +273,7 @@ class StartableStoppableLedgerApiServer(
         inMemoryState = inMemoryState,
         tracer = config.tracerProvider.tracer,
         loggerFactory = loggerFactory,
+        incompleteOffsets = timedReadService.incompleteReassignmentOffsets(_, _)(_),
       )
       userManagementStore = getUserManagementStore(dbSupport, loggerFactory)
       partyRecordStore = new PersistentPartyRecordStore(
@@ -280,6 +281,7 @@ class StartableStoppableLedgerApiServer(
         metrics = config.metrics,
         timeProvider = TimeProvider.UTC,
         executionContext = executionContext,
+        loggerFactory = loggerFactory,
       )
 
       apiServerConfig = getApiServerConfig
@@ -296,6 +298,7 @@ class StartableStoppableLedgerApiServer(
         participantId = config.participantId,
         config = apiServerConfig,
         optWriteService = Some(timedWriteService),
+        readService = timedReadService,
         healthChecks = new HealthChecks(
           "read" -> timedReadService,
           "write" -> (() => config.syncService.currentWriteHealth()),
@@ -322,6 +325,14 @@ class StartableStoppableLedgerApiServer(
         multiDomainEnabled = multiDomainEnabled,
       )
       _ <- startHttpApiIfEnabled
+      _ <- {
+        config.serverConfig.userManagementService.additionalAdminUserId.fold(ResourceOwner.unit) {
+          rawUserId =>
+            ResourceOwner.forFuture { () =>
+              userManagementStore.createExtraAdminUser(rawUserId)
+            }
+        }
+      }
     } yield ()
   }
 
@@ -434,7 +445,7 @@ class StartableStoppableLedgerApiServer(
             .forReleasable(() =>
               ClientChannelBuilder.createChannelToTrustedServer(config.serverConfig.clientConfig)
             ) { channel => Future(channel.shutdown().discard) }
-          _ <- HttpApiServer(jsonApiConfig, channel)(config.jsonApiMetrics, loggingContext)
+          _ <- HttpApiServer(jsonApiConfig, channel, loggerFactory)(config.jsonApiMetrics)
         } yield ()
       }
 }

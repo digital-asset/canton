@@ -208,6 +208,8 @@ class RepairService(
               (cId -> metadata) -> (cId -> saltO)
             }.unzip
 
+          _ = logger.debug(s"Publishing ${contractsToPublishUpstream.size} added contracts")
+
           contractMetadata = contractIdSalts.collect { case (cId, Some(salt)) =>
             val driverContractMetadataBytes =
               DriverContractMetadata(salt).toLfBytes(repair.domainParameters.protocolVersion)
@@ -591,11 +593,13 @@ class RepairService(
         case None =>
           Right(
             (true, None)
-          ) // TODO(i12286): we should pass the transfer counter in as part of the RepairRequest
+          ) // TODO(#13573): we should pass the transfer counter in as part of the RepairRequest
         case Some(ActiveContractStore.Active(_)) =>
           Either.cond(
-            ignoreAlreadyAdded,
-            (false, None),
+            ignoreAlreadyAdded, {
+              logger.debug(s"Skipping contract ${contract.contractId} because it is already active")
+              (false, None)
+            },
             log(
               s"A contract with ${contract.contractId} is already active. Set ignoreAlreadyAdded = true to skip active contracts."
             ),
@@ -613,7 +617,7 @@ class RepairService(
           ).discard
           Right(
             (true, Some(SourceDomainId(targetDomain.unwrap) -> transferCounter))
-          ) // TODO(i12286): we should pass the transfer counter in as part of the RepairRequest
+          ) // TODO(#13573): we should pass the transfer counter in as part of the RepairRequest
       })
       (needToAddContract, transferringFromAndTransferCounter) = res
 
@@ -1098,7 +1102,7 @@ class RepairService(
         val transactionId = repair.transactionId.tryAsLedgerTransactionId
         def eventFor(hostedWitnesses: List[LfPartyId]) = TimestampedEvent(
           LedgerSyncEvent.TransactionAccepted(
-            optCompletionInfo = None,
+            completionInfoO = None,
             transactionMeta = TransactionMeta(
               ledgerEffectiveTime = repair.ts.toLf,
               workflowId = None,
@@ -1113,7 +1117,7 @@ class RepairService(
             transactionId = transactionId,
             recordTime = repair.ts.toLf,
             divulgedContracts = List.empty, // create and plain archive don't involve divulgence
-            blindingInfo = None,
+            blindingInfoO = None,
             hostedWitnesses = hostedWitnesses,
             contractMetadata = driverContractMetadata,
           ),

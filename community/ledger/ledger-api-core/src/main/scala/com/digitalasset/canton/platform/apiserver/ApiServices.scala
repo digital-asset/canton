@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.api.grpc.{GrpcHealthService, GrpcTransactionService}
 import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.participant.state.index.v2.*
+import com.digitalasset.canton.ledger.participant.state.v2.ReadService
 import com.digitalasset.canton.ledger.participant.state.v2 as state
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.configuration.{
@@ -72,6 +73,7 @@ object ApiServices {
   final class Owner(
       participantId: Ref.ParticipantId,
       optWriteService: Option[state.WriteService],
+      readService: ReadService,
       indexService: IndexService,
       userManagementStore: UserManagementStore,
       identityProviderConfigStore: IdentityProviderConfigStore,
@@ -241,6 +243,15 @@ object ApiServices {
         val apiPackageService = new ApiPackageServiceV2(packagesService, telemetry, loggerFactory)
         val apiUpdateService =
           new ApiUpdateService(transactionsService, metrics, telemetry, loggerFactory)
+        val apiStateService =
+          new ApiStateService(
+            acsService = activeContractsService,
+            readService = readService,
+            txService = transactionsService,
+            metrics = metrics,
+            telemetry = telemetry,
+            loggerFactory = loggerFactory,
+          )
         val apiVersionService =
           new ApiVersionServiceV2(ledgerFeatures, userManagementConfig, telemetry, loggerFactory)
 
@@ -250,6 +261,7 @@ object ApiServices {
             new EventQueryServiceV2Authorization(apiEventQueryService, authorizer),
             new PackageServiceV2Authorization(apiPackageService, authorizer),
             new UpdateServiceAuthorization(apiUpdateService, authorizer),
+            new StateServiceAuthorization(apiStateService, authorizer),
             apiVersionService,
           )
 
@@ -346,10 +358,12 @@ object ApiServices {
               contractStore,
               authorityResolver,
               metrics,
+              loggerFactory,
             ),
             new ResolveMaximumLedgerTime(maximumLedgerTimeService),
             maxRetries = 3,
             metrics,
+            loggerFactory,
           ),
           metrics,
         )

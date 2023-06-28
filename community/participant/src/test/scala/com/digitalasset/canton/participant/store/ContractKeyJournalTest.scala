@@ -168,7 +168,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
       "remove the obsolete updates" in {
         val ckj = mk()
         for {
-          _ <- valueOrFail(ckj.prune(CantonTimestamp.Epoch))("Prune the empty journal")
+          _ <- ckj.prune(CantonTimestamp.Epoch)
           _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Assigned, key1 -> Assigned), toc))(
             s"Add keys at $toc"
           )
@@ -178,7 +178,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
           _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Assigned, key2 -> Assigned), toc2))(
             s"Add keys at $toc2"
           )
-          _ <- valueOrFail(ckj.prune(toc1.timestamp))("prune")
+          _ <- ckj.prune(toc1.timestamp)
           fetch1 <- ckj.fetchStates(keys012)
           count1 <- keys012.parTraverse(ckj.countUpdates)
           _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key1 -> Unassigned), toc2))(
@@ -187,7 +187,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest {
           _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key0 -> Unassigned, key2 -> Assigned), toc3))(
             s"Add keys at $toc3"
           )
-          _ <- valueOrFail(ckj.prune(toc3.timestamp))("prune")
+          _ <- ckj.prune(toc3.timestamp)
           fetch2 <- ckj.fetchStates(keys012)
           count2 <- keys012.parTraverse(ckj.countUpdates)
         } yield {

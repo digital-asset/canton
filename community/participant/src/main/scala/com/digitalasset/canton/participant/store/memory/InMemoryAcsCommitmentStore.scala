@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import cats.data.EitherT
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordTime
@@ -11,7 +10,6 @@ import com.digitalasset.canton.participant.pruning.{
   SortedReconciliationIntervals,
   SortedReconciliationIntervalsProvider,
 }
-import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentStore,
   CommitmentQueue,
@@ -40,10 +38,8 @@ import scala.math.Ordering.Implicits.*
 class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory)(implicit
     val ec: ExecutionContext
 ) extends AcsCommitmentStore
-    with InMemoryPrunableByTime[AcsCommitmentStoreError]
+    with InMemoryPrunableByTime
     with NamedLogging {
-
-  import AcsCommitmentStore.*
 
   private val computed
       : TrieMap[ParticipantId, Map[CommitmentPeriod, AcsCommitment.CommitmentType]] = TrieMap.empty
@@ -276,8 +272,8 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
 
   override def doPrune(
       before: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, AcsCommitmentStoreError, Unit] = {
-    EitherT.pure[Future, AcsCommitmentStoreError] {
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    Future.successful {
       computed.foreach { case (p, periods) =>
         computed.update(p, periods.filter(_._1.toInclusive >= before))
       }
@@ -285,7 +281,6 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
         received.update(p, commitmentMsgs.filter(_.message.period.toInclusive >= before))
       }
     }
-  }
 
   override def close(): Unit = ()
 }

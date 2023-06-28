@@ -64,7 +64,7 @@ object ErrorCodeUtils {
 trait BaseCantonError extends BaseError {
 
   override def context: Map[String, String] =
-    super.context ++ BaseCantonError.extractContext(this)
+    super.context ++ BaseError.extractContext(this)
 
   // note that all of the following arguments must be constructor arguments, not body values
   // as otherwise we won't be able to log on creation (parent class is initialized before derived class,
@@ -168,26 +168,6 @@ object BaseCantonError {
       override val throwableO: Option[Throwable] = None,
   )(implicit override val code: ErrorCode)
       extends BaseCantonError {}
-
-  private val ignoreFields =
-    Set(
-      "cause",
-      "throwable",
-      "loggingContext",
-      "definiteAnswer",
-      "representativeProtocolVersion",
-      "companionObj",
-    )
-
-  private[error] def extractContext[D](obj: D): Map[String, String] = {
-    obj.getClass.getDeclaredFields
-      .filterNot(x => ignoreFields.contains(x.getName) || x.getName.startsWith("_"))
-      .map { field =>
-        field.setAccessible(true)
-        (field.getName, field.get(obj).toString)
-      }
-      .toMap
-  }
 
   def isStatusErrorCode(errorCode: ErrorCode, status: com.google.rpc.status.Status): Boolean = {
     val code = errorCode.category.grpcCode.getOrElse(

@@ -823,6 +823,8 @@ object CantonConfig {
       deriveReader[PackageMetadataViewConfig]
     lazy implicit val identityConfigReader: ConfigReader[TopologyConfig] =
       deriveReader[TopologyConfig]
+    lazy implicit val topologyXConfigReader: ConfigReader[TopologyXConfig] =
+      deriveReader[TopologyXConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileReader
         : ConfigReader[SequencerConnectionConfig.CertificateFile] =
       deriveReader[SequencerConnectionConfig.CertificateFile]
@@ -1194,6 +1196,8 @@ object CantonConfig {
       deriveWriter[IndexerConfig]
     lazy implicit val identityConfigWriter: ConfigWriter[TopologyConfig] =
       deriveWriter[TopologyConfig]
+    lazy implicit val topologyXConfigWriter: ConfigWriter[TopologyXConfig] =
+      deriveWriter[TopologyXConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileWriter
         : ConfigWriter[SequencerConnectionConfig.CertificateFile] =
       deriveWriter[SequencerConnectionConfig.CertificateFile]

@@ -40,7 +40,7 @@ class TransactionTreeFactoryImplV3(
     protocolVersion: ProtocolVersion,
     contractSerializer: (LfContractInst, AgreementText) => SerializableRawContractInstance,
     packageInfoService: PackageInfoService,
-    cryptoOps: HashOps with HmacOps,
+    cryptoOps: HashOps & HmacOps,
     uniqueContractKeys: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -137,8 +137,8 @@ class TransactionTreeFactoryImplV3(
       mediator: MediatorRef,
       transactionUUID: UUID,
       ledgerTime: CantonTimestamp,
-      nextSaltIndex: Int,
       keyResolver: LfKeyResolver,
+      nextSaltIndex: Int,
   ): State =
     State.submission(
       transactionSeed,
@@ -210,7 +210,7 @@ class TransactionTreeFactoryImplV3(
               createdInView ++= createdInSubview
               val keyResolutionsInSubview = v.globalKeyInputs.fmap(_.asSerializable)
               MapsUtil.extendMapWith(subViewKeyResolutions, keyResolutionsInSubview) {
-                (accRes, _newRes) => accRes
+                (accRes, _) => accRes
               }
             }
 

@@ -128,7 +128,8 @@ class SequencedEventTestFixture(
         .map(Future.successful)
         .getOrElse(sign(deliver.getCryptographicEvidence, deliver.timestamp))
     } yield OrdinarySequencedEvent(
-      SignedContent(deliver, sig, timestampOfSigningKey, testedProtocolVersion)
+      SignedContent(deliver, sig, timestampOfSigningKey, testedProtocolVersion),
+      None,
     )(
       traceContext
     )
@@ -154,7 +155,8 @@ class SequencedEventTestFixture(
         event.timestamp,
       )
     } yield OrdinarySequencedEvent(
-      SignedContent(event, signature, timestampOfSigningKey, testedProtocolVersion)
+      SignedContent(event, signature, timestampOfSigningKey, testedProtocolVersion),
+      None,
     )(traceContext)
   }
 

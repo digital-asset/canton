@@ -23,20 +23,25 @@ import scala.concurrent.{Future, Promise}
 
 class MockTimeRequestSubmitter extends TimeProofRequestSubmitter {
   private val hasRequestedRef = new AtomicBoolean(false)
+
   def hasRequestedTime: Boolean = hasRequestedRef.get()
+
   def resetHasRequestedTime(): Unit = hasRequestedRef.set(false)
 
   val fetchResult = Promise[TimeProof]()
+
   override def fetchTimeProof()(implicit traceContext: TraceContext): Unit = {
     hasRequestedRef.set(true)
   }
 
   override def handleTimeProof(proof: TimeProof): Unit = ()
+
   override def close(): Unit = ()
 }
 
 class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
   def ts(epochSeconds: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(epochSeconds.toLong)
+
   def timeProofEvent(ts: CantonTimestamp): OrdinaryProtocolEvent =
     OrdinarySequencedEvent(
       SignedContent(
@@ -51,7 +56,8 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         SymbolicCrypto.emptySignature,
         None,
         testedProtocolVersion,
-      )
+      ),
+      None,
     )(traceContext)
 
   def otherEvent(ts: CantonTimestamp): OrdinaryProtocolEvent = {
@@ -69,7 +75,8 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         SymbolicCrypto.emptySignature,
         None,
         testedProtocolVersion,
-      )
+      ),
+      None,
     )(traceContext)
 
     // make sure future changes don't treat this as a time proof
@@ -108,10 +115,12 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
       clock.advanceTo(ts(epochSeconds))
       Future.unit
     }
+
     def advanceToAndFlush(epochSecs: Int): Future[Unit] = {
       clock.advanceTo(ts(epochSecs))
       timeTracker.flush()
     }
+
     def advanceAndFlush(secs: Int): Future[Unit] = {
       clock.advance(Duration.ofSeconds(secs.toLong))
       timeTracker.flush()

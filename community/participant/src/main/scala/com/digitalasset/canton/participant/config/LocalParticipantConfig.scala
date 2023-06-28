@@ -80,6 +80,13 @@ object LocalParticipantConfig {
             "init.parameters.unique-contract-keys",
           ),
         ) ++ deprecatedLocalNodeConfig.movedFields
+
+        override def deprecatePath: List[DeprecatedConfigUtils.DeprecatedConfigPath[_]] = List(
+          DeprecatedConfigUtils
+            .DeprecatedConfigPath[Boolean]("parameters.unique-contract-keys", "2.7.0"),
+          DeprecatedConfigUtils
+            .DeprecatedConfigPath[Boolean]("init.parameters.unique-contract-keys", "2.7.0"),
+        )
       }
   }
 }
@@ -165,6 +172,7 @@ final case class CommunityParticipantConfig(
     override val sequencerClient: SequencerClientConfig = SequencerClientConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig(),
+    override val topologyX: TopologyXConfig = TopologyXConfig(),
 ) extends LocalParticipantConfig
     with CommunityLocalNodeConfig
     with ConfigDefaults[DefaultPorts, CommunityParticipantConfig] {
@@ -402,6 +410,7 @@ object LedgerApiServerConfig {
       maxParallelIdCreateQueries,
       maxParallelPayloadCreateQueries,
       _contractProcessingParallelism,
+      _maxIncompletePageSize,
     ) = acsStreams
 
     {
@@ -702,6 +711,7 @@ final case class UserManagementServiceConfig(
       UserManagementConfig.DefaultCacheExpiryAfterWriteInSeconds,
     maxRightsPerUser: Int = UserManagementConfig.DefaultMaxRightsPerUser,
     maxUsersPageSize: Int = UserManagementConfig.DefaultMaxUsersPageSize,
+    additionalAdminUserId: Option[String] = None,
 ) {
 
   def damlConfig: UserManagementConfig =
@@ -715,6 +725,7 @@ object UserManagementServiceConfig {
       .into[UserManagementServiceConfig]
       .disableDefaultValues
       .withFieldConst(_.maxRightsPerUser, UserManagementConfig.DefaultMaxRightsPerUser)
+      .withFieldConst(_.additionalAdminUserId, None)
       .transform
   }
 }

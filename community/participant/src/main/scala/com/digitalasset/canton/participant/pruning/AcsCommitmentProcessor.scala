@@ -694,9 +694,7 @@ class AcsCommitmentProcessor(
     remote.parTraverse_ { cmt =>
       for {
         commitments <- store.getComputed(cmt.period, cmt.sender)
-        lastPruningTime <- store.pruningStatus.valueOr { err =>
-          ErrorUtil.internalError(new RuntimeException(s"Can't get the pruning status: $err"))
-        }
+        lastPruningTime <- store.pruningStatus
         _ <-
           if (matches(cmt, commitments, lastPruningTime.map(_.timestamp))) {
             store.markSafe(cmt.sender, cmt.period, sortedReconciliationIntervalsProvider)

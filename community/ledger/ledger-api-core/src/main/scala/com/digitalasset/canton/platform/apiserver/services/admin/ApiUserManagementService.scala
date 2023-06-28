@@ -63,6 +63,7 @@ private[apiserver] final class ApiUserManagementService(
 
   import ApiUserManagementService.*
   import FieldValidator.*
+  import UserManagementStore.handleResult
 
   override def close(): Unit = ()
 
@@ -523,54 +524,6 @@ private[apiserver] final class ApiUserManagementService(
               .asGrpcError
           )
       }
-
-  private def handleResult[T](operation: String)(
-      result: UserManagementStore.Result[T]
-  )(implicit errorLogger: ContextualizedErrorLogger): Future[T] =
-    result match {
-      case Left(UserManagementStore.PermissionDenied(id)) =>
-        Future.failed(
-          LedgerApiErrors.AuthorizationChecks.PermissionDenied
-            .Reject(s"User $id belongs to another Identity Provider")
-            .asGrpcError
-        )
-      case Left(UserManagementStore.UserNotFound(id)) =>
-        Future.failed(
-          LedgerApiErrors.Admin.UserManagement.UserNotFound
-            .Reject(operation, id.toString)
-            .asGrpcError
-        )
-
-      case Left(UserManagementStore.UserExists(id)) =>
-        Future.failed(
-          LedgerApiErrors.Admin.UserManagement.UserAlreadyExists
-            .Reject(operation, id.toString)
-            .asGrpcError
-        )
-
-      case Left(UserManagementStore.TooManyUserRights(id)) =>
-        Future.failed(
-          LedgerApiErrors.Admin.UserManagement.TooManyUserRights
-            .Reject(operation, id: String)
-            .asGrpcError
-        )
-      case Left(e: UserManagementStore.ConcurrentUserUpdate) =>
-        Future.failed(
-          LedgerApiErrors.Admin.UserManagement.ConcurrentUserUpdateDetected
-            .Reject(userId = e.userId)
-            .asGrpcError
-        )
-
-      case Left(e: UserManagementStore.MaxAnnotationsSizeExceeded) =>
-        Future.failed(
-          LedgerApiErrors.Admin.UserManagement.MaxUserAnnotationsSizeExceeded
-            .Reject(userId = e.userId)
-            .asGrpcError
-        )
-
-      case scala.util.Right(t) =>
-        Future.successful(t)
-    }
 
   private def userParties(rights: Set[UserRight]): Set[Ref.Party] = rights.collect {
     case UserRight.CanActAs(party) => party

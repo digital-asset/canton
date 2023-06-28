@@ -4,8 +4,9 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.syntax.alternative.*
+import com.daml.lf.data.Ref.Party
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.protocol.{LfContractId, WithContractMetadata}
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -20,21 +21,22 @@ private[routing] final case class ContractsDomainData(
 private[routing] object ContractsDomainData {
   def create(
       domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
-      inputContractMetadata: Set[WithContractMetadata[LfContractId]],
+      contractRoutingParties: Map[LfContractId, Set[Party]],
   )(implicit ec: ExecutionContext): Future[ContractsDomainData] = {
-    val inputDataSeq = inputContractMetadata.toSeq
-    domainOfContracts(inputDataSeq.map(_.unwrap))
+    domainOfContracts(contractRoutingParties.keySet.toSeq)
       .map { domainMap =>
         // Collect domains of input contracts, ignoring contracts that cannot be found in the ACS.
         // Such contracts need to be ignored, because they could be divulged contracts.
-        val (bad, good) = inputDataSeq.map { metadata =>
-          val coid = metadata.unwrap
-          domainMap.get(coid) match {
-            case Some(domainId) =>
-              Right(ContractData(coid, domainId, metadata.metadata.stakeholders))
-            case None => Left(coid)
+        val (bad, good) = contractRoutingParties
+          .map { case (coid, routingParties) =>
+            domainMap.get(coid) match {
+              case Some(domainId) =>
+                Right(ContractData(coid, domainId, routingParties))
+              case None => Left(coid)
+            }
           }
-        }.separate
+          .toSeq
+          .separate
         ContractsDomainData(good, bad)
       }
   }

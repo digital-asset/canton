@@ -4,24 +4,17 @@
 package com.digitalasset.canton.platform.apiserver.error
 
 import com.daml.error.{BaseError, NoLogging}
-import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.ledger.error.{DamlContextualizedErrorLogger, LedgerApiErrors}
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.logging.*
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall
-import io.grpc.{
-  ForwardingServerCallListener,
-  Metadata,
-  ServerCall,
-  ServerCallHandler,
-  ServerInterceptor,
-  Status,
-  StatusException,
-  StatusRuntimeException,
-}
+import io.grpc.*
 
 import scala.util.control.NonFatal
 
-final class ErrorInterceptor extends ServerInterceptor {
+final class ErrorInterceptor(val loggerFactory: NamedLoggerFactory)
+    extends ServerInterceptor
+    with NamedLogging {
 
   override def interceptCall[ReqT, RespT](
       call: ServerCall[ReqT, RespT],
@@ -70,9 +63,9 @@ final class ErrorInterceptor extends ServerInterceptor {
           val newMetadata =
             Option(Status.trailersFromThrowable(errorCodeException)).getOrElse(new Metadata())
           val newStatus = Status.fromThrowable(errorCodeException)
-          LogOnUnhandledFailureInClose(superClose(newStatus, newMetadata))
+          LogOnUnhandledFailureInClose(logger, superClose(newStatus, newMetadata))
         } else {
-          LogOnUnhandledFailureInClose(superClose(status, trailers))
+          LogOnUnhandledFailureInClose(logger, superClose(status, trailers))
         }
       }
 
@@ -89,6 +82,7 @@ final class ErrorInterceptor extends ServerInterceptor {
 
     val listener = next.startCall(forwardingCall, headers)
     new ErrorListener(
+      loggerFactory = loggerFactory,
       delegate = listener,
       call = call,
     )
@@ -102,8 +96,12 @@ final class ErrorInterceptor extends ServerInterceptor {
         ))
 }
 
-class ErrorListener[ReqT, RespT](delegate: ServerCall.Listener[ReqT], call: ServerCall[ReqT, RespT])
-    extends ForwardingServerCallListener.SimpleForwardingServerCallListener[ReqT](delegate) {
+class ErrorListener[ReqT, RespT](
+    val loggerFactory: NamedLoggerFactory,
+    delegate: ServerCall.Listener[ReqT],
+    call: ServerCall[ReqT, RespT],
+) extends ForwardingServerCallListener.SimpleForwardingServerCallListener[ReqT](delegate)
+    with NamedLogging {
 
   /** Handles errors arising outside Futures or Akka streaming.
     *
@@ -120,22 +118,21 @@ class ErrorListener[ReqT, RespT](delegate: ServerCall.Listener[ReqT], call: Serv
       // 2. We need to catch it and call `call.close` as otherwise gRPC will close the stream with a Status.UNKNOWN
       //    (see io.grpc.internal.ServerImpl.JumpToApplicationThreadServerStreamListener.internalClose)
       case t: StatusException =>
-        LogOnUnhandledFailureInClose(call.close(t.getStatus, t.getTrailers))
+        LogOnUnhandledFailureInClose(logger, call.close(t.getStatus, t.getTrailers))
       case t: StatusRuntimeException =>
-        LogOnUnhandledFailureInClose(call.close(t.getStatus, t.getTrailers))
+        LogOnUnhandledFailureInClose(logger, call.close(t.getStatus, t.getTrailers))
       case NonFatal(t) =>
         val e = LedgerApiErrors.InternalError
           .UnexpectedOrUnknownException(t = t)(NoLogging)
           .asGrpcError
-        LogOnUnhandledFailureInClose(call.close(e.getStatus, e.getTrailers))
+        LogOnUnhandledFailureInClose(logger, call.close(e.getStatus, e.getTrailers))
     }
   }
 }
 
 private[error] object LogOnUnhandledFailureInClose {
-  private val logger = ContextualizedLogger.get(getClass)
 
-  def apply[T](close: => T): T = {
+  def apply[T](logger: TracedLogger, close: => T): T = {
     // If close throws, we can't call ServerCall.close a second time
     // since it might have already been marked internally as closed.
     // In this situation, we can't do much about it except for notifying the participant operator.
@@ -150,7 +147,7 @@ private[error] object LogOnUnhandledFailureInClose {
               s"The gRPC client might have not been notified about the call/stream termination. " +
               s"Either notify clients to retry pending unary/streaming calls or restart the participant server.",
             Some(e),
-          )(new DamlContextualizedErrorLogger(logger, LoggingContext.empty, None))
+          )(ErrorLoggingContext(logger, LoggingContextWithTrace.empty))
           .discard
         throw e
     }

@@ -28,7 +28,7 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
     val ec: ExecutionContext
 ) extends SequencedEventStore
     with NamedLogging
-    with InMemoryPrunableByTime[Nothing] {
+    with InMemoryPrunableByTime {
 
   private val lock = new Object()
 
@@ -115,15 +115,13 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
 
   override def doPrune(
       beforeAndIncluding: CantonTimestamp
-  )(implicit traceContext: TraceContext): EitherT[Future, Nothing, Unit] = {
+  )(implicit traceContext: TraceContext): Future[Unit] = Future.successful {
     blocking(lock.synchronized {
       eventByTimestamp.rangeTo(beforeAndIncluding).foreach { case (ts, e) =>
         eventByTimestamp.remove(ts).discard
         timestampOfCounter.remove(e.counter).discard
       }
     })
-
-    EitherT.pure(())
   }
 
   override def ignoreEvents(from: SequencerCounter, to: SequencerCounter)(implicit

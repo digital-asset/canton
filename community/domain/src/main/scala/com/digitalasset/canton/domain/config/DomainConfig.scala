@@ -90,6 +90,13 @@ object DomainBaseConfig {
             "init.domain-parameters",
           )
         ) ++ deprecatedLocalNodeConfig.movedFields
+
+        override def deprecatePath: List[DeprecatedConfigUtils.DeprecatedConfigPath[_]] = List(
+          DeprecatedConfigUtils
+            .DeprecatedConfigPath[Boolean]("domain-parameters.unique-contract-keys", "2.7.0"),
+          DeprecatedConfigUtils
+            .DeprecatedConfigPath[Boolean]("init.domain-parameters.unique-contract-keys", "2.7.0"),
+        )
       }
   }
 }
@@ -118,6 +125,8 @@ trait DomainBaseConfig extends LocalNodeConfig {
   def timeTracker: DomainTimeTrackerConfig
 
   override def clientAdminApi: ClientConfig = adminApi.clientConfig
+
+  override val topologyX: TopologyXConfig = TopologyXConfig.NotUsed
 }
 
 /** Configuration parameters for a single domain. */

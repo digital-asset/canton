@@ -10,7 +10,6 @@ import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.data.{Ref, Time}
 import com.daml.lf.transaction.{GlobalKey as LfGlobalKey, Transaction as LfTransaction}
 import com.daml.lf.value.Value.ContractId
-import com.daml.logging.ContextualizedLogger
 import com.daml.metrics.Timed
 import com.digitalasset.canton.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.ledger.configuration.Configuration
@@ -27,6 +26,8 @@ import com.digitalasset.canton.ledger.sandbox.bridge.validate.SequencerState.Las
 import com.digitalasset.canton.ledger.sandbox.domain.Rejection.*
 import com.digitalasset.canton.ledger.sandbox.domain.Submission.{AllocateParty, Config, Transaction}
 import com.digitalasset.canton.ledger.sandbox.domain.*
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.time.Duration
 import scala.util.chaining.*
@@ -42,8 +43,9 @@ private[validate] class SequenceImpl(
     initialLedgerConfiguration: Option[Configuration],
     bridgeMetrics: BridgeMetrics,
     maxDeduplicationDuration: Duration,
-) extends Sequence {
-  private[this] implicit val logger: ContextualizedLogger = ContextualizedLogger.get(getClass)
+    val loggerFactory: NamedLoggerFactory,
+) extends Sequence
+    with NamedLogging {
 
   @volatile private[validate] var offsetIdx = fromOffset(initialLedgerEnd)
   @volatile private[validate] var sequencerState = SequencerState.empty(bridgeMetrics)
@@ -102,7 +104,7 @@ private[validate] class SequenceImpl(
     if (allocatedParties(party)) {
       logger.warn(
         s"Found duplicate party '$party' for submissionId ${allocateParty.submissionId}"
-      )(allocateParty.loggingContext)
+      )(TraceContext.empty)
       Update.PartyAllocationRejected(
         allocateParty.submissionId,
         participantId = participantId,

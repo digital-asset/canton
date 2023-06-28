@@ -8,7 +8,7 @@ import com.daml.lf.data.Ref.UserId
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore.*
 import com.digitalasset.canton.platform.localstore.api.{UserManagementStore, UserUpdate}
 import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
@@ -16,7 +16,11 @@ import com.digitalasset.canton.platform.localstore.utils.LocalAnnotationsUtils
 import scala.collection.mutable
 import scala.concurrent.{Future, blocking}
 
-class InMemoryUserManagementStore(createAdmin: Boolean = true) extends UserManagementStore {
+class InMemoryUserManagementStore(
+    createAdmin: Boolean = true,
+    val loggerFactory: NamedLoggerFactory,
+) extends UserManagementStore
+    with NamedLogging {
   import InMemoryUserManagementStore.*
 
   // Underlying mutable map to keep track of UserInfo state.

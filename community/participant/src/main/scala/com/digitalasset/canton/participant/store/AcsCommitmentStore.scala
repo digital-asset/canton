@@ -7,7 +7,6 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProvider
-import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
@@ -22,10 +21,7 @@ import scala.concurrent.Future
 import scala.util.control.Breaks.*
 
 /** Read and write interface for ACS commitments. Apart from pruning, should only be used by the ACS commitment processor */
-trait AcsCommitmentStore
-    extends AcsCommitmentLookup
-    with PrunableByTime[AcsCommitmentStoreError]
-    with AutoCloseable {
+trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with AutoCloseable {
 
   /** Store a locally computed ACS commitment. To be called by the ACS commitment processor only.
     *

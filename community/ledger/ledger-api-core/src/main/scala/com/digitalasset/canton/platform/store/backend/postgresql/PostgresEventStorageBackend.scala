@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.backend.postgresql
 
 import anorm.SqlParser.int
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.{
   EventStorageBackendTemplate,
@@ -15,13 +16,17 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 import java.sql.Connection
 
-class PostgresEventStorageBackend(ledgerEndCache: LedgerEndCache, stringInterning: StringInterning)
-    extends EventStorageBackendTemplate(
+class PostgresEventStorageBackend(
+    ledgerEndCache: LedgerEndCache,
+    stringInterning: StringInterning,
+    loggerFactory: NamedLoggerFactory,
+) extends EventStorageBackendTemplate(
       queryStrategy = PostgresQueryStrategy,
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
       participantAllDivulgedContractsPrunedUpToInclusive =
         ParameterStorageBackendImpl.participantAllDivulgedContractsPrunedUpToInclusive,
+      loggerFactory = loggerFactory,
     ) {
 
   /** If `pruneAllDivulgedContracts` is set, validate that the pruning offset is after

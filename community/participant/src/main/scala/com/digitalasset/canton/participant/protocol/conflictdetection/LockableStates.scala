@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.RequestCounter
@@ -35,9 +34,8 @@ import scala.reflect.ClassTag
 private[conflictdetection] class LockableStates[
     Key,
     Status <: PrettyPrinting with HasPrunable,
-    E,
 ] private (
-    private val store: ConflictDetectionStore[Key, Status, E],
+    private val store: ConflictDetectionStore[Key, Status],
     protected override val loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
     private val executionContext: ExecutionContext,
@@ -550,9 +548,7 @@ private[conflictdetection] class LockableStates[
         timeouts.io.await(
           s"running fetchStatesForInvariantChecking with ${withoutPendingWrites.keys}"
         )(store.fetchStatesForInvariantChecking(withoutPendingWrites.keys))
-      val pruningStatusO = timeouts.io
-        .await("getting the pruning status")(store.pruningStatus.value)
-        .valueOr(err => throw new RuntimeException(s"Failed to get the pruning status: $err"))
+      val pruningStatusO = timeouts.io.await("getting the pruning status")(store.pruningStatus)
       withoutPendingWrites.foreach { case (id, state) =>
         val storedState = storeSnapshot.get(id)
         state.versionedState.foreach { versionedState =>
@@ -582,8 +578,8 @@ private[conflictdetection] class LockableStates[
 }
 
 private[conflictdetection] object LockableStates {
-  def empty[K: Pretty: ClassTag, A <: PrettyPrinting with HasPrunable, E](
-      store: ConflictDetectionStore[K, A, E],
+  def empty[K: Pretty: ClassTag, A <: PrettyPrinting with HasPrunable](
+      store: ConflictDetectionStore[K, A],
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
       executionContext: ExecutionContext,

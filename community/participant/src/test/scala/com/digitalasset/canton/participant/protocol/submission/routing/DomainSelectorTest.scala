@@ -4,10 +4,11 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
+import com.daml.lf.data.Ref
 import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.Transactions.{
   ExerciseByInterface,
   ThreeExercises,
@@ -25,12 +26,10 @@ import com.digitalasset.canton.participant.sync.{
   TransactionRoutingErrorWithDomain,
 }
 import com.digitalasset.canton.protocol.{
-  ContractMetadata,
   ExampleTransactionFactory,
   LfContractId,
   LfTransactionVersion,
   LfVersionedTransaction,
-  WithContractMetadata,
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -52,7 +51,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
     def leftValue: TransactionRoutingError = e.value.futureValue.left.value
   }
 
-  implicit val _loggerFactor = loggerFactory
+  implicit val _loggerFactor: SuppressingLogger = loggerFactory
 
   /*
     Topology:
@@ -72,7 +71,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
     import DomainSelectorTest.ForSimpleTopology.*
     import SimpleTopology.*
 
-    implicit val _loggerFactor = loggerFactory
+    implicit val _loggerFactor: SuppressingLogger = loggerFactory
 
     val defaultDomainRank = DomainRank(Map.empty, 0, da)
 
@@ -420,15 +419,8 @@ private[routing] object DomainSelectorTest {
 
       val exerciseByInterface = ExerciseByInterface(languageVersion)
 
-      val inputContractsMetadata = Set(
-        WithContractMetadata[LfContractId](
-          exerciseByInterface.inputContractId,
-          ContractMetadata.tryCreate(
-            signatories = Set(signatory),
-            stakeholders = Set(signatory, observer),
-            maybeKeyWithMaintainers = None,
-          ),
-        )
+      val inputContractStakeholders = Map(
+        exerciseByInterface.inputContractId -> Set(signatory, observer)
       )
 
       new Selector(loggerFactory)(
@@ -442,7 +434,7 @@ private[routing] object DomainSelectorTest {
         domainProtocolVersion,
         vettedPackages,
         exerciseByInterface.tx,
-        inputContractsMetadata,
+        inputContractStakeholders,
       )
     }
 
@@ -462,16 +454,9 @@ private[routing] object DomainSelectorTest {
         loggerFactory: NamedLoggerFactory,
     ): Selector = {
 
-      val inputContractsMetadata = threeExercises.inputContractIds.map { inputContractId =>
-        WithContractMetadata[LfContractId](
-          inputContractId,
-          ContractMetadata.tryCreate(
-            signatories = Set(signatory),
-            stakeholders = Set(signatory, observer),
-            maybeKeyWithMaintainers = None,
-          ),
-        )
-      }
+      val inputContractStakeholders = threeExercises.inputContractIds.map { inputContractId =>
+        inputContractId -> Set(signatory, observer)
+      }.toMap
 
       new Selector(loggerFactory)(
         priorityOfDomain,
@@ -484,7 +469,7 @@ private[routing] object DomainSelectorTest {
         domainProtocolVersion,
         vettedPackages,
         threeExercises.tx,
-        inputContractsMetadata,
+        inputContractStakeholders,
       )
     }
 
@@ -499,12 +484,12 @@ private[routing] object DomainSelectorTest {
         domainProtocolVersion: DomainId => ProtocolVersion,
         vettedPackages: Seq[LfPackageId],
         tx: LfVersionedTransaction,
-        inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
+        inputContractStakeholders: Map[LfContractId, Set[Ref.Party]],
     )(implicit ec: ExecutionContext, traceContext: TraceContext) {
 
       import SimpleTopology.*
 
-      val inputContractIds: Set[LfContractId] = inputContractsMetadata.map(_.unwrap)
+      val inputContractIds: Set[LfContractId] = inputContractStakeholders.keySet
 
       private def domainStateProvider(
           d: DomainId
@@ -549,7 +534,7 @@ private[routing] object DomainSelectorTest {
             ),
           domainOfContracts = ids => Future.successful(domainOfContracts(ids)),
           domainIdResolver = domainAliasResolver,
-          inputContractsMetadata = inputContractsMetadata,
+          contractRoutingParties = inputContractStakeholders,
           submitterDomainId = prescribedSubmitterDomainId,
         )
 

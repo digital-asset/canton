@@ -278,15 +278,16 @@ class DbMultiDomainEventLog private[db] (
 
       published = publications(eventsToPublish, previousGlobalOffset, foundEvents)
 
-      // We wait here because we don't want to update the ledger end (new head of the dispatcher) if notification fails
-      _ <- published.parTraverse_ { publication =>
+      transferEvents = published.mapFilter { publication =>
         publication.event match {
           case transfer: LedgerSyncEvent.TransferEvent if transfer.isTransferringParticipant =>
-            notifyOnPublishTransfer(transfer, publication.globalOffset)
-
-          case _ => Future.unit
+            Some((transfer, publication.globalOffset))
+          case _ => None
         }
       }
+
+      // We wait here because we don't want to update the ledger end (new head of the dispatcher) if notification fails
+      _ <- notifyOnPublishTransfer(transferEvents)
 
     } yield {
       logger.debug(show"Signalling global offset $newGlobalOffset.")

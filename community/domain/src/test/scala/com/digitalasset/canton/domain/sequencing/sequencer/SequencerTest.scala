@@ -207,14 +207,14 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
           .map(_.loneElement.signedEvent.content)
           .map(asDeliverEvent)
       } yield {
-        aliceDeliverEvent.messageId.value shouldBe messageId // as alice is the sender
+        aliceDeliverEvent.messageIdO.value shouldBe messageId // as alice is the sender
         aliceDeliverEvent.batch.envelopes should have size (0) // as we didn't send a message to ourself
 
-        bobDeliverEvent.messageId shouldBe None
+        bobDeliverEvent.messageIdO shouldBe None
         bobDeliverEvent.batch.envelopes.map(_.bytes) should contain only
           EnvelopeContent.tryCreate(message1, testedProtocolVersion).toByteString
 
-        caroleDeliverEvent.messageId shouldBe None
+        caroleDeliverEvent.messageIdO shouldBe None
         caroleDeliverEvent.batch.envelopes.map(_.bytes) should contain only
           EnvelopeContent.tryCreate(message2, testedProtocolVersion).toByteString
       }

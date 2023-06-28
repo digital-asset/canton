@@ -497,7 +497,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
     def signAndTrace(event: RawProtocolEvent): Traced[Seq[Either[Traced[
       EventWithErrors[SequencedEvent[OpenEnvelope[ProtocolMessage]]]
     ], PossiblyIgnoredProtocolEvent]]] =
-      Traced(Seq(Right(OrdinarySequencedEvent(signEvent(event))(traceContext))))
+      Traced(Seq(Right(OrdinarySequencedEvent(signEvent(event), None)(traceContext))))
 
     def handle(sut: Fixture, event: RawProtocolEvent)(checks: => Assertion): Future[Assertion] = {
       for {
@@ -1178,7 +1178,7 @@ trait MessageDispatcherTest { this: AnyWordSpec with BaseTest with HasExecutorSe
         )
 
         val sequencedEvents = Seq(deliver1, deliver2, deliver3, deliverError4).map(event =>
-          Right(OrdinarySequencedEvent(signEvent(event))(traceContext))
+          Right(OrdinarySequencedEvent(signEvent(event), None)(traceContext))
         )
 
         sut.messageDispatcher

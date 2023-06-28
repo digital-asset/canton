@@ -70,7 +70,7 @@ final case class StaticDomainParameters(
       "Starting from protocol version 4, `maxRequestSize` is a dynamic domain parameter",
       "protocol version 4",
     ) maxRequestSize: MaxRequestSize,
-    uniqueContractKeys: Boolean,
+    uniqueContractKeys: Boolean, // TODO(i13235) remove when UCK is gone
     requiredSigningKeySchemes: NonEmpty[Set[SigningKeyScheme]],
     requiredEncryptionKeySchemes: NonEmpty[Set[EncryptionKeyScheme]],
     requiredSymmetricKeySchemes: NonEmpty[Set[SymmetricKeyScheme]],

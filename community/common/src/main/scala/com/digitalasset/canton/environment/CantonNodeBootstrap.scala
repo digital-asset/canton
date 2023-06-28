@@ -4,7 +4,7 @@
 package com.digitalasset.canton.environment
 
 import akka.actor.ActorSystem
-import cats.data.{EitherT, OptionT}
+import cats.data.EitherT
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
@@ -63,7 +63,9 @@ abstract class CantonNodeBootstrapBase[
 ) extends CantonNodeBootstrapCommon[T, NodeConfig, ParameterConfig, Metrics](arguments) {
 
   private val isRunningVar = new AtomicBoolean(true)
+  private val isWaitingForIdVar = new AtomicBoolean(false)
   protected def isRunning: Boolean = isRunningVar.get()
+  def isWaitingForId: Boolean = isWaitingForIdVar.get()
 
   /** Can this node be initialized by a replica */
   protected def supportsReplicaInitialization: Boolean = false
@@ -124,7 +126,14 @@ abstract class CantonNodeBootstrapBase[
 
   adminServerRegistry.addServiceU(
     VaultServiceGrpc.bindService(
-      arguments.grpcVaultServiceFactory.create(crypto.value, certificateGenerator, loggerFactory),
+      arguments.grpcVaultServiceFactory
+        .create(
+          crypto.value,
+          certificateGenerator,
+          parameterConfig.enablePreviewFeatures,
+          timeouts,
+          loggerFactory,
+        ),
       executionContext,
     )
   )
@@ -224,20 +233,36 @@ abstract class CantonNodeBootstrapBase[
     */
   def start(): EitherT[Future, String, Unit] = {
     // The passive replica waits for the active replica to initialize the unique identifier
-    def waitForActiveId(): EitherT[Future, String, NodeId] = {
+    def waitForActiveId(): EitherT[Future, String, Option[NodeId]] = EitherT {
       val timeout = parameterConfig.processingTimeouts
-      OptionT(
-        retry
-          .Pause(
-            logger,
-            FlagCloseable(logger, timeout),
-            timeout.activeInit.retries(50.millis),
-            50.millis,
-            functionFullName,
-          )
-          .apply(initializationStore.id, NoExnRetryable)
-      )
-        .toRight("Active replica failed to initialize unique identifier")
+      val resultAfterRetry = retry
+        .Pause(
+          logger,
+          FlagCloseable(logger, timeout),
+          timeout.activeInit.retries(timeout.activeInitRetryDelay.duration),
+          timeout.activeInitRetryDelay.asFiniteApproximation,
+          functionFullName,
+        )
+        .apply(
+          {
+            if (storage.isActive) Future.successful(Right(None))
+            else {
+              isWaitingForIdVar.set(true)
+              initializationStore.id
+                .map(
+                  _.toRight("Active replica failed to initialize unique identifier")
+                    .map(Some(_))
+                )
+            }
+          },
+          NoExnRetryable,
+        )
+
+      resultAfterRetry.onComplete { _ =>
+        isWaitingForIdVar.set(false)
+      }
+
+      resultAfterRetry
     }
 
     initQueue
@@ -246,7 +271,7 @@ abstract class CantonNodeBootstrapBase[
           // if we're a passive replica but the node is set to auto-initialize, wait here until the node has established an id
           id <-
             performUnlessClosingEitherU("waitOrFetchActiveId") {
-              if (!storage.isActive && initConfig.autoInit) waitForActiveId().map(Some(_))
+              if (!storage.isActive && initConfig.autoInit) waitForActiveId()
               else
                 EitherT.right[String](
                   initializationStore.id

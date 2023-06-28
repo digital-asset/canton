@@ -28,6 +28,7 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
 import com.digitalasset.canton.participant.protocol.{
   ProcessingSteps,
   ProtocolProcessor,
+  SubmissionTracker,
   TransactionProcessor,
 }
 import com.digitalasset.canton.participant.store.TransferStore.TransferStoreError
@@ -203,6 +204,7 @@ trait TransferProcessingSteps[
       rc: RequestCounter,
       sc: SequencerCounter,
       decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
+      freshOwnTimelyTx: Boolean,
   )(implicit
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId]) = {
@@ -284,6 +286,10 @@ trait TransferProcessingSteps[
       requestTs: CantonTimestamp,
   ): Either[TransferProcessorError, CantonTimestamp] =
     parameters.decisionTimeFor(requestTs).leftMap(TransferParametersError(parameters.domainId, _))
+
+  override def getSubmissionDataForTracker(
+      views: Seq[DecryptedView]
+  ): Option[SubmissionTracker.SubmissionData] = None // Currently not used for transfers
 
   override def participantResponseDeadlineFor(
       parameters: DynamicDomainParametersWithValidity,

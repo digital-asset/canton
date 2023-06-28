@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.backend.h2
 
 import com.digitalasset.canton.ledger.offset.Offset
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.common.{
   EventStorageBackendTemplate,
   ParameterStorageBackendImpl,
@@ -13,13 +14,17 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 import java.sql.Connection
 
-class H2EventStorageBackend(ledgerEndCache: LedgerEndCache, stringInterning: StringInterning)
-    extends EventStorageBackendTemplate(
+class H2EventStorageBackend(
+    ledgerEndCache: LedgerEndCache,
+    stringInterning: StringInterning,
+    loggerFactory: NamedLoggerFactory,
+) extends EventStorageBackendTemplate(
       queryStrategy = H2QueryStrategy,
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
       participantAllDivulgedContractsPrunedUpToInclusive =
         ParameterStorageBackendImpl.participantAllDivulgedContractsPrunedUpToInclusive,
+      loggerFactory = loggerFactory,
     ) {
 
   // Migration from mutable schema is not supported for H2

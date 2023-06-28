@@ -12,6 +12,7 @@ import com.daml.resources.ProgramResource.StartupException
 import com.daml.timer.RetryStrategy
 import com.digitalasset.canton.ledger.api.domain.LedgerId
 import com.digitalasset.canton.ledger.error.IndexErrors.IndexDbException
+import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.IndexService
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -49,6 +50,7 @@ final class IndexServiceOwner(
     inMemoryState: InMemoryState,
     tracer: Tracer,
     val loggerFactory: NamedLoggerFactory,
+    incompleteOffsets: (Offset, Set[Ref.Party], TraceContext) => Future[Vector[Offset]],
 ) extends ResourceOwner[IndexService]
     with NamedLogging {
   private val initializationRetryDelay = 100.millis
@@ -76,6 +78,7 @@ final class IndexServiceOwner(
         engineO = Some(engine),
         loadPackage = (packageId, loggingContext) =>
           ledgerDao.getLfArchive(packageId)(loggingContext),
+        loggerFactory = loggerFactory,
       )
 
       inMemoryFanOutExecutionContext <- buildInMemoryFanOutExecutionContext(
@@ -190,6 +193,7 @@ final class IndexServiceOwner(
       globalMaxEventPayloadQueries = config.globalMaxEventPayloadQueries,
       tracer = tracer,
       loggerFactory = loggerFactory,
+      incompleteOffsets = incompleteOffsets,
     )
 
   private def buildInMemoryFanOutExecutionContext(

@@ -44,6 +44,7 @@ final class LedgerApiService(
           metrics,
           servicesExecutor,
           apiServices.services,
+          loggerFactory,
         )
         .acquire()
     } yield {

@@ -468,7 +468,7 @@ class SequencerReader(
           HashPurpose.SequencedEventSignature,
           protocolVersion,
         )
-      } yield OrdinarySequencedEvent(signedEvent)(traceContext)
+      } yield OrdinarySequencedEvent(signedEvent, None)(traceContext)
     }
 
     /** Takes our stored event and turns it back into a real sequenced event.

@@ -63,7 +63,7 @@ trait CantonNodeBootstrap[+T <: CantonNode] extends FlagCloseable with NamedLogg
 
   /** Access to the private and public store to support local key inspection commands */
   def crypto: Option[Crypto]
-
+  def isActive: Boolean
 }
 
 object CantonNodeBootstrap {
@@ -146,8 +146,6 @@ abstract class CantonNodeBootstrapCommon[
   protected def connectionPoolForParticipant: Boolean = false
 
   protected val ips = new IdentityProvidingServiceClient()
-
-  protected def isActive: Boolean
 
   private def status: Future[NodeStatus[NodeStatus.Status]] = {
     getNode
@@ -259,7 +257,7 @@ object CantonNodeBootstrapCommon {
       "encryption",
       crypto.cryptoPublicStore.findEncryptionKeyIdByName,
       name => crypto.generateEncryptionKey(name = name).leftMap(_.toString),
-      crypto.cryptoPrivateStore.existsPrivateKey,
+      crypto.cryptoPrivateStore.existsDecryptionKey,
       name,
     )
 

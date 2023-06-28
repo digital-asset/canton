@@ -178,7 +178,7 @@ class ParticipantTopologyManager(
       // if tx is for this node, check that we do have this key
       case OwnerToKeyMapping(`participantId`, key) =>
         crypto.cryptoPrivateStore
-          .existsPrivateKey(key.fingerprint)
+          .existsPrivateKey(key.fingerprint, key.purpose)
           .leftMap(err => wrapError(TopologyManagerError.InternalError.CryptoPrivateError(err)))
           .subflatMap { exists =>
             if (exists) {

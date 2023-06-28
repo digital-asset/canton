@@ -6,8 +6,7 @@ package com.digitalasset.canton.platform.store.dao.events
 import akka.NotUsed
 import akka.stream.Attributes
 import akka.stream.scaladsl.Source
-import com.daml.api.util.TimestampConversion
-import com.daml.ledger.api.v2.reassignment.{AssignedEvent, Reassignment, UnassignedEvent}
+import com.daml.ledger.api.v2.reassignment.Reassignment
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.Party
 import com.daml.metrics.{DatabaseMetrics, Metrics, Timed}
@@ -15,7 +14,6 @@ import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.indexer.parallel.BatchN
-import com.digitalasset.canton.platform.participant.util.LfEngineToApi
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawAssignEvent,
@@ -193,18 +191,7 @@ class ReassignmentStreamReader(
           workflowId = rawUnassignEvent.workflowId.getOrElse(""),
           offset = rawUnassignEvent.offset,
           event = Reassignment.Event.UnassignedEvent(
-            UnassignedEvent(
-              unassignId = rawUnassignEvent.unassignId,
-              contractId = rawUnassignEvent.contractId,
-              templateId = Some(LfEngineToApi.toApiIdentifier(rawUnassignEvent.templateId)),
-              source = rawUnassignEvent.sourceDomainId,
-              target = rawUnassignEvent.targetDomainId,
-              submitter = rawUnassignEvent.submitter,
-              reassignmentCounter = rawUnassignEvent.reassignmentCounter,
-              assignmentExclusivity =
-                rawUnassignEvent.assignmentExclusivity.map(TimestampConversion.fromLf),
-              witnessParties = rawUnassignEvent.witnessParties.toSeq,
-            )
+            TransactionsReader.toUnassignedEvent(rawUnassignEvent)
           ),
         )
       },
@@ -228,13 +215,9 @@ class ReassignmentStreamReader(
               workflowId = rawAssignEvent.workflowId.getOrElse(""),
               offset = rawAssignEvent.offset,
               event = Reassignment.Event.AssignedEvent(
-                AssignedEvent(
-                  source = rawAssignEvent.sourceDomainId,
-                  target = rawAssignEvent.targetDomainId,
-                  unassignId = rawAssignEvent.unassignId,
-                  submitter = rawAssignEvent.submitter,
-                  reassignmentCounter = rawAssignEvent.reassignmentCounter,
-                  createdEvent = Some(createdEvent),
+                TransactionsReader.toAssignedEvent(
+                  rawAssignEvent,
+                  createdEvent,
                 )
               ),
             )

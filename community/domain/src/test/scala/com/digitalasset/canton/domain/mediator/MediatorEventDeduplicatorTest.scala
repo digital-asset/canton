@@ -14,6 +14,7 @@ import com.digitalasset.canton.domain.mediator.store.{
   MediatorDeduplicationStore,
 }
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.*
@@ -345,7 +346,10 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
           traceContext: TraceContext
       ): Future[Unit] = Future.never
 
-      override protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
+      override protected def prunePersistentData(
+          upToInclusive: CantonTimestamp,
+          callerCloseContext: CloseContext,
+      )(implicit
           traceContext: TraceContext
       ): Future[Unit] = Future.unit
 

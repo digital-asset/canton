@@ -43,7 +43,7 @@ class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ContractKeyJournalError, Unit] =
+  ): Future[Unit] =
     ckj.doPrune(beforeAndIncluding)
 
   override def deleteSince(inclusive: TimeOfChange)(implicit
@@ -56,13 +56,13 @@ class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
 
   override def pruningStatus(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ContractKeyJournalError, Option[PruningStatus]] =
+  ): Future[Option[PruningStatus]] =
     ckj.pruningStatus
 
   override protected[canton] def advancePruningTimestamp(
       phase: PruningPhase,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): EitherT[Future, ContractKeyJournalError, Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] =
     ckj.advancePruningTimestamp(phase, timestamp)
 }
 

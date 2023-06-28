@@ -73,7 +73,7 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
         testedProtocolVersion,
       )
       handler.fold(fail("handler not registered"))(h =>
-        Await.result(h(OrdinarySequencedEvent(event)(traceContext)), 5.seconds)
+        Await.result(h(OrdinarySequencedEvent(event, None)(traceContext)), 5.seconds)
       )
     }
 

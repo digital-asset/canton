@@ -4,25 +4,26 @@
 package com.daml.http
 
 import akka.actor.ActorSystem
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.model.*
+import akka.http.scaladsl.server.*
+import akka.http.scaladsl.server.Directives.*
 import akka.http.scaladsl.server.RouteResult.{Complete, Rejected}
 import akka.http.scaladsl.server.directives.ContentTypeResolver.Default
-import akka.http.scaladsl.server.{Directives, Rejection, RequestContext, Route, RouteResult}
 import com.daml.http.util.Logging.InstanceUUID
-import com.daml.logging.{ContextualizedLogger, LoggingContextOf}
-import scalaz.syntax.show._
+import com.daml.logging.LoggingContextOf
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.NoTracing
+import scalaz.syntax.show.*
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.collection.immutable.Seq
 
 object StaticContentEndpoints {
-  def all(config: StaticContentConfig)(implicit
+  def all(config: StaticContentConfig, loggerFactory: NamedLoggerFactory)(implicit
       asys: ActorSystem,
       lc: LoggingContextOf[InstanceUUID],
       ec: ExecutionContext,
   ): Route = (ctx: RequestContext) =>
-    new StaticContentRouter(config)
+    new StaticContentRouter(config, loggerFactory)
       .andThen(
         _ map Complete
       )
@@ -32,17 +33,22 @@ object StaticContentEndpoints {
       )
 }
 
-private class StaticContentRouter(config: StaticContentConfig)(implicit
+private class StaticContentRouter(
+    config: StaticContentConfig,
+    val loggerFactory: NamedLoggerFactory,
+)(implicit
     asys: ActorSystem,
     lc: LoggingContextOf[InstanceUUID],
-) extends PartialFunction[HttpRequest, Future[HttpResponse]] {
-
-  private[this] val logger = ContextualizedLogger.get(getClass)
+) extends PartialFunction[HttpRequest, Future[HttpResponse]]
+    with NamedLogging
+    with NoTracing {
 
   private val pathPrefix: Uri.Path = Uri.Path("/" + config.prefix)
 
-  logger.warn(s"StaticContentRouter configured: ${config.shows}")
-  logger.warn("DO NOT USE StaticContentRouter IN PRODUCTION, CONSIDER SETTING UP REVERSE PROXY!!!")
+  logger.warn(s"StaticContentRouter configured: ${config.shows}, ${lc.makeString}")
+  logger.warn(
+    s"DO NOT USE StaticContentRouter IN PRODUCTION, CONSIDER SETTING UP REVERSE PROXY!!!, ${lc.makeString}"
+  )
 
   private val fn =
     akka.http.scaladsl.server.Route.toFunction(

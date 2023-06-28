@@ -504,13 +504,13 @@ object InMemoryStateUpdaterSpec {
 
   private val update1 = offset(1L) -> Traced(
     Update.TransactionAccepted(
-      optCompletionInfo = None,
+      completionInfoO = None,
       transactionMeta = someTransactionMeta,
       transaction = CommittedTransaction(TransactionBuilder.Empty),
       transactionId = txId1,
       recordTime = Timestamp.Epoch,
       divulgedContracts = List.empty,
-      blindingInfo = None,
+      blindingInfoO = None,
       hostedWitnesses = Nil,
       contractMetadata = Map.empty,
     )
@@ -524,13 +524,13 @@ object InMemoryStateUpdaterSpec {
   private val metadataChangedUpdate = rawMetadataChangedUpdate.bimap(identity, Traced[Update])
   private val update3 = offset(3L) -> Traced[Update](
     Update.TransactionAccepted(
-      optCompletionInfo = None,
+      completionInfoO = None,
       transactionMeta = someTransactionMeta,
       transaction = CommittedTransaction(TransactionBuilder.Empty),
       transactionId = txId2,
       recordTime = Timestamp.Epoch,
       divulgedContracts = List.empty,
-      blindingInfo = None,
+      blindingInfoO = None,
       hostedWitnesses = Nil,
       contractMetadata = Map.empty,
     )

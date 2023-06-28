@@ -181,10 +181,16 @@ final case class TransferId(sourceDomain: SourceDomainId, transferOutTimestamp: 
     param("ts", _.transferOutTimestamp),
     param("source", _.sourceDomain),
   )
-
 }
 
 object TransferId {
+  implicit val transferIdGetResult: GetResult[TransferId] = GetResult { r =>
+    TransferId(
+      SourceDomainId(GetResult[DomainId].apply(r)),
+      GetResult[CantonTimestamp].apply(r),
+    )
+  }
+
   def fromProtoV0(transferIdP: v0.TransferId): ParsingResult[TransferId] =
     transferIdP match {
       case v0.TransferId(sourceDomainP, requestTimestampP) =>

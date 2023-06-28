@@ -80,9 +80,8 @@ private[participant] class ConflictDetector(
     )
 
   /** Lock management and cache for contracts. */
-  private[this] val contractStates
-      : LockableStates[LfContractId, ActiveContractStore.Status, AcsError] =
-    LockableStates.empty[LfContractId, ActiveContractStore.Status, AcsError](
+  private[this] val contractStates: LockableStates[LfContractId, ActiveContractStore.Status] =
+    LockableStates.empty[LfContractId, ActiveContractStore.Status](
       acs,
       loggerFactory,
       timeouts,
@@ -90,18 +89,13 @@ private[participant] class ConflictDetector(
     )
 
   /** Lock management and cache for keys. */
-  private[this] val keyStates: LockableStates[
-    LfGlobalKey,
-    ContractKeyJournal.Status,
-    ContractKeyJournal.ContractKeyJournalError,
-  ] =
-    LockableStates
-      .empty[LfGlobalKey, ContractKeyJournal.Status, ContractKeyJournal.ContractKeyJournalError](
-        contractKeyJournal,
-        loggerFactory,
-        timeouts,
-        executionContext = executionContext,
-      )
+  private[this] val keyStates: LockableStates[LfGlobalKey, ContractKeyJournal.Status] =
+    LockableStates.empty[LfGlobalKey, ContractKeyJournal.Status](
+      contractKeyJournal,
+      loggerFactory,
+      timeouts,
+      executionContext = executionContext,
+    )
 
   /** Contains the [[com.digitalasset.canton.RequestCounter]]s of all requests
     * that have registered their activeness check using [[registerActivenessSet]]

@@ -163,7 +163,13 @@ abstract class CantonNodeBootstrapX[
             adminServerRegistry.addServiceU(
               VaultServiceGrpc.bindService(
                 arguments.grpcVaultServiceFactory
-                  .create(crypto, certificateGenerator, loggerFactory),
+                  .create(
+                    crypto,
+                    certificateGenerator,
+                    parameterConfig.enablePreviewFeatures,
+                    timeouts,
+                    loggerFactory,
+                  ),
                 executionContext,
               )
             )

@@ -192,8 +192,8 @@ class OngoingAuthorizationObserverSpec
     verify(cancellableMock, times(1)).cancel()
     assertError(
       actual = captor.getValue,
-      expectedF = LedgerApiErrors.AuthorizationChecks.PermissionDenied
-        .Reject(Expired(expiration, clock.instant).reason)(_)
+      expected = LedgerApiErrors.AuthorizationChecks.PermissionDenied
+        .Reject(Expired(expiration, clock.instant).reason)
         .asGrpcError,
     )
 
