@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import com.daml.ledger.api.v1.admin.metering_report_service.GetMeteringReportRequest
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore
@@ -33,7 +32,6 @@ class ApiMeteringReportServiceSpec
     with BaseTest {
 
   private val someParticipantId = Ref.ParticipantId.assertFromString("test-participant")
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   private val appIdA = Ref.ApplicationId.assertFromString("AppA")
   private val appIdB = Ref.ApplicationId.assertFromString("AppB")

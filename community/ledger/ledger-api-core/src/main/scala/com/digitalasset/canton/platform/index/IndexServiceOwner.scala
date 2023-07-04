@@ -92,12 +92,14 @@ final class IndexServiceOwner(
         lfValueTranslation = lfValueTranslation,
         metrics = metrics,
         eventProcessingParallelism = config.bufferedEventsProcessingParallelism,
+        loggerFactory = loggerFactory,
       )(inMemoryFanOutExecutionContext)
 
       bufferedCommandCompletionsReader = BufferedCommandCompletionsReader(
         inMemoryFanoutBuffer = inMemoryState.inMemoryFanoutBuffer,
         delegate = ledgerDao.completions,
         metrics = metrics,
+        loggerFactory = loggerFactory,
       )(inMemoryFanOutExecutionContext)
 
       indexService = new IndexServiceImpl(

@@ -63,14 +63,10 @@ abstract class BaseSequencer(
   private def autoRegisterNewMembersMentionedByIdentityManager(
       submission: SubmissionRequest
   )(implicit traceContext: TraceContext): EitherT[Future, WriteRequestRefused, Unit] = {
-    def ensureAllRecipientsRegistered: EitherT[Future, WriteRequestRefused, Unit] =
+    ifThenET(submission.sender == domainManagerId)(
       submission.batch.allMembers.toList
-        .parTraverse(ensureMemberRegistered)
-        .map(_ => ())
-
-    for {
-      _ <- ifThenET(submission.sender == domainManagerId)(ensureAllRecipientsRegistered)
-    } yield ()
+        .parTraverse_(ensureMemberRegistered)
+    )
   }
 
   private def ensureMemberRegistered(member: Member)(implicit

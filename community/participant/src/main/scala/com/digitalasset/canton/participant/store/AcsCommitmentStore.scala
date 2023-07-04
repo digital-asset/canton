@@ -216,10 +216,6 @@ trait CommitmentQueue {
 
 object AcsCommitmentStore {
 
-  sealed trait AcsCommitmentStoreError
-
-  final case class AcsCommitmentDbError(msg: String) extends AcsCommitmentStoreError
-
   /** Given a timestamp and a list of "unclean" periods, return the latest "clean" timestamp before or at the given one.
     *
     * A clean timestamp is one that is not covered by the unclean periods. The periods are given as pairs of

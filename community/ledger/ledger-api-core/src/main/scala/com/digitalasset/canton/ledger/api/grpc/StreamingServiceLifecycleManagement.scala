@@ -9,33 +9,36 @@ import akka.stream.{KillSwitch, KillSwitches, Materializer}
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.server.akka.ServerAdapter
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.error.CommonErrors
+import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, blocking}
+import scala.concurrent.blocking
 
-trait StreamingServiceLifecycleManagement extends AutoCloseable {
+trait StreamingServiceLifecycleManagement extends AutoCloseable with NamedLogging {
+
+  private val directEc = DirectExecutionContext(logger)
+
   @volatile private var _closed = false
   private val _killSwitches = TrieMap.empty[KillSwitch, Object]
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger
 
   def close(): Unit = blocking {
     synchronized {
       if (!_closed) {
         _closed = true
-        _killSwitches.keySet.foreach(_.abort(closingError(contextualizedErrorLogger)))
+        _killSwitches.keySet.foreach(_.abort(closingError(errorLoggingContext(TraceContext.empty))))
         _killSwitches.clear()
       }
     }
   }
 
-  private def errorHandler(throwable: Throwable) =
+  private def errorHandler(throwable: Throwable): StatusRuntimeException =
     CommonErrors.ServiceInternalError
-      .UnexpectedOrUnknownException(throwable)(contextualizedErrorLogger)
+      .UnexpectedOrUnknownException(throwable)(errorLoggingContext(TraceContext.empty))
       .asGrpcError
 
   protected def registerStream[RespT](
@@ -45,7 +48,7 @@ trait StreamingServiceLifecycleManagement extends AutoCloseable {
       executionSequencerFactory: ExecutionSequencerFactory,
   ): Unit = {
     def ifNotClosed(run: () => Unit): Unit =
-      if (_closed) responseObserver.onError(closingError(contextualizedErrorLogger))
+      if (_closed) responseObserver.onError(closingError(errorLoggingContext(TraceContext.empty)))
       else run()
 
     // Double-checked locking to keep the (potentially expensive)
@@ -68,17 +71,13 @@ trait StreamingServiceLifecycleManagement extends AutoCloseable {
 
             // This can complete outside the synchronized block
             // maintaining the need of using a concurrent collection for _killSwitches
-            @SuppressWarnings(
-              Array("com.digitalasset.canton.GlobalExecutionContext")
-            ) // No TracedLogger available
-            val ec = ExecutionContext.parasitic
-            doneF.onComplete(_ => _killSwitches -= killSwitch)(ec)
+            doneF.onComplete(_ => _killSwitches -= killSwitch)(directEc)
           }
         }
       }
     }
   }
 
-  def closingError(errorLogger: ContextualizedErrorLogger): StatusRuntimeException =
+  private def closingError(errorLogger: ContextualizedErrorLogger): StatusRuntimeException =
     CommonErrors.ServerIsShuttingDown.Reject()(errorLogger).asGrpcError
 }

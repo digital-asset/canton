@@ -25,6 +25,7 @@ import com.daml.lf.value.Value.{ContractId, VersionedContractInstance}
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.Metrics
 import com.daml.tracing.{Event, SpanAttribute, Spans}
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.domain.ConfigurationEntry.Accepted
 import com.digitalasset.canton.ledger.api.domain.{
   Filters,
@@ -53,14 +54,7 @@ import com.digitalasset.canton.platform.ApiOffset.ApiOffsetConverter
 import com.digitalasset.canton.platform.akkastreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.akkastreams.dispatcher.DispatcherImpl.DispatcherIsClosedException
 import com.digitalasset.canton.platform.akkastreams.dispatcher.SubSource.RangeSource
-import com.digitalasset.canton.platform.index.IndexServiceImpl.{
-  foldToSource,
-  memoizedTransactionFilterProjection,
-  transactionFilterProjection,
-  validateTransactionFilter,
-  validatedAcsActiveAtOffset,
-  withValidatedFilter,
-}
+import com.digitalasset.canton.platform.index.IndexServiceImpl.*
 import com.digitalasset.canton.platform.store.dao.{
   EventProjectionProperties,
   LedgerDaoCommandCompletionsReader,
@@ -74,7 +68,7 @@ import com.digitalasset.canton.platform.{ApiOffset, Party, PruneBuffers, Templat
 import io.grpc.StatusRuntimeException
 import scalaz.syntax.tag.ToTagOps
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.util.Success
 
 private[index] class IndexServiceImpl(
@@ -88,16 +82,20 @@ private[index] class IndexServiceImpl(
     dispatcher: () => Dispatcher[Offset],
     packageMetadataView: PackageMetadataView,
     metrics: Metrics,
-    val loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 ) extends IndexService
     with NamedLogging {
+
+  private val directEc = DirectExecutionContext(logger)
+
   // An Akka stream buffer is added at the end of all streaming queries,
   // allowing to absorb temporary downstream backpressure.
   // (e.g. when the client is temporarily slower than upstream delivery throughput)
   private val LedgerApiStreamsBufferSize = 128
 
   private val maximumLedgerTimeService = new ContractStoreBasedMaximumLedgerTimeService(
-    contractStore
+    contractStore,
+    loggerFactory,
   )
 
   override def getParticipantId(): Future[Ref.ParticipantId] =
@@ -399,8 +397,6 @@ private[index] class IndexServiceImpl(
     * to subscribe to further configuration changes.
     * The offset is internal and not exposed over Ledger API.
     */
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def lookupConfiguration()(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[(LedgerOffset.Absolute, Configuration)]] =
@@ -408,7 +404,7 @@ private[index] class IndexServiceImpl(
       .lookupLedgerConfiguration()
       .map(
         _.map { case (offset, config) => (toAbsolute(offset), config) }
-      )(ExecutionContext.parasitic)
+      )(directEc)
 
   /** Looks up the current configuration, if set, and continues to stream configuration changes.
     */
@@ -547,8 +543,6 @@ private[index] class IndexServiceImpl(
   ): Future[MaximumLedgerTime] =
     maximumLedgerTimeService.lookupMaximumLedgerTimeAfterInterpretation(ids)
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def latestPrunedOffsets()(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[(LedgerOffset.Absolute, LedgerOffset.Absolute)] =
@@ -557,7 +551,7 @@ private[index] class IndexServiceImpl(
         toApiOffset(prunedUpToInclusiveO.getOrElse(Offset.beforeBegin)) -> toApiOffset(
           divulgencePrunedUpToO.getOrElse(Offset.beforeBegin)
         )
-      }(ExecutionContext.parasitic)
+      }(directEc)
 }
 
 object IndexServiceImpl {
@@ -565,7 +559,7 @@ object IndexServiceImpl {
   private[index] def checkUnknownTemplatesOrInterfaces(
       domainTransactionFilter: domain.TransactionFilter,
       metadata: PackageMetadata,
-  ) =
+  ): List[Either[Identifier, Identifier]] =
     (for {
       (_, inclusiveFilterOption) <- domainTransactionFilter.filtersByParty.iterator
       inclusiveFilter <- inclusiveFilterOption.inclusive.iterator

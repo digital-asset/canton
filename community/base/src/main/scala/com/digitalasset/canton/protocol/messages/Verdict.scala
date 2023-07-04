@@ -11,13 +11,13 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   InvariantViolation,
   NotImplementedYet,
+  OtherError,
   ValueDeserializationError,
 }
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.v0.RejectionReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.*
@@ -35,6 +35,8 @@ sealed trait Verdict
   def toProtoV0: v0.Verdict
 
   def toProtoV1: v1.Verdict
+
+  def toProtoV2: v2.Verdict
 }
 
 object Verdict
@@ -50,6 +52,10 @@ object Verdict
       supportedProtoVersion(_)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
+    ProtoVersion(2) -> VersionedProtoConverter(ProtocolVersion.v5)(v2.Verdict)(
+      supportedProtoVersion(_)(fromProtoV2),
+      _.toProtoV2.toByteString,
+    ),
   )
 
   final case class Approve()(
@@ -60,6 +66,9 @@ object Verdict
 
     override def toProtoV1: v1.Verdict =
       v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.Approve(empty.Empty()))
+
+    override def toProtoV2: v2.Verdict =
+      v2.Verdict(someVerdict = v2.Verdict.SomeVerdict.Approve(empty.Empty()))
 
     override def pretty: Pretty[Verdict] = prettyOfString(_ => "Approve")
   }
@@ -91,6 +100,9 @@ object Verdict
     def toProtoMediatorRejectV1: v1.MediatorReject = {
       v1.MediatorReject(cause = cause, errorCode = code.id, errorCategory = code.category.asInt)
     }
+
+    override def toProtoV2: v2.Verdict =
+      v2.Verdict(someVerdict = v2.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV1))
 
     override def pretty: Pretty[MediatorReject] =
       prettyOfClass(
@@ -171,6 +183,13 @@ object Verdict
       v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.ParticipantReject(reasonsP))
     }
 
+    def toProtoV2: v2.Verdict = {
+      val reasonsP = v2.ParticipantReject(reasons.map { case (parties, message) =>
+        v2.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV1))
+      })
+      v2.Verdict(someVerdict = v2.Verdict.SomeVerdict.ParticipantReject(reasonsP))
+    }
+
     override def pretty: Pretty[ParticipantReject] = {
       import Pretty.PrettyOps
 
@@ -208,10 +227,10 @@ object Verdict
     }
 
     private def fromProtoRejectionReasonsV0(
-        reasonsP: Seq[RejectionReason]
+        reasonsP: Seq[v0.RejectionReason]
     ): ParsingResult[ParticipantReject] =
       for {
-        reasons <- reasonsP.traverse(fromProtoReason)
+        reasons <- reasonsP.traverse(fromProtoReasonV0)
         reasonsNE <- NonEmpty
           .from(reasons.toList)
           .toRight(InvariantViolation("Field reasons must not be empty!"))
@@ -224,6 +243,25 @@ object Verdict
     ): ParsingResult[ParticipantReject] = {
       val v1.ParticipantReject(reasonsP) = participantRejectP
       fromProtoRejectionReasonsV0(reasonsP)
+    }
+
+    private def fromProtoRejectionReasonsV2(
+        reasonsP: Seq[v2.RejectionReason]
+    ): ParsingResult[ParticipantReject] =
+      for {
+        reasons <- reasonsP.traverse(fromProtoReasonV2)
+        reasonsNE <- NonEmpty
+          .from(reasons.toList)
+          .toRight(InvariantViolation("Field reasons must not be empty!"))
+      } yield ParticipantReject(reasonsNE)(
+        Verdict.protocolVersionRepresentativeFor(ProtoVersion(2))
+      )
+
+    def fromProtoV2(
+        participantRejectP: v2.ParticipantReject
+    ): ParsingResult[ParticipantReject] = {
+      val v2.ParticipantReject(reasonsP) = participantRejectP
+      fromProtoRejectionReasonsV2(reasonsP)
     }
   }
 
@@ -260,13 +298,38 @@ object Verdict
     }
   }
 
-  private def fromProtoReason(
+  def fromProtoV2(verdictP: v2.Verdict): ParsingResult[Verdict] = {
+    val v2.Verdict(someVerdictP) = verdictP
+    import v2.Verdict.{SomeVerdict as V}
+
+    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(2))
+
+    someVerdictP match {
+      case V.Approve(empty.Empty(_)) => Right(Approve()(representativeProtocolVersion))
+      case V.MediatorReject(mediatorRejectP) => MediatorReject.fromProtoV1(mediatorRejectP)
+      case V.ParticipantReject(participantRejectP) =>
+        ParticipantReject.fromProtoV2(participantRejectP)
+      case V.Empty => Left(OtherError("empty verdict type"))
+    }
+  }
+
+  private def fromProtoReasonV0(
       protoReason: v0.RejectionReason
   ): ParsingResult[(Set[LfPartyId], LocalReject)] = {
     val v0.RejectionReason(partiesP, messageP) = protoReason
     for {
       parties <- partiesP.traverse(ProtoConverter.parseLfPartyId).map(_.toSet)
       message <- ProtoConverter.parseRequired(LocalReject.fromProtoV0, "reject", messageP)
+    } yield (parties, message)
+  }
+
+  private def fromProtoReasonV2(
+      protoReason: v2.RejectionReason
+  ): ParsingResult[(Set[LfPartyId], LocalReject)] = {
+    val v2.RejectionReason(partiesP, messageP) = protoReason
+    for {
+      parties <- partiesP.traverse(ProtoConverter.parseLfPartyId).map(_.toSet)
+      message <- ProtoConverter.parseRequired(LocalReject.fromProtoV1, "reject", messageP)
     } yield (parties, message)
   }
 }

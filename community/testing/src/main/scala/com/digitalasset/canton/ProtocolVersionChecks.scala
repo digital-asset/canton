@@ -76,6 +76,11 @@ trait ProtocolVersionChecksFixtureAnyWordSpec {
     def in(testFun: FixtureParam => Any /* Assertion */ )(implicit pos: source.Position): Unit = {
       if (condition) verb.in(testFun) else verb.ignore(testFun)
     }
+    def ignore(
+        testFun: FixtureParam => Any /* Assertion */
+    )(implicit pos: source.Position): Unit = {
+      verb.ignore(testFun)
+    }
   }
 }
 

@@ -24,13 +24,7 @@ import com.digitalasset.canton.ledger.client.configuration.{
   LedgerClientConfiguration,
 }
 import com.digitalasset.canton.ledger.client.services.acs.ActiveContractSetClient
-import com.digitalasset.canton.ledger.client.services.admin.{
-  IdentityProviderConfigClient,
-  PackageManagementClient,
-  ParticipantPruningManagementClient,
-  PartyManagementClient,
-  UserManagementClient,
-}
+import com.digitalasset.canton.ledger.client.services.admin.*
 import com.digitalasset.canton.ledger.client.services.commands.{
   CommandClient,
   SynchronousCommandClient,
@@ -39,6 +33,7 @@ import com.digitalasset.canton.ledger.client.services.identity.LedgerIdentityCli
 import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
 import com.digitalasset.canton.ledger.client.services.transactions.TransactionClient
 import com.digitalasset.canton.ledger.client.services.version.VersionClient
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import io.grpc.Channel
 import io.grpc.netty.NettyChannelBuilder
 import io.grpc.stub.AbstractStub
@@ -51,6 +46,7 @@ final class LedgerClient private (
     val channel: Channel,
     config: LedgerClientConfiguration,
     val ledgerId: LedgerId,
+    loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory)
     extends Closeable {
 
@@ -67,6 +63,7 @@ final class LedgerClient private (
       ledgerId,
       config.applicationId,
       config.commandClient,
+      loggerFactory,
     )
 
   val commandServiceClient: SynchronousCommandClient =
@@ -117,6 +114,7 @@ object LedgerClient {
   def apply(
       channel: Channel,
       config: LedgerClientConfiguration,
+      loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory): Future[LedgerClient] =
     for {
       ledgerId <- new LedgerIdentityClient(
@@ -127,7 +125,7 @@ object LedgerClient {
           config.token,
         )
       ).satisfies(config.ledgerIdRequirement)
-    } yield new LedgerClient(channel, config, ledgerId)
+    } yield new LedgerClient(channel, config, ledgerId, loggerFactory)
 
   private[client] def stub[A <: AbstractStub[A]](stub: A, token: Option[String]): A =
     token.fold(stub)(authenticatingStub(stub, _))
@@ -140,20 +138,26 @@ object LedgerClient {
       port: Int,
       configuration: LedgerClientConfiguration,
       channelConfig: LedgerClientChannelConfiguration,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
       esf: ExecutionSequencerFactory,
   ): Future[LedgerClient] =
-    fromBuilder(channelConfig.builderFor(hostIp, port), configuration)
+    fromBuilder(channelConfig.builderFor(hostIp, port), configuration, loggerFactory)
 
-  def insecureSingleHost(hostIp: String, port: Int, configuration: LedgerClientConfiguration)(
-      implicit
+  def insecureSingleHost(
+      hostIp: String,
+      port: Int,
+      configuration: LedgerClientConfiguration,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext,
       esf: ExecutionSequencerFactory,
   ): Future[LedgerClient] =
     fromBuilder(
       LedgerClientChannelConfiguration.InsecureDefaults.builderFor(hostIp, port),
       configuration,
+      loggerFactory,
     )
 
   /** Takes a [[io.grpc.netty.NettyChannelBuilder]], possibly set up with some relevant extra options
@@ -167,8 +171,12 @@ object LedgerClient {
   def fromBuilder(
       builder: NettyChannelBuilder,
       configuration: LedgerClientConfiguration,
+      loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory): Future[LedgerClient] = {
-    LedgerClient(GrpcChannel.withShutdownHook(builder), configuration)
+    LedgerClient(
+      GrpcChannel.withShutdownHook(builder),
+      configuration,
+      loggerFactory,
+    )
   }
-
 }

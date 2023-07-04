@@ -5,6 +5,8 @@ package com.digitalasset.canton.participant.ledger.api.multidomain
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.util.DelayUtil
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
@@ -12,7 +14,15 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.scalaUtilChainingOps
 
-object ApiStreaming {
+class ApiStreaming(
+    override protected val loggerFactory: NamedLoggerFactory
+)(implicit
+    executionContext: ExecutionContext
+) extends NamedLogging {
+
+  import ApiStreaming.*
+
+  private val directEc = DirectExecutionContext(loggerFactory.getTracedLogger(getClass))
 
   // Uses an asynchronous polling callback to populate a distinct stream of new indexes.
   // If polling leads to the same result, it applies the specified back-off.
@@ -24,7 +34,7 @@ object ApiStreaming {
       increaseDelayForSameIndex: FiniteDuration => FiniteDuration = _ * 2, // exponential back-off
   )(
       poll: () => Future[T]
-  )(implicit executionContext: ExecutionContext): Source[T, NotUsed] = {
+  ): Source[T, NotUsed] = {
     val streamTerminated = new AtomicBoolean(false)
     def pollUntilNextDistinctElem(
         previous: Option[T],
@@ -94,8 +104,6 @@ object ApiStreaming {
     * @param indexRange the complete range.
     * @return Results for the complete range in index order.
     */
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def pagedRangeQueryStream[T](
       rangeQueryWithLimit: IndexRange => Future[Vector[T]]
   )(indexExtractor: T => Long)(indexRange: IndexRange): Source[T, NotUsed] =
@@ -107,9 +115,12 @@ object ApiStreaming {
             .map(results =>
               results.lastOption
                 .map(last => indexExtractor(last) + 1 -> results)
-            )(ExecutionContext.parasitic)
+            )(directEc)
       )
       .mapConcat(identity)
+}
+
+object ApiStreaming {
 
   final case class IndexRange(fromInclusive: Long, toInclusive: Long)
 }

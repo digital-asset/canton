@@ -463,7 +463,7 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class Upload(acsChunk: ByteString)
+    final case class Upload(acsChunk: ByteString, gzip: Boolean)
         extends GrpcAdminCommand[UploadRequest, UploadResponse, Unit] {
 
       override type Svc = ParticipantRepairServiceStub
@@ -472,7 +472,7 @@ object ParticipantAdminCommands {
         ParticipantRepairServiceGrpc.stub(channel)
 
       override def createRequest(): Either[String, UploadRequest] = {
-        Right(UploadRequest(acsChunk))
+        Right(UploadRequest(acsChunk, gzip))
       }
 
       override def submitRequest(
@@ -508,7 +508,7 @@ object ParticipantAdminCommands {
           .grouped(GrpcParticipantRepairService.defaultChunkSize)
           .foreach { bytes =>
             blocking {
-              requestObserver.onNext(UploadRequest(ByteString.copyFrom(bytes)))
+              requestObserver.onNext(UploadRequest(ByteString.copyFrom(bytes), gzip))
             }
           }
         requestObserver.onCompleted()

@@ -222,7 +222,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
   }
 
-  def checkpoint(
+  private def checkpoint(
       counter: SequencerCounter,
       ts: CantonTimestamp,
       latestTopologyClientTs: Option[CantonTimestamp] = None,

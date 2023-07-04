@@ -9,7 +9,7 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.sync.SyncServiceError.TrafficControlErrorGroup
 import com.digitalasset.canton.sequencing.protocol.SequencedEventTrafficState
-import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.traffic.{MemberTrafficStatus, TopUpEvent, TopUpQueue}
 
@@ -81,18 +81,21 @@ object TrafficStateController {
     }
 
     @Explanation(
-      """This error indicates that the requested member is unknown."""
+      """This error indicates that the participant does not have a traffic state."""
     )
-    @Resolution("Ensure that the member provided is registered to the sequencer.")
-    object MemberNotFound
+    @Resolution(
+      """Ensure that the the participant is connected to a domain with traffic control enabled,
+        and that it has received at least one event from the domain since its connection."""
+    )
+    object TrafficStateNotFound
         extends ErrorCode(
-          id = "TRAFFIC_CONTROL_MEMBER_NOT_FOUND",
-          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+          id = "TRAFFIC_CONTROL_STATE_NOT_FOUND",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
         ) {
-      final case class Error(member: Member)(implicit
+      final case class Error()(implicit
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(
-            cause = "The member was not found"
+            cause = "Traffic state not found"
           )
           with TrafficControlError
     }

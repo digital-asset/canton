@@ -7,13 +7,12 @@ import com.daml.error.*
 import com.daml.lf.engine.Error.Validation.ReplayMismatch
 import com.daml.lf.engine.Error as LfError
 import com.daml.metrics.ExecutorServiceMetrics
-import com.digitalasset.canton.ledger.error.ErrorGroups.ParticipantErrorGroup.LedgerApiErrorGroup
 import org.slf4j.event.Level
 
 @Explanation(
   "Errors raised by or forwarded by the Ledger API."
 )
-object LedgerApiErrors extends LedgerApiErrorGroup {
+object LedgerApiErrors extends ErrorGroup()(ParticipantErrorGroup.errorClass) {
 
   val Admin: groups.AdminServices.type = groups.AdminServices
   val CommandExecution: groups.CommandExecution.type = groups.CommandExecution

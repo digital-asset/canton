@@ -154,7 +154,7 @@ object TimeProof {
     * Currently adding a short prefix for debugging at the sequencer so floods of time requests will be observable.
     */
   @VisibleForTesting
-  private[time] def mkTimeProofRequestMessageId: MessageId =
+  def mkTimeProofRequestMessageId: MessageId =
     MessageId(
       String73(s"$timeEventMessageIdPrefix${UUID.randomUUID()}")("time-proof-message-id".some)
     )

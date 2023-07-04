@@ -43,8 +43,9 @@ final case class TransactionMeta(
     optUsedPackages: Option[Set[Ref.PackageId]],
     optNodeSeeds: Option[ImmArray[(NodeId, crypto.Hash)]],
     optByKeyNodes: Option[ImmArray[NodeId]],
-    optDomainId: Option[DomainId] =
-      None, // TODO(#13173) None for backwards compatibility, expected to be set for X nodes
+    optDomainId: Option[
+      DomainId
+    ], // TODO(#13173) None for backwards compatibility, expected to be set for X nodes
 ) extends PrettyPrinting {
   override def pretty: Pretty[TransactionMeta.this.type] = prettyOfClass(
     param("ledgerEffectiveTime", _.ledgerEffectiveTime),

@@ -94,7 +94,7 @@ object IndexMetadata {
           engine = None,
           participantId = Ref.ParticipantId.assertFromString("1"),
           ledgerEndCache = MutableLedgerEndCache(), // not used
-          stringInterning = new StringInterningView(), // not used
+          stringInterning = new StringInterningView(loggerFactory), // not used
           acsStreamsConfig = AcsStreamsConfig.default,
           transactionFlatStreamsConfig = TransactionFlatStreamsConfig.default,
           transactionTreeStreamsConfig = TransactionTreeStreamsConfig.default,

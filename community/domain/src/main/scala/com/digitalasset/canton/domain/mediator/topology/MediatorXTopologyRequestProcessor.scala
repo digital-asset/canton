@@ -14,21 +14,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientSend}
-import com.digitalasset.canton.sequencing.protocol.{
-  AggregationRule,
-  Batch,
-  Deliver,
-  OpenEnvelope,
-  Recipients,
-}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.transaction.{
-  DomainParametersStateX,
-  DomainTrustCertificateX,
-  MediatorDomainStateX,
-  SequencerDomainStateX,
-}
+import com.digitalasset.canton.topology.transaction.{DomainParametersStateX, MediatorDomainStateX}
 import com.digitalasset.canton.topology.{DomainId, TopologyStateProcessorX}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
@@ -204,49 +193,13 @@ class MediatorXTopologyRequestProcessor(
       domainId = domainId,
       protocolVersion = protocolVersion,
     )
-    performUnlessClosingF(functionFullName)(
-      processor.store.findPositiveTransactions(
-        asOf = ts,
-        asOfInclusive =
-          false, // must be exclusive as we don't want to include folks that we just added
-        isProposal = false,
-        types = Seq(
-          DomainTrustCertificateX.code,
-          MediatorDomainStateX.code,
-          SequencerDomainStateX.code,
-        ),
-        filterUid = None,
-        filterNamespace = None,
-      )
-    ).flatMap { res =>
-      val participants = res
-        .collectOfMapping[DomainTrustCertificateX]
-        .result
-        .map(_.transaction.transaction.mapping.participantId)
-      val mediators = res
-        .collectOfMapping[MediatorDomainStateX]
-        .result
-        .map(_.transaction.transaction.mapping)
-        .flatMap(mds => mds.active ++ mds.observers)
-      val sequencers = res
-        .collectOfMapping[SequencerDomainStateX]
-        .result
-        .map(_.transaction.transaction.mapping)
-        .flatMap(sds => sds.active ++ sds.observers)
-      val members = participants ++ mediators ++ sequencers
-      Recipients.ofSet(members.toSet) match {
-        case Some(recipients) =>
-          send(
-            OpenEnvelope(msg, recipients)(protocolVersion),
-            "sending accepted txs to members",
-            aggregationRule,
-            maxSequencingTime,
-          )
-        case None =>
-          logger.error("Didn't find recipients")
-          FutureUnlessShutdown.unit
-      }
-    }
+    send(
+      OpenEnvelope(msg, Recipients.cc(AllMembersOfDomain))(protocolVersion),
+      "sending accepted txs to members",
+      aggregationRule,
+      maxSequencingTime,
+    )
+
   }
 
   private def send(

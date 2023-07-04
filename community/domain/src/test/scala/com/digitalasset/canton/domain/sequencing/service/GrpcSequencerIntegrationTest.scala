@@ -157,7 +157,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       loggerFactory,
       ParticipantAuditor.noop,
       authenticationCheck,
-      new SubscriptionPool[GrpcManagedSubscription](
+      new SubscriptionPool[GrpcManagedSubscription[_]](
         clock,
         DomainTestMetrics.sequencer,
         timeouts,

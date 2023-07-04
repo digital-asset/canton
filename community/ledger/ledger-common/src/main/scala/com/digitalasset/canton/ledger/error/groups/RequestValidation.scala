@@ -24,7 +24,7 @@ import java.time.Duration
 @Explanation(
   "Validation errors raised when evaluating requests in the Ledger API."
 )
-object RequestValidation extends LedgerApiErrors.RequestValidation {
+object RequestValidation extends ErrorGroup()(LedgerApiErrors.errorClass) {
   object NotFound extends ErrorGroup() {
     @Explanation(
       "This rejection is given when a read request tries to access a package which does not exist on the ledger."

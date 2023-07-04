@@ -31,8 +31,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission.{OWNER_READ, OWNER_WRITE}
 import java.time.Instant
-import scala.concurrent.ExecutionContext.Implicits.*
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
 class SecretKeyAdministration(
@@ -415,15 +414,14 @@ class KeyAdministrationGroup(
 
 }
 
-// TODO(#13019) Avoid the global execution context
-@SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
 class LocalSecretKeyAdministration(
     instance: InstanceReferenceCommon,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     crypto: => Crypto,
     loggerFactory: NamedLoggerFactory,
-) extends SecretKeyAdministration(instance, runner, consoleEnvironment, loggerFactory) {
+)(implicit executionContext: ExecutionContext)
+    extends SecretKeyAdministration(instance, runner, consoleEnvironment, loggerFactory) {
 
   private def run[V](eitherT: EitherT[Future, String, V], action: String): V = {
     import TraceContext.Implicits.Empty.*
@@ -488,7 +486,8 @@ class LocalKeyAdministrationGroup(
     consoleEnvironment: ConsoleEnvironment,
     crypto: => Crypto,
     loggerFactory: NamedLoggerFactory,
-) extends KeyAdministrationGroup(instance, runner, consoleEnvironment, loggerFactory) {
+)(implicit executionContext: ExecutionContext)
+    extends KeyAdministrationGroup(instance, runner, consoleEnvironment, loggerFactory) {
 
   private lazy val localSecretAdmin: LocalSecretKeyAdministration =
     new LocalSecretKeyAdministration(instance, runner, consoleEnvironment, crypto, loggerFactory)
@@ -496,5 +495,4 @@ class LocalKeyAdministrationGroup(
   @Help.Summary("Manage secret keys")
   @Help.Group("Secret keys")
   override def secret: LocalSecretKeyAdministration = localSecretAdmin
-
 }

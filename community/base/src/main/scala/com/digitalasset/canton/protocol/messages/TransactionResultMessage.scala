@@ -87,7 +87,7 @@ case class TransactionResultMessage private (
     require(isEquivalentTo(ProtocolVersion.v5))
     v2.TransactionResultMessage(
       requestId = Some(requestId.toProtoPrimitive),
-      verdict = Some(verdict.toProtoV1),
+      verdict = Some(verdict.toProtoV2),
       rootHash = rootHash.toProtoPrimitive,
       domainId = domainId.toProtoPrimitive,
     )
@@ -229,7 +229,7 @@ object TransactionResultMessage
         .flatMap(RequestId.fromProtoPrimitive)
       transactionResult <- ProtoConverter
         .required("verdict", verdictPO)
-        .flatMap(Verdict.fromProtoV1)
+        .flatMap(Verdict.fromProtoV2)
       rootHash <- RootHash.fromProtoPrimitive(rootHashP)
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
     } yield TransactionResultMessage(requestId, transactionResult, rootHash, domainId, None)(

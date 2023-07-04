@@ -8,6 +8,7 @@ import com.daml.error.{
   DamlErrorWithDefiniteAnswer,
   ErrorCategory,
   ErrorCode,
+  ErrorGroup,
   ErrorResource,
   Explanation,
   Resolution,
@@ -22,7 +23,7 @@ import java.time.Instant
 @Explanation(
   "Potential consistency errors raised due to race conditions during command submission or returned as submission rejections by the backing ledger."
 )
-object ConsistencyErrors extends LedgerApiErrors.ConsistencyErrors {
+object ConsistencyErrors extends ErrorGroup()(LedgerApiErrors.errorClass) {
 
   @Explanation("A command with the given command id has already been successfully processed.")
   @Resolution(

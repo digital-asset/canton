@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.transaction_filter.TransactionFilter
 import com.daml.ledger.api.v2.participant_offset.ParticipantOffset
@@ -50,12 +49,6 @@ final class ApiStateService(
     with StreamingServiceLifecycleManagement
     with GrpcApiService
     with NamedLogging {
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   override def getActiveContracts(
       request: GetActiveContractsRequest,

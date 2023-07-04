@@ -29,6 +29,8 @@ class TransactionViewDecompositionTest
     with ComparesLfTransactions
     with NeedsNewLfContractIds {
 
+  import RollbackTransactionBuilder.*
+
   lazy val factory: TransactionViewDecompositionFactory = TransactionViewDecompositionFactory(
     testedProtocolVersion
   )
@@ -151,16 +153,18 @@ class TransactionViewDecompositionTest
       }
     }
 
+    val rollbackTransactionBuilder = new RollbackTransactionBuilder(loggerFactory)
+
     "a transaction with nested rollbacks" can {
 
-      import RollbackTransactionBuilder.*
+      import rollbackTransactionBuilder.*
 
       val alice: LfPartyId = LfPartyId.assertFromString("alice::default")
       val bob: LfPartyId = LfPartyId.assertFromString("bob::default")
       val carol: LfPartyId = LfPartyId.assertFromString("carol::default")
 
       val embeddedRollbackExample: LfTransaction = {
-        RollbackTransactionBuilder.run(for {
+        rollbackTransactionBuilder.run(for {
           rootId <- nextExerciseWithChildren( // NewView
             n => c => exerciseNode(n, signatories = Set(alice), children = c.toList), // SameView
             Seq(
@@ -199,7 +203,7 @@ class TransactionViewDecompositionTest
           .fromTransaction(
             ConfirmationPolicy.Signatory,
             defaultTopologySnapshot,
-            RollbackTransactionBuilder.wellFormedUnsuffixedTransaction(embeddedRollbackExample),
+            wellFormedUnsuffixedTransaction(embeddedRollbackExample),
             RollbackContext.empty,
             None,
           )

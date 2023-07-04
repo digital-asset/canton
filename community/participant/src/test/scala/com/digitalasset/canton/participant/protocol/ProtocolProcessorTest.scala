@@ -699,6 +699,9 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
           .registerRequest(sut.steps.requestType)(
             requestId
           )
+      ephemeral.submissionTracker
+        .register(rootHash, requestId)
+        .discard
 
       // Process the result message before the request
       val processF = performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut)

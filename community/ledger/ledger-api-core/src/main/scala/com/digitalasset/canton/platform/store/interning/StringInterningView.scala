@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.platform.store.interning
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.{Identifier, Party}
 import com.digitalasset.canton.topology.DomainId
 
-import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.concurrent.{Future, blocking}
 
 class DomainStringIterators(
     val parties: Iterator[String],
@@ -58,10 +60,14 @@ trait LoadStringInterningEntries {
   * - The single, volatile reference enables non-synchronized access from all threads, accessing persistent-immutable datastructure
   * - On the writing side it synchronizes (this usage is anyway expected) and maintains the immutable internal datastructure
   */
-class StringInterningView()
+class StringInterningView(override protected val loggerFactory: NamedLoggerFactory)
     extends StringInterning
     with InternizingStringInterningView
-    with UpdatingStringInterningView {
+    with UpdatingStringInterningView
+    with NamedLogging {
+
+  private val directEc = DirectExecutionContext(logger)
+
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private var raw: RawStringInterning = RawStringInterning.from(Nil)
 
@@ -114,8 +120,6 @@ class StringInterningView()
       newEntries
     })
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def update(lastStringInterningId: Int)(
       loadStringInterningEntries: LoadStringInterningEntries
   ): Future[Unit] =
@@ -124,7 +128,7 @@ class StringInterningView()
       Future.unit
     } else {
       loadStringInterningEntries(raw.lastId, lastStringInterningId)
-        .map(updateView)(ExecutionContext.parasitic)
+        .map(updateView)(directEc)
     }
 
   private def updateView(newEntries: Iterable[(Int, String)]): Unit = blocking(synchronized {

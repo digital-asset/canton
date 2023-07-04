@@ -6,34 +6,37 @@ package com.digitalasset.canton.platform.store.cache
 import com.daml.ledger.resources.Resource
 import com.daml.lf.crypto.Hash
 import com.daml.lf.data.ImmArray
+import com.daml.lf.data.Ref.IdString
 import com.daml.lf.data.Time.Timestamp
 import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.{ContractInstance, ValueRecord, ValueText}
 import com.daml.metrics.Metrics
-import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.ContractState
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
-import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.{cId_5, *}
+import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.*
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{
   KeyAssigned,
   KeyUnassigned,
 }
+import com.digitalasset.canton.{HasExecutionContext, TestEssentials}
 import org.mockito.MockitoSugar
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.annotation.nowarn
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 class MutableCacheBackedContractStoreSpec
     extends AsyncWordSpec
     with Matchers
     with MockitoSugar
-    with TestEssentials {
+    with TestEssentials
+    with HasExecutionContext {
+
   implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   "push" should {
@@ -289,20 +292,16 @@ object MutableCacheBackedContractStoreSpec {
       cachesSize: Long,
       loggerFactory: NamedLoggerFactory,
       readerFixture: LedgerDaoContractsReader = ContractsReaderFixture(),
-  ) = {
+  )(implicit ec: ExecutionContext) = {
     val metrics = Metrics.ForTesting
     val startIndexExclusive: Offset = offset0
-    // TODO(#13019) Avoid the global execution context
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val contractStore = new MutableCacheBackedContractStore(
       metrics,
       readerFixture,
       contractStateCaches = ContractStateCaches
-        .build(startIndexExclusive, cachesSize, cachesSize, metrics, loggerFactory)(
-          scala.concurrent.ExecutionContext.global
-        ),
+        .build(startIndexExclusive, cachesSize, cachesSize, metrics, loggerFactory),
       loggerFactory = loggerFactory,
-    )(scala.concurrent.ExecutionContext.global)
+    )
 
     Resource.successful(contractStore)
   }
@@ -369,15 +368,17 @@ object MutableCacheBackedContractStoreSpec {
       contract: Contract,
       parties: Set[Party],
       ledgerEffectiveTime: Timestamp,
-  ) =
+  ): Future[Option[LedgerDaoContractsReader.ActiveContract]] =
     Future.successful(
       Some(LedgerDaoContractsReader.ActiveContract(contract, parties, ledgerEffectiveTime))
     )
 
-  private def archivedContract(parties: Set[Party]) =
+  private def archivedContract(
+      parties: Set[Party]
+  ): Future[Option[LedgerDaoContractsReader.ArchivedContract]] =
     Future.successful(Some(LedgerDaoContractsReader.ArchivedContract(parties)))
 
-  private def party(name: String) = Party.assertFromString(name)
+  private def party(name: String): IdString.Party = Party.assertFromString(name)
 
   private def contract(templateName: String): Contract = {
     val templateId = Identifier.assertFromString(s"some:template:$templateName")

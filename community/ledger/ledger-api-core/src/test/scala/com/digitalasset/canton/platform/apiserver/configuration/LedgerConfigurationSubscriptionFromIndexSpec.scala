@@ -10,7 +10,6 @@ import akka.testkit.ExplicitlyTriggeredScheduler
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.data.Ref
-import com.daml.logging.LoggingContext
 import com.daml.timer.Delayed
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.domain.{ConfigurationEntry, LedgerOffset}
@@ -36,7 +35,7 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
 
   private implicit val resourceContext: ResourceContext = ResourceContext(executionContext)
   private implicit val loggingContext =
-    LoggingContextWithTrace(traceContext)(LoggingContext.ForTesting)
+    LoggingContextWithTrace.ForTesting
 
   override implicit def patienceConfig: PatienceConfig =
     super.patienceConfig.copy(timeout = 1.second)
@@ -229,16 +228,21 @@ final class LedgerConfigurationSubscriptionFromIndexSpec
         loggerFactory = loggerFactory,
       )
 
-      subscriptionBuilder
-        .subscription(configurationLoadTimeout)
-        .use { currentLedgerConfiguration =>
-          currentLedgerConfiguration.ready.isCompleted should be(false)
-          scheduler.timePasses(1.second)
-          currentLedgerConfiguration.ready.isCompleted should be(true)
-          currentLedgerConfiguration.ready.map { _ =>
-            currentLedgerConfiguration.latestConfiguration() should be(None)
-          }
-        }
+      loggerFactory.assertLogs(
+        within = subscriptionBuilder
+          .subscription(configurationLoadTimeout)
+          .use { currentLedgerConfiguration =>
+            currentLedgerConfiguration.ready.isCompleted should be(false)
+            scheduler.timePasses(1.second)
+            currentLedgerConfiguration.ready.isCompleted should be(true)
+            currentLedgerConfiguration.ready.map { _ =>
+              currentLedgerConfiguration.latestConfiguration() should be(None)
+            }
+          },
+        assertions = _.warningMessage should include(
+          s"No ledger configuration found after $configurationLoadTimeout."
+        ),
+      )
     }
 
     "never becomes ready if stopped" in {

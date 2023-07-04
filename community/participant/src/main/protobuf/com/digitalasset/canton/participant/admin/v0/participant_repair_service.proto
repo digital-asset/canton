@@ -37,6 +37,7 @@ message AcsSnapshotChunk {
 
 message UploadRequest {
   bytes acs_snapshot = 1;
+  bool gzip_format = 2;
 }
 
 message UploadResponse {}

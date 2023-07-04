@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.active_contracts_service.ActiveContractsServiceGrpc.ActiveContractsService
 import com.daml.ledger.api.v1.active_contracts_service.*
@@ -28,7 +27,6 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.{
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.ApiOffset
-import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{BindableService, ServerServiceDefinition}
 
@@ -47,12 +45,6 @@ private[apiserver] final class ApiActiveContractsService private (
     with StreamingServiceLifecycleManagement
     with GrpcApiService
     with NamedLogging {
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   override def getActiveContracts(
       request: GetActiveContractsRequest,

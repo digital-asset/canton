@@ -8,7 +8,7 @@ import akka.stream.scaladsl.Source
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.metrics.Metrics
 import com.digitalasset.canton.ledger.offset.Offset
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsReader.CompletionsFilter
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
@@ -77,6 +77,7 @@ object BufferedCommandCompletionsReader {
       delegate: LedgerDaoCommandCompletionsReader,
       inMemoryFanoutBuffer: InMemoryFanoutBuffer,
       metrics: Metrics,
+      loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): BufferedCommandCompletionsReader = {
     val fetchCompletions = new FetchFromPersistence[CompletionsFilter, CompletionStreamResponse] {
       override def apply(
@@ -100,6 +101,7 @@ object BufferedCommandCompletionsReader {
         bufferedStreamEventsProcessingParallelism = 1,
         metrics = metrics,
         streamName = "completions",
+        loggerFactory,
       )
     )
   }

@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import akka.stream.Materializer
 import com.daml.api.util.DurationConversion.*
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.ledger_configuration_service.*
 import com.daml.tracing.Telemetry
@@ -19,7 +18,6 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.IndexConfigurat
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{BindableService, ServerServiceDefinition}
 
@@ -37,12 +35,6 @@ private[apiserver] final class ApiLedgerConfigurationService private (
     with StreamingServiceLifecycleManagement
     with GrpcApiService
     with NamedLogging {
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   def getLedgerConfiguration(
       request: GetLedgerConfigurationRequest,

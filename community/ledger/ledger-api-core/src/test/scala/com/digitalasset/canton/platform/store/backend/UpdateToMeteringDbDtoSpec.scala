@@ -61,6 +61,7 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
       optUsedPackages = None,
       optNodeSeeds = None,
       optByKeyNodes = None,
+      optDomainId = None,
     )
 
     val someTransactionAccepted = state.Update.TransactionAccepted(

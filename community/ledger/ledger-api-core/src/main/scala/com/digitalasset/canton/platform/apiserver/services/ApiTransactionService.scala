@@ -1,17 +1,17 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api.grpc
+package com.digitalasset.canton.platform.apiserver.services
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction_service.*
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
 import com.digitalasset.canton.ledger.api.services.TransactionService
 import com.digitalasset.canton.ledger.api.validation.TransactionServiceRequestValidator.Result
 import com.digitalasset.canton.ledger.api.validation.{
@@ -25,13 +25,12 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerServiceDefinition
 import io.grpc.stub.StreamObserver
 
 import scala.concurrent.{ExecutionContext, Future}
 
-final class GrpcTransactionService(
+final class ApiTransactionService(
     protected val service: TransactionService,
     val ledgerId: LedgerId,
     partyNameChecker: PartyNameChecker,
@@ -45,12 +44,6 @@ final class GrpcTransactionService(
     with StreamingServiceLifecycleManagement
     with GrpcApiService
     with NamedLogging {
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   private val validator =
     new TransactionServiceRequestValidator(ledgerId, partyNameChecker)

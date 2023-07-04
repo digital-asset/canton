@@ -14,7 +14,6 @@ import com.digitalasset.canton.logging.{
   SuppressionRule,
 }
 import com.digitalasset.canton.platform.indexer.RecoveringIndexerSpec.*
-import com.digitalasset.canton.testing.{LoggingAssertions, TestingLogCollector}
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.matchers.should.Matchers
@@ -35,7 +34,6 @@ final class RecoveringIndexerSpec
     with Matchers
     with TestResourceContext
     with BeforeAndAfterEach
-    with LoggingAssertions
     with Eventually
     with IntegrationPatience
     with NamedLogging {
@@ -47,7 +45,6 @@ final class RecoveringIndexerSpec
   override def beforeEach(): Unit = {
     super.beforeEach()
     actorSystem = ActorSystem(getClass.getSimpleName)
-    TestingLogCollector.clear[this.type]
   }
 
   override def afterEach(): Unit = {
@@ -256,35 +253,37 @@ final class RecoveringIndexerSpec
       )
 
       val resource = recoveringIndexer.start(testIndexer())
+      loggerFactory.suppress(RecoveringIndexerSuppressionRule) {
 
-      for {
-        (healthReporter, complete) <- resource.asFuture
-        _ <- complete.transformWith(finallyRelease(resource))
-      } yield {
-        testIndexer.actions shouldBe Seq[IndexerEvent](
-          EventSubscribeCalled("A"),
-          EventSubscribeFail("A"),
-          EventSubscribeCalled("B"),
-          EventSubscribeSuccess("B"),
-          EventStreamFail("B"),
-          EventStopCalled("B"),
-          EventSubscribeCalled("C"),
-          EventSubscribeSuccess("C"),
-          EventStreamComplete("C"),
-          EventStopCalled("C"),
-        )
+        for {
+          (healthReporter, complete) <- resource.asFuture
+          _ <- complete.transformWith(finallyRelease(resource))
+        } yield {
+          testIndexer.actions shouldBe Seq[IndexerEvent](
+            EventSubscribeCalled("A"),
+            EventSubscribeFail("A"),
+            EventSubscribeCalled("B"),
+            EventSubscribeSuccess("B"),
+            EventStreamFail("B"),
+            EventStopCalled("B"),
+            EventSubscribeCalled("C"),
+            EventSubscribeSuccess("C"),
+            EventStreamComplete("C"),
+            EventStopCalled("C"),
+          )
 
-        testIndexer.openSubscriptions shouldBe mutable.Set.empty
+          testIndexer.openSubscriptions shouldBe mutable.Set.empty
 
-        healthStatusLogCapture should contain theSameElementsInOrderAs Seq(
-          Unhealthy,
-          Healthy,
-          Unhealthy,
-          Healthy,
-          Unhealthy,
-        )
-        // When the indexer is shutdown, its status should be unhealthy/not serving
-        healthReporter.currentHealth() shouldBe Unhealthy
+          healthStatusLogCapture should contain theSameElementsInOrderAs Seq(
+            Unhealthy,
+            Healthy,
+            Unhealthy,
+            Healthy,
+            Unhealthy,
+          )
+          // When the indexer is shutdown, its status should be unhealthy/not serving
+          healthReporter.currentHealth() shouldBe Unhealthy
+        }
       }
     }
 

@@ -9,13 +9,17 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose, Signatu
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
+import com.digitalasset.canton.sequencing.SequencerAggregator.{
+  MessageAggregationConfig,
+  SequencerAggregatorError,
+}
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
 
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ArrayBlockingQueue, BlockingQueue}
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
@@ -24,9 +28,14 @@ class SequencerAggregator(
     cryptoPureApi: CryptoPureApi,
     eventInboxSize: PositiveInt,
     val loggerFactory: NamedLoggerFactory,
-    expectedSequencers: NonEmpty[Set[SequencerId]],
-    expectedSequencersSize: PositiveInt,
+    initialConfig: MessageAggregationConfig,
 ) extends NamedLogging {
+
+  private val configRef: AtomicReference[MessageAggregationConfig] =
+    new AtomicReference[MessageAggregationConfig](initialConfig)
+  def expectedSequencers: NonEmpty[Set[SequencerId]] = configRef.get().expectedSequencers
+
+  def sequencerTrustThreshold: PositiveInt = configRef.get().sequencerTrustThreshold
 
   private case class SequencerMessageData(
       eventBySequencer: Map[SequencerId, OrdinarySerializedEvent],
@@ -128,19 +137,36 @@ class SequencerAggregator(
               (message.timestamp, sequencerMessageData)
             ) // returns min message.timestamp
 
-          if (nextData.eventBySequencer.sizeCompare(expectedSequencersSize.unwrap) == 0) {
-            sequenceData.remove(nextMinimumTimestamp): Unit
-            cursor = Some(nextMinimumTimestamp)
-
-            val messages: NonEmpty[List[OrdinarySerializedEvent]] =
-              NonEmptyUtil.fromUnsafe(nextData.eventBySequencer.values.toList)
-            nextData.promise.success(addEventToQueue(messages).map(_ => sequencerId)): Unit
-          }
+          pushDownstreamIfConsensusIsReached(nextMinimumTimestamp, nextData)
 
           sequencerMessageData.promise.future.map(_.map(_ == sequencerId))
         } else
           Future.successful(Right(false))
       }
+    }
+  }
+
+  private def pushDownstreamIfConsensusIsReached(
+      nextMinimumTimestamp: CantonTimestamp,
+      nextData: SequencerMessageData,
+  ): Unit = {
+    val expectedMessages = nextData.eventBySequencer.view.filterKeys { sequencerId =>
+      expectedSequencers.contains(sequencerId)
+    }
+
+    if (expectedMessages.sizeCompare(sequencerTrustThreshold.unwrap) >= 0) {
+      cursor = Some(nextMinimumTimestamp)
+      sequenceData.remove(nextMinimumTimestamp): Unit
+
+      val nonEmptyMessages = NonEmptyUtil.fromUnsafe(expectedMessages.toMap)
+      val messagesToCombine = nonEmptyMessages.map(_._2).toList
+      val (sequencerIdToNotify, _) = nonEmptyMessages.head1
+
+      nextData.promise
+        .success(
+          addEventToQueue(messagesToCombine).map(_ => sequencerIdToNotify)
+        )
+        .discard
     }
   }
 
@@ -156,8 +182,26 @@ class SequencerAggregator(
     data.copy(eventBySequencer = data.eventBySequencer.updated(sequencerId, message))
   }
 
+  def changeMessageAggregationConfig(
+      newConfig: MessageAggregationConfig
+  ): Unit = blocking {
+    this.synchronized {
+      configRef.set(newConfig)
+      sequenceData.headOption.foreach { case (nextMinimumTimestamp, nextData) =>
+        pushDownstreamIfConsensusIsReached(
+          nextMinimumTimestamp,
+          nextData,
+        )
+      }
+    }
+  }
+
 }
 object SequencerAggregator {
+  final case class MessageAggregationConfig(
+      expectedSequencers: NonEmpty[Set[SequencerId]],
+      sequencerTrustThreshold: PositiveInt,
+  )
   sealed trait SequencerAggregatorError extends Product with Serializable with PrettyPrinting
   object SequencerAggregatorError {
     final case class NotTheSameContentHash(hashes: NonEmpty[Set[Hash]])

@@ -7,6 +7,7 @@ import com.daml.ledger.api.benchtool.BenchtoolSandboxFixture
 import com.daml.ledger.api.benchtool.config.WorkflowConfig
 import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.digitalasset.canton.BaseTest
 import org.scalatest.AppendedClues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,7 +17,8 @@ class FibonacciCommandSubmitterITSpec
     with BenchtoolSandboxFixture
     with SuiteResourceManagementAroundAll
     with Matchers
-    with AppendedClues {
+    with AppendedClues
+    with BaseTest {
 
   it should "populate create fibonacci contracts" in {
 
@@ -71,7 +73,7 @@ class FibonacciCommandSubmitterITSpec
     } yield {
       observerResult.numberOfCreatesPerTemplateName(
         "InefficientFibonacci"
-      ) shouldBe config.numberOfInstances withClue ("number of create events")
+      ) shouldBe config.numberOfInstances withClue "number of create events"
       succeed
     }
   }

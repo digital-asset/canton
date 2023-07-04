@@ -20,7 +20,6 @@ import com.digitalasset.canton.lifecycle.{
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
@@ -103,7 +102,6 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     val writerStore = SequencerWriterStore.singleInstance(store)
     val clock = new SimClock(loggerFactory = loggerFactory)
 
-    val domainParameters = DynamicDomainParameters.initialValues(clock, testedProtocolVersion)
     val eventSignaller = new MockEventSignaller
 
     // explicitly pass a real execution context so shutdowns don't deadlock while Await'ing completion of the done

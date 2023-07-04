@@ -437,7 +437,7 @@ abstract class CantonNodeBootstrapX[
   }
 
   override protected def onClosed(): Unit = {
-    Lifecycle.close(initQueue, adminServerRegistry, adminServer, startupStage)(
+    Lifecycle.close(clock, initQueue, adminServerRegistry, adminServer, startupStage)(
       logger
     )
     super.onClosed()

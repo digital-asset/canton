@@ -15,6 +15,7 @@ import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.ports.Port
 import com.daml.testing.utils.{TestModels, TestResourceUtils}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.auth.client.LedgerCallCredentials
 import com.digitalasset.canton.ledger.api.auth.{AuthService, JwtVerifierLoader}
 import com.digitalasset.canton.ledger.api.domain
@@ -42,7 +43,7 @@ import scala.concurrent.duration.*
 import scala.util.Try
 
 trait AbstractSandboxFixture extends AkkaBeforeAndAfterAll {
-  self: Suite =>
+  self: Suite & BaseTest =>
 
   protected def darFile =
     TestResourceUtils.resourceFile(TestModels.com_daml_ledger_test_ModelTestDar_1_15_path)
@@ -63,7 +64,7 @@ trait AbstractSandboxFixture extends AkkaBeforeAndAfterAll {
       esf: ExecutionSequencerFactory,
   ): TimeProvider = {
     Try(TimeServiceGrpc.stub(channel))
-      .map(StaticTime.updatedVia(_, ledgerId().unwrap)(mat, esf))
+      .map(StaticTime.updatedVia(_, ledgerId().unwrap, loggerFactory)(mat, esf))
       .fold[TimeProvider](_ => TimeProvider.UTC, Await.result(_, 30.seconds))
   }
 

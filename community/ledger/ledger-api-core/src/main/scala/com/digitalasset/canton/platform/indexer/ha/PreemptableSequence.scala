@@ -123,7 +123,7 @@ object PreemptableSequence {
             // Failing Future here means we interrupt the Future sequencing.
             // The failure itself is not important, since the returning Handle-s completion-future-s result is overridden in case KillSwitch was used.
             logger.info(s"KillSwitch already used, interrupting sequence!")
-            Future.failed(new Exception("UsedKillSwitch"))
+            Future.failed(new UsedKillSwitch)
 
           case _ =>
             f
@@ -157,6 +157,9 @@ object PreemptableSequence {
                 retry(waitMillisBetweenRetries, maxAmountOfRetries - 1, retryable)(body)
               )
             }
+
+          case Failure(ex: UsedKillSwitch) =>
+            Future.failed(ex)
 
           case Failure(ex) =>
             logger.warn(s"Failure not retryable.", ex)
@@ -214,4 +217,6 @@ object PreemptableSequence {
 
     resultHandle
   }
+
+  class UsedKillSwitch extends Exception("UsedKillSwitch")
 }

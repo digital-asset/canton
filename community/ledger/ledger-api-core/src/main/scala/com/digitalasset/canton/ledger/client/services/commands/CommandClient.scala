@@ -20,9 +20,8 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.Completio
   CompletionFailure,
   CompletionSuccess,
 }
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.google.protobuf.empty.Empty
-import org.slf4j.{Logger, LoggerFactory}
-import scalaz.syntax.tag.*
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
@@ -41,14 +40,14 @@ final class CommandClient(
     ledgerId: LedgerId,
     applicationId: String,
     config: CommandClientConfiguration,
-    logger: Logger = LoggerFactory.getLogger(getClass),
+    loggerFactory: NamedLoggerFactory,
 )(implicit esf: ExecutionSequencerFactory) {
   private val it = new withoutledgerid.CommandClient(
     commandSubmissionService,
     commandCompletionService,
     applicationId,
     config,
-    logger,
+    loggerFactory,
   )
 
   type TrackCommandFlow[Context] =

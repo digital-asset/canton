@@ -10,8 +10,9 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.admin.v0.*
-import com.digitalasset.canton.participant.sync.{CantonSyncService, SyncDomain}
+import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.traffic.TrafficStateController.TrafficControlError
+import com.digitalasset.canton.participant.traffic.TrafficStateController.TrafficControlError.TrafficStateNotFound
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.traffic.MemberTrafficStatus
@@ -38,17 +39,22 @@ class GrpcTrafficControlService(
             .leftMap(ProtoDeserializationFailure.Wrap(_))
         )
       syncDomain <- EitherT
-        .fromEither[Future]
-        .apply[CantonError, SyncDomain](
+        .fromEither[Future](
           service
             .readySyncDomainById(domainId)
             .toRight(TrafficControlError.DomainIdNotFound.Error(domainId))
         )
-      trafficState <- EitherT.liftF[Future, CantonError, Option[MemberTrafficStatus]](
+        .leftWiden[CantonError]
+      trafficStateOpt <- EitherT.liftF[Future, CantonError, Option[MemberTrafficStatus]](
         syncDomain.getTrafficControlState
       )
+      trafficState <- EitherT
+        .fromEither[Future](
+          trafficStateOpt.toRight(TrafficStateNotFound.Error())
+        )
+        .leftWiden[CantonError]
     } yield {
-      TrafficControlStateResponse(trafficState.map(_.toProtoV0))
+      TrafficControlStateResponse(Some(trafficState.toProtoV0))
     }
 
     CantonGrpcUtil.mapErrNew(result)

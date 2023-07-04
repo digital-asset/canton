@@ -4,17 +4,16 @@
 package com.digitalasset.canton.ledger.api.auth
 
 import akka.actor.Scheduler
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.api.v1.transaction_filter.Filters
-import com.daml.logging.LoggingContext
+import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.auth.interceptor.AuthorizationInterceptor
 import com.digitalasset.canton.ledger.api.domain.IdentityProviderId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.localstore.api.UserManagementStore
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TelemetryTracing, TraceContext}
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 import scalapb.lenses.Lens
@@ -35,12 +34,10 @@ final class Authorizer(
     userRightsCheckIntervalInSeconds: Int,
     akkaScheduler: Scheduler,
     jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
+    protected val telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
-)(implicit loggingContext: LoggingContext)
-    extends NamedLogging {
-
-  private implicit val errorLogger: ContextualizedErrorLogger =
-    ErrorLoggingContext(logger, loggingContext.toPropertiesMap, TraceContext.empty)
+) extends NamedLogging
+    with TelemetryTracing {
 
   /** Validates all properties of claims that do not depend on the request,
     * such as expiration time or ledger ID.

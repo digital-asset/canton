@@ -13,7 +13,6 @@ import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerServiceDefinition
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse, HealthGrpc}
 import io.grpc.stub.StreamObserver
@@ -35,12 +34,6 @@ class GrpcHealthService(
     with StreamingServiceLifecycleManagement
     with GrpcApiService
     with NamedLogging {
-
-  // TODO(#13269) remove the contextualizedErrorLogger
-  protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-    errorLoggingContext(
-      TraceContext.empty
-    )
 
   override def bindService(): ServerServiceDefinition =
     HealthGrpc.bindService(this, executionContext)

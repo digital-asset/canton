@@ -21,7 +21,6 @@ import com.digitalasset.canton.ledger.participant.state.index.v2.{
   IndexPackagesService,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
-import com.digitalasset.canton.tracing.TraceContext
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -103,19 +102,17 @@ class StoreBackedCommandExecutorSpec
         loggerFactory,
       )
 
-      LoggingContext.newLoggingContext { implicit context =>
-        instance
-          .execute(commands, submissionSeed, configuration)(
-            LoggingContextWithTrace(TraceContext.empty)
-          )
-          .map { actual =>
-            actual.foreach { actualResult =>
-              actualResult.interpretationTimeNanos should be > 0L
-              actualResult.processedDisclosedContracts shouldBe processedDisclosedContracts
-            }
-            succeed
+      instance
+        .execute(commands, submissionSeed, configuration)(
+          LoggingContextWithTrace(loggerFactory)
+        )
+        .map { actual =>
+          actual.foreach { actualResult =>
+            actualResult.interpretationTimeNanos should be > 0L
+            actualResult.processedDisclosedContracts shouldBe processedDisclosedContracts
           }
-      }
+          succeed
+        }
     }
   }
 }

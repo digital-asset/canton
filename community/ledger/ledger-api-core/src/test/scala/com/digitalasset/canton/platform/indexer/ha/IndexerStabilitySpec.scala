@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.indexer.ha
 
 import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.resources.ResourceContext
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.DbType
@@ -14,10 +13,10 @@ import com.digitalasset.canton.platform.store.backend.{
   ParameterStorageBackend,
   StorageBackendFactory,
 }
+import com.digitalasset.canton.tracing.NoTracing
 import org.scalatest.Assertion
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AsyncFlatSpec
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import java.sql.Connection
@@ -25,13 +24,14 @@ import scala.concurrent.{ExecutionContext, Future}
 
 trait IndexerStabilitySpec
     extends AsyncFlatSpec
-    with Matchers
+    with NoTracing
     with AkkaBeforeAndAfterAll
     with Eventually {
 
   import IndexerStabilitySpec.*
 
   private val loggerFactory = SuppressingLogger(getClass)
+  private val logger = loggerFactory.getTracedLogger(getClass)
 
   // To be overriden by the spec implementation
   def jdbcUrl: String
@@ -40,7 +40,6 @@ trait IndexerStabilitySpec
 
   // The default EC is coming from AsyncTestSuite and is serial, do not use it
   implicit val ec: ExecutionContext = system.dispatcher
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   behavior of "concurrently running indexers"
 
@@ -51,73 +50,79 @@ trait IndexerStabilitySpec
 
     implicit val rc: ResourceContext = ResourceContext(ec)
 
-    info(s"Creating indexers fixture with $indexerCount indexers")
-    IndexerStabilityTestFixture
-      .owner(
-        updatesPerSecond,
-        indexerCount,
-        jdbcUrl,
-        lockIdSeed,
-        materializer,
-      )
-      .use[Unit] { indexers =>
-        val factory =
-          StorageBackendFactory.of(dbType = DbType.jdbcType(jdbcUrl), loggerFactory = loggerFactory)
-        val dataSource = factory.createDataSourceStorageBackend.createDataSource(
-          DataSourceStorageBackend.DataSourceConfig(jdbcUrl),
-          loggerFactory,
+    // suppress "Failure not retryable" warnings
+    loggerFactory.suppressWarnings {
+      logger.info(s"Creating indexers fixture with $indexerCount indexers")
+      new IndexerStabilityTestFixture(loggerFactory)
+        .owner(
+          updatesPerSecond,
+          indexerCount,
+          jdbcUrl,
+          lockIdSeed,
+          materializer,
         )
-        val parameterStorageBackend = factory.createParameterStorageBackend
-        val integrityStorageBackend = factory.createIntegrityStorageBackend
-        val connection = dataSource.getConnection()
+        .use[Unit] { indexers =>
+          val factory =
+            StorageBackendFactory.of(
+              dbType = DbType.jdbcType(jdbcUrl),
+              loggerFactory = loggerFactory,
+            )
+          val dataSource = factory.createDataSourceStorageBackend.createDataSource(
+            DataSourceStorageBackend.DataSourceConfig(jdbcUrl),
+            loggerFactory,
+          )
+          val parameterStorageBackend = factory.createParameterStorageBackend
+          val integrityStorageBackend = factory.createIntegrityStorageBackend
+          val connection = dataSource.getConnection()
 
-        Iterator
-          .iterate(IterationState())(previousState => {
-            // Assert that there is exactly one indexer running
-            val activeIndexer = findActiveIndexer(indexers)
-            info(s"Indexer ${activeIndexer.readService.name} is running")
+          Iterator
+            .iterate(IterationState())(previousState => {
+              // Assert that there is exactly one indexer running
+              val activeIndexer = findActiveIndexer(indexers)
+              logger.info(s"Indexer ${activeIndexer.readService.name} is running")
 
-            // Assert that state updates are being indexed
-            assertLedgerEndHasMoved(parameterStorageBackend, connection)
-            info("Ledger end has moved")
+              // Assert that state updates are being indexed
+              assertLedgerEndHasMoved(parameterStorageBackend, connection)
+              logger.info("Ledger end has moved")
 
-            // At this point, the indexer that was aborted by the previous iteration can be reset,
-            // in order to keep the pool of competing indexers full.
-            previousState.abortedIndexer.foreach(idx => {
-              idx.readService.reset()
-              info(s"ReadService ${idx.readService.name} was reset")
+              // At this point, the indexer that was aborted by the previous iteration can be reset,
+              // in order to keep the pool of competing indexers full.
+              previousState.abortedIndexer.foreach(idx => {
+                idx.readService.reset()
+                logger.info(s"ReadService ${idx.readService.name} was reset")
+              })
+
+              // Abort the indexer by terminating the ReadService stream
+              activeIndexer.readService.abort(simulatedFailure())
+              logger.info(s"ReadService ${activeIndexer.readService.name} was aborted")
+
+              IterationState(Some(activeIndexer))
             })
+            .take(restartIterations + 1)
+            .foreach(_ => ())
 
-            // Abort the indexer by terminating the ReadService stream
-            activeIndexer.readService.abort(simulatedFailure())
-            info(s"ReadService ${activeIndexer.readService.name} was aborted")
+          // Stop all indexers, in order to stop all database operations
+          indexers.indexers.foreach(_.readService.abort(simulatedFailure()))
+          logger.info(s"All ReadServices were aborted")
 
-            IterationState(Some(activeIndexer))
-          })
-          .take(restartIterations + 1)
-          .foreach(_ => ())
+          // Wait until all indexers stop using the database, otherwise the test will
+          // fail while trying to drop the database at the end.
+          // It can take some time until all indexers actually stop indexing after the
+          // state update stream was aborted. It is difficult to observe this event,
+          // as the only externally visible signal is the health status of the indexer,
+          // which is only "unhealthy" while RecoveringIndexer is waiting to restart.
+          // Instead, we just wait a short time.
+          Threading.sleep(1000L)
 
-        // Stop all indexers, in order to stop all database operations
-        indexers.indexers.foreach(_.readService.abort(simulatedFailure()))
-        info(s"All ReadServices were aborted")
+          // Verify the integrity of the index database
+          integrityStorageBackend.verifyIntegrity()(connection)
+          logger.info(s"Integrity of the index database was checked")
 
-        // Wait until all indexers stop using the database, otherwise the test will
-        // fail while trying to drop the database at the end.
-        // It can take some time until all indexers actually stop indexing after the
-        // state update stream was aborted. It is difficult to observe this event,
-        // as the only externally visible signal is the health status of the indexer,
-        // which is only "unhealthy" while RecoveringIndexer is waiting to restart.
-        // Instead, we just wait a short time.
-        Threading.sleep(1000L)
-
-        // Verify the integrity of the index database
-        integrityStorageBackend.verifyIntegrity()(connection)
-        info(s"Integrity of the index database was checked")
-
-        connection.close()
-        Future.successful(())
-      }
-      .map(_ => succeed)
+          connection.close()
+          Future.successful(())
+        }
+        .map(_ => succeed)
+    }
   }
 
   // Finds the first non-aborted indexer that has subscribed to the ReadService stream

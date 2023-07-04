@@ -19,7 +19,7 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors
 @Explanation(
   "Generic submission rejection errors returned by the backing ledger's write service."
 )
-object WriteServiceRejections extends LedgerApiErrors.WriteServiceRejections {
+object WriteServiceRejections extends ErrorGroup()(LedgerApiErrors.errorClass) {
   @Explanation("The submitting party has not been allocated.")
   @Resolution(
     "Check that the party identifier is correct, allocate the submitting party, " +

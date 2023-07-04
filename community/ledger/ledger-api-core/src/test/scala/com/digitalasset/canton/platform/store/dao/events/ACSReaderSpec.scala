@@ -7,24 +7,25 @@ import akka.actor.ActorSystem
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Sink, Source}
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
-  IdPaginationState,
-  streamIdsFromSeekPagination,
-}
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPaginationState
 import com.digitalasset.canton.platform.store.dao.events.EventIdsUtils.*
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll}
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, ExecutionContext, Future}
 
 class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
+
   private val actorSystem = ActorSystem()
   private implicit val materializer: Materializer = Materializer(actorSystem)
   private implicit val ec: ExecutionContext = actorSystem.dispatcher
 
+  private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
+
   override def afterAll(): Unit = {
-    Await.result(actorSystem.terminate(), Duration(10, "seconds"))
+    Await.result(actorSystem.terminate(), 10.seconds)
     ()
   }
 
@@ -46,9 +47,23 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
     realisticConfigForFilterSize(1000) shouldBe IdPageSizing(200, 6553)
     // 200 655 655...
     realisticConfigForFilterSize(10000) shouldBe IdPageSizing(200, 655)
-    realisticConfigForFilterSize(100000) shouldBe IdPageSizing(65, 65)
-    realisticConfigForFilterSize(1000000) shouldBe IdPageSizing(10, 10)
-    realisticConfigForFilterSize(10000000) shouldBe IdPageSizing(10, 10)
+    loggerFactory.assertLogs(
+      within = {
+        realisticConfigForFilterSize(100000) shouldBe IdPageSizing(65, 65)
+        realisticConfigForFilterSize(1000000) shouldBe IdPageSizing(10, 10)
+        realisticConfigForFilterSize(10000000) shouldBe IdPageSizing(10, 10)
+      },
+      assertions = _.warningMessage should include(
+        "Calculated maximum ID page size supporting API stream memory limits [65] is very low"
+      ),
+      _.warningMessage should include(
+        "Calculated maximum ID page size supporting API stream memory limits [6] is too low"
+      ),
+      _.warningMessage should include(
+        "Calculated maximum ID page size supporting API stream memory limits [0] is too low"
+      ),
+    )
+
   }
 
   it should "compute correct parameters, if maxIdPageSize is lower than recommended (200), then maxIdPageSize is preferred" in {
@@ -64,9 +79,22 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
     configWith(100) shouldBe IdPageSizing(150, 150)
     configWith(1000) shouldBe IdPageSizing(150, 150)
     configWith(10000) shouldBe IdPageSizing(150, 150)
-    configWith(100000) shouldBe IdPageSizing(65, 65)
-    configWith(1000000) shouldBe IdPageSizing(10, 10)
-    configWith(10000000) shouldBe IdPageSizing(10, 10)
+    loggerFactory.assertLogs(
+      within = {
+        configWith(100000) shouldBe IdPageSizing(65, 65)
+        configWith(1000000) shouldBe IdPageSizing(10, 10)
+        configWith(10000000) shouldBe IdPageSizing(10, 10)
+      },
+      assertions = _.warningMessage should include(
+        "Calculated maximum ID page size supporting API stream memory limits [65] is very low"
+      ),
+      _.warningMessage should include(
+        "Calculated maximum ID page size supporting API stream memory limits [6] is too low"
+      ),
+      _.warningMessage should include(
+        "Calculated maximum ID page size supporting API stream memory limits [0] is too low"
+      ),
+    )
   }
 
   it should "compute correct parameters, if maxIdPageSize is lower than minimum (10), then maxIdPageSize is preferred" in {
@@ -84,7 +112,12 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
     configWith(10000) shouldBe IdPageSizing(4, 4)
     configWith(100000) shouldBe IdPageSizing(4, 4)
     configWith(1000000) shouldBe IdPageSizing(4, 4)
-    configWith(10000000) shouldBe IdPageSizing(4, 4)
+    loggerFactory.assertLogs(
+      configWith(10000000) shouldBe IdPageSizing(4, 4),
+      _.warningMessage should include(
+        "Calculated maximum ID page size supporting API stream memory limits [0] is too low"
+      ),
+    )
   }
 
   behavior of "idSource"
@@ -269,17 +302,20 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       ids: Vector[Long],
   ): Future[Vector[IdPaginationState]] = {
     val queries = Vector.newBuilder[IdPaginationState]
-    streamIdsFromSeekPagination(idQueryConfiguration, 1, 0L) { idQuery =>
-      queries.addOne(idQuery)
-      Future.successful(
-        ids
-          .dropWhile(_ <= idQuery.fromIdExclusive)
-          .take(idQuery.pageSize)
-      )
-    }.runWith(Sink.seq[Long]).map { result =>
-      result shouldBe ids
-      queries.result()
-    }
+    paginatingAsyncStream
+      .streamIdsFromSeekPagination(idQueryConfiguration, 1, 0L) { idQuery =>
+        queries.addOne(idQuery)
+        Future.successful(
+          ids
+            .dropWhile(_ <= idQuery.fromIdExclusive)
+            .take(idQuery.pageSize)
+        )
+      }
+      .runWith(Sink.seq[Long])
+      .map { result =>
+        result shouldBe ids
+        queries.result()
+      }
   }
 
 }

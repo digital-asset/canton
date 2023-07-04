@@ -56,6 +56,7 @@ class BridgeWriteServiceTest extends AnyFlatSpec with MockitoSugar with Matchers
     optUsedPackages = None,
     optNodeSeeds = None,
     optByKeyNodes = None,
+    optDomainId = None,
   )
 
   private val submission = Submission.Transaction(

@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
 import cats.implicits.catsSyntaxOptionId
+import cats.syntax.either.*
 import com.daml.metrics.Timed
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
@@ -27,6 +28,7 @@ import com.digitalasset.canton.protocol.DomainParametersLookup
 import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
+import com.digitalasset.canton.sequencing.SequencerAggregator.MessageAggregationConfig
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SendCallback.CallbackFuture
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
@@ -215,8 +217,10 @@ class SequencerClientImpl(
       cryptoPureApi,
       config.eventInboxSize,
       loggerFactory,
-      sequencerTransports.expectedSequencers,
-      PositiveInt.tryCreate(sequencerTransports.expectedSequencers.size),
+      MessageAggregationConfig(
+        sequencerTransports.expectedSequencers,
+        sequencerTransports.sequencerTrustThreshold,
+      ),
     )
 
   private val sequencersTransportState =
@@ -388,6 +392,26 @@ class SequencerClientImpl(
         callback,
       )
 
+  private def checkRequestSize(
+      request: SubmissionRequest,
+      maxRequestSize: MaxRequestSize,
+  ): Either[SendAsyncClientError, Unit] = {
+    // We're ignoring the size of the SignedContent wrapper here.
+    // TODO(#12320) Look into what we really want to do here
+    val serializedRequestSize =
+      if (SubmissionRequest.usingVersionedSubmissionRequest(protocolVersion))
+        request.toProtoV0.serializedSize
+      else request.toByteString.size()
+
+    Either.cond(
+      serializedRequestSize <= maxRequestSize.unwrap,
+      (),
+      SendAsyncClientError.RequestInvalid(
+        s"Batch size ($serializedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for domain $domainId"
+      ),
+    )
+  }
+
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],
       requiresAuthentication: Boolean,
@@ -399,41 +423,36 @@ class SequencerClientImpl(
       callback: SendCallback,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
     withSpan("SequencerClient.sendAsync") { implicit traceContext => span =>
-      val request = SubmissionRequest.tryCreate(
-        member,
-        messageId,
-        sendType.isRequest,
-        Batch.closeEnvelopes(batch),
-        maxSequencingTime,
-        timestampOfSigningKey,
-        aggregationRule,
-        protocolVersion,
-      )
+      val requestE = SubmissionRequest
+        .create(
+          member,
+          messageId,
+          sendType.isRequest,
+          Batch.closeEnvelopes(batch),
+          maxSequencingTime,
+          timestampOfSigningKey,
+          aggregationRule,
+          SubmissionRequest.protocolVersionRepresentativeFor(protocolVersion),
+        )
+        .leftMap(err =>
+          SendAsyncClientError.RequestInvalid(s"Unable to get submission request: $err")
+        )
 
       if (loggingConfig.eventDetails) {
-        logger.debug(
-          s"About to send async batch ${printer.printAdHoc(batch)} as request ${printer.printAdHoc(request)}"
-        )
+        requestE match {
+          case Left(err) =>
+            logger.debug(
+              s"Will not send async batch ${printer.printAdHoc(batch)} because of invalid request: $err"
+            )
+          case Right(request) =>
+            logger.debug(
+              s"About to send async batch ${printer.printAdHoc(batch)} as request ${printer.printAdHoc(request)}"
+            )
+        }
       }
 
       span.setAttribute("member", member.show)
       span.setAttribute("message_id", messageId.unwrap)
-
-      // We're ignoring the size of the SignedContent wrapper here.
-      // TODO(#12320) Look into what we really want to do here
-      val serializedRequestSize =
-        if (SubmissionRequest.usingVersionedSubmissionRequest(protocolVersion))
-          request.toProtoV0.serializedSize
-        else request.toByteString.size()
-
-      def checkRequestSize(maxRequestSize: MaxRequestSize): Either[SendAsyncClientError, Unit] =
-        Either.cond(
-          serializedRequestSize <= maxRequestSize.unwrap,
-          (),
-          SendAsyncClientError.RequestInvalid(
-            s"Batch size ($serializedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for domain $domainId"
-          ),
-        )
 
       // avoid emitting a warning during the first sequencing of the topology snapshot
       val warnOnUsingDefaults = member match {
@@ -458,8 +477,9 @@ class SequencerClientImpl(
 
       if (replayEnabled) {
         for {
+          request <- EitherT.fromEither[Future](requestE)
           domainParams <- domainParamsF
-          _ <- EitherT.fromEither[Future](checkRequestSize(domainParams.maxRequestSize))
+          _ <- EitherT.fromEither[Future](checkRequestSize(request, domainParams.maxRequestSize))
         } yield {
           // Invoke the callback immediately, because it will not be triggered by replayed messages,
           // as they will very likely have mismatching message ids.
@@ -478,8 +498,9 @@ class SequencerClientImpl(
         }
       } else {
         for {
+          request <- EitherT.fromEither[Future](requestE)
           domainParams <- domainParamsF
-          _ <- EitherT.fromEither[Future](checkRequestSize(domainParams.maxRequestSize))
+          _ <- EitherT.fromEither[Future](checkRequestSize(request, domainParams.maxRequestSize))
           _ <- trackSend
           _ = recorderO.foreach(_.recordSubmission(request))
           _ <- performSend(messageId, request, requiresAuthentication)
@@ -700,17 +721,19 @@ class SequencerClientImpl(
             .valueOr(err => throw SequencerClientSubscriptionException(err))
         )
       } yield {
-        sequencerTransports.sequencerIdToTransportMap.foreach { case (sequencerId, _) =>
-          createSubscription(
-            sequencerId,
-            replayEvents,
-            initialPriorEventO,
-            requiresAuthentication,
-            timeTracker,
-            eventHandler,
-            timeoutHandler,
-          ).discard
-        }
+        sequencerTransports.sequencerIdToTransportMap
+          .take(sequencerTransports.sequencerTrustThreshold.unwrap)
+          .foreach { case (sequencerId, _) =>
+            createSubscription(
+              sequencerId,
+              replayEvents,
+              initialPriorEventO,
+              requiresAuthentication,
+              timeTracker,
+              eventHandler,
+              timeoutHandler,
+            ).discard
+          }
 
         // periodically acknowledge that we've successfully processed up to the clean counter
         // We only need to it setup once; the sequencer client will direct the acknowledgements to the
@@ -1112,17 +1135,23 @@ class SequencerClientImpl(
 
   def changeTransport(
       sequencerTransports: SequencerTransports
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    sequencerAggregator.changeMessageAggregationConfig(
+      MessageAggregationConfig(
+        sequencerTransports.expectedSequencers,
+        sequencerTransports.sequencerTrustThreshold,
+      )
+    )
     sequencersTransportState.changeTransport(sequencerTransports)
+  }
 
   /** Future which is completed when the client is not functional any more and is ready to be closed.
     * The value with which the future is completed will indicate the reason for completion.
     */
   def completion: Future[SequencerClient.CloseReason] = sequencersTransportState.completion
 
-  def closeAllSubscriptions(): Unit = {
+  def waitForHandlerToComplete(): Unit = {
     import TraceContext.Implicits.Empty.*
-    sequencersTransportState.closeAllSubscriptions()
     logger.trace(s"Wait for the handler to become idle")
     // This logs a warn if the handle does not become idle within 60 seconds.
     // This happen because the handler is not making progress, for example due to a db outage.
@@ -1145,7 +1174,8 @@ class SequencerClientImpl(
         "sequencer-client-periodic-ack",
         toCloseableOption(periodicAcknowledgementsRef.get()).close(),
       ),
-      SyncCloseable("sequencer-client-subscription", closeAllSubscriptions()),
+      SyncCloseable("sequencer-client-subscription", sequencersTransportState.close()),
+      SyncCloseable("handler-becomes-idle", waitForHandlerToComplete()),
       SyncCloseable("sequencer-client-recorder", recorderO.foreach(_.close())),
       SyncCloseable("sequenced-event-store", sequencedEventStore.close()),
       SyncCloseable("deferred-subscription-health", deferredSubscriptionHealth.close()),
@@ -1169,7 +1199,8 @@ object SequencerClient {
   )
 
   final case class SequencerTransports(
-      sequencerToTransportMap: NonEmpty[Map[SequencerAlias, SequencerTransportContainer]]
+      sequencerToTransportMap: NonEmpty[Map[SequencerAlias, SequencerTransportContainer]],
+      sequencerTrustThreshold: PositiveInt,
   ) {
     def expectedSequencers: NonEmpty[Set[SequencerId]] =
       sequencerToTransportMap.map(_._2.sequencerId).toSet
@@ -1188,14 +1219,21 @@ object SequencerClient {
     def from(
         sequencerTransportsMap: NonEmpty[Map[SequencerAlias, SequencerClientTransport]],
         expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
+        sequencerSignatureThreshold: PositiveInt,
     ): Either[String, SequencerTransports] =
       if (sequencerTransportsMap.keySet != expectedSequencers.keySet) {
         Left("Inconsistent map of sequencer transports and their ids.")
       } else
-        Right(SequencerTransports(sequencerTransportsMap.map { case (sequencerAlias, transport) =>
-          val sequencerId = expectedSequencers(sequencerAlias)
-          sequencerAlias -> SequencerTransportContainer(sequencerId, transport)
-        }.toMap))
+        Right(
+          SequencerTransports(
+            sequencerToTransportMap =
+              sequencerTransportsMap.map { case (sequencerAlias, transport) =>
+                val sequencerId = expectedSequencers(sequencerAlias)
+                sequencerAlias -> SequencerTransportContainer(sequencerId, transport)
+              }.toMap,
+            sequencerTrustThreshold = sequencerSignatureThreshold,
+          )
+        )
 
     def single(
         sequencerAlias: SequencerAlias,
@@ -1208,7 +1246,8 @@ object SequencerClient {
             Seq,
             sequencerAlias -> SequencerTransportContainer(sequencerId, transport),
           )
-          .toMap
+          .toMap,
+        PositiveInt.tryCreate(1),
       )
 
     def default(

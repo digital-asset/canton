@@ -63,7 +63,7 @@ object MemoryCheck {
           // say 'The maximum amount of memory may change over time'.  If we detect this situation we
           // recalculate and reset the threshold
           logger.warn(
-            s"Detected change in max pool memory, updating collection usage threshold  from ${p.getCollectionUsageThreshold} to $expectedThreshold"
+            s"Detected change in max pool memory, updating collection usage threshold from ${p.getCollectionUsageThreshold} to $expectedThreshold"
           )
           p.setCollectionUsageThreshold(expectedThreshold)
           UnderLimit

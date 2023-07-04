@@ -14,12 +14,11 @@ import com.daml.ledger.resources.{ResourceOwner, TestResourceContext}
 import com.daml.platform.hello.HelloServiceGrpc.HelloService
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import com.daml.platform.testing.StreamConsumer
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.testing.TestingLogCollector
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.*
 import io.grpc.stub.StreamObserver
 import org.scalatest.*
@@ -30,7 +29,6 @@ import scala.concurrent.Future
 
 final class ErrorInterceptorSpec
     extends AsyncFreeSpec
-    with BeforeAndAfter
     with AkkaBeforeAndAfterAll
     with OptionValues
     with Eventually
@@ -38,16 +36,13 @@ final class ErrorInterceptorSpec
     with TestResourceContext
     with Checkpoints
     with ErrorsAssertions
-    with BaseTest {
+    with BaseTest
+    with HasExecutionContext {
 
   import ErrorInterceptorSpec.*
 
   private val bypassMsg: String =
     "(should still intercept the error to bypass default gRPC error handling)"
-
-  before {
-    TestingLogCollector.clear[this.type]
-  }
 
   classOf[ErrorInterceptor].getSimpleName - {
 
@@ -135,16 +130,23 @@ final class ErrorInterceptorSpec
 
       "when signalling with a non-self-service error should SANITIZE the server response when arising" - {
         "inside a Stream" in {
-          exerciseStreamingAkkaEndpoint(
-            new HelloServiceFailing(
-              useSelfService = false,
-              errorInsideFutureOrStream = true,
-              loggerFactory = loggerFactory,
-            )
+          loggerFactory.assertLogs(
+            within = {
+              exerciseStreamingAkkaEndpoint(
+                new HelloServiceFailing(
+                  useSelfService = false,
+                  errorInsideFutureOrStream = true,
+                  loggerFactory = loggerFactory,
+                )
+              )
+                .map { t: StatusRuntimeException =>
+                  assertSecuritySanitizedError(t)
+                }
+            },
+            assertions = _.errorMessage should include(
+              "SERVICE_INTERNAL_ERROR(4,0): Unexpected or unknown exception occurred."
+            ),
           )
-            .map { t: StatusRuntimeException =>
-              assertSecuritySanitizedError(t)
-            }
         }
 
         s"outside a Stream $bypassMsg" in {
@@ -299,65 +301,33 @@ final class ErrorInterceptorSpec
     Assertions.succeed
   }
 
-}
-
-object ErrorInterceptorSpec {
-
-  def server(tested: ErrorInterceptor, service: BindableService): ResourceOwner[Channel] = {
-    TestingServerInterceptors.channelOwner(tested, service)
-  }
-
-  object FooMissingErrorCode
-      extends ErrorCode(
-        id = "FOO_MISSING_ERROR_CODE",
-        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
-      )(ErrorClass.root()) {
-
-    final case class Error(msg: String)(implicit
-        val loggingContext: ContextualizedErrorLogger
-    ) extends DamlError(
-          cause = s"Foo is missing: ${msg}"
-        )
-
-  }
-
   trait HelloServiceBase extends BindableService {
     self: HelloService =>
 
-    // TODO(#13019) Avoid the global execution context
-    @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     override def bindService(): ServerServiceDefinition =
-      HelloServiceGrpc.bindService(this, scala.concurrent.ExecutionContext.Implicits.global)
+      HelloServiceGrpc.bindService(this, parallelExecutionContext)
 
     override def fails(request: HelloRequest): Future[HelloResponse] = ??? // not used in this test
   }
 
-  /** @param useSelfService - whether to use self service error codes or "rogue" exceptions
+  /** @param useSelfService            - whether to use self service error codes or "rogue" exceptions
     * @param errorInsideFutureOrStream - whether to signal the exception inside a Future or a Stream, or outside to them
     */
   class HelloServiceFailing(
       useSelfService: Boolean,
       errorInsideFutureOrStream: Boolean,
       val loggerFactory: NamedLoggerFactory,
-  )(implicit
-      esf: ExecutionSequencerFactory,
-      mat: Materializer,
   ) extends HelloService
       with StreamingServiceLifecycleManagement
       with HelloServiceResponding
       with HelloServiceBase
       with NamedLogging {
 
-    override protected val contextualizedErrorLogger: ContextualizedErrorLogger =
-      errorLoggingContext(
-        TraceContext.empty
-      )
-
     override def serverStreaming(
         request: HelloRequest,
         responseObserver: StreamObserver[HelloResponse],
     ): Unit = registerStream(responseObserver) {
-      implicit val traceContext = TraceContext.empty
+      implicit val traceContext: TraceContext = TraceContext.empty
       val where = if (errorInsideFutureOrStream) "inside" else "outside"
       val t: Throwable = if (useSelfService) {
         FooMissingErrorCode
@@ -376,7 +346,7 @@ object ErrorInterceptorSpec {
     }
 
     override def single(request: HelloRequest): Future[HelloResponse] = {
-      implicit val traceContext = TraceContext.empty
+      implicit val traceContext: TraceContext = TraceContext.empty
       val where = if (errorInsideFutureOrStream) "inside" else "outside"
       val t: Throwable = if (useSelfService) {
         FooMissingErrorCode
@@ -412,5 +382,25 @@ object ErrorInterceptorSpec {
     override def single(request: HelloRequest): Future[HelloResponse] =
       Assertions.fail("This class is not intended to test unary endpoints")
   }
+}
 
+object ErrorInterceptorSpec {
+
+  def server(tested: ErrorInterceptor, service: BindableService): ResourceOwner[Channel] = {
+    TestingServerInterceptors.channelOwner(tested, service)
+  }
+
+  object FooMissingErrorCode
+      extends ErrorCode(
+        id = "FOO_MISSING_ERROR_CODE",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+      )(ErrorClass.root()) {
+
+    final case class Error(msg: String)(implicit
+        val loggingContext: ContextualizedErrorLogger
+    ) extends DamlError(
+          cause = s"Foo is missing: $msg"
+        )
+
+  }
 }

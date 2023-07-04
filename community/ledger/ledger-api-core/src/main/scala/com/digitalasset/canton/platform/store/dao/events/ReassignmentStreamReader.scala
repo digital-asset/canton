@@ -56,6 +56,8 @@ class ReassignmentStreamReader(
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
 
+  private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
+
   private val dbMetrics = metrics.daml.index.db
 
   def streamReassignments(reassignmentStreamQueryParams: ReassignmentStreamQueryParams)(implicit
@@ -79,7 +81,7 @@ class ReassignmentStreamReader(
     ): Source[ArrayBuffer[Long], NotUsed] = {
       decomposedFilters
         .map { filter =>
-          PaginatingAsyncStream.streamIdsFromSeekPagination(
+          paginatingAsyncStream.streamIdsFromSeekPagination(
             idPageSizing = idPageSizing,
             idPageBufferSize = maxPagesPerIdPagesBuffer,
             initialFromIdExclusive = queryRange.startExclusiveEventSeqId,

@@ -8,6 +8,7 @@ import com.daml.ledger.api.testing.utils.AkkaBeforeAndAfterAll
 import com.daml.ledger.api.v1.commands.Commands
 import com.daml.tracing.TelemetryContext
 import com.daml.util.Ctx
+import com.digitalasset.canton.BaseTest
 import com.google.protobuf.empty.Empty
 import org.mockito.captor.ArgCaptor
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
@@ -21,7 +22,8 @@ class CommandSubmissionFlowTest
     with MockitoSugar
     with ArgumentMatchersSugar
     with Matchers
-    with AkkaBeforeAndAfterAll {
+    with AkkaBeforeAndAfterAll
+    with BaseTest {
 
   "apply" should {
     "propagate trace context" in {
@@ -32,7 +34,7 @@ class CommandSubmissionFlowTest
 
       Source
         .single(Ctx((), CommandSubmission(Commands.defaultInstance), mockTelemetryContext))
-        .via(CommandSubmissionFlow(_ => Future.successful(Empty.defaultInstance), 1))
+        .via(CommandSubmissionFlow(_ => Future.successful(Empty.defaultInstance), 1, loggerFactory))
         .runWith(Sink.head)
         .map { ctx =>
           verify(mockTelemetryContext).runInOpenTelemetryScope(any[Future[_]])

@@ -12,7 +12,9 @@ import com.daml.grpc.adapter.client.akka.ClientAdapter
 import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc.{TimeService, TimeServiceStub}
 import com.daml.ledger.api.v1.testing.time_service.{GetTimeRequest, SetTimeRequest}
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.client.LedgerClient
+import com.digitalasset.canton.logging.NamedLoggerFactory
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
@@ -28,7 +30,7 @@ class StaticTime(
 
   def getCurrentTime: Instant = clock.get
 
-  def timeRequest(instant: Instant) =
+  def timeRequest(instant: Instant): SetTimeRequest =
     SetTimeRequest(
       ledgerId,
       Some(TimestampConversion.fromInstant(getCurrentTime)),
@@ -45,6 +47,7 @@ class StaticTime(
 }
 
 object StaticTime {
+
   def advanceClock(clock: AtomicReference[Instant], instant: Instant): Instant = {
     clock.updateAndGet {
       case current if instant isAfter current => instant
@@ -52,16 +55,18 @@ object StaticTime {
     }
   }
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def updatedVia(
       timeService: TimeServiceStub,
       ledgerId: String,
+      loggerFactory: NamedLoggerFactory,
       token: Option[String] = None,
   )(implicit m: Materializer, esf: ExecutionSequencerFactory): Future[StaticTime] = {
     val clockRef = new AtomicReference[Instant](Instant.EPOCH)
     val killSwitchExternal = KillSwitches.single[Instant]
     val sinkExternal = Sink.head[Instant]
+
+    val logger = loggerFactory.getTracedLogger(getClass)
+    val directEc = DirectExecutionContext(logger)
 
     RunnableGraph
       .fromGraph {
@@ -70,7 +75,7 @@ object StaticTime {
             // We serve this in a future which completes when the first element has passed through.
             // Thus we make sure that the object we serve already received time data from the ledger.
             futureOfFirstElem.map(_ => new StaticTime(timeService, clockRef, killSwitch, ledgerId))(
-              ExecutionContext.parasitic
+              directEc
             )
         } { implicit b => (killSwitch, sinkHead) =>
           import GraphDSL.Implicits.*

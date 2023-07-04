@@ -1,10 +1,10 @@
 // Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api.grpc
+package com.digitalasset.canton.platform.apiserver.services
 
 import com.daml.error.ContextualizedErrorLogger
-import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc.CommandSubmissionService as ApiCommandSubmissionService
+import com.daml.ledger.api.v1.command_submission_service.CommandSubmissionServiceGrpc.CommandSubmissionService as GrpcCommandSubmissionService
 import com.daml.ledger.api.v1.command_submission_service.{
   CommandSubmissionServiceGrpc,
   SubmitRequest as ApiSubmitRequest,
@@ -12,6 +12,7 @@ import com.daml.ledger.api.v1.command_submission_service.{
 import com.daml.metrics.{Metrics, Timed}
 import com.daml.tracing.{SpanAttribute, Telemetry, TelemetryContext}
 import com.digitalasset.canton.ledger.api.domain.LedgerId
+import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, SubmitRequestValidator}
 import com.digitalasset.canton.ledger.api.{ProxyCloseable, SubmissionIdGenerator, ValidationLogger}
@@ -27,7 +28,7 @@ import io.grpc.ServerServiceDefinition
 import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
 
-class GrpcCommandSubmissionService(
+class ApiCommandSubmissionService(
     override protected val service: CommandSubmissionService with AutoCloseable,
     ledgerId: LedgerId,
     currentLedgerTime: () => Instant,
@@ -39,7 +40,7 @@ class GrpcCommandSubmissionService(
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends ApiCommandSubmissionService
+    extends GrpcCommandSubmissionService
     with ProxyCloseable
     with GrpcApiService
     with NamedLogging {

@@ -679,30 +679,3 @@ object TestingIdentityFactory {
   def pureCrypto(): CryptoPureApi = new SymbolicPureCrypto
 
 }
-
-object DefaultTestIdentities {
-
-  private def createParticipantAndParty(counter: Int): (ParticipantId, PartyId) = {
-    val namespace = Namespace(Fingerprint.tryCreate(s"participant$counter-identity"))
-    val id = ParticipantId(Identifier.tryCreate(s"participant$counter"), namespace)
-    val party = PartyId(UniqueIdentifier(Identifier.tryCreate(s"party$counter"), namespace))
-    (id, party)
-  }
-
-  val namespace = Namespace(Fingerprint.tryCreate("default"))
-  val uid = UniqueIdentifier(Identifier.tryCreate("da"), namespace)
-  val domainId = DomainId(uid)
-  val domainManager = DomainTopologyManagerId(uid)
-  val sequencerId = SequencerId(uid)
-  val mediator = MediatorId(uid)
-
-  val (participant1, party1) = createParticipantAndParty(1)
-  val (participant2, party2) = createParticipantAndParty(2)
-  val (participant3, party3) = createParticipantAndParty(3)
-
-  val defaultDynamicDomainParameters =
-    DynamicDomainParameters.initialValues(
-      NonNegativeFiniteDuration.Zero,
-      BaseTest.testedProtocolVersion,
-    )
-}

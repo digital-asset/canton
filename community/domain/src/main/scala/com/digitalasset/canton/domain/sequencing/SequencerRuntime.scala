@@ -9,7 +9,7 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
+import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.admin.v0.{
   SequencerAdministrationServiceGrpc,
   SequencerVersionServiceGrpc,
@@ -33,7 +33,6 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
@@ -50,7 +49,6 @@ import com.digitalasset.canton.topology.store.TopologyStateForInitializationServ
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
-import io.opentelemetry.api.trace.Tracer
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -74,14 +72,14 @@ object SequencerAuthenticationConfig {
   * @param staticDomainParameters The set of members to register on startup statically.
   */
 class SequencerRuntime(
-    sequencerFactory: SequencerFactory,
     sequencerId: SequencerId,
+    val sequencer: Sequencer,
     staticDomainParameters: StaticDomainParameters,
     localNodeParameters: CantonNodeWithSequencerParameters,
     publicServerConfig: PublicServerConfig,
     val metrics: SequencerMetrics,
     val domainId: DomainId,
-    crypto: Crypto,
+    protected val syncCrypto: DomainSyncCryptoClient,
     topologyClient: DomainTopologyClientWithInit,
     storage: Storage,
     clock: Clock,
@@ -93,11 +91,9 @@ class SequencerRuntime(
     agreementManager: Option[ServiceAgreementManager],
     memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
     topologyStateForInitializationService: Option[TopologyStateForInitializationService],
-    rateLimitManager: Option[SequencerRateLimitManager],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext,
-    tracer: Tracer,
     actorSystem: ActorSystem,
 ) extends FlagCloseable
     with HasCloseContext
@@ -106,30 +102,6 @@ class SequencerRuntime(
   override protected def timeouts: ProcessingTimeout = localNodeParameters.processingTimeouts
 
   protected val isTopologyInitializedPromise = Promise[Unit]()
-  protected val syncCrypto =
-    new DomainSyncCryptoClient(
-      sequencerId,
-      domainId,
-      topologyClient,
-      crypto,
-      localNodeParameters.cachingConfigs,
-      timeouts,
-      futureSupervisor,
-      loggerFactory,
-    )
-
-  val sequencer: Sequencer = {
-    import TraceContext.Implicits.Empty.*
-    sequencerFactory
-      .create(
-        domainId,
-        sequencerId,
-        clock,
-        syncCrypto,
-        futureSupervisor,
-        rateLimitManager,
-      )
-  }
 
   def initialize(
       topologyInitIsCompleted: Boolean = true

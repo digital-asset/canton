@@ -1123,6 +1123,8 @@ final case class MediatorDomainStateX private (
     observers: Seq[MediatorId],
 ) extends TopologyMappingX {
 
+  lazy val allMediatorsInGroup = active ++ observers
+
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder.add(domain.uid.toProtoPrimitive).add(group.unwrap)
 
@@ -1265,6 +1267,8 @@ final case class SequencerDomainStateX private (
     active: NonEmpty[Seq[SequencerId]],
     observers: Seq[SequencerId],
 ) extends TopologyMappingX {
+
+  lazy val allSequencers = active ++ observers
 
   override protected def addUniqueKeyToBuilder(builder: HashBuilder): HashBuilder =
     builder.add(domain.uid.toProtoPrimitive)

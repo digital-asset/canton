@@ -104,7 +104,7 @@ class CommunityConsoleEnvironment(
     }
 
   override protected def createDomainReference(name: String): DomainLocalRef =
-    new CommunityLocalDomainReference(this, name)
+    new CommunityLocalDomainReference(this, name, environment.executionContext)
 
   override protected def createRemoteDomainReference(name: String): DomainRemoteRef =
     new CommunityRemoteDomainReference(this, name)

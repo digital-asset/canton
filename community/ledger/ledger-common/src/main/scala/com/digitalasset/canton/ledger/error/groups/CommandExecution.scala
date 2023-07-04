@@ -25,7 +25,7 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors
 @Explanation(
   "Errors raised during the command execution phase of the command submission evaluation."
 )
-object CommandExecution extends LedgerApiErrors.CommandExecutionErrorGroup {
+object CommandExecution extends ErrorGroup()(LedgerApiErrors.errorClass) {
   @Explanation(
     """This error occurs if the participant fails to determine the max ledger time of the used
       |contracts. Most likely, this means that one of the contracts is not active anymore which can

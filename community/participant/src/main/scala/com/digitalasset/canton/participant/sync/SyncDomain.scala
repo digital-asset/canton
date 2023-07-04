@@ -290,6 +290,7 @@ class SyncDomain(
   private val messageDispatcher: MessageDispatcher =
     messageDispatcherFactory.create(
       staticDomainParameters.protocolVersion,
+      staticDomainParameters.uniqueContractKeys,
       domainId,
       participantId,
       ephemeral.requestTracker,
@@ -642,7 +643,7 @@ class SyncDomain(
       ephemeral.markAsRecovered()
       logger.debug("Sync domain is ready.")(initializationTraceContext)
       FutureUtil.doNotAwait(
-        completeTxIn.unwrap,
+        completeTransferIn.unwrap,
         "Failed to complete outstanding transfer-ins on startup. " +
           "You may have to complete the transfer-ins manually.",
       )
@@ -650,7 +651,7 @@ class SyncDomain(
     }).value
   }
 
-  def completeTxIn(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
+  def completeTransferIn(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
 
     val fetchLimit = 1000
 

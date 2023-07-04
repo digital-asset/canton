@@ -113,6 +113,7 @@ final case class DomainConnectionConfig(
       initialRetryDelay = initialRetryDelay.map(_.toProtoPrimitive),
       maxRetryDelay = maxRetryDelay.map(_.toProtoPrimitive),
       timeTracker = timeTracker.toProtoV0.some,
+      sequencerTrustThreshold = sequencerConnections.sequencerTrustThreshold.unwrap,
     )
 }
 
@@ -165,14 +166,16 @@ object DomainConnectionConfig
       initialRetryDelayP,
       maxRetryDelayP,
       timeTrackerP,
+      sequencerTrustThreshold,
     ) =
       domainConnectionConfigP
     for {
       alias <- DomainAlias
         .create(domainAlias)
         .leftMap(err => InvariantViolation(s"DomainConnectionConfig.DomainAlias: $err"))
-      sequencerConnections <- SequencerConnections.fromProtoV0(
-        sequencerConnectionP
+      sequencerConnections <- SequencerConnections.fromLegacyProtoV0(
+        sequencerConnectionP,
+        sequencerTrustThreshold,
       )
       domainId <- OptionUtil
         .emptyStringAsNone(domainId)

@@ -9,12 +9,13 @@ import com.daml.error.{
   DamlErrorWithDefiniteAnswer,
   ErrorCategory,
   ErrorCode,
+  ErrorGroup,
   ErrorResource,
   Explanation,
   Resolution,
 }
 
-object UserManagementServiceErrorGroup extends AdminServices.UserManagementServiceErrorGroup {
+object UserManagementServiceErrorGroup extends ErrorGroup()(AdminServices.errorClass) {
 
   @Explanation("There was an attempt to update a user using an invalid update request.")
   @Resolution(

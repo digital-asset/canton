@@ -11,6 +11,7 @@ import com.daml.ledger.api.benchtool.{BenchtoolSandboxFixture, PruningBenchmark}
 import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.client.binding
+import com.digitalasset.canton.BaseTest
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
@@ -26,7 +27,8 @@ class PruningITSpec
     with AppendedClues
     with EitherValues
     with OptionValues
-    with Checkpoints {
+    with Checkpoints
+    with BaseTest {
 
   private var actorSystem: ActorSystem[SpawnProtocol.Command] = _
 
@@ -66,7 +68,7 @@ class PruningITSpec
       _ <- submission.performSubmission(submissionConfig)
       txPrePruning: ObservedEvents <- txTreeObserver(
         apiServices = apiServices,
-        party = allocatedParties.observers(0),
+        party = allocatedParties.observers.head,
       )
       pruningBenchmarkResult <- testedPruningBenchmark.benchmarkPruning(
         pruningConfig = WorkflowConfig.PruningConfig(
@@ -82,7 +84,7 @@ class PruningITSpec
       )
       acsPostPruning: ObservedEvents <- acsObserver(
         apiServices = apiServices,
-        party = allocatedParties.observers(0),
+        party = allocatedParties.observers.head,
       )
     } yield {
       pruningBenchmarkResult.value shouldBe ()

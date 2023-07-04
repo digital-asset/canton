@@ -538,6 +538,7 @@ object BuildCommon {
           opentelemetry_instrumentation_grpc,
           opentelemetry_zipkin,
           opentelemetry_jaeger,
+          opentelemetry_otlp,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         coverageEnabled := false,
@@ -735,6 +736,7 @@ object BuildCommon {
           opentelemetry_instrumentation_grpc,
           opentelemetry_zipkin,
           opentelemetry_jaeger,
+          opentelemetry_otlp,
           aws_kms,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
@@ -1105,10 +1107,7 @@ object BuildCommon {
           opentelemetry_sdk_testing % Test,
           scalatestScalacheck % Test,
         ),
-        Test / fork := true,
-        Test / testForkedParallel := true,
-        // TODO(#12133) remove when this issue is closed
-        Test / javaOptions += s"-Dlogback.configurationFile=${(Test / resourceDirectory).value.getAbsolutePath}/logback-test-ledger-common.xml",
+        Test / parallelExecution := true,
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -1119,13 +1118,10 @@ object BuildCommon {
     // by the system variable "com.sun.net.ssl.checkRevocation". To ensure that the test runs correctly it needs to be
     // executed in its own JVM instance that is isolated from other tests.
     def separateRevocationTest(
-        tests: Seq[TestDefinition],
-        logbackFileJVMOption: String,
+        tests: Seq[TestDefinition]
     ): Seq[Group] = {
       val options = ForkOptions().withRunJVMOptions(
         Vector(
-          // TODO(#12133) remove setting the logback configuration when this issue is closed
-          logbackFileJVMOption
           // "-Djava.security.debug=certpath ocsp" // enable when debugging ocsp tests
         )
       )
@@ -1142,7 +1138,7 @@ object BuildCommon {
       .dependsOn(
         `ledger-common` % "compile->compile;test->test",
         `community-base`,
-        `community-testing` % Test,
+        `community-testing` % "test->test",
       )
       .settings(
         sharedCantonSettings,
@@ -1177,11 +1173,7 @@ object BuildCommon {
         ),
         Test / parallelExecution := true,
         Test / fork := false,
-        Test / testGrouping := separateRevocationTest(
-          (Test / definedTests).value,
-          // TODO(#12133) remove setting the logback configuration when this issue is closed
-          s"-Dlogback.configurationFile=${(`ledger-common` / Test / resourceDirectory).value.getAbsolutePath}/logback-test-ledger-common.xml",
-        ),
+        Test / testGrouping := separateRevocationTest((Test / definedTests).value),
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -1285,9 +1277,6 @@ object BuildCommon {
           circe_generic_extras % Test, // Needed by integration tests in Sandbox-on-X
         ),
         Test / parallelExecution := true,
-        Test / fork := true,
-        // TODO(#12133) remove setting the logback configuration when this issue is closed
-        Test / javaOptions += s"-Dlogback.configurationFile=${(`ledger-common` / Test / resourceDirectory).value.getAbsolutePath}/logback-test-ledger-common.xml",
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
       )

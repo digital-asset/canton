@@ -3,13 +3,16 @@
 
 package com.digitalasset.canton.platform.localstore.api
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderConfig, IdentityProviderId}
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
 import com.digitalasset.canton.platform.localstore.api.IdentityProviderConfigStore.Result
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait IdentityProviderConfigStore {
+trait IdentityProviderConfigStore { self: NamedLogging =>
+
+  protected val directEc: ExecutionContext = DirectExecutionContext(logger)
 
   def createIdentityProviderConfig(identityProviderConfig: IdentityProviderConfig)(implicit
       loggingContext: LoggingContextWithTrace
@@ -39,8 +42,6 @@ trait IdentityProviderConfigStore {
       loggingContext: LoggingContextWithTrace
   ): Future[Boolean]
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def getActiveIdentityProviderByIssuer(issuer: String)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[IdentityProviderConfig] =
@@ -56,10 +57,11 @@ trait IdentityProviderConfigStore {
           )
         case Left(error) =>
           Future.failed(new Exception(error.toString))
-      }(ExecutionContext.parasitic)
-
+      }(directEc)
 }
+
 object IdentityProviderConfigStore {
+
   type Result[T] = Either[Error, T]
 
   sealed trait Error

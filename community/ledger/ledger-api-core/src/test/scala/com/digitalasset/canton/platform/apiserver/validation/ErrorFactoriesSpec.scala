@@ -10,11 +10,9 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.error.groups.RequestValidation.InvalidDeduplicationPeriodField.ValidMaxDeduplicationFieldKey
 import com.digitalasset.canton.ledger.error.{CommonErrors, IndexErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.{LedgerErrorLoggingContext, SuppressionRule}
-import com.digitalasset.canton.testing.TestingLogCollector
 import com.google.rpc.*
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
-import org.scalatest.BeforeAndAfter
 import org.scalatest.concurrent.{Eventually, IntegrationPatience}
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
@@ -28,7 +26,6 @@ import scala.concurrent.duration.*
 class ErrorFactoriesSpec
     extends AnyWordSpec
     with TableDrivenPropertyChecks
-    with BeforeAndAfter
     with ErrorsAssertions
     with Eventually
     with IntegrationPatience
@@ -53,10 +50,6 @@ class ErrorFactoriesSpec
     BaseError.securitySensitiveMessage(Some(originalCorrelationId))
   private val expectedInternalErrorDetails =
     Seq[ErrorDetails.ErrorDetail](expectedCorrelationIdRequestInfo)
-
-  before {
-    TestingLogCollector.clear[this.type]
-  }
 
   "Errors " should {
 

@@ -70,9 +70,17 @@ service SequencerService {
   // TBD: Message TTL - How far back should it go when the participant initiate a subscription ?
   rpc Subscribe(SubscriptionRequest) returns (stream SubscriptionResponse);
 
+  // Same as `Subscribe(SubscriptionRequest)` but delivers byte array rather than typed
+  // message to support multiple versions.
+  rpc SubscribeVersioned(SubscriptionRequest) returns (stream VersionedSubscriptionResponse);
+
   // Establishes a stream with the server to receive sequenced events exactly like Subscribe, except that this is
   // supposed to be used only by unauthenticated members similarly to SendAsyncUnauthenticated
   rpc SubscribeUnauthenticated(SubscriptionRequest) returns (stream SubscriptionResponse);
+
+  // Same as `SubscribeUnauthenticated(SubscriptionRequest)` but delivers byte array rather than typed
+  // message to support multiple versions.
+  rpc SubscribeUnauthenticatedVersioned(SubscriptionRequest) returns (stream VersionedSubscriptionResponse);
 
   // Allows a member to acknowledge that they have read all events up to and including the provided timestamp,
   // and that they will never re-read these events again. This information is currently only used for informational
@@ -176,6 +184,19 @@ message SubscriptionRequest {
 
 message SubscriptionResponse {
   com.digitalasset.canton.protocol.v0.SignedContent signed_sequenced_event = 1;
+
+  // optional, canton trace context
+  //
+  // DO NOT RENAME this field, as the ApiRequestLogger uses reflection to read this field.
+  //
+  // We typically use a header to transfer this information however streamed items do
+  // not have per item/message headers, so we instead in this instance set it in the body.
+  com.digitalasset.canton.v0.TraceContext trace_context = 2; // optional, canton trace context
+}
+
+message VersionedSubscriptionResponse {
+  // Contains a versioned SignedContent of v0 or higher
+  bytes signed_sequenced_event = 1;
 
   // optional, canton trace context
   //

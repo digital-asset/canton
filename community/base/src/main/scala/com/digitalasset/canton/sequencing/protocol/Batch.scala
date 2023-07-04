@@ -52,6 +52,7 @@ final case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
     allRecipients.collect {
       case r @ MemberRecipient(_: MediatorId) => r
       case r: MediatorsOfDomain => r
+      case AllMembersOfDomain => AllMembersOfDomain
     }
   }
 

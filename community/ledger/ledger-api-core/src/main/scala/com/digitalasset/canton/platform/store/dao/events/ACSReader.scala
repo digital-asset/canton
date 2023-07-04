@@ -87,7 +87,10 @@ class ACSReader(
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
+
   private val dbMetrics = metrics.daml.index.db
+
+  private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
 
   def streamActiveContracts(
       filteringConstraints: TemplatePartiesFilter,
@@ -145,7 +148,7 @@ class ACSReader(
     )
 
     def fetchCreateIds(filter: DecomposedFilter): Source[Long, NotUsed] =
-      PaginatingAsyncStream.streamIdsFromSeekPagination(
+      paginatingAsyncStream.streamIdsFromSeekPagination(
         idPageSizing = idQueryPageSizing,
         idPageBufferSize = config.maxPagesPerIdPagesBuffer,
         initialFromIdExclusive = 0L,
@@ -174,7 +177,7 @@ class ACSReader(
       )
 
     def fetchAssignIds(filter: DecomposedFilter): Source[Long, NotUsed] =
-      PaginatingAsyncStream.streamIdsFromSeekPagination(
+      paginatingAsyncStream.streamIdsFromSeekPagination(
         idPageSizing = idQueryPageSizing,
         idPageBufferSize = config.maxPagesPerIdPagesBuffer,
         initialFromIdExclusive = 0L,
@@ -498,7 +501,7 @@ class ACSReader(
 
     val stringWildcardParties = filter.wildcardParties.map(_.toString)
     val stringTemplateFilters = filter.relation.map { case (key, value) =>
-      key -> value.map(_.toString)
+      key -> value
     }
     def eventMeetsConstraints(templateId: Identifier, witnesses: Set[String]): Boolean =
       witnesses.exists(stringWildcardParties) ||
@@ -747,6 +750,6 @@ class ACSReader(
 object ACSReader {
 
   def acsBeforePruningErrorReason(acsOffset: String, prunedUpToOffset: String): String =
-    s"Active contracts request at offset ${acsOffset} precedes pruned offset ${prunedUpToOffset}"
+    s"Active contracts request at offset $acsOffset precedes pruned offset $prunedUpToOffset"
 
 }

@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.indexer
 import com.daml.executors.executors.QueueAwareExecutionContextExecutorService
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Time.Timestamp
-import com.daml.logging.LoggingContext
 import com.daml.metrics.{DatabaseMetrics, Metrics}
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.ledger.participant.state.index.v2.MeteringStore.{
@@ -40,7 +39,6 @@ final class MeteringAggregatorSpec
     with Matchers
     with TestEssentials {
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
   private val metrics = Metrics.ForTesting
   private def toTS(t: OffsetDateTime): Timestamp = Timestamp.assertFromInstant(t.toInstant)
 

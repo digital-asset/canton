@@ -34,7 +34,7 @@ import java.time.{Duration, Instant}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
-final class ApiSubmissionServiceV2(
+final class ApiCommandSubmissionServiceV2(
     commandSubmissionService: CommandSubmissionService,
     writeService: WriteService,
     explicitDisclosureUnsafeEnabled: Boolean,

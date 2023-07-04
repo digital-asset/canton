@@ -19,7 +19,7 @@ import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary.LEDGER_BEGIN
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.Value.{Absolute, Boundary}
 import com.daml.util.Ctx
-import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.client.services.commands.tracker.CompletionResponse.{
   CompletionFailure,
   CompletionSuccess,
@@ -29,6 +29,8 @@ import com.digitalasset.canton.ledger.client.services.commands.tracker.{
   CompletionResponse,
   TrackedCommandKey,
 }
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.{BaseTest, DiscardOps}
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
 import com.google.rpc.code.*
@@ -50,7 +52,8 @@ class CommandTrackerFlowTest
     with Matchers
     with OptionValues
     with AkkaBeforeAndAfterAll
-    with ScalaFutures {
+    with ScalaFutures
+    with BaseTest {
 
   type C[Value] = Ctx[(Int, TrackedCommandKey), Value]
 
@@ -98,14 +101,18 @@ class CommandTrackerFlowTest
       completionsStreamMock: CompletionStreamMock,
   )
 
-  private class CompletionStreamMock() {
+  private class CompletionStreamMock(override protected val loggerFactory: NamedLoggerFactory)
+      extends NamedLogging {
 
-    case class State(
+    private case class State(
         queue: SourceQueueWithComplete[CompletionStreamElement],
         startOffset: LedgerOffset,
     )
 
-    private implicit val ec: ExecutionContext[Nothing] = ExecutionContext.parasitic
+    private implicit val directEc: ExecutionContext[Nothing] = ExecutionContext(
+      DirectExecutionContext(logger)
+    )
+
     private val stateRef = new AtomicReference[Promise[State]](Promise[State]())
 
     def createCompletionsSource(
@@ -676,7 +683,7 @@ class CommandTrackerFlowTest
       maximumCommandTimeout: Duration = Duration.ofSeconds(10),
   ): Handle = {
 
-    val completionsMock = new CompletionStreamMock()
+    val completionsMock = new CompletionStreamMock(loggerFactory)
 
     val trackingFlow =
       CommandTrackerFlow[Int, NotUsed](

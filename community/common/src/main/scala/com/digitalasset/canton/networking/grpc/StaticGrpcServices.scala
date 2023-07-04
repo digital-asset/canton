@@ -15,7 +15,7 @@ object StaticGrpcServices {
 
   val notSupportedByCommunityStatus = Status.UNIMPLEMENTED
     .withDescription(
-      "This method is unsupported by the Community edition of canton. Please see canton.io/enterprise for details on obtaining Canton Enterprise."
+      "This method is unsupported by the Community edition of canton. Please see https://www.digitalasset.com/products/daml-enterprise for details on obtaining Canton Enterprise."
     )
 
   /** Return a `UNIMPLEMENTED` error for any methods called on this service mentioning that the service is only
@@ -31,7 +31,7 @@ object StaticGrpcServices {
       val shortServiceName =
         method.getServiceName.split('.').lastOption.getOrElse(method.getServiceName)
       logger.warn(
-        s"This Community edition of canton does not support the operation: $shortServiceName.${method.getBareMethodName}. Please see canton.io/enterprise for details on obtaining Canton Enterprise edition."
+        s"This Community edition of canton does not support the operation: $shortServiceName.${method.getBareMethodName}. Please see https://www.digitalasset.com/products/daml-enterprise for details on obtaining Canton Enterprise edition."
       )
 
       notSupportedByCommunityStatus

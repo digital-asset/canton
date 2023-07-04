@@ -18,7 +18,6 @@ import com.daml.ledger.api.v1.transaction_service.{
 }
 import com.daml.lf.data.Ref.Party
 import com.daml.lf.ledger.EventId as LfEventId
-import com.daml.logging.LoggingContext
 import com.daml.logging.entries.{LoggingEntries, LoggingValue}
 import com.daml.metrics.Metrics
 import com.daml.tracing.Telemetry
@@ -29,7 +28,6 @@ import com.digitalasset.canton.ledger.api.domain.{
   TransactionFilter,
   TransactionId,
 }
-import com.digitalasset.canton.ledger.api.grpc.GrpcTransactionService
 import com.digitalasset.canton.ledger.api.messages.transaction.*
 import com.digitalasset.canton.ledger.api.services.TransactionService
 import com.digitalasset.canton.ledger.api.validation.PartyNameChecker
@@ -47,13 +45,18 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.platform.apiserver.services.{ApiConversions, StreamMetrics, logging}
+import com.digitalasset.canton.platform.apiserver.services.{
+  ApiConversions,
+  ApiTransactionService,
+  StreamMetrics,
+  logging,
+}
 import io.grpc.*
 import scalaz.syntax.tag.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
-private[apiserver] object ApiTransactionService {
+private[apiserver] object TransactionServiceImpl {
   def create(
       ledgerId: LedgerId,
       transactionsService: IndexTransactionsService,
@@ -64,9 +67,9 @@ private[apiserver] object ApiTransactionService {
       ec: ExecutionContext,
       mat: Materializer,
       esf: ExecutionSequencerFactory,
-  ): GrpcTransactionService with BindableService =
-    new GrpcTransactionService(
-      new ApiTransactionService(transactionsService, metrics, loggerFactory),
+  ): ApiTransactionService with BindableService =
+    new ApiTransactionService(
+      new TransactionServiceImpl(transactionsService, metrics, loggerFactory),
       ledgerId,
       PartyNameChecker.AllowAllParties,
       telemetry,
@@ -74,7 +77,7 @@ private[apiserver] object ApiTransactionService {
     )
 }
 
-private[apiserver] final class ApiTransactionService private (
+private[apiserver] final class TransactionServiceImpl private (
     transactionsService: IndexTransactionsService,
     metrics: Metrics,
     val loggerFactory: NamedLoggerFactory,
@@ -153,13 +156,11 @@ private[apiserver] final class ApiTransactionService private (
       request: GetTransactionByEventIdRequest
   )(implicit loggingContext: LoggingContextWithTrace): Future[GetTransactionResponse] = {
     implicit val enrichedLoggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggingContext.traceContext)(
-        LoggingContext.enriched(
-          logging.ledgerId(request.ledgerId),
-          logging.eventId(request.eventId),
-          logging.parties(request.requestingParties),
-        )(loggingContext)
-      )
+      LoggingContextWithTrace.enriched(
+        logging.ledgerId(request.ledgerId),
+        logging.eventId(request.eventId),
+        logging.parties(request.requestingParties),
+      )(loggingContext)
     logger.info(s"Received request for transaction by event ID, ${enrichedLoggingContext
         .serializeFiltered("ledgerId", "eventId", "parties")}.")(loggingContext.traceContext)
     implicit val errorLogger: ContextualizedErrorLogger =

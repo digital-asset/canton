@@ -21,6 +21,7 @@ import com.digitalasset.canton.networking.grpc.GrpcError.GrpcServiceUnavailable
 import com.digitalasset.canton.sequencing.SerializedEventHandler
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
 import com.digitalasset.canton.sequencing.protocol.SubscriptionResponse
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.tracing.TraceContext.withTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, SerializableTraceContext, TraceContext, Traced}
@@ -47,10 +48,25 @@ final case class GrpcPermissionDeniedError(grpcError: GrpcError)
 final case class GrpcSubscriptionUnexpectedException(exception: Throwable)
     extends SubscriptionCloseReason.SubscriptionError
 
+trait HasProtoTraceContext[R] {
+  def traceContext(value: R): Option[com.digitalasset.canton.v0.TraceContext]
+}
+object HasProtoTraceContext {
+  implicit val subscriptionResponseTraceContext =
+    new HasProtoTraceContext[v0.SubscriptionResponse] {
+      override def traceContext(value: v0.SubscriptionResponse) = value.traceContext
+    }
+
+  implicit val versionedSubscriptionResponseTraceContext =
+    new HasProtoTraceContext[v0.VersionedSubscriptionResponse] {
+      override def traceContext(value: v0.VersionedSubscriptionResponse) = value.traceContext
+    }
+}
+
 @VisibleForTesting
-class GrpcSequencerSubscription[E] private[transports] (
+class GrpcSequencerSubscription[E, R: HasProtoTraceContext] private[transports] (
     context: CancellableContext,
-    callHandler: Traced[v0.SubscriptionResponse] => Future[Either[E, Unit]],
+    callHandler: Traced[R] => Future[Either[E, Unit]],
     metrics: SequencerClientMetrics,
     override val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -124,14 +140,16 @@ class GrpcSequencerSubscription[E] private[transports] (
   }
 
   @VisibleForTesting // so unit tests can call onNext, onError and onComplete
-  private[transports] val observer = new StreamObserver[v0.SubscriptionResponse] {
-    override def onNext(value: v0.SubscriptionResponse): Unit = {
+  private[transports] val observer = new StreamObserver[R] {
+    override def onNext(value: R): Unit = {
       metrics.load.syncEvent {
         // we take the unusual step of immediately trying to deserialize the trace-context
         // so it is available here for logging
         implicit val traceContext: TraceContext =
           SerializableTraceContext
-            .fromProtoSafeV0Opt(loggerWithoutTracing(logger))(value.traceContext)
+            .fromProtoSafeV0Opt(loggerWithoutTracing(logger))(
+              implicitly[HasProtoTraceContext[R]].traceContext(value)
+            )
             .unwrap
 
         logger.debug("Received a message from the sequencer.")
@@ -229,27 +247,52 @@ class GrpcSequencerSubscription[E] private[transports] (
 }
 
 object GrpcSequencerSubscription {
-  def apply[E](
+  def fromSubscriptionResponse[E](
       context: CancellableContext,
       handler: SerializedEventHandler[E],
       metrics: SequencerClientMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): GrpcSequencerSubscription[E] =
+  )(implicit
+      executionContext: ExecutionContext
+  ): GrpcSequencerSubscription[E, v0.SubscriptionResponse] =
     new GrpcSequencerSubscription(
       context,
-      deserializingHandler(handler),
+      deserializingSubscriptionHandler(
+        handler,
+        (value, traceContext) => SubscriptionResponse.fromProtoV0(value)(traceContext),
+      ),
       metrics,
       timeouts,
       loggerFactory,
     )
 
-  private def deserializingHandler[E](
-      handler: SerializedEventHandler[E]
-  ): Traced[v0.SubscriptionResponse] => Future[Either[E, Unit]] = {
+  def fromVersionedSubscriptionResponse[E](
+      context: CancellableContext,
+      handler: SerializedEventHandler[E],
+      metrics: SequencerClientMetrics,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      executionContext: ExecutionContext
+  ): GrpcSequencerSubscription[E, v0.VersionedSubscriptionResponse] =
+    new GrpcSequencerSubscription(
+      context,
+      deserializingSubscriptionHandler(
+        handler,
+        (value, traceContext) => SubscriptionResponse.fromVersionedProtoV0(value)(traceContext),
+      ),
+      metrics,
+      timeouts,
+      loggerFactory,
+    )
+
+  private def deserializingSubscriptionHandler[E, R](
+      handler: SerializedEventHandler[E],
+      fromProto: (R, TraceContext) => ParsingResult[SubscriptionResponse],
+  ): Traced[R] => Future[Either[E, Unit]] = {
     withTraceContext { implicit traceContext => responseP =>
-      SubscriptionResponse
-        .fromProtoV0(responseP)
+      fromProto(responseP, traceContext)
         .fold(
           err => {
             Future.failed(

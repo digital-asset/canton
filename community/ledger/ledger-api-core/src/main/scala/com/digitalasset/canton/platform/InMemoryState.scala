@@ -36,6 +36,7 @@ private[platform] class InMemoryState(
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
+
   final def initialized: Boolean = dispatcherState.isRunning
 
   /** (Re-)initializes the participant in-memory state to a specific ledger end.
@@ -107,7 +108,7 @@ object InMemoryState {
         maxBufferedChunkSize = bufferedStreamsPageSize,
         loggerFactory = loggerFactory,
       ),
-      stringInterningView = new StringInterningView,
+      stringInterningView = new StringInterningView(loggerFactory),
       packageMetadataView = PackageMetadataView.create,
       submissionTracker = submissionTracker,
       loggerFactory = loggerFactory,

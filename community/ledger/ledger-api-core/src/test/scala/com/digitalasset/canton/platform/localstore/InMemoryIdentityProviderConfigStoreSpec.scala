@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.platform.localstore
 
+import com.digitalasset.canton.BaseTest
 import org.scalatest.freespec.AsyncFreeSpec
 
 class InMemoryIdentityProviderConfigStoreSpec
     extends AsyncFreeSpec
-    with IdentityProviderConfigStoreTests {
+    with IdentityProviderConfigStoreTests
+    with BaseTest {
 
-  override def newStore() = new InMemoryIdentityProviderConfigStore(MaxIdentityProviderConfigs)
-
+  override def newStore() =
+    new InMemoryIdentityProviderConfigStore(loggerFactory, MaxIdentityProviderConfigs)
 }

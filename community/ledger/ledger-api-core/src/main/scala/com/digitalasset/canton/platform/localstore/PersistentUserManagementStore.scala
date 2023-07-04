@@ -7,6 +7,7 @@ import com.daml.api.util.TimeProvider
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.UserId
 import com.daml.metrics.{DatabaseMetrics, Metrics}
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User}
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
@@ -50,46 +51,6 @@ final case class UserManagementConfig(
     maxRightsPerUser: Int = UserManagementConfig.DefaultMaxRightsPerUser,
 )
 
-object PersistentUserManagementStore {
-
-  /** Intended to be thrown within a DB transaction to abort it.
-    * The resulting failed future will get mapped to a successful future containing scala.util.Left
-    */
-  final case class TooManyUserRightsRuntimeException(userId: Ref.UserId) extends RuntimeException
-
-  final case class ConcurrentUserUpdateDetectedRuntimeException(userId: Ref.UserId)
-      extends RuntimeException
-
-  final case class MaxAnnotationsSizeExceededException(userId: Ref.UserId) extends RuntimeException
-
-  def cached(
-      dbSupport: DbSupport,
-      metrics: Metrics,
-      timeProvider: TimeProvider,
-      cacheExpiryAfterWriteInSeconds: Int,
-      maxCacheSize: Int,
-      maxRightsPerUser: Int,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): UserManagementStore = {
-    new CachedUserManagementStore(
-      delegate = new PersistentUserManagementStore(
-        dbSupport = dbSupport,
-        metrics = metrics,
-        maxRightsPerUser = maxRightsPerUser,
-        timeProvider = timeProvider,
-        loggerFactory = loggerFactory,
-      ),
-      expiryAfterWriteInSeconds = cacheExpiryAfterWriteInSeconds,
-      maximumCacheSize = maxCacheSize,
-      metrics = metrics,
-      loggerFactory = loggerFactory,
-    )(executionContext, LoggingContextWithTrace(loggerFactory))
-  }
-}
-
 class PersistentUserManagementStore(
     dbSupport: DbSupport,
     metrics: Metrics,
@@ -99,12 +60,14 @@ class PersistentUserManagementStore(
 ) extends UserManagementStore
     with NamedLogging {
 
+  private val directEc = DirectExecutionContext(logger)
+
   private val backend = dbSupport.storageBackendFactory.createUserManagementStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher
 
   override def getUserInfo(id: UserId, identityProviderId: IdentityProviderId)(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[Result[UserInfo]] = {
+  ): Future[Result[UserInfo]] =
     inTransaction(_.getUserInfo) { implicit connection =>
       withUser(id, identityProviderId) { dbUser =>
         val rights = backend.getUserRights(internalId = dbUser.internalId)(connection)
@@ -113,14 +76,11 @@ class PersistentUserManagementStore(
         UserInfo(domainUser, rights.map(_.domainRight))
       }
     }
-  }
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def createUser(
       user: domain.User,
       rights: Set[domain.UserRight],
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] =
     inTransaction(_.createUser) { implicit connection: Connection =>
       withoutUser(user.id, user.identityProviderId) {
         val now = epochMicroseconds()
@@ -162,14 +122,17 @@ class PersistentUserManagementStore(
       }
     }.map(tapSuccess { _ =>
       logger.info(
-        s"Created new user: ${user} with ${rights.size} rights: ${rightsDigestText(rights)}"
+        s"Created new user: $user with " +
+          (if (rights.size > 0)
+             s"${rights.size} rights: ${rightsDigestText(rights)}"
+           else "no rights") +
+          s", ${loggingContext.serializeFiltered("submissionId")}."
       )
-    })(scala.concurrent.ExecutionContext.parasitic)
-  }
+    })(directEc)
 
   override def updateUser(
       userUpdate: UserUpdate
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] =
     inTransaction(_.updateUser) { implicit connection =>
       for {
         _ <- withUser(id = userUpdate.id, userUpdate.identityProviderId) { dbUser =>
@@ -244,15 +207,12 @@ class PersistentUserManagementStore(
         }
       } yield domainUser
     }
-  }
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def updateUserIdp(
       id: UserId,
       sourceIdp: IdentityProviderId,
       targetIdp: IdentityProviderId,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]] =
     inTransaction(_.updateUserIdp) { implicit connection =>
       for {
         _ <- withUser(id = id, sourceIdp) { dbUser =>
@@ -272,15 +232,12 @@ class PersistentUserManagementStore(
       } yield domainUser
     }.map(tapSuccess { _ =>
       logger.info(s"Updated user $id idp from $sourceIdp to $targetIdp.")
-    })(scala.concurrent.ExecutionContext.parasitic)
-  }
+    })(directEc)
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def deleteUser(
       id: UserId,
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Unit]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Unit]] =
     inTransaction(_.deleteUser) { implicit connection =>
       withUser(id, identityProviderId) { _ =>
         backend.deleteUser(id = id)(connection)
@@ -289,17 +246,16 @@ class PersistentUserManagementStore(
         case false => Left(UserNotFound(userId = id))
       }
     }.map(tapSuccess { _ =>
-      logger.info(s"Deleted user with id: $id.")
-    })(scala.concurrent.ExecutionContext.parasitic)
-  }
+      logger.info(
+        s"Deleted user with id: $id, ${loggingContext.serializeFiltered("submissionId")}."
+      )
+    })(directEc)
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def grantRights(
       id: UserId,
       rights: Set[domain.UserRight],
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[domain.UserRight]]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[domain.UserRight]]] =
     inTransaction(_.grantRights) { implicit connection =>
       withUser(id = id, identityProviderId) { user =>
         val now = epochMicroseconds()
@@ -323,18 +279,16 @@ class PersistentUserManagementStore(
       }
     }.map(tapSuccess { grantedRights =>
       logger.info(
-        s"Granted ${grantedRights.size} user rights to user $id: ${rightsDigestText(grantedRights)}."
+        s"Granted ${grantedRights.size} user rights to user $id: ${rightsDigestText(grantedRights)}, ${loggingContext
+            .serializeFiltered("submissionId")}."
       )
-    })(scala.concurrent.ExecutionContext.parasitic)
-  }
+    })(directEc)
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   override def revokeRights(
       id: UserId,
       rights: Set[domain.UserRight],
       identityProviderId: IdentityProviderId,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[domain.UserRight]]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[Set[domain.UserRight]]] =
     inTransaction(_.revokeRights) { implicit connection =>
       withUser(id = id, identityProviderId) { user =>
         val revokedRights = rights.filter { right =>
@@ -344,11 +298,10 @@ class PersistentUserManagementStore(
       }
     }.map(tapSuccess { revokedRights =>
       logger.info(
-        s"Revoked ${revokedRights.size} user rights from user $id: ${rightsDigestText(revokedRights)}."
+        s"Revoked ${revokedRights.size} user rights from user $id: ${rightsDigestText(revokedRights)}, ${loggingContext
+            .serializeFiltered("submissionId")}."
       )
-    })(scala.concurrent.ExecutionContext.parasitic)
-
-  }
+    })(directEc)
 
   override def listUsers(
       fromExcl: Option[Ref.UserId],
@@ -356,7 +309,7 @@ class PersistentUserManagementStore(
       identityProviderId: IdentityProviderId,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[Result[UsersPage]] = {
+  ): Future[Result[UsersPage]] =
     inTransaction(_.listUsers) { connection =>
       val dbUsers = fromExcl match {
         case None =>
@@ -372,15 +325,12 @@ class PersistentUserManagementStore(
       }
       Right(UsersPage(users = users))
     }
-  }
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   private def inTransaction[T](
       dbMetric: metrics.daml.userManagement.type => DatabaseMetrics
   )(
       thunk: Connection => Result[T]
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[T]] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Result[T]] =
     dbDispatcher
       .executeSql(dbMetric(metrics.daml.userManagement))(thunk)
       .recover[Result[T]] {
@@ -389,18 +339,16 @@ class PersistentUserManagementStore(
           Left(UserManagementStore.ConcurrentUserUpdate(userId))
         case MaxAnnotationsSizeExceededException(userId) =>
           Left(UserManagementStore.MaxAnnotationsSizeExceeded(userId))
-      }(ExecutionContext.parasitic)
-  }
+      }(directEc)
 
   private def toDomainUser(
       dbUser: UserManagementStorageBackend.DbUserWithId,
       annotations: Map[String, String],
-  ): domain.User = {
+  ): domain.User =
     toDomainUser(
       dbUser = dbUser.payload,
       annotations = annotations,
     )
-  }
 
   private def toDomainUser(
       dbUser: UserManagementStorageBackend.DbUserPayload,
@@ -424,19 +372,18 @@ class PersistentUserManagementStore(
       identityProviderId: IdentityProviderId,
   )(
       f: UserManagementStorageBackend.DbUserWithId => T
-  )(implicit connection: Connection): Result[T] = {
+  )(implicit connection: Connection): Result[T] =
     backend.getUser(id = id)(connection) match {
       case Some(user) if user.payload.identityProviderId == identityProviderId.toDb =>
         Right(f(user))
       case Some(_) => Left(PermissionDenied(userId = id))
       case None => Left(UserNotFound(userId = id))
     }
-  }
 
   private def withoutUser[T](
       id: Ref.UserId,
       identityProviderId: IdentityProviderId,
-  )(t: => T)(implicit connection: Connection): Result[T] = {
+  )(t: => T)(implicit connection: Connection): Result[T] =
     backend.getUser(id = id)(connection) match {
       case Some(user) if user.payload.identityProviderId != identityProviderId.toDb =>
         Left(PermissionDenied(userId = id))
@@ -444,7 +391,6 @@ class PersistentUserManagementStore(
         Left(UserExists(userId = user.payload.id))
       case None => Right(t)
     }
-  }
 
   private def tapSuccess[T](f: T => Unit)(r: Result[T]): Result[T] = {
     r.foreach(f)
@@ -460,4 +406,43 @@ class PersistentUserManagementStore(
     val now = timeProvider.getCurrentTime
     (now.getEpochSecond * 1000 * 1000) + (now.getNano / 1000)
   }
+}
+
+object PersistentUserManagementStore {
+
+  /** Intended to be thrown within a DB transaction to abort it.
+    * The resulting failed future will get mapped to a successful future containing scala.util.Left
+    */
+  final case class TooManyUserRightsRuntimeException(userId: Ref.UserId) extends RuntimeException
+
+  final case class ConcurrentUserUpdateDetectedRuntimeException(userId: Ref.UserId)
+      extends RuntimeException
+
+  final case class MaxAnnotationsSizeExceededException(userId: Ref.UserId) extends RuntimeException
+
+  def cached(
+      dbSupport: DbSupport,
+      metrics: Metrics,
+      timeProvider: TimeProvider,
+      cacheExpiryAfterWriteInSeconds: Int,
+      maxCacheSize: Int,
+      maxRightsPerUser: Int,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): UserManagementStore =
+    new CachedUserManagementStore(
+      delegate = new PersistentUserManagementStore(
+        dbSupport = dbSupport,
+        metrics = metrics,
+        maxRightsPerUser = maxRightsPerUser,
+        timeProvider = timeProvider,
+        loggerFactory = loggerFactory,
+      ),
+      expiryAfterWriteInSeconds = cacheExpiryAfterWriteInSeconds,
+      maximumCacheSize = maxCacheSize,
+      metrics = metrics,
+      loggerFactory = loggerFactory,
+    )(executionContext, LoggingContextWithTrace(loggerFactory))
 }

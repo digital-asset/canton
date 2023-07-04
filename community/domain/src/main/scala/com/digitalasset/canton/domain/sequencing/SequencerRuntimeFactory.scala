@@ -9,7 +9,7 @@ import cats.syntax.option.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveDouble
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
-import com.digitalasset.canton.crypto.Crypto
+import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.admin.v0.EnterpriseSequencerAdministrationServiceGrpc
 import com.digitalasset.canton.domain.config.DomainConfig
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
@@ -18,6 +18,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerRate
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommunityDatabaseSequencerFactory,
   CommunitySequencerConfig,
+  Sequencer,
 }
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.environment.CantonNodeParameters
@@ -110,47 +111,76 @@ object SequencerRuntimeFactory {
         system: ActorSystem,
         traceContext: TraceContext,
     ): EitherT[Future, String, SequencerRuntime] = {
-      val ret = new SequencerRuntime(
-        new CommunityDatabaseSequencerFactory(
-          sequencerConfig,
-          metrics,
-          storage,
-          staticDomainParameters.protocolVersion,
-          topologyClientMember,
-          localParameters,
-          loggerFactory,
-        ),
-        sequencerId,
-        staticDomainParameters,
-        localParameters,
-        domainConfig.publicApi,
+
+      val sequencerFactory = new CommunityDatabaseSequencerFactory(
+        sequencerConfig,
         metrics,
-        domainId,
-        crypto,
-        topologyClient,
         storage,
-        clock,
-        auditLogger,
-        SequencerAuthenticationConfig(
-          agreementManager,
-          domainConfig.publicApi.nonceExpirationTime,
-          domainConfig.publicApi.tokenExpirationTime,
-        ),
-        _ =>
-          StaticGrpcServices
-            .notSupportedByCommunity(EnterpriseSequencerAdministrationServiceGrpc.SERVICE, logger)
-            .some,
-        DomainMember
-          .list(domainId, includeSequencer = false)
-          .toList, // the community sequencer is always an embedded single sequencer
-        futureSupervisor,
-        agreementManager,
-        memberAuthenticationServiceFactory,
-        topologyStateForInitializationService,
-        rateLimitManager,
+        staticDomainParameters.protocolVersion,
+        topologyClientMember,
+        localParameters,
         loggerFactory,
       )
-      ret.initialize().map(_ => ret)
+
+      val syncCrypto = new DomainSyncCryptoClient(
+        sequencerId,
+        domainId,
+        topologyClient,
+        crypto,
+        localParameters.cachingConfigs,
+        processingTimeout,
+        futureSupervisor,
+        loggerFactory,
+      )
+
+      for {
+        sequencer <- EitherT.liftF[Future, String, Sequencer](
+          sequencerFactory
+            .create(
+              domainId,
+              sequencerId,
+              clock,
+              syncCrypto,
+              futureSupervisor,
+              rateLimitManager,
+              implicitMemberRegistration = false,
+            )
+        )
+
+        sequencerRuntime = new SequencerRuntime(
+          sequencerId,
+          sequencer,
+          staticDomainParameters,
+          localParameters,
+          domainConfig.publicApi,
+          metrics,
+          domainId,
+          syncCrypto,
+          topologyClient,
+          storage,
+          clock,
+          auditLogger,
+          SequencerAuthenticationConfig(
+            agreementManager,
+            domainConfig.publicApi.nonceExpirationTime,
+            domainConfig.publicApi.tokenExpirationTime,
+          ),
+          _ =>
+            StaticGrpcServices
+              .notSupportedByCommunity(EnterpriseSequencerAdministrationServiceGrpc.SERVICE, logger)
+              .some,
+          DomainMember
+            .list(domainId, includeSequencer = false)
+            .toList, // the community sequencer is always an embedded single sequencer
+          futureSupervisor,
+          agreementManager,
+          memberAuthenticationServiceFactory,
+          topologyStateForInitializationService,
+          loggerFactory,
+        )
+
+        _ <- sequencerRuntime.initialize()
+      } yield sequencerRuntime
     }
   }
 }

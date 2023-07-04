@@ -55,6 +55,8 @@ trait MessageDispatcher { this: NamedLogging =>
 
   protected def protocolVersion: ProtocolVersion
 
+  protected def uniqueContractKeys: Boolean
+
   protected def domainId: DomainId
 
   protected def participantId: ParticipantId
@@ -202,20 +204,27 @@ trait MessageDispatcher { this: NamedLogging =>
 
       identityResult <- processTopologyTransactions(sc, ts, envelopesWithCorrectDomainId)
       acsCommitmentResult <- processAcsCommitmentEnvelope(envelopesWithCorrectDomainId, sc, ts)
+      // Make room for the repair requests that have been inserted before the current timestamp.
+      //
+      // Some sequenced events do not take this code path (e.g. deliver errors),
+      // but repair requests may still be tagged to their timestamp.
+      // We therefore wedge all of them in now before we possibly allocate a request counter for the current event.
+      // It is safe to not wedge repair requests with the sequenced events they're tagged to
+      // because wedging affects only request counter allocation.
+      repairProcessorResult <- repairProcessorWedging(ts)
       transactionTransferResult <- processTransactionAndTransferMessages(
         eventE,
         sc,
         ts,
         envelopesWithCorrectDomainId,
       )
-      repairProcessorResult <- repairProcessorWedging(ts)
     } yield Foldable[List].fold(
       List(
         sanityCheck,
         identityResult,
         acsCommitmentResult,
-        transactionTransferResult,
         repairProcessorResult,
+        transactionTransferResult,
       )
     )
   }
@@ -319,16 +328,26 @@ trait MessageDispatcher { this: NamedLogging =>
         withNewRequestCounter { rc =>
           val rootHashMessage: goodRequest.rootHashMessage.type = goodRequest.rootHashMessage
           val viewType: rootHashMessage.viewType.type = rootHashMessage.viewType
-          val processor = tryProtocolProcessor(viewType)
-          val batch = RequestAndRootHashMessage(
-            goodRequest.requestEnvelopes,
-            rootHashMessage,
-            goodRequest.mediator,
-          )
-          doProcess(
-            RequestKind(goodRequest.rootHashMessage.viewType),
-            processor.processRequest(ts, rc, sc, batch),
-          )
+
+          viewType match {
+            case TransferInViewType | TransferOutViewType if uniqueContractKeys =>
+              ErrorUtil.internalError(
+                new IllegalArgumentException(
+                  "Domain transfers are not supported with unique contract keys"
+                )
+              )
+            case _ =>
+              val processor = tryProtocolProcessor(viewType)
+              val batch = RequestAndRootHashMessage(
+                goodRequest.requestEnvelopes,
+                rootHashMessage,
+                goodRequest.mediator,
+              )
+              doProcess(
+                RequestKind(goodRequest.rootHashMessage.viewType),
+                processor.processRequest(ts, rc, sc, batch),
+              )
+          }
         }
       case Left(DoNotExpectMediatorResult) => tickRecordOrderPublisher(sc, ts)
       case Left(ExpectMalformedMediatorRequestResult(mediator)) =>
@@ -526,10 +545,10 @@ trait MessageDispatcher { this: NamedLogging =>
   }
 
   protected def repairProcessorWedging(
-      timestamp: CantonTimestamp
+      upToExclusive: CantonTimestamp
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
     lazy val future = FutureUnlessShutdown.pure {
-      repairProcessor.wedgeRepairRequests(timestamp)
+      repairProcessor.wedgeRepairRequests(upToExclusive)
     }
     doProcess(UnspecifiedMessageKind, future)
   }
@@ -661,6 +680,7 @@ private[participant] object MessageDispatcher {
   trait Factory[+T <: MessageDispatcher] {
     def create(
         protocolVersion: ProtocolVersion,
+        uniqueContractKeys: Boolean,
         domainId: DomainId,
         participantId: ParticipantId,
         requestTracker: RequestTracker,
@@ -681,6 +701,7 @@ private[participant] object MessageDispatcher {
 
     def create(
         protocolVersion: ProtocolVersion,
+        uniqueContractKeys: Boolean,
         domainId: DomainId,
         participantId: ParticipantId,
         requestTracker: RequestTracker,
@@ -723,6 +744,7 @@ private[participant] object MessageDispatcher {
 
       create(
         protocolVersion,
+        uniqueContractKeys,
         domainId,
         participantId,
         requestTracker,
@@ -742,6 +764,7 @@ private[participant] object MessageDispatcher {
   object DefaultFactory extends Factory[MessageDispatcher] {
     override def create(
         protocolVersion: ProtocolVersion,
+        uniqueContractKeys: Boolean,
         domainId: DomainId,
         participantId: ParticipantId,
         requestTracker: RequestTracker,
@@ -761,6 +784,7 @@ private[participant] object MessageDispatcher {
     )(implicit ec: ExecutionContext, tracer: Tracer): MessageDispatcher = {
       new DefaultMessageDispatcher(
         protocolVersion,
+        uniqueContractKeys,
         domainId,
         participantId,
         requestTracker,

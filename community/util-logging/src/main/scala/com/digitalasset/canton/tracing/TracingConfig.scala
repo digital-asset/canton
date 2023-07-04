@@ -3,7 +3,13 @@
 
 package com.digitalasset.canton.tracing
 
+import com.digitalasset.canton.tracing.TracingConfig.BatchSpanProcessor.{
+  defaultBatchSize,
+  defaultScheduleDelay,
+}
 import com.digitalasset.canton.tracing.TracingConfig.{Propagation, Tracer}
+
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 /** @param propagation       How should trace contexts (debugging details associated with actions) be propagated between nodes.
   * @param tracer            Tracer configuration
@@ -25,6 +31,7 @@ object TracingConfig {
   final case class Tracer(
       exporter: Exporter = Exporter.Disabled,
       sampler: Sampler = Sampler.AlwaysOn(),
+      batchSpanProcessor: BatchSpanProcessor = BatchSpanProcessor(),
   )
 
   sealed trait Sampler {
@@ -36,11 +43,23 @@ object TracingConfig {
     final case class TraceIdRatio(ratio: Double, parentBased: Boolean = true) extends Sampler
   }
 
+  final case class BatchSpanProcessor(
+      batchSize: Int = defaultBatchSize,
+      scheduleDelay: FiniteDuration = defaultScheduleDelay,
+  )
+
+  object BatchSpanProcessor {
+    val defaultBatchSize: Int = 0 // zero means take default from the BatchSpanProcessorBuilder
+    val defaultScheduleDelay: FiniteDuration =
+      0.millis // zero means take default from the BatchSpanProcessorBuilder
+  }
+
   /** Configuration for how to export spans */
   sealed trait Exporter
   object Exporter {
     case object Disabled extends Exporter
     final case class Jaeger(address: String = "localhost", port: Int = 14250) extends Exporter
     final case class Zipkin(address: String = "localhost", port: Int = 9411) extends Exporter
+    final case class Otlp(address: String = "localhost", port: Int = 4318) extends Exporter
   }
 }

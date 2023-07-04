@@ -7,18 +7,19 @@ import akka.NotUsed
 import akka.stream.scaladsl.Flow
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
 import com.daml.util.Ctx
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.google.protobuf.empty.Empty
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.util.{Success, Try}
 
 object CommandSubmissionFlow {
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def apply[Context](
       submit: SubmitRequest => Future[Empty],
       maxInFlight: Int,
+      loggerFactory: NamedLoggerFactory,
   ): Flow[Ctx[Context, CommandSubmission], Ctx[Context, Try[Empty]], NotUsed] = {
     Flow[Ctx[Context, CommandSubmission]]
       .log("submission at client", _.value.commands.commandId)
@@ -34,9 +35,8 @@ object CommandSubmissionFlow {
                     telemetryContext,
                   )
                 )
-              }(ExecutionContext.parasitic)
+              }(DirectExecutionContext(loggerFactory.getTracedLogger(getClass)))
           }
       }
   }
-
 }

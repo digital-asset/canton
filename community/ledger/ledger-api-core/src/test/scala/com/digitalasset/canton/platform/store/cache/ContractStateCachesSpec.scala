@@ -9,9 +9,9 @@ import com.daml.lf.transaction.GlobalKey
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.value.Value.{ContractInstance, ValueInt64, ValueRecord}
 import com.daml.metrics.Metrics
-import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.offset.Offset
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
+import com.digitalasset.canton.{HasExecutionContext, TestEssentials}
 import org.mockito.MockitoSugar
 import org.scalatest.OptionValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -24,20 +24,20 @@ class ContractStateCachesSpec
     with Matchers
     with MockitoSugar
     with OptionValues
-    with TestEssentials {
+    with TestEssentials
+    with HasExecutionContext {
   behavior of classOf[ContractStateCaches].getSimpleName
 
   "build" should "set the cache index to the initialization index" in {
     val cacheInitializationOffset = offset(1337)
-    // TODO(#13019) Avoid the global execution context
     @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val contractStateCaches = ContractStateCaches.build(
       cacheInitializationOffset,
-      1L,
-      1L,
+      maxContractsCacheSize = 1L,
+      maxKeyCacheSize = 1L,
       metrics = Metrics.ForTesting,
       loggerFactory,
-    )(scala.concurrent.ExecutionContext.global)
+    )
 
     contractStateCaches.keyState.cacheIndex shouldBe cacheInitializationOffset
     contractStateCaches.contractState.cacheIndex shouldBe cacheInitializationOffset
@@ -80,7 +80,11 @@ class ContractStateCachesSpec
   }
 
   "push" should "ignore empty batches" in new TestScope {
-    contractStateCaches.push(Vector.empty)
+    loggerFactory.assertLogs(
+      within = contractStateCaches.push(Vector.empty),
+      assertions = _.errorMessage should include("push triggered with empty events batch"),
+    )
+
     verifyZeroInteractions(contractStateCache, keyStateCache)
   }
 

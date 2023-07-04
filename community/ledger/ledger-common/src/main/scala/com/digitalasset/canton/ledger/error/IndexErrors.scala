@@ -5,11 +5,10 @@ package com.digitalasset.canton.ledger.error
 
 import com.daml.error.ErrorCode.LoggedApiException
 import com.daml.error.*
-import com.digitalasset.canton.ledger.error.ErrorGroups.ParticipantErrorGroup.IndexErrorGroup
 
 @Explanation("Errors raised by the Participant Index persistence layer.")
-object IndexErrors extends IndexErrorGroup {
-  object DatabaseErrors extends DatabaseErrorGroup {
+object IndexErrors extends ErrorGroup()(ParticipantErrorGroup.errorClass) {
+  object DatabaseErrors extends ErrorGroup() {
     @Explanation(
       "This error occurs if a transient error arises when executing a query against the index database."
     )

@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.sandbox.fixture
 import com.daml.ledger.api.testing.utils.{OwnedResource, Resource, SuiteResource}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.ports.Port
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.grpc.GrpcClientResource
 import com.digitalasset.canton.ledger.sandbox.SandboxOnXForTest.{ConfigAdaptor, dataSource}
 import com.digitalasset.canton.ledger.sandbox.{SandboxOnXForTest, SandboxOnXRunner}
@@ -23,8 +24,7 @@ import scala.concurrent.duration.*
 trait SandboxFixture
     extends AbstractSandboxFixture
     with SuiteResource[(Port, Channel)]
-    with SandboxRequiringAuthorizationFuns {
-  self: Suite =>
+    with SandboxRequiringAuthorizationFuns { self: Suite & BaseTest =>
 
   override protected def serverPort: Port = suiteResource.value._1
 
@@ -51,7 +51,7 @@ trait SandboxFixture
           loggerFactory = loggerFactory,
         )
         channel <- GrpcClientResource.owner(port)
-        client = adminLedgerClient(port, cfg, jwtSecret)(
+        client = adminLedgerClient(port, cfg, jwtSecret, loggerFactory)(
           system.dispatcher,
           executionSequencerFactory,
         )

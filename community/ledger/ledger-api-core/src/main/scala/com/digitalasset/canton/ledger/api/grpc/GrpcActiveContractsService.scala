@@ -9,6 +9,7 @@ import com.daml.ledger.api.v1.active_contracts_service.{
   GetActiveContractsRequest,
   GetActiveContractsResponse,
 }
+import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.ledger.api.domain.{LedgerId, optionalLedgerId}
 import com.digitalasset.canton.ledger.api.validation.FieldValidator
@@ -35,7 +36,7 @@ class GrpcActiveContractsService(
       request: GetActiveContractsRequest,
       responseObserver: StreamObserver[GetActiveContractsResponse],
   ): Unit = {
-    implicit val loggingContext = LoggingContextWithTrace(loggerFactory, telemetry)
+    implicit val loggingContext = LoggingContextWithTrace(telemetry)(LoggingContext.empty)
 
     FieldValidator
       .matchLedgerId(ledgerId)(optionalLedgerId(request.ledgerId))

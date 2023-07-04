@@ -110,6 +110,11 @@ sealed trait TrustLevel extends Product with Serializable with PrettyPrinting {
   def rank: Byte
 
   override def pretty: Pretty[TrustLevel] = prettyOfObject[TrustLevel]
+
+  def toX: TrustLevelX = this match {
+    case TrustLevel.Ordinary => TrustLevelX.Ordinary
+    case TrustLevel.Vip => TrustLevelX.Vip
+  }
 }
 
 object TrustLevel {

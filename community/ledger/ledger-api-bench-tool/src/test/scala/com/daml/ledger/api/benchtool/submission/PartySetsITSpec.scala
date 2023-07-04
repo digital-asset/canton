@@ -18,6 +18,7 @@ import com.daml.ledger.api.benchtool.{BenchtoolSandboxFixture, ConfigEnricher}
 import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.BaseTest
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
@@ -31,7 +32,8 @@ class PartySetsITSpec
     with Matchers
     with AppendedClues
     with OptionValues
-    with Checkpoints {
+    with Checkpoints
+    with BaseTest {
 
   it should "submit a party-set and apply party-set filter on a stream" in {
     val submissionConfig = WorkflowConfig.FooSubmissionConfig(

@@ -4,8 +4,10 @@
 package com.digitalasset.canton.sequencing
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.domain.api.{v0, v1}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequiredNonEmpty}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
@@ -23,7 +25,8 @@ import com.google.protobuf.ByteString
 import java.net.URI
 
 final case class SequencerConnections private (
-    aliasToConnection: NonEmpty[Map[SequencerAlias, SequencerConnection]]
+    aliasToConnection: NonEmpty[Map[SequencerAlias, SequencerConnection]],
+    sequencerTrustThreshold: PositiveInt,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       SequencerConnections.type
@@ -71,7 +74,8 @@ final case class SequencerConnections private (
           aliasToConnection.updated(
             sequencerAlias,
             m(connection),
-          )
+          ),
+          sequencerTrustThreshold,
         )(representativeProtocolVersion)
       }
       .getOrElse(this)
@@ -107,37 +111,51 @@ final case class SequencerConnections private (
   @transient override protected lazy val companionObj: SequencerConnections.type =
     SequencerConnections
 
-  def toProtoV1: v1.SequencerConnections = new v1.SequencerConnections(connections.map(_.toProtoV0))
+  def toProtoV1: v1.SequencerConnections =
+    new v1.SequencerConnections(connections.map(_.toProtoV0), sequencerTrustThreshold.unwrap)
 }
 
 object SequencerConnections
     extends HasProtocolVersionedCompanion[SequencerConnections]
     with ProtocolVersionedCompanionDbHelpers[SequencerConnections] {
   def single(connection: SequencerConnection): SequencerConnections =
-    new SequencerConnections(NonEmpty.mk(Seq, (connection.sequencerAlias, connection)).toMap)(
+    new SequencerConnections(
+      NonEmpty.mk(Seq, (connection.sequencerAlias, connection)).toMap,
+      PositiveInt.tryCreate(1),
+    )(
       protocolVersionRepresentativeFor(ProtocolVersion.v3)
     )
 
-  def many(connections: NonEmpty[Seq[SequencerConnection]]): SequencerConnections = {
+  def many(
+      connections: NonEmpty[Seq[SequencerConnection]],
+      sequencerTrustThreshold: PositiveInt,
+  ): SequencerConnections = {
     if (connections.size == 1) {
       SequencerConnections.single(connections.head1)
     } else
-      new SequencerConnections(connections.map(conn => (conn.sequencerAlias, conn)).toMap)(
+      new SequencerConnections(
+        connections.map(conn => (conn.sequencerAlias, conn)).toMap,
+        sequencerTrustThreshold,
+      )(
         protocolVersionRepresentativeFor(ProtocolVersion.dev)
       )
   }
 
-  def tryMany(connections: Seq[SequencerConnection]): SequencerConnections = {
+  def tryMany(
+      connections: Seq[SequencerConnection],
+      sequencerTrustThreshold: PositiveInt,
+  ): SequencerConnections = {
     require(
       connections.map(_.sequencerAlias).toSet.size == connections.size,
       "Non-unique sequencer aliases detected",
     )
-    many(NonEmptyUtil.fromUnsafe(connections))
+    many(NonEmptyUtil.fromUnsafe(connections), sequencerTrustThreshold)
   }
 
   private def fromProtoV0V1(
       fieldName: String,
       connections: Seq[v0.SequencerConnection],
+      sequencerTrustThreshold: PositiveInt,
   ): ParsingResult[SequencerConnections] = for {
     sequencerConnectionsNes <- parseRequiredNonEmpty(
       SequencerConnection.fromProtoV0,
@@ -152,22 +170,39 @@ object SequencerConnections
         "Every sequencer connection must have a unique sequencer alias",
       ),
     )
-  } yield many(sequencerConnectionsNes)
+  } yield many(sequencerConnectionsNes, sequencerTrustThreshold)
 
   def fromProtoV0(
       sequencerConnection: v0.SequencerConnection
   ): ParsingResult[SequencerConnections] =
-    fromProtoV0V1("sequencer_connection", Seq(sequencerConnection))
+    fromProtoV0V1("sequencer_connection", Seq(sequencerConnection), PositiveInt.tryCreate(1))
 
   def fromProtoV0(
-      sequencerConnection: Seq[v0.SequencerConnection]
+      sequencerConnection: Seq[v0.SequencerConnection],
+      sequencerTrustThreshold: Int,
   ): ParsingResult[SequencerConnections] =
-    fromProtoV0V1("sequencer_connections", sequencerConnection)
+    ProtoConverter
+      .parsePositiveInt(sequencerTrustThreshold)
+      .flatMap(fromProtoV0V1("sequencer_connections", sequencerConnection, _))
+
+  def fromLegacyProtoV0(
+      sequencerConnection: Seq[v0.SequencerConnection],
+      providedSequencerTrustThreshold: Int,
+  ): ParsingResult[SequencerConnections] = {
+    val sequencerTrustThreshold =
+      if (providedSequencerTrustThreshold == 0) sequencerConnection.size
+      else providedSequencerTrustThreshold
+    ProtoConverter
+      .parsePositiveInt(sequencerTrustThreshold)
+      .flatMap(fromProtoV0V1("sequencer_connections", sequencerConnection, _))
+  }
 
   def fromProtoV1(
       sequencerConnections: v1.SequencerConnections
   ): ParsingResult[SequencerConnections] =
-    fromProtoV0V1("sequencer_connections", sequencerConnections.sequencerConnections)
+    ProtoConverter
+      .parsePositiveInt(sequencerConnections.sequencerTrustThreshold)
+      .flatMap(fromProtoV0V1("sequencer_connections", sequencerConnections.sequencerConnections, _))
 
   override protected def name: String = "sequencer connections"
 

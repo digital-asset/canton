@@ -6,15 +6,23 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.common.domain.RegisterTopologyTransactionHandleCommon
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.common.domain.{
+  RegisterTopologyTransactionHandleCommon,
+  SequencerBasedRegisterTopologyTransactionHandleX,
+}
+import com.digitalasset.canton.config.{ProcessingTimeout, TopologyXConfig}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, RunOnShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.sequencing.EnvelopeHandler
+import com.digitalasset.canton.sequencing.client.SequencerClientSend
+import com.digitalasset.canton.sequencing.protocol.Batch
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, DomainTopologyClientWithInit}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreCommon,
@@ -23,8 +31,13 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactionX.GenericSignedTopologyTransactionX
+import com.digitalasset.canton.topology.transaction.{
+  SignedTopologyTransactionX,
+  TopologyChangeOpX,
+  TopologyMappingX,
+}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{DelayUtil, EitherTUtil}
+import com.digitalasset.canton.util.{DelayUtil, EitherTUtil, ErrorUtil, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, DomainAlias}
 
@@ -148,6 +161,11 @@ class DomainOutboxX(
   override def maxAuthorizedStoreTimestamp()(implicit
       traceContext: TraceContext
   ): Future[Option[(SequencedTime, EffectiveTime)]] = authorizedStore.maxTimestamp()
+
+  override protected def onClosed(): Unit = {
+    Lifecycle.close(handle)(logger)
+    super.onClosed()
+  }
 }
 
 abstract class DomainOutboxCommon[
@@ -425,6 +443,73 @@ abstract class DomainOutboxCommon[
       FutureUnlessShutdown.unit
     }
   }
+}
+
+class DomainOutboxXFactory(
+    domainId: DomainId,
+    memberId: Member,
+    manager: TopologyManagerX,
+    domainTopologyStore: TopologyStoreX[DomainStore],
+    crypto: Crypto,
+    topologyXConfig: TopologyXConfig,
+    override val timeouts: ProcessingTimeout,
+    override val loggerFactory: NamedLoggerFactory,
+) extends FlagCloseable
+    with NamedLogging {
+  val outboxRef = new SingleUseCell[DomainOutboxX]
+
+  def create(
+      protocolVersion: ProtocolVersion,
+      targetTopologyClient: DomainTopologyClientWithInit,
+      sequencerClient: SequencerClientSend,
+      clock: Clock,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): (DomainOutboxCommon[?, ?, ?], EnvelopeHandler) = {
+    outboxRef.get.foreach { outbox =>
+      ErrorUtil.invalidState(s"DomainOutbox was already created. This is a bug.")
+    }
+    val handle = new SequencerBasedRegisterTopologyTransactionHandleX(
+      (traceContext, env) =>
+        sequencerClient.sendAsync(Batch(List(env), protocolVersion))(traceContext),
+      domainId,
+      memberId,
+      memberId,
+      maybeClockForRetries = Some(clock),
+      topologyXConfig,
+      protocolVersion,
+      timeouts,
+      loggerFactory,
+    )
+    val outbox =
+      new DomainOutboxX(
+        DomainAlias(domainId.uid.toLengthLimitedString),
+        domainId,
+        memberId = memberId,
+        protocolVersion = protocolVersion,
+        handle = handle,
+        targetClient = targetTopologyClient,
+        authorizedStore = manager.store,
+        targetStore = domainTopologyStore,
+        timeouts = timeouts,
+        loggerFactory = loggerFactory,
+        crypto = crypto,
+      )
+    outboxRef.putIfAbsent(outbox).discard
+    manager.addObserver(new TopologyManagerObserver {
+      override def addedNewTransactions(
+          timestamp: CantonTimestamp,
+          transactions: Seq[SignedTopologyTransactionX[TopologyChangeOpX, TopologyMappingX]],
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+        outbox.newTransactionsAddedToAuthorizedStore(timestamp, transactions.size)
+      }
+    })
+    (outbox, handle.processor)
+  }
+
+  override protected def onClosed(): Unit =
+    Lifecycle.close(outboxRef.get.toList: _*)(logger)
 }
 
 final case class PendingTransactions[TX](

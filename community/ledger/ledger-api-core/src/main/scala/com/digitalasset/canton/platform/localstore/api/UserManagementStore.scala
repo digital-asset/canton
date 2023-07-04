@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.localstore.api
 
 import com.daml.error.ContextualizedErrorLogger
 import com.daml.lf.data.Ref
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.domain
 import com.digitalasset.canton.ledger.api.domain.{IdentityProviderId, User, UserRight}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
@@ -33,8 +34,9 @@ object ObjectMetaUpdate {
   )
 }
 
-trait UserManagementStore {
-  self: NamedLogging =>
+trait UserManagementStore { self: NamedLogging =>
+
+  private val directEc = DirectExecutionContext(logger)
 
   import UserManagementStore.*
 
@@ -84,20 +86,16 @@ trait UserManagementStore {
   )(implicit loggingContext: LoggingContextWithTrace): Future[Result[User]]
   // read helpers
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def getUser(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Result[User]] = {
-    getUserInfo(id, identityProviderId).map(_.map(_.user))(ExecutionContext.parasitic)
+    getUserInfo(id, identityProviderId).map(_.map(_.user))(directEc)
   }
 
-  // TODO(#13019) Replace parasitic with DirectExecutionContext
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   final def listUserRights(id: Ref.UserId, identityProviderId: IdentityProviderId)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Result[Set[UserRight]]] = {
-    getUserInfo(id, identityProviderId).map(_.map(_.rights))(ExecutionContext.parasitic)
+    getUserInfo(id, identityProviderId).map(_.map(_.rights))(directEc)
   }
 
   def createExtraAdminUser(rawUserId: String)(implicit
@@ -159,14 +157,14 @@ object UserManagementStore {
       case Left(UserManagementStore.UserNotFound(id)) =>
         Future.failed(
           LedgerApiErrors.Admin.UserManagement.UserNotFound
-            .Reject(operation, id.toString)
+            .Reject(operation, id)
             .asGrpcError
         )
 
       case Left(UserManagementStore.UserExists(id)) =>
         Future.failed(
           LedgerApiErrors.Admin.UserManagement.UserAlreadyExists
-            .Reject(operation, id.toString)
+            .Reject(operation, id)
             .asGrpcError
         )
 

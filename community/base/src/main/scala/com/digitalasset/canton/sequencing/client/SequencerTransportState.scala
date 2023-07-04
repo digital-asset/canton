@@ -3,8 +3,11 @@
 
 package com.digitalasset.canton.sequencing.client
 
+import cats.implicits.catsSyntaxFlatten
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.{FlagCloseable, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencerClient.{
   SequencerTransportContainer,
@@ -29,7 +32,8 @@ class SequencersTransportState(
     val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends NamedLogging {
+    extends NamedLogging
+    with FlagCloseable {
 
   private val closeReasonPromise = Promise[SequencerClient.CloseReason]()
 
@@ -49,26 +53,30 @@ class SequencersTransportState(
 
   private def transportState(
       sequencerId: SequencerId
-  )(implicit traceContext: TraceContext): SequencerTransportState =
-    blocking(lock.synchronized {
+  )(implicit traceContext: TraceContext): UnlessShutdown[SequencerTransportState] =
+    performUnlessClosing(functionFullName)(blocking(lock.synchronized {
       state.getOrElse(
         sequencerId,
         ErrorUtil.internalError(
           new IllegalArgumentException(s"sequencerId=$sequencerId is unknown")
         ),
       )
-    })
+    }))
 
   private def updateTransport(
       sequencerId: SequencerId,
       updatedTransport: SequencerTransportContainer,
-  )(implicit traceContext: TraceContext): SequencerTransportState = blocking(lock.synchronized {
-    val transportStateBefore = transportState(sequencerId)
-    state
-      .put(sequencerId, transportStateBefore.withTransport(updatedTransport))
-      .discard
-    transportStateBefore
-  })
+  )(implicit traceContext: TraceContext): UnlessShutdown[SequencerTransportState] =
+    performUnlessClosing(functionFullName) {
+      blocking(lock.synchronized {
+        transportState(sequencerId).map { transportStateBefore =>
+          state
+            .put(sequencerId, transportStateBefore.withTransport(updatedTransport))
+            .discard
+          transportStateBefore
+        }
+      })
+    }.flatten
 
   def transport(implicit traceContext: TraceContext): SequencerClientTransport = blocking(
     lock.synchronized {
@@ -90,13 +98,17 @@ class SequencersTransportState(
   def subscriptionIsHealthy(
       sequencerId: SequencerId
   )(implicit traceContext: TraceContext): Boolean =
-    transportState(sequencerId).subscription
-      .exists(!_.resilientSequencerSubscription.isFailed)
+    transportState(sequencerId)
+      .map(
+        _.subscription
+          .exists(!_.resilientSequencerSubscription.isFailed)
+      )
+      .onShutdown(false)
 
   def transport(sequencerId: SequencerId)(implicit
       traceContext: TraceContext
-  ): SequencerClientTransport =
-    transportState(sequencerId).transport.clientTransport
+  ): UnlessShutdown[SequencerClientTransport] =
+    transportState(sequencerId).map(_.transport.clientTransport)
 
   def addSubscription(
       sequencerId: SequencerId,
@@ -104,30 +116,35 @@ class SequencersTransportState(
         SequencerClientSubscriptionError
       ],
       eventValidator: SequencedEventValidator,
-  )(implicit traceContext: TraceContext): Unit = blocking(lock.synchronized {
-    val currentSequencerTransportStateForAlias: SequencerTransportState =
-      transportState(sequencerId)
-    if (currentSequencerTransportStateForAlias.subscription.nonEmpty) {
-      // there's an existing subscription!
-      logger.warn(
-        "Cannot create additional subscriptions to the sequencer from the same client"
-      )
-      sys.error(
-        s"The sequencer client already has a running subscription for sequencerAlias=$sequencerId"
-      )
-    }
-    subscription.closeReason.onComplete(closeWithSubscriptionReason(sequencerId))
+  )(implicit traceContext: TraceContext): Unit =
+    performUnlessClosing(functionFullName) {
+      blocking(lock.synchronized {
+        transportState(sequencerId)
+          .map { currentSequencerTransportStateForAlias =>
+            if (currentSequencerTransportStateForAlias.subscription.nonEmpty) {
+              // there's an existing subscription!
+              logger.warn(
+                "Cannot create additional subscriptions to the sequencer from the same client"
+              )
+              sys.error(
+                s"The sequencer client already has a running subscription for sequencerAlias=$sequencerId"
+              )
+            }
+            subscription.closeReason.onComplete(closeWithSubscriptionReason(sequencerId))
 
-    state
-      .put(
-        sequencerId,
-        currentSequencerTransportStateForAlias.withSubscription(
-          subscription,
-          eventValidator,
-        ),
-      )
-      .discard
-  })
+            state
+              .put(
+                sequencerId,
+                currentSequencerTransportStateForAlias.withSubscription(
+                  subscription,
+                  eventValidator,
+                ),
+              )
+              .discard
+          }
+          .onShutdown(())
+      })
+    }.onShutdown(())
 
   def changeTransport(
       sequencerTransports: SequencerTransports
@@ -147,15 +164,16 @@ class SequencersTransportState(
       )
     } else
       MonadUtil
-        .sequentialTraverse(keptValues.toSeq) { sequencerId =>
-          val transportStateBefore =
-            updateTransport(sequencerId, sequencerTransports.sequencerIdToTransportMap(sequencerId))
-          transportStateBefore.subscription
-            .map(_.resilientSequencerSubscription.resubscribeOnTransportChange())
-            .getOrElse(Future.unit)
-            .thereafter { _ => transportStateBefore.transport.clientTransport.close() }
+        .sequentialTraverse_(keptValues.toSeq) { sequencerId =>
+          updateTransport(sequencerId, sequencerTransports.sequencerIdToTransportMap(sequencerId))
+            .map { transportStateBefore =>
+              transportStateBefore.subscription
+                .map(_.resilientSequencerSubscription.resubscribeOnTransportChange())
+                .getOrElse(Future.unit)
+                .thereafter { _ => transportStateBefore.transport.clientTransport.close() }
+            }
+            .onShutdown(Future.unit)
         }
-        .map(_ => ())
   })
 
   private def closeSubscription(
@@ -231,6 +249,10 @@ class SequencersTransportState(
       case Success(Left(_)) => complete(closeReason)
       case Success(Right(())) =>
     }
+  }
+
+  override protected def onClosed(): Unit = {
+    closeAllSubscriptions()
   }
 }
 

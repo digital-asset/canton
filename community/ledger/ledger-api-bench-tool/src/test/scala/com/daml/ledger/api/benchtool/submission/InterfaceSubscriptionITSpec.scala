@@ -8,6 +8,7 @@ import com.daml.ledger.api.benchtool.services.LedgerApiServices
 import com.daml.ledger.api.benchtool.{BenchtoolSandboxFixture, ConfigEnricher}
 import com.daml.ledger.api.testing.utils.SuiteResourceManagementAroundAll
 import com.daml.ledger.client.binding
+import com.digitalasset.canton.BaseTest
 import org.scalatest.AppendedClues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,7 +20,8 @@ class InterfaceSubscriptionITSpec
     with BenchtoolSandboxFixture
     with SuiteResourceManagementAroundAll
     with Matchers
-    with AppendedClues {
+    with AppendedClues
+    with BaseTest {
 
   it should "make interface subscriptions exposed to the benchtool" in {
 

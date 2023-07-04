@@ -17,6 +17,7 @@ import com.daml.metrics.{JvmMetricSet, Metrics}
 import com.daml.resources
 import com.daml.telemetry.OpenTelemetryOwner
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy}
 import com.digitalasset.canton.ledger.configuration.{
   Configuration,
@@ -30,7 +31,6 @@ import com.digitalasset.canton.platform.LedgerApiServer
 import com.digitalasset.canton.platform.indexer.{Indexer, IndexerServiceOwner, JdbcIndexer}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import org.slf4j.LoggerFactory
 
 import java.util.concurrent.{Executors, TimeUnit}
 import scala.concurrent.duration.Duration
@@ -38,9 +38,11 @@ import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutor, Futu
 import scala.io.StdIn
 
 // TODO(i12337): Use it or remove it
-class IndexerBenchmark() extends NamedLogging {
+class IndexerBenchmark extends NamedLogging {
 
   override val loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
+
+  private val directEc = DirectExecutionContext(logger)
 
   def run(
       createUpdates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
@@ -197,14 +199,7 @@ class IndexerBenchmark() extends NamedLogging {
       override def currentHealth(): HealthStatus = Healthy
     }
   }
-}
 
-object IndexerBenchmark {
-  private val logger = LoggerFactory.getLogger(getClass)
-  val LedgerId = "IndexerBenchmarkLedger"
-
-  // TODO(#13019) Avoid the global execution context
-  @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
   def runAndExit(
       config: Config,
       updates: () => Future[Source[(Offset, Traced[Update]), NotUsed]],
@@ -212,13 +207,17 @@ object IndexerBenchmark {
     val result: Future[Unit] = new IndexerBenchmark()
       .run(updates, config)
       .recover { case ex =>
-        logger.error("Error running benchmark", ex)
+        logger.error("Error running benchmark", ex)(TraceContext.empty)
         sys.exit(1)
-      }(scala.concurrent.ExecutionContext.Implicits.global)
+      }(directEc)
 
     Await.result(result, Duration(100, "hour"))
     println("Done.")
     // We call sys.exit because some actor system or thread pool is still running, preventing a normal shutdown.
     sys.exit(0)
   }
+}
+
+object IndexerBenchmark {
+  private val LedgerId = "IndexerBenchmarkLedger"
 }

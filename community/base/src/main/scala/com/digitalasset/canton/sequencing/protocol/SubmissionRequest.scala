@@ -192,7 +192,7 @@ object SubmissionRequest
 
   override protected def name: String = "submission request"
 
-  val aggregationRuleSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
+  private val aggregationRuleSupportedSince = protocolVersionRepresentativeFor(ProtoVersion(1))
 
   def create(
       sender: Member,

@@ -12,6 +12,7 @@ import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.client.binding
 import com.daml.scalautil.Statement.discard
 import com.daml.timer.Delayed
+import com.digitalasset.canton.BaseTest
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
@@ -27,7 +28,8 @@ class WeightedApplicationIdsAndSubmittersITSpec
     with Matchers
     with AppendedClues
     with OptionValues
-    with Checkpoints {
+    with Checkpoints
+    with BaseTest {
 
   it should "populate participant with contracts using specified application-ids and submitters" in {
     val submissionConfig = WorkflowConfig.FooSubmissionConfig(
@@ -71,7 +73,7 @@ class WeightedApplicationIdsAndSubmittersITSpec
         applicationId = "App-2",
       )
       completionsApp1Submitter0 <- observeCompletions(
-        parties = List(allocatedParties.extraSubmitters(0)),
+        parties = List(allocatedParties.extraSubmitters.head),
         apiServices = apiServices,
         applicationId = "App-1",
       )

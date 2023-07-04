@@ -25,7 +25,7 @@ class PersistentIdentityProviderConfigStore(
     dbSupport: DbSupport,
     metrics: Metrics,
     maxIdentityProviders: Int,
-    val loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends IdentityProviderConfigStore
     with NamedLogging {
@@ -236,5 +236,6 @@ object PersistentIdentityProviderConfigStore {
     cacheExpiryAfterWrite = cacheExpiryAfterWrite,
     maximumCacheSize = maxIdentityProviders,
     metrics = metrics,
+    loggerFactory,
   )(executionContext, LoggingContextWithTrace(loggerFactory))
 }

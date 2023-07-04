@@ -202,6 +202,7 @@ object EndlessReadService {
     optUsedPackages = None,
     optNodeSeeds = None,
     optByKeyNodes = None,
+    optDomainId = None,
   )
   // Creates contract #i
   private def createTransaction(i: Int): CommittedTransaction = {

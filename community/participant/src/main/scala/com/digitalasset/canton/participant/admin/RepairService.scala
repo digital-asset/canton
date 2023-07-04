@@ -616,7 +616,12 @@ class RepairService(
               s"transferred-in from ${targetDomain} (even though contract may have been transferred to yet another domain since)."
           ).discard
           Right(
-            (true, Some(SourceDomainId(targetDomain.unwrap) -> transferCounter))
+            (
+              true,
+              Some(
+                SourceDomainId(targetDomain.unwrap) -> transferCounter.flatMap(_.increment.toOption)
+              ),
+            )
           ) // TODO(#13573): we should pass the transfer counter in as part of the RepairRequest
       })
       (needToAddContract, transferringFromAndTransferCounter) = res
@@ -1112,6 +1117,7 @@ class RepairService(
               optUsedPackages = None,
               optNodeSeeds = None,
               optByKeyNodes = None,
+              optDomainId = Some(repair.domainId),
             ),
             transaction = tx,
             transactionId = transactionId,
